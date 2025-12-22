@@ -89,6 +89,7 @@ interface APIGameState {
   units_shot: string[];
   units_charged: string[];
   units_attacked: string[];
+  units_advanced?: string[]; // Units that have advanced this turn
   move_activation_pool: string[];
   shoot_activation_pool: string[];
   charge_activation_pool: string[];
@@ -338,18 +339,21 @@ export const useEngineAPI = () => {
           let autoAdvanceUnitId: string | null = null;
           
           // Handle advance execution with destination - display advance roll badge before cleanup
+          // Clean up advance preview when advance is executed (advance_range returned), even if activation_ended is not set
           if (lastActionRef.current?.action === "advance" && 
-              data.result?.advance_range !== undefined &&
-              data.result?.activation_ended === true) {
-            // Advance was executed - show badge with the roll value
-            const unitId = parseInt(data.result.unitId || lastActionRef.current.unitId);
-            const advanceRollValue = data.result.advance_range; // Backend returns advance_range, use as advance_roll
-            console.log("🟠 ADVANCE EXECUTED: Displaying advance roll badge", { unitId, advanceRollValue });
-            setAdvanceRoll(advanceRollValue);
-            setAdvancingUnitId(unitId);
-            // Keep selected unit to show badge
-            setSelectedUnitId(unitId);
-          }
+            data.result?.advance_range !== undefined) {
+          // Advance was executed - show badge with the roll value
+          const unitId = parseInt(data.result.unitId || lastActionRef.current.unitId);
+          const advanceRollValue = data.result.advance_range; // Backend returns advance_range, use as advance_roll
+          console.log("🟠 ADVANCE EXECUTED: Displaying advance roll badge", { unitId, advanceRollValue });
+          setAdvanceRoll(advanceRollValue);
+          setAdvancingUnitId(unitId);
+          // Keep selected unit to show badge
+          setSelectedUnitId(unitId);
+          // Clear advance preview (destinations and mode) since advance is complete
+          setAdvanceDestinations([]);
+          setMode("select");
+        }
           
           // Debug: always log when we have activate_unit in shoot phase
           if (lastActionRef.current?.action === "activate_unit" && lastActionRef.current?.phase === "shoot") {

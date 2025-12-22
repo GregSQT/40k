@@ -168,6 +168,7 @@ export interface GameState {
   unitsCharged?: UnitId[];
   units_attacked?: string[];
   unitsAttacked?: UnitId[];
+  units_advanced?: string[]; // Units that have advanced this turn
   
   // Engine specific
   move_activation_pool?: string[];

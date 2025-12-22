@@ -1226,7 +1226,25 @@ export default function Board({
           advanceRoll,
           advancingUnitId,
           // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action props
-          canAdvance: (phase === 'shoot' && isEligibleForRendering && !unitsFled?.includes(unit.id)) ?? false,
+          // Check if unit can advance: eligible, not fled, and hasn't already advanced this turn
+          canAdvance: (() => {
+            const unitsAdvanced = gameState?.units_advanced || [];
+            const hasAdvanced = unitsAdvanced.includes(unit.id.toString());
+            const canAdvanceValue = phase === 'shoot' && isEligibleForRendering && !unitsFled?.includes(unit.id) && !hasAdvanced;
+            
+            // DEBUG: Log advance state for unit
+            if (phase === 'shoot' && unit.player === currentPlayer) {
+              console.log(`🔍 [ADVANCE DEBUG] Unit ${unit.id}:`, {
+                isEligible: isEligibleForRendering,
+                hasFled: unitsFled?.includes(unit.id),
+                hasAdvanced,
+                unitsAdvanced,
+                canAdvance: canAdvanceValue
+              });
+            }
+            
+            return canAdvanceValue ?? false;
+          })(),
           onAdvance: (unitId: number) => {
             window.dispatchEvent(new CustomEvent('boardAdvanceClick', { detail: { unitId } }));
           }
@@ -1574,13 +1592,6 @@ export default function Board({
         // Try to use available_weapons from unit if available
         const unitWithWeapons = unit as any;
         const availableWeapons = unitWithWeapons?.available_weapons;
-        
-        console.log('🔫 WEAPON MENU DEBUG:', {
-          hasGameState: !!gameState,
-          hasAvailableWeapons: !!availableWeapons,
-          availableWeapons: availableWeapons,
-          gameStateKeys: Object.keys(gameState || {})
-        });
         
         if (availableWeapons && Array.isArray(availableWeapons)) {
           // Use backend-filtered weapons

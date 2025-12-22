@@ -112,7 +112,7 @@ def _get_available_weapons_after_advance(
 def _get_available_weapons_for_selection(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
-    current_weapon_is_pistol: bool = False,
+    current_weapon_is_pistol: Optional[bool] = False,
     exclude_used: bool = True,
     has_advanced: bool = False
 ) -> List[Dict[str, Any]]:
@@ -165,33 +165,36 @@ def _get_available_weapons_for_selection(
                 continue
         
         # Check PISTOL rule category
+        # Only apply PISTOL filter if unit has already fired (current_weapon_is_pistol is not None)
+        # If None, unit hasn't fired yet, so all weapons should be selectable
         weapon_rules = weapon.get("WEAPON_RULES", [])
         is_pistol = "PISTOL" in weapon_rules
         
-        if current_weapon_is_pistol:
-            # If current weapon is PISTOL, can only select other PISTOL weapons
-            if not is_pistol:
-                can_use = False
-                reason = "Cannot mix PISTOL with non-PISTOL weapons"
-                available_weapons.append({
-                    "index": idx,
-                    "weapon": _serialize_weapon_for_json(weapon),
-                    "can_use": can_use,
-                    "reason": reason
-                })
-                continue
-        else:
-            # If current weapon is not PISTOL, exclude PISTOL weapons
-            if is_pistol:
-                can_use = False
-                reason = "Cannot mix non-PISTOL with PISTOL weapons"
-                available_weapons.append({
-                    "index": idx,
-                    "weapon": _serialize_weapon_for_json(weapon),
-                    "can_use": can_use,
-                    "reason": reason
-                })
-                continue
+        if current_weapon_is_pistol is not None:
+            if current_weapon_is_pistol:
+                # If current weapon is PISTOL, can only select other PISTOL weapons
+                if not is_pistol:
+                    can_use = False
+                    reason = "Cannot mix PISTOL with non-PISTOL weapons"
+                    available_weapons.append({
+                        "index": idx,
+                        "weapon": _serialize_weapon_for_json(weapon),
+                        "can_use": can_use,
+                        "reason": reason
+                    })
+                    continue
+            else:
+                # If current weapon is not PISTOL, exclude PISTOL weapons
+                if is_pistol:
+                    can_use = False
+                    reason = "Cannot mix non-PISTOL with PISTOL weapons"
+                    available_weapons.append({
+                        "index": idx,
+                        "weapon": _serialize_weapon_for_json(weapon),
+                        "can_use": can_use,
+                        "reason": reason
+                    })
+                    continue
         
         # Check if weapon has at least one valid target (range + LoS)
         weapon_has_valid_target = False
@@ -480,9 +483,20 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     # CAN_ADVANCE is True only if unit has NOT already advanced
     can_advance = not has_advanced
     
-    # If unit has advanced without ASSAULT weapon, it cannot shoot
-    if has_advanced and not _weapon_has_assault_rule(selected_weapon):
-        can_shoot = False
+    # If unit has advanced, find and select first ASSAULT weapon
+    if has_advanced:
+        has_assault_weapon = False
+        rng_weapons = unit.get("RNG_WEAPONS", [])
+        for idx, weapon in enumerate(rng_weapons):
+            if _weapon_has_assault_rule(weapon):
+                # Found ASSAULT weapon - select it automatically
+                unit["selectedRngWeaponIndex"] = idx
+                has_assault_weapon = True
+                break
+        
+        # If no ASSAULT weapon found, cannot shoot
+        if not has_assault_weapon:
+            can_shoot = False
     
     # Store capability flags on unit for later use in action validation
     unit["_can_shoot"] = can_shoot
@@ -601,8 +615,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     if not auto_select:
         rng_weapons = unit.get("RNG_WEAPONS", [])
         if len(rng_weapons) > 1:
+            # Check if unit has advanced to filter weapons correctly
+            has_advanced = unit_id in game_state.get("units_advanced", set())
             available_weapons = _get_available_weapons_after_advance(
-                unit, has_advanced=False, game_state=game_state, 
+                unit, has_advanced=has_advanced, game_state=game_state, 
                 current_weapon_is_pistol=False, exclude_used=False
             )
             return {
@@ -1343,6 +1359,31 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     # Only humans get waiting_for_player response
+    # Get available weapons for frontend weapon menu
+    has_advanced = unit_id in game_state.get("units_advanced", set())
+    
+    # Check if current weapon is PISTOL to filter correctly
+    # Only apply PISTOL filter if unit has already fired at least once
+    # If SHOOT_LEFT == selected_weapon["NB"], unit hasn't fired yet, so don't filter
+    from engine.utils.weapon_helpers import get_selected_ranged_weapon
+    selected_weapon = get_selected_ranged_weapon(unit)
+    current_weapon_is_pistol = None  # Default: no filter (unit hasn't fired yet)
+    
+    if selected_weapon and unit.get("SHOOT_LEFT", 0) < selected_weapon.get("NB", 0):
+        # Unit has already fired (SHOOT_LEFT decreased), apply PISTOL filter
+        weapon_rules = selected_weapon.get("WEAPON_RULES", [])
+        current_weapon_is_pistol = "PISTOL" in weapon_rules
+    
+    print(f"[DIAG] Unit {unit_id} - has_advanced={has_advanced}")
+    print(f"[DIAG] current_weapon_is_pistol={current_weapon_is_pistol}")
+    print(f"[DIAG] All weapons: {[w.get('name', 'no_name') for w in unit.get('RNG_WEAPONS', [])]}")
+    
+    available_weapons = _get_available_weapons_for_selection(
+        game_state, unit, current_weapon_is_pistol=current_weapon_is_pistol, exclude_used=False, has_advanced=has_advanced
+    )
+    
+    print(f"[DIAG] Available after filter: {[(w['index'], w['weapon'].get('name', 'no_name'), w['can_use']) for w in available_weapons]}")
+    
     response = {
         "while_loop_active": True,
         "validTargets": valid_targets,
@@ -1350,7 +1391,8 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         "context": "player_action_selection",
         "blinking_units": valid_targets,
         "start_blinking": True,
-        "waiting_for_player": True
+        "waiting_for_player": True,
+        "available_weapons": available_weapons
     }
     return True, response
 
@@ -1631,6 +1673,15 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         if not unit:
             return False, {"error": "unit_not_found"}
+        
+        # ASSAULT RULE VALIDATION: Block shooting if unit advanced without ASSAULT weapon
+        unit_id_str = str(unit["id"])
+        has_advanced = unit_id_str in game_state.get("units_advanced", set())
+        if has_advanced:
+            from engine.utils.weapon_helpers import get_selected_ranged_weapon
+            selected_weapon = get_selected_ranged_weapon(unit)
+            if not selected_weapon or not _weapon_has_assault_rule(selected_weapon):
+                return False, {"error": "cannot_shoot_after_advance_without_assault", "unitId": unit_id_str}
                 
         # CRITICAL: Validate unit has shots remaining
         if "SHOOT_LEFT" not in unit:
@@ -2669,6 +2720,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                     "actually_moved": actually_moved
                 })
                 return result
+            
+            # Set active_shooting_unit so frontend can show weapon selection icon
+            game_state["active_shooting_unit"] = unit_id
             
             return True, {
                 "waiting_for_weapon_selection": True,

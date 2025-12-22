@@ -1163,6 +1163,19 @@ export class UnitRenderer {
     const isActiveShooting = (gameState?.active_shooting_unit && 
       parseInt(gameState.active_shooting_unit) === unit.id) ||
       (selectedUnitId !== null && selectedUnitId === unit.id);
+    
+    // DEBUG: Log weapon icon visibility
+    console.log(`🔍 [WEAPON ICON DEBUG] Unit ${unit.id}:`, {
+      phase,
+      isCurrentPlayer: unit.player === currentPlayer,
+      activeShootingUnit: gameState?.active_shooting_unit,
+      selectedUnitId,
+      isActiveShooting,
+      hasMultipleWeapons: unit.RNG_WEAPONS && unit.RNG_WEAPONS.length > 1,
+      autoSelectWeapon,
+      willShow: isActiveShooting && unit.RNG_WEAPONS && unit.RNG_WEAPONS.length > 1 && autoSelectWeapon === false
+    });
+    
     if (!isActiveShooting) return;
     
     // Check if unit has multiple ranged weapons
