@@ -1230,20 +1230,8 @@ export default function Board({
           canAdvance: (() => {
             const unitsAdvanced = gameState?.units_advanced || [];
             const hasAdvanced = unitsAdvanced.includes(unit.id.toString());
-            const canAdvanceValue = phase === 'shoot' && isEligibleForRendering && !unitsFled?.includes(unit.id) && !hasAdvanced;
-            
-            // DEBUG: Log advance state for unit
-            if (phase === 'shoot' && unit.player === currentPlayer) {
-              console.log(`🔍 [ADVANCE DEBUG] Unit ${unit.id}:`, {
-                isEligible: isEligibleForRendering,
-                hasFled: unitsFled?.includes(unit.id),
-                hasAdvanced,
-                unitsAdvanced,
-                canAdvance: canAdvanceValue
-              });
-            }
-            
-            return canAdvanceValue ?? false;
+            const result = phase === 'shoot' && isEligibleForRendering && !unitsFled?.includes(unit.id) && !hasAdvanced;
+            return result ?? false;
           })(),
           onAdvance: (unitId: number) => {
             window.dispatchEvent(new CustomEvent('boardAdvanceClick', { detail: { unitId } }));

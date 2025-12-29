@@ -179,7 +179,7 @@ game_state ← Single authoritative object
 
 ```javascript
 END OF ACTIVATION PROCEDURE
-end_activation (Arg1, Arg2, Arg3, Arg4, Arg5)
+end_activation (Arg1, Arg2, Arg3, Arg4, Arg5, Arg6)
 ├── Arg1 = ?
 │   ├── CASE Arg1 = ACTION → log the action
 │   ├── CASE Arg1 = WAIT → log the wait action
@@ -188,22 +188,26 @@ end_activation (Arg1, Arg2, Arg3, Arg4, Arg5)
 │   ├── YES → +1 step
 │   └── NO → No step increase
 ├── Arg3 = 
-│	├── CASE Arg3 = MOVE → Mark as units_moved
-│	├── CASE Arg3 = FLED → Mark as units_moved AND Mark as units_fled
-│	├── CASE Arg3 = SHOOTING → Mark as units_shot
-│	├── CASE Arg3 = ADVANCE → Mark as units_advanced
-│	├── CASE Arg3 = CHARGE → Mark as units_charged
-│	└── CASE Arg3 = FIGHT → Mark as units_fought
+│   ├── CASE Arg3 = 0 → Do not mark the unit
+│   ├── CASE Arg3 = MOVE → Mark as units_moved
+│   ├── CASE Arg3 = FLED → Mark as units_moved AND Mark as units_fled
+│   ├── CASE Arg3 = SHOOTING → Mark as units_shot
+│   ├── CASE Arg3 = ADVANCE → Mark as units_advanced
+│   ├── CASE Arg3 = CHARGE → Mark as units_charged
+│   └── CASE Arg3 = FIGHT → Mark as units_fought
 ├── Arg4 = ?
-│	├── CASE Arg4 = MOVE → Unit removed from move_activation_pool
-│	├── CASE Arg4 = FLED → Unit removed from move_activation_pool
-│	├── CASE Arg4 = SHOOTING → Unit removed from shoot_activation_pool
-│	├── CASE Arg4 = CHARGE → Unit removed from charge_activation_pool
-│	└── CASE Arg4 = FIGHT → Unit removed from fight_activation_pool
+│   ├── CASE Arg4 = NOT_REMOVED → Do not remove the unit from an activation pool
+│   ├── CASE Arg4 = MOVE → Unit removed from move_activation_pool
+│   ├── CASE Arg4 = FLED → Unit removed from move_activation_pool
+│   ├── CASE Arg4 = SHOOTING → Unit removed from shoot_activation_pool
+│   ├── CASE Arg4 = CHARGE → Unit removed from charge_activation_pool
+│   └── CASE Arg4 = FIGHT → Unit removed from fight_activation_pool
 ├── Arg5 = 1 ?
 │   ├── YES → log the error
 │   └── NO → No action
-└── Remove the green circle around the unit's icon
+└── Arg6 = 1 ?
+    ├── YES → Remove the green circle around the unit's icon
+    └── NO → Do NOT remove the green circle around the unit's icon
 
 ATTACK ACTION
 attack_sequence(Arg)
@@ -276,18 +280,18 @@ For each unit
 │   │   │   └── Valid destination exists (reacheable hexes using BFS pathfinding within MOVE attribute distance, NOT through/into wall hexes, NOT through/into adjacent to enemy hexes) ?
 │   │   │       ├── YES → MOVEMENT PHASE ACTIONS AVAILABLE
 │   │   │       │   ├── 🎯 VALID ACTIONS: [move, wait]
-│   │   │       │   ├── ❌ INVALID ACTIONS: [shoot, charge, attack] → end_activation (ERROR, 0, PASS, MOVE)
+│   │   │       │   ├── ❌ INVALID ACTIONS: [shoot, charge, attack] → end_activation (ERROR, 0, PASS, MOVE, 1, 1)
 │   │   │       │   └── AGENT ACTION SELECTION → Choose move ?
 │   │   │       │       ├── YES → ✅ VALID → Execute move action
 │   │   │       │       │   ├── The active_unit was adjacent to an enemy unit at the start of its move action ?
-│   │   │       │       │   │   ├── YES → end_activation (ACTION, 1, FLED, MOVE)
-│   │   │       │       │   │   └── NO → end_activation (ACTION, 1, MOVE, MOVE)
+│   │   │       │       │   │   ├── YES → end_activation (ACTION, 1, FLED, MOVE, 1, 1)
+│   │   │       │       │   │   └── NO → end_activation (ACTION, 1, MOVE, MOVE, 1, 1)
 │   │   │       │       └── NO → Agent chooses: wait?
 │   │   │       │           ├── YES → ✅ VALID → Execute wait action
-│   │   │       │           │   └── end_activation (WAIT, 1, PASS, MOVE)
+│   │   │       │           │   └── end_activation (WAIT, 1, PASS, MOVE, 1, 1)
 │   │   │       │           └── NO → Agent chooses invalid action (shoot/charge/attack)?
-│   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, MOVE)
-│   │   │       └── NO → end_activation (PASS, 0, PASS, MOVE)
+│   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, MOVE, 1, 1)
+│   │   │       └── NO → end_activation (NO, 0, PASS, MOVE, 1, 1)
 │   │   │
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION
 │   │       ├── If any, cancel the Highlight of the hexes in valid_move_destinations_pool
@@ -299,19 +303,19 @@ For each unit
 │   │               │   └── Player select the action to execute
 │   │               │       ├── Left click on a hex in valid_move_destinations_pool → Move the unit's icon to the selected hex
 │   │               │       │   ├── The active_unit was adjacent to an enemy unit at the start of its move action ?
-│   │               │       │   │   ├── YES → end_activation (ACTION, 1, FLED, MOVE)
-│   │               │       │   │   └── NO → end_activation (ACTION, 1, MOVE, MOVE)
+│   │               │       │   │   ├── YES → end_activation (ACTION, 1, FLED, MOVE, 1, 1)
+│   │               │       │   │   └── NO → end_activation (ACTION, 1, MOVE, MOVE, 1, 1)
 │   │               │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
 │   │               │       ├── Left click on the active_unit → Move postponed
 │   │               │       │   └── GO TO STEP : STEP : UNIT_ACTIVATION
 │   │               │       ├── Right click on the active_unit → Move cancelled
-│   │               │       │   ├── end_activation (PASS, 0, PASS, MOVE)
+│   │               │       │   ├── end_activation (NO, 0, PASS, MOVE, 1, 1)
 │   │               │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
 │   │               │       ├── Left click on another unit in activation pool → Move postponed
 │   │               │       │   └── GO TO STEP : UNIT_ACTIVATION
 │   │               │       └── Left OR Right click anywhere else on the board → Cancel Move hex selection
 │   │               │           └── GO TO STEP : UNIT_ACTIVATION
-│   │               └── NO → end_activation (PASS, 0, PASS, MOVE)
+│   │               └── NO → end_activation (NO, 0, PASS, MOVE, 1, 1)
 │   ├── NO → If any, cancel the Highlight of the hexes in valid_move_destinations_pool
 │   └── No more activable units → pass
 └── End of MOVEMENT PHASE → Advance to shooting phase
@@ -362,6 +366,139 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 **⚠️ ADVANCE_IMPLEMENTATION_PLAN.md**: Shooting phase now supports ADVANCE action in addition to SHOOT.
 
 ```javascript
+GLOBAL VARIABLE :
+If we activated the weapon rules :
+weapon_rule == 1
+Else
+weapon_rule == 0
+
+               ####################################################################################################################
+               #######################################           PHASE FUNCTIONS           ########################################
+               ####################################################################################################################
+
+player_advance() :
+├── Roll 1D6 → advance_range (from config: advance_distance_range)
+├── Display advance_range on unit icon (bottom right)
+├── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
+├── Highlight destinations in ORANGE
+├── Left click on valid advance hex → Move unit
+│   └── Return: Unit actually moved to different hex? (boolean)
+├── Left or Right click on the unit's icon
+│   └── Return: false (unit didn't advance)
+└── Remove advance icon from the unit
+
+valid_target_pool_build (arg1, arg2, arg3):
+arg1 : do we use the weapons rules (weapon_rule)?
+arg2 : did the unit ADVANCE ? (0 = no, 1 = yes)
+arg3 : is the unit ADJACENT to an enemy unit ? (0 = no, 1 = yes)
+├── unit.HP_CUR > 0
+├── unit.player != current_player
+├── Unit is NOT adjacent to a friendly unit (excluding active unit) within melee range (1 hex)
+├── Unit in Line of Sight
+├── Perform weapon_availability_check (arg1, arg2, arg3) → Build weapon_available_pool (filters weapons based on rules)
+├── Unit within range of AT LEAST 1 available weapon from weapon_available_pool
+└── ALL conditions met → ✅ Add unit to valid_target_pool
+
+weapon_availability_check (arg1, arg2, arg3):
+arg1 : do we use the weapons rules (weapon_rule)?
+arg2 : did the unit ADVANCE ?
+arg3 : is the unit ADJACENT to an enemy unit ?
+Loop on EACH ranged weapon of the unit
+├── Check arg1 value
+│   ├── arg1 = 0 (We WILL NOT use the weapons rules)
+│   │   └── no weapon rule checked / applied
+│   ├── arg1 = 1 (We WILL use the weapons rules)
+│   │   └── no restriction
+├── Check arg2 value
+│   ├── arg2 = 0 (the unit did NOT perform an ADVANCE during this phase)
+│   │   └── no restriction
+│   └── arg2 = 1 (the unit DID perform an ADVANCE during this phase)
+│       ├── arg1 = 0
+│       │   └── No weapon selectible (unit advanced, no weapon rules)
+│       └── arg1 = 1
+│           └── The weapons MUST have the ASSAULT rule to be selectible
+├── Check arg3 value
+│   ├── arg3 = 0 (the unit IS NOT adjacent to an enemy unit)
+│   │   └── no restriction
+│   └── arg3 = 1 (the unit IS adjacent to an enemy unit)
+│       ├── arg1 = 0
+│       │   └── No weapon selectible (unit is adjacent to an enemy unit)
+│       └── arg1 = 1
+│           └── The weapons MUST have the PISTOL rule to be selectible
+├── Check weapon.shot (flag for weapons having shot this phase)
+│   ├── weapon.shot = 0 (the weapon did NOT shoot this phase)
+│   │   └── no restriction
+│   └── weapon.shot = 1 (the weapon DID shoot this phase)
+│       └── weapon CANNOT be selectible
+├── Check weapon range and Line of Sight
+│   ├── weapon.RNG > 0? (weapon has a range)
+│   │   └── NO → weapon CANNOT be selectible
+│   └── YES → Check if at least one enemy unit meets ALL conditions:
+│       │   Conditions (ALL must be true for at least one enemy):
+│       │   ├── Within weapon.RNG range (distance <= weapon.RNG)
+│       │   ├── In Line of Sight (no walls blocking)
+│       │   ├── HP_CUR > 0 (alive)
+│       │   └── NOT adjacent to friendly unit (excluding active unit)
+│       └── If NO enemy meets ALL conditions → weapon CANNOT be selectible
+└── ALL conditions met → ✅ Add to weapon_available_pool
+
+weapon_selection():
+├── Opens the weapon selection menu
+├── The weapons in weapon_available_pool are displayed normally
+├── The weapons NOT in weapon_available_pool are displayed greyed and CANNOT be selected
+├── Click on a weapon in weapon_available_pool
+│   ├── This weapon becomes selected_weapon
+│   ├── SHOOT_LEFT = selected_weapon.NB
+│   ├── Determine context for valid_target_pool_build:
+│   │   ├── arg1 = weapon_rule
+│   │   ├── arg2 = (unit.id in units_advanced) ? 1 : 0
+│   │   └── arg3 = (Is unit adjacent to enemy unit?) ? 1 : 0
+│   ├── valid_target_pool_build (arg1, arg2, arg3)
+│   ├── Close the weapon selection menu
+│   └── Return to calling step (weapon selected)
+├── Click on the weapon selection icon
+│   ├── Close the weapon selection menu
+│   └── Return to calling step (no weapon selected, continue with current weapon)
+└── Click anywhere outside the weapon selection menu
+    ├── Close the weapon selection menu
+    └── Return to calling step (no weapon selected, continue with current weapon)
+
+agent_shoot_action():
+├── Select target from valid_target_pool (AI chooses best target)
+├── Execute attack_sequence(RNG)
+├── Concatenate Return to TOTAL_ACTION log
+├── SHOOT_LEFT -= 1
+└── SHOOT_LEFT == 0 ?
+    ├── YES → Current weapon exhausted
+    │   ├── Remove selected_weapon from weapon_available_pool (mark as used/greyed)
+    │   └── Is there any available weapons in weapon_available_pool ?
+    │       ├── YES → Select next available weapon (AI chooses best weapon)
+    │       │   ├── This weapon becomes selected_weapon
+    │       │   ├── SHOOT_LEFT = selected_weapon.NB
+    │       │   ├── valid_target_pool_build (weapon_rule, arg2=1, arg3=0) → Unit has advanced, not adjacent (advance restrictions)
+    │       │   └── GO TO STEP : AGENT_ADVANCED_SHOOTING_ACTION_SELECTION
+    │       └── NO → All weapons exhausted → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+    │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+    └── NO → Continue normally (SHOOT_LEFT > 0)
+        ├── selected_target dies ?
+        │   ├── YES → Remove from valid_target_pool
+        │   │   ├── valid_target_pool empty ?
+        │   │   │   ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+        │   │   │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+        │   │   │   └── NO → Continue (other targets remain)
+        │   │   │       └── GO TO STEP : AGENT_ADVANCED_SHOOTING_ACTION_SELECTION
+        │   │   └── (target removed from pool)
+        │   └── NO → selected_target survives
+        └── Final safety check (if target survived or edge case): valid_target_pool empty AND SHOOT_LEFT > 0 ?
+            ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+            │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+            └── NO → Continue
+                └── GO TO STEP : AGENT_ADVANCED_SHOOTING_ACTION_SELECTION
+
+               ####################################################################################################################
+               #######################################             PHASE START             ########################################
+               ####################################################################################################################
+
 For each PLAYER unit
 ├── ELIGIBILITY CHECK (Pool Building Phase)
 │   ├── unit.HP_CUR > 0?
@@ -371,110 +508,362 @@ For each PLAYER unit
 │   ├── units_fled.includes(unit.id)?
 │   │   └── YES → ❌ Fled unit (Skip, no log)
 │   ├── Adjacent to enemy unit within melee range (1 hex)?
-│   │   └── YES → ❌ In fight (Skip, no log)
-│   │
-│   ├── CAPABILITY CHECK:
-│   │   ├── CAN_SHOOT = unit.RNG_WEAPONS.length > 0 AND has_LOS_to_enemies_within_range
-│   │   ├── CAN_ADVANCE = true (always available if passed above checks)
-│   │   └── (CAN_SHOOT OR CAN_ADVANCE)?
-│   │       └── NO → ❌ No valid actions (Skip, no log)
+│   │   ├── YES → CAN_ADVANCE = false
+│   │   │   └── Check if the unit can shoot
+│   │   │       ├── weapon_availability_check (weapon_rule, 0, 1):
+│   │   │       └── At least ONE weapon is available?
+│   │   │           ├── YES → CAN_SHOOT = true → Store unit.CAN_SHOOT = true
+│   │   │           └── NO → CAN_SHOOT = false → Store unit.CAN_SHOOT = false → ❌ No valid actions (Skip, no log)
+│   │   └── NO → Check capabilities
+│   │       ├── CAN_ADVANCE = true → Store unit.CAN_ADVANCE = true (always available if not adjacent)
+│   │       ├── weapon_availability_check (weapon_rule, 0, 0)
+│   │       ├── At least ONE weapon is available?
+│   │       │   ├── YES → CAN_SHOOT = true → Store unit.CAN_SHOOT = true
+│   │       │   └── NO → CAN_SHOOT = false → Store unit.CAN_SHOOT = false
+│   │       └── (CAN_SHOOT OR CAN_ADVANCE)?
+│   │           ├── YES → Continue (unit has at least one valid action)
+│   │           └── NO → ❌ No valid actions (Skip, no log)
 │   │
 │   └── ALL conditions met → ✅ Add to shoot_activation_pool → Highlight the unit with a green circle around its icon
 │
 ├── STEP : UNIT_ACTIVABLE_CHECK → is shoot_activation_pool NOT empty ?
 │   ├── YES → Current player is an AI player ?
+│   │
+│   │          ####################################################################################################################
+│   │          ########################################              AI PLAYER             ########################################
+│   │          ####################################################################################################################
+│   │
 │   │   ├── YES → pick one unit in shoot_activation_pool
 │   │   │   ├── Clear any unit remaining in valid_target_pool
 │   │   │   ├── Clear TOTAL_ATTACK log
-│   │   │   ├── SHOOT_LEFT = RNG_NB
-│   │   │   └── While SHOOT_LEFT > 0
-│   │   │       ├── Build valid_target_pool : All enemies within range AND in Line of Sight AND having HP_CUR > 0 → added to valid_target_pool
-│   │   │       └── valid_target_pool NOT empty ?
-│   │   │           ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
-│   │   │           │   ├── Display the shooting preview (all the hexes with LoS and RNG_RNG are red)
-│   │   │           │   ├── Display the HP bar blinking animation for every unit in valid_target_pool
-│   │   │           │   ├── 🎯 VALID ACTIONS: [shoot, advance, wait]
-│   │   │           │   ├── ❌ INVALID ACTIONS: [move, charge, attack] → end_activation (ERROR, 0, PASS, SHOOTING)
-│   │   │           │   └── AGENT ACTION SELECTION → Choose advance?
-│   │   │           │       ├── YES → ✅ VALID → Execute advance action
-│   │   │           │       │   ├── Roll 1D6 → advance_range (from config: advance_distance_range)
-│   │   │           │       │   ├── Display advance_range on unit icon
-│   │   │           │       │   ├── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
-│   │   │           │       │   ├── Highlight destinations in ORANGE
-│   │   │           │       │   ├── Select destination hex
-│   │   │           │       │   ├── Unit actually moved to different hex?
-│   │   │           │       │   │   ├── YES → Mark units_advanced, end_activation(ACTION, 1, ADVANCED, SHOOTING)
-│   │   │           │       │   │   └── NO → end_activation without marking (unit didn't advance)
-│   │   │           │       │   └── POST-ADVANCE: Cannot shoot (unless weapon has "Assault" rule), Cannot charge
-│   │   │           │       │
-│   │   │           │   └── AGENT ACTION SELECTION → Choose shoot?
-│   │   │           │       └── NO → Agent chooses: wait?
-│   │   │           │           ├── YES → ✅ VALID → Execute wait action
-│   │   │           │           │   └── end_activation (WAIT, 1, PASS, SHOOTING)
-│   │   │           │           └── NO → Agent chooses invalid action (move/shoot/attack)?
-│   │   │           │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, SHOOTING)
-│   │   │           └── NO → end_activation (PASS, 0, PASS, SHOOTING)
+│   │   │   ├── Is the active unit adjacent to an enemy unit ?
+│   │   │   │   ├── YES → weapon_availability_check (weapon_rule,0,1) → Build weapon_available_pool (only PISTOL weapons if weapon_rule=1)
+│   │   │   │   │   └── Store: unit_is_adjacent = true
+│   │   │   │   └── NO → weapon_availability_check (weapon_rule,0,0) → Build weapon_available_pool (all available weapons)
+│   │   │   │       └── Store: unit_is_adjacent = false
+│   │   │   ├── valid_target_pool_build (weapon_rule, arg2=0, arg3=unit_is_adjacent ? 1 : 0) → Build valid_target_pool using weapon_available_pool
+│   │   │   └── valid_target_pool NOT empty ?
+│   │   │       ├── YES → SHOOTING ACTIONS AVAILABLE
+│   │   │       │   ├── Pre-select the first available weapon
+│   │   │       │   ├── SHOOT_LEFT = selected_weapon.NB
+│   │   │       │   ├── Display the shooting preview (all the hexes with LoS and selected_weapon.RNG are red)
+│   │   │       │   ├── Display the HP bar blinking animation for every unit in valid_target_pool
+│   │   │       │   ├── Build VALID_ACTIONS list based on current state:
+│   │   │       │   │   ├── If unit.CAN_SHOOT = true AND valid_target_pool NOT empty → Add "shoot"
+│   │   │       │   │   ├── If unit.CAN_ADVANCE = true → Add "advance"
+│   │   │       │   │   └── Always add "wait"
+│   │   │       │   ├── 🎯 VALID ACTIONS: [shoot (if CAN_SHOOT), advance (if CAN_ADVANCE), wait]
+│   │   │       │   ├── ❌ INVALID ACTIONS: [move, charge, attack] → end_activation(ERROR, 0, 0, SHOOTING, 1, 1)
+│   │   │       │   └── STEP : AGENT_ACTION_SELECTION
+│   │   │       │       ├── Choose advance?
+│   │   │       │       │   ├── YES → ✅ VALID → Execute advance action
+│   │   │       │       │   │── Roll 1D6 → advance_range (from config: advance_distance_range)
+│   │   │       │       │   │── Display advance_range on unit icon
+│   │   │       │       │   │── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
+│   │   │       │       │   │── Select destination hex (AI chooses best destination)
+│   │   │       │       │   └── Unit actually moved to different hex?
+│   │   │       │       │      ├── YES → Unit advanced
+│   │   │       │       │      │   ├── Mark units_advanced, log action, do NOT remove from pool, do NOT remove green circle
+│   │   │       │       │      │   │   └── Log advance action: end_activation (ACTION, 1, ADVANCE, NOT_REMOVED, 1, 0)
+│   │   │       │       │      │   ├── Clear any unit remaining in valid_target_pool
+│   │   │       │       │      │   ├── weapon_availability_check (weapon_rule,1,0) → Only Assault weapons available
+│   │   │       │       │      │   ├── At least ONE Assault weapon is available?
+│   │   │       │       │      │   │   ├── YES → CAN_SHOOT = true → Store unit.CAN_SHOOT = true
+│   │   │       │       │      │   │   └── NO → CAN_SHOOT = false → Store unit.CAN_SHOOT = false
+│   │   │       │       │      │   ├── unit.CAN_ADVANCE = false (unit has advanced, cannot advance again)
+│   │   │       │       │      │   ├── Pre-select the first available weapon
+│   │   │       │       │      │   ├── SHOOT_LEFT = selected_weapon.NB
+│   │   │       │       │      │   ├── Unit has advanced (arg2=1), not adjacent (arg3=0, advance restrictions prevent adjacent destinations)
+│   │   │       │       │      │   |   └── valid_target_pool_build (weapon_rule, arg2=1, arg3=0)
+│   │   │       │       │      │   └── valid_target_pool NOT empty AND unit.CAN_SHOOT = true ?
+│   │   │       │       │      │       ├── YES → SHOOTING ACTIONS AVAILABLE (post-advance)
+│   │   │       │       │      │       │   ├── STEP : AGENT_ADVANCED_SHOOTING_ACTION_SELECTION
+│   │   │       │       │      │       │   ├── Display the shooting preview (all the hexes with LoS and selected_weapon.RNG are red)
+│   │   │       │       │      │       │   ├── Display the HP bar blinking animation for every unit in valid_target_pool
+│   │   │       │       │      │       │   ├── Build VALID_ACTIONS list:
+│   │   │       │       │      │       │   │   ├── If unit.CAN_SHOOT = true AND valid_target_pool NOT empty → Add "shoot"
+│   │   │       │       │      │       │   │   └── Always add "wait"
+│   │   │       │       │      │       │   ├── 🎯 VALID ACTIONS: [shoot (if CAN_SHOOT), wait]
+│   │   │       │       │      │       │   ├── ❌ INVALID ACTIONS: [advance, move, charge, attack] → end_activation(ERROR, 0, 0, SHOOTING, 1, 1)
+│   │   │       │       │      │       │   └── AGENT ACTION SELECTION → Choose shoot?
+│   │   │       │       │      │       │       ├── YES → ✅ VALID → Execute shoot action
+│   │   │       │       │      │       │       │   ├── agent_shoot_action()
+│   │   │       │       │      │       │       └── NO → Agent chooses: wait?
+│   │   │       │       │      │       │           ├── YES → ✅ VALID → Execute wait action
+│   │   │       │       │      │       │           │   └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │   │       │       │      │       │           │       ├── YES → Unit has already shot → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │   │       │       │      │       │           │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │      │       │           │       └── NO → Unit has not shot yet (only advanced) → end_activation (ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+│   │   │       │       │      │       │           │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │      │       │           └── NO → Agent chooses invalid action (move/charge/attack)?
+│   │   │       │       │      │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, 0, SHOOTING, 1, 1)
+│   │   │       │       │      │       │                   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │      │       └── NO → Unit advanced but no valid targets available → end_activation (ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+│   │   │       │       │      │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │      └── NO → Unit did not advance → Continue without marking (unit not added to units_advanced, stays in shoot_activation_pool)
+│   │   │       │       │          └── GO TO STEP : AGENT_ACTION_SELECTION
+│   │   │       │       ├── Choose shoot?
+│   │   │       │       │   ├── YES → ✅ VALID → Execute shoot action
+│   │   │       │       │   └── STEP : AGENT_SHOOTING_ACTION_SELECTION
+│   │   │       │       │       ├── Select target from valid_target_pool (AI chooses best target)
+│   │   │       │       │       ├── Execute attack_sequence(RNG)
+│   │   │       │       │       ├── Concatenate Return to TOTAL_ACTION log
+│   │   │       │       │       ├── SHOOT_LEFT -= 1
+│   │   │       │       │       └── SHOOT_LEFT == 0 ?
+│   │   │       │       │           ├── YES → Current weapon exhausted
+│   │   │       │       │           │   ├── Remove selected_weapon from weapon_available_pool (mark as used/greyed)
+│   │   │       │       │           │   └── Is there any available weapons in weapon_available_pool ?
+│   │   │       │       │           │       ├── YES → Select next available weapon (AI chooses best weapon)
+│   │   │       │       │           │       │   ├── This weapon becomes selected_weapon
+│   │   │       │       │           │       │   ├── SHOOT_LEFT = selected_weapon.NB
+│   │   │       │       │           │       │   ├── Determine context: Is unit adjacent to enemy unit?
+│   │   │       │       │           │       │   │   ├── YES → arg3 = 1
+│   │   │       │       │           │       │   │   └── NO → arg3 = 0
+│   │   │       │       │           │       │   ├── valid_target_pool_build (weapon_rule, arg2=0, arg3) → Unit has NOT advanced (arg2=0)
+│   │   │       │       │           │       │   └── GO TO STEP : AGENT_SHOOTING_ACTION_SELECTION
+│   │   │       │       │           │       └── NO → All weapons exhausted → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │   │       │       │           │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │           └── NO → Continue normally (SHOOT_LEFT > 0)
+│   │   │       │       │               ├── selected_target dies ?
+│   │   │       │       │               │   ├── YES → Remove from valid_target_pool
+│   │   │       │       │               │   │   ├── valid_target_pool empty ?
+│   │   │       │       │               │   │   │   ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │   │       │       │               │   │   │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │               │   │   │   └── NO → Continue (other targets remain)
+│   │   │       │       │               │   │   │       └── GO TO STEP : AGENT_SHOOTING_ACTION_SELECTION
+│   │   │       │       │               │   │   └── (target removed from pool)
+│   │   │       │       │               │   └── NO → selected_target survives
+│   │   │       │       │               └── Final safety check (if target survived or edge case): valid_target_pool empty AND SHOOT_LEFT > 0 ?
+│   │   │       │       │                   ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │   │       │       │                   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │       │                   └── NO → Continue
+│   │   │       │       │                       └── GO TO STEP : AGENT_SHOOTING_ACTION_SELECTION
+│   │   │       │       └── NO → Agent chooses: wait?
+│   │   │       │           ├── YES → ✅ VALID → Execute wait action
+│   │   │       │           │   └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │   │       │           │       ├── YES → Unit has already shot → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │   │       │           │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │           │       └── NO → Unit has not shot yet → end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
+│   │   │       │           │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       │           └── NO → Agent chooses invalid action (move/charge/attack)?
+│   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, 0, SHOOTING, 1, 1)
+│   │   │       │                   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │       └── NO → valid_target_pool is empty
+│   │   │           └── unit.CAN_ADVANCE = true ?
+│   │   │               ├── YES → Only action available is advance
+│   │   │               │   └── AGENT ACTION SELECTION → Choose advance?
+│   │   │               │       ├── YES → ✅ VALID → Execute advance action
+│   │   │               │       │   ├── Roll 1D6 → advance_range (from config: advance_distance_range)
+│   │   │               │       │   ├── Display advance_range on unit icon
+│   │   │               │       │   ├── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
+│   │   │               │       │   ├── Select destination hex (AI chooses best destination)
+│   │   │               │       │   └── Unit actually moved to different hex?
+│   │   │               │       │       ├── YES → end_activation (ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+│   │   │               │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │               │       │       └── NO → end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
+│   │   │               │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │               │       └── NO → Agent chooses: wait?
+│   │   │               │           ├── YES → ✅ VALID → Execute wait action
+│   │   │               │           │   └── end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
+│   │   │               │           │       └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │               │           └── NO → Agent chooses invalid action?
+│   │   │               │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, 0, SHOOTING, 1, 1)
+│   │   │               │                   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │               └── NO → unit.CAN_ADVANCE = false → No valid actions available
+│   │   │                   └── end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
+│   │   │                       └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │   │
+│   │   │      ####################################################################################################################
+│   │   │      ########################################            HUMAN PLAYER            ########################################
+│   │   │      ####################################################################################################################
 │   │   │
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION → player activate one unit from shoot_activation_pool by left clicking on it
 │   │       ├── Clear any unit remaining in valid_target_pool
 │   │       ├── Clear TOTAL_ATTACK log
-│   │       ├── SHOOT_LEFT = RNG_NB
-│   │       ├── While SHOOT_LEFT > 0
-│   │       │   ├── Build valid_target_pool : All enemies within range AND in Line of Sight AND having HP_CUR > 0 → added to valid_target_pool
-│   │       │   └── valid_target_pool NOT empty ?
-│   │       │       ├── YES → SHOOTING PHASE ACTIONS AVAILABLE
-│   │       │       │   ├── STEP : PLAYER_ACTION_SELECTION
-│   │       │       │   ├── Display the shooting preview (all the hexes with LoS and RNG_RNG are red)
-│   │       │       │   └── Display the HP bar blinking animation for every unit in valid_target_pool
-│   │       │       │       ├── Click ADVANCE logo → ⚠️ POINT OF NO RETURN
-│   │       │       │       │   ├── Roll 1D6 → advance_range (from config: advance_distance_range)
-│   │       │       │       │   ├── Display advance_range on unit icon
-│   │       │       │       │   ├── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
-│   │       │       │       │   ├── Highlight destinations in ORANGE
-│   │       │       │       │   ├── Left click on valid advance hex → Move unit
-│   │       │       │       │   │   ├── Unit actually moved to different hex?
-│   │       │       │       │   │   │   ├── YES → Mark units_advanced, end_activation(ACTION, 1, ADVANCED, SHOOTING)
-│   │       │       │       │   │   │   └── NO → end_activation without marking (unit didn't advance)
-│   │       │       │       │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       │   ├── Left click on unit / Right-click → Stay in place
-│   │       │       │       │   │   └── end_activation without marking (unit didn't advance)
-│   │       │       │       │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       │   └── POST-ADVANCE: Cannot shoot (unless weapon has "Assault" rule), Cannot charge
-│   │       │       │       ├── Left click on a target in valid_target_pool
-│   │       │       │       │   ├── Execute attack_sequence(RNG)
-│   │       │       │       │   ├── SHOOT_LEFT -= 1
-│   │       │       │       │   ├── Concatenate Return to TOTAL_ACTION log
-│   │       │       │       │   ├── selected_target dies → Remove from valid_target_pool, continue
-│   │       │       │       │   ├── selected_target survives → Continue
-│   │       │       │       │   └── GO TO STEP : PLAYER_ACTION_SELECTION
-│   │       │       │       ├── Left click on another unit in shoot_activation_pool ?
-│   │       │       │       │   └── SHOOT_LEFT = RNG_NB ?
-│   │       │       │       │       ├── YES → Postpone the shooting phase for this unit
-│   │       │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       │       └── NO → The unit must end its activation when started
-│   │       │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
-│   │       │       │       ├── Left click on the active_unit → No effect
-│   │       │       │       ├── Right click on the active_unit
-│   │       │       │       │    └── SHOOT_LEFT = RNG_NB ?
-│   │       │       │       │       ├── NO → end_activation (ACTION, 1, SHOOTING, SHOOTING)
-│   │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       │       └── YES → end_activation (WAIT, 1, PASS, SHOOTING)
-│   │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       └── Left OR Right click anywhere else on the board
-│   │       │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
-│   │       │       └── NO → SHOOT_LEFT = RNG_NB ?
-│   │       │           ├── NO → shot the last target available in valid_target_pool → end_activation (ACTION, 1, SHOOTING, SHOOTING)
-│   │       │           └── YES → no target available in valid_target_pool at activation → no shoot → end_activation (PASS, 1, PASS, SHOOTING)
-│   │       └── End of shooting → end_activation (ACTION, 1, SHOOTING, SHOOTING)
+│   │       ├── Is the active unit adjacent to an enemy unit ?
+│   │       │   ├── YES → weapon_availability_check (weapon_rule,0,1) → Build weapon_available_pool (only PISTOL weapons if weapon_rule=1)
+│   │       │   │   └── Store: unit_is_adjacent = true
+│   │       │   └── NO → weapon_availability_check (weapon_rule,0,0) → Build weapon_available_pool (all available weapons)
+│   │       │       └── Store: unit_is_adjacent = false
+│   │       ├── valid_target_pool_build (weapon_rule, arg2=0, arg3=unit_is_adjacent ? 1 : 0) → Build valid_target_pool using weapon_available_pool
+│   │       └── valid_target_pool NOT empty ?
+│   │           ├── YES
+│   │           │   ├── Pre-select the first available weapon
+│   │           │   ├── SHOOT_LEFT = selected_weapon.NB
+│   │           │   ├── Display the shooting preview (all the hexes with LoS and selected_weapon.RNG are blue)
+│   │           │   ├── Display the HP bar blinking animation for every unit in valid_target_pool
+│   │           │   ├── Build UI elements based on current state:
+│   │           │   │   ├── If unit.CAN_SHOOT = true AND valid_target_pool NOT empty → Display weapon selection icon
+│   │           │   │   └── If unit.CAN_ADVANCE = true → Display advance icon
+│   │           │   ├── Display advance icon (if CAN_ADVANCE) AND weapon selection icon (if CAN_SHOOT)
+│   │           │   └── STEP : PLAYER_ACTION_SELECTION
+│   │           │       ├── Click ADVANCE logo → ⚠️ POINT OF NO RETURN
+│   │           │       │   ├── Perform player_advance() → unit_advanced (boolean)
+│   │           │       │   └── unit_advanced = true ?
+│   │           │       │       ├── YES → Unit advanced
+│   │           │       │       │   ├── Mark units_advanced, log action, do NOT remove from pool, do NOT remove green circle
+│   │           │       │       │   │   └── Log advance action: end_activation (ACTION, 1, ADVANCE, NOT_REMOVED, 1, 0)
+│   │           │       │       │   ├── Clear any unit remaining in valid_target_pool
+│   │           │       │       │   ├── weapon_availability_check (weapon_rule,1,0) → Only Assault weapons available
+│   │           │       │       │   ├── At least ONE Assault weapon is available?
+│   │           │       │       │   │   ├── YES → CAN_SHOOT = true → Store unit.CAN_SHOOT = true
+│   │           │       │       │   │   └── NO → CAN_SHOOT = false → Store unit.CAN_SHOOT = false
+│   │           │       │       │   ├── unit.CAN_ADVANCE = false (unit has advanced, cannot advance again)
+│   │           │       │       │   ├── Pre-select the first available weapon
+│   │           │       │       │   ├── SHOOT_LEFT = selected_weapon.NB
+│   │           │       │       │   ├── Unit has advanced (arg2=1), not adjacent (arg3=0, advance restrictions prevent adjacent destinations)
+│   │           │       │       │   |   └── valid_target_pool_build (weapon_rule, arg2=1, arg3=0)
+│   │           │       │       │   └── valid_target_pool NOT empty AND unit.CAN_SHOOT = true ?
+│   │           │       │       │       ├── YES → SHOOTING ACTIONS AVAILABLE
+│   │           │       │       │       │   ├── STEP : PLAYER_ADVANCED_SHOOTING_ACTION_SELECTION
+│   │           │       │       │       │   ├── Display the shooting preview (all the hexes with LoS and selected_weapon.RNG are blue)
+│   │           │       │       │       │   ├── Display the HP bar blinking animation for every unit in valid_target_pool
+│   │           │       │       │       │   └── Display weapon selection icon (only if unit.CAN_SHOOT = true)
+│   │           │       │       │       │       ├── Left click on the weapon selection icon
+│   │           │       │       │       │       │   ├── weapon_selection():
+│   │           │       │       │       │       │   └── GO TO STEP : PLAYER_ADVANCED_SHOOTING_ACTION_SELECTION
+│   │           │       │       │       │       ├── Left click on a target in valid_target_pool
+│   │           │       │       │       │       │   ├── Execute attack_sequence(RNG)
+│   │           │       │       │       │       │   ├── Concatenate Return to TOTAL_ACTION log
+│   │           │       │       │       │       │   ├── SHOOT_LEFT -= 1
+│   │           │       │       │       │       │   └── SHOOT_LEFT == 0 ?
+│   │           │       │       │       │       │       ├── YES → Current weapon exhausted
+│   │           │       │       │       │       │       │   ├── Remove selected_weapon from weapon_available_pool (mark as used/greyed)
+│   │           │       │       │       │       │       │   └── Is there any available weapons in weapon_available_pool
+│   │           │       │       │       │       │       │       ├── YES → weapon_selection()
+│   │           │       │       │       │       │       │       │   └── GO TO STEP : PLAYER_ADVANCED_SHOOTING_ACTION_SELECTION
+│   │           │       │       │       │       │       │       └── NO → All weapons exhausted → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │       │       │       │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │       │       └── NO → Continue normally (SHOOT_LEFT > 0)
+│   │           │       │       │       │       │           ├── selected_target dies ?
+│   │           │       │       │       │       │           │   ├── YES → Remove from valid_target_pool
+│   │           │       │       │       │       │           │   │   ├── valid_target_pool empty ?
+│   │           │       │       │       │       │           │   │   │   ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │       │       │       │       │           │   │   │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │       │           │   │   │   └── NO → Continue (other targets remain)
+│   │           │       │       │       │       │           │   │   │       └── GO TO STEP : PLAYER_ADVANCED_SHOOTING_ACTION_SELECTION
+│   │           │       │       │       │       │           │   │   └── (target removed from pool)
+│   │           │       │       │       │       │           │   └── NO → selected_target survives
+│   │           │       │       │       │       │           └── Final safety check (if target survived or edge case): valid_target_pool empty AND SHOOT_LEFT > 0 ?
+│   │           │       │       │       │       │               ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │       │       │       │       │               │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │       │               └── NO → Continue
+│   │           │       │       │       │       │                   └── GO TO STEP : PLAYER_ADVANCED_SHOOTING_ACTION_SELECTION
+│   │           │       │       │       │       ├── Left click on another unit in shoot_activation_pool ?
+│   │           │       │       │       │       │   └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │           │       │       │       │       │       ├── NO → Unit has not shot with any weapon yet → Postpone the shooting phase for this unit
+│   │           │       │       │       │       │       |   ├── Unit is NOT removed from the shoot_activation_pool and can be re-activated later in the phase
+│   │           │       │       │       │       │       |   ├── Remove the weapon selection icon
+│   │           │       │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │       │       └── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │       │       │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │       ├── Left OR Right click on the active_unit
+│   │           │       │       │       │       │   └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │           │       │       │       │       │       ├── YES → Unit has already shot → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │       │       │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │       │       └── NO → Unit has not shot yet (only advanced) → end_activation (ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+│   │           │       │       │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │       └── Left OR Right click anywhere else on the board (treated as potential misclick)
+│   │           │       │       │       │           └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │           │       │       │       │               ├── NO → Unit has not shot with any weapon yet → Postpone the shooting phase for this unit
+│   │           │       │       │       │               |   ├── Unit is NOT removed from the shoot_activation_pool and can be re-activated later in the phase
+│   │           │       │       │       │               |   ├── Remove the weapon selection icon
+│   │           │       │       │       │               │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       │       │               └── YES → Unit has already shotif desired)
+│   │           │       │       │       │                   ├── Do not end activation automatically (allow user to click active unit to confirm it)
+│   │           │       │       │       │                   └── GO TO STEP : PLAYER_ADVANCED_SHOOTING_ACTION_SELECTION
+│   │           │       │       │       └── NO → Unit advanced but no valid targets available → end_activation (ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+│   │           │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │       │       └── NO → Unit did not advance → Continue without marking (unit not added to units_advanced, stays in shoot_activation_pool)
+│   │           │       │           └── GO TO STEP : PLAYER_ACTION_SELECTION
+│   │           │       └── STEP : PLAYER_SHOOTING_ACTION_SELECTION
+│   │           │           ├── Left click on the weapon selection icon
+│   │           │           │   ├── weapon_selection():
+│   │           │           |   └── GO TO STEP : PLAYER_SHOOTING_ACTION_SELECTION
+│   │           │           ├── Left click on a target in valid_target_pool
+│   │           │           │   ├── Execute attack_sequence(RNG)
+│   │           │           │   ├── Concatenate Return to TOTAL_ACTION log
+│   │           │           │   ├── SHOOT_LEFT -= 1
+│   │           │           │   └── SHOOT_LEFT == 0 ?
+│   │           │           │       ├── YES → Current weapon exhausted
+│   │           │           │       │   ├── Remove selected_weapon from weapon_available_pool (mark as used/greyed)
+│   │           │           │       │   └── Is there any available weapons in weapon_available_pool
+│   │           │           │       │       ├── YES → weapon_selection()
+│   │           │           │       │       │   └── GO TO STEP : PLAYER_SHOOTING_ACTION_SELECTION
+│   │           │           │       │       └── NO → All weapons exhausted → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │           │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │           │       └── NO → Continue normally (SHOOT_LEFT > 0)
+│   │           │           │           ├── selected_target dies ?
+│   │           │           │           │   ├── YES → Remove from valid_target_pool
+│   │           │           │           │   │   ├── valid_target_pool empty ?
+│   │           │           │           │   │   │   ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │           │           │   │   │   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │           │           │   │   │   └── NO → Continue (other targets remain)
+│   │           │           │           │   │   │       └── GO TO STEP : PLAYER_SHOOTING_ACTION_SELECTION
+│   │           │           │           │   │   └── (target removed from pool)
+│   │           │           │           │   └── NO → selected_target survives
+│   │           │           │           └── Final safety check (if target survived or edge case): valid_target_pool empty AND SHOOT_LEFT > 0 ?
+│   │           │           │               ├── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │           │               │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │           │               └── NO → Continue
+│   │           │           │                   └── GO TO STEP : PLAYER_SHOOTING_ACTION_SELECTION
+│   │           │           ├── Left click on another unit in shoot_activation_pool ?
+│   │           │           │   └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │           │           │       ├── NO → Unit has not shot with any weapon yet → Postpone the shooting phase for this unit
+│   │           │           │       |   ├── Unit is NOT removed from the shoot_activation_pool and can be re-activated later in the phase
+│   │           │           │       |   ├── Remove the weapon selection icon
+│   │           │           │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │           │       └── YES → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │           │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │           ├── Left OR Right click on the active_unit
+│   │           │           │   └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │           │           │       ├── YES → Unit has already shot → end_activation (ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+│   │           │           │       |   ├── Remove the weapon selection icon
+│   │           │           │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │           │       └── NO → Unit has not shot yet → end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
+│   │           │           │           ├── Remove the weapon selection icon
+│   │           │           │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │           └── Left OR Right click anywhere else on the board (treated as potential misclick)
+│   │           │               └── Check if unit has shot with ANY weapon (at least one weapon has weapon.shot = 1) ?
+│   │           │                   ├── NO → Unit has not shot with any weapon yet → Postpone the shooting phase for this unit
+│   │           │                   |   ├── Unit is NOT removed from the shoot_activation_pool and can be re-activated later in the phase
+│   │           │                   │   ├── Remove the weapon selection icon
+│   │           │                   │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │           │                   └── YES → Unit has already shot → 
+│   │           │                       ├── Do not end activation automatically (allow user to click active unit to confirm if desired)
+│   │           │                       └── GO TO STEP : PLAYER_SHOOTING_ACTION_SELECTION
+│   │           └── NO → valid_target_pool is empty
+│   │               └── unit.CAN_ADVANCE = true ?
+│   │                   ├── YES → Only action available is advance
+│   │                   │   ├── Click ADVANCE logo → ⚠️ POINT OF NO RETURN
+│   │                   │   │   ├── Perform player_advance() → unit_advanced (boolean)
+│   │                   │   │   └── unit_advanced = true ?
+│   │                   │   │       ├── YES → end_activation (ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+│   │                   │   │       └── NO → end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
+│   │                   │   └── Left or Right click on the active_unit → No effect
+│   │                   │       └── end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
+│   │                   └── NO → unit.CAN_ADVANCE = false → No valid actions available
+│   │                       └── end_activation (WAIT, 1, 0, SHOOTING, 1, 1)
 │   └── No more activable units → pass
 └── End of shooting phase → Advance to charge phase
 ```
+
+### Flow Control Terminology
+
+**"Continue normally"** (in shooting context):
+- **When**: After executing a shot with SHOOT_LEFT > 0 remaining
+- **Meaning**: Continue the shooting sequence by:  
+  1. Handling target outcome (died/survived)  
+  2. Updating valid_target_pool  
+  3. Running final safety check  
+  4. Looping back to shooting action selection
+- **Purpose**: Maintain multi-shot sequence until SHOOT_LEFT = 0 or no targets remain
 
 ### Target Restrictions Logic
 
 **Valid Target Requirements (ALL must be true):**
 
-1. **Range check**: Enemy within unit's RNG_RNG hexes (varies by weapon)
+1. **Range check**: Enemy within unit's selected_weapon.RNG hexes (varies by weapon)
 2. **Line of sight**: No wall hexes between shooter and target
 3. **Fight exclusion**: Enemy NOT adjacent to shooter (adjacent = melee fight)
 4. **Friendly fire prevention**: Enemy NOT adjacent to any friendly units
@@ -590,18 +979,18 @@ For each unit
 │   │   │   │   └── valid_charge_destinations_pool NOT empty ?
 │   │   │   │       ├── YES → CHARGE PHASE ACTIONS AVAILABLE
 │   │   │   │       │   ├── 🎯 VALID ACTIONS: [charge, wait]
-│   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, attack] → end_activation (ERROR, 0, PASS, CHARGE)
+│   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, attack] → end_activation (ERROR, 0, PASS, CHARGE, 1, 1)
 │   │   │   │       │   └── AGENT ACTION SELECTION → Choose charge?
 │   │   │   │       │       ├── YES → ✅ VALID → Execute charge
 │   │   │   │       │       │   ├── Select destination hex from valid_charge_destinations_pool
 │   │   │   │       │       │   ├── Move unit to destination
-│   │   │   │       │       │   └── end_activation (ACTION, 1, CHARGE, CHARGE)
+│   │   │   │       │       │   └── end_activation (ACTION, 1, CHARGE, CHARGE, 1, 1)
 │   │   │   │       │       └── NO → Agent chooses: wait?
 │   │   │   │       │           ├── YES → ✅ VALID → Execute wait action
-│   │   │   │       │           │   └── end_activation (WAIT, 1, PASS, CHARGE)
+│   │   │   │       │           │   └── end_activation (WAIT, 1, PASS, CHARGE, 1, 1)
 │   │   │   │       │           └── NO → Agent chooses invalid action (move/shoot/attack)?
-│   │   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, CHARGE)
-│   │   │   │       └── NO → end_activation (PASS, 0, PASS, CHARGE)
+│   │   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, CHARGE, 1, 1)
+│   │   │   │       └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
 │   │   │   └── Discard charge_range roll (whether used or not)
 │   │   │
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it
@@ -614,18 +1003,18 @@ For each unit
 │   │       │       │   ├── Highlight the valid_charge_destinations_pool hexes by making them orange
 │   │       │       │   └── Player select the action to execute
 │   │       │       │       ├── Left click on a hex in valid_charge_destinations_pool → Move the icon of the unit to the selected hex
-│   │       │       │       │   ├── end_activation (ACTION, 1, CHARGE, CHARGE)
+│   │       │       │       │   ├── end_activation (ACTION, 1, CHARGE, CHARGE, 1, 1)
 │   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
 │   │       │       │       ├── Left click on the active_unit → Charge postponed
 │   │       │       │       │   └── GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
 │   │       │       │       ├── Right click on the active_unit → Charge cancelled
-│   │       │       │       │   ├── end_activation (PASS, 0, PASS, CHARGE)
+│   │       │       │       │   ├── end_activation (NO, 0, PASS, CHARGE, 1, 1)
 │   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
 │   │       │       │       ├── Left click on another unit in activation pool → Charge postponed
 │   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
 │   │       │       │       └── Left OR Right click anywhere else on the board → Cancel charge hex selection
 │   │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       └── NO → end_activation (PASS, 0, PASS, CHARGE)
+│   │       │       └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
 │   │       └── Discard charge_range roll (whether used or not)
 │   └── NO → If any, cancel the Highlight of the hexes in valid_charge_destinations_pool
 │       └── No more activable units → pass
@@ -721,7 +1110,7 @@ Start of the Figh Phase:
 │   │   │   │   └── valid_target_pool NOT empty ?
 │   │   │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │   │   │   │       │   ├── 🎯 VALID ACTIONS: [fight]
-│   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
+│   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │   │   │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │   │   │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │   │   │   │       │       │   ├── ATTACK_LEFT -= 1
@@ -729,12 +1118,12 @@ Start of the Figh Phase:
 │   │   │   │       │       │   ├── selected_target dies → Remove from valid_target_pool, continue
 │   │   │   │       │       │   └── selected_target survives → Continue
 │   │   │   │       │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│   │   │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT)
+│   │   │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │   │   │   │       └── NO → ATTACK_LEFT = CC_NB ?
-│   │   │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT)
-│   │   │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (PASS, 1, PASS, FIGHT)
+│   │   │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│   │   │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (NO, 1, PASS, FIGHT, 1, 1)
 │   │   │   ├── Return: TOTAL_ACTION log
-│   │   │   └── end_activation (ACTION, 1, FIGHT, FIGHT)
+│   │   │   └── end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION → player activate one unit from charging_activation_pool by left clicking on it
 │   │       ├── Clear any unit remaining in valid_target_pool
 │   │       ├── Clear TOTAL_ATTACK_LOG
@@ -785,10 +1174,10 @@ Start of the Figh Phase:
 │   │       │       │   └── Left OR Right click anywhere else on the board
 │   │       │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
 │   │   │   │       └── NO → ATTACK_LEFT = CC_NB ?
-│   │   │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT)
-│   │       │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (PASS, 1, PASS, FIGHT)
+│   │   │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│   │       │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (NO, 1, PASS, FIGHT, 1, 1)
 │   │       ├── Return: TOTAL_ACTION log
-│   │       └── end_activation (ACTION, 1, FIGHT, FIGHT)
+│   │       └── end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 │   └── NO → All charging units processed → GO TO STEP : ATLERNATE_FIGHT
 │
 │   ##### Sub-Phase 2 : Alternate activation
@@ -831,7 +1220,7 @@ Start of the Figh Phase:
 │   │   │   │   │   └── valid_target_pool NOT empty ?
 │   │   │   │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │   │   │   │   │       │   ├── 🎯 VALID ACTIONS: [fight]
-│   │   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
+│   │   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │   │   │   │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │   │   │   │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │   │   │   │   │       │       │   ├── ATTACK_LEFT -= 1
@@ -839,12 +1228,12 @@ Start of the Figh Phase:
 │   │   │   │   │       │       │   ├── selected_target dies → Remove from valid_target_pool, continue
 │   │   │   │   │       │       │   └── selected_target survives → Continue
 │   │   │   │   │       │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│   │   │   │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT)
+│   │   │   │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │   │   │   │   │       └── NO → ATTACK_LEFT = CC_NB ?
-│   │   │   │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT)
-│   │   │   │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (PASS, 1, PASS, FIGHT)
+│   │   │   │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│   │   │   │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (NO, 1, PASS, FIGHT, 1, 1)
 │   │   │   │   ├── Return: TOTAL_ACTION log
-│   │   │   │   ├── end_activation (ACTION, 1, FIGHT, FIGHT)
+│   │   │   │   ├── end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 │   │   │   │   └── Check: Either pool empty?
 │   │   │   │       ├── YES → Exit loop, GO TO STEP : ONE_PLAYER_HAS_UNITS_LEFT
 │   │   │   │       └── NO → Continue → GO TO STEP : ATLERNATE_FIGHT
@@ -898,8 +1287,8 @@ Start of the Figh Phase:
 │   │   │       │       │   │            └── GO TO STEP : PLAYER_ACTION_SELECTION
 │   │   │       │       │   └── Left OR Right click anywhere else on the board
 │   │   │       │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
-│   │   │       │       └── NO → end_activation (ACTION, 1, FIGHT, FIGHT)
-│   │   │       ├── End of Fight → end_activation (ACTION, 1, FIGHT, FIGHT)
+│   │   │       │       └── NO → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│   │   │       ├── End of Fight → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 │   │   │       └── Check: Either pool empty?
 │   │   │           ├── YES → Exit loop, GO TO STEP : ONE_PLAYER_HAS_UNITS_LEFT
 │   │   │           └── NO → Continue → GO TO STEP : ATLERNATE_FIGHT
@@ -913,7 +1302,7 @@ Start of the Figh Phase:
 │   │       │   │   └── valid_target_pool NOT empty ?
 │   │       │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │   │       │   │       │   ├── 🎯 VALID ACTIONS: [fight]
-│   │       │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
+│   │       │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │   │       │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │   │       │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │   │       │   │       │       │   ├── ATTACK_LEFT -= 1
@@ -921,12 +1310,12 @@ Start of the Figh Phase:
 │   │       │   │       │       │   ├── selected_target dies → Remove from valid_target_pool, continue
 │   │       │   │       │       │   └── selected_target survives → Continue
 │   │       │   │       │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│   │       │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT)
+│   │       │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │   │       │   │       └── NO → ATTACK_LEFT = CC_NB ?
-│   │       │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT)
-│   │       │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (PASS, 1, PASS, FIGHT)
+│   │       │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│   │       │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (NO, 1, PASS, FIGHT, 1, 1)
 │   │       │   ├── Return: TOTAL_ACTION log
-│   │       │   ├── end_activation (ACTION, 1, FIGHT, FIGHT)
+│   │       │   ├── end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 │   │       │   └── Check: Either pool empty?
 │   │       │       ├── YES → Exit loop, GO TO STEP : ONE_PLAYER_HAS_UNITS_LEFT
 │   │       │       └── NO → Continue → GO TO STEP : ATLERNATE_FIGHT
@@ -980,8 +1369,8 @@ Start of the Figh Phase:
 │   │           │       │   │            └── GO TO STEP : PLAYER_ACTION_SELECTION
 │   │           │       │   └── Left OR Right click anywhere else on the board
 │   │           │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
-│   │           │       └── NO → end_activation (ACTION, 1, FIGHT, FIGHT)
-│   │           ├── End of Fight → end_activation (ACTION, 1, FIGHT, FIGHT)
+│   │           │       └── NO → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│   │           ├── End of Fight → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 │   │           └── Check: Either pool empty?
 │   │               ├── YES → Exit loop, GO TO STEP : ONE_PLAYER_HAS_UNITS_LEFT
 │   │               └── NO → Continue → GO TO STEP : ATLERNATE_FIGHT
@@ -999,7 +1388,7 @@ Start of the Figh Phase:
 │           │   │   └── valid_target_pool NOT empty ?
 │           │   │       ├── YES → FIGHT PHASE ACTIONS AVAILABLE
 │           │   │       │   ├── 🎯 VALID ACTIONS: [fight]
-│           │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT)
+│           │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, charge, wait] → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │           │   │       │   └── AGENT ACTION SELECTION → Choose fight?
 │           │   │       │       ├── YES → ✅ VALID → Execute attack_sequence(CC)
 │           │   │       │       │   ├── ATTACK_LEFT -= 1
@@ -1007,12 +1396,12 @@ Start of the Figh Phase:
 │           │   │       │       │   ├── selected_target dies → Remove from valid_target_pool, continue
 │           │   │       │       │   └── selected_target survives → Continue
 │           │   │       │       └── NO → Agent chooses invalid action (move/shoot/charge/wait)?
-│           │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT)
+│           │   │       │           └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT, 1, 1)
 │           │   │       └── NO → ATTACK_LEFT = CC_NB ?
-│           │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT)
-│           │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (PASS, 1, PASS, FIGHT)
+│           │   │           ├── NO → Fought the last target available in valid_target_pool → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│           │   │           └── YES → no target available in valid_target_pool at activation → no attack → end_activation (NO, 1, PASS, FIGHT, 1, 1)
 │           │   ├── Return: TOTAL_ACTION log
-│           │   ├── end_activation (ACTION, 1, FIGHT, FIGHT)
+│           │   ├── end_activation (ACTION, 1, FIGHT, FIGHT, 1)
 │           │   └── Check: Either pool empty?
 │           │       ├── YES → Exit loop, GO TO STEP : ONE_PLAYER_HAS_UNITS_LEFT
 │           │       └── NO → Continue → GO TO STEP : ATLERNATE_FIGHT
@@ -1066,8 +1455,8 @@ Start of the Figh Phase:
 │               │       │   │            └── GO TO STEP : PLAYER_ACTION_SELECTION
 │               │       │   └── Left OR Right click anywhere else on the board
 │               │       │       └── GO TO STEP : PLAYER_ACTION_SELECTION
-│               │       └── NO → end_activation (ACTION, 1, FIGHT, FIGHT)
-│               └── End of Fight → end_activation (ACTION, 1, FIGHT, FIGHT)
+│               │       └── NO → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
+│               └── End of Fight → end_activation (ACTION, 1, FIGHT, FIGHT, 1, 1)
 └── End Fight Phase: Advance to the Movement Phase of the next player
 ```
 

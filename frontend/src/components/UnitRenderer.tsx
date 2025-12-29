@@ -1109,13 +1109,18 @@ export class UnitRenderer {
   
   private renderAdvanceButton(unitIconScale: number, iconZIndex: number): void {
     const { unit, phase, currentPlayer, app, centerX, centerY, HEX_RADIUS, 
-            canAdvance, onAdvance, isEligible } = this.props;
+            canAdvance, onAdvance, gameState, selectedUnitId } = this.props;
     
-    // Show only during shoot phase for eligible units of current player
+    // Show only during shoot phase for active unit of current player
     if (phase !== 'shoot') return;
     if (unit.player !== currentPlayer) return;
-    if (!isEligible) return;
     if (canAdvance === false) return;
+    
+    // Only show icon when unit is actively activated (active_shooting_unit or selectedUnitId)
+    const isActiveShooting = (gameState?.active_shooting_unit && 
+      parseInt(gameState.active_shooting_unit) === unit.id) ||
+      (selectedUnitId !== null && selectedUnitId === unit.id);
+    if (!isActiveShooting) return;
     
     // Position: above HP bar (same calculation as renderHPBar)
     const scaledYOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
@@ -1163,19 +1168,6 @@ export class UnitRenderer {
     const isActiveShooting = (gameState?.active_shooting_unit && 
       parseInt(gameState.active_shooting_unit) === unit.id) ||
       (selectedUnitId !== null && selectedUnitId === unit.id);
-    
-    // DEBUG: Log weapon icon visibility
-    console.log(`🔍 [WEAPON ICON DEBUG] Unit ${unit.id}:`, {
-      phase,
-      isCurrentPlayer: unit.player === currentPlayer,
-      activeShootingUnit: gameState?.active_shooting_unit,
-      selectedUnitId,
-      isActiveShooting,
-      hasMultipleWeapons: unit.RNG_WEAPONS && unit.RNG_WEAPONS.length > 1,
-      autoSelectWeapon,
-      willShow: isActiveShooting && unit.RNG_WEAPONS && unit.RNG_WEAPONS.length > 1 && autoSelectWeapon === false
-    });
-    
     if (!isActiveShooting) return;
     
     // Check if unit has multiple ranged weapons
@@ -1183,6 +1175,10 @@ export class UnitRenderer {
     
     // Only show icon when automatic weapon selection is disabled
     if (autoSelectWeapon !== false) return;
+    
+    // Show icon when unit is active_shooting_unit (backend only sets this when unit has valid targets)
+    // This indicates the unit can shoot and has enemies in LoS/range
+    if (!gameState?.active_shooting_unit || gameState.active_shooting_unit !== unit.id.toString()) return;
     
     // Position: to the right of Advance icon (same Y position as Advance)
     const scaledYOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
