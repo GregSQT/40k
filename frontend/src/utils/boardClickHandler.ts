@@ -134,7 +134,7 @@ export function setupBoardClickHandler(callbacks: {
   window.addEventListener('boardUnitClick', globalClickHandler);
   
   // Remove existing charge cancel handler before adding new one
-  const existingCancelHandler = (window as any).cancelChargeHandler;
+  const existingCancelHandler = (window as unknown as Record<string, unknown>).cancelChargeHandler as (() => void) | undefined;
   if (existingCancelHandler) {
     window.removeEventListener('boardCancelCharge', existingCancelHandler);
   }
@@ -143,12 +143,12 @@ export function setupBoardClickHandler(callbacks: {
   const cancelChargeHandler = () => {
     callbacks.onCancelCharge?.();
   };
-  (window as any).cancelChargeHandler = cancelChargeHandler;
+  (window as unknown as Record<string, unknown>).cancelChargeHandler = cancelChargeHandler;
   
   window.addEventListener('boardCancelCharge', cancelChargeHandler);
 
   // Remove existing advance cancel handler before adding new one
-  const existingCancelAdvanceHandler = (window as any).cancelAdvanceHandler;
+  const existingCancelAdvanceHandler = (window as unknown as Record<string, unknown>).cancelAdvanceHandler as (() => void) | undefined;
   if (existingCancelAdvanceHandler) {
     window.removeEventListener('boardCancelAdvance', existingCancelAdvanceHandler);
   }
@@ -157,7 +157,7 @@ export function setupBoardClickHandler(callbacks: {
   const cancelAdvanceHandler = () => {
     callbacks.onCancelAdvance?.();
   };
-  (window as any).cancelAdvanceHandler = cancelAdvanceHandler;
+  (window as unknown as Record<string, unknown>).cancelAdvanceHandler = cancelAdvanceHandler;
   
   window.addEventListener('boardCancelAdvance', cancelAdvanceHandler);
   
@@ -211,4 +211,4 @@ export function setupBoardClickHandler(callbacks: {
   window.addEventListener('boardHexClick', globalHexClickHandler);
 }
 
-;(window as any).setupBoardClickHandler = setupBoardClickHandler;
+;(window as unknown as Record<string, unknown>).setupBoardClickHandler = setupBoardClickHandler;

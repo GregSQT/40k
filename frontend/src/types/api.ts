@@ -1,5 +1,5 @@
 // frontend/src/types/api.ts
-export interface APIResponse<T = any> {
+export interface APIResponse<T = unknown> {
   data: T;
   success: boolean;
   message?: string;
@@ -9,7 +9,7 @@ export interface APIResponse<T = any> {
 export interface APIError {
   code: string;
   message: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 export interface AIActionRequest {

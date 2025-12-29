@@ -8,6 +8,9 @@
     "copy-configs": "node ../scripts/copy-configs.js",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint",
     "preview": "vite preview"
   },
   "dependencies": {

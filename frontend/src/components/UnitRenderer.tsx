@@ -1,6 +1,6 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, FightSubPhase, PlayerId } from "../types/game";
+import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState } from "../types/game";
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 import { getSelectedRangedWeapon, getSelectedMeleeWeapon, getMeleeRange } from '../utils/weaponHelpers';
 
@@ -44,7 +44,26 @@ interface UnitRendererProps {
   advancingUnitId?: number | null;
 
   // Board configuration
-  boardConfig: any;
+  boardConfig: {
+    colors?: {
+      current_unit?: string;
+      hp_damaged?: string;
+      [key: string]: string | undefined;
+    };
+    [key: string]: unknown;
+  } | Record<string, unknown> | null | {
+    cols: number;
+    rows: number;
+    hex_radius: number;
+    margin: number;
+    colors: {
+      [key: string]: string;
+    };
+    display?: {
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
   HEX_RADIUS: number;
   ICON_SCALE: number;
   ELIGIBLE_OUTLINE_WIDTH: number;
@@ -69,7 +88,7 @@ interface UnitRendererProps {
   unitsFled?: number[];
   fightSubPhase?: FightSubPhase; // NEW
   fightActivePlayer?: PlayerId; // NEW
-  gameState?: any; // Add gameState property for active_shooting_unit access
+  gameState?: GameState; // Add gameState property for active_shooting_unit access
   units: Unit[];
   chargeTargets: Unit[];
   fightTargets: Unit[];
@@ -113,15 +132,21 @@ export class UnitRenderer {
   
   private cleanupExistingBlinkIntervals(): void {
     // Find any existing blink containers and clean them up
+    interface BlinkContainer extends PIXI.Container {
+      unitId?: number;
+      cleanupBlink?: () => void;
+    }
+    
     const existingBlinkContainers = this.props.app.stage.children.filter(
       child => child.name === 'hp-blink-container'
     );
     
     existingBlinkContainers.forEach((container) => {
       // Only cleanup OLD containers that belong to current unit (prevent duplicates)
-      if ((container as any).unitId && (container as any).unitId === this.props.unit.id) {
-        if ((container as any).cleanupBlink) {
-          (container as any).cleanupBlink();
+      const blinkContainer = container as BlinkContainer;
+      if (blinkContainer.unitId && blinkContainer.unitId === this.props.unit.id) {
+        if (blinkContainer.cleanupBlink) {
+          blinkContainer.cleanupBlink();
         }
         container.destroy({ children: true });
       }
@@ -136,7 +161,12 @@ export class UnitRenderer {
 
     // AI_TURN.md COMPLIANCE: Dead units don't render - UNLESS just killed (show as grey ghost)
     // Just-killed units are shown in grey, then removed in the next action
-    const isJustKilled = (unit as any).isJustKilled === true;
+    interface UnitWithFlags extends Unit {
+      isJustKilled?: boolean;
+      isGhost?: boolean;
+    }
+    const unitWithFlags = unit as UnitWithFlags;
+    const isJustKilled = unitWithFlags.isJustKilled === true;
     if (unit.HP_CUR <= 0) {
       if (isJustKilled) {
         console.log(`Rendering just-killed unit ${unit.id} as grey ghost`);
@@ -181,14 +211,19 @@ export class UnitRenderer {
 
     // AI_TURN.md: Basic eligibility checks
     // Allow just-killed units to be rendered as grey ghosts
-    const isJustKilled = (unit as any).isJustKilled === true;
+    interface UnitWithFlags extends Unit {
+      isJustKilled?: boolean;
+      isGhost?: boolean;
+    }
+    const unitWithFlags = unit as UnitWithFlags;
+    const isJustKilled = unitWithFlags.isJustKilled === true;
     if (unit.HP_CUR === undefined || (unit.HP_CUR <= 0 && !isJustKilled)) return false;
     if (phase !== "fight" && unit.player !== currentPlayer) return false;
     
     switch (phase) {
       case "move":
         return !unitsMoved.includes(unit.id);
-      case "shoot":
+      case "shoot": {
         // AI_TURN.md: Queue-based eligibility during active shooting phase
         // Type-safe checks with proper fallbacks
         if (unitsFled && unitsFled.includes(unit.id)) return false;
@@ -197,6 +232,7 @@ export class UnitRenderer {
         if (!selectedRngWeapon || selectedRngWeapon.NB <= 0) return false;
         // Simplified check - parent should provide queue membership
         return this.props.isEligible || false;
+      }
       case "charge":
         // AI_TURN.md: Charge phase uses pool-based eligibility (charge_activation_pool)
         // Parent provides proper eligibility through isEligible prop
@@ -249,7 +285,8 @@ export class UnitRenderer {
     
     // Handle selection and used unit states
     if (selectedUnitId === unit.id) {
-      borderColor = parseColor(boardConfig.colors.current_unit);
+      const currentUnitColor = (boardConfig && typeof boardConfig === 'object' && 'colors' in boardConfig && boardConfig.colors && typeof boardConfig.colors === 'object' && 'current_unit' in boardConfig.colors) ? (boardConfig.colors as { current_unit?: string }).current_unit : undefined;
+      borderColor = parseColor(currentUnitColor || '#ffffff');
       borderWidth = SELECTED_BORDER_WIDTH;
     } else if (unitsMoved.includes(unit.id) || unitsCharged?.includes(unit.id) || unitsAttacked?.includes(unit.id)) {
       unitColor = 0x666666;
@@ -267,17 +304,23 @@ export class UnitRenderer {
     const unitCircle = new PIXI.Graphics();
 
     // Ghost unit styling (for replay move visualization)
+    interface UnitWithFlags extends Unit {
+      isJustKilled?: boolean;
+      isGhost?: boolean;
+    }
+    const unitWithFlags = unit as UnitWithFlags;
+    
     let finalUnitColor = unitColor;
     let finalBorderColor = borderColor;
     let circleAlpha = 1.0;
-    if ((unit as any).isGhost) {
+    if (unitWithFlags.isGhost) {
       finalUnitColor = 0x666666;  // Medium grey fill
       finalBorderColor = 0x888888; // Lighter grey border
       circleAlpha = 0.6;
     }
 
     // Just-killed unit styling (show as grey ghost before removal)
-    if ((unit as any).isJustKilled) {
+    if (unitWithFlags.isJustKilled) {
       finalUnitColor = 0x444444;  // Dark grey fill
       finalBorderColor = 0x666666; // Medium grey border
       circleAlpha = 0.5;
@@ -414,7 +457,7 @@ export class UnitRenderer {
         
         // Get or create texture (PIXI.Texture.from uses cache if available)
         // This ensures textures are reused from cache, preventing black flashing
-        let texture = PIXI.Texture.from(iconPath, isPreview ? { resourceOptions: { crossorigin: 'anonymous' } } : undefined);
+        const texture = PIXI.Texture.from(iconPath, isPreview ? { resourceOptions: { crossorigin: 'anonymous' } } : undefined);
         
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);
@@ -424,25 +467,21 @@ export class UnitRenderer {
         sprite.zIndex = iconZIndex;
         sprite.alpha = 1.0; // Always fully opaque
 
+        interface UnitWithFlags extends Unit {
+          isJustKilled?: boolean;
+          isGhost?: boolean;
+        }
+        const unitWithFlags = unit as UnitWithFlags;
+
         // Ghost unit rendering (for replay move visualization)
-        if ((unit as any).isGhost) {
+        if (unitWithFlags.isGhost) {
           sprite.alpha = 0.5;
           sprite.tint = 0x666666;
         }
 
         // Just-killed unit rendering (show as dark grey before removal)
-        if ((unit as any).isJustKilled) {
+        if (unitWithFlags.isJustKilled) {
           sprite.alpha = 0.4;
-          sprite.tint = 0x444444;
-        }
-
-        // Ghost unit rendering (for replay move visualization)
-        if ((unit as any).isGhost) {
-          sprite.tint = 0x666666;
-        }
-
-        // Just-killed unit rendering (show as dark grey before removal)
-        if ((unit as any).isJustKilled) {
           sprite.tint = 0x444444;
         }
 
@@ -474,7 +513,7 @@ export class UnitRenderer {
          
          app.stage.addChild(sprite);
 
-      } catch (iconError) {
+      } catch {
         this.renderTextFallback(iconZIndex);
       }
     } else {
@@ -485,16 +524,22 @@ export class UnitRenderer {
   private renderTextFallback(iconZIndex: number): void {
     const { unit, centerX, centerY, app } = this.props;
 
+    interface UnitWithFlags extends Unit {
+      isJustKilled?: boolean;
+      isGhost?: boolean;
+    }
+    const unitWithFlags = unit as UnitWithFlags;
+
     // Ghost unit styling
     let textColor = 0xffffff;
     let textAlpha = 1.0;
-    if ((unit as any).isGhost) {
+    if (unitWithFlags.isGhost) {
       textColor = 0x999999;
       textAlpha = 0.7;
     }
 
     // Just-killed unit styling
-    if ((unit as any).isJustKilled) {
+    if (unitWithFlags.isJustKilled) {
       textColor = 0x666666;
       textAlpha = 0.5;
     }
@@ -597,22 +642,22 @@ export class UnitRenderer {
     // Clean up any existing target indicator for this unit from the container
     // This prevents duplicate logos when re-rendering
     if (targetContainer === uiElementsContainer) {
-      const existingElements = uiElementsContainer.children.filter((child: any) => 
+      const existingElements = uiElementsContainer.children.filter((child: PIXI.DisplayObject) => 
         child.name === `target-indicator-${unitIdNum}-bg` || child.name === `target-indicator-${unitIdNum}-text`
       );
-      existingElements.forEach((child: any) => {
+      existingElements.forEach((child: PIXI.DisplayObject) => {
         uiElementsContainer.removeChild(child);
-        if (child.destroy) child.destroy();
+        if ('destroy' in child && typeof child.destroy === 'function') child.destroy();
       });
     } else {
       // For stage, also clean up existing elements
-      const existingElements = app.stage.children.filter((child: any) => 
+      const existingElements = app.stage.children.filter((child: PIXI.DisplayObject) => 
         (child instanceof PIXI.Graphics || child instanceof PIXI.Text) &&
         (child.name === `target-indicator-${unitIdNum}-bg` || child.name === `target-indicator-${unitIdNum}-text`)
       );
-      existingElements.forEach((child: any) => {
+      existingElements.forEach((child: PIXI.DisplayObject) => {
         app.stage.removeChild(child);
-        if (child.destroy) child.destroy();
+        if ('destroy' in child && typeof child.destroy === 'function') child.destroy();
       });
     }
     
@@ -889,11 +934,17 @@ export class UnitRenderer {
     const sliceWidth = finalBarWidth / unit.HP_MAX;
     
     if (shouldShowBlinkingHP) {
+      interface HPBlinkContainer extends PIXI.Container {
+        unitId?: number;
+        cleanupBlink?: () => void;
+        blinkInterval?: ReturnType<typeof setInterval>;
+      }
+      
       // Create blinking HP bar animation (works for both individual and multi-unit)
-      const hpContainer = new PIXI.Container();
+      const hpContainer = new PIXI.Container() as HPBlinkContainer;
       hpContainer.name = 'hp-blink-container';
       hpContainer.zIndex = 350;
-      (hpContainer as any).unitId = unit.id; // Tag container with unit ID
+      hpContainer.unitId = unit.id; // Tag container with unit ID
       
       // Create normal HP slices
       const normalSlices: PIXI.Graphics[] = [];
@@ -982,12 +1033,12 @@ export class UnitRenderer {
       const blinkInterval = setInterval(blinkTicker, 500);
       
       // Store cleanup function with proper interval reference
-      (hpContainer as any).cleanupBlink = () => {
+      hpContainer.cleanupBlink = () => {
         if (blinkInterval) {
           clearInterval(blinkInterval);
         }
       };
-      (hpContainer as any).blinkInterval = blinkInterval;
+      hpContainer.blinkInterval = blinkInterval;
       
       app.stage.addChild(hpContainer);
       
@@ -995,7 +1046,8 @@ export class UnitRenderer {
       // Normal non-blinking HP slices
       for (let i = 0; i < unit.HP_MAX; i++) {
         const slice = new PIXI.Graphics();
-        const color = i < displayHP ? (unit.player === 0 ? this.getCSSColor('--hp-bar-player0') : this.getCSSColor('--hp-bar-player1')) : parseColor(boardConfig.colors.hp_damaged);
+        const hpDamagedColor = (boardConfig && typeof boardConfig === 'object' && 'colors' in boardConfig && boardConfig.colors && typeof boardConfig.colors === 'object' && 'hp_damaged' in boardConfig.colors) ? (boardConfig.colors as { hp_damaged?: string }).hp_damaged : undefined;
+        const color = i < displayHP ? (unit.player === 0 ? this.getCSSColor('--hp-bar-player0') : this.getCSSColor('--hp-bar-player1')) : parseColor(hpDamagedColor || '#666666');
         slice.beginFill(color, 1);
         slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         slice.endFill();
@@ -1158,27 +1210,34 @@ export class UnitRenderer {
   }
   
   private renderWeaponSelectionIcon(unitIconScale: number, iconZIndex: number): void {
-    const { unit, phase, currentPlayer, app, centerX, centerY, HEX_RADIUS, gameState, selectedUnitId, autoSelectWeapon } = this.props;
+    const { unit, phase, currentPlayer, app, centerX, centerY, HEX_RADIUS, gameState } = this.props;
     
+    // AI_TURN.md ligne 694: Human only: Display weapon selection icon (if CAN_SHOOT)
     // Show only during shoot phase for active unit with multiple weapons
     if (phase !== 'shoot') return;
     if (unit.player !== currentPlayer) return;
     
-    // Check if unit is active shooting unit or selected unit
-    const isActiveShooting = (gameState?.active_shooting_unit && 
-      parseInt(gameState.active_shooting_unit) === unit.id) ||
-      (selectedUnitId !== null && selectedUnitId === unit.id);
-    if (!isActiveShooting) return;
-    
-    // Check if unit has multiple ranged weapons
-    if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length <= 1) return;
-    
-    // Only show icon when automatic weapon selection is disabled
-    if (autoSelectWeapon !== false) return;
-    
-    // Show icon when unit is active_shooting_unit (backend only sets this when unit has valid targets)
-    // This indicates the unit can shoot and has enemies in LoS/range
+    // Check if unit is active shooting unit (backend sets this when unit has valid targets)
+    // This indicates CAN_SHOOT = true (backend only sets active_shooting_unit when unit can shoot)
     if (!gameState?.active_shooting_unit || gameState.active_shooting_unit !== unit.id.toString()) return;
+    
+    // Check if unit has multiple available weapons (not just multiple weapons in list)
+    // Use available_weapons from backend if available, otherwise fallback to RNG_WEAPONS
+    interface UnitWithAvailableWeapons extends Unit {
+      available_weapons?: Array<{ can_use: boolean }>;
+    }
+    const unitWithWeapons = unit as UnitWithAvailableWeapons;
+    const availableWeapons = unitWithWeapons.available_weapons;
+    const usableWeapons = availableWeapons 
+      ? availableWeapons.filter(w => w.can_use)
+      : (unit.RNG_WEAPONS || []);
+    
+    if (usableWeapons.length <= 1) return;
+    
+    // AI_TURN.md: Display for human players (autoSelectWeapon can be used to control auto-selection,
+    // but icon should always be shown for human players when CAN_SHOOT and multiple weapons available)
+    // If autoSelectWeapon is explicitly false, show icon; if undefined or true, still show for manual selection option
+    // Note: The icon allows manual weapon selection even if auto-selection is enabled
     
     // Position: to the right of Advance icon (same Y position as Advance)
     const scaledYOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
@@ -1306,12 +1365,12 @@ export class UnitRenderer {
     // Clean up any existing charge badge for this unit from the container
     const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
     if (uiElementsContainer) {
-      const existingElements = uiElementsContainer.children.filter((child: any) => 
+      const existingElements = uiElementsContainer.children.filter((child: PIXI.DisplayObject) => 
         child.name === `charge-badge-${unitIdNum}`
       );
-      existingElements.forEach((child: any) => {
+      existingElements.forEach((child: PIXI.DisplayObject) => {
         uiElementsContainer.removeChild(child);
-        if (child.destroy) child.destroy();
+        if ('destroy' in child && typeof child.destroy === 'function') child.destroy();
       });
     }
 
@@ -1371,12 +1430,12 @@ export class UnitRenderer {
     // Clean up any existing advance badge for this unit from the container
     const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
     if (uiElementsContainer) {
-      const existingElements = uiElementsContainer.children.filter((child: any) => 
+      const existingElements = uiElementsContainer.children.filter((child: PIXI.DisplayObject) => 
         child.name === `advance-badge-${unitIdNum}`
       );
-      existingElements.forEach((child: any) => {
+      existingElements.forEach((child: PIXI.DisplayObject) => {
         uiElementsContainer.removeChild(child);
-        if (child.destroy) child.destroy();
+        if ('destroy' in child && typeof child.destroy === 'function') child.destroy();
       });
     }
 

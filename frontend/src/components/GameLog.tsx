@@ -1,13 +1,17 @@
 // frontend/src/components/GameLog.tsx
 // frontend/src/components/GameLog.tsx
 import React from 'react';
-import type { BaseLogEntry } from '../../../shared/gameLogStructure.ts';
+import type { BaseLogEntry, ShootDetail } from '../../../shared/gameLogStructure.ts';
 import { getEventIcon, getEventTypeClass } from '../../../shared/gameLogStructure.ts';
 
 // Use shared interface as base, add frontend-specific fields
 export interface GameLogEvent extends BaseLogEntry {
   id: string;
   timestamp: Date;
+  action_name?: string;
+  actionName?: string;
+  is_ai_action?: boolean;
+  reward?: number;
 }
 interface GameLogProps {
   events: GameLogEvent[];
@@ -21,21 +25,6 @@ interface GameLogProps {
 
 export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availableHeight = 220, useStepNumbers = false, debugMode = false }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
-
-  // TEMPORARY DEBUG - Removed to reduce console flooding
-  // React.useEffect(() => {
-  //   console.log('🔍 GAMELOG DEBUG:', {
-  //     debugMode,
-  //     eventsCount: events.length,
-  //     firstEvent: events[0],
-  //     hasRewardInFirst: events[0] && 'reward' in events[0],
-  //     hasActionNameInFirst: events[0] && 'action_name' in events[0],
-  //     hasIsAiActionInFirst: events[0] && 'is_ai_action' in events[0],
-  //     rewardValue: events[0] && (events[0] as any).reward,
-  //     actionName: events[0] && (events[0] as any).action_name,
-  //     isAiAction: events[0] && (events[0] as any).is_ai_action
-  //   });
-  // }, [debugMode, events.length]);
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events]
@@ -82,11 +71,11 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
               // Check if this is a wait/skip action
               // Multiple detection methods:
               // 1. Check action_name field
-              const actionName = (event as any).action_name || (event as any).actionName;
+              const actionName = event.action_name || event.actionName;
               const hasWaitActionName = actionName && (actionName.toLowerCase() === 'wait' || actionName.toLowerCase() === 'skip');
               
-              // 2. Check event type (backend logs wait actions as type "wait")
-              const isWaitType = (event as any).type === 'wait';
+              // 2. Check event type (backend logs wait actions differently - check message instead)
+              const isWaitType = false; // 'wait' is not a valid type in BaseLogEntry, check message instead
               
               // 3. Check message content (frontend logs "chose not to move")
               const message = event.message || '';
@@ -100,7 +89,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
               // Shooting / combat outcome badge (MISS / SAVED / DMG)
               let outcomeLabel: string | null = null;
               let outcomeClass: 'miss' | 'saved' | 'damage' | null = null;
-              const shootDetails: any[] | undefined = (event as any).shootDetails;
+              const shootDetails: ShootDetail[] | undefined = event.shootDetails;
 
               if ((event.type === 'shoot' || event.type === 'combat') && Array.isArray(shootDetails) && shootDetails.length > 0) {
                 const targetDied = shootDetails.some((shot) => shot.targetDied === true);
@@ -153,17 +142,17 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
                     </span>
                   )}
                   {/* NEW: Debug mode reward display for AI actions */}
-                  {debugMode && (event as any).is_ai_action && (event as any).reward !== undefined && (
+                  {debugMode && event.is_ai_action && event.reward !== undefined && (
                     <span className="game-log-entry__reward">
                       {' '}
                       <span className="game-log-entry__reward-action">
-                        {((event as any).action_name || '').toLowerCase()}
+                        {(event.action_name || '').toLowerCase()}
                       </span>
                       {' '}
                       <span className="game-log-entry__reward-value">
-                        {typeof (event as any).reward === 'number' 
-                          ? (event as any).reward.toFixed(2) 
-                          : (event as any).reward}
+                        {typeof event.reward === 'number' 
+                          ? event.reward.toFixed(2) 
+                          : String(event.reward)}
                       </span>
                     </span>
                   )}

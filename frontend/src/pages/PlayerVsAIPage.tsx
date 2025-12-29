@@ -8,7 +8,7 @@ import { initializeUnitRegistry } from "../data/UnitFactory";
 export default function PlayerVsAIPage() {
   const [registryInitialized, setRegistryInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
-  const [initialUnits, setInitialUnits] = useState<any[]>([]);
+  const [initialUnits, setInitialUnits] = useState<Array<Record<string, unknown>>>([]);
 
   useEffect(() => {
     const initRegistry = async () => {

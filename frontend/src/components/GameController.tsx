@@ -12,7 +12,7 @@ import { useGameState } from "../hooks/useGameState";
 import { useGameActions } from "../hooks/useGameActions";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
-import type { Unit } from "../types/game";
+import type { Unit, GameMode } from "../types/game";
 import { useState, useEffect } from "react";
 //import { createUnit, getAvailableUnitTypes } from "../data/UnitFactory";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
@@ -61,12 +61,19 @@ export const GameController: React.FC<GameControllerProps> = ({
           if (scenarioData.units) {
             
             // Transform scenario data using UnitFactory.createUnit()
-            const transformedUnits = scenarioData.units.map((unit: any, _index: number) => {
+            interface ScenarioUnit {
+              id: number;
+              unit_type: string;
+              player: number;
+              col: number;
+              row: number;
+            }
+            const transformedUnits = scenarioData.units.map((unit: ScenarioUnit) => {
               return createUnit({
                 id: unit.id,
                 name: `${unit.unit_type}-${unit.id}`,
                 type: unit.unit_type,
-                player: unit.player,
+                player: unit.player as 0 | 1,
                 col: unit.col,
                 row: unit.row,
                 color: unit.player === 0 ? 0x244488 : 0xff3333
@@ -93,8 +100,7 @@ export const GameController: React.FC<GameControllerProps> = ({
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
 
   // Get board configuration for line of sight calculations
-  const { gameConfig } = useGameConfig();
-  const boardConfig = gameConfig;
+  const { boardConfig, gameConfig } = useGameConfig();
 
   // Initialize game log hook with live turn tracking - AI_TURN.md compliance
   const gameLog = useGameLog(gameState.currentTurn ?? 1);
@@ -105,10 +111,10 @@ export const GameController: React.FC<GameControllerProps> = ({
     movePreview,
     attackPreview,
     shootingPhaseState,
-    boardConfig,
+    boardConfig: boardConfig as Record<string, unknown> | null | undefined,
     actions: {
       ...actions,
-      setMode: (mode: any) => actions.setMode(mode || "select"),
+      setMode: (mode: GameMode | null | undefined) => actions.setMode(mode || "select"),
     },
     gameLog,
   });
@@ -152,7 +158,6 @@ export const GameController: React.FC<GameControllerProps> = ({
         setLogAvailableHeight(220);
         return;
       }
-      sampleLogEntry.getBoundingClientRect().height;
       setLogAvailableHeight(availableForLogEntries);
     }, 100); // Wait 100ms for DOM to render
   }, [player0Collapsed, player1Collapsed, gameState.units, gameState.phase]);
@@ -165,21 +170,21 @@ export const GameController: React.FC<GameControllerProps> = ({
       // Call the ACTUAL isUnitEligible function from useGameActions (single source of truth)
       return originalGameActions.isUnitEligible(unit);
     }).map(unit => unit.id);
-  }, [gameState.units, boardConfig, originalGameActions.isUnitEligible, gameState.phase, gameState.currentPlayer, gameState.unitsMoved, gameState.unitsCharged, gameState.unitsAttacked, gameState.unitsFled]);
+  }, [gameState.units, boardConfig, originalGameActions]);
 
   // Initialize shooting phase when entering shoot phase
   React.useEffect(() => {
     if (gameState.phase === 'shoot') {
       actions.initializeShootingPhase();
     }
-  }, [gameState.phase]);
+  }, [gameState.phase, actions]);
 
   // Initialize fight phase when entering fight phase
   React.useEffect(() => {
     if (gameState.phase === 'fight') {
       actions.initializeFightPhase();
     }
-  }, [gameState.phase]);
+  }, [gameState.phase, actions]);
 
   // Track turn changes with ref to prevent infinite loops
   const lastLoggedTurn = React.useRef<number>(0);

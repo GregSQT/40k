@@ -14,7 +14,7 @@ export function useGameLog(currentTurn?: number) {
     return `event_${eventIdCounter.current}_${Date.now()}`;
   };
 
-  const addEvent = useCallback((baseEntry: any) => {
+  const addEvent = useCallback((baseEntry: Record<string, unknown>) => {
     const currentTime = new Date();
     
     if (gameStartTime.current === null) {
@@ -25,8 +25,8 @@ export function useGameLog(currentTurn?: number) {
       ...baseEntry,
       id: generateEventId(),
       timestamp: currentTime,
-      turnNumber: currentTurn ?? baseEntry.turnNumber ?? 1,  // Capture live turn here
-    };
+      turnNumber: currentTurn ?? (typeof baseEntry.turnNumber === 'number' ? baseEntry.turnNumber : 1),  // Capture live turn here
+    } as GameLogEvent;
     
     setEvents(prevEvents => [newEvent, ...prevEvents]);
   }, [currentTurn]);
@@ -111,7 +111,7 @@ export function useGameLog(currentTurn?: number) {
       phase: 'movement',
       startHex: `(${startCol}, ${startRow})`,
       endHex: `(${endCol}, ${endRow})`,
-      player: player ?? (unit as any).player
+      player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);
 
@@ -122,7 +122,7 @@ export function useGameLog(currentTurn?: number) {
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
       phase: 'movement',
-      player: player ?? (unit as any).player
+      player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);
 
@@ -133,14 +133,14 @@ export function useGameLog(currentTurn?: number) {
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
       phase: 'movement',
-      player: player ?? (unit as any).player
+      player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);
 
   const logShootingAction = useCallback((
     shooter: Unit,
     target: Unit,
-    shootDetails: any,
+    shootDetails: Array<Record<string, unknown>>,
     turnNumber: number,
     player?: number
   ) => {
@@ -152,7 +152,7 @@ export function useGameLog(currentTurn?: number) {
       turnNumber: currentTurn ?? turnNumber,
       phase: 'shooting',
       shootDetails,
-      player: player ?? (shooter as any).player
+      player: player ?? shooter.player
     });
   }, [addEvent, currentTurn]);
 
@@ -175,7 +175,7 @@ export function useGameLog(currentTurn?: number) {
       phase: 'charge',
       startHex: `(${startCol}, ${startRow})`,
       endHex: `(${endCol}, ${endRow})`,
-      player: player ?? (unit as any).player
+      player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);
 
@@ -186,7 +186,7 @@ export function useGameLog(currentTurn?: number) {
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
       phase: 'charge',
-      player: player ?? (unit as any).player
+      player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);
 
@@ -207,14 +207,14 @@ export function useGameLog(currentTurn?: number) {
       phase: 'shooting',
       startHex: `(${startCol}, ${startRow})`,
       endHex: `(${endCol}, ${endRow})`,
-      player: player ?? (unit as any).player
+      player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);
 
   const logCombatAction = useCallback((
     attacker: Unit,
     target: Unit,
-    combatDetails: any,
+    combatDetails: Array<Record<string, unknown>>,
     turnNumber: number,
     player?: number
   ) => {
@@ -226,7 +226,7 @@ export function useGameLog(currentTurn?: number) {
       turnNumber: currentTurn ?? turnNumber,
       phase: 'combat',
       shootDetails: combatDetails,
-      player: player ?? (attacker as any).player
+      player: player ?? attacker.player
     });
   }, [addEvent, currentTurn]);
 
@@ -237,7 +237,7 @@ export function useGameLog(currentTurn?: number) {
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
       phase,
-      player: player ?? (unit as any).player
+      player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);
 

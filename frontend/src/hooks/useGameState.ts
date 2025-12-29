@@ -1,6 +1,7 @@
 // frontend/src/hooks/useGameState.ts
 import React, { useState, useCallback } from 'react';
 import type { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, ShootingPhaseState, TargetPreview, FightSubPhase, MovePreview, AttackPreview } from '../types/game';
+import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
 
 interface ChargeRollPopup {
   unitId: UnitId;
@@ -82,7 +83,6 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
             };
           }
           // Get NB from selected or first weapon
-          const { getSelectedRangedWeapon } = require('../utils/weaponHelpers');
           const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
           return {
             ...unit,
@@ -142,10 +142,9 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
             throw new Error('unit must have RNG_WEAPONS or CC_WEAPONS');
           }
           return { ...unit, SHOOT_LEFT: 0 };
-        }
-        // Get NB from selected or first weapon
-        const { getSelectedRangedWeapon } = require('../utils/weaponHelpers');
-        const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
+          }
+          // Get NB from selected or first weapon
+          const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
         return { ...unit, SHOOT_LEFT: selectedWeapon?.NB || 0 };
       })
     }));
@@ -156,10 +155,9 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setGameState(prev => ({
       ...prev,
       units: prev.units.map(unit => {
-        if (unit.CC_NB === undefined) {
-          throw new Error('unit.CC_NB is required');
-        }
-        return { ...unit, ATTACK_LEFT: unit.CC_NB };
+        // Get NB from selected or first CC weapon
+        const selectedWeapon = getSelectedMeleeWeapon(unit) || unit.CC_WEAPONS?.[0];
+        return { ...unit, ATTACK_LEFT: selectedWeapon?.NB || 0 };
       })
     }));
   }, []);

@@ -14,6 +14,12 @@ import { useGameLog } from '../hooks/useGameLog';
 import { initializeUnitRegistry, getUnitClass } from '../data/UnitFactory';
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
+import type { Unit, GameState, Weapon } from '../types/game';
+
+// Extended Unit type for replay mode (with ghost units)
+interface UnitWithGhost extends Unit {
+  isGhost?: boolean;
+}
 
 // Import replay parser types
 interface ReplayAction {
@@ -49,13 +55,22 @@ interface ReplayAction {
   charge_success?: boolean;
 }
 
+// Extended GameState for replay mode (with additional properties from parser)
+interface ReplayGameState extends Omit<GameState, 'episode_steps'> {
+  episode_steps?: number; // Optional in replay mode
+  board_cols?: number;
+  board_rows?: number;
+  walls?: Array<{ col: number; row: number }>;
+  objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
+}
+
 interface ReplayEpisode {
   episode_num: number;
   scenario: string;
   bot_name: string;
-  initial_state: any;
+  initial_state: ReplayGameState;
   actions: ReplayAction[];
-  states: any[];
+  states: ReplayGameState[];
   total_actions: number;
   final_result: string | null;
 }
@@ -140,7 +155,9 @@ export const BoardReplay: React.FC = () => {
         const { parse_log_file_from_text } = await import('../utils/replayParser');
         const data = parse_log_file_from_text(text);
 
-        setReplayData(data);
+        // Type assertion with proper conversion
+        const typedData = data as unknown as ReplayData;
+        setReplayData(typedData);
         setSelectedFileName('train_step.log');
         setSelectedEpisode(null);
         setCurrentActionIndex(0);
@@ -158,12 +175,12 @@ export const BoardReplay: React.FC = () => {
   }, []);
 
   // Enrich units with stats from UnitFactory
-  const enrichUnitsWithStats = (units: any[]): any[] => {
+  const enrichUnitsWithStats = (units: Unit[]): Unit[] => {
     if (!unitRegistryReady) return units;
 
     return units.map(unit => {
       try {
-        const UnitClass = getUnitClass(unit.type);
+        const UnitClass = getUnitClass(unit.type || '');
 
         // Merge UnitClass stats with unit data
         // Fix HP: replayParser hardcodes HP_MAX=2, so if HP_CUR==HP_MAX==2, reset to correct values
@@ -186,8 +203,8 @@ export const BoardReplay: React.FC = () => {
           OC: UnitClass.OC || 0,
           VALUE: UnitClass.VALUE || 0,
           // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract from weapons arrays
-          RNG_WEAPONS: UnitClass.RNG_WEAPONS || [],
-          CC_WEAPONS: UnitClass.CC_WEAPONS || [],
+          RNG_WEAPONS: (UnitClass.RNG_WEAPONS || []) as unknown as Weapon[],
+          CC_WEAPONS: (UnitClass.CC_WEAPONS || []) as unknown as Weapon[],
           selectedRngWeaponIndex: UnitClass.RNG_WEAPONS && UnitClass.RNG_WEAPONS.length > 0 ? 0 : undefined,
           selectedCcWeaponIndex: UnitClass.CC_WEAPONS && UnitClass.CC_WEAPONS.length > 0 ? 0 : undefined,
           ICON: UnitClass.ICON || '',
@@ -219,14 +236,16 @@ export const BoardReplay: React.FC = () => {
       const { parse_log_file_from_text } = await import('../utils/replayParser');
       const data = parse_log_file_from_text(text);
 
-      setReplayData(data);
+      // Type assertion - parser returns any types, we cast to ReplayData
+      setReplayData(data as unknown as ReplayData);
       setSelectedEpisode(null);
       setCurrentActionIndex(0);
       setIsPlaying(false);
       setLoadError(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to parse replay:', error);
-      setLoadError(`Failed to load file: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setLoadError(`Failed to load file: ${errorMessage}`);
       setSelectedFileName('');
     }
   };
@@ -261,7 +280,7 @@ export const BoardReplay: React.FC = () => {
   }, [isPlaying, selectedEpisode, playbackSpeed, replayData]);
 
   // Get current game state
-  const getCurrentGameState = () => {
+  const getCurrentGameState = (): ReplayGameState | null => {
     if (!selectedEpisode || !replayData) return null;
     const episode = replayData.episodes[selectedEpisode - 1];
 
@@ -272,8 +291,9 @@ export const BoardReplay: React.FC = () => {
       // Enrich initial state units with stats
       return {
         ...episode.initial_state,
-        units: enrichUnitsWithStats(episode.initial_state.units || [])
-      };
+        units: enrichUnitsWithStats(episode.initial_state.units || []),
+        episode_steps: episode.initial_state.episode_steps || 0
+      } as ReplayGameState;
     } else {
       const state = episode.states[currentActionIndex - 1];
 
@@ -300,7 +320,7 @@ export const BoardReplay: React.FC = () => {
   // Add ghost unit at starting position for move actions
   // For shoot actions, compute SHOOT_LEFT for the active shooter exactly like PvP,
   // based on RNG_NB and the number of shots already fired in the current shooting phase.
-  const unitsWithGhost = currentState?.units ? [...currentState.units].map((u: any) => {
+  const unitsWithGhost = currentState?.units ? [...currentState.units].map((u: Unit) => {
     // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
     // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
     if (currentAction?.type === 'shoot' && currentEpisode && currentActionIndex > 0 && u.id === currentAction.shooter_id) {
@@ -381,7 +401,7 @@ export const BoardReplay: React.FC = () => {
   }) : [];
   if (currentAction?.type === 'move' && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u: any) => u.id === currentAction.unit_id);
+    const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
     if (originalUnit) {
       unitsWithGhost.push({
         ...originalUnit,
@@ -389,14 +409,14 @@ export const BoardReplay: React.FC = () => {
         col: currentAction.from.col,
         row: currentAction.from.row,
         isGhost: true // Mark as ghost for special rendering
-      });
+      } as UnitWithGhost);
     }
   }
 
   // Add ghost unit at starting position for charge actions (like move)
   if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u: any) => u.id === currentAction.unit_id);
+    const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
     if (originalUnit) {
       unitsWithGhost.push({
         ...originalUnit,
@@ -404,7 +424,7 @@ export const BoardReplay: React.FC = () => {
         col: currentAction.from.col,
         row: currentAction.from.row,
         isGhost: true // Mark as ghost for special rendering
-      });
+      } as UnitWithGhost);
     }
   }
 
@@ -421,7 +441,7 @@ export const BoardReplay: React.FC = () => {
 
       if (action.type === 'move' && action.from && action.to) {
         gameLog.logMoveAction(
-          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as any,
+          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
           action.from.col,
           action.from.row,
           action.to.col,
@@ -431,7 +451,7 @@ export const BoardReplay: React.FC = () => {
         );
       } else if (action.type === 'move_wait' && action.pos) {
         gameLog.logNoMoveAction(
-          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as any,
+          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
           turnNumber,
           action.player
         );
@@ -439,11 +459,11 @@ export const BoardReplay: React.FC = () => {
         // Parse shooting details from log format to match PvP mode
         const shooterId = action.shooter_id!;
         const targetId = action.target_id!;
-        const shooter = currentEpisode.actions.find((a: any) => a.shooter_id === shooterId);
+        const shooter = currentEpisode.actions.find((a: ReplayAction) => a.shooter_id === shooterId);
         const shooterPos = shooter?.shooter_pos || action.shooter_pos || { col: 0, row: 0 };
         // Get target from the state AFTER this action
         const stateAfterAction = currentEpisode.states[i];
-        const target = stateAfterAction?.units?.find((u: any) => u.id === targetId);
+        const target = stateAfterAction?.units?.find((u: Unit) => u.id === targetId);
         const targetPos = target ? { col: target.col, row: target.row } : { col: 0, row: 0 };
 
         // Reconstruct message in the same format as shooting_handlers.py
@@ -465,9 +485,9 @@ export const BoardReplay: React.FC = () => {
         // Check if THIS shot killed the target by comparing HP before and after
         // Get target's HP from state BEFORE this action
         const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
-        const targetBefore = stateBeforeAction?.units?.find((u: any) => u.id === targetId);
-        const hpBefore = targetBefore ? (targetBefore as any).HP_CUR : 0;
-        const hpAfter = target ? (target as any).HP_CUR : 0;
+        const targetBefore = stateBeforeAction?.units?.find((u: Unit) => u.id === targetId);
+        const hpBefore = targetBefore ? targetBefore.HP_CUR : 0;
+        const hpAfter = target ? target.HP_CUR : 0;
 
         // Target died if HP went from >0 to <=0 after this action
         const targetDied = hpBefore > 0 && hpAfter <= 0;
@@ -518,11 +538,11 @@ export const BoardReplay: React.FC = () => {
           is_ai_action: action.player === 0,
           reward: action.reward,
           action_name: 'shoot'
-        } as any);
+        });
 
         // Add separate death event if target was killed (like PvP mode does)
         if (targetDied && target) {
-          const targetType = (target as any).type || 'Unknown';
+          const targetType = target.type || 'Unknown';
           gameLog.addEvent({
             type: 'death',
             message: `Unit ${targetId} (${targetType}) was DESTROYED!`,
@@ -617,16 +637,16 @@ export const BoardReplay: React.FC = () => {
 
         // Get target info for death check
         const stateAfterAction = currentEpisode.states[i];
-        const target = stateAfterAction?.units?.find((u: any) => u.id === targetId);
+        const target = stateAfterAction?.units?.find((u: Unit) => u.id === targetId);
         const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
-        const targetBefore = stateBeforeAction?.units?.find((u: any) => u.id === targetId);
-        const hpBefore = targetBefore ? (targetBefore as any).HP_CUR : 0;
-        const hpAfter = target ? (target as any).HP_CUR : 0;
+        const targetBefore = stateBeforeAction?.units?.find((u: Unit) => u.id === targetId);
+        const hpBefore = targetBefore ? targetBefore.HP_CUR : 0;
+        const hpAfter = target ? target.HP_CUR : 0;
         const targetDied = hpBefore > 0 && hpAfter <= 0;
 
         // Determine the correct player to attribute this combat action to:
         // use the attacker unit's player, not the current turn player.
-        const attackerUnitBefore = stateBeforeAction?.units?.find((u: any) => u.id === attackerId);
+        const attackerUnitBefore = stateBeforeAction?.units?.find((u: Unit) => u.id === attackerId);
         const attackerPlayer = attackerUnitBefore ? attackerUnitBefore.player : action.player;
 
         // Build shootDetails for color coding
@@ -654,11 +674,11 @@ export const BoardReplay: React.FC = () => {
           is_ai_action: action.player === 0,
           reward: action.reward,
           action_name: 'fight'
-        } as any);
+        });
 
         // Add death event if target died
         if (targetDied && target) {
-          const targetType = (target as any).type || 'Unknown';
+          const targetType = target.type || 'Unknown';
           gameLog.addEvent({
             type: 'death',
             message: `Unit ${targetId} (${targetType}) was DESTROYED!`,
@@ -944,7 +964,7 @@ export const BoardReplay: React.FC = () => {
     <BoardPvp
       units={unitsWithGhost}
       selectedUnitId={replaySelectedUnitId}
-      eligibleUnitIds={unitsWithGhost.map((u: any) => u.id)}
+      eligibleUnitIds={unitsWithGhost.map((u: Unit) => u.id)}
       showHexCoordinates={showHexCoordinates}
       mode="select"
       movePreview={null}
@@ -959,7 +979,7 @@ export const BoardReplay: React.FC = () => {
       unitsMoved={[]}
       phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
       onShoot={() => {}}
-      gameState={currentState}
+      gameState={currentState as GameState}
       getChargeDestinations={(unitId: number) => {
         // Calculate ALL valid charge destinations for replay mode using BFS
         if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id === unitId) {
@@ -972,12 +992,12 @@ export const BoardReplay: React.FC = () => {
           }
 
           // Find all enemy units (units from the other player)
-          const chargingUnit = unitsWithGhost.find((u: any) => u.id === unitId);
+          const chargingUnit = unitsWithGhost.find((u: Unit) => u.id === unitId);
           if (!chargingUnit) {
             return [];
           }
 
-          const enemyUnits = unitsWithGhost.filter((u: any) =>
+          const enemyUnits = unitsWithGhost.filter((u: Unit) =>
             u.player !== chargingUnit?.player &&
             u.id >= 0 && // Not a ghost unit
             u.HP_CUR > 0
@@ -1022,12 +1042,12 @@ export const BoardReplay: React.FC = () => {
             }
             
             // Check walls
-            if (currentState?.walls?.some((w: any) => w.col === col && w.row === row)) {
+            if (currentState?.walls?.some((w: { col: number; row: number }) => w.col === col && w.row === row)) {
               return false;
             }
             
             // Check if occupied by another unit (excluding the charging unit)
-            if (unitsWithGhost.some((u: any) =>
+            if (unitsWithGhost.some((u: Unit) =>
               u.col === col && u.row === row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
             )) {
               return false;
@@ -1039,7 +1059,7 @@ export const BoardReplay: React.FC = () => {
           // Helper function to check if hex is adjacent to an enemy
           const isAdjacentToEnemy = (col: number, row: number): boolean => {
             const hexCube = offsetToCube(col, row);
-            return enemyUnits.some((enemy: any) => {
+            return enemyUnits.some((enemy: Unit) => {
               const enemyCube = offsetToCube(enemy.col, enemy.row);
               return cubeDistance(hexCube, enemyCube) === 1;
             });
@@ -1085,7 +1105,7 @@ export const BoardReplay: React.FC = () => {
               // Check if this hex is adjacent to an enemy (valid destination)
               if (isAdjacentToEnemy(neighbor.col, neighbor.row)) {
                 // Double-check that the destination hex is not occupied
-                if (!unitsWithGhost.some((u: any) =>
+                if (!unitsWithGhost.some((u: Unit) =>
                   u.col === neighbor.col && u.row === neighbor.row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
                 )) {
                   validDestinations.push({ col: neighbor.col, row: neighbor.row });

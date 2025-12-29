@@ -31,10 +31,11 @@ export const GameStatus = memo<GameStatusProps>(({
   unitsMoved,
   unitsCharged,
   unitsAttacked,
-  unitsFled,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  unitsFled: _unitsFled,
 }) => {
   // Get current player's units that have acted
-  const fledUnitsCount = unitsFled.length;
+  // Note: unitsFled.length could be used for future statistics
   const currentPlayerUnits = units.filter(u => u.player === currentPlayer);
   
   const getActedUnits = () => {

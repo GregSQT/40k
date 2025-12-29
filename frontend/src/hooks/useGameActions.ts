@@ -1,20 +1,23 @@
 // frontend/src/hooks/useGameActions.ts - AI_TURN.md Compliant Version
 import { useCallback } from 'react';
-import type { GameState, UnitId, Unit } from '../types/game';
+import type { GameState, UnitId, Unit, MovePreview, AttackPreview, ShootingPhaseState, TargetPreview, FightSubPhase, PlayerId } from '../types/game';
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
+
+type BoardConfig = Record<string, unknown> | null | undefined;
+type GameLog = Record<string, unknown> | null | undefined;
 
 interface UseGameActionsParams {
   gameState: GameState;
-  movePreview: any | null;
-  attackPreview: any | null;
-  shootingPhaseState: any;
-  boardConfig?: any;
-  gameLog?: any;
+  movePreview: MovePreview | null;
+  attackPreview: AttackPreview | null;
+  shootingPhaseState: ShootingPhaseState;
+  boardConfig?: BoardConfig;
+  gameLog?: GameLog;
   actions: {
     setMode: (mode: GameState['mode']) => void;
     setSelectedUnitId: (id: UnitId | null) => void;
-    setMovePreview: (preview: any | null) => void;
-    setAttackPreview: (preview: any | null) => void;
+    setMovePreview: (preview: MovePreview | null) => void;
+    setAttackPreview: (preview: AttackPreview | null) => void;
     addMovedUnit: (unitId: UnitId) => void;
     addChargedUnit: (unitId: UnitId) => void;
     addAttackedUnit: (unitId: UnitId) => void;
@@ -22,11 +25,11 @@ interface UseGameActionsParams {
     updateUnit: (unitId: UnitId, updates: Partial<Unit>) => void;
     removeUnit: (unitId: UnitId) => void;
     initializeShootingPhase: () => void;
-    updateShootingPhaseState: (updates: any) => void;
+    updateShootingPhaseState: (updates: Partial<ShootingPhaseState>) => void;
     decrementShotsLeft: (unitId: UnitId) => void;
-    setTargetPreview: (preview: any | null) => void;
-    setFightSubPhase?: (subPhase: any) => void;
-    setFightActivePlayer?: (player: any) => void;
+    setTargetPreview: (preview: TargetPreview | null) => void;
+    setFightSubPhase?: (subPhase: FightSubPhase) => void;
+    setFightActivePlayer?: (player: PlayerId) => void;
     setUnitChargeRoll?: (unitId: UnitId, roll: number) => void;
     resetUnitChargeRoll?: (unitId: UnitId) => void;
     showChargeRollPopup?: (unitId: UnitId, roll: number, tooLow: boolean) => void;
@@ -37,10 +40,14 @@ interface UseGameActionsParams {
   export const useGameActions = ({
     gameState,
     movePreview,
-    attackPreview,
-    shootingPhaseState,
-    boardConfig,
-    gameLog,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    attackPreview: _attackPreview,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    shootingPhaseState: _shootingPhaseState,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    boardConfig: _boardConfig,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    gameLog: _gameLog,
     actions,
   }: UseGameActionsParams) => {
     
@@ -55,7 +62,7 @@ interface UseGameActionsParams {
     switch (phase) {
       case "move":
         return !unitsMoved.includes(unit.id);
-      case "shoot":
+      case "shoot": {
         // Check basic eligibility first
         if (unitsMoved.includes(unit.id) || unitsFled.includes(unit.id)) return false;
         
@@ -71,6 +78,7 @@ interface UseGameActionsParams {
         );
         
         return !hasAdjacentEnemy;
+      }
       case "charge":
         return !unitsCharged.includes(unit.id) && !unitsFled.includes(unit.id);
       case "fight":
@@ -176,15 +184,18 @@ interface UseGameActionsParams {
   }, [actions]);
 
   // Placeholder implementations for other actions
-  const handleShoot = useCallback((shooterId: UnitId, targetId: UnitId) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleShoot = useCallback((_shooterId: UnitId, _targetId: UnitId) => {
     // AI_TURN.md compliant shooting implementation
   }, []);
 
-  const handleFightAttack = useCallback((attackerId: UnitId, targetId: UnitId | null) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleFightAttack = useCallback((_attackerId: UnitId, _targetId: UnitId | null) => {
     // AI_TURN.md compliant fight implementation
   }, []);
 
-  const handleCharge = useCallback((chargerId: UnitId, targetId: UnitId) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleCharge = useCallback((_chargerId: UnitId, _targetId: UnitId) => {
     // AI_TURN.md compliant charge implementation
   }, []);
 

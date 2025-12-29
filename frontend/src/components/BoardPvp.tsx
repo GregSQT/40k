@@ -1,15 +1,14 @@
 // frontend/src/components/BoardPvp.tsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState, WeaponOption } from "../types/game";
+import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState, WeaponOption, ShootingPhaseState, Weapon } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { drawBoard } from './BoardDisplay';
-const setupBoardInteractions = (_app: any, _boardConfig: any, _config: any) => {};
-const cleanupBoardInteractions = (_app: any) => {};
 import { renderUnit } from './UnitRenderer';
 import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine } from '../utils/gameHelpers';
+import type { Position } from '../types/game';
 import { getMaxRangedRange, getMeleeRange } from '../utils/weaponHelpers';
 import { WeaponDropdown } from './WeaponDropdown';
 
@@ -162,7 +161,7 @@ type BoardProps = {
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
   onLogChargeRoll?: (unit: Unit, roll: number) => void;
-  shootingPhaseState?: any;
+  shootingPhaseState?: ShootingPhaseState;
   targetPreview?: TargetPreview | null;
   onCancelTargetPreview?: () => void;
   gameState: GameState; // Add gameState prop
@@ -211,7 +210,7 @@ export default function Board({
   blinkState,
   onSelectUnit,
   onSkipUnit,
-  onStartTargetPreview: _onStartTargetPreview,
+  onStartTargetPreview: _onStartTargetPreview, // eslint-disable-line @typescript-eslint/no-unused-vars
   onStartMovePreview,
   onDirectMove,
   onStartAttackPreview,
@@ -234,7 +233,7 @@ export default function Board({
   onCancelCharge,
   onValidateCharge,
   onLogChargeRoll,
-  shootingPhaseState: _shootingPhaseState,
+  shootingPhaseState: _shootingPhaseState, // eslint-disable-line @typescript-eslint/no-unused-vars
   targetPreview,
   onCancelTargetPreview,
   gameState,
@@ -391,6 +390,20 @@ export default function Board({
       window.removeEventListener('boardWeaponSelectionClick', weaponClickHandler);
     };
   }, [units, boardConfig]);
+
+  // Memoize complex expressions for dependency array
+  const unitsSignature = useMemo(() => 
+    JSON.stringify(units.map(u => ({ id: u.id, col: u.col, row: u.row, HP_CUR: u.HP_CUR, SHOOT_LEFT: u.SHOOT_LEFT, ATTACK_LEFT: u.ATTACK_LEFT }))),
+    [units]
+  );
+  const blinkingUnitsSignature = useMemo(() => 
+    JSON.stringify(blinkingUnits),
+    [blinkingUnits]
+  );
+  const wallHexesOverrideSignature = useMemo(() => 
+    JSON.stringify(wallHexesOverride),
+    [wallHexesOverride]
+  );
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -628,7 +641,7 @@ export default function Board({
     }
 
     // ✅ RESTRUCTURED: Calculate ALL highlight data BEFORE any drawBoard calls
-    let availableCells: { col: number; row: number }[] = [];
+    const availableCells: { col: number; row: number }[] = [];
     const selectedUnit = units.find(u => u.id === selectedUnitId);
 
     // Charge preview: chargeCells & targets
@@ -853,10 +866,10 @@ export default function Board({
     }
 
       // Attack cells: Different colors for different line of sight conditions
-      let attackCells: { col: number; row: number }[] = []; // Red = clear line of sight
-      let coverCells: { col: number; row: number }[] = []; // Orange = targets in cover
-      let blockedTargets: Set<string> = new Set(); // Track targets with no line of sight (no hex shown)
-      let coverTargets: Set<string> = new Set(); // Track targets in cover
+      const attackCells: { col: number; row: number }[] = []; // Red = clear line of sight
+      const coverCells: { col: number; row: number }[] = []; // Orange = targets in cover
+      const blockedTargets: Set<string> = new Set(); // Track targets with no line of sight (no hex shown)
+      const coverTargets: Set<string> = new Set(); // Track targets in cover
       let previewUnit: Unit | undefined = undefined;
       let attackFromCol: number | null = null;
       let attackFromRow: number | null = null;
@@ -990,7 +1003,7 @@ export default function Board({
                     coverTargets.add(`${enemy.col},${enemy.row}`);
                     
                     // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
-                    const pathHexes: any[] = getHexLine(attackFromCol!, attackFromRow!, enemy.col, enemy.row);
+                    const pathHexes: Position[] = getHexLine(attackFromCol!, attackFromRow!, enemy.col, enemy.row);
                     const wallHexSet = new Set<string>(
                       effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`)
                     );
@@ -1064,11 +1077,66 @@ export default function Board({
         }
       }
 
-      const boardConfigWithOverrides = {
+      // Type assertion for boardConfig to match UnitRenderer's expected type
+      const boardConfigForRender = boardConfig as unknown as Record<string, unknown> | null;
+
+      interface BoardConfigForDrawBoard {
+        cols: number;
+        rows: number;
+        hex_radius: number;
+        margin: number;
+        colors: {
+          background: string;
+          cell_even: string;
+          cell_odd: string;
+          cell_border: string;
+          highlight: string;
+          attack: string;
+          charge: string;
+          eligible: string;
+          objective: string;
+          objective_zone: string;
+          wall: string;
+          player_0: string;
+          player_1: string;
+          hp_full: string;
+          hp_damaged: string;
+          [key: string]: string;
+        };
+        display: {
+          icon_scale: number;
+          eligible_outline_width: number;
+          eligible_outline_alpha: number;
+          hp_bar_width_ratio: number;
+          hp_bar_height: number;
+          hp_bar_y_offset_ratio: number;
+          unit_circle_radius_ratio: number;
+          unit_text_size: number;
+          selected_border_width: number;
+          charge_target_border_width: number;
+          default_border_width: number;
+          canvas_border: string;
+          antialias: boolean;
+          autoDensity: boolean;
+          resolution: number | "auto";
+        };
+        objective_hexes: [number, number][];
+        wall_hexes: [number, number][];
+        walls?: Array<{
+          start: { col: number; row: number };
+          end: { col: number; row: number };
+          thickness?: number;
+        }>;
+      }
+      const boardConfigWithOverrides: BoardConfigForDrawBoard = {
         ...boardConfig,
-        wall_hexes: wallHexesOverride ? effectiveWallHexes : boardConfig.wall_hexes,
+        colors: {
+          ...boardConfig.colors,
+          attack: boardConfig.colors.attack || '#FF0000', // Ensure attack is defined
+        },
+        wall_hexes: wallHexesOverride ? effectiveWallHexes : (boardConfig.wall_hexes || []),
         objective_hexes: effectiveObjectiveHexes
-      };
+      } as BoardConfigForDrawBoard;
       // Override availableCells if availableCellsOverride is provided (for replay mode)
       const effectiveAvailableCells = availableCellsOverride || availableCells;
 
@@ -1090,7 +1158,7 @@ export default function Board({
       // Update persistent state
       objectiveControllersRef.current = updatedControllers;
 
-      drawBoard(app, boardConfigWithOverrides as any, {
+      drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
         availableCells: effectiveAvailableCells,
         attackCells,
         coverCells,
@@ -1108,20 +1176,7 @@ export default function Board({
       });
 
       // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
-      setupBoardInteractions(app, boardConfig, {
-        phase,
-        mode,
-        selectedUnitId,
-        units,
-        availableCells,
-        attackCells,
-        coverCells,
-        chargeCells,
-        onCancelCharge,
-        onCancelMove,
-        targetPreview,
-        onCancelTargetPreview
-      });
+      // setupBoardInteractions is now a stub - no longer needed
 
       // ✅ UNIFIED UNIT RENDERING USING COMPONENT
       for (const unit of units) {
@@ -1172,7 +1227,10 @@ export default function Board({
         // AI_TURN.md: During charge phase, show selected unit as ghost (darkened) at origin
         // This indicates the unit is about to move, similar to movement preview
         // In replay mode, a separate ghost unit is added, so we check if one already exists
-        const hasExistingGhost = units.some((u: any) => u.isGhost && u.id < 0);
+        interface UnitWithGhost extends Unit {
+          isGhost?: boolean;
+        }
+        const hasExistingGhost = units.some((u: UnitWithGhost) => u.isGhost && u.id < 0);
         const isChargeOrigin = phase === "charge" &&
           mode === "select" &&
           unit.id === selectedUnitId &&
@@ -1189,7 +1247,7 @@ export default function Board({
           isPreview: false,
           isEligible: isEligibleForRendering || false,
           isShootable,
-          boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
+          boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
           phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
@@ -1250,7 +1308,7 @@ export default function Board({
             unit: previewUnit, centerX, centerY, app,
             isPreview: true, previewType: 'move',
             isEligible: false, // Preview units are not eligible
-            boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
+            boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
@@ -1273,7 +1331,7 @@ export default function Board({
             unit: previewUnit, centerX, centerY, app,
             isPreview: true, previewType: 'attack',
             isEligible: false, // Preview units are not eligible
-            boardConfig, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
+            boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
             phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
@@ -1468,7 +1526,7 @@ export default function Board({
       // Cleanup function
       return () => {
         // Cleanup board interactions
-        cleanupBoardInteractions(app);
+        // cleanupBoardInteractions is now a stub - no longer needed
         
         if (app && app.stage) {
           // Destroy all sprites but preserve textures in cache to prevent black flashing
@@ -1486,30 +1544,65 @@ export default function Board({
       };
 
       }, [
-        // Essential dependencies only - prevent infinite re-renders
+        // Essential dependencies - all values used in the effect
         units.length,
-        JSON.stringify(units.map(u => ({ id: u.id, col: u.col, row: u.row, HP_CUR: u.HP_CUR, SHOOT_LEFT: u.SHOOT_LEFT, ATTACK_LEFT: u.ATTACK_LEFT }))), // Track position, HP, shooting & fight changes
+        unitsSignature,
         selectedUnitId,
         mode,
         phase,
-        boardConfig?.cols,
+        boardConfig,
         loading,
         error,
-        // Add blinking state to trigger re-render
+        activeShootingUnit,
+        advanceRoll,
+        advanceWarningPopup,
+        advancingUnitId,
+        attackPreview,
+        autoSelectWeapon,
+        availableCellsOverride,
+        blinkState,
+        blinkingUnits,
         isBlinkingActive,
-        JSON.stringify(blinkingUnits),
-        // Add showHexCoordinates to trigger re-render when toggle changes
-        showHexCoordinates,
-        // Add shooting indicators to trigger re-render
-        shootingTargetId,
-        shootingUnitId,
-        // Add charge indicators to trigger re-render when charge target changes
+        blinkingUnitsSignature,
+        chargeRoll,
+        chargeRollPopup,
+        chargeSuccess,
         chargeTargetId,
         chargingUnitId,
-        // Add wall override for replay mode
-        JSON.stringify(wallHexesOverride),
-        // AI_TURN.md: Add charge destinations to trigger re-render when backend returns valid destinations
-        getChargeDestinations
+        currentPlayer,
+        eligibleUnitIds,
+        fightActivePlayer,
+        fightSubPhase,
+        fightTargetId,
+        fightingUnitId,
+        gameState,
+        getAdvanceDestinations,
+        getChargeDestinations,
+        movePreview,
+        movingUnitId,
+        objectivesOverride,
+        onAdvance,
+        onCancelAdvanceWarning,
+        onCancelMove,
+        onCancelTargetPreview,
+        onConfirmAdvanceWarning,
+        onConfirmMove,
+        onDirectMove,
+        onSkipAdvanceWarning,
+        onStartMovePreview,
+        shootingActivationQueue,
+        showAdvanceWarningPopup,
+        showHexCoordinates,
+        shootingTargetId,
+        shootingUnitId,
+        targetPreview,
+        units,
+        unitsAttacked,
+        unitsCharged,
+        unitsFled,
+        unitsMoved,
+        wallHexesOverride,
+        wallHexesOverrideSignature
       ]);
 
       // Handle weapon selection
@@ -1550,12 +1643,17 @@ export default function Board({
             });
             if (data.success && data.game_state) {
               // Log the unit's weapon selection for debugging
-              const unit = data.game_state.units?.find((u: any) => u.id === weaponSelectionMenu.unitId.toString());
+              interface UnitFromAPI {
+                id: string | number;
+                selectedRngWeaponIndex?: number;
+                RNG_WEAPONS?: Array<{ display_name?: string }>;
+              }
+              const unit = data.game_state.units?.find((u: UnitFromAPI) => u.id.toString() === weaponSelectionMenu.unitId.toString());
               console.log('🔫 Weapon selection response:', {
                 unitId: weaponSelectionMenu.unitId,
                 weaponIndex,
                 unitSelectedWeapon: unit?.selectedRngWeaponIndex,
-                unitWeapons: unit?.RNG_WEAPONS?.map((w: any, idx: number) => ({ idx, name: w.display_name }))
+                unitWeapons: unit?.RNG_WEAPONS?.map((w: { display_name?: string }, idx: number) => ({ idx, name: w.display_name }))
               });
               
               // Trigger a custom event to notify useEngineAPI to update gameState
@@ -1578,14 +1676,22 @@ export default function Board({
         if (!unit || !unit.RNG_WEAPONS) return [];
 
         // Try to use available_weapons from unit if available
-        const unitWithWeapons = unit as any;
+        interface UnitWithAvailableWeapons extends Unit {
+          available_weapons?: Array<{
+            index: number;
+            weapon: Record<string, unknown>;
+            can_use: boolean;
+            reason?: string;
+          }>;
+        }
+        const unitWithWeapons = unit as UnitWithAvailableWeapons;
         const availableWeapons = unitWithWeapons?.available_weapons;
         
         if (availableWeapons && Array.isArray(availableWeapons)) {
           // Use backend-filtered weapons
-          return availableWeapons.map((w: any) => ({
+          return availableWeapons.map((w: { index: number; weapon: Record<string, unknown>; can_use: boolean; reason?: string }) => ({
             index: w.index,
-            weapon: w.weapon,
+            weapon: w.weapon as unknown as Weapon,
             canUse: w.can_use || false,
             reason: w.reason || undefined
           }));

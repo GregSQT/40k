@@ -4,14 +4,14 @@
 
 ---
 
-## 📚 SECTION 1: GLOBAL VARIABLES & REFERENCE TABLES
+### 📚 SECTION 1: GLOBAL VARIABLES & REFERENCE TABLES
 
-### Global Variable
+#### Global Variable
 ```javascript
 weapon_rule = (weapon rules activated) ? 1 : 0
 ```
 
-### Function Argument Reference Table
+#### Function Argument Reference Table
 
 | Function | arg1 | arg2 | arg3 |
 |----------|------|------|------|
@@ -20,7 +20,7 @@ weapon_rule = (weapon rules activated) ? 1 : 0
 
 **Critical Note on arg3 after Advance:** When unit has advanced (arg2=1), arg3 is ALWAYS 0 because advance restrictions prevent moving to enemy-adjacent destinations.
 
-### End Activation Parameters Reference
+#### End Activation Parameters Reference
 ```javascript
 end_activation(result_type, step_count, action_type, phase, remove_from_pool, increment_step)
 ```
@@ -31,7 +31,7 @@ end_activation(result_type, step_count, action_type, phase, remove_from_pool, in
 - `remove_from_pool`: 0 or 1 (whether to remove unit from activation pool)
 - `increment_step`: 0 or 1 (internal tracking)
 
-### State Flags (CAN_SHOOT, CAN_ADVANCE)
+#### State Flags (CAN_SHOOT, CAN_ADVANCE)
 
 **Determined during ELIGIBILITY CHECK:**
 - `CAN_ADVANCE = true` if unit is NOT adjacent to enemy (always available)
@@ -44,7 +44,7 @@ end_activation(result_type, step_count, action_type, phase, remove_from_pool, in
 - `CAN_SHOOT = (weapon_availability_check(weapon_rule, 1, 0) returns non-empty pool)`
   - Note: Only Assault weapons available if weapon_rule=1
 
-### UI Display Constants
+#### UI Display Constants
 
 **Shooting Preview Color:**
 - **All players (AI and Human)**: Blue hexes (LoS and selected_weapon.RNG)
@@ -53,9 +53,9 @@ end_activation(result_type, step_count, action_type, phase, remove_from_pool, in
 
 ---
 
-## 🔧 SECTION 2: CORE FUNCTIONS (Reusable Building Blocks)
+### 🔧 SECTION 2: CORE FUNCTIONS (Reusable Building Blocks)
 
-### Function: player_advance()
+#### Function: player_advance()
 **Purpose**: Execute advance movement for human player  
 **Returns**: boolean (true if unit actually moved to different hex, false otherwise)
 
@@ -72,7 +72,7 @@ player_advance():
 └── Remove advance icon from the unit
 ```
 
-### Function: weapon_availability_check(arg1, arg2, arg3)
+#### Function: weapon_availability_check(arg1, arg2, arg3)
 **Purpose**: Filter weapons based on rules and context  
 **Returns**: weapon_available_pool (set of weapons that can be selected)  
 **Process**: Loops through EACH ranged weapon of the unit
@@ -108,7 +108,7 @@ For each weapon:
         └── If at least ONE enemy meets ALL conditions → ✅ Add weapon to weapon_available_pool
 ```
 
-### Function: valid_target_pool_build(arg1, arg2, arg3)
+#### Function: valid_target_pool_build(arg1, arg2, arg3)
 **Purpose**: Build list of valid enemy targets  
 **Returns**: valid_target_pool (set of enemy units that can be targeted)  
 **Process**: Uses weapon_availability_check() to determine which weapons are available
@@ -125,7 +125,7 @@ For each enemy unit:
 └── ALL conditions met → ✅ Add unit to valid_target_pool
 ```
 
-### Function: weapon_selection()
+#### Function: weapon_selection()
 **Purpose**: Allow player to select weapon (Human only)  
 **Returns**: void (updates selected_weapon and valid_target_pool)
 
@@ -149,7 +149,7 @@ weapon_selection():
 │   └── Return: no weapon selected (continue with current weapon)
 ```
 
-### Function: shoot_action(target)
+#### Function: shoot_action(target)
 **Purpose**: Execute single shot sequence (unified for AI and Human)  
 **Parameters**: target (AI selects best, Human clicks)  
 **Returns**: void (updates SHOOT_LEFT, weapon.shot, valid_target_pool)
@@ -193,7 +193,7 @@ shoot_action(target):
   4. Loop back to shooting action selection step
 - **Purpose**: Maintain multi-shot sequence until SHOOT_LEFT = 0 or no targets remain
 
-### Function: POSTPONE_ACTIVATION() (Human only)
+#### Function: POSTPONE_ACTIVATION() (Human only)
 **Purpose**: Allow human player to postpone unit activation  
 **Trigger**: Human clicks elsewhere without shooting AND unit has NOT shot with ANY weapon
 
@@ -206,9 +206,9 @@ POSTPONE_ACTIVATION():
 
 ---
 
-## 🎯 SECTION 3: PHASE FLOW (Main Decision Tree)
+### 🎯 SECTION 3: PHASE FLOW (Main Decision Tree)
 
-### STEP 1: ELIGIBILITY CHECK (Pool Building Phase)
+#### STEP 1: ELIGIBILITY CHECK (Pool Building Phase)
 
 **Purpose**: Determine which units can participate in shooting phase  
 **Output**: shoot_activation_pool (set of eligible units)
@@ -238,7 +238,7 @@ For each PLAYER unit:
 │   └── ALL conditions met → ✅ Add to shoot_activation_pool → Highlight unit with green circle
 ```
 
-### STEP 2: UNIT_ACTIVABLE_CHECK
+#### STEP 2: UNIT_ACTIVABLE_CHECK
 
 **Purpose**: Check if there are units to activate  
 **Decision Point**: Is shoot_activation_pool NOT empty?
@@ -260,7 +260,7 @@ STEP : UNIT_ACTIVABLE_CHECK
 │   └── NO → End of shooting phase → Advance to charge phase
 ```
 
-### STEP 3: ACTION_SELECTION (Initial State - valid_target_pool NOT empty)
+#### STEP 3: ACTION_SELECTION (Initial State - valid_target_pool NOT empty)
 
 **Purpose**: Choose between shoot, advance, or wait  
 **Context**: Unit has valid targets available
@@ -286,7 +286,7 @@ STEP : ACTION_SELECTION (Initial State)
 - **AI**: Programmatically chooses action from VALID_ACTIONS
 - **Human**: Clicks UI elements (advance icon, target, weapon selection icon, or unit icon)
 
-### STEP 4: ADVANCE_ACTION
+#### STEP 4: ADVANCE_ACTION
 
 **Purpose**: Execute advance movement  
 **⚠️ POINT OF NO RETURN** (Human: Click ADVANCE logo)
@@ -319,12 +319,12 @@ STEP : ADVANCE_ACTION
     └── NO → Unit did not advance → Go back to STEP 3: ACTION_SELECTION
 ```
 
-### STEP 5: SHOOTING_ACTION_SELECTION
+#### STEP 5: SHOOTING_ACTION_SELECTION
 
 **Purpose**: Execute shooting sequence  
 **Two variants**: Normal (unit has NOT advanced) vs Advanced (post-advance state)
 
-#### STEP 5A: SHOOTING_ACTION_SELECTION (Normal - unit has NOT advanced)
+##### STEP 5A: SHOOTING_ACTION_SELECTION (Normal - unit has NOT advanced)
 
 ```javascript
 STEP : SHOOTING_ACTION_SELECTION (Normal)
@@ -355,7 +355,7 @@ STEP : SHOOTING_ACTION_SELECTION (Normal)
             └── YES → Do not end activation automatically (allow user to click active unit to confirm) → Return to this step
 ```
 
-#### STEP 5B: ADVANCED_SHOOTING_ACTION_SELECTION (Post-advance state)
+##### STEP 5B: ADVANCED_SHOOTING_ACTION_SELECTION (Post-advance state)
 
 ```javascript
 STEP : ADVANCED_SHOOTING_ACTION_SELECTION (Post-advance)
@@ -389,7 +389,7 @@ STEP : ADVANCED_SHOOTING_ACTION_SELECTION (Post-advance)
             └── YES → Do not end activation automatically (allow user to click active unit to confirm) → Return to this step
 ```
 
-### STEP 6: EMPTY_TARGET_HANDLING (valid_target_pool is empty)
+#### STEP 6: EMPTY_TARGET_HANDLING (valid_target_pool is empty)
 
 **Purpose**: Handle case when no valid targets are available  
 **Context**: Unit was eligible but has no targets
@@ -407,7 +407,7 @@ STEP : EMPTY_TARGET_HANDLING
         └── end_activation(WAIT, 1, 0, SHOOTING, 1, 1) → UNIT_ACTIVABLE_CHECK
 ```
 
-### STEP 7: WAIT_ACTION (Initial state, no shooting available)
+#### STEP 7: WAIT_ACTION (Initial state, no shooting available)
 
 **Purpose**: End activation without action  
 **Context**: Player chooses to wait (no valid actions or player decision)
@@ -421,9 +421,9 @@ STEP : WAIT_ACTION
 
 ---
 
-## 🔄 SECTION 4: FLOW SUMMARY & STEP TRANSITIONS
+### 🔄 SECTION 4: FLOW SUMMARY & STEP TRANSITIONS
 
-### Complete Step Flow
+#### Complete Step Flow
 ```
 UNIT_ACTIVABLE_CHECK
   → ACTION_SELECTION (if valid_target_pool NOT empty)
@@ -434,7 +434,7 @@ UNIT_ACTIVABLE_CHECK
   → (repeat until pool empty) → End of shooting phase
 ```
 
-### Key Step Transitions
+#### Key Step Transitions
 - **UNIT_ACTIVABLE_CHECK → ACTION_SELECTION**: valid_target_pool NOT empty
 - **UNIT_ACTIVABLE_CHECK → EMPTY_TARGET_HANDLING**: valid_target_pool is empty
 - **ACTION_SELECTION → ADVANCE_ACTION**: Player/AI chooses advance
@@ -451,9 +451,9 @@ UNIT_ACTIVABLE_CHECK
 
 ---
 
-## 📖 SECTION 5: CONCEPTUAL EXPLANATIONS
+### 📖 SECTION 5: CONCEPTUAL EXPLANATIONS
 
-### Target Restrictions Logic
+#### Target Restrictions Logic
 
 **Valid Target Requirements (ALL must be true):**
 1. **Range check**: Enemy within unit's selected_weapon.RNG hexes (varies by weapon)
@@ -472,7 +472,7 @@ UNIT_ACTIVABLE_CHECK
 - **Engagement types**: Adjacent = melee fight, not shooting
 - **Safety**: Prevent accidental damage to own forces
 
-### Multiple Shots Logic
+#### Multiple Shots Logic
 
 **Multi-Shot Rules:**
 - **All shots in one action**: Selected ranged weapon's NB shots fired as single activation
@@ -503,7 +503,7 @@ Shot 2: No more "Valid target" available, remaining shots are cancelled
 Result: Avoid a shooting unit to be stuck because it has no more "Valid target" while having remaining shots to perform
 ```
 
-### Advance Distance Logic
+#### Advance Distance Logic
 
 **1D6 Roll System:**
 - **When rolled**: When advance action is selected (at activation start)
@@ -540,7 +540,7 @@ Trade-off: Better position next turn vs losing shooting opportunity this turn
 - Exception: Weapons with "Assault" rule allow shooting after advance
 - Strategic importance: Must commit to advance before knowing exact distance
 
-### Key Differences Between AI and Human Players
+#### Key Differences Between AI and Human Players
 
 1. **Target Selection**: AI automatically chooses best target; Human clicks on target
 2. **UI Display**: Both AI and Human see blue preview (see UI Display Constants above)
@@ -550,7 +550,7 @@ Trade-off: Better position next turn vs losing shooting opportunity this turn
 
 ---
 
-## ✅ VALIDATION CHECKLIST
+### ✅ VALIDATION CHECKLIST
 
 **All features preserved:**
 - ✅ Advance action support
@@ -570,7 +570,7 @@ Trade-off: Better position next turn vs losing shooting opportunity this turn
 
 ---
 
-## 📝 Document Notes
+### 📝 Document Notes
 
 **This is an optimized version of the Shooting Phase documentation from `AI_TURN.md`.**
 

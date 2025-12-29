@@ -67,27 +67,42 @@ def _weapon_has_assault_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
-def _get_available_weapons_after_advance(
-    unit: Dict[str, Any], 
-    has_advanced: bool,
-    game_state: Dict[str, Any] = None,
-    current_weapon_is_pistol: bool = False,
-    exclude_used: bool = False
+def _weapon_has_pistol_rule(weapon: Dict[str, Any]) -> bool:
+    """Check if weapon has PISTOL rule."""
+    if not weapon:
+        return False
+    rules = weapon.get("WEAPON_RULES", [])
+    # Handle both ParsedWeaponRule objects and strings
+    for rule in rules:
+        if hasattr(rule, 'rule'):  # ParsedWeaponRule object
+            if rule.rule == "PISTOL":
+                return True
+        elif rule == "PISTOL":  # String
+            return True
+    return False
+
+
+def weapon_availability_check(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    weapon_rule: int,
+    advance_status: int,
+    adjacent_status: int
 ) -> List[Dict[str, Any]]:
     """
-    Get list of available weapons, filtered by ASSAULT rule if unit advanced.
-    If game_state is provided, uses centralized function for full filtering.
+    shoot_refactor.md EXACT: Filter weapons based on rules and context
+    
+    Args:
+        game_state: Game state dictionary
+        unit: Unit dictionary
+        weapon_rule: 0 = no rules, 1 = rules apply
+        advance_status: 0 = no advance, 1 = advanced
+        adjacent_status: 0 = not adjacent, 1 = adjacent to enemy
     
     Returns:
-        List of dicts with keys: index, weapon, can_use, reason
+        List of weapons that can be selected (weapon_available_pool)
+        Each item has: index, weapon, can_use, reason
     """
-    # If game_state is provided, use centralized function for full filtering
-    if game_state is not None:
-        return _get_available_weapons_for_selection(
-            game_state, unit, current_weapon_is_pistol, exclude_used, has_advanced
-        )
-    
-    # Fallback: simple filtering without game_state (for backward compatibility)
     available_weapons = []
     rng_weapons = unit.get("RNG_WEAPONS", [])
     
@@ -95,10 +110,75 @@ def _get_available_weapons_after_advance(
         can_use = True
         reason = None
         
-        if has_advanced:
-            if not _weapon_has_assault_rule(weapon):
+        # Check arg1 (weapon_rule)
+        # arg1 = 0 → No weapon rules checked/applied (continue to next check)
+        # arg1 = 1 → Weapon rules apply (continue to next check)
+        
+        # Check arg2 (advance_status)
+        if advance_status == 1:
+            # Unit DID advance
+            if weapon_rule == 0:
+                # arg1=0 AND arg2=1 → ❌ Weapon CANNOT be selectable (skip weapon)
                 can_use = False
-                reason = "No ASSAULT rule (cannot shoot after advancing)"
+                reason = "Cannot shoot after advance (weapon_rule=0)"
+            else:
+                # arg1=1 AND arg2=1 → ✅ Weapon MUST have ASSAULT rule (continue to next check)
+                if not _weapon_has_assault_rule(weapon):
+                    can_use = False
+                    reason = "No ASSAULT rule (cannot shoot after advancing)"
+        
+        # Check arg3 (adjacent_status)
+        if can_use and adjacent_status == 1:
+            # Unit IS adjacent to enemy
+            if weapon_rule == 0:
+                # arg1=0 AND arg3=1 → ❌ Weapon CANNOT be selectable (skip weapon)
+                can_use = False
+                reason = "Cannot shoot when adjacent (weapon_rule=0)"
+            else:
+                # arg1=1 AND arg3=1 → ✅ Weapon MUST have PISTOL rule (continue to next check)
+                if not _weapon_has_pistol_rule(weapon):
+                    can_use = False
+                    reason = "No PISTOL rule (cannot shoot non-PISTOL when adjacent)"
+        
+        # Check weapon.shot flag
+        if can_use:
+            weapon_shot = weapon.get("shot", 0)
+            if weapon_shot == 1:
+                # ❌ Weapon CANNOT be selectable (skip weapon)
+                can_use = False
+                reason = "Weapon already used (weapon.shot = 1)"
+        
+        # Check weapon.RNG and target availability
+        if can_use:
+            weapon_range = weapon.get("RNG", 0)
+            if weapon_range <= 0:
+                can_use = False
+                reason = "Weapon has no range"
+            else:
+                # Check if at least ONE enemy unit meets ALL conditions
+                weapon_has_valid_target = False
+                for enemy in game_state["units"]:
+                    if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                        # Check range
+                        distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+                        if distance > weapon_range:
+                            continue
+                        
+                        # Check Line of Sight
+                        temp_unit = dict(unit)
+                        temp_unit["RNG_WEAPONS"] = [weapon]
+                        temp_unit["selectedRngWeaponIndex"] = 0
+                        
+                        try:
+                            if _is_valid_shooting_target(game_state, temp_unit, enemy):
+                                weapon_has_valid_target = True
+                                break
+                        except (KeyError, IndexError, AttributeError):
+                            continue
+                
+                if not weapon_has_valid_target:
+                    can_use = False
+                    reason = "No valid targets in range or line of sight"
         
         available_weapons.append({
             "index": idx,
@@ -117,19 +197,21 @@ def _get_available_weapons_for_selection(
     has_advanced: bool = False
 ) -> List[Dict[str, Any]]:
     """
+    DEPRECATED: This function is kept for backward compatibility.
+    Use weapon_availability_check() instead.
+    
     Get list of available weapons for selection, filtered by:
     - Range: weapon must have at least one target in range
     - LoS: weapon must have at least one target with line of sight
     - ASSAULT rule: if unit advanced
     - PISTOL rule: category (PISTOL or non-PISTOL)
-    - Used weapons: if exclude_used=True, exclude weapons in _used_weapon_indices
+    - Used weapons: if exclude_used=True, exclude weapons with weapon.shot = 1
     
     Returns:
         List of dicts with keys: index, weapon, can_use, reason
     """
     available_weapons = []
     rng_weapons = unit.get("RNG_WEAPONS", [])
-    used_indices = unit.get("_used_weapon_indices", [])
     
     # Build valid targets for range/LoS checking
     # We'll check each weapon individually
@@ -139,17 +221,19 @@ def _get_available_weapons_for_selection(
         can_use = True
         reason = None
         
-        # Check if weapon is already used
-        if exclude_used and idx in used_indices:
-            can_use = False
-            reason = "Weapon already used"
-            available_weapons.append({
-                "index": idx,
-                "weapon": _serialize_weapon_for_json(weapon),
-                "can_use": can_use,
-                "reason": reason
-            })
-            continue
+        # Check weapon.shot flag
+        if exclude_used:
+            weapon_shot = weapon.get("shot", 0)
+            if weapon_shot == 1:
+                can_use = False
+                reason = "Weapon already used (weapon.shot = 1)"
+                available_weapons.append({
+                    "index": idx,
+                    "weapon": _serialize_weapon_for_json(weapon),
+                    "can_use": can_use,
+                    "reason": reason
+                })
+                continue
         
         # Check ASSAULT rule if unit advanced
         if has_advanced:
@@ -254,24 +338,31 @@ def _get_available_weapons_for_selection(
 def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     AI_Shooting_Phase.md EXACT: Initialize shooting phase and build activation pool
+    Initialize weapon_rule and weapon.shot flags
     """
     global _target_pool_cache
 
     # Set phase
     game_state["phase"] = "shoot"
 
-    # CRITICAL: Clear target pool cache at phase start - targets may have moved
+    # Initialize weapon_rule (weapon rules activated = 1)
+    # This is a global variable that determines if weapon rules are applied
+    game_state["weapon_rule"] = 1
+
+    # Clear target pool cache at phase start - targets may have moved
     # The cache key only includes shooter position, not target positions
     # So stale cache entries could allow shooting blocked targets
     _target_pool_cache.clear()
 
-    # AI_TURN.md COMPLIANCE: Reset SHOOT_LEFT for all units at phase start
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon
+    # Initialize weapon.shot = 0 for all weapons in all units
+    # Reset weapon.shot flag at phase start
     current_player = game_state["current_player"]
     for unit in game_state["units"]:
         if unit["player"] == current_player and unit["HP_CUR"] > 0:
             rng_weapons = unit.get("RNG_WEAPONS", [])
+            for weapon in rng_weapons:
+                weapon["shot"] = 0
+            
             if rng_weapons:
                 selected_idx = unit.get("selectedRngWeaponIndex", 0)
                 if selected_idx < 0 or selected_idx >= len(rng_weapons):
@@ -282,7 +373,6 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
-    # PERFORMANCE: Build LoS cache once at phase start (10-100x speedup)
     _build_shooting_los_cache(game_state)
     
     # Build activation pool
@@ -306,7 +396,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
     """
     Build LoS cache for all unit pairs at shooting phase start.
-    AI_TURN.md COMPLIANCE: Pure function, stores in game_state, no copying.
+    Pure function, stores in game_state, no copying.
     
     Performance: O(n²) calculation once per phase vs O(n²×m) per activation.
     Called once per shooting phase, massive speedup during unit activations.
@@ -333,11 +423,10 @@ def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
     # Debug log cache size (optional, remove in production)
     # print(f"LoS CACHE: Built {len(los_cache)} entries for {len(alive_units)} units")
 
-
 def _invalidate_los_cache_for_unit(game_state: Dict[str, Any], dead_unit_id: str) -> None:
     """
     Partially invalidate LoS cache when unit dies.
-    AI_TURN.md COMPLIANCE: Direct field access, no state copying.
+    Direct field access, no state copying.
     
     Only removes entries involving dead unit (performance optimization).
     """
@@ -356,7 +445,7 @@ def _invalidate_los_cache_for_unit(game_state: Dict[str, Any], dead_unit_id: str
 
 def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     """
-    AI_TURN.md: Build activation pool with comprehensive debug logging
+    Build activation pool with comprehensive debug logging
     """
     current_player = game_state["current_player"]
     shoot_activation_pool = []
@@ -416,12 +505,10 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
             if reward > best_reward:
                 best_reward = reward
                 best_target = target_id
-        
-        # print(f"AI SHOOTING: Unit {unit_id} selected target {best_target} (reward: {best_reward})")
+
         return best_target
         
     except Exception as e:
-        # print(f"AI target selection error: {e}")
         return valid_targets[0]
 
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
@@ -439,64 +526,53 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         return False
         
     # units_fled.includes(unit.id)?
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    # Direct field access with validation
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
     if unit["id"] in game_state["units_fled"]:
         return False
     
-    # CRITICAL FIX: Add missing adjacency check - units in melee cannot shoot OR advance
-    # This matches the frontend logic: hasAdjacentEnemyShoot check
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_RNG
-    from engine.utils.weapon_helpers import get_melee_range
-    melee_range = get_melee_range()  # Always 1
+    # STEP 1: ELIGIBILITY CHECK
+    # Check if unit is adjacent to enemy (melee range)
+    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
     
-    for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-            if distance <= melee_range:
-                return False
+    # Determine CAN_ADVANCE and CAN_SHOOT using weapon_availability_check
+    if "weapon_rule" not in game_state:
+        raise KeyError("game_state missing required 'weapon_rule' field")
+    weapon_rule = game_state["weapon_rule"]
     
-    # ADVANCE_IMPLEMENTATION: At this point, unit CAN_ADVANCE (alive, correct player, not fled, not in melee)
-    # So we return True even if unit has no ranged weapons or no valid targets
-    # The actual action selection (shoot vs advance vs wait) happens later
-    
-    # Check CAN_SHOOT: has ranged weapons AND has valid targets
-    can_shoot = False
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon
-    selected_weapon = get_selected_ranged_weapon(unit)
-    if selected_weapon:
-        from shared.data_validation import require_key
-        rng_nb = require_key(selected_weapon, "NB")
-        if rng_nb > 0:
-            # Check for valid targets
-            for enemy in game_state["units"]:
-                if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                    if _is_valid_shooting_target(game_state, unit, enemy):
-                        can_shoot = True
-                        break
-    
-    # ASSAULT RULE: If unit has advanced, can only shoot with Assault weapons
-    unit_id = unit["id"]
-    has_advanced = unit_id in game_state.get("units_advanced", set())
-    
-    # CAN_ADVANCE is True only if unit has NOT already advanced
-    can_advance = not has_advanced
-    
-    # If unit has advanced, find and select first ASSAULT weapon
-    if has_advanced:
-        has_assault_weapon = False
-        rng_weapons = unit.get("RNG_WEAPONS", [])
-        for idx, weapon in enumerate(rng_weapons):
-            if _weapon_has_assault_rule(weapon):
-                # Found ASSAULT weapon - select it automatically
-                unit["selectedRngWeaponIndex"] = idx
-                has_assault_weapon = True
-                break
-        
-        # If no ASSAULT weapon found, cannot shoot
-        if not has_assault_weapon:
-            can_shoot = False
+    if is_adjacent:
+        # Adjacent to enemy
+        # CAN_ADVANCE = false (cannot advance when adjacent)
+        can_advance = False
+        # weapon_availability_check(weapon_rule, 0, 1) → Build weapon_available_pool
+        advance_status = 0  # Not advanced yet (eligibility check)
+        adjacent_status = 1  # Adjacent to enemy
+        weapon_available_pool = weapon_availability_check(
+            game_state, unit, weapon_rule, advance_status, adjacent_status
+        )
+        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+        # weapon_available_pool NOT empty? → CAN_SHOOT = true, else false
+        can_shoot = len(usable_weapons) > 0
+        # If CAN_SHOOT = false → ❌ Skip (no valid actions)
+        if not can_shoot:
+            return False
+    else:
+        # NOT adjacent to enemy
+        # CAN_ADVANCE = true → Store unit.CAN_ADVANCE = true
+        can_advance = True
+        # weapon_availability_check(weapon_rule, 0, 0) → Build weapon_available_pool
+        advance_status = 0  # Not advanced yet (eligibility check)
+        adjacent_status = 0  # Not adjacent to enemy
+        weapon_available_pool = weapon_availability_check(
+            game_state, unit, weapon_rule, advance_status, adjacent_status
+        )
+        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+        # weapon_available_pool NOT empty? → CAN_SHOOT = true, else false
+        can_shoot = len(usable_weapons) > 0
+        # (CAN_SHOOT OR CAN_ADVANCE)? → YES → Continue, NO → ❌ Skip
+        if not (can_shoot or can_advance):
+            return False
     
     # Store capability flags on unit for later use in action validation
     unit["_can_shoot"] = can_shoot
@@ -547,7 +623,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
                 return False
 
     # PERFORMANCE: Use LoS cache if available (instant lookup)
-    # Fallback to calculation if cache missing (phase not started yet)
+    # Fallback to calculation if cache missing (edge cases: cache invalidated, tests, or other contexts)
     has_los = False
     if "los_cache" in game_state and game_state["los_cache"]:
         cache_key = (shooter["id"], target["id"])
@@ -566,7 +642,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
 
 def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
     """
-    AI_TURN.md EXACT: Start unit activation from shoot_activation_pool
+    Start unit activation from shoot_activation_pool
     Clear valid_target_pool, clear TOTAL_ACTION_LOG, SHOOT_LEFT = selected weapon NB
     MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
     """
@@ -574,62 +650,182 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     if not unit:
         return {"error": "unit_not_found", "unitId": unit_id}
 
-    # REMOVED: Line 335 was clearing action_logs between unit activations, destroying cross-phase data
-    # action_logs must accumulate for entire episode, only cleared in __init__ and reset()
-
-    # AI_TURN.md initialization
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon
+    # STEP 2: UNIT_ACTIVABLE_CHECK
+    # Clear valid_target_pool, Clear TOTAL_ATTACK log
     unit["valid_target_pool"] = []
     unit["TOTAL_ATTACK_LOG"] = ""
-    rng_weapons = unit.get("RNG_WEAPONS", [])
-    if rng_weapons:
-        selected_idx = unit.get("selectedRngWeaponIndex", 0)
-        if selected_idx < 0 or selected_idx >= len(rng_weapons):
-            raise IndexError(f"Invalid selectedRngWeaponIndex {selected_idx} for unit {unit['id']}")
-        weapon = rng_weapons[selected_idx]
-        unit["SHOOT_LEFT"] = weapon["NB"]
-        # PISTOL rule: Store if selected weapon is PISTOL to prevent shooting with other weapons
-        weapon_rules = weapon.get("WEAPON_RULES", [])
+    
+    # Determine adjacency
+    unit_is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+    
+    # weapon_availability_check(weapon_rule, 0, unit_is_adjacent ? 1 : 0) → Build weapon_available_pool
+    if "weapon_rule" not in game_state:
+        raise KeyError("game_state missing required 'weapon_rule' field")
+    weapon_rule = game_state["weapon_rule"]
+    advance_status = 0  # STEP 2: Unit has NOT advanced yet
+    adjacent_status = 1 if unit_is_adjacent else 0
+    weapon_available_pool = weapon_availability_check(
+        game_state, unit, weapon_rule, advance_status, adjacent_status
+    )
+    
+    # valid_target_pool_build(weapon_rule, arg2=0, arg3=unit_is_adjacent ? 1 : 0)
+    valid_target_pool = valid_target_pool_build(
+        game_state, unit, weapon_rule, advance_status, adjacent_status
+    )
+    
+    # valid_target_pool NOT empty?
+    if len(valid_target_pool) == 0:
+        # AI_TURN.md STEP 6: EMPTY_TARGET_HANDLING
+        # unit.CAN_ADVANCE = true?
+        can_advance = unit.get("_can_advance", False)
+        if can_advance:
+            # YES → Only action available is advance
+            # Return signal to allow advance action (handled by frontend/action handler)
+            unit["valid_target_pool"] = []
+            return {
+                "success": True,
+                "unitId": unit_id,
+                "empty_target_pool": True,
+                "can_advance": True,
+                "waiting_for_player": True,
+                "action": "empty_target_advance_available"
+            }
+        else:
+            # NO → unit.CAN_ADVANCE = false → No valid actions available
+            # end_activation(WAIT, 1, 0, SHOOTING, 1, 1) → UNIT_ACTIVABLE_CHECK
+            unit["valid_target_pool"] = []
+            result = _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
+            return result
+    
+    # YES → SHOOTING ACTIONS AVAILABLE → Go to STEP 3: ACTION_SELECTION
+    unit["valid_target_pool"] = valid_target_pool
+    
+    # AI_TURN.md STEP 3: Pre-select first available weapon
+    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+    if usable_weapons:
+        first_weapon_idx = usable_weapons[0]["index"]
+        unit["selectedRngWeaponIndex"] = first_weapon_idx
+        selected_weapon = unit["RNG_WEAPONS"][first_weapon_idx]
+        unit["SHOOT_LEFT"] = selected_weapon["NB"]
+    else:
+        unit["SHOOT_LEFT"] = 0
+    
+    # PISTOL rule: Store if selected weapon is PISTOL to prevent shooting with other weapons
+    if unit["SHOOT_LEFT"] > 0:
+        selected_weapon = unit["RNG_WEAPONS"][unit["selectedRngWeaponIndex"]]
+        weapon_rules = selected_weapon.get("WEAPON_RULES", [])
         if "PISTOL" in weapon_rules:
             unit["_shooting_with_pistol"] = True
         else:
             unit["_shooting_with_pistol"] = False
     else:
-        unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
         unit["_shooting_with_pistol"] = False
-    # Track weapons that have been completely used (SHOOT_LEFT reached 0)
-    unit["_used_weapon_indices"] = []
+    
+    # weapon.shot flags are initialized at phase start, not here
     unit["selected_target_id"] = None  # For two-click confirmation
 
-    # CRITICAL: Capture unit's current location for shooting phase tracking
+    # Capture unit's current location for shooting phase tracking
     unit["activation_position"] = {"col": unit["col"], "row": unit["row"]}
 
     # Mark unit as currently active
     game_state["active_shooting_unit"] = unit_id
-    
-    # WEAPON_SELECTION: Check if manual mode needs weapon selection
-    config = game_state.get("config", {})
-    auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
-    
-    if not auto_select:
-        rng_weapons = unit.get("RNG_WEAPONS", [])
-        if len(rng_weapons) > 1:
-            # Check if unit has advanced to filter weapons correctly
-            has_advanced = unit_id in game_state.get("units_advanced", set())
-            available_weapons = _get_available_weapons_after_advance(
-                unit, has_advanced=has_advanced, game_state=game_state, 
-                current_weapon_is_pistol=False, exclude_used=False
-            )
-            return {
-                "success": True,
-                "waiting_for_weapon_selection": True,
-                "unitId": unit_id,
-                "available_weapons": available_weapons
-            }
+
+    # Serialize available weapons for frontend (weapon_available_pool already contains serialized weapons)
+    available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in weapon_available_pool]
 
     return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"],
-            "position": {"col": unit["col"], "row": unit["row"]}}
+            "position": {"col": unit["col"], "row": unit["row"]},
+            "available_weapons": available_weapons}
+
+
+def valid_target_pool_build(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    weapon_rule: int,
+    advance_status: int,
+    adjacent_status: int
+) -> List[str]:
+    """
+    shoot_refactor.md EXACT: Build list of valid enemy targets
+    
+    Args:
+        game_state: Game state dictionary
+        unit: Unit dictionary
+        weapon_rule: 0 = no rules, 1 = rules apply
+        advance_status: 0 = no advance, 1 = advanced
+        adjacent_status: 0 = not adjacent, 1 = adjacent to enemy
+    
+    Returns:
+        List of enemy unit IDs that can be targeted (valid_target_pool)
+    """
+    current_player = unit["player"]
+    
+    # Perform weapon_availability_check(arg1, arg2, arg3) → Build weapon_available_pool
+    weapon_available_pool = weapon_availability_check(
+        game_state, unit, weapon_rule, advance_status, adjacent_status
+    )
+    
+    # Get usable weapons (can_use = True)
+    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+    
+    if not usable_weapons:
+        return []
+    
+    # Extract usable weapon indices and ranges
+    usable_weapon_indices = [w["index"] for w in usable_weapons]
+    rng_weapons = unit.get("RNG_WEAPONS", [])
+    
+    # For each enemy unit
+    valid_target_pool = []
+    
+    for enemy in game_state["units"]:
+        # unit.HP_CUR > 0? → NO → Skip enemy unit
+        if enemy["HP_CUR"] <= 0:
+            continue
+        
+        # unit.player != current_player? → NO → Skip enemy unit
+        if enemy["player"] == current_player:
+            continue
+        
+        # Unit NOT adjacent to friendly unit (excluding active unit)? → NO → Skip enemy unit
+        from engine.utils.weapon_helpers import get_melee_range
+        melee_range = get_melee_range()
+        enemy_adjacent_to_friendly = False
+        for friendly in game_state["units"]:
+            if (friendly["player"] == current_player and 
+                friendly["HP_CUR"] > 0 and 
+                friendly["id"] != unit["id"]):
+                friendly_distance = _calculate_hex_distance(
+                    enemy["col"], enemy["row"], friendly["col"], friendly["row"]
+                )
+                if friendly_distance <= melee_range:
+                    enemy_adjacent_to_friendly = True
+                    break
+        
+        if enemy_adjacent_to_friendly:
+            continue
+        
+        # Unit in Line of Sight? → NO → Skip enemy unit
+        if not _has_line_of_sight(game_state, unit, enemy):
+            continue
+        
+        # Unit within range of AT LEAST 1 weapon from weapon_available_pool? → NO → Skip enemy unit
+        unit_within_range = False
+        distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+        
+        for weapon_idx in usable_weapon_indices:
+            if weapon_idx < len(rng_weapons):
+                weapon = rng_weapons[weapon_idx]
+                weapon_range = weapon.get("RNG", 0)
+                if distance <= weapon_range:
+                    unit_within_range = True
+                    break
+        
+        # ALL conditions met → ✅ Add unit to valid_target_pool
+        if unit_within_range:
+            valid_target_pool.append(enemy["id"])
+    
+    return valid_target_pool
 
 
 def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -> List[str]:
@@ -640,6 +836,13 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     PERFORMANCE: Caches target pool per (unit_id, col, row) to avoid repeated
     distance/LoS calculations during a unit's shooting activation.
     Cache invalidates automatically when unit changes or moves.
+    
+    NOTE: This function is a wrapper that determines context and calls valid_target_pool_build.
+    For direct calls, use valid_target_pool_build() with explicit parameters.
+    
+    Determines context (arg2, arg3) based on unit state:
+    - arg2 = (unit.id in units_advanced) ? 1 : 0
+    - arg3 = (unit adjacent to enemy?) ? 1 : 0
     """
     global _target_pool_cache
 
@@ -647,13 +850,28 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     if not unit:
         return []
 
-    # Create cache key from unit identity and position
-    cache_key = (unit_id, unit["col"], unit["row"])
+    # Determine context for valid_target_pool_build
+    # arg2 = (unit.id in units_advanced) ? 1 : 0
+    unit_id_str = str(unit_id)
+    has_advanced = unit_id_str in game_state.get("units_advanced", set())
+    advance_status = 1 if has_advanced else 0
+    
+    # arg3 = (unit adjacent to enemy?) ? 1 : 0
+    # After advance, arg3 is ALWAYS 0 (advance restrictions prevent adjacent destinations)
+    if has_advanced:
+        adjacent_status = 0  # arg3=0 always after advance
+    else:
+        adjacent_status = 1 if _is_adjacent_to_enemy_within_cc_range(game_state, unit) else 0
+
+    # Create cache key from unit identity, position, AND context (advance_status, adjacent_status)
+    # Cache must include context to avoid wrong results after advance
+    cache_key = (unit_id, unit["col"], unit["row"], advance_status, adjacent_status)
 
     # Check cache
     if cache_key in _target_pool_cache:
         # Cache hit: Fast path - filter dead targets AND re-validate melee status
-        # CRITICAL: Melee status can change when friendly units die, so we must re-validate
+        # Melee status can change when friendly units die, so we must re-validate
+        # Context (advance_status, adjacent_status) is now part of cache key
         cached_pool = _target_pool_cache[cache_key]
 
         # Filter out units that died AND re-validate targets that might have changed melee status
@@ -671,20 +889,19 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
         return alive_targets
 
-    # Cache miss: Build target pool from scratch (expensive)
-    valid_target_pool = []
-
-    for enemy in game_state["units"]:
-        if (enemy["player"] != unit["player"] and
-            enemy["HP_CUR"] > 0):
-
-            # Check if target is valid with detailed logging for training debug
-            is_valid = _is_valid_shooting_target(game_state, unit, enemy)
-            if not is_valid:
-                # Add specific failure reason debugging
-                distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-            else:
-                valid_target_pool.append(enemy["id"])
+    # Cache miss: Build target pool from scratch using valid_target_pool_build
+    # Use context already determined above (lines 881-892)
+    # Do NOT recalculate - use advance_status and adjacent_status already computed
+    # which correctly implement "arg3=0 always after advance" rule
+    if "weapon_rule" not in game_state:
+        raise KeyError("game_state missing required 'weapon_rule' field")
+    weapon_rule = game_state["weapon_rule"]
+    
+    # Call valid_target_pool_build with context parameters
+    # Use advance_status and adjacent_status already calculated above (lines 885, 890-892)
+    valid_target_pool = valid_target_pool_build(
+        game_state, unit, weapon_rule, advance_status, adjacent_status
+    )
 
     # PERFORMANCE: Pre-calculate priorities for all targets ONCE before sorting
     # This reduces from O(n log n) priority calculations to O(n) calculations
@@ -743,7 +960,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
         distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
 
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
+        # Direct UPPERCASE field access - no defaults
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_* fields
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         from shared.data_validation import require_key
@@ -881,7 +1098,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
 def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md EXACT: Line of sight check with proper hex pathfinding.
+    Line of sight check with proper hex pathfinding.
     Fixed to get wall data from multiple possible sources.
     """
     start_col, start_row = shooter["col"], shooter["row"]
@@ -899,7 +1116,7 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         wall_hexes_data = game_state["board"]["wall_hexes"]
     
     # Source 3: Check if walls exist in board config
-    # AI_TURN.md COMPLIANCE: Direct field access chain
+    # Direct field access chain
     elif "board_config" in game_state and "wall_hexes" in game_state["board_config"]:
         wall_hexes_data = game_state["board_config"]["wall_hexes"]
     
@@ -1028,7 +1245,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["console_logs"] = []
     game_state["console_logs"].append("SHOOTING PHASE COMPLETE")
     
-    # AI_TURN.md: Player progression logic
+    # Player progression logic
     if game_state["current_player"] == 0:
         # AI_TURN.md Line 105: P0 Move → P0 Shoot → P0 Charge → P0 Fight
         # Player stays 0, advance to charge phase
@@ -1037,9 +1254,9 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "phase_transition": True,
             "next_phase": "charge",
             "current_player": 0,
-            # AI_TURN.md COMPLIANCE: Direct field access
+            # Direct field access
             "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
-            # CRITICAL: Add missing frontend cleanup signals
+            # Add missing frontend cleanup signals
             "clear_blinking_gentle": True,
             "reset_mode": "select",
             "clear_selected_unit": True,
@@ -1070,9 +1287,9 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "phase_transition": True,
                 "next_phase": "charge",
                 "current_player": 1,
-                # AI_TURN.md COMPLIANCE: Direct field access
+                # Direct field access
                 "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
-                # CRITICAL: Add missing frontend cleanup signals
+                # Add missing frontend cleanup signals
                 "clear_blinking_gentle": True,
                 "reset_mode": "select",
                 "clear_selected_unit": True,
@@ -1085,21 +1302,20 @@ def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
     """Determine current shooting context for nested behavior."""
-    # AI_TURN.md COMPLIANCE: Direct field access
+    # Direct field access
     if "selected_target_id" in unit and unit["selected_target_id"]:
         return "target_selected"
     else:
         return "no_target_selected"
 
 def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any], 
-                   arg1: str, arg2: int, arg3: str, arg4: str) -> Dict[str, Any]:
+                   arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1) -> Dict[str, Any]:
     """
-    AI_TURN.md EXACT: shooting_activation_end procedure with exact arguments
-    shooting_activation_end(Arg1, Arg2, Arg3, Arg4, Arg5)
+    shooting_activation_end procedure with exact arguments
+    end_activation(result_type, step_count, action_type, phase, remove_from_pool, increment_step)
+    arg1 = result_type, arg2 = step_count, arg3 = action_type, arg4 = phase, arg5 = remove_from_pool
+    Note: increment_step is handled via arg2 (if arg2=1, increment episode_steps)
     """
-    
-    # Arg2 step increment
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
     if arg2 == 1:
         if "episode_steps" not in game_state:
             game_state["episode_steps"] = 0
@@ -1110,11 +1326,18 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
         game_state["units_shot"].add(unit["id"])
+    elif arg3 == "ADVANCE":
+        # AI_TURN.md: Mark as units_advanced
+        if "units_advanced" not in game_state:
+            game_state["units_advanced"] = set()
+        game_state["units_advanced"].add(unit["id"])
     # arg3 == "PASS" → no tracking update
     
-    # Arg4 pool removal
-    if arg4 == "SHOOTING":
-        # AI_TURN.md COMPLIANCE: Direct field access
+    # Arg4/Arg5 pool removal (arg4 = phase, arg5 = remove_from_pool)
+    # remove_from_pool = 0 means NOT_REMOVED, 1 means remove
+    remove_from_pool = arg5
+    if remove_from_pool == 1:
+        # Direct field access
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         pool_before = game_state["shoot_activation_pool"].copy()
@@ -1126,26 +1349,35 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
             # print(f"🔴 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {current_pool}")
     
     # Clean up unit activation state including position tracking
-    if "valid_target_pool" in unit:
-        del unit["valid_target_pool"]
-    if "TOTAL_ATTACK_LOG" in unit:
-        del unit["TOTAL_ATTACK_LOG"]
-    if "selected_target_id" in unit:
-        del unit["selected_target_id"]
-    if "activation_position" in unit:
-        del unit["activation_position"]  # Clear position tracking
-    unit["SHOOT_LEFT"] = 0
-    
-    # Clear active unit
-    if "active_shooting_unit" in game_state:
-        del game_state["active_shooting_unit"]
+    # AI_TURN.md: Only clean up if actually ending activation (arg5=1)
+    # If arg5=0 (NOT_REMOVED), we continue activation, so keep state intact
+    if remove_from_pool == 1:
+        if "valid_target_pool" in unit:
+            del unit["valid_target_pool"]
+        if "TOTAL_ATTACK_LOG" in unit:
+            del unit["TOTAL_ATTACK_LOG"]
+        if "selected_target_id" in unit:
+            del unit["selected_target_id"]
+        if "activation_position" in unit:
+            del unit["activation_position"]  # Clear position tracking
+        unit["SHOOT_LEFT"] = 0
+        
+        # Clear active unit
+        if "active_shooting_unit" in game_state:
+            del game_state["active_shooting_unit"]
     
     # Check if shooting pool is now empty after removing this unit
-    # AI_TURN.md COMPLIANCE: Direct field access
+    # Direct field access
     if "shoot_activation_pool" not in game_state:
         pool_empty = True
     else:
         pool_empty = len(game_state["shoot_activation_pool"]) == 0
+    
+    # AI_TURN.md: Only return activation_ended response if actually ending (arg5=1)
+    # If arg5=0 (NOT_REMOVED), we continue activation, so return None or empty dict
+    if remove_from_pool == 0:
+        # NOT_REMOVED: This is just a log call, continue activation
+        return {}
     
     response = {
         "activation_ended": True,
@@ -1166,14 +1398,14 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
 
 def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md EXACT: Execute While SHOOT_LEFT > 0 loop automatically
+    Execute While SHOOT_LEFT > 0 loop automatically
     """
     
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found"}
     
-    # AI_TURN.md: While SHOOT_LEFT > 0
+    # While SHOOT_LEFT > 0
     if unit["SHOOT_LEFT"] <= 0:
         # Check if current weapon is PISTOL and find available weapons of same category
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
@@ -1232,12 +1464,28 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             if available_weapons_same_category and has_valid_targets_for_any_weapon:
                 # There are other weapons of the same category and targets available
                 # Allow weapon selection to continue shooting
-                # Get available weapons filtered by backend
-                has_advanced = unit_id in game_state.get("units_advanced", set())
+                # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
+                if "weapon_rule" not in game_state:
+                    raise KeyError("game_state missing required 'weapon_rule' field")
+                weapon_rule = game_state["weapon_rule"]
+                unit_id_str = str(unit["id"])
+                has_advanced = unit_id_str in game_state.get("units_advanced", set())
+                is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                advance_status = 1 if has_advanced else 0
+                adjacent_status = 1 if is_adjacent else 0
+                
                 try:
-                    available_weapons = _get_available_weapons_for_selection(
-                        game_state, unit, current_weapon_is_pistol, exclude_used=True, has_advanced=has_advanced
+                    weapon_available_pool = weapon_availability_check(
+                        game_state, unit, weapon_rule, advance_status, adjacent_status
                     )
+                    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+                    # Filter by same category (PISTOL or non-PISTOL) if needed
+                    if current_weapon_is_pistol:
+                        usable_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w["weapon"])]
+                    else:
+                        usable_weapons = [w for w in usable_weapons if not _weapon_has_pistol_rule(w["weapon"])]
+                    
+                    available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
                     # CRITICAL FIX: Store on unit for frontend access (not in game_state global)
                     unit["available_weapons"] = available_weapons
                 except Exception as e:
@@ -1245,7 +1493,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                     result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                     return True, result
                 
-                # CRITICAL: Check if at least one weapon is usable (can_use: True)
+                # Check if at least one weapon is usable (can_use: True)
                 usable_weapons = [w for w in available_weapons if w["can_use"]]
                 if not usable_weapons:
                     # No usable weapons left, end activation
@@ -1273,23 +1521,33 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
             return True, result
     
-    # AI_TURN.md: Build valid_target_pool
+    # Build valid_target_pool
+    # shooting_build_valid_target_pool() now correctly determines context
+    # including arg2=1, arg3=0 if unit has advanced
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
     
-    # AI_TURN.md: valid_target_pool NOT empty?
+    # valid_target_pool NOT empty?
     if len(valid_targets) == 0:
         # Check if a target died and rebuild valid_targets for all available weapons
         # This allows switching to another weapon if current weapon has no targets
-        has_advanced = unit_id in game_state.get("units_advanced", set())
+        # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
+        if "weapon_rule" not in game_state:
+            raise KeyError("game_state missing required 'weapon_rule' field")
+        weapon_rule = game_state["weapon_rule"]
+        unit_id_str = str(unit["id"])
+        has_advanced = unit_id_str in game_state.get("units_advanced", set())
+        is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+        advance_status = 1 if has_advanced else 0
+        adjacent_status = 1 if is_adjacent else 0
+        
         try:
-            available_weapons = _get_available_weapons_for_selection(
-                game_state, unit, current_weapon_is_pistol=False, exclude_used=True, has_advanced=has_advanced
+            weapon_available_pool = weapon_availability_check(
+                game_state, unit, weapon_rule, advance_status, adjacent_status
             )
+            usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
         except Exception as e:
             # If weapon selection fails, continue with normal flow (no targets)
-            available_weapons = []
-        usable_weapons = [w for w in available_weapons if w["can_use"]]
-        usable_weapons = [w for w in available_weapons if w["can_use"]]
+            usable_weapons = []
         
         # Try to rebuild valid_targets for each usable weapon
         for weapon_info in usable_weapons:
@@ -1373,16 +1631,28 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         # Unit has already fired (SHOOT_LEFT decreased), apply PISTOL filter
         weapon_rules = selected_weapon.get("WEAPON_RULES", [])
         current_weapon_is_pistol = "PISTOL" in weapon_rules
+        
+    # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
+    if "weapon_rule" not in game_state:
+        raise KeyError("game_state missing required 'weapon_rule' field")
+    weapon_rule = game_state["weapon_rule"]
+    unit_id_str = str(unit["id"])
+    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+    advance_status = 1 if has_advanced else 0
+    adjacent_status = 1 if is_adjacent else 0
     
-    print(f"[DIAG] Unit {unit_id} - has_advanced={has_advanced}")
-    print(f"[DIAG] current_weapon_is_pistol={current_weapon_is_pistol}")
-    print(f"[DIAG] All weapons: {[w.get('name', 'no_name') for w in unit.get('RNG_WEAPONS', [])]}")
-    
-    available_weapons = _get_available_weapons_for_selection(
-        game_state, unit, current_weapon_is_pistol=current_weapon_is_pistol, exclude_used=False, has_advanced=has_advanced
+    weapon_available_pool = weapon_availability_check(
+        game_state, unit, weapon_rule, advance_status, adjacent_status
     )
+    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+    # Filter by category (PISTOL or non-PISTOL) if needed
+    if current_weapon_is_pistol is not None:
+        if current_weapon_is_pistol:
+            usable_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w["weapon"])]
+        else:
+            usable_weapons = [w for w in usable_weapons if not _weapon_has_pistol_rule(w["weapon"])]
     
-    print(f"[DIAG] Available after filter: {[(w['index'], w['weapon'].get('name', 'no_name'), w['can_use']) for w in available_weapons]}")
+    available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
     
     response = {
         "while_loop_active": True,
@@ -1425,7 +1695,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     if current_pool:
         # Remove units with no shots remaining
-        # CRITICAL: Don't remove unit if action is select_weapon (can reactivate with new weapon)
+        # Don't remove unit if action is select_weapon (can reactivate with new weapon)
         updated_pool = []
         for pool_unit_id in current_pool:  # Changed: Use separate variable name
             unit_check = _get_unit_by_id(game_state, pool_unit_id)
@@ -1457,7 +1727,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if not unit:
             return False, {"error": "unit_not_found", "unitId": unit_id}
     
-    # AI_TURN.md COMPLIANCE: Direct field access
+    # Direct field access
     if "action" not in action:
         raise KeyError(f"Action missing required 'action' field: {action}")
     action_type = action["action"]
@@ -1478,6 +1748,15 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if action_type == "activate_unit":
         result = shooting_unit_activation_start(game_state, unit_id)
         if result.get("success"):
+            # AI_TURN.md: Check if empty_target_pool with can_advance
+            if result.get("empty_target_pool") and result.get("can_advance"):
+                # STEP 6: EMPTY_TARGET_HANDLING - advance available
+                # Return to allow advance action selection
+                return True, result
+            elif result.get("empty_target_pool"):
+                # STEP 6: Already handled in shooting_unit_activation_start (WAIT)
+                return True, result
+            # Normal flow: valid targets available
             execution_result = _shooting_unit_execution_loop(game_state, unit_id, config)
             return execution_result
         return True, result
@@ -1489,7 +1768,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         else:
             target_id = action["targetId"]
         
-        # CRITICAL: Validate unit eligibility
+        # Validate unit eligibility
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         if unit_id not in game_state["shoot_activation_pool"]:
@@ -1557,7 +1836,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         weapon = rng_weapons[weapon_index]
         unit["SHOOT_LEFT"] = weapon["NB"]
         
-        # CRITICAL: Reactivate unit in pool after weapon selection
+        # Reactivate unit in pool after weapon selection
         # This allows subsequent shooting actions (left_click, shoot) to proceed
         if unit_id not in game_state["shoot_activation_pool"]:
             game_state["shoot_activation_pool"].append(unit_id)
@@ -1596,10 +1875,24 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return shooting_click_handler(game_state, unit_id, action, config)
     
     elif action_type == "right_click":
-        return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+        # AI_TURN.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
+        has_shot = _unit_has_shot_with_any_weapon(unit)
+        if has_shot:
+            # YES → end_activation(ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+            return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+        else:
+            # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
+            unit_id_str = str(unit["id"])
+            has_advanced = unit_id_str in game_state.get("units_advanced", set())
+            if has_advanced:
+                # NO → Unit has not shot yet (only advanced) → end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+                return _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
+            else:
+                # NO → end_activation(WAIT, 1, 0, SHOOTING, 1, 1)
+                return _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
     
     elif action_type == "skip":
-        return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
+        return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING", 1)
     
     elif action_type == "invalid":
         # Handle invalid actions with training penalty - treat as miss but continue shooting sequence
@@ -1632,7 +1925,7 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     """
     AI_SHOOT.md: Route click actions to appropriate handlers
     """
-    # AI_TURN.md COMPLIANCE: Direct field access
+    # Direct field access
     if "targetId" not in action:
         target_id = None
     else:
@@ -1659,8 +1952,29 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         return _shooting_unit_execution_loop(game_state, unit_id, config)
     
     else:
-        # Left click elsewhere - continue selection
-        return True, {"action": "continue_selection", "context": "elsewhere_clicked"}
+        # STEP 5A/5B: Postpone/Click elsewhere (Human only)
+        # Check if unit has shot with ANY weapon?
+        unit = _get_unit_by_id(game_state, unit_id)
+        if not unit:
+            return False, {"error": "unit_not_found", "unitId": unit_id}
+        has_shot = _unit_has_shot_with_any_weapon(unit)
+        if not has_shot:
+            # NO → POSTPONE_ACTIVATION() → UNIT_ACTIVABLE_CHECK
+            # Unit is NOT removed from shoot_activation_pool (can be re-activated later)
+            # Remove weapon selection icon from UI (handled by frontend)
+            # Clear active unit
+            if "active_shooting_unit" in game_state:
+                del game_state["active_shooting_unit"]
+            # Return to UNIT_ACTIVABLE_CHECK step (by returning activation_ended=False)
+            return True, {
+                "action": "postpone",
+                "unitId": unit_id,
+                "activation_ended": False,
+                "reset_mode": "select"
+            }
+        else:
+            # YES → Do not end activation automatically (allow user to click active unit to confirm)
+            return True, {"action": "continue_selection", "context": "elsewhere_clicked"}
 
 
 def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -1683,7 +1997,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             if not selected_weapon or not _weapon_has_assault_rule(selected_weapon):
                 return False, {"error": "cannot_shoot_after_advance_without_assault", "unitId": unit_id_str}
                 
-        # CRITICAL: Validate unit has shots remaining
+        # Validate unit has shots remaining
         if "SHOOT_LEFT" not in unit:
             raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
         
@@ -1723,12 +2037,28 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
             
             if auto_select:
-                # Use centralized function to get available weapons
-                has_advanced = unit_id in game_state.get("units_advanced", set())
+                # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
+                if "weapon_rule" not in game_state:
+                    raise KeyError("game_state missing required 'weapon_rule' field")
+                weapon_rule = game_state["weapon_rule"]
+                unit_id_str = str(unit["id"])
+                has_advanced = unit_id_str in game_state.get("units_advanced", set())
+                is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                advance_status = 1 if has_advanced else 0
+                adjacent_status = 1 if is_adjacent else 0
+                
                 try:
-                    available_weapons = _get_available_weapons_for_selection(
-                        game_state, unit, current_weapon_is_pistol, exclude_used=True, has_advanced=has_advanced
+                    weapon_available_pool = weapon_availability_check(
+                        game_state, unit, weapon_rule, advance_status, adjacent_status
                     )
+                    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+                    # Filter by same category (PISTOL or non-PISTOL) if needed
+                    if current_weapon_is_pistol:
+                        usable_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w["weapon"])]
+                    else:
+                        usable_weapons = [w for w in usable_weapons if not _weapon_has_pistol_rule(w["weapon"])]
+                    
+                    available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
                 except Exception as e:
                     # If weapon selection fails, return error
                     if current_weapon_is_pistol:
@@ -1784,12 +2114,28 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         weapon_rules = selected_weapon.get("WEAPON_RULES", [])
                         current_weapon_is_pistol = "PISTOL" in weapon_rules
                         
-                        # Use centralized function to get available weapons
-                        has_advanced = unit_id in game_state.get("units_advanced", set())
+                        # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
+                        if "weapon_rule" not in game_state:
+                            raise KeyError("game_state missing required 'weapon_rule' field")
+                        weapon_rule = game_state["weapon_rule"]
+                        unit_id_str = str(unit["id"])
+                        has_advanced = unit_id_str in game_state.get("units_advanced", set())
+                        is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                        advance_status = 1 if has_advanced else 0
+                        adjacent_status = 1 if is_adjacent else 0
+                        
                         try:
-                            available_weapons = _get_available_weapons_for_selection(
-                                game_state, unit, current_weapon_is_pistol, exclude_used=True, has_advanced=has_advanced
+                            weapon_available_pool = weapon_availability_check(
+                                game_state, unit, weapon_rule, advance_status, adjacent_status
                             )
+                            usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+                            # Filter by same category (PISTOL or non-PISTOL) if needed
+                            if current_weapon_is_pistol:
+                                usable_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w["weapon"])]
+                            else:
+                                usable_weapons = [w for w in usable_weapons if not _weapon_has_pistol_rule(w["weapon"])]
+                            
+                            available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
                         except Exception as e:
                             # If weapon selection fails, end activation
                             result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
@@ -1842,12 +2188,28 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
                 
                 if auto_select:
-                    # Use centralized function to get available weapons
-                    has_advanced = unit_id in game_state.get("units_advanced", set())
+                    # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
+                    if "weapon_rule" not in game_state:
+                        raise KeyError("game_state missing required 'weapon_rule' field")
+                    weapon_rule = game_state["weapon_rule"]
+                    unit_id_str = str(unit["id"])
+                    has_advanced = unit_id_str in game_state.get("units_advanced", set())
+                    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                    advance_status = 1 if has_advanced else 0
+                    adjacent_status = 1 if is_adjacent else 0
+                    
                     try:
-                        available_weapons = _get_available_weapons_for_selection(
-                            game_state, unit, current_weapon_is_pistol, exclude_used=True, has_advanced=has_advanced
+                        weapon_available_pool = weapon_availability_check(
+                            game_state, unit, weapon_rule, advance_status, adjacent_status
                         )
+                        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+                        # Filter by same category (PISTOL or non-PISTOL) if needed
+                        if current_weapon_is_pistol:
+                            usable_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w["weapon"])]
+                        else:
+                            usable_weapons = [w for w in usable_weapons if not _weapon_has_pistol_rule(w["weapon"])]
+                        
+                        available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
                     except Exception as e:
                         # If weapon selection fails, return error
                         if current_weapon_is_pistol:
@@ -1921,25 +2283,89 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         # Update SHOOT_LEFT and continue loop per AI_TURN.md
         unit["SHOOT_LEFT"] -= 1
         
-        # If SHOOT_LEFT reached 0, mark weapon as used
+        # AI_TURN.md ligne 523-536: SHOOT_LEFT == 0 handling
         if unit["SHOOT_LEFT"] == 0:
+            # Mark selected_weapon as used (set weapon.shot = 1)
             current_weapon_index = unit.get("selectedRngWeaponIndex", 0)
-            used_indices = unit.get("_used_weapon_indices", [])
-            if current_weapon_index not in used_indices:
-                used_indices.append(current_weapon_index)
-                unit["_used_weapon_indices"] = used_indices
-
-        # Continue execution loop to check for more shots or end activation
-        success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
-
-        # CRITICAL: Merge attack result into loop result for metrics tracking
-        # The callback needs phase="shoot" and target_died to track shoot kills
-        loop_result["phase"] = "shoot"
-        loop_result["target_died"] = attack_result.get("target_died", False)
-        loop_result["damage"] = attack_result.get("damage", 0)
-        loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
-
-        return success, loop_result
+            rng_weapons = unit.get("RNG_WEAPONS", [])
+            if current_weapon_index < len(rng_weapons):
+                weapon = rng_weapons[current_weapon_index]
+                weapon["shot"] = 1
+            
+            # weapon_available_pool NOT empty? Check using weapon_availability_check
+            if "weapon_rule" not in game_state:
+                raise KeyError("game_state missing required 'weapon_rule' field")
+            weapon_rule = game_state["weapon_rule"]
+            unit_id_str = str(unit["id"])
+            has_advanced = unit_id_str in game_state.get("units_advanced", set())
+            is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+            advance_status = 1 if has_advanced else 0
+            adjacent_status = 1 if is_adjacent else 0
+            
+            weapon_available_pool = weapon_availability_check(
+                game_state, unit, weapon_rule, advance_status, adjacent_status
+            )
+            usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+            
+            if usable_weapons:
+                # YES → Select next available weapon (AI/Human chooses)
+                # For now, auto-select first usable weapon
+                next_weapon = usable_weapons[0]
+                unit["selectedRngWeaponIndex"] = next_weapon["index"]
+                unit["SHOOT_LEFT"] = next_weapon["weapon"].get("NB", 0)
+                
+                # valid_target_pool_build(weapon_rule, arg2, arg3)
+                valid_target_pool = valid_target_pool_build(
+                    game_state, unit, weapon_rule, advance_status, adjacent_status
+                )
+                unit["valid_target_pool"] = valid_target_pool
+                
+                # Continue to shooting action selection step (ADVANCED if arg2=1, else normal)
+                # This is handled by _shooting_unit_execution_loop
+                success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
+                loop_result["phase"] = "shoot"
+                loop_result["target_died"] = attack_result.get("target_died", False)
+                loop_result["damage"] = attack_result.get("damage", 0)
+                loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
+                return success, loop_result
+            else:
+                # NO → All weapons exhausted → End activation
+                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                return True, result
+        else:
+            # NO → Continue normally (SHOOT_LEFT > 0)
+            # Handle target outcome (died/survived)
+            target_died = attack_result.get("target_died", False)
+            
+            if target_died:
+                # Remove from valid_target_pool
+                valid_target_pool = unit.get("valid_target_pool", [])
+                if selected_target_id in valid_target_pool:
+                    valid_target_pool.remove(selected_target_id)
+                    unit["valid_target_pool"] = valid_target_pool
+                
+                # valid_target_pool empty? → YES → End activation (Slaughter handling)
+                if not unit.get("valid_target_pool"):
+                    result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                    return True, result
+                # NO → Continue to shooting action selection step
+            # else: Target survives
+            
+            # Final safety check: valid_target_pool empty AND SHOOT_LEFT > 0?
+            valid_targets = unit.get("valid_target_pool", [])
+            if not valid_targets and unit["SHOOT_LEFT"] > 0:
+                # YES → End activation (Slaughter handling)
+                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                return True, result
+            # NO → Continue to shooting action selection step
+            
+            # Continue to shooting action selection step
+            success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
+            loop_result["phase"] = "shoot"
+            loop_result["target_died"] = attack_result.get("target_died", False)
+            loop_result["damage"] = attack_result.get("damage", 0)
+            loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
+            return success, loop_result
     
     except Exception as e:
         import traceback
@@ -1948,7 +2374,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
 
 def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_id: str) -> Dict[str, Any]:
     """
-    AI_TURN.md EXACT: attack_sequence(RNG) implementation with proper logging
+    attack_sequence(RNG) implementation with proper logging
     """
     shooter = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
@@ -1961,6 +2387,16 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
 
     # Execute single attack_sequence(RNG) per AI_TURN.md
     attack_result = _attack_sequence_rng(shooter, target)
+    
+    # AI_TURN.md ligne 521: Concatenate Return to TOTAL_ACTION log
+    if "TOTAL_ATTACK_LOG" not in shooter:
+        shooter["TOTAL_ATTACK_LOG"] = ""
+    attack_log_message = attack_result.get("attack_log", "")
+    if attack_log_message:
+        if shooter["TOTAL_ATTACK_LOG"]:
+            shooter["TOTAL_ATTACK_LOG"] += " / " + attack_log_message
+        else:
+            shooter["TOTAL_ATTACK_LOG"] = attack_log_message
 
     # Apply damage immediately per AI_TURN.md
     if attack_result["damage"] > 0:
@@ -1982,7 +2418,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Store pre-damage HP in attack_result for reward calculation
     attack_result["target_hp_before_damage"] = target_hp_before_damage
     
-    # CRITICAL: Store detailed log for frontend display with location data
+    # Store detailed log for frontend display with location data
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
     
@@ -2228,7 +2664,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
 
 def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
     """
-    AI_TURN.md EXACT: attack_sequence(RNG) with proper <OFF> replacement
+    attack_sequence(RNG) with proper <OFF> replacement
     MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon
     """
     import random
@@ -2344,7 +2780,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
 
 def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
     """Calculate save target with AP modifier and invulnerable save"""
-    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
+    # Direct UPPERCASE field access
     if "ARMOR_SAVE" not in target:
         raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
     if "INVUL_SAVE" not in target:
@@ -2386,7 +2822,7 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
     # End current unit activation
     current_unit = _get_unit_by_id(game_state, current_unit_id)
     if current_unit:
-        _shooting_activation_end(game_state, current_unit, "WAIT", 1, "PASS", "SHOOTING")
+        _shooting_activation_end(game_state, current_unit, "WAIT", 1, "PASS", "SHOOTING", 1)
     
     # Start new unit activation
     new_unit = _get_unit_by_id(game_state, new_unit_id)
@@ -2399,6 +2835,17 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
 
 
 # === HELPER FUNCTIONS (Minimal Implementation) ===
+
+def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
+    """
+    AI_TURN.md: Check if unit has shot with ANY weapon (any weapon.shot = 1)
+    Returns True if at least one weapon has shot flag set to 1
+    """
+    rng_weapons = unit.get("RNG_WEAPONS", [])
+    for weapon in rng_weapons:
+        if weapon.get("shot", 0) == 1:
+            return True
+    return False
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """Cube coordinate adjacency check
@@ -2433,7 +2880,7 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
     """Get unit by ID from game state.
 
-    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
+    Compare both sides as strings to handle int/string ID mismatches.
     """
     for unit in game_state["units"]:
         if str(unit["id"]) == str(unit_id):
@@ -2513,7 +2960,7 @@ def _enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, A
     if not unit:
         return {}
     
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    # Direct field access with validation
     if "agent_mapping" not in game_state:
         agent_mapping = {}
     else:
@@ -2531,7 +2978,7 @@ def _enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, A
     
     enriched = unit.copy()
     
-    # AI_TURN.md COMPLIANCE: All required fields must be present
+    # All required fields must be present
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_DMG/RNG_DMG
     from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
     
@@ -2649,9 +3096,11 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # Mark as advanced ONLY if actually moved
         actually_moved = (orig_col != dest_col) or (orig_row != dest_row)
         if actually_moved:
-            if "units_advanced" not in game_state:
-                game_state["units_advanced"] = set()
-            game_state["units_advanced"].add(unit_id)
+            # AI_TURN.md ligne 666: Log: end_activation(ACTION, 1, ADVANCE, NOT_REMOVED, 1, 0)
+            # This marks units_advanced (ligne 665 describes what this does)
+            # arg5=0 means NOT_REMOVED (do not remove from pool, do not end activation)
+            # We track the advance but continue to shooting, so we don't use the return value
+            _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 0)
         
         # Clean up advance state
         if "advance_range" in unit:
@@ -2676,67 +3125,69 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             "timestamp": "server_time"
         })
         
-        # Check if unit can shoot after advance (ASSAULT weapon rule)
-        from engine.utils.weapon_helpers import get_selected_ranged_weapon
-        selected_weapon = get_selected_ranged_weapon(unit)
-        
-        # Get auto-select setting from config
-        auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
-        
-        if auto_select:
-            # AUTO MODE: Select best ASSAULT weapon automatically
-            can_shoot_after_advance = _weapon_has_assault_rule(selected_weapon)
-            
-            if can_shoot_after_advance:
-                return _shooting_unit_execution_loop(game_state, unit_id, config)
-            else:
-                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "PASS", "SHOOTING")
-                result.update({
-                    "action": "advance",
-                    "unitId": unit_id,
-                    "fromCol": orig_col,
-                    "fromRow": orig_row,
-                    "toCol": dest_col,
-                    "toRow": dest_row,
-                    "advance_range": advance_range,
-                    "actually_moved": actually_moved
-                })
-                return result
-        else:
-            # MANUAL MODE: Return weapon selection list
-            available_weapons = _get_available_weapons_after_advance(unit, has_advanced=True)
-            usable_weapons = [w for w in available_weapons if w["can_use"]]
-            
-            if not usable_weapons:
-                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "PASS", "SHOOTING")
-                result.update({
-                    "action": "advance",
-                    "unitId": unit_id,
-                    "fromCol": orig_col,
-                    "fromRow": orig_row,
-                    "toCol": dest_col,
-                    "toRow": dest_row,
-                    "advance_range": advance_range,
-                    "actually_moved": actually_moved
-                })
-                return result
-            
-            # Set active_shooting_unit so frontend can show weapon selection icon
-            game_state["active_shooting_unit"] = unit_id
-            
+        # AI_TURN.md STEP 4: ADVANCE_ACTION post-advance logic (lines 666-679)
+        # Continue only if unit actually moved
+        if not actually_moved:
+            # Unit did not advance → Go back to STEP 3: ACTION_SELECTION
             return True, {
-                "waiting_for_weapon_selection": True,
+                "waiting_for_player": True,
+                "action": "advance_cancelled",
+                "unitId": unit_id
+            }
+        
+        # Clear valid_target_pool
+        if "valid_target_pool" in unit:
+            del unit["valid_target_pool"]
+        
+        # Update capabilities
+        # CAN_ADVANCE = false (unit has advanced, cannot advance again)
+        unit["_can_advance"] = False
+        
+        # weapon_availability_check(weapon_rule, 1, 0) → Build weapon_available_pool (only Assault if weapon_rule=1)
+        weapon_rule = game_state.get("weapon_rule", 0)
+        weapon_available_pool = weapon_availability_check(
+            game_state, unit, weapon_rule, advance_status=1, adjacent_status=0
+        )
+        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+        # CAN_SHOOT = (weapon_available_pool NOT empty)
+        can_shoot = len(usable_weapons) > 0
+        unit["_can_shoot"] = can_shoot
+        
+        # Pre-select first available weapon
+        if usable_weapons:
+            first_weapon = usable_weapons[0]
+            unit["selectedRngWeaponIndex"] = first_weapon["index"]
+            selected_weapon = first_weapon["weapon"]
+            unit["SHOOT_LEFT"] = selected_weapon.get("NB", 0)
+        else:
+            unit["SHOOT_LEFT"] = 0
+        
+        # valid_target_pool_build(weapon_rule, arg2=1, arg3=0) → Note: arg3=0 always after advance
+        valid_target_pool = valid_target_pool_build(
+            game_state, unit, weapon_rule, advance_status=1, adjacent_status=0
+        )
+        unit["valid_target_pool"] = valid_target_pool
+        
+        # valid_target_pool NOT empty AND CAN_SHOOT = true?
+        if valid_target_pool and can_shoot:
+            # YES → SHOOTING ACTIONS AVAILABLE (post-advance) → Go to STEP 5: ADVANCED_SHOOTING_ACTION_SELECTION
+            # Continue to shooting action selection (post-advance state)
+            return _shooting_unit_execution_loop(game_state, unit_id, config)
+        else:
+            # NO → Unit advanced but no valid targets → end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+            # arg3="ADVANCE", arg4="SHOOTING", arg5=1 (remove from pool)
+            result = _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
+            result.update({
                 "action": "advance",
                 "unitId": unit_id,
-                "available_weapons": available_weapons,
-                "has_advanced": True,
                 "fromCol": orig_col,
                 "fromRow": orig_row,
                 "toCol": dest_col,
                 "toRow": dest_row,
                 "advance_range": advance_range,
                 "actually_moved": actually_moved
-            }
+            })
+            return result
     else:
         # No destination - return valid destinations for player/AI to choose
         # For AI, auto-select best destination

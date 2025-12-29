@@ -251,7 +251,7 @@ const UnitRow = memo<UnitRowProps>(({
                         )}
                       </td>
                       <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
-                        {weapon.RNG ? `${weapon.RNG}\"` : '/'}
+                        {weapon.RNG ? `${weapon.RNG}"` : '/'}
                       </td>
                       <td className="unit-status-cell" style={{ textAlign: 'center', padding: '4px 8px', fontSize: '12px' }}>
                         {weapon.NB || 0}

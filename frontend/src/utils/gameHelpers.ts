@@ -1,5 +1,6 @@
 // frontend/src/utils/gameHelpers.ts
 import type { Unit, Position, UnitId } from '../types';
+import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from './weaponHelpers';
 
 // Wall interface for collision detection
 interface Wall {
@@ -326,7 +327,7 @@ export function getAdjacentPositions(position: Position, boardCols: number, boar
   ];
   
   for (const [dcol, drow] of directions) {
-    let newCol = col + dcol;
+    const newCol = col + dcol;
     let newRow = row + drow;
     
     // Adjust for odd columns in hex grid
@@ -425,7 +426,11 @@ export function isGameOver(units: Unit[]): { gameOver: boolean; winner?: number 
 
 // Health utility functions
 export function calculateDamage(attacker: Unit, _target: Unit, damageType: 'ranged' | 'melee'): number {
-  const baseDamage = damageType === 'ranged' ? attacker.RNG_DMG : attacker.CC_DMG;
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get damage from selected weapon
+  const selectedWeapon = damageType === 'ranged' 
+    ? getSelectedRangedWeapon(attacker)
+    : getSelectedMeleeWeapon(attacker);
+  const baseDamage = selectedWeapon?.DMG || 0;
   
   // You can add more complex damage calculations here
   // e.g., armor saves, weapon effectiveness, etc.

@@ -20,23 +20,65 @@ interface ReplayAction {
   save_roll?: number;
   save_target?: number;
   reward?: number;
+  // Fight action fields
+  attacker_id?: number;
+  attacker_pos?: { col: number; row: number };
+  hit_target?: number;
+  hit_result?: string;
+  wound_target?: number;
+  wound_result?: string;
+  save_result?: string;
+  // Weapon info
+  weapon_name?: string;
+  // Charge action fields
+  charge_roll?: number;
+  charge_success?: boolean;
+  charge_failed_reason?: string;
 }
 
+interface ReplayGameState {
+  [key: string]: unknown;
+  episode_steps?: number;
+  board_cols?: number;
+  board_rows?: number;
+  walls?: Array<{ col: number; row: number }>;
+  objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
+}
+
+// Temporary interface for parsing (has additional properties)
+interface ReplayEpisodeDuringParsing {
+  episode_num: number;
+  scenario: string;
+  bot_name: string;
+  actions: ReplayAction[];
+  units: Record<number, { id: number; player: number; col: number; row: number; HP_CUR: number; HP_MAX: number; type?: string; [key: string]: unknown }>;
+  initial_positions: Record<number, { col: number; row: number }>;
+  walls: Array<{ col: number; row: number }>;
+  objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
+  final_result: string | null;
+}
+
+// Final interface for parsed data
 interface ReplayEpisode {
   episode_num: number;
   scenario: string;
   bot_name: string;
-  initial_state: any;
+  initial_state: ReplayGameState;
   actions: ReplayAction[];
-  states: any[];
+  states: ReplayGameState[];
   total_actions: number;
   final_result: string | null;
 }
 
-export function parse_log_file_from_text(text: string) {
+interface ReplayData {
+  total_episodes: number;
+  episodes: ReplayEpisode[];
+}
+
+export function parse_log_file_from_text(text: string): ReplayData {
   const lines = text.split('\n');
-  const episodes: any[] = [];
-  let currentEpisode: any = null;
+  const episodes: ReplayEpisodeDuringParsing[] = [];
+  let currentEpisode: ReplayEpisodeDuringParsing | null = null;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -241,7 +283,7 @@ export function parse_log_file_from_text(text: string) {
           const targetId = parseInt(targetMatch[1]);
           const damage = damageMatch ? parseInt(damageMatch[1]) : 0;
 
-          const action: any = {
+          const action: ReplayAction = {
             type: 'shoot',
             timestamp,
             turn,
@@ -425,7 +467,7 @@ export function parse_log_file_from_text(text: string) {
       const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)\((FAIL|SAVED?)\)/);
       const dmgMatch = trimmed.match(/Dmg:(\d+)HP/);
 
-      const action: any = {
+      const action: ReplayAction = {
         type: 'fight',
         timestamp,
         turn,
@@ -514,7 +556,7 @@ export function parse_log_file_from_text(text: string) {
       });
     }
     // Removed verbose episode units logging
-    // console.log(`Episode ${episode.episode_num}: ${initialUnits.length} units`, initialUnits.map((u: any) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` })));
+    // console.log(`Episode ${episode.episode_num}: ${initialUnits.length} units`, initialUnits.map((u) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` })));
 
     const initialState = {
       units: initialUnits,
@@ -526,8 +568,18 @@ export function parse_log_file_from_text(text: string) {
     };
 
     // Build states
-    const states: any[] = [];
-    const currentUnits: any = {};
+    interface UnitInParser {
+      id: number;
+      player: number;
+      col: number;
+      row: number;
+      HP_CUR: number;
+      HP_MAX: number;
+      isJustKilled?: boolean;
+      [key: string]: unknown;
+    }
+    const states: ReplayGameState[] = [];
+    const currentUnits: Record<number, UnitInParser> = {};
     // Initialize currentUnits with initial positions (episode.units has been mutated)
     for (const unit of initialUnits) {
       currentUnits[unit.id] = { ...unit };
@@ -627,8 +679,8 @@ export function parse_log_file_from_text(text: string) {
       const stateUnits = Object.values(currentUnits).map(u => {
         const unitCopy = { ...u };
         // Preserve isJustKilled flag in the copy
-        if ((u as any).isJustKilled) {
-          (unitCopy as any).isJustKilled = true;
+        if (u.isJustKilled) {
+          unitCopy.isJustKilled = true;
         }
         return unitCopy;
       });

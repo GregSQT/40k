@@ -37,7 +37,14 @@ constructor(config: Partial<AIServiceConfig> = {}) {
 
   async fetchAiAction(gameState: AIGameState, currentUnitId?: number): Promise<AIAction> {
     // Create a unique key for this request to prevent duplicates
-    const requestKey = `${gameState.units.map((u: any) => `${u.id}-${u.col}-${u.row}-${u.CUR_HP}`).join('|')}-${currentUnitId}-${Date.now()}`;
+    interface UnitForRequestKey {
+      id: number;
+      col: number;
+      row: number;
+      CUR_HP?: number;
+      HP_CUR?: number;
+    }
+    const requestKey = `${gameState.units.map((u: UnitForRequestKey) => `${u.id}-${u.col}-${u.row}-${(u.CUR_HP ?? u.HP_CUR) ?? 'unknown'}`).join('|')}-${currentUnitId}-${Date.now()}`;
     
     // If same request is already pending, return existing promise
     if (this.pendingRequests.has(requestKey)) {
@@ -142,16 +149,16 @@ constructor(config: Partial<AIServiceConfig> = {}) {
     }
   }
 
-  private isValidAIAction(obj: any): obj is AIAction {
+  private isValidAIAction(obj: unknown): obj is AIAction {
+    if (!obj || typeof obj !== 'object') return false;
+    const candidate = obj as Record<string, unknown>;
     return (
-      obj &&
-      typeof obj === 'object' &&
-      typeof obj.action === 'string' &&
-      ['move', 'moveAwayToRngRng', 'shoot', 'charge', 'attack', 'skip'].includes(obj.action) &&
-      typeof obj.unitId === 'number' &&
-      (obj.destCol === undefined || typeof obj.destCol === 'number') &&
-      (obj.destRow === undefined || typeof obj.destRow === 'number') &&
-      (obj.targetId === undefined || typeof obj.targetId === 'number')
+      typeof candidate.action === 'string' &&
+      ['move', 'moveAwayToRngRng', 'shoot', 'charge', 'attack', 'skip'].includes(candidate.action) &&
+      typeof candidate.unitId === 'number' &&
+      (candidate.destCol === undefined || typeof candidate.destCol === 'number') &&
+      (candidate.destRow === undefined || typeof candidate.destRow === 'number') &&
+      (candidate.targetId === undefined || typeof candidate.targetId === 'number')
     );
   }
 

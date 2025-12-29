@@ -1,14 +1,19 @@
 // frontend/src/utils/probabilityCalculator.ts
 
 import type { Unit } from '../types/game';
+import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from './weaponHelpers';
 
 export function calculateHitProbability(shooter: Unit): number {
-  const hitTarget = shooter.RNG_ATK || 4;
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get ATK from selected weapon
+  const selectedWeapon = getSelectedRangedWeapon(shooter);
+  const hitTarget = selectedWeapon?.ATK || 4;
   return Math.max(0, (7 - hitTarget) / 6 * 100);
 }
 
 export function calculateWoundProbability(shooter: Unit, target: Unit): number {
-  const strength = shooter.RNG_STR || 4;
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get STR from selected weapon
+  const selectedWeapon = getSelectedRangedWeapon(shooter);
+  const strength = selectedWeapon?.STR || 4;
   const toughness = target.T || 4;
   
   let woundTarget: number;
@@ -24,7 +29,9 @@ export function calculateWoundProbability(shooter: Unit, target: Unit): number {
 export function calculateSaveProbability(shooter: Unit, target: Unit, inCover: boolean = false): number {
   let armorSave = target.ARMOR_SAVE || 5;
   const invulSave = target.INVUL_SAVE || 0;
-  const armorPenetration = shooter.RNG_AP || 0;
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get AP from selected weapon
+  const selectedWeapon = getSelectedRangedWeapon(shooter);
+  const armorPenetration = selectedWeapon?.AP || 0;
   
   // Apply cover bonus - +1 to armor save (better save)
   if (inCover) {
@@ -49,12 +56,16 @@ export function calculateOverallProbability(shooter: Unit, target: Unit, inCover
 
 // ✅ NEW: Combat-specific probability calculation functions
 export function calculateCombatHitProbability(attacker: Unit): number {
-  const hitTarget = attacker.CC_ATK || 4;
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get ATK from selected melee weapon
+  const selectedWeapon = getSelectedMeleeWeapon(attacker);
+  const hitTarget = selectedWeapon?.ATK || 4;
   return Math.max(0, (7 - hitTarget) / 6 * 100);
 }
 
 export function calculateCombatWoundProbability(attacker: Unit, target: Unit): number {
-  const strength = attacker.CC_STR || 4;
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get STR from selected melee weapon
+  const selectedWeapon = getSelectedMeleeWeapon(attacker);
+  const strength = selectedWeapon?.STR || 4;
   const toughness = target.T || 4;
   
   let woundTarget: number;
@@ -70,7 +81,9 @@ export function calculateCombatWoundProbability(attacker: Unit, target: Unit): n
 export function calculateCombatSaveProbability(attacker: Unit, target: Unit): number {
   const armorSave = target.ARMOR_SAVE || 5;
   const invulSave = target.INVUL_SAVE || 0;
-  const armorPenetration = attacker.CC_AP || 0;
+  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get AP from selected melee weapon
+  const selectedWeapon = getSelectedMeleeWeapon(attacker);
+  const armorPenetration = selectedWeapon?.AP || 0;
   
   const modifiedArmor = armorSave + armorPenetration;
   const saveTarget = (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor;

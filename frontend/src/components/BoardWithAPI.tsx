@@ -11,7 +11,7 @@ import { UnitStatusTable } from './UnitStatusTable';
 import { GameLog } from './GameLog';
 import { TurnPhaseTracker } from './TurnPhaseTracker';
 import { useGameLog } from '../hooks/useGameLog';
-import type { PlayerId } from '../types';
+import type { PlayerId, Unit, TargetPreview } from '../types';
 import { SettingsMenu } from './SettingsMenu';
 
 export const BoardWithAPI: React.FC = () => {
@@ -107,7 +107,7 @@ export const BoardWithAPI: React.FC = () => {
       if (apiProps.gameState.move_activation_pool) {
         hasEligibleAIUnits = apiProps.gameState.move_activation_pool.some(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState.units.find((u: any) => String(u.id) === String(unitId));
+          const unit = apiProps.gameState.units.find((u: Unit) => String(u.id) === String(unitId));
           return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         });
       }
@@ -122,7 +122,7 @@ export const BoardWithAPI: React.FC = () => {
       if (apiProps.gameState.charge_activation_pool) {
         hasEligibleAIUnits = apiProps.gameState.charge_activation_pool.some(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState.units.find((u: any) => String(u.id) === String(unitId));
+          const unit = apiProps.gameState.units.find((u: Unit) => String(u.id) === String(unitId));
           return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         });
       }
@@ -146,7 +146,7 @@ export const BoardWithAPI: React.FC = () => {
       
       hasEligibleAIUnits = fightPool.some(unitId => {
         // Normalize comparison: pools contain strings, unit.id might be number
-        const unit = apiProps.gameState.units.find((u: any) => String(u.id) === String(unitId));
+        const unit = apiProps.gameState.units.find((u: Unit) => String(u.id) === String(unitId));
         const isAI = unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         return isAI;
       });
@@ -250,7 +250,7 @@ export const BoardWithAPI: React.FC = () => {
       //   turnKeyMatches: lastProcessedTurn === turnKey
       // });
     }
-  }, [isPvE, apiProps.gameState?.currentPlayer, apiProps.gameState?.phase, apiProps.gameState?.fight_subphase, apiProps.gameState?.pve_mode, apiProps.gameState?.move_activation_pool, apiProps.gameState?.charge_activation_pool, apiProps.gameState?.non_active_alternating_activation_pool, apiProps.gameState?.active_alternating_activation_pool, apiProps.gameState?.charging_activation_pool, apiProps.unitsMoved, apiProps.unitsCharged, apiProps.unitsAttacked, apiProps.gameState?.units, apiProps.executeAITurn, lastProcessedTurn]);
+  }, [isPvE, apiProps, lastProcessedTurn]);
   
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
@@ -270,7 +270,7 @@ export const BoardWithAPI: React.FC = () => {
         setLastProcessedTurn('');
       }
     }
-  }, [apiProps.gameState?.phase, apiProps.gameState?.currentTurn, apiProps.gameState?.currentPlayer, apiProps.fightSubPhase, apiProps.gameState?.fight_subphase, lastProcessedTurn]);
+  }, [apiProps.gameState, apiProps.fightSubPhase, lastProcessedTurn]);
 
   // Calculate available height for GameLog dynamically
   useEffect(() => {
@@ -306,7 +306,6 @@ export const BoardWithAPI: React.FC = () => {
         setLogAvailableHeight(220);
         return;
       }
-      sampleLogEntry.getBoundingClientRect().height;
       setLogAvailableHeight(availableForLogEntries);
     }, 100); // Wait 100ms for DOM to render
   }, [player0Collapsed, player1Collapsed, apiProps.gameState?.units, apiProps.gameState?.phase]);
@@ -478,13 +477,13 @@ export const BoardWithAPI: React.FC = () => {
         targetPreview={apiProps.targetPreview ? {
           targetId: apiProps.targetPreview.targetId,
           shooterId: apiProps.targetPreview.shooterId,
-          currentBlinkStep: (apiProps.targetPreview as any).currentBlinkStep || 0,
-          totalBlinkSteps: (apiProps.targetPreview as any).totalBlinkSteps || 2,
-          blinkTimer: (apiProps.targetPreview as any).blinkTimer || null,
-          hitProbability: (apiProps.targetPreview as any).hitProbability || 0.5,
-          woundProbability: (apiProps.targetPreview as any).woundProbability || 0.5,
-          saveProbability: (apiProps.targetPreview as any).saveProbability || 0.5,
-          overallProbability: (apiProps.targetPreview as any).overallProbability || 0.25
+          currentBlinkStep: apiProps.targetPreview.currentBlinkStep ?? 0,
+          totalBlinkSteps: apiProps.targetPreview.totalBlinkSteps ?? 2,
+          blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
+          hitProbability: apiProps.targetPreview.hitProbability ?? 0.5,
+          woundProbability: apiProps.targetPreview.woundProbability ?? 0.5,
+          saveProbability: apiProps.targetPreview.saveProbability ?? 0.5,
+          overallProbability: apiProps.targetPreview.overallProbability ?? 0.25
         } : null}
         blinkingUnits={apiProps.blinkingUnits}
         isBlinkingActive={apiProps.isBlinkingActive}
@@ -500,7 +499,7 @@ export const BoardWithAPI: React.FC = () => {
         onSkipShoot={apiProps.onSkipShoot}
         onStartTargetPreview={apiProps.onStartTargetPreview}
         onCancelTargetPreview={() => {
-          const targetPreview = apiProps.targetPreview as any;
+          const targetPreview = apiProps.targetPreview as TargetPreview | null;
           if (targetPreview?.blinkTimer) {
             clearInterval(targetPreview.blinkTimer);
           }

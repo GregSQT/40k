@@ -1,10 +1,25 @@
 // frontend/src/data/UnitFactory.ts
 // AI_TURN.md compliant dynamic unit factory - zero hardcoding
 
-import type { Unit } from '../types/game';
+import type { Unit, Weapon } from '../types/game';
 
-// Dynamic unit registry - populated by directory scanning  
-let unitClassMap: Record<string, any> = {};
+// Dynamic unit registry - populated by directory scanning
+interface UnitClass {
+  HP_MAX: number;
+  MOVE: number;
+  ICON: string;
+  ICON_SCALE?: number;
+  T?: number;
+  ARMOR_SAVE?: number;
+  INVUL_SAVE?: number;
+  LD?: number;
+  OC?: number;
+  VALUE?: number;
+  RNG_WEAPONS?: Array<Record<string, unknown>>;
+  CC_WEAPONS?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+let unitClassMap: Record<string, UnitClass> = {};
 let availableUnitTypes: string[] = [];
 let initialized = false;
 
@@ -143,8 +158,8 @@ export function createUnit(params: {
     OC: UnitClass.OC,
     VALUE: UnitClass.VALUE,
     // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Multiple weapons system
-    RNG_WEAPONS: rngWeapons,
-    CC_WEAPONS: ccWeapons,
+    RNG_WEAPONS: rngWeapons as unknown as Weapon[],
+    CC_WEAPONS: ccWeapons as unknown as Weapon[],
     selectedRngWeaponIndex,
     selectedCcWeaponIndex,
   };

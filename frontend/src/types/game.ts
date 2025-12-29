@@ -192,6 +192,8 @@ export interface GameState {
   fightActivePlayer?: PlayerId;
   unitChargeRolls?: Record<UnitId, number>;
   pve_mode?: boolean; // Add PvE mode flag
+  active_shooting_unit?: string; // Active unit ID in shooting phase
+  active_fight_unit?: string; // Active unit ID in fight phase
 }
 
 export interface SemanticAction {
@@ -204,7 +206,7 @@ export interface SemanticAction {
 
 export interface ActionResult {
   success: boolean;
-  result: any;
+  result: unknown;
   game_state: GameState;
   message?: string;
   error?: string;

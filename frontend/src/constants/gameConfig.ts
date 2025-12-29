@@ -174,12 +174,17 @@ export const isValidPlayerId = (id: number): id is PlayerId => {
 };
 
 // Dynamic configuration validator
-export const validateDynamicConfig = (boardConfig: any, _gameConfig: any) => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const validateDynamicConfig = (boardConfig: Record<string, unknown> | null | undefined, _gameConfig: Record<string, unknown> | null | undefined) => {
   const errors: string[] = [];
 
-  if (!boardConfig?.cols || boardConfig.cols <= 0) errors.push('Board columns must be positive');
-  if (!boardConfig?.rows || boardConfig.rows <= 0) errors.push('Board rows must be positive');
-  if (!boardConfig?.hex_radius || boardConfig.hex_radius <= 0) errors.push('Hex radius must be positive');
+  const cols = boardConfig?.cols as number | undefined;
+  const rows = boardConfig?.rows as number | undefined;
+  const hexRadius = boardConfig?.hex_radius as number | undefined;
+  
+  if (!cols || cols <= 0) errors.push('Board columns must be positive');
+  if (!rows || rows <= 0) errors.push('Board rows must be positive');
+  if (!hexRadius || hexRadius <= 0) errors.push('Hex radius must be positive');
   if (TIMING.AI_ACTION_DELAY < 0) errors.push('AI action delay cannot be negative');
   if (AI_CONFIG.DEFAULT_RETRIES < 0) errors.push('AI retries cannot be negative');
 

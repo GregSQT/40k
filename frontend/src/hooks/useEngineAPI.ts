@@ -1,6 +1,6 @@
 // frontend/src/hooks/useEngineAPI.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Unit, PlayerId } from '../types';
+import type { Unit, PlayerId, GameMode } from '../types';
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 import { getMeleeRange, getSelectedRangedWeapon } from '../utils/weaponHelpers';
 
@@ -51,7 +51,7 @@ interface APIGameState {
     }>;
     available_weapons?: Array<{
       index: number;
-      weapon: any;
+      weapon: Record<string, unknown>;
       can_use: boolean;
       reason?: string;
     }>;
@@ -198,13 +198,21 @@ export const useEngineAPI = () => {
   // Listen for weapon selection events to update gameState
   useEffect(() => {
     const weaponSelectedHandler = (e: Event) => {
-      const { gameState: newGameState } = (e as CustomEvent<{ gameState: any }>).detail;
+      interface WeaponSelectedEventDetail {
+        gameState: APIGameState;
+      }
+      interface UnitSummary {
+        id: string | number;
+        selectedRngWeaponIndex?: number;
+        RNG_WEAPONS?: Array<{ display_name?: string }>;
+      }
+      const { gameState: newGameState } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
       if (newGameState) {
         console.log('🔫 Weapon selected - updating gameState:', {
-          units: newGameState.units?.map((u: any) => ({
+          units: newGameState.units?.map((u: UnitSummary) => ({
             id: u.id,
             selectedRngWeaponIndex: u.selectedRngWeaponIndex,
-            RNG_WEAPONS: u.RNG_WEAPONS?.map((w: any) => w.display_name)
+            RNG_WEAPONS: u.RNG_WEAPONS?.map((w: { display_name?: string }) => w.display_name)
           }))
         });
         setGameState(newGameState);
@@ -218,7 +226,7 @@ export const useEngineAPI = () => {
   }, []);
 
   // Execute action via API
-  const executeAction = useCallback(async (action: any) => {
+  const executeAction = useCallback(async (action: Record<string, unknown>) => {
     
     if (!gameState) {
       return;
@@ -226,9 +234,9 @@ export const useEngineAPI = () => {
     
     // Track last action for auto-advance detection
     lastActionRef.current = {
-      action: action.action,
+      action: action.action as string,
       phase: gameState.phase,
-      unitId: action.unitId
+      unitId: typeof action.unitId === 'string' || typeof action.unitId === 'number' ? String(action.unitId) : undefined
     };
     
     try {
@@ -268,7 +276,12 @@ export const useEngineAPI = () => {
 
       // Process detailed backend action logs FIRST
       if (data.action_logs && data.action_logs.length > 0) {
-        data.action_logs.forEach((logEntry: any) => {
+        interface ActionLogEntry {
+          message?: string;
+          shootDetails?: Array<Record<string, unknown>>;
+          [key: string]: unknown;
+        }
+        data.action_logs.forEach((logEntry: ActionLogEntry) => {
           // console.log(`🎯 DETAILED BACKEND LOG: ${logEntry.message}`);
 
           // Send detailed log to GameLog component via custom event
@@ -538,7 +551,7 @@ export const useEngineAPI = () => {
           setAdvanceRoll(data.result.advance_roll);
           setAdvancingUnitId(parseInt(data.result.unitId));
           setSelectedUnitId(parseInt(data.result.unitId));
-          setMode("advancePreview" as any);  // TODO: Add advancePreview to Mode type
+          setMode("advancePreview" as GameMode);
         }
         // AI_TURN.md: Handle charge activation response with valid destinations
         // MUST be after setGameState to prevent being overwritten
@@ -609,7 +622,12 @@ export const useEngineAPI = () => {
           setMode("attackPreview");
 
           // Set attackPreview state for red hexes to appear
-          const unit = data.game_state.units.find((u: any) => parseInt(u.id) === unitId);
+          interface UnitWithId {
+            id: string | number;
+            col: number;
+            row: number;
+          }
+          const unit = data.game_state.units.find((u: UnitWithId) => parseInt(u.id.toString()) === unitId);
           if (unit) {
             setAttackPreview({ unitId, col: unit.col, row: unit.row });
           }
@@ -654,6 +672,21 @@ export const useEngineAPI = () => {
           setSelectedUnitId(parseInt(data.game_state.active_shooting_unit));
           setAttackPreview(null);  // Clear stale attackPreview to prevent ghost rendering
           // Mode will be set by blinking_units handler (attackPreview) or allow_advance handler (advancePreview)
+          
+          // Propagate available_weapons from API response to unit if present
+          // Update the unit in game_state before setGameState is called later
+          if (data.result?.available_weapons && Array.isArray(data.result.available_weapons) && data.game_state.units) {
+            const activeUnitId = data.game_state.active_shooting_unit;
+            const unitIndex = data.game_state.units.findIndex((u: { id: string | number }) => 
+              u.id.toString() === activeUnitId.toString()
+            );
+            if (unitIndex >= 0) {
+              data.game_state.units[unitIndex] = {
+                ...data.game_state.units[unitIndex],
+                available_weapons: data.result.available_weapons
+              };
+            }
+          }
         } else {
           setSelectedUnitId(null);
         }
@@ -661,7 +694,7 @@ export const useEngineAPI = () => {
     } catch (err) {
       console.error('Action error:', err);
     }
-  }, [gameState]);
+  }, [gameState, advanceWarningPopup, blinkingUnits.blinkTimer, targetPreview?.blinkTimer]);
 
   // Convert API units to frontend format
   const convertUnits = useCallback((apiUnits: APIGameState['units']): Unit[] => {
@@ -684,8 +717,8 @@ export const useEngineAPI = () => {
         throw new Error(`API ERROR: Unit ${unit.id} missing required ATTACK_LEFT field`);
       }
       
-      return {
-        id: parseInt(unit.id) || unit.id as any,
+        return {
+        id: parseInt(unit.id) || (typeof unit.id === 'number' ? unit.id : parseInt(unit.id)),
         name: unit.unitType,
         type: unit.unitType,
         player: unit.player as PlayerId,
@@ -720,7 +753,11 @@ export const useEngineAPI = () => {
   const determineClickTarget = useCallback((unitId: number, gameState: APIGameState): string => {
     if (!gameState) return "elsewhere";
     
-    const unit = gameState.units.find((u: any) => parseInt(u.id) === unitId);
+    interface UnitWithId {
+      id: string | number;
+      [key: string]: unknown;
+    }
+    const unit = gameState.units.find((u: UnitWithId) => parseInt(u.id.toString()) === unitId);
     if (!unit) return "elsewhere";
     
     const currentPlayer = gameState.current_player;
@@ -800,7 +837,7 @@ export const useEngineAPI = () => {
     setMovePreview(null);
     setTargetPreview(null);
     // Remove all frontend shooting state - backend manages everything
-  }, [gameState, handleShootingPhaseClick, executeAction, mode]);
+  }, [gameState, executeAction, mode, determineClickTarget]);
 
   // Right-click handler for shooting phase
   const handleRightClick = useCallback(async (unitId: number) => {
@@ -1236,7 +1273,7 @@ export const useEngineAPI = () => {
     
     setTargetPreview(preview);
     setMode("targetPreview");
-  }, [gameState]);
+  }, [gameState, executeAction]);
 
   // Cleanup interval when targetPreview changes or component unmounts
   useEffect(() => {
@@ -1312,7 +1349,7 @@ export const useEngineAPI = () => {
     throw new Error(`API ERROR: Unsupported phase for eligible units: ${gameState.phase}`);
   }, [gameState]);
 
-  const getChargeDestinations = useCallback((_unitId: number) => {
+  const getChargeDestinations = useCallback(() => {
     return chargeDestinations;
   }, [chargeDestinations]);
 
@@ -1451,7 +1488,7 @@ export const useEngineAPI = () => {
     onLogChargeRoll: () => {},
     getChargeDestinations,
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler
-    getAdvanceDestinations: (_unitId: number) => advanceDestinations,
+    getAdvanceDestinations: () => advanceDestinations,
     advancingUnitId,
     advanceRoll,
     onAdvance: handleAdvance,
@@ -1660,13 +1697,13 @@ export const useEngineAPI = () => {
       console.log('executeAITurn proceeding with sequential AI processing');
       
       // Helper function to make AI movement decision
-      const makeMovementDecision = (validDestinations: number[][], unitId: string, currentGameState: any) => {
+      const makeMovementDecision = (validDestinations: number[][], unitId: string, currentGameState: APIGameState) => {
         if (!validDestinations || validDestinations.length === 0) {
           return { action: 'skip', unitId };
         }
         
         // Strategy: Move toward nearest enemy using FRESH game state
-        const enemies = currentGameState?.units.filter((u: any) => u.player === 0 && u.HP_CUR > 0) || [];
+        const enemies = currentGameState?.units.filter((u) => u.player === 0 && u.HP_CUR > 0) || [];
         
         if (enemies.length === 0) {
           // No enemies - just take first destination
@@ -1680,7 +1717,7 @@ export const useEngineAPI = () => {
         }
         
         // Find nearest enemy using fresh unit positions
-        const currentUnit = currentGameState?.units.find((u: any) => u.id === unitId);
+        const currentUnit = currentGameState?.units.find((u) => u.id.toString() === unitId);
         if (!currentUnit) {
           console.log(`AI DECISION ERROR: Unit ${unitId} not found in current game state`);
           const dest = validDestinations[0];
@@ -1692,7 +1729,7 @@ export const useEngineAPI = () => {
           };
         }
         
-        const nearestEnemy = enemies.reduce((nearest: any, enemy: any) => {
+        const nearestEnemy = enemies.reduce((nearest, enemy) => {
           const distToCurrent = Math.abs(enemy.col - currentUnit.col) + Math.abs(enemy.row - currentUnit.row);
           const distToNearest = Math.abs(nearest.col - currentUnit.col) + Math.abs(nearest.row - currentUnit.row);
           return distToCurrent < distToNearest ? enemy : nearest;
@@ -1721,13 +1758,13 @@ export const useEngineAPI = () => {
       };
       
       // Helper function to make AI shooting decision
-      const makeShootingDecision = (validTargets: string[], unitId: string, currentGameState: any) => {
+      const makeShootingDecision = (validTargets: string[], unitId: string, currentGameState: APIGameState) => {
         if (!validTargets || validTargets.length === 0) {
           return { action: 'skip', unitId };
         }
         
         // Strategy: Shoot nearest/most threatening target using fresh game state
-        const shooter = currentGameState?.units.find((u: any) => u.id === unitId);
+        const shooter = currentGameState?.units.find((u) => u.id.toString() === unitId);
         if (!shooter) {
           return {
             action: 'shoot',
@@ -1738,8 +1775,8 @@ export const useEngineAPI = () => {
         
         // Find nearest target
         const nearestTarget = validTargets.reduce((nearest, targetId) => {
-          const target = currentGameState?.units.find((u: any) => u.id === targetId);
-          const nearestTargetUnit = currentGameState?.units.find((u: any) => u.id === nearest);
+          const target = currentGameState?.units.find((u) => u.id.toString() === targetId);
+          const nearestTargetUnit = currentGameState?.units.find((u) => u.id.toString() === nearest);
           
           if (!target || !nearestTargetUnit) return nearest;
           
@@ -1758,7 +1795,7 @@ export const useEngineAPI = () => {
       
       try {
         let totalUnitsProcessed = 0;
-        let maxIterations = 10; // Reduced to prevent infinite loops
+        const maxIterations = 10; // Reduced to prevent infinite loops
         let iteration = 0;
         let lastPoolSize = -1;
         let samePoolSizeCount = 0;
@@ -1786,7 +1823,27 @@ export const useEngineAPI = () => {
           
           // Process AI activation logs immediately
           if (activationData.action_logs && activationData.action_logs.length > 0) {
-            activationData.action_logs.forEach((logEntry: any) => {
+            interface ActivationLogEntry {
+              message?: string;
+              type?: string;
+              turn?: number;
+              phase?: string;
+              shooterId?: string;
+              targetId?: string;
+              player?: number;
+              damage?: number;
+              target_died?: boolean;
+              hitRoll?: number;
+              woundRoll?: number;
+              saveRoll?: number;
+              saveTarget?: number;
+              weaponName?: string;
+              action_name?: string;
+              reward?: number;
+              is_ai_action?: boolean;
+              [key: string]: unknown;
+            }
+            activationData.action_logs.forEach((logEntry: ActivationLogEntry) => {
               console.log(`🎯 AI ACTIVATION LOG: ${logEntry.message}`);
               
               window.dispatchEvent(new CustomEvent('backendLogEvent', {
@@ -1838,18 +1895,25 @@ export const useEngineAPI = () => {
               if (currentPhase === 'charge') {
                 // Charge phase - pick destination and find adjacent enemy target
                 const validDestinations = activationData.result.valid_destinations;
-                const currentUnit = activationData.game_state?.units.find((u: any) => String(u.id) === String(unitId));
+                interface ChargeUnit {
+                  id: string | number;
+                  player: number;
+                  HP_CUR: number;
+                  col: number;
+                  row: number;
+                }
+                const currentUnit = activationData.game_state?.units.find((u: ChargeUnit) => String(u.id) === String(unitId));
                 
                 if (!currentUnit || !validDestinations || validDestinations.length === 0) {
                   aiDecision = { action: 'skip', unitId };
                 } else {
                   // Find enemies
-                  const enemies = activationData.game_state?.units.filter((u: any) => 
+                  const enemies = activationData.game_state?.units.filter((u: ChargeUnit) => 
                     u.player !== currentUnit.player && u.HP_CUR > 0
                   ) || [];
                   
                   // Find nearest enemy
-                  const nearestEnemy = enemies.reduce((nearest: any, enemy: any) => {
+                  const nearestEnemy = enemies.reduce((nearest: ChargeUnit, enemy: ChargeUnit) => {
                     const distToCurrent = Math.abs(enemy.col - currentUnit.col) + Math.abs(enemy.row - currentUnit.row);
                     const distToNearest = Math.abs(nearest.col - currentUnit.col) + Math.abs(nearest.row - currentUnit.row);
                     return distToCurrent < distToNearest ? enemy : nearest;
@@ -1863,7 +1927,7 @@ export const useEngineAPI = () => {
                   });
                   
                   // Find enemy adjacent to destination (target for charge)
-                  const targetEnemy = enemies.find((enemy: any) => {
+                  const targetEnemy = enemies.find((enemy: ChargeUnit) => {
                     const dist = Math.abs(enemy.col - bestDestination[0]) + Math.abs(enemy.row - bestDestination[1]);
                     return dist === 1; // Adjacent
                   });
@@ -1920,7 +1984,27 @@ export const useEngineAPI = () => {
             if (decisionData.success) {
               // Process action logs
               if (decisionData.action_logs && decisionData.action_logs.length > 0) {
-                decisionData.action_logs.forEach((logEntry: any) => {
+                interface DecisionLogEntry {
+                  message?: string;
+                  type?: string;
+                  turn?: number;
+                  phase?: string;
+                  shooterId?: string;
+                  targetId?: string;
+                  player?: number;
+                  damage?: number;
+                  target_died?: boolean;
+                  hitRoll?: number;
+                  woundRoll?: number;
+                  saveRoll?: number;
+                  saveTarget?: number;
+                  weaponName?: string;
+                  action_name?: string;
+                  reward?: number;
+                  is_ai_action?: boolean;
+                  [key: string]: unknown;
+                }
+                decisionData.action_logs.forEach((logEntry: DecisionLogEntry) => {
                   console.log(`🎯 AI ACTION LOG: ${logEntry.message}`);
                   console.log("🎯 ACTION LOG FULL DATA:", logEntry);
                   
@@ -2037,17 +2121,17 @@ export const useEngineAPI = () => {
               }
               
               hasMoreEligibleUnits = fightPool.some(unitId => {
-                const unit = updatedGameState?.units?.find((u: any) => String(u.id) === String(unitId));
+                const unit = updatedGameState?.units?.find((u: APIGameState['units'][0]) => String(u.id) === String(unitId));
                 return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
               });
             } else if (currentPhase === 'move' && updatedGameState?.move_activation_pool) {
               hasMoreEligibleUnits = updatedGameState.move_activation_pool.some((unitId: string) => {
-                const unit = updatedGameState?.units?.find((u: any) => String(u.id) === String(unitId));
+                const unit = updatedGameState?.units?.find((u: APIGameState['units'][0]) => String(u.id) === String(unitId));
                 return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
               });
             } else if (currentPhase === 'charge' && updatedGameState?.charge_activation_pool) {
               hasMoreEligibleUnits = updatedGameState.charge_activation_pool.some((unitId: string) => {
-                const unit = updatedGameState?.units?.find((u: any) => String(u.id) === String(unitId));
+                const unit = updatedGameState?.units?.find((u: APIGameState['units'][0]) => String(u.id) === String(unitId));
                 return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
               });
             }

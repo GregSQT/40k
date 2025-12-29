@@ -4,7 +4,7 @@ import type { GameState, Unit, UnitId, PlayerId, FightSubPhase } from '../types/
 
 interface UsePhaseTransitionParams {
   gameState: GameState;
-  boardConfig: any;
+  boardConfig: Record<string, unknown> | null | undefined;
   isUnitEligible: (unit: Unit) => boolean;
   actions: {
     setPhase: (phase: GameState['phase']) => void;
@@ -25,11 +25,13 @@ interface UsePhaseTransitionParams {
 
 export const usePhaseTransition = ({
   gameState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   boardConfig: _boardConfig,
   isUnitEligible,
   actions,
 }: UsePhaseTransitionParams) => {
   // AI_TURN.md: Phase completion by eligibility (NOT step counts)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const shouldTransitionPhase = useCallback((_phase: string): boolean => {
     const playerUnits = gameState.units.filter(u => u.player === gameState.currentPlayer);
     const eligibleUnits = playerUnits.filter(unit => isUnitEligible(unit));
@@ -51,7 +53,7 @@ export const usePhaseTransition = ({
           case "charge":
             actions.setPhase("fight");
             break;
-          case "fight":
+          case "fight": {
             // End turn
             const newPlayer = gameState.currentPlayer === 0 ? 1 : 0;
             actions.setCurrentPlayer(newPlayer);
@@ -60,10 +62,11 @@ export const usePhaseTransition = ({
               actions.setCurrentTurn((gameState.currentTurn ?? 1) + 1);
             }
             break;
+          }
         }
       }, 300);
     }
-  }, [gameState.phase, gameState.currentPlayer, shouldTransitionPhase, actions]);
+  }, [gameState.phase, gameState.currentPlayer, gameState.currentTurn, shouldTransitionPhase, actions]);
 
   return {
     shouldTransitionPhase

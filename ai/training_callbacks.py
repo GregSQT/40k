@@ -718,11 +718,6 @@ class MetricsCollectionCallback(BaseCallback):
             'winner': info.get('winner', None)
         }
 
-        # DIAGNOSTIC: Log winner for first 10 episodes (disabled for cleaner output)
-        # if self.episode_count <= 10:
-        #     winner = episode_data['winner']
-        #     print(f"  [DIAG] Episode {self.episode_count}: winner={winner} (P0 wins if 0, P1 wins if 1, draw if -1)")
-       
         # GAMMA MONITORING: Track discount factor effects
         if hasattr(self.model, 'gamma'):
             gamma = self.model.gamma
