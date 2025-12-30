@@ -157,7 +157,6 @@ export class UnitRenderer {
         // CRITICAL: Only destroy if unit should NO LONGER blink
         // If unit should still blink, keep the container and its animation running
         if (!shouldStillBlink) {
-          console.log(`💫 UnitRenderer: Cleaning up blink container for unit ${this.props.unit.id} (shouldStillBlink=false)`);
           if (blinkContainer.cleanupBlink) {
             blinkContainer.cleanupBlink();
           }
@@ -166,8 +165,6 @@ export class UnitRenderer {
             container.parent.removeChild(container);
           }
           container.destroy({ children: true });
-        } else {
-          console.log(`💫 UnitRenderer: Keeping blink container for unit ${this.props.unit.id} (shouldStillBlink=true)`);
         }
         // If shouldStillBlink is true, do nothing - let the existing container continue animating
       }
@@ -909,16 +906,6 @@ export class UnitRenderer {
     // Check if this unit should be blinking (multi-unit blinking for valid targets)
     const shouldBlink = this.props.isBlinkingActive && this.props.blinkingUnits?.includes(unit.id);
     
-    // Debug log for unit 4 (the blinking target)
-    if (unit.id === 4) {
-      console.log("💫 UnitRenderer renderHPBar for unit 4:", {
-        isBlinkingActive: this.props.isBlinkingActive,
-        blinkingUnits: this.props.blinkingUnits,
-        shouldBlink,
-        isTargetPreviewed
-      });
-    }
-    
     // Use either individual target preview OR multi-unit blinking
     const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;    
     const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
@@ -1138,28 +1125,14 @@ export class UnitRenderer {
     // AI_TURN.md ligne 694: Human only: Display weapon selection icon (if CAN_SHOOT)
     // Show only during shoot phase for active unit with multiple weapons
     if (phase !== 'shoot') {
-      if (unit.id === 1 && unit.player === currentPlayer) {
-        console.log("🔫 WEAPON ICON DEBUG unit 1: phase !== 'shoot'", phase);
-      }
       return;
     }
     if (unit.player !== currentPlayer) {
-      if (unit.id === 1) {
-        console.log("🔫 WEAPON ICON DEBUG unit 1: wrong player", unit.player, currentPlayer);
-      }
       return;
     }
     
     // Check if unit is active shooting unit (backend sets this when unit has valid targets)
     if (!gameState?.active_shooting_unit || parseInt(gameState.active_shooting_unit) !== unit.id) {
-      if (unit.id === 1) {
-        console.log("🔫 WEAPON ICON DEBUG unit 1: not active_shooting_unit", {
-          hasGameState: !!gameState,
-          active_shooting_unit: gameState?.active_shooting_unit,
-          unitId: unit.id,
-          match: gameState?.active_shooting_unit && parseInt(gameState.active_shooting_unit) === unit.id
-        });
-      }
       return;
     }
     
@@ -1177,30 +1150,11 @@ export class UnitRenderer {
     
     const usableWeapons = availableWeapons.filter(w => w.can_use);
     
-    if (unit.id === 1) {
-      console.log("🔫 WEAPON ICON DEBUG unit 1: weapon checks", {
-        availableWeaponsCount: availableWeapons.length,
-        usableWeaponsCount: usableWeapons.length,
-        willShowIcon: usableWeapons.length > 0
-      });
-    }
-    
     // AI_TURN.md ligne 1121: Display weapon selection icon (only if unit.CAN_SHOOT = true)
     // CAN_SHOOT = true if usableWeapons.length > 0 (at least one weapon can be used)
     // Note: Icon should be displayed if CAN_SHOOT = true, even with a single weapon
     // The icon allows manual weapon selection even if only one weapon is available
     if (usableWeapons.length === 0) return;
-    
-    if (unit.id === 1) {
-      console.log("🔫 WEAPON ICON DEBUG unit 1: RENDERING ICON", {
-        phase,
-        currentPlayer,
-        unitPlayer: unit.player,
-        active_shooting_unit: gameState?.active_shooting_unit,
-        availableWeaponsCount: availableWeapons.length,
-        usableWeaponsCount: usableWeapons.length
-      });
-    }
     
     // Display for human players (autoSelectWeapon can be used to control auto-selection,
     // but icon should always be shown for human players when CAN_SHOOT and multiple weapons available)

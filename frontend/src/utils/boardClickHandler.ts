@@ -44,11 +44,8 @@ export function setupBoardClickHandler(callbacks: {
       clickType?: 'left' | 'right';
     }>).detail;
 
-    console.log(`🔥 BOARD CLICK HANDLER | Unit : ${unitId} | Phase : ${phase} | Mode : ${mode} | Selected : ${selectedUnitId} | Click : ${clickType} |`);
-
     // Ignore unit clicks in advancePreview mode - hex clicks are handled by hex handler
     if (mode === 'advancePreview') {
-      console.log("  ⏭️ Ignoring unit click in advancePreview mode - hex clicks handle advance movement");
       return;
     }
 
@@ -58,29 +55,21 @@ export function setupBoardClickHandler(callbacks: {
     if (phase === 'move' && mode === 'select') {
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
-          console.log("    - Right click on active unit → calling onSkipUnit");
           callbacks.onSkipUnit?.(unitId);
         } else {
-          console.log("    - Left click on active unit → calling onSelectUnit(null)");
           callbacks.onSelectUnit(null);
         }
       } else {
-        console.log("    - Attempting unit selection (player validation in useGameActions)");
         callbacks.onSelectUnit(unitId);
       }
     } else if (phase === 'shoot' && mode === 'select') {
-      console.log("  ✅ SHOOTING SELECT LOGIC TRIGGERED");
-      console.log("    - Calling onSelectUnit with unitId:", unitId);
       callbacks.onSelectUnit(unitId);
       // Don't call onStartAttackPreview here - wait for backend response
       // Backend will return blinking_units (attackPreview) or allow_advance (advancePreview)
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
-      console.log("  ✅ SHOOTING ATTACK PREVIEW LOGIC");
       if (selectedUnitId !== unitId) {
-        console.log("    - Single click on enemy target → calling onShoot");
         callbacks.onShoot(selectedUnitId, unitId);  // Execute immediately
       } else {
-        console.log("    - Left click on active unit → no effect");
         return;
       }
     } else if (phase === 'charge' && mode === 'select') {

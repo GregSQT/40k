@@ -1186,7 +1186,6 @@ export default function Board({
 
       // ✅ UNIFIED UNIT RENDERING USING COMPONENT
       for (const unit of units) {
-        console.log(`🟢 BoardPvp: Rendering unit ${unit.id} (HP: ${unit.HP_CUR}, player: ${unit.player})`);
         const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
         const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
 
@@ -1627,11 +1626,6 @@ export default function Board({
 
       // Handle weapon selection
       const handleSelectWeapon = async (weaponIndex: number) => {
-        console.log('🔵 WEAPON SELECT CALLED:', {
-          unitId: weaponSelectionMenu?.unitId,
-          weaponIndex,
-          hasMenu: !!weaponSelectionMenu
-        });
         if (!weaponSelectionMenu) return;
 
         // Close menu immediately (optimistic update)
@@ -1639,11 +1633,6 @@ export default function Board({
 
         try {
           const API_BASE = 'http://localhost:5001/api';
-          console.log('🔵 SENDING select_weapon to backend:', {
-            unitId: weaponSelectionMenu.unitId,
-            weaponIndex,
-            autoSelectWeapon
-          });
           const response = await fetch(`${API_BASE}/game/action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1657,25 +1646,7 @@ export default function Board({
 
           if (response.ok) {
             const data = await response.json();
-            console.log('🔵 BACKEND RESPONSE:', {
-              success: data.success,
-              hasGameState: !!data.game_state
-            });
             if (data.success && data.game_state) {
-              // Log the unit's weapon selection for debugging
-              interface UnitFromAPI {
-                id: string | number;
-                selectedRngWeaponIndex?: number;
-                RNG_WEAPONS?: Array<{ display_name?: string }>;
-              }
-              const unit = data.game_state.units?.find((u: UnitFromAPI) => u.id.toString() === weaponSelectionMenu.unitId.toString());
-              console.log('🔫 Weapon selection response:', {
-                unitId: weaponSelectionMenu.unitId,
-                weaponIndex,
-                unitSelectedWeapon: unit?.selectedRngWeaponIndex,
-                unitWeapons: unit?.RNG_WEAPONS?.map((w: { display_name?: string }, idx: number) => ({ idx, name: w.display_name }))
-              });
-              
               // Trigger a custom event to notify useEngineAPI to update gameState
               // This ensures the frontend state is synchronized with backend
               window.dispatchEvent(new CustomEvent('weaponSelected', {

@@ -60,13 +60,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                 key={weaponOption.index}
                 className={isDisabled ? 'disabled' : ''}
                 onClick={() => {
-                  console.log('🟡 DROPDOWN CLICK:', {
-                    weaponName: weapon.display_name,
-                    weaponIndex: weaponOption.index,
-                    isDisabled
-                  });
                   if (!isDisabled) {
-                    console.log('🟡 CALLING onSelectWeapon with index:', weaponOption.index);
                     onSelectWeapon(weaponOption.index);
                   }
                 }}

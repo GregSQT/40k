@@ -202,20 +202,8 @@ export const useEngineAPI = () => {
       interface WeaponSelectedEventDetail {
         gameState: APIGameState;
       }
-      interface UnitSummary {
-        id: string | number;
-        selectedRngWeaponIndex?: number;
-        RNG_WEAPONS?: Array<{ display_name?: string }>;
-      }
       const { gameState: newGameState } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
       if (newGameState) {
-        console.log('🔫 Weapon selected - updating gameState:', {
-          units: newGameState.units?.map((u: UnitSummary) => ({
-            id: u.id,
-            selectedRngWeaponIndex: u.selectedRngWeaponIndex,
-            RNG_WEAPONS: u.RNG_WEAPONS?.map((w: { display_name?: string }) => w.display_name)
-          }))
-        });
         setGameState(newGameState);
       }
     };
@@ -367,20 +355,6 @@ export const useEngineAPI = () => {
           }
         }
           
-          // Debug: always log when we have activate_unit in shoot phase
-          if (lastActionRef.current?.action === "activate_unit" && lastActionRef.current?.phase === "shoot") {
-            console.log("🟠 DEBUG: activate_unit in shoot phase detected:", {
-              lastAction: lastActionRef.current,
-              resultUnitId: data.result?.unitId,
-              lastActionUnitId: lastActionRef.current?.unitId,
-              unitIdMatch: data.result?.unitId === lastActionRef.current?.unitId,
-              hasBlinkingUnits: !!data.result?.blinking_units,
-              hasAdvanceDestinations: !!data.result?.advance_destinations,
-              currentPhase: data.game_state?.phase,
-              fullResult: data.result
-            });
-          }
-          
           // Check if we just activated a unit in shoot phase (use lastActionRef phase, not current phase which may have changed)
           // Backend returns allow_advance: true when unit has no valid targets
           if (lastActionRef.current?.action === "activate_unit" &&
@@ -417,7 +391,6 @@ export const useEngineAPI = () => {
           }
           
           if (data.result?.clear_blinking_gentle) {
-            console.log("🧹 Backend requested gentle blinking cleanup");
             // Clear central timers only - don't destroy renderer
             if (blinkingUnits.blinkTimer) {
               clearInterval(blinkingUnits.blinkTimer);
@@ -431,7 +404,6 @@ export const useEngineAPI = () => {
           }
           
           if (data.result?.reset_mode && !shouldAutoAdvance) {
-            console.log("🧹 Backend requested mode reset");
             setMode("select");
             // Clear advance state when mode resets
             setAdvanceDestinations([]);
@@ -440,7 +412,6 @@ export const useEngineAPI = () => {
           }
           
           if (data.result?.clear_selected_unit && !shouldAutoAdvance) {
-            console.log("🧹 Backend requested selected unit clear");
             setSelectedUnitId(null);
             // Clear advance state when selected unit is cleared
             setAdvanceDestinations([]);
@@ -500,9 +471,6 @@ export const useEngineAPI = () => {
                 }, 500);
   
                 setBlinkingUnits({unitIds: newUnitIds, blinkTimer: timer});
-              console.log("💫 STARTED blinking for units:", newUnitIds);
-            } else {
-              console.log("💫 Blinking already active for units:", newUnitIds);
             }
           } else if (data.result?.blinking_units && !data.result?.start_blinking) {
             console.warn("💫 WARNING: blinking_units present but start_blinking is false");
@@ -528,7 +496,6 @@ export const useEngineAPI = () => {
                   ...data.game_state,
                   units: updatedUnits
                 };
-                console.log("🔫 PROPAGATED available_weapons to unit", activeUnitId, "weapons:", data.result.available_weapons.length);
               } else {
                 console.warn("🔫 WARNING: Could not find unit", activeUnitId, "in game_state.units");
               }
@@ -640,9 +607,8 @@ export const useEngineAPI = () => {
         // CRITICAL FIX: When phase_complete=true, backend has already transitioned to next phase
         // So we check activation_complete AND (current phase is charge OR phase just completed)
         else if (data.result?.activation_complete &&
-                 (data.game_state?.phase === "charge" || data.result?.phase_complete)) {
-          console.log("🎯 CHARGE COMPLETE: Resetting to select mode");
-          // Store successful charge target for target icon display
+          (data.game_state?.phase === "charge" || data.result?.phase_complete)) {
+   // Store successful charge target for target icon display
           if (data.result?.targetId && data.result?.unitId) {
             const chargerId = parseInt(data.result.unitId);
             const targetId = parseInt(data.result.targetId);
