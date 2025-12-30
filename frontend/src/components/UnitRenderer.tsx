@@ -135,7 +135,15 @@ export class UnitRenderer {
     interface BlinkContainer extends PIXI.Container {
       unitId?: number;
       cleanupBlink?: () => void;
+      blinkTicker?: () => void;
     }
+    
+    // Check if this unit should still be blinking
+    const shouldBlink = this.props.isBlinkingActive && this.props.blinkingUnits?.includes(this.props.unit.id);
+    const isTargetPreviewed = (this.props.mode === "targetPreview" || this.props.mode === "attackPreview") && 
+                               this.props.targetPreview && 
+                               this.props.targetPreview.targetId === this.props.unit.id;
+    const shouldStillBlink = shouldBlink || isTargetPreviewed;
     
     const existingBlinkContainers = this.props.app.stage.children.filter(
       child => child.name === 'hp-blink-container'
@@ -145,10 +153,22 @@ export class UnitRenderer {
       // Only cleanup OLD containers that belong to current unit (prevent duplicates)
       const blinkContainer = container as BlinkContainer;
       if (blinkContainer.unitId && blinkContainer.unitId === this.props.unit.id) {
-        if (blinkContainer.cleanupBlink) {
-          blinkContainer.cleanupBlink();
+        // CRITICAL: Only destroy if unit should NO LONGER blink
+        // If unit should still blink, keep the container and its animation running
+        if (!shouldStillBlink) {
+          console.log(`💫 UnitRenderer: Cleaning up blink container for unit ${this.props.unit.id} (shouldStillBlink=false)`);
+          if (blinkContainer.cleanupBlink) {
+            blinkContainer.cleanupBlink();
+          }
+          // Remove from stage before destroying to prevent re-render issues
+          if (container.parent) {
+            container.parent.removeChild(container);
+          }
+          container.destroy({ children: true });
+        } else {
+          console.log(`💫 UnitRenderer: Keeping blink container for unit ${this.props.unit.id} (shouldStillBlink=true)`);
         }
-        container.destroy({ children: true });
+        // If shouldStillBlink is true, do nothing - let the existing container continue animating
       }
     });
   }
@@ -905,14 +925,6 @@ export class UnitRenderer {
     const finalBarX = shouldShowBlinkingHP ? centerX - finalBarWidth / 2 : barX;
     const finalBarY = shouldShowBlinkingHP ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
     
-    // Background
-    const barBg = new PIXI.Graphics();
-    barBg.beginFill(0x222222, 1);
-    barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
-    barBg.endFill();
-    barBg.zIndex = 350;
-    app.stage.addChild(barBg);
-    
     // HP calculation with preview
     const currentHP = Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
     let displayHP = currentHP;
@@ -947,14 +959,144 @@ export class UnitRenderer {
       interface HPBlinkContainer extends PIXI.Container {
         unitId?: number;
         cleanupBlink?: () => void;
-        blinkInterval?: ReturnType<typeof setInterval>;
+        blinkTicker?: () => void;
+        background?: PIXI.Graphics;
       }
+      
+      // Check if container already exists and is still valid
+      // Normalize unit.id to number for comparison (handle string/number mismatch)
+      const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
+      const existingContainer = this.props.app.stage.children.find(
+        child => {
+          if (child.name !== 'hp-blink-container') return false;
+          const container = child as HPBlinkContainer;
+          if (!container.unitId) return false;
+          const containerUnitIdNum = typeof container.unitId === 'string' ? parseInt(container.unitId) : container.unitId;
+          return containerUnitIdNum === unitIdNum;
+        }
+      ) as HPBlinkContainer | undefined;
+      
+      // Debug: Log container search results
+      if (unitIdNum === 4) {
+        const allBlinkContainers = this.props.app.stage.children.filter(
+          child => child.name === 'hp-blink-container'
+        );
+        const allContainerIds = allBlinkContainers.map(c => {
+          const container = c as HPBlinkContainer;
+          return {
+            unitId: container.unitId,
+            unitIdType: typeof container.unitId,
+            hasBlinkTicker: !!container.blinkTicker,
+            normalized: typeof container.unitId === 'string' ? parseInt(container.unitId) : container.unitId
+          };
+        });
+        console.log(`💫 UnitRenderer: Container search for unit ${unit.id} (normalized: ${unitIdNum}):`, {
+          existingContainer: !!existingContainer,
+          existingContainerUnitId: existingContainer?.unitId,
+          existingContainerBlinkTicker: !!existingContainer?.blinkTicker,
+          allBlinkContainersCount: allBlinkContainers.length,
+          allBlinkContainerUnitIds: allContainerIds,
+          searchingForUnitId: unitIdNum,
+          unitIdType: typeof unit.id,
+          matchFound: allContainerIds.some(c => c.normalized === unitIdNum)
+        });
+      }
+      
+      // If container exists and is still blinking, reuse it (don't recreate)
+      if (existingContainer && existingContainer.blinkTicker) {
+        // Container already exists and is animating - skip recreation
+        console.log(`💫 UnitRenderer: Reusing existing blink container for unit ${unit.id}`);
+        return;
+      }
+      
+      // Create background ONLY if container doesn't exist
+      const barBg = new PIXI.Graphics();
+      barBg.beginFill(0x222222, 1);
+      barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
+      barBg.endFill();
+      barBg.zIndex = 350;
+      
+      console.log(`💫 UnitRenderer: Creating NEW blink container for unit ${unit.id}`, {
+        shouldBlink,
+        isTargetPreviewed,
+        shouldShowBlinkingHP,
+        existingContainer: !!existingContainer
+      });
       
       // Create blinking HP bar animation (works for both individual and multi-unit)
       const hpContainer = new PIXI.Container() as HPBlinkContainer;
       hpContainer.name = 'hp-blink-container';
       hpContainer.zIndex = 350;
-      hpContainer.unitId = unit.id; // Tag container with unit ID
+      hpContainer.sortableChildren = true; // Enable z-index sorting for children
+      // Normalize unit.id to number for consistent comparison
+      hpContainer.unitId = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
+      hpContainer.background = barBg; // Store background reference
+      
+      // Add background to container FIRST (so slices are on top)
+      hpContainer.addChild(barBg);
+      
+      // Calculate damage ONCE before the loop (optimization + ensures consistent calculation)
+      let shooterDamage = 0;
+      if (targetPreview) {
+        const previewShooter = units.find(u => u.id === targetPreview.shooterId);
+        if (previewShooter) {
+          if (this.props.phase === 'fight') {
+            const weapon = getSelectedMeleeWeapon(previewShooter);
+            if (weapon) {
+              shooterDamage = weapon.DMG;
+            }
+          } else {
+            const weapon = getSelectedRangedWeapon(previewShooter);
+            if (weapon) {
+              shooterDamage = weapon.DMG;
+            }
+          }
+        }
+      } else if (shouldBlink) {
+        const activeShooterId = this.props.gameState?.active_shooting_unit || this.props.gameState?.active_fight_unit || this.props.selectedUnitId;
+        // Normalize activeShooterId to number for comparison (handle string/number mismatch)
+        const activeShooterIdNum = activeShooterId ? (typeof activeShooterId === 'string' ? parseInt(activeShooterId) : activeShooterId) : null;
+        const activeShooter = activeShooterIdNum ? this.props.units.find(u => {
+          const unitIdNum = typeof u.id === 'string' ? parseInt(u.id) : u.id;
+          return unitIdNum === activeShooterIdNum;
+        }) : null;
+        if (activeShooter) {
+          if (this.props.phase === 'fight') {
+            const weapon = getSelectedMeleeWeapon(activeShooter);
+            if (weapon) {
+              shooterDamage = weapon.DMG;
+            }
+          } else {
+            const weapon = getSelectedRangedWeapon(activeShooter);
+            if (weapon) {
+              shooterDamage = weapon.DMG;
+            }
+          }
+        }
+      }
+      
+      // Debug: Log damage calculation for unit 4
+      if (unit.id === 4) {
+        const rawActiveShooterId = this.props.gameState?.active_shooting_unit || this.props.gameState?.active_fight_unit || this.props.selectedUnitId;
+        const activeShooterIdNum = rawActiveShooterId ? (typeof rawActiveShooterId === 'string' ? parseInt(rawActiveShooterId) : rawActiveShooterId) : null;
+        const foundShooter = activeShooterIdNum ? this.props.units.find(u => {
+          const unitIdNum = typeof u.id === 'string' ? parseInt(u.id) : u.id;
+          return unitIdNum === activeShooterIdNum;
+        }) : null;
+        console.log(`💫 UnitRenderer: Damage calculation for unit ${unit.id}:`, {
+          shouldBlink,
+          targetPreview: !!targetPreview,
+          rawActiveShooterId,
+          activeShooterIdNum,
+          activeShooter: !!foundShooter,
+          foundShooterId: foundShooter?.id,
+          foundShooterWeapon: foundShooter ? (this.props.phase === 'fight' ? getSelectedMeleeWeapon(foundShooter) : getSelectedRangedWeapon(foundShooter)) : null,
+          shooterDamage,
+          currentHP,
+          unitHP_MAX: unit.HP_MAX,
+          phase: this.props.phase
+        });
+      }
       
       // Create normal HP slices
       const normalSlices: PIXI.Graphics[] = [];
@@ -973,42 +1115,23 @@ export class UnitRenderer {
         
         // Highlight HP slice for damage preview
         const highlightSlice = new PIXI.Graphics();
-        // Calculate damage for both targetPreview and multi-unit blinking
-        // ✅ FIX: Get selected weapon and calculate damage per attack (DMG only, not DMG * NB)
-        let shooterDamage = 0;
-        if (targetPreview) {
-          const previewShooter = units.find(u => u.id === targetPreview.shooterId);
-          if (previewShooter) {
-            if (this.props.phase === 'fight') {
-              const weapon = getSelectedMeleeWeapon(previewShooter);
-              if (weapon) {
-                shooterDamage = weapon.DMG;
-              }
-            } else {
-              const weapon = getSelectedRangedWeapon(previewShooter);
-              if (weapon) {
-                shooterDamage = weapon.DMG;
-              }
-            }
-          }
-        } else if (shouldBlink) {
-          const activeShooterId = this.props.gameState?.active_shooting_unit || this.props.gameState?.active_fight_unit || this.props.selectedUnitId;
-          const activeShooter = this.props.units.find(u => u.id === activeShooterId);
-          if (activeShooter) {
-            if (this.props.phase === 'fight') {
-              const weapon = getSelectedMeleeWeapon(activeShooter);
-              if (weapon) {
-                shooterDamage = weapon.DMG;
-              }
-            } else {
-              const weapon = getSelectedRangedWeapon(activeShooter);
-              if (weapon) {
-                shooterDamage = weapon.DMG;
-              }
-            }
-          }
-        }
+        // Calculate which slices would be damaged
+        // Calculate which slices would be damaged
         const wouldBeDamaged = i >= (currentHP - shooterDamage) && i < currentHP;
+        
+        // Debug: Log damage slices for unit 4
+        if (unit.id === 4 && i === 0) {
+          console.log(`💫 UnitRenderer: Damage slice calculation for unit ${unit.id}:`, {
+            sliceIndex: i,
+            currentHP,
+            shooterDamage,
+            wouldBeDamaged,
+            condition1: i >= (currentHP - shooterDamage),
+            condition2: i < currentHP,
+            damagePreviewColor: wouldBeDamaged ? 'damage-preview' : 'normal'
+          });
+        }
+        
         const highlightColor = wouldBeDamaged ? this.getCSSColor('--hp-bar-damage-preview') : (i < currentHP ? (unit.player === 0 ? this.getCSSColor('--hp-bar-player0') : this.getCSSColor('--hp-bar-player1')) : this.getCSSColor('--hp-bar-lost'));
         highlightSlice.beginFill(highlightColor, 1);
         highlightSlice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
@@ -1019,47 +1142,207 @@ export class UnitRenderer {
         hpContainer.addChild(highlightSlice);
       }
       
-      // Create continuous blinking animation with local interval (like old version)
+      // Create continuous blinking animation using PIXI Ticker (more reliable than setInterval)
       // Use local blinkState instead of props.blinkState for reliable updates
       let blinkState = false;
+      let lastBlinkTime = performance.now();
+      const BLINK_INTERVAL_MS = 500;
+      let tickCount = 0;
+      
       const blinkTicker = () => {
-        blinkState = !blinkState;
-        normalSlices.forEach(slice => {
-          slice.visible = !blinkState;
-        });
-        highlightSlices.forEach(slice => {
-          slice.visible = blinkState;
-        });
-        // Force PIXI to re-render the stage with safety check
-        if (app && app.renderer && app.renderer.type !== undefined) {
-          try {
-            app.renderer.render(app.stage);
-          } catch (error) {
-            console.warn('Renderer error during HP bar blink, clearing interval:', error);
+        tickCount++;
+        const now = performance.now();
+        const elapsed = now - lastBlinkTime;
+        
+        if (elapsed >= BLINK_INTERVAL_MS) {
+          lastBlinkTime = now;
+          blinkState = !blinkState;
+          
+          // Log for debugging (every blink for unit 4)
+          if (unit.id === 4) {
+            console.log(`💫 Blink ticker for unit ${unit.id}:`, {
+              blinkState,
+              elapsed,
+              tickCount,
+              normalSlicesCount: normalSlices.length,
+              highlightSlicesCount: highlightSlices.length,
+              normalSlicesVisible: normalSlices.filter(s => s.visible).length,
+              highlightSlicesVisible: highlightSlices.filter(s => s.visible).length
+            });
           }
+          
+          // Update slice visibility
+          normalSlices.forEach((slice, index) => {
+            slice.visible = !blinkState;
+            if (unit.id === 4 && index === 0) {
+              console.log(`💫 Unit ${unit.id} normalSlice[0] visibility set to:`, !blinkState);
+            }
+          });
+          highlightSlices.forEach((slice, index) => {
+            slice.visible = blinkState;
+            if (unit.id === 4 && index === 0) {
+              console.log(`💫 Unit ${unit.id} highlightSlice[0] visibility set to:`, blinkState);
+            }
+          });
         }
       };
       
-      // Start blinking immediately and set interval
-      const blinkInterval = setInterval(blinkTicker, 500);
+      // Start blinking immediately (first tick) and then use PIXI Ticker
+      blinkState = true; // Start with highlight visible
+      normalSlices.forEach(slice => {
+        slice.visible = false;
+      });
+      highlightSlices.forEach(slice => {
+        slice.visible = true;
+      });
       
-      // Store cleanup function with proper interval reference
+      // Add to PIXI Ticker for smooth animation
+      app.ticker.add(blinkTicker);
+      console.log(`💫 UnitRenderer: Added blinkTicker to PIXI Ticker for unit ${unit.id}`, {
+        tickerSpeed: app.ticker.speed,
+        tickerStarted: app.ticker.started,
+        normalSlicesCount: normalSlices.length,
+        highlightSlicesCount: highlightSlices.length,
+        containerChildren: hpContainer.children.length,
+        normalSlicesInContainer: hpContainer.children.filter(c => normalSlices.includes(c as PIXI.Graphics)).length,
+        highlightSlicesInContainer: hpContainer.children.filter(c => highlightSlices.includes(c as PIXI.Graphics)).length,
+        initialNormalVisible: normalSlices.filter(s => s.visible).length,
+        initialHighlightVisible: highlightSlices.filter(s => s.visible).length
+      });
+      
+      // Store cleanup function with proper ticker reference
       interface HPContainerWithBlink extends PIXI.Container {
         cleanupBlink?: () => void;
-        blinkInterval?: ReturnType<typeof setInterval>;
+        blinkTicker?: () => void;
       }
       const hpContainerWithBlink = hpContainer as HPContainerWithBlink;
       hpContainerWithBlink.cleanupBlink = () => {
-        if (blinkInterval) {
-          clearInterval(blinkInterval);
+        console.log(`💫 UnitRenderer: Cleaning up blinkTicker for unit ${unit.id}`);
+        if (hpContainerWithBlink.blinkTicker) {
+          app.ticker.remove(hpContainerWithBlink.blinkTicker);
         }
       };
-      hpContainerWithBlink.blinkInterval = blinkInterval;
+      hpContainerWithBlink.blinkTicker = blinkTicker;
+      
+      // Add probability display to container BEFORE adding to stage
+      // Calculate probability for this unit
+      let displayProbability = 0;
+      if (shouldBlink) {
+        const activeAttackerId = this.props.gameState?.active_shooting_unit || this.props.gameState?.active_fight_unit || this.props.selectedUnitId;
+        const activeAttackerIdNum = activeAttackerId ? (typeof activeAttackerId === 'string' ? parseInt(activeAttackerId) : activeAttackerId) : null;
+        const activeAttacker = activeAttackerIdNum ? this.props.units.find(u => {
+          const unitIdNum = typeof u.id === 'string' ? parseInt(u.id) : u.id;
+          return unitIdNum === activeAttackerIdNum;
+        }) : null;
+
+        if (activeAttacker && this.props.phase === "shoot") {
+          const rngWeapon = getSelectedRangedWeapon(activeAttacker);
+          const hitProb = Math.max(0, (7 - (rngWeapon?.ATK || 4)) / 6);
+          const strength = rngWeapon?.STR || 4;
+          const toughness = unit.T || 4;
+          let woundTarget = 4;
+          if (strength >= toughness * 2) woundTarget = 2;
+          else if (strength > toughness) woundTarget = 3;
+          else if (strength === toughness) woundTarget = 4;
+          else if (strength < toughness) woundTarget = 5;
+          else woundTarget = 6;
+          const woundProb = Math.max(0, (7 - woundTarget) / 6);
+          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (rngWeapon?.AP || 0), unit.INVUL_SAVE || 7));
+          const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
+          displayProbability = hitProb * woundProb * saveFailProb;
+        } else if (activeAttacker && this.props.phase === "fight") {
+          const ccWeapon = getSelectedMeleeWeapon(activeAttacker);
+          const hitProb = Math.max(0, (7 - (ccWeapon?.ATK || 4)) / 6);
+          const strength = ccWeapon?.STR || 4;
+          const toughness = unit.T || 4;
+          let woundTarget = 4;
+          if (strength >= toughness * 2) woundTarget = 2;
+          else if (strength > toughness) woundTarget = 3;
+          else if (strength === toughness) woundTarget = 4;
+          else if (strength < toughness) woundTarget = 5;
+          else woundTarget = 6;
+          const woundProb = Math.max(0, (7 - woundTarget) / 6);
+          const saveTarget = Math.max(2, Math.min((unit.ARMOR_SAVE || 5) - (ccWeapon?.AP || 0), unit.INVUL_SAVE || 7));
+          const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
+          displayProbability = hitProb * woundProb * saveFailProb;
+        }
+      }
+      
+      // Create probability display square
+      const squareSize = 35;
+      const squareX = centerX - squareSize/2;
+      const squareY = finalBarY - squareSize - 8;
+      
+      const probBg = new PIXI.Graphics();
+      probBg.name = `prob-bg-${unit.id}`;
+      probBg.beginFill(0x333333, 0.9);
+      probBg.lineStyle(2, 0x00ff00, 1);
+      probBg.drawRoundedRect(squareX, squareY, squareSize, squareSize, 3);
+      probBg.endFill();
+      probBg.zIndex = 400; // Above HP bar
+      hpContainer.addChild(probBg);
+      
+      const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
+        fontSize: 12,
+        fill: 0x00ff00,
+        align: "center",
+        fontWeight: "bold"
+      });
+      probText.name = `prob-text-${unit.id}`;
+      probText.anchor.set(0.5);
+      probText.position.set(squareX + squareSize/2, squareY + squareSize/2);
+      probText.zIndex = 401; // Above background
+      hpContainer.addChild(probText);
+      
+      if (unit.id === 4) {
+        console.log(`💫 UnitRenderer: Probability display added to container for unit ${unit.id}`, {
+          displayProbability,
+          displayProbabilityPercent: Math.round(displayProbability * 100),
+          squareX,
+          squareY,
+          containerChildren: hpContainer.children.length,
+          probBgVisible: probBg.visible,
+          probBgAlpha: probBg.alpha,
+          probBgWorldPosition: { x: probBg.getGlobalPosition().x, y: probBg.getGlobalPosition().y },
+          probTextVisible: probText.visible,
+          probTextAlpha: probText.alpha,
+          probTextWorldPosition: { x: probText.getGlobalPosition().x, y: probText.getGlobalPosition().y },
+          containerWorldPosition: { x: hpContainer.getGlobalPosition().x, y: hpContainer.getGlobalPosition().y },
+          probBgZIndex: probBg.zIndex,
+          probTextZIndex: probText.zIndex
+        });
+      }
       
       app.stage.addChild(hpContainer);
+      console.log(`💫 UnitRenderer: Added hpContainer to stage for unit ${unit.id}`, {
+        containerVisible: hpContainer.visible,
+        containerAlpha: hpContainer.alpha,
+        containerPosition: { x: hpContainer.x, y: hpContainer.y },
+        containerWorldVisible: hpContainer.worldVisible,
+        backgroundVisible: barBg.visible,
+        backgroundAlpha: barBg.alpha,
+        firstNormalSliceVisible: normalSlices[0]?.visible,
+        firstNormalSliceAlpha: normalSlices[0]?.alpha,
+        firstNormalSlicePosition: normalSlices[0] ? { x: normalSlices[0].x, y: normalSlices[0].y } : null,
+        firstHighlightSliceVisible: highlightSlices[0]?.visible,
+        firstHighlightSliceAlpha: highlightSlices[0]?.alpha,
+        firstHighlightSlicePosition: highlightSlices[0] ? { x: highlightSlices[0].x, y: highlightSlices[0].y } : null,
+        finalBarX,
+        finalBarY,
+        finalBarWidth,
+        finalBarHeight
+      });
       
     } else {
       // Normal non-blinking HP slices
+      // Create background for normal HP bar
+      const barBg = new PIXI.Graphics();
+      barBg.beginFill(0x222222, 1);
+      barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
+      barBg.endFill();
+      barBg.zIndex = 350;
+      app.stage.addChild(barBg);
+      
       for (let i = 0; i < unit.HP_MAX; i++) {
         const slice = new PIXI.Graphics();
         const hpDamagedColor = (boardConfig && typeof boardConfig === 'object' && 'colors' in boardConfig && boardConfig.colors && typeof boardConfig.colors === 'object' && 'hp_damaged' in boardConfig.colors) ? (boardConfig.colors as { hp_damaged?: string }).hp_damaged : undefined;
@@ -1081,7 +1364,12 @@ export class UnitRenderer {
       } else if (shouldBlink) {
         // Calculate probability for multi-unit blinking
         const activeAttackerId = this.props.gameState?.active_shooting_unit || this.props.gameState?.active_fight_unit || this.props.selectedUnitId;
-        const activeAttacker = this.props.units.find(u => u.id === activeAttackerId);
+        // Normalize activeAttackerId to number for comparison (handle string/number mismatch)
+        const activeAttackerIdNum = activeAttackerId ? (typeof activeAttackerId === 'string' ? parseInt(activeAttackerId) : activeAttackerId) : null;
+        const activeAttacker = activeAttackerIdNum ? this.props.units.find(u => {
+          const unitIdNum = typeof u.id === 'string' ? parseInt(u.id) : u.id;
+          return unitIdNum === activeAttackerIdNum;
+        }) : null;
 
         if (activeAttacker && this.props.phase === "shoot") {
           const rngWeapon = getSelectedRangedWeapon(activeAttacker);
@@ -1117,26 +1405,116 @@ export class UnitRenderer {
         }
       }
       
+      // Debug: Log probability calculation for unit 4
+      if (unit.id === 4) {
+        console.log(`💫 UnitRenderer: Probability calculation for unit ${unit.id}:`, {
+          isTargetPreviewed: !!isTargetPreviewed,
+          shouldBlink,
+          shouldShowBlinkingHP,
+          displayProbability,
+          displayProbabilityPercent: Math.round(displayProbability * 100)
+        });
+      }
+      
       const squareSize = 35;
       const squareX = centerX - squareSize/2;
       const squareY = finalBarY - squareSize - 8;
       
-      const probBg = new PIXI.Graphics();
-      probBg.beginFill(0x333333, 0.9);
-      probBg.lineStyle(2, 0x00ff00, 1);
-      probBg.drawRoundedRect(squareX, squareY, squareSize, squareSize, 3);
-      probBg.endFill();
-      app.stage.addChild(probBg);
+      // Find the blink container for this unit (if it exists)
+      const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
+      interface HPBlinkContainerForProb extends PIXI.Container {
+        unitId?: number;
+      }
+      const blinkContainer = this.props.app.stage.children.find(
+        child => {
+          if (child.name !== 'hp-blink-container') return false;
+          const container = child as HPBlinkContainerForProb;
+          if (!container.unitId) return false;
+          const containerUnitIdNum = typeof container.unitId === 'string' ? parseInt(container.unitId) : container.unitId;
+          return containerUnitIdNum === unitIdNum;
+        }
+      ) as HPBlinkContainerForProb | undefined;
       
-      const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
-        fontSize: 12,
-        fill: 0x00ff00,
-        align: "center",
-        fontWeight: "bold"
-      });
-      probText.anchor.set(0.5);
-      probText.position.set(squareX + squareSize/2, squareY + squareSize/2);
-      app.stage.addChild(probText);
+      // Check if probability display already exists in the container
+      const existingProbBg = blinkContainer?.children.find((c: PIXI.DisplayObject) => c.name === `prob-bg-${unit.id}`);
+      const existingProbText = blinkContainer?.children.find((c: PIXI.DisplayObject) => c.name === `prob-text-${unit.id}`);
+      
+      // Debug: Log probability display creation for unit 4
+      if (unit.id === 4) {
+        console.log(`💫 UnitRenderer: Probability display for unit ${unit.id}:`, {
+          blinkContainer: !!blinkContainer,
+          blinkContainerUnitId: blinkContainer?.unitId,
+          existingProbBg: !!existingProbBg,
+          existingProbText: !!existingProbText,
+          squareX,
+          squareY,
+          squareSize,
+          displayProbability,
+          willCreate: blinkContainer && !existingProbBg && !existingProbText,
+          willUpdate: existingProbText && existingProbText instanceof PIXI.Text,
+          willFallback: !blinkContainer
+        });
+      }
+      
+      // Only create if container exists and probability display doesn't exist
+      if (blinkContainer && !existingProbBg && !existingProbText) {
+        console.log(`💫 UnitRenderer: Creating probability display for unit ${unit.id} in container`);
+        const probBg = new PIXI.Graphics();
+        probBg.name = `prob-bg-${unit.id}`;
+        probBg.beginFill(0x333333, 0.9);
+        probBg.lineStyle(2, 0x00ff00, 1);
+        // Coordinates are relative to container (container is at 0,0 on stage)
+        probBg.drawRoundedRect(squareX, squareY, squareSize, squareSize, 3);
+        probBg.endFill();
+        probBg.zIndex = 400; // Above HP bar
+        blinkContainer.addChild(probBg);
+        
+        const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
+          fontSize: 12,
+          fill: 0x00ff00,
+          align: "center",
+          fontWeight: "bold"
+        });
+        probText.name = `prob-text-${unit.id}`;
+        probText.anchor.set(0.5);
+        // Coordinates are relative to container (container is at 0,0 on stage)
+        probText.position.set(squareX + squareSize/2, squareY + squareSize/2);
+        probText.zIndex = 401; // Above background
+        blinkContainer.addChild(probText);
+        
+        if (unit.id === 4) {
+          console.log(`💫 UnitRenderer: Probability display created for unit ${unit.id}`, {
+            probBgPosition: { x: probBg.x, y: probBg.y },
+            probTextPosition: { x: probText.x, y: probText.y },
+            squareX,
+            squareY,
+            containerPosition: { x: blinkContainer.x, y: blinkContainer.y }
+          });
+        }
+      } else if (existingProbText && existingProbText instanceof PIXI.Text) {
+        // Update existing text with new probability
+        existingProbText.text = `${Math.round(displayProbability * 100)}%`;
+      } else if (!blinkContainer) {
+        // If no container exists, add directly to stage (fallback for targetPreview mode)
+        const probBg = new PIXI.Graphics();
+        probBg.beginFill(0x333333, 0.9);
+        probBg.lineStyle(2, 0x00ff00, 1);
+        probBg.drawRoundedRect(squareX, squareY, squareSize, squareSize, 3);
+        probBg.endFill();
+        probBg.zIndex = 400;
+        app.stage.addChild(probBg);
+        
+        const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
+          fontSize: 12,
+          fill: 0x00ff00,
+          align: "center",
+          fontWeight: "bold"
+        });
+        probText.anchor.set(0.5);
+        probText.position.set(squareX + squareSize/2, squareY + squareSize/2);
+        probText.zIndex = 401;
+        app.stage.addChild(probText);
+      }
     }
   }
   

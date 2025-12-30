@@ -298,13 +298,18 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
 
     // ✅ AGGRESSIVE STAGE CLEANUP - Destroy everything first, then clear - EXACT from Board.tsx
     // BUT: Preserve the UI elements container (target logos, charge badges) - it's never cleaned up
+    // AND: Preserve hp-blink-container (blinking HP bars) - they need to persist for animation
     const childrenToDestroy: PIXI.DisplayObject[] = [];
     
-    // Identify which children to destroy (skip the UI elements container)
+    // Identify which children to destroy (skip the UI elements container and blink containers)
     for (const child of app.stage.children) {
       // NEVER destroy the UI elements container - it persists across all renders
       if (child.name === 'ui-elements-container') {
         continue; // Skip the UI container
+      }
+      // NEVER destroy hp-blink-container - they persist for blinking animation
+      if (child.name === 'hp-blink-container') {
+        continue; // Skip the blink container
       }
       childrenToDestroy.push(child);
     }
