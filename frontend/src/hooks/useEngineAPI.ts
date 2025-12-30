@@ -492,6 +492,10 @@ export const useEngineAPI = () => {
                   ...updatedUnits[unitIndex],
                   available_weapons: data.result.available_weapons
                 };
+                // Also update selectedRngWeaponIndex if provided in result
+                if (data.result.selectedRngWeaponIndex !== undefined) {
+                  updatedUnits[unitIndex].selectedRngWeaponIndex = data.result.selectedRngWeaponIndex;
+                }
                 data.game_state = {
                   ...data.game_state,
                   units: updatedUnits
@@ -505,6 +509,26 @@ export const useEngineAPI = () => {
                 unitId: data.result.unitId,
                 has_available_weapons: !!data.result.available_weapons
               });
+            }
+          }
+          // Also handle selectedRngWeaponIndex even if available_weapons is not present
+          else if (data.result?.selectedRngWeaponIndex !== undefined) {
+            const activeUnitId = data.game_state.active_shooting_unit || data.result.unitId;
+            if (activeUnitId && data.game_state.units) {
+              const unitIndex = data.game_state.units.findIndex((u: { id: string | number }) => 
+                u.id.toString() === activeUnitId.toString()
+              );
+              if (unitIndex >= 0) {
+                const updatedUnits = [...data.game_state.units];
+                updatedUnits[unitIndex] = {
+                  ...updatedUnits[unitIndex],
+                  selectedRngWeaponIndex: data.result.selectedRngWeaponIndex
+                };
+                data.game_state = {
+                  ...data.game_state,
+                  units: updatedUnits
+                };
+              }
             }
           }
           

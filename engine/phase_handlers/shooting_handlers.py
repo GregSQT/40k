@@ -174,22 +174,12 @@ def weapon_availability_check(
             else:
                 # Check if at least ONE enemy unit meets ALL conditions
                 weapon_has_valid_target = False
-                unit_id_int = int(unit["id"]) if isinstance(unit["id"], str) else unit["id"]
-                debug_this_weapon = (unit_id_int in [1, 2, 3, 4] and advance_status == 1 and _weapon_has_assault_rule(weapon))
-                
-                if debug_this_weapon:
-                    print(f"🔫 TARGET CHECK: Unit {unit['id']} checking targets for ASSAULT weapon {weapon_name} (range={weapon_range})")
-                    print(f"   Unit position: ({unit['col']}, {unit['row']})")
                 
                 for enemy in game_state["units"]:
                     if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
                         # Check range
                         distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
-                        if debug_this_weapon:
-                            print(f"   Enemy {enemy['id']} at ({enemy['col']}, {enemy['row']}): distance={distance}, range={weapon_range}")
                         if distance > weapon_range:
-                            if debug_this_weapon:
-                                print(f"     ❌ Out of range")
                             continue
                         
                         # Check Line of Sight
@@ -199,23 +189,15 @@ def weapon_availability_check(
                         
                         try:
                             is_valid = _is_valid_shooting_target(game_state, temp_unit, enemy)
-                            if debug_this_weapon:
-                                print(f"     LoS check: {is_valid}")
                             if is_valid:
                                 weapon_has_valid_target = True
-                                if debug_this_weapon:
-                                    print(f"     ✅ Valid target found!")
                                 break
                         except (KeyError, IndexError, AttributeError) as e:
-                            if debug_this_weapon:
-                                print(f"     ❌ Exception: {e}")
                             continue
                 
                 if not weapon_has_valid_target:
                     can_use = False
                     reason = "No valid targets in range or line of sight"
-                    if debug_this_weapon:
-                        print(f"   ❌ No valid targets found for ASSAULT weapon")
         
         available_weapons.append({
             "index": idx,
@@ -556,13 +538,7 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     """
     # PISTOL rule: Initialize _shooting_with_pistol to None for eligibility check
     # This ensures each unit starts with no PISTOL category restriction
-    old_value = unit.get("_shooting_with_pistol", "NOT_SET")
     unit["_shooting_with_pistol"] = None
-    
-    # Debug log
-    unit_id_int = int(unit["id"]) if isinstance(unit["id"], str) else unit["id"]
-    if unit_id_int in [1, 2, 3, 4]:
-        print(f"🔫 PISTOL ELIGIBILITY: Unit {unit['id']} eligibility check, _shooting_with_pistol: {old_value} -> None")
     
     # unit.HP_CUR > 0?
     if unit["HP_CUR"] <= 0:
@@ -651,11 +627,19 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         return False
     
     # Adjacent check - can't shoot at adjacent enemies (melee range)
+    # EXCEPTION: PISTOL weapons can shoot at adjacent enemies
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-    from engine.utils.weapon_helpers import get_melee_range
+    from engine.utils.weapon_helpers import get_melee_range, get_selected_ranged_weapon
     melee_range = get_melee_range()
     if distance <= melee_range:
-        return False
+        # Check if selected weapon has PISTOL rule
+        selected_weapon = get_selected_ranged_weapon(shooter)
+        if selected_weapon and _weapon_has_pistol_rule(selected_weapon):
+            # PISTOL weapons can shoot at adjacent enemies - allow this
+            pass
+        else:
+            # Non-PISTOL weapons cannot shoot at adjacent enemies
+            return False
 
     # W40K RULE: Cannot shoot at enemy engaged in melee with friendly units
     # Check if target is adjacent to any friendly unit (same player as shooter)
@@ -764,19 +748,35 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     unit["valid_target_pool"] = valid_target_pool
     
     # AI_TURN.md STEP 3: Pre-select first available weapon
+    # If unit is adjacent to enemy, prioritize PISTOL weapons
     usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
     if usable_weapons:
-        first_weapon_idx = usable_weapons[0]["index"]
+        if unit_is_adjacent:
+            # Prioritize PISTOL weapons when adjacent to enemy
+            pistol_weapons = []
+            non_pistol_weapons = []
+            for w in usable_weapons:
+                weapon = w.get("weapon", {})
+                if _weapon_has_pistol_rule(weapon):
+                    pistol_weapons.append(w)
+                else:
+                    non_pistol_weapons.append(w)
+            
+            # Prefer PISTOL weapons, but fall back to non-PISTOL if no PISTOL available
+            if pistol_weapons:
+                first_weapon = pistol_weapons[0]
+            else:
+                first_weapon = usable_weapons[0]
+        else:
+            # Not adjacent, use first available weapon
+            first_weapon = usable_weapons[0]
+        
+        first_weapon_idx = first_weapon["index"]
         unit["selectedRngWeaponIndex"] = first_weapon_idx
         selected_weapon = unit["RNG_WEAPONS"][first_weapon_idx]
         unit["SHOOT_LEFT"] = selected_weapon["NB"]
     else:
         unit["SHOOT_LEFT"] = 0
-    
-    # Debug log (removal already done above, before weapon_availability_check)
-    unit_id_int = int(unit["id"]) if isinstance(unit["id"], str) else unit["id"]
-    if unit_id_int in [1, 2, 3, 4]:
-        print(f"🔫 PISTOL INIT: Unit {unit['id']} activation start, _shooting_with_pistol removed (not set yet)")
     
     unit["selected_target_id"] = None  # For two-click confirmation
 
@@ -791,6 +791,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
 
     return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"],
             "position": {"col": unit["col"], "row": unit["row"]},
+            "selectedRngWeaponIndex": unit.get("selectedRngWeaponIndex", 0),
             "available_weapons": available_weapons}
 
 
@@ -1417,12 +1418,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "activation_position" in unit:
             del unit["activation_position"]  # Clear position tracking
         if "_shooting_with_pistol" in unit:
-            old_value = unit["_shooting_with_pistol"]
             del unit["_shooting_with_pistol"]  # Clear PISTOL category tracking
-            # Debug log
-            unit_id_int = int(unit["id"]) if isinstance(unit["id"], str) else unit["id"]
-            if unit_id_int in [1, 2, 3, 4]:
-                print(f"🔫 PISTOL CLEANUP: Unit {unit['id']} activation end, deleted _shooting_with_pistol={old_value}")
         unit["SHOOT_LEFT"] = 0
         
         # Clear active unit
@@ -2068,25 +2064,23 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if "SHOOT_LEFT" not in unit:
             raise KeyError(f"Unit missing required 'SHOOT_LEFT' field: {unit}")
         
-        # Check if SHOOT_LEFT == 0 and handle weapon selection/switching
-        # Store if current weapon is PISTOL to filter weapons correctly below
+        # Always check if current weapon is PISTOL to filter weapons correctly below
+        # This is needed even when SHOOT_LEFT > 0 to maintain PISTOL category consistency
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        selected_weapon = get_selected_ranged_weapon(unit)
         current_weapon_is_pistol = False
+        if selected_weapon:
+            current_weapon_is_pistol = _weapon_has_pistol_rule(selected_weapon)
+        else:
+            return False, {"error": "no_weapons_available", "unitId": unit_id}
+        
+        # Check if SHOOT_LEFT == 0 and handle weapon selection/switching
         if unit["SHOOT_LEFT"] <= 0:
-            from engine.utils.weapon_helpers import get_selected_ranged_weapon
-            selected_weapon = get_selected_ranged_weapon(unit)
-            if selected_weapon:
-                weapon_rules = selected_weapon.get("WEAPON_RULES", [])
-                if "PISTOL" in weapon_rules:
-                    # PISTOL rule: can only select another PISTOL weapon
-                    current_weapon_is_pistol = True
-                # Non-PISTOL weapon: will exclude PISTOL weapons below
-            else:
-                return False, {"error": "no_weapons_available", "unitId": unit_id}
+            # SHOOT_LEFT is 0, need to switch to another weapon of the same category
+            # current_weapon_is_pistol is already set above
+            pass
         
-        # Build valid target pool
-        valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
-        
-        if not valid_targets:
+        # Build valid target
             return False, {"error": "no_valid_targets", "unitId": unit_id}
         
         # Handle target selection: agent-provided or auto-select
@@ -2103,7 +2097,17 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             config = game_state.get("config", {})
             auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
             
-            if auto_select:
+            # If SHOOT_LEFT > 0, weapon is already selected and has remaining shots
+            # Don't re-select weapon, just use the already selected one
+            current_shoot_left = unit.get("SHOOT_LEFT", 0)
+            if current_shoot_left > 0:
+                # Weapon already selected, just verify it's still valid
+                selected_weapon = get_selected_ranged_weapon(unit)
+                if not selected_weapon:
+                    return False, {"error": "no_weapons_available", "unitId": unit_id}
+                # Use already selected weapon, no re-selection needed
+            elif auto_select:
+                # SHOOT_LEFT == 0, need to select a new weapon (same category if current weapon was used)
                 # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
                 if "weapon_rule" not in game_state:
                     raise KeyError("game_state missing required 'weapon_rule' field")
@@ -2155,9 +2159,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     best_weapon_idx = filtered_indices[best_weapon_idx_in_filtered]
                     unit["selectedRngWeaponIndex"] = best_weapon_idx
                     weapon = unit["RNG_WEAPONS"][best_weapon_idx]
-                    current_shoot_left = unit.get("SHOOT_LEFT", 0)
-                    if current_shoot_left == 0:
-                        unit["SHOOT_LEFT"] = weapon["NB"]
+                    unit["SHOOT_LEFT"] = weapon["NB"]
                 else:
                     unit["SHOOT_LEFT"] = 0
                     return False, {"error": "no_weapons_available", "unitId": unit_id}
@@ -2363,13 +2365,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 unit["_shooting_with_pistol"] = True
             else:
                 unit["_shooting_with_pistol"] = False
-            
-            # Debug log
-            unit_id_int = int(unit["id"]) if isinstance(unit["id"], str) else unit["id"]
-            if unit_id_int in [1, 2, 3, 4]:
-                print(f"🔫 PISTOL UPDATE: Unit {unit['id']} fired with {weapon_name} (PISTOL={is_pistol})")
-                print(f"   Set _shooting_with_pistol={unit['_shooting_with_pistol']}")
-        
+
         # AI_TURN.md ligne 523-536: SHOOT_LEFT == 0 handling
         if unit["SHOOT_LEFT"] == 0:
             # Mark selected_weapon as used (set weapon.shot = 1)
@@ -3247,16 +3243,6 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         )
         usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
         
-        # Debug log: Check weapons after advance
-        unit_id_int = int(unit["id"]) if isinstance(unit["id"], str) else unit["id"]
-        if unit_id_int in [1, 2, 3, 4]:
-            print(f"🔫 AFTER ADVANCE: Unit {unit['id']} at ({unit['col']}, {unit['row']})")
-            rng_weapons = unit.get("RNG_WEAPONS", [])
-            for idx, weapon in enumerate(rng_weapons):
-                weapon_name = weapon.get("display_name", f"weapon_{idx}")
-                has_assault = _weapon_has_assault_rule(weapon)
-                print(f"   Weapon {idx} ({weapon_name}): ASSAULT={has_assault}")
-        
         # Now rebuild valid_target_pool using the usable weapons from weapon_availability_check
         # valid_target_pool_build will use the usable weapons to find valid targets
         valid_target_pool = valid_target_pool_build(
@@ -3266,21 +3252,6 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # CAN_SHOOT = (weapon_available_pool NOT empty)
         can_shoot = len(usable_weapons) > 0
         unit["_can_shoot"] = can_shoot
-        
-        # Debug log: Check result and why weapons are rejected
-        unit_id_int = int(unit["id"]) if isinstance(unit["id"], str) else unit["id"]
-        if unit_id_int in [1, 2, 3, 4]:
-            print(f"🔫 AFTER ADVANCE: Unit {unit['id']} can_shoot={can_shoot}, usable_weapons={len(usable_weapons)}")
-            print(f"   valid_target_pool empty: {len(valid_target_pool) == 0}")
-            if not can_shoot:
-                print(f"   ❌ Activation will end: can_shoot=False or valid_target_pool empty")
-                # Show why each weapon is rejected
-                for w in weapon_available_pool:
-                    weapon_name = w.get("weapon", {}).get("display_name", f"weapon_{w.get('index', '?')}")
-                    has_assault = _weapon_has_assault_rule(w.get("weapon", {}))
-                    can_use = w.get("can_use", False)
-                    reason = w.get("reason", "unknown")
-                    print(f"   Weapon {w.get('index')} ({weapon_name}): can_use={can_use}, ASSAULT={has_assault}, reason={reason}")
         
         # Pre-select first available weapon
         if usable_weapons:

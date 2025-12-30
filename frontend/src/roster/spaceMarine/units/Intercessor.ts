@@ -10,13 +10,13 @@ export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
   static T = 4;                // Toughness score
   static ARMOR_SAVE = 3;       // Armor save score
   static INVUL_SAVE = 7;       // Armor invulnerable save score (7+ = no invul)
-  static HP_MAX = 2;           // Max hit points
+  static HP_MAX = 20;           // Max hit points
   static LD = 6;               // Leadership score
   static OC = 2;               // Operative Control
   static VALUE = 19;           // Unit value (W40K points cost)
   
   // WEAPONS
-  static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol", "testor", "pistor"];
+  static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(Intercessor.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["intercessor_chainsword"];
   static CC_WEAPONS = getWeapons(Intercessor.CC_WEAPON_CODES);
