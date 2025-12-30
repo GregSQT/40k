@@ -1,7 +1,7 @@
 {
     "default": {
     "type": "################################################### Default ###################################################",
-    "total_episodes": 3000,
+    "total_episodes": 10000,
     "total_episodes_normal": "1000 - 100 ep / minute -> 6k ep / hour",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 200,

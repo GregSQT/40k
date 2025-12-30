@@ -63,13 +63,13 @@ def parse_log(filepath):
         'actions_by_type': Counter(),
         'actions_by_phase': Counter(),
         'actions_by_player': {0: Counter(), 1: Counter()},
-        'shoot_vs_wait': {'shoot': 0, 'wait': 0, 'skip': 0},
+        'shoot_vs_wait': {'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0},
         'turns_distribution': Counter(),
         'episode_lengths': [],
         'sample_games': {'win': None, 'loss': None, 'draw': None},
         'shoot_vs_wait_by_player': {
-            0: {'shoot': 0, 'wait': 0, 'skip': 0},
-            1: {'shoot': 0, 'wait': 0, 'skip': 0}
+            0: {'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0},
+            1: {'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0}
         },
         'wall_collisions': {0: 0, 1: 0},
         # Target priority tracking - with LOS awareness
@@ -84,6 +84,11 @@ def parse_log(filepath):
         },
         # Track shots after advance (Assault weapon rule)
         'shots_after_advance': {0: 0, 1: 0},
+        # Track PISTOL weapon shots by adjacency
+        'pistol_shots': {
+            0: {'adjacent': 0, 'not_adjacent': 0},
+            1: {'adjacent': 0, 'not_adjacent': 0}
+        },
         # Enemy death order tracking with unit types
         'death_orders': [],
         'current_episode_deaths': [],
@@ -277,6 +282,22 @@ def parse_log(filepath):
                             if shooter_id in units_advanced_this_turn:
                                 stats['shots_after_advance'][player] += 1
 
+                            # Check if weapon is PISTOL and track adjacency
+                            weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
+                            if weapon_match:
+                                weapon_name = weapon_match.group(1).lower()
+                                is_pistol = 'pistol' in weapon_name
+                                
+                                if is_pistol:
+                                    # Calculate distance to target to determine adjacency
+                                    if target_id in unit_positions:
+                                        target_pos = unit_positions[target_id]
+                                        distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
+                                        if distance == 1:
+                                            stats['pistol_shots'][player]['adjacent'] += 1
+                                        else:
+                                            stats['pistol_shots'][player]['not_adjacent'] += 1
+
                             stats['target_priority'][player]['total_shots'] += 1
 
                             # Check if target was already wounded
@@ -365,6 +386,11 @@ def parse_log(filepath):
                         stats['shoot_vs_wait_by_player'][player]['skip'] += 1
                     elif 'advanced' in action_desc.lower():
                         action_type = 'advance'
+                        
+                        # Count advance actions in SHOOT phase
+                        if phase == 'SHOOT':
+                            stats['shoot_vs_wait']['advance'] += 1
+                            stats['shoot_vs_wait_by_player'][player]['advance'] += 1
 
                         # Update unit position (same as move)
                         move_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
@@ -521,12 +547,14 @@ def print_statistics(stats):
 
     agent_shoot_total = (stats['shoot_vs_wait_by_player'][0]['shoot'] +
                         stats['shoot_vs_wait_by_player'][0]['wait'] +
-                        stats['shoot_vs_wait_by_player'][0]['skip'])
+                        stats['shoot_vs_wait_by_player'][0]['skip'] +
+                        stats['shoot_vs_wait_by_player'][0]['advance'])
     bot_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
                       stats['shoot_vs_wait_by_player'][1]['wait'] +
-                      stats['shoot_vs_wait_by_player'][1]['skip'])
+                      stats['shoot_vs_wait_by_player'][1]['skip'] +
+                      stats['shoot_vs_wait_by_player'][1]['advance'])
 
-    for action in ['shoot', 'wait', 'skip']:
+    for action in ['shoot', 'wait', 'skip', 'advance']:
         agent_count = stats['shoot_vs_wait_by_player'][0][action]
         bot_count = stats['shoot_vs_wait_by_player'][1][action]
         agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
@@ -539,6 +567,28 @@ def print_statistics(stats):
     agent_pct_after_advance = (agent_shots_after_advance / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_pct_after_advance = (bot_shots_after_advance / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
     print(f"{'Shoot+Advance':<12} {agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)   {bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)")
+    
+    # PISTOL weapon shots by adjacency
+    print("\n" + "-" * 80)
+    print("PISTOL WEAPON SHOTS BY ADJACENCY")
+    print("-" * 80)
+    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print("-" * 80)
+    agent_pistol_adj = stats['pistol_shots'][0]['adjacent']
+    bot_pistol_adj = stats['pistol_shots'][1]['adjacent']
+    agent_pistol_not_adj = stats['pistol_shots'][0]['not_adjacent']
+    bot_pistol_not_adj = stats['pistol_shots'][1]['not_adjacent']
+    agent_pistol_total = agent_pistol_adj + agent_pistol_not_adj
+    bot_pistol_total = bot_pistol_adj + bot_pistol_not_adj
+    
+    agent_pistol_adj_pct = (agent_pistol_adj / agent_pistol_total * 100) if agent_pistol_total > 0 else 0
+    bot_pistol_adj_pct = (bot_pistol_adj / bot_pistol_total * 100) if bot_pistol_total > 0 else 0
+    agent_pistol_not_adj_pct = (agent_pistol_not_adj / agent_pistol_total * 100) if agent_pistol_total > 0 else 0
+    bot_pistol_not_adj_pct = (bot_pistol_not_adj / bot_pistol_total * 100) if bot_pistol_total > 0 else 0
+    
+    print(f"PISTOL shots (adjacent):       {agent_pistol_adj:6d} ({agent_pistol_adj_pct:5.1f}%)  {bot_pistol_adj:6d} ({bot_pistol_adj_pct:5.1f}%)")
+    print(f"PISTOL shots (not adjacent):   {agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)  {bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)")
+    print(f"Total PISTOL shots:            {agent_pistol_total:6d}           {bot_pistol_total:6d}")
 
     # WAIT BEHAVIOR - shoot waits with LOS only
     print("\n" + "-" * 80)

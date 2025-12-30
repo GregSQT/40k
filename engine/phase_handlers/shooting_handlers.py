@@ -2081,6 +2081,12 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             pass
         
         # Build valid target
+        # shooting_build_valid_target_pool() now correctly determines context
+        # including arg2=1, arg3=0 if unit has advanced
+        valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+        
+        # valid_target_pool NOT empty?
+        if len(valid_targets) == 0:
             return False, {"error": "no_valid_targets", "unitId": unit_id}
         
         # Handle target selection: agent-provided or auto-select
