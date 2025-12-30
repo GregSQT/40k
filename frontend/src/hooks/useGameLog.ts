@@ -36,7 +36,7 @@ export function useGameLog(currentTurn?: number) {
     const handleBackendLog = (event: CustomEvent) => {
       const logData = event.detail;
 
-      // AI_TURN.md: Use shootDetails directly if passed from fight handler,
+      // Use shootDetails directly if passed from fight handler,
       // otherwise build from flat fields (shooting handler format)
       let shootDetails = logData.shootDetails;
       if (!shootDetails && logData.hitRoll) {

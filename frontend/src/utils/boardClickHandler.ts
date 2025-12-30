@@ -52,7 +52,7 @@ export function setupBoardClickHandler(callbacks: {
       return;
     }
 
-    // AI_TURN.md: Validate player context before processing clicks
+    // Validate player context before processing clicks
     // Note: Actual player validation happens in useGameActions.selectUnit
     
     if (phase === 'move' && mode === 'select') {

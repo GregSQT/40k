@@ -675,7 +675,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     
     # valid_target_pool NOT empty?
     if len(valid_target_pool) == 0:
-        # AI_TURN.md STEP 6: EMPTY_TARGET_HANDLING
+        # STEP 6: EMPTY_TARGET_HANDLING
+        # Mark unit as active BEFORE returning (required for frontend to show advance icon)
+        game_state["active_shooting_unit"] = unit_id
+        
         # unit.CAN_ADVANCE = true?
         can_advance = unit.get("_can_advance", False)
         if can_advance:
@@ -687,8 +690,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 "unitId": unit_id,
                 "empty_target_pool": True,
                 "can_advance": True,
+                "allow_advance": True,  # Signal frontend to use advancePreview mode (no shooting preview)
                 "waiting_for_player": True,
-                "action": "empty_target_advance_available"
+                "action": "empty_target_advance_available",
+                "available_weapons": []  # Explicitly return empty array to prevent frontend from using stale weapons
             }
         else:
             # NO → unit.CAN_ADVANCE = false → No valid actions available
@@ -1327,7 +1332,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
             game_state["units_shot"] = set()
         game_state["units_shot"].add(unit["id"])
     elif arg3 == "ADVANCE":
-        # AI_TURN.md: Mark as units_advanced
+        # Mark as units_advanced
         if "units_advanced" not in game_state:
             game_state["units_advanced"] = set()
         game_state["units_advanced"].add(unit["id"])
@@ -1349,7 +1354,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
             # print(f"🔴 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {current_pool}")
     
     # Clean up unit activation state including position tracking
-    # AI_TURN.md: Only clean up if actually ending activation (arg5=1)
+    # Only clean up if actually ending activation (arg5=1)
     # If arg5=0 (NOT_REMOVED), we continue activation, so keep state intact
     if remove_from_pool == 1:
         if "valid_target_pool" in unit:
@@ -1373,7 +1378,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     else:
         pool_empty = len(game_state["shoot_activation_pool"]) == 0
     
-    # AI_TURN.md: Only return activation_ended response if actually ending (arg5=1)
+    # Only return activation_ended response if actually ending (arg5=1)
     # If arg5=0 (NOT_REMOVED), we continue activation, so return None or empty dict
     if remove_from_pool == 0:
         # NOT_REMOVED: This is just a log call, continue activation
@@ -1748,7 +1753,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if action_type == "activate_unit":
         result = shooting_unit_activation_start(game_state, unit_id)
         if result.get("success"):
-            # AI_TURN.md: Check if empty_target_pool with can_advance
+            # Check if empty_target_pool with can_advance
             if result.get("empty_target_pool") and result.get("can_advance"):
                 # STEP 6: EMPTY_TARGET_HANDLING - advance available
                 # Return to allow advance action selection
@@ -2838,7 +2843,7 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
 
 def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md: Check if unit has shot with ANY weapon (any weapon.shot = 1)
+    Check if unit has shot with ANY weapon (any weapon.shot = 1)
     Returns True if at least one weapon has shot flag set to 1
     """
     rng_weapons = unit.get("RNG_WEAPONS", [])
@@ -3171,6 +3176,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # valid_target_pool NOT empty AND CAN_SHOOT = true?
         if valid_target_pool and can_shoot:
             # YES → SHOOTING ACTIONS AVAILABLE (post-advance) → Go to STEP 5: ADVANCED_SHOOTING_ACTION_SELECTION
+            # Mark unit as currently active (required for frontend to show weapon icon)
+            game_state["active_shooting_unit"] = unit_id
             # Continue to shooting action selection (post-advance state)
             return _shooting_unit_execution_loop(game_state, unit_id, config)
         else:

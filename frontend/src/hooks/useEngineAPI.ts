@@ -1,5 +1,5 @@
 // frontend/src/hooks/useEngineAPI.ts
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { Unit, PlayerId, GameMode } from '../types';
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 import { getMeleeRange, getSelectedRangedWeapon } from '../utils/weaponHelpers';
@@ -97,9 +97,10 @@ interface APIGameState {
   active_alternating_activation_pool: string[];
   non_active_alternating_activation_pool: string[];
   fight_subphase: string | null;
-  // AI_TURN.md shooting phase state
+  active_movement_unit?: string;
   active_shooting_unit?: string;
-  pve_mode?: boolean; // Add PvE mode flag
+  active_fight_unit?: string;
+  pve_mode?: boolean;
 }
 
 export const useEngineAPI = () => {
@@ -133,7 +134,7 @@ export const useEngineAPI = () => {
 } | null>(null);
   
   // State for multi-unit HP bar blinking
-  const [blinkingUnits, setBlinkingUnits] = useState<{unitIds: number[], blinkTimer: number | null, blinkState: boolean}>({unitIds: [], blinkTimer: null, blinkState: false});
+  const [blinkingUnits, setBlinkingUnits] = useState<{unitIds: number[], blinkTimer: number | null}>({unitIds: [], blinkTimer: null});
   
   // State for failed charge roll display
   const [failedChargeRoll, setFailedChargeRoll] = useState<{unitId: number, roll: number, targetId?: number} | null>(null);
@@ -282,12 +283,6 @@ export const useEngineAPI = () => {
           [key: string]: unknown;
         }
         data.action_logs.forEach((logEntry: ActionLogEntry) => {
-          // console.log(`🎯 DETAILED BACKEND LOG: ${logEntry.message}`);
-
-          // Send detailed log to GameLog component via custom event
-          // AI_TURN.md: Handle both shooting (flat fields) and fight (shootDetails array) formats
-          // Fight handler sends shootDetails array, shooting handler sends flat fields
-          // Extract from shootDetails[0] if shootDetails exists (fight phase)
           const shootDetail = logEntry.shootDetails?.[0];
 
           window.dispatchEvent(new CustomEvent('backendLogEvent', {
@@ -365,7 +360,11 @@ export const useEngineAPI = () => {
           setSelectedUnitId(unitId);
           // Clear advance preview (destinations and mode) since advance is complete
           setAdvanceDestinations([]);
-          setMode("select");
+          // AI_TURN.md COMPLIANCE: Don't reset mode to "select" if unit can shoot after advance
+          // If blinking_units is present, unit has valid targets and can shoot - mode will be set to "attackPreview" by blinking_units handler
+          if (!data.result?.blinking_units || !data.result?.start_blinking) {
+            setMode("select");
+          }
         }
           
           // Debug: always log when we have activate_unit in shoot phase
@@ -423,7 +422,7 @@ export const useEngineAPI = () => {
             if (blinkingUnits.blinkTimer) {
               clearInterval(blinkingUnits.blinkTimer);
             }
-            setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+            setBlinkingUnits({unitIds: [], blinkTimer: null});
             
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
@@ -454,8 +453,6 @@ export const useEngineAPI = () => {
             setMode("select");
           }
 
-          setGameState(data.game_state);
-
           // Trigger auto-advance IMMEDIATELY if needed (BEFORE processing cleanup signals that might remove unit from pool)
           if (shouldAutoAdvance && autoAdvanceUnitId) {
             const unitId = parseInt(autoAdvanceUnitId);
@@ -475,47 +472,97 @@ export const useEngineAPI = () => {
           
           // Auto-display Python console logs in browser (only during actions)
           if (data.game_state?.console_logs && data.game_state.console_logs.length > 0) {
-            // DISABLED TO REDUCE FLOOD
-            // const newLogs = data.game_state.console_logs.filter((log: string) =>
-            //   !lastShownLogs.current.has(log)
-            // );
-            // if (newLogs.length > 0) {
-            //   newLogs.forEach((log: string) => {
-            //     console.log(`  ${log}`);
-            //     lastShownLogs.current.add(log);
-            //   });
-            // }
-            
-            // Clear logs from the data before setting state to prevent persistence
             data.game_state.console_logs = [];
           }
           
-          // Process blinking data from backend
+          // Process blinking data and available_weapons from backend
+          // Handle both cases: with and without empty_target_pool
+          
+          // STEP 1: Start blinking if blinking_units is present (regardless of empty_target_pool)
           if (data.result?.blinking_units && data.result?.start_blinking) {
-
-            // Clear any existing blinking timer
-            if (blinkingUnits.blinkTimer) {
-              clearInterval(blinkingUnits.blinkTimer);
+            // Only start blinking if not already started (avoid duplicate timers)
+            const newUnitIds = data.result.blinking_units.map((id: string) => parseInt(id));
+            const needsNewTimer = !blinkingUnits.blinkTimer || 
+              !blinkingUnits.unitIds.some(id => newUnitIds.includes(id));
+            
+              if (needsNewTimer) {
+                // Clear any existing blinking timer
+                if (blinkingUnits.blinkTimer) {
+                  clearInterval(blinkingUnits.blinkTimer);
+                }
+  
+                // Start blinking for all valid targets
+                // Note: Actual blinking animation is handled locally in UnitRenderer
+                // We only track which units should blink, not the blink state itself
+                const timer = window.setInterval(() => {
+                  // Empty interval - blinking is handled locally in UnitRenderer
+                  // This timer is kept for cleanup purposes only
+                }, 500);
+  
+                setBlinkingUnits({unitIds: newUnitIds, blinkTimer: timer});
+              console.log("💫 STARTED blinking for units:", newUnitIds);
+            } else {
+              console.log("💫 Blinking already active for units:", newUnitIds);
             }
+          } else if (data.result?.blinking_units && !data.result?.start_blinking) {
+            console.warn("💫 WARNING: blinking_units present but start_blinking is false");
+          }
+          
+          // STEP 2: Propagate available_weapons to unit in game_state (required for weapon icon)
+          // CRITICAL: This must happen BEFORE setGameState to ensure React detects the change
+          if (data.result?.available_weapons && Array.isArray(data.result.available_weapons)) {
+            // Check both data.game_state.active_shooting_unit AND data.result.unitId (fallback)
+            const activeUnitId = data.game_state.active_shooting_unit || data.result.unitId;
+            if (activeUnitId && data.game_state.units) {
+              const unitIndex = data.game_state.units.findIndex((u: { id: string | number }) => 
+                u.id.toString() === activeUnitId.toString()
+              );
+              if (unitIndex >= 0) {
+                // Create new array to ensure React detects the change
+                const updatedUnits = [...data.game_state.units];
+                updatedUnits[unitIndex] = {
+                  ...updatedUnits[unitIndex],
+                  available_weapons: data.result.available_weapons
+                };
+                data.game_state = {
+                  ...data.game_state,
+                  units: updatedUnits
+                };
+                console.log("🔫 PROPAGATED available_weapons to unit", activeUnitId, "weapons:", data.result.available_weapons.length);
+              } else {
+                console.warn("🔫 WARNING: Could not find unit", activeUnitId, "in game_state.units");
+              }
+            } else {
+              console.warn("🔫 WARNING: No active_shooting_unit or unitId in response", {
+                active_shooting_unit: data.game_state.active_shooting_unit,
+                unitId: data.result.unitId,
+                has_available_weapons: !!data.result.available_weapons
+              });
+            }
+          }
+          
+          // STEP 3: Set mode to attackPreview only if unit has valid targets (not empty_target_pool)
+          // This prevents shooting preview from showing when unit can only advance
+          // CRITICAL FIX: After advance move, blinking_units indicates valid targets are available
+          if (data.result?.blinking_units && data.result?.start_blinking) {
+            // If blinking_units is present and has elements, unit has valid targets
+            // blinking_units IS the list of valid target IDs, so if it exists and has length > 0, targets are available
+            const hasValidTargets = Array.isArray(data.result.blinking_units) && data.result.blinking_units.length > 0;
+            
+            if (hasValidTargets) {
+              // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode for shooting
+              // This prevents units from rendering at old positions from previous fight phases
+              setAttackPreview(null);
+              setMode("attackPreview");
 
-            // Start blinking for all valid targets
-            const unitIds = data.result.blinking_units.map((id: string) => parseInt(id));
-            const timer = window.setInterval(() => {
-              // Toggle blink state for visual effect
-              setBlinkingUnits(prev => ({
-                ...prev,
-                blinkState: !prev.blinkState
-              }));
-            }, 500);
-
-            setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
-            // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode for shooting
-            // This prevents units from rendering at old positions from previous fight phases
-            setAttackPreview(null);
-            setMode("attackPreview");
-
-            // Force component re-render to ensure props propagate
-            setSelectedUnitId(prevId => prevId);
+              // CRITICAL: Set selectedUnitId to active_shooting_unit or unitId from result
+              // This MUST happen BEFORE setGameState to ensure weapon icon appears
+              // active_shooting_unit is set by backend (shooting_handlers.py line 3180) after advance
+              const activeUnitId = data.game_state?.active_shooting_unit || data.result?.unitId;
+              if (activeUnitId) {
+                setSelectedUnitId(parseInt(activeUnitId));
+              }
+            }
           }
 
           setGameState(data.game_state);
@@ -546,14 +593,14 @@ export const useEngineAPI = () => {
           if (blinkingUnits.blinkTimer) {
             clearInterval(blinkingUnits.blinkTimer);
           }
-          setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+          setBlinkingUnits({unitIds: [], blinkTimer: null});
           setAdvanceDestinations(data.result.advance_destinations);
           setAdvanceRoll(data.result.advance_roll);
           setAdvancingUnitId(parseInt(data.result.unitId));
           setSelectedUnitId(parseInt(data.result.unitId));
           setMode("advancePreview" as GameMode);
         }
-        // AI_TURN.md: Handle charge activation response with valid destinations
+        // Handle charge activation response with valid destinations
         // MUST be after setGameState to prevent being overwritten
         else if (data.result?.valid_destinations && data.result?.waiting_for_player) {
           console.log("🎯 CHARGE ACTIVATION: Valid destinations received, switching to chargePreview mode");
@@ -589,7 +636,7 @@ export const useEngineAPI = () => {
             setFailedChargeRoll(null); // Clear after display
           }, 2000); // Show badge for 2 seconds
         }
-        // AI_TURN.md: Handle charge completion - reset to select mode
+        // Handle charge completion - reset to select mode
         // CRITICAL FIX: When phase_complete=true, backend has already transitioned to next phase
         // So we check activation_complete AND (current phase is charge OR phase just completed)
         else if (data.result?.activation_complete &&
@@ -609,7 +656,7 @@ export const useEngineAPI = () => {
           setSelectedUnitId(null);
           setMode("select");
         }
-        // AI_TURN.md: Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
+        // Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
         else if (data.game_state?.phase === "fight" && data.result?.waiting_for_player && data.result?.valid_targets) {
           console.log("✅ FIGHT CONDITION MATCHED - staying in attackPreview");
           console.log("🎯 FIGHT ATTACK: Unit still has attacks left, staying in attackPreview mode");
@@ -635,16 +682,16 @@ export const useEngineAPI = () => {
           // Start blinking for valid fight targets if not already blinking
           if (data.result.valid_targets.length > 0 && !blinkingUnits.blinkTimer) {
             const unitIds = data.result.valid_targets.map((id: string) => parseInt(id));
+            // Note: Actual blinking animation is handled locally in UnitRenderer
+            // We only track which units should blink, not the blink state itself
             const timer = window.setInterval(() => {
-              setBlinkingUnits(prev => ({
-                ...prev,
-                blinkState: !prev.blinkState
-              }));
+              // Empty interval - blinking is handled locally in UnitRenderer
+              // This timer is kept for cleanup purposes only
             }, 500);
-            setBlinkingUnits({unitIds, blinkTimer: timer, blinkState: false});
+            setBlinkingUnits({unitIds, blinkTimer: timer});
           }
         }
-        // AI_TURN.md: Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
+        // Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
         else if (data.game_state?.phase === "fight" && data.result?.activation_ended) {
           console.log("🎯 FIGHT COMPLETE: Activation ended, resetting to select mode");
           console.log("🔍 FIGHT POOLS AFTER ACTIVATION:", {
@@ -657,7 +704,7 @@ export const useEngineAPI = () => {
           if (blinkingUnits.blinkTimer) {
             clearInterval(blinkingUnits.blinkTimer);
           }
-          setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+          setBlinkingUnits({unitIds: [], blinkTimer: null});
           setAttackPreview(null);
           setSelectedUnitId(null);
           setMode("select");
@@ -672,7 +719,14 @@ export const useEngineAPI = () => {
           setSelectedUnitId(parseInt(data.game_state.active_shooting_unit));
           setAttackPreview(null);  // Clear stale attackPreview to prevent ghost rendering
           // Mode will be set by blinking_units handler (attackPreview) or allow_advance handler (advancePreview)
-          
+        } else {
+          setSelectedUnitId(null);
+        }
+        
+        // CRITICAL FIX: Propagate available_weapons independently of allow_advance condition
+        // This ensures weapon icons appear after advance when unit has ASSAULT weapon and LoS
+        // Must happen after setSelectedUnitId to ensure active_shooting_unit is set
+        if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
           // Propagate available_weapons from API response to unit if present
           // Update the unit in game_state before setGameState is called later
           if (data.result?.available_weapons && Array.isArray(data.result.available_weapons) && data.game_state.units) {
@@ -687,19 +741,17 @@ export const useEngineAPI = () => {
               };
             }
           }
-        } else {
-          setSelectedUnitId(null);
         }
       }
     } catch (err) {
       console.error('Action error:', err);
     }
-  }, [gameState, advanceWarningPopup, blinkingUnits.blinkTimer, targetPreview?.blinkTimer]);
+  }, [gameState, advanceWarningPopup, blinkingUnits.blinkTimer, blinkingUnits.unitIds, targetPreview?.blinkTimer]);
 
   // Convert API units to frontend format
   const convertUnits = useCallback((apiUnits: APIGameState['units']): Unit[] => {
     return apiUnits.map(unit => {
-      // AI_TURN.md: NEVER create defaults - raise errors for missing data
+      // NEVER create defaults - raise errors for missing data
       // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons arrays exist
       if (!unit.RNG_WEAPONS || !Array.isArray(unit.RNG_WEAPONS)) {
         throw new Error(`API ERROR: Unit ${unit.id} missing required RNG_WEAPONS array`);
@@ -774,14 +826,14 @@ export const useEngineAPI = () => {
     }
   }, []);
 
-  // AI_TURN.md: Backend-driven shooting phase management
+  // Backend-driven shooting phase management
   const handleShootingPhaseClick = useCallback(async (unitId: number, clickType: 'left' | 'right') => {
     if (!gameState) return;
     
     const clickTarget = determineClickTarget(unitId, gameState);
     const activeShooterId = gameState.active_shooting_unit;
     
-    // AI_TURN.md: Backend handles all context awareness
+    // Backend handles all context awareness
     const action = {
       action: clickType === 'left' ? 'left_click' : 'right_click',
       unitId: activeShooterId || selectedUnitId?.toString(),
@@ -802,8 +854,8 @@ export const useEngineAPI = () => {
       return;
     }
     
-    // AI_TURN.md: Shooting phase click handling
-    // AI_TURN.md: Shooting phase click handling
+    // Shooting phase click handling
+    // Shooting phase click handling
     if (gameState && gameState.phase === "shoot") {
       if (numericUnitId !== null) {
         if (!gameState.shoot_activation_pool) {
@@ -899,7 +951,7 @@ export const useEngineAPI = () => {
     setMode("select");
   }, []);
 
-  // AI_TURN.md: Backend handles all shooting logic - frontend just sends clicks
+  // Backend handles all shooting logic - frontend just sends clicks
   const handleShoot = useCallback(async (_shooterId: number | string, targetId: number | string) => {
     // Convert to left_click action that backend understands
     await handleShootingPhaseClick(typeof targetId === 'string' ? parseInt(targetId) : targetId, 'left');
@@ -917,7 +969,7 @@ export const useEngineAPI = () => {
     }
   }, [handleRightClick, executeAction]);
 
-  // AI_TURN.md: Charge activation - sends left_click to trigger 2d6 roll and destination building
+  // Charge activation - sends left_click to trigger 2d6 roll and destination building
   const handleActivateCharge = useCallback(async (chargerId: number | string) => {
     console.log("🎯 handleActivateCharge called with chargerId:", chargerId);
     const numericChargerId = typeof chargerId === 'string' ? parseInt(chargerId) : chargerId;
@@ -939,7 +991,7 @@ export const useEngineAPI = () => {
     console.log("🎯 executeAction completed");
   }, [executeAction]);
 
-  // AI_TURN.md: Fight activation - sends activate_unit to activate unit and get valid targets
+  // Fight activation - sends activate_unit to activate unit and get valid targets
   const handleActivateFight = useCallback(async (fighterId: number | string) => {
     const numericFighterId = typeof fighterId === 'string' ? parseInt(fighterId) : fighterId;
 
@@ -971,7 +1023,7 @@ export const useEngineAPI = () => {
     if (blinkingUnits.blinkTimer) {
       clearInterval(blinkingUnits.blinkTimer);
     }
-    setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+    setBlinkingUnits({unitIds: [], blinkTimer: null});
     // Change mode immediately to prevent shooting preview from showing
     setMode("select");
     
@@ -1041,7 +1093,7 @@ export const useEngineAPI = () => {
     if (blinkingUnits.blinkTimer) {
       clearInterval(blinkingUnits.blinkTimer);
     }
-    setBlinkingUnits({unitIds: [], blinkTimer: null, blinkState: false});
+    setBlinkingUnits({unitIds: [], blinkTimer: null});
     setMode("select");
     
     // Send advance action to backend to trigger 1D6 roll and get destinations
@@ -1107,7 +1159,7 @@ export const useEngineAPI = () => {
   }, [executeAction]);
 
   const handleFightAttack = useCallback(async (attackerId: number | string, targetId: number | string | null) => {
-    // AI_TURN.md: Fight action - send fight action to backend
+    // Fight action - send fight action to backend
     if (targetId === null) {
       console.warn("🟠 Fight attack called with null target");
       return;
@@ -1127,7 +1179,7 @@ export const useEngineAPI = () => {
     console.log("🎯 handleMoveCharger called with:", { chargerId, destCol, destRow });
     const numericChargerId = typeof chargerId === 'string' ? parseInt(chargerId) : chargerId;
 
-    // AI_TURN.md: Find target enemy adjacent to destination
+    // Find target enemy adjacent to destination
     if (!gameState) return;
 
     const charger = gameState.units.find(u => parseInt(u.id) === numericChargerId);
@@ -1148,7 +1200,7 @@ export const useEngineAPI = () => {
     for (const enemy of enemies) {
       const enemyCube = offsetToCube(enemy.col, enemy.row);
       const distance = cubeDistance(destCube, enemyCube);
-      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use getMeleeRange() (always 1)
+      // Use getMeleeRange() (always 1)
       if (distance <= getMeleeRange()) {
         targetEnemy = enemy;
         break; // Use first adjacent enemy
@@ -1162,7 +1214,7 @@ export const useEngineAPI = () => {
 
     console.log("🎯 Target enemy found:", targetEnemy.id);
 
-    // AI_TURN.md: Send charge action with correct field names
+    // Send charge action with correct field names
     await executeAction({
       action: "charge",
       unitId: numericChargerId.toString(),
@@ -1202,7 +1254,7 @@ export const useEngineAPI = () => {
     let potentialDamage = 0;
     
     if (shooter && target) {
-      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get selected ranged weapon
+      // Get selected ranged weapon
       // Convert shooter to proper Unit type (id as number, player as PlayerId)
       const shooterUnit: Unit = {
         ...shooter,
@@ -1307,7 +1359,7 @@ export const useEngineAPI = () => {
       const eligible = gameState.charge_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
       return eligible;
     } else if (gameState.phase === 'fight') {
-      // AI_TURN.md COMPLIANCE: Fight phase has sub-phases - only show units from current sub-phase
+      // Fight phase has sub-phases - only show units from current sub-phase
       const subphase = gameState.fight_subphase;
 
       if (subphase === 'charging') {
@@ -1358,66 +1410,159 @@ export const useEngineAPI = () => {
     throw new Error(`API ERROR: ${error}`);
   }
   
+  // Memoize blinkingUnits.unitIds to prevent re-renders when only blinkState changes
+  // Compare by content (string) to avoid re-renders when only blinkState toggles
+  const blinkingUnitsIds = useMemo(() => {
+    // Return sorted copy to ensure stable reference when content is same
+    return [...blinkingUnits.unitIds].sort((a, b) => a - b);
+  }, [blinkingUnits.unitIds]);
+  
+  // Memoize isBlinkingActive to prevent re-renders when only blinkState toggles
+  const isBlinkingActiveMemo = useMemo(() => {
+    return blinkingUnits.blinkTimer !== null;
+  }, [blinkingUnits.blinkTimer]);
+  
+  // Memoize units conversion to prevent unnecessary re-renders
+  const memoizedUnits = useMemo(() => {
+    return convertUnits(gameState?.units || []);
+  }, [gameState?.units, convertUnits]);
+  
+  // Memoize derived arrays to prevent unnecessary re-renders
+  const memoizedUnitsMoved = useMemo(() => {
+    return gameState?.units_moved ? gameState.units_moved.map(id => parseInt(id)) : [];
+  }, [gameState?.units_moved]);
+  
+  const memoizedUnitsCharged = useMemo(() => {
+    return gameState?.units_charged ? gameState.units_charged.map(id => parseInt(id)) : [];
+  }, [gameState?.units_charged]);
+  
+  const memoizedUnitsAttacked = useMemo(() => {
+    return gameState?.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : [];
+  }, [gameState?.units_attacked]);
+  
+  const memoizedUnitsFled = useMemo(() => {
+    return gameState?.units_fled ? gameState.units_fled.map(id => parseInt(id)) : [];
+  }, [gameState?.units_fled]);
+  
+  const memoizedUnitsAdvanced = useMemo(() => {
+    return gameState?.units_advanced ? gameState.units_advanced.map(id => parseInt(id)) : [];
+  }, [gameState?.units_advanced]);
+  
+  // Memoize inline callbacks to prevent re-renders
+  const onStartAttackPreviewMemo = useCallback((unitId: number) => {
+    setSelectedUnitId(typeof unitId === 'string' ? parseInt(unitId) : unitId);
+    setAttackPreview(null);
+    setMode("attackPreview");
+  }, []);
+  
+  const emptyCallback = useCallback(() => {}, []);
+  const getAdvanceDestinationsMemo = useCallback(() => advanceDestinations, [advanceDestinations]);
+  
+  // Memoize gameState to prevent re-renders when content hasn't changed
+  const memoizedGameState = useMemo(() => {
+    if (!gameState) return null;
+    return {
+      episode_steps: gameState.episode_steps,
+      units: memoizedUnits,
+      currentPlayer: gameState.current_player as PlayerId,
+      phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
+      mode,
+      selectedUnitId,
+      unitsMoved: memoizedUnitsMoved,
+      unitsCharged: memoizedUnitsCharged,
+      unitsAttacked: memoizedUnitsAttacked,
+      unitsFled: memoizedUnitsFled,
+      unitsAdvanced: memoizedUnitsAdvanced,
+      targetPreview: null,
+      currentTurn: gameState.turn,
+      maxTurns: maxTurnsFromConfig,
+      unitChargeRolls: {},
+      pve_mode: gameState.pve_mode,
+      move_activation_pool: gameState.move_activation_pool,
+      shoot_activation_pool: gameState.shoot_activation_pool,
+      charge_activation_pool: gameState.charge_activation_pool,
+      fight_subphase: gameState.fight_subphase as "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null | undefined,
+      charging_activation_pool: gameState.charging_activation_pool,
+      active_alternating_activation_pool: gameState.active_alternating_activation_pool,
+      non_active_alternating_activation_pool: gameState.non_active_alternating_activation_pool,
+      active_movement_unit: gameState.active_movement_unit,
+      active_shooting_unit: gameState.active_shooting_unit,
+      active_fight_unit: gameState.active_fight_unit,
+    };
+  }, [
+    gameState,
+    memoizedUnits,
+    mode,
+    selectedUnitId,
+    memoizedUnitsMoved,
+    memoizedUnitsCharged,
+    memoizedUnitsAttacked,
+    memoizedUnitsFled,
+    memoizedUnitsAdvanced,
+    maxTurnsFromConfig
+  ]);
+  
   if (loading || !gameState) {
     return {
-      loading: true,
-      error: null,
-      units: [],
-      selectedUnitId: null,
-      eligibleUnitIds: [],
-      mode: "select" as const,
-      movePreview: null,
-      attackPreview: null,
-      targetPreview: null,
-      currentPlayer: null,
-      maxTurns: null,
-      unitsMoved: [],
-      unitsCharged: [],
-      unitsAttacked: [],
-      unitsFled: [],
-      phase: null,
-      gameState: null,
-      onSelectUnit: () => {},
-      onSkipUnit: () => {},
-      onStartMovePreview: () => {},
-      onDirectMove: () => {},
-      onStartAttackPreview: () => {},
-      onConfirmMove: () => {},
-      onCancelMove: () => {},
-      onCancelAdvance: () => {},
-      onAdvanceMove: async () => {},
-      onShoot: () => {},
-      onSkipShoot: () => {},
-      onStartTargetPreview: () => {},
-      onFightAttack: () => {},
-      onActivateFight: () => {},
-      onCharge: () => {},
-      onActivateCharge: () => {},
-      onMoveCharger: () => {},
-      onCancelCharge: () => {},
-      onValidateCharge: () => {},
-      onLogChargeRoll: () => {},
-      getChargeDestinations: () => [],
-      onAdvance: async () => {},
-      getAdvanceDestinations: () => [],
-      advancingUnitId: null,
-      advanceRoll: null,
-      advanceWarningPopup: null,
-      onConfirmAdvanceWarning: async () => {},
-      onCancelAdvanceWarning: () => {},
-      onSkipAdvanceWarning: async () => {},
-      blinkingUnits: [],
-      isBlinkingActive: false,
-      blinkState: false,
-      fightSubPhase: null,
-      executeAITurn: async () => {}, // Add missing executeAITurn function
-    };
-  }
-
-  const returnObject = {
-    loading: false,
+        loading: true,
+        error: null,
+        units: [],
+        selectedUnitId: null,
+        eligibleUnitIds: [],
+        mode: "select" as const,
+        movePreview: null,
+        attackPreview: null,
+        targetPreview: null,
+        currentPlayer: null,
+        maxTurns: null,
+        unitsMoved: [],
+        unitsCharged: [],
+        unitsAttacked: [],
+        unitsFled: [],
+        phase: null,
+        gameState: null,
+        onSelectUnit: () => {},
+        onSkipUnit: () => {},
+        onStartMovePreview: () => {},
+        onDirectMove: () => {},
+        onStartAttackPreview: () => {},
+        onConfirmMove: () => {},
+        onCancelMove: () => {},
+        onCancelAdvance: () => {},
+        onAdvanceMove: async () => {},
+        onShoot: () => {},
+        onSkipShoot: () => {},
+        onStartTargetPreview: () => {},
+        onFightAttack: () => {},
+        onActivateFight: () => {},
+        onCharge: () => {},
+        onActivateCharge: () => {},
+        onMoveCharger: () => {},
+        onCancelCharge: () => {},
+        onValidateCharge: () => {},
+        onLogChargeRoll: () => {},
+        getChargeDestinations: () => [],
+        onAdvance: async () => {},
+        getAdvanceDestinations: () => [],
+        advancingUnitId: null,
+        advanceRoll: null,
+        advanceWarningPopup: null,
+        onConfirmAdvanceWarning: async () => {},
+        onCancelAdvanceWarning: () => {},
+        onSkipAdvanceWarning: async () => {},
+        blinkingUnits: [],
+        isBlinkingActive: false,
+        // blinkState removed - blinking is handled locally in UnitRenderer
+        fightSubPhase: null,
+        executeAITurn: async () => {},
+      };
+    }
+  
+    // Normal case
+    const returnObject = {
+      loading: false,
     error: null,
-    units: convertUnits(gameState.units),
+    units: memoizedUnits,
     selectedUnitId,
     eligibleUnitIds: getEligibleUnitIds(),
     mode,
@@ -1426,52 +1571,19 @@ export const useEngineAPI = () => {
     targetPreview,
     currentPlayer: gameState.current_player as PlayerId,
     maxTurns: maxTurnsFromConfig,
-    unitsMoved: gameState.units_moved ? gameState.units_moved.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_moved array'); })(),
-    unitsCharged: gameState.units_charged ? gameState.units_charged.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_charged array'); })(),
-    unitsAttacked: gameState.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_attacked array'); })(),
-    unitsFled: gameState.units_fled ? gameState.units_fled.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_fled array'); })(),
+    unitsMoved: memoizedUnitsMoved,
+    unitsCharged: memoizedUnitsCharged,
+    unitsAttacked: memoizedUnitsAttacked,
+    unitsFled: memoizedUnitsFled,
     phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
-    // AI_TURN.md COMPLIANCE: Expose fight_subphase for UnitRenderer click handling
+    // Expose fight_subphase for UnitRenderer click handling
     fightSubPhase: gameState.fight_subphase as "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null,
-    gameState: {
-      episode_steps: gameState.episode_steps,
-      units: convertUnits(gameState.units),
-      currentPlayer: gameState.current_player as PlayerId,
-      phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
-      mode,
-      selectedUnitId,
-      unitsMoved: gameState.units_moved ? gameState.units_moved.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_moved array in gameState'); })(),
-      unitsCharged: gameState.units_charged ? gameState.units_charged.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_charged array in gameState'); })(),
-      unitsAttacked: gameState.units_attacked ? gameState.units_attacked.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_attacked array in gameState'); })(),
-      unitsFled: gameState.units_fled ? gameState.units_fled.map(id => parseInt(id)) : (() => { throw new Error('API ERROR: Missing required units_fled array in gameState'); })(),
-      targetPreview: null,
-      currentTurn: gameState.turn,
-      maxTurns: maxTurnsFromConfig,
-      unitChargeRolls: {},
-      pve_mode: gameState.pve_mode, // Add PvE mode flag
-      // Phase activation pools (AI_TURN.md)
-      move_activation_pool: gameState.move_activation_pool,
-      shoot_activation_pool: gameState.shoot_activation_pool,
-      charge_activation_pool: gameState.charge_activation_pool,
-      // Fight phase pools (AI_TURN.md)
-      fight_subphase: gameState.fight_subphase as "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null | undefined,
-      charging_activation_pool: gameState.charging_activation_pool,
-      active_alternating_activation_pool: gameState.active_alternating_activation_pool,
-      non_active_alternating_activation_pool: gameState.non_active_alternating_activation_pool,
-    },
+    gameState: memoizedGameState,
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
     onStartMovePreview: handleStartMovePreview,
-    onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
-      return handleDirectMove(unitId, col, row);
-    },
-    onStartAttackPreview: (unitId: number) => {
-      setSelectedUnitId(typeof unitId === 'string' ? parseInt(unitId) : unitId);
-      // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode
-      // This prevents units from rendering at old positions from previous fight phases
-      setAttackPreview(null);
-      setMode("attackPreview");
-    },
+    onDirectMove: handleDirectMove,
+    onStartAttackPreview: onStartAttackPreviewMemo,
     onConfirmMove: handleConfirmMove,
     onCancelMove: handleCancelMove,
     onShoot: handleShoot,
@@ -1479,16 +1591,16 @@ export const useEngineAPI = () => {
     onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: handleFightAttack,
     onActivateFight: handleActivateFight,
-    onCharge: () => {},
+    onCharge: emptyCallback,
     onActivateCharge: handleActivateCharge,
     onMoveCharger: handleMoveCharger,
     onAdvanceMove: handleAdvanceMove,
-    onCancelCharge: () => {},
-    onValidateCharge: () => {},
-    onLogChargeRoll: () => {},
+    onCancelCharge: emptyCallback,
+    onValidateCharge: emptyCallback,
+    onLogChargeRoll: emptyCallback,
     getChargeDestinations,
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler
-    getAdvanceDestinations: () => advanceDestinations,
+    getAdvanceDestinations: getAdvanceDestinationsMemo,
     advancingUnitId,
     advanceRoll,
     onAdvance: handleAdvance,
@@ -1498,9 +1610,9 @@ export const useEngineAPI = () => {
     onCancelAdvanceWarning: handleCancelAdvanceWarning,
     onSkipAdvanceWarning: handleSkipAdvanceWarning,
     // Export blinking state for HP bar components
-    blinkingUnits: blinkingUnits.unitIds,
-    isBlinkingActive: blinkingUnits.blinkTimer !== null,
-    blinkState: blinkingUnits.blinkState,
+    blinkingUnits: blinkingUnitsIds,
+    isBlinkingActive: isBlinkingActiveMemo,
+    // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display
     chargingUnitId: failedChargeRoll ? failedChargeRoll.unitId : null,
     chargeRoll: failedChargeRoll ? failedChargeRoll.roll : null,
@@ -1610,7 +1722,7 @@ export const useEngineAPI = () => {
         }).length;
         console.log(`🔍 [FRONTEND] Charge phase AI eligible count: ${eligibleAICount} from pool size ${gameState.charge_activation_pool.length}`);
       } else if (phaseCheck === 'fight') {
-        // AI_TURN.md: Fight phase has 3 sub-phases with different pools
+        // Fight phase has 3 sub-phases with different pools
         const fightSubphase = gameState.fight_subphase;
         console.log(`🔍 [FRONTEND] Fight phase detected: fight_subphase=${fightSubphase}`);
         
@@ -2175,6 +2287,6 @@ export const useEngineAPI = () => {
       }
     },
   };
-  
+
   return returnObject;
 };

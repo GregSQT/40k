@@ -46,7 +46,7 @@ interface UseGameStateReturn {
 }
 
 export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
-  // AI_TURN.md: Single source of truth - one game_state object
+  // Single source of truth - one game_state object
   const [gameState, setGameState] = useState<GameState>({
     units: [],
     currentPlayer: 0,
@@ -58,7 +58,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     unitsCharged: [],
     unitsAttacked: [],
     unitsFled: [],
-    episode_steps: 0, // AI_TURN.md: Built-in step counting
+    episode_steps: 0, // Built-in step counting
     fightSubPhase: undefined,
     fightActivePlayer: undefined,
     targetPreview: null
@@ -113,7 +113,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   });
   const [chargeRollPopup] = useState<ChargeRollPopup | null>(null);
 
-  // AI_TURN.md: Update unit with UPPERCASE field validation
+  // Update unit with UPPERCASE field validation
   const updateUnit = useCallback((unitId: UnitId, updates: Partial<Unit>) => {
     setGameState(prev => ({
       ...prev,
@@ -130,7 +130,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     }));
   }, []);
 
-  // AI_TURN.md: Initialize shooting phase with UPPERCASE field validation
+  // Initialize shooting phase with UPPERCASE field validation
   const initializeShootingPhase = useCallback(() => {
     setGameState(prev => ({
       ...prev,
@@ -150,7 +150,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     }));
   }, []);
 
-  // AI_TURN.md: Initialize fight phase with UPPERCASE field validation
+  // Initialize fight phase with UPPERCASE field validation
   const initializeFightPhase = useCallback(() => {
     setGameState(prev => ({
       ...prev,
@@ -218,7 +218,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     setGameState(prev => ({ ...prev, fightActivePlayer: player }));
   }, []);
 
-  // AI_TURN.md: Tracking set management (sequential activation)
+  // Tracking set management (sequential activation)
   const addMovedUnit = useCallback((unitId: UnitId) => {
     setGameState(prev => ({
       ...prev,

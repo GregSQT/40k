@@ -75,19 +75,19 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     for unit in game_state["units"]:
-        # AI_TURN.md: "unit.HP_CUR > 0?"
+        # "unit.HP_CUR > 0?"
         if unit["HP_CUR"] <= 0:
             continue  # Dead unit (Skip, no log)
 
-        # AI_TURN.md: "unit.player === current_player?"
+        # "unit.player === current_player?"
         if unit["player"] != current_player:
             continue  # Wrong player (Skip, no log)
 
-        # AI_TURN.md: "unit.id not in units_moved?"
+        # "unit.id not in units_moved?"
         if unit["id"] in game_state["units_moved"]:
             continue  # Already moved (Skip, no log)
 
-        # AI_TURN.md: Unit passes all conditions
+        # Unit passes all conditions
         eligible_units.append(unit["id"])
 
     return eligible_units
@@ -392,7 +392,7 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
             other_unit["row"] == row):
             return False
 
-    # AI_TURN.md: Cannot move TO hexes adjacent to enemies
+    # Cannot move TO hexes adjacent to enemies
     if _is_hex_adjacent_to_enemy(game_state, col, row, unit["player"], enemy_adjacent_hexes):
         return False
 
@@ -526,7 +526,7 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
     """
     Check if a hex can be traversed (moved through) during pathfinding.
 
-    AI_TURN.md: A hex is traversable if it's:
+    A hex is traversable if it's:
     - Within board bounds
     - NOT a wall
     - NOT occupied by another unit
@@ -565,7 +565,7 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
 
 def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str) -> List[Tuple[int, int]]:
     """
-    AI_TURN.md: Build valid movement destinations using BFS pathfinding.
+    Build valid movement destinations using BFS pathfinding.
 
     CRITICAL FIX: Uses BFS to find REACHABLE hexes, not just hexes within distance.
     This prevents movement through walls (AI_TURN.md compliance).
@@ -688,7 +688,7 @@ def _select_strategic_destination(
     from engine.combat_utils import has_line_of_sight
     from engine.utils.weapon_helpers import get_max_ranged_range
 
-    # AI_TURN.md: Direct field access with validation
+    # Direct field access with validation
     if "units" not in game_state:
         raise KeyError("game_state missing required 'units' field")
     if "col" not in unit or "row" not in unit:

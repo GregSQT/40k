@@ -58,7 +58,7 @@ class ModelEvaluator:
             truncated = False
             
             while not (terminated or truncated):
-                # AI_TURN.md: Sequential activation - one action per step
+                # Sequential activation - one action per step
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
                 

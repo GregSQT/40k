@@ -158,17 +158,13 @@ export interface GameState {
   game_over?: boolean;
   winner?: number | null;
   
-  // AI_TURN.md tracking sets
-  units_moved?: string[]; // Engine format
-  unitsMoved?: UnitId[]; // Frontend format
-  units_fled?: string[];
+  // AI_TURN.md tracking sets (Frontend format - converted from Engine string[] to UnitId[])
+  unitsMoved?: UnitId[];
   unitsFled?: UnitId[];
-  units_shot?: string[];
-  units_charged?: string[];
+  units_shot?: string[]; // Not used in frontend, kept for compatibility
   unitsCharged?: UnitId[];
-  units_attacked?: string[];
   unitsAttacked?: UnitId[];
-  units_advanced?: string[]; // Units that have advanced this turn
+  unitsAdvanced?: UnitId[];
   
   // Engine specific
   move_activation_pool?: string[];
@@ -192,6 +188,7 @@ export interface GameState {
   fightActivePlayer?: PlayerId;
   unitChargeRolls?: Record<UnitId, number>;
   pve_mode?: boolean; // Add PvE mode flag
+  active_movement_unit?: string; // Active unit ID in movement phase
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
 }

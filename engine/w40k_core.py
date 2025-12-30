@@ -920,7 +920,7 @@ class W40KEngine(gym.Env):
                         )
 
         # Log to replay_logger for replay file generation (independent of step_logger)
-        # AI_TURN.md: Log action for replay/debugging
+        # Log action for replay/debugging
         if hasattr(self, 'replay_logger') and self.replay_logger and success:
             # Get action_type and unit_id using same logic as step_logger
             action_type = result.get("action") if isinstance(result, dict) else None
@@ -1242,7 +1242,7 @@ class W40KEngine(gym.Env):
         else:
             return False, {"error": "invalid_phase", "phase": current_phase}
 
-        # AI_TURN.md: Auto-advance to next phase when current phase completes
+        # Auto-advance to next phase when current phase completes
         # Loop to handle cascading empty phases (e.g., charge → fight → move if all empty)
         max_cascade = 10  # Prevent infinite loops
         cascade_count = 0

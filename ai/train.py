@@ -228,7 +228,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # Use same pattern as evaluate.py for working icon movement
             base_env.is_evaluation_mode = True
             base_env._force_evaluation_mode = True
-            # AI_TURN.md: Direct integration without wrapper
+            # Direct integration without wrapper
             base_env = GameReplayIntegration.enhance_training_env(base_env)
             if hasattr(base_env, 'replay_logger') and base_env.replay_logger:
                 base_env.replay_logger.is_evaluation_mode = True

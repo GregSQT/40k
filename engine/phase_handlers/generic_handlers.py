@@ -117,7 +117,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             game_state["charge_activation_pool"].remove(unit_id)
             response["removed_from_charge_pool"] = True
     elif arg4 == "FIGHT":
-        # AI_TURN.md: Fight phase has 3 sub-phase pools - check all 3
+        # Fight phase has 3 sub-phase pools - check all 3
         # Units can only be in ONE pool at a time (verified via AI_TURN.md lines 717-718, 730-731)
         removed = False
 
@@ -202,7 +202,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         else:
             pool_empty = len(game_state["charge_activation_pool"]) == 0
     elif current_phase == "fight":
-        # AI_TURN.md: Fight phase complete when ALL 3 pools empty
+        # Fight phase complete when ALL 3 pools empty
         if "charging_activation_pool" not in game_state:
             charging_empty = True
         else:

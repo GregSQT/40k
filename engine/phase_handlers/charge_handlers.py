@@ -13,12 +13,12 @@ from .generic_handlers import end_activation
 
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    AI_TURN.md: Initialize charge phase and build activation pool
+    Initialize charge phase and build activation pool
     """
     # Set phase
     game_state["phase"] = "charge"
 
-    # AI_TURN.md: Tracking sets are NOT cleared at charge phase start
+    # Tracking sets are NOT cleared at charge phase start
     # They persist from movement phase (units_fled, units_moved, units_shot remain)
 
     # Clear charge preview state
@@ -48,7 +48,7 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 def charge_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
-    AI_TURN.md: Build charge activation pool with eligibility checks
+    Build charge activation pool with eligibility checks
     """
     eligible_units = get_eligible_units(game_state)
     game_state["charge_activation_pool"] = eligible_units
@@ -73,23 +73,23 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     for unit in game_state["units"]:
-        # AI_TURN.md: "unit.HP_CUR > 0?"
+        # "unit.HP_CUR > 0?"
         if unit["HP_CUR"] <= 0:
             continue  # Dead unit
 
-        # AI_TURN.md: "unit.player === current_player?"
+        # "unit.player === current_player?"
         if unit["player"] != current_player:
             continue  # Wrong player
 
-        # AI_TURN.md: "unit.id not in units_charged?"
+        # "unit.id not in units_charged?"
         if unit["id"] in game_state["units_charged"]:
             continue  # Already charged
 
-        # AI_TURN.md: "NOT adjacent to enemy?"
+        # "NOT adjacent to enemy?"
         if _is_adjacent_to_enemy(game_state, unit):
             continue  # Already in melee, cannot charge
 
-        # AI_TURN.md: "NOT in units_fled?"
+        # "NOT in units_fled?"
         if unit["id"] in game_state["units_fled"]:
             continue  # Fled units cannot charge
 
@@ -97,12 +97,12 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if unit["id"] in game_state.get("units_advanced", set()):
             continue  # Advanced units cannot charge
 
-        # AI_TURN.md: "Has valid charge target?"
+        # "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)
         if not _has_valid_charge_target(game_state, unit):
             continue  # No valid charge targets
 
-        # AI_TURN.md: Unit passes all conditions
+        # Unit passes all conditions
         eligible_units.append(unit["id"])
 
     return eligible_units
@@ -110,7 +110,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
 
 def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Charge phase handler action routing with complete autonomy
+    Charge phase handler action routing with complete autonomy
     """
 
     # Handler self-initialization on first action
@@ -181,7 +181,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         active_charge_unit_exists = bool(game_state["active_charge_unit"])
 
     if not active_charge_unit_exists and action_type in ["charge", "left_click"]:
-        # AI_TURN.md: Both gym and human players need activation result
+        # Both gym and human players need activation result
         # Returns charge roll, valid destinations, and preview state
         return _handle_unit_activation(game_state, active_unit, config)
 
@@ -223,7 +223,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # Clear preview first
             charge_clear_preview(game_state)
 
-            # AI_TURN.md: Invalid action during charge phase
+            # Invalid action during charge phase
             result = end_activation(
                 game_state, active_unit,
                 "SKIP",        # Arg1: Skip logging
@@ -242,7 +242,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
 
 def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """AI_TURN.md: Charge unit activation start + execution loop"""
+    """Charge unit activation start + execution loop"""
     # Unit activation start
     charge_unit_activation_start(game_state, unit["id"])
 
@@ -438,7 +438,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     unit["col"] = dest_col
     unit["row"] = dest_row
 
-    # AI_TURN.md: Mark as units_charged (NOT units_moved)
+    # Mark as units_charged (NOT units_moved)
     game_state["units_charged"].add(unit["id"])
 
     # Clear charge roll after use
@@ -488,7 +488,7 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
             other_unit["row"] == row):
             return False
 
-    # AI_TURN.md: MUST be adjacent to target enemy
+    # MUST be adjacent to target enemy
     target = _get_unit_by_id(game_state, target_id)
     if not target:
         return False
@@ -502,7 +502,7 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     if distance_to_target > melee_range:
         return False  # Not adjacent to target
 
-    # AI_TURN.md: Must be reachable within charge_range via pathfinding
+    # Must be reachable within charge_range via pathfinding
     # This is validated by charge_build_valid_destinations_pool
     # If destination is in valid pool, it's reachable
     return True
@@ -510,7 +510,7 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
 
 def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md: Check if unit has at least one valid charge target.
+    Check if unit has at least one valid charge target.
 
     AI_TURN.md Line 495: "Enemies exist within charge_max_distance hexes?"
     AI_TURN.md Line 562: "Enemy units within charge_max_distance hexes (via pathfinding)"
@@ -712,7 +712,7 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
     """
     Check if a hex can be traversed (moved through) during pathfinding.
 
-    AI_TURN.md: A hex is traversable if it's:
+    A hex is traversable if it's:
     - Within board bounds
     - NOT a wall
     - NOT occupied by another unit
@@ -751,7 +751,7 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
 
 def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int) -> List[Tuple[int, int]]:
     """
-    AI_TURN.md: Build valid charge destinations using BFS pathfinding.
+    Build valid charge destinations using BFS pathfinding.
 
     CRITICAL: Charge destinations must:
     - Be reachable within charge_roll distance (2d6) via BFS
@@ -810,7 +810,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             # Mark as visited
             visited[neighbor_pos] = neighbor_dist
 
-            # AI_TURN.md: Check if this hex is adjacent to any enemy
+            # Check if this hex is adjacent to any enemy
             is_adjacent_to_enemy = False
             from engine.utils.weapon_helpers import get_melee_range
             melee_range = get_melee_range()  # Always 1
@@ -884,7 +884,7 @@ def _select_strategic_destination(
     """
     from engine.combat_utils import has_line_of_sight
 
-    # AI_TURN.md: Direct field access with validation
+    # Direct field access with validation
     if "units" not in game_state:
         raise KeyError("game_state missing required 'units' field")
     if "col" not in unit or "row" not in unit:
@@ -975,7 +975,7 @@ def _select_strategic_destination(
 
 
 def charge_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:
-    """AI_TURN.md: Generate preview data for green hexes (charge destinations)"""
+    """Generate preview data for green hexes (charge destinations)"""
     return {
         "green_hexes": valid_destinations,
         "show_preview": True
@@ -983,10 +983,10 @@ def charge_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:
 
 
 def charge_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """AI_TURN.md: Clear charge preview"""
+    """Clear charge preview"""
     game_state["preview_hexes"] = []
     game_state["valid_charge_destinations_pool"] = []
-    # AI_TURN.md: Clear active_charge_unit to allow next unit activation
+    # Clear active_charge_unit to allow next unit activation
     game_state["active_charge_unit"] = None
     return {
         "show_preview": False,
@@ -995,7 +995,7 @@ def charge_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """AI_TURN.md: Route charge click actions"""
+    """Route charge click actions"""
     # AI_TURN.md COMPLIANCE: Direct field access
     if "clickTarget" not in action:
         click_target = "elsewhere"
@@ -1230,7 +1230,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         "activation_complete": True
     })
 
-    # AI_TURN.md: Check if pool is now empty after removing this unit
+    # Check if pool is now empty after removing this unit
     if not game_state["charge_activation_pool"]:
         # Pool empty - phase complete
         phase_end_result = charge_phase_end(game_state)
@@ -1241,7 +1241,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
 def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md: Simplified flee detection (distance <= 1, no CC_RNG)
+    Simplified flee detection (distance <= 1, no CC_RNG)
 
     CRITICAL: Uses proper hex distance, not Chebyshev distance.
     Hexagonal grids require hex distance calculation for accurate adjacency.
@@ -1257,7 +1257,7 @@ def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any
 
 def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_valid_destinations: bool = True) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Handle skip action during charge phase
+    Handle skip action during charge phase
 
     Two cases per AI_TURN.md:
     - Line 515: Valid destinations exist, agent chooses wait → end_activation (WAIT, 1, PASS, CHARGE)
@@ -1297,7 +1297,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
         "activation_complete": True
     })
 
-    # AI_TURN.md: Check if pool is now empty after removing this unit
+    # Check if pool is now empty after removing this unit
     if not game_state["charge_activation_pool"]:
         # Pool empty - phase complete
         phase_end_result = charge_phase_end(game_state)
@@ -1307,7 +1307,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
 
 
 def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """AI_TURN.md: Clean up and end charge phase"""
+    """Clean up and end charge phase"""
     charge_clear_preview(game_state)
 
     # Clear all charge rolls (phase complete)

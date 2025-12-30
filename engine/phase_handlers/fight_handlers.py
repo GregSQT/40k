@@ -21,7 +21,7 @@ shooting_build_activation_pool = shooting_handlers.shooting_build_activation_poo
 
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    AI_TURN.md: Initialize fight phase and build activation pools.
+    Initialize fight phase and build activation pools.
 
     CRITICAL: Fight phase has THREE sub-phases:
     1. Charging units (units in units_charged) attack first
@@ -31,7 +31,7 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Set phase
     game_state["phase"] = "fight"
 
-    # AI_TURN.md: Build ALL fight pools (charging + alternating for both players)
+    # Build ALL fight pools (charging + alternating for both players)
     # NOTE: ATTACK_LEFT is NOT set at phase start - it's set per unit activation
     fight_build_activation_pools(game_state)
     
@@ -61,7 +61,7 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if charging_pool:
         game_state["fight_subphase"] = "charging"
     elif non_active_alternating or active_alternating:
-        # AI_TURN.md: Non-active player goes FIRST in alternating phase
+        # Non-active player goes FIRST in alternating phase
         game_state["fight_subphase"] = "alternating_non_active"
     else:
         game_state["fight_subphase"] = None
@@ -80,7 +80,7 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     """
-    AI_TURN.md: Build all 3 fight phase activation pools.
+    Build all 3 fight phase activation pools.
 
     Sub-Phase 1: charging_activation_pool (current player's charging units)
     Sub-Phase 2: active_alternating_activation_pool + non_active_alternating_activation_pool
@@ -161,7 +161,7 @@ def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str)
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md: Check if unit is adjacent to at least one enemy within melee range.
+    Check if unit is adjacent to at least one enemy within melee range.
 
     Used for fight phase eligibility - unit must be within melee range of an enemy.
     MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
@@ -754,7 +754,7 @@ def _cube_round(x: float, y: float, z: float) -> CubeCoordinate:
 
 def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    AI_TURN.md: Complete fight phase with player progression and turn management.
+    Complete fight phase with player progression and turn management.
 
     CRITICAL: Fight is the LAST phase. After fight:
     - P0 → P1 movement phase
@@ -777,13 +777,13 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["console_logs"] = []
     game_state["console_logs"].append("FIGHT PHASE COMPLETE")
 
-    # AI_TURN.md: Player progression logic
+    # Player progression logic
     if game_state["current_player"] == 0:
         # Player 0 complete → Player 1 movement phase
         game_state["current_player"] = 1
-        game_state["phase"] = "move"  # AI_TURN.md: Actually transition phase
+        game_state["phase"] = "move"  # Actually transition phase
 
-        # AI_TURN.md: Initialize movement phase pools for P1
+        # Initialize movement phase pools for P1
         # CRITICAL: movement_phase_start() resets ALL tracking sets (units_fought, units_charged, etc.)
         # This ensures P1 starts with clean state, allowing units that fought in P0's fight phase
         # to fight again in P1's fight phase if they remain adjacent
@@ -821,9 +821,9 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             # Safe to increment turn and continue to P0's movement phase
             game_state["turn"] += 1
             game_state["current_player"] = 0
-            game_state["phase"] = "move"  # AI_TURN.md: Actually transition phase
+            game_state["phase"] = "move"  # Actually transition phase
 
-            # AI_TURN.md: Initialize movement phase pools for P0
+            # Initialize movement phase pools for P0
             # CRITICAL: movement_phase_start() resets ALL tracking sets (units_fought, units_charged, etc.)
             # This ensures P0 starts with clean state at the beginning of each turn
             from engine.phase_handlers import movement_handlers
@@ -843,7 +843,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             }
 
 def fight_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """AI_TURN.md: Fight phase end - redirects to complete function"""
+    """Fight phase end - redirects to complete function"""
     return _fight_phase_complete(game_state)
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
@@ -936,15 +936,15 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     if not unit:
         return False, {"error": "unit_not_found"}
     
-    # AI_TURN.md: While SHOOT_LEFT > 0
+    # While SHOOT_LEFT > 0
     if unit["SHOOT_LEFT"] <= 0:
         result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
         return True, result  # Ensure consistent (bool, dict) format
     
-    # AI_TURN.md: Build valid_target_pool
+    # Build valid_target_pool
     valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
     
-    # AI_TURN.md: valid_target_pool NOT empty?
+    # valid_target_pool NOT empty?
     if len(valid_targets) == 0:
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if SHOOT_LEFT equals selected weapon NB
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
@@ -990,7 +990,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
 
 def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Fight phase handler action routing with 3 sub-phases.
+    Fight phase handler action routing with 3 sub-phases.
 
     Sub-Phase 1: Charging units (charging_activation_pool)
     Sub-Phase 2: Alternating activation (non-active player first)
@@ -1007,7 +1007,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if current_phase != "fight":
         fight_phase_start(game_state)
 
-    # AI_TURN.md: Check which sub-phase we're in
+    # Check which sub-phase we're in
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     if "charging_activation_pool" not in game_state:
         charging_pool = []
@@ -1162,12 +1162,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # NOTE: AI_TURN.md line 667 specifies invalid actions should call end_activation (ERROR, 0, PASS, FIGHT)
     # We follow this rule strictly - invalid actions are not converted to valid actions
 
-    # AI_TURN.md: Fight phase action routing
+    # Fight phase action routing
     if action_type == "activate_unit":
         return _handle_fight_unit_activation(game_state, unit, config)
 
     elif action_type == "fight":
-        # AI_TURN.md: Fight action with target selection
+        # Fight action with target selection
         # GYM TRAINING / PvE AI: Auto-select target if not provided
         if "targetId" not in action:
             if is_gym_training or is_pve_ai:
@@ -1209,7 +1209,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _handle_fight_attack(game_state, unit, target_id, config)
 
     elif action_type == "postpone":
-        # AI_TURN.md: Postpone action (only valid if ATTACK_LEFT = CC_NB)
+        # Postpone action (only valid if ATTACK_LEFT = CC_NB)
         return _handle_fight_postpone(game_state, unit)
 
     elif action_type == "left_click":
@@ -1230,7 +1230,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return True, {"action": "continue_selection"}
 
     elif action_type == "right_click":
-        # AI_TURN.md: Right click = postpone (if ATTACK_LEFT = CC_NB)
+        # Right click = postpone (if ATTACK_LEFT = CC_NB)
         return _handle_fight_postpone(game_state, unit)
 
     elif action_type == "invalid":
@@ -1252,7 +1252,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         else:
             result["attempted_action"] = action["attempted_action"]
 
-        # AI_TURN.md: Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty → phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
             phase_result = _fight_phase_complete(game_state)
@@ -1268,13 +1268,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return True, result
 
     else:
-        # AI_TURN.md: Only valid actions are fight, postpone
+        # Only valid actions are fight, postpone
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "fight"}
 
 
 def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Handle fight unit activation start.
+    Handle fight unit activation start.
 
     Initialize unit for fighting:
     - Set ATTACK_LEFT = CC_NB
@@ -1283,7 +1283,7 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     """
     unit_id = unit["id"]
 
-    # AI_TURN.md: Set ATTACK_LEFT = CC_NB at activation start
+    # Set ATTACK_LEFT = CC_NB at activation start
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon
     from engine.utils.weapon_helpers import get_selected_melee_weapon
     cc_weapons = unit.get("CC_WEAPONS", [])
@@ -1301,7 +1301,7 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
 
     if not valid_targets:
         # No targets - end activation with PASS
-        # AI_TURN.md: ATTACK_LEFT = CC_NB? YES → no attack → end_activation (PASS, 1, PASS, FIGHT)
+        # ATTACK_LEFT = CC_NB? YES → no attack → end_activation (PASS, 1, PASS, FIGHT)
         result = end_activation(
             game_state, unit,
             "PASS",        # Arg1: Pass logging
@@ -1314,7 +1314,7 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         game_state["active_fight_unit"] = None
         game_state["valid_fight_targets"] = []
 
-        # AI_TURN.md: Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty → phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
             phase_result = _fight_phase_complete(game_state)
@@ -1441,7 +1441,7 @@ def _update_fight_subphase(game_state: Dict[str, Any]) -> None:
 
 def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
     """
-    AI_TURN.md: Build valid fight target pool.
+    Build valid fight target pool.
 
     Valid targets:
     - Enemy units
@@ -1459,15 +1459,15 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
     valid_targets = []
 
     for target in game_state["units"]:
-        # AI_TURN.md: Enemy check
+        # Enemy check
         if target["player"] == unit_player:
             continue
 
-        # AI_TURN.md: Alive check
+        # Alive check
         if target["HP_CUR"] <= 0:
             continue
 
-        # AI_TURN.md: Adjacent check (within melee range)
+        # Adjacent check (within melee range)
         distance = _calculate_hex_distance(unit_col, unit_row, target["col"], target["row"])
         if distance > cc_range:
             continue
@@ -1480,7 +1480,7 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
 
 def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Handle fight attack execution.
+    Handle fight attack execution.
 
     Execute attack_sequence(CC) using CC_* stats:
     - CC_ATK (to-hit roll)
@@ -1582,7 +1582,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         # No more targets or no valid target selected - fall through to end activation
 
         # No more targets - end activation
-        # AI_TURN.md: ATTACK_LEFT > 0 but no targets → end_activation (ACTION, 1, FIGHT, FIGHT)
+        # ATTACK_LEFT > 0 but no targets → end_activation (ACTION, 1, FIGHT, FIGHT)
         result = end_activation(
             game_state, unit,
             "ACTION",      # Arg1: Log action
@@ -1608,7 +1608,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
-        # AI_TURN.md: Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty → phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
             phase_result = _fight_phase_complete(game_state)
@@ -1624,7 +1624,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         return True, result
     else:
         # ATTACK_LEFT = 0 - end activation
-        # AI_TURN.md: end_activation (ACTION, 1, FIGHT, FIGHT)
+        # end_activation (ACTION, 1, FIGHT, FIGHT)
         result = end_activation(
             game_state, unit,
             "ACTION",      # Arg1: Log action
@@ -1650,7 +1650,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
-        # AI_TURN.md: Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty → phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
             phase_result = _fight_phase_complete(game_state)
@@ -1668,14 +1668,14 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
 
 def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Handle postpone action.
+    Handle postpone action.
 
     CRITICAL: Can ONLY postpone if ATTACK_LEFT = CC_NB (no attacks made yet)
     If unit has already attacked, must complete activation.
     """
     unit_id = unit["id"]
 
-    # AI_TURN.md: Check ATTACK_LEFT = weapon NB?
+    # Check ATTACK_LEFT = weapon NB?
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
     if "ATTACK_LEFT" not in unit:
         raise KeyError(f"Unit missing required 'ATTACK_LEFT' field: {unit}")
@@ -1686,7 +1686,7 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
         return False, {"error": "no_melee_weapon", "unitId": unit["id"]}
     
     if unit["ATTACK_LEFT"] == selected_weapon["NB"]:
-        # AI_TURN.md: YES → Postpone allowed
+        # YES → Postpone allowed
         # Do NOT call end_activation - just return postpone signal
         # Unit stays in pool for later activation
         return True, {
@@ -1695,7 +1695,7 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
             "postpone_allowed": True
         }
     else:
-        # AI_TURN.md: NO → Must complete activation
+        # NO → Must complete activation
         return False, {
             "error": "postpone_not_allowed",
             "reason": "unit_has_already_attacked",
@@ -1706,7 +1706,7 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
 
 def _handle_fight_unit_switch(game_state: Dict[str, Any], current_unit: Dict[str, Any], new_unit_id: str) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md: Handle unit switching during fight phase.
+    Handle unit switching during fight phase.
 
     Can only switch if current unit has ATTACK_LEFT = CC_NB (hasn't attacked yet).
     Otherwise must complete current unit's activation.

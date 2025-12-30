@@ -17,7 +17,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   className = ""
 }) => {
   
-  // Validate required props (AI_TURN.md: raise errors for missing data)
+  // Validate required props (raise errors for missing data)
   if (!phases || phases.length === 0) {
     throw new Error('TurnPhaseTracker: phases array is required and cannot be empty');
   }

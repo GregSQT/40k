@@ -99,7 +99,7 @@ class TrainingOrchestrator:
             print(f"\n--- Training Agent: {agent_name} ---")
             
             # Calculate timesteps from episodes
-            # AI_TURN.md: Episodes are primary metric, steps are derived
+            # Episodes are primary metric, steps are derived
             max_steps_per_episode = self._estimate_max_steps_per_episode()
             total_timesteps = episodes_per_agent * max_steps_per_episode
             

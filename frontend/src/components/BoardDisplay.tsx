@@ -174,7 +174,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
         const isAvailable = availableCells.some(cell => cell.col === col && cell.row === row);
         const isAttackable = attackCells.some(cell => cell.col === col && cell.row === row);
         const isInCover = coverCells.some(cell => cell.col === col && cell.row === row);
-        // AI_TURN.md: chargeCells come as [col, row] arrays from backend, not {col, row} objects
+        // chargeCells come as [col, row] arrays from backend, not {col, row} objects
         const isChargeable = chargeCells.some(cell => {
           if (Array.isArray(cell)) {
             const matches = cell[0] === col && cell[1] === row;
@@ -190,7 +190,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           return matches;
         });
 
-        // AI_TURN.md: Debug charge hex detection
+        // Debug charge hex detection
         if (isChargeable) {
           console.log(`🟠 CHARGE HEX DETECTED at (${col}, ${row})`);
         }
@@ -278,7 +278,7 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           highlightCell.drawPolygon(points);
           highlightCell.endFill();
 
-          // AI_TURN.md: Add click handlers for movement, charge, and advance hexes
+          // Add click handlers for movement, charge, and advance hexes
           if (isAvailable || isChargeable || isAdvanceDestination) {
             highlightCell.eventMode = 'static';
             highlightCell.cursor = 'pointer';

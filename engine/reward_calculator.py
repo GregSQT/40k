@@ -1629,7 +1629,7 @@ class RewardCalculator:
             # Training mode: use controlled_agent which includes phase suffix
             agent_key = config_controlled_agent
         elif hasattr(self, 'unit_registry') and self.unit_registry:
-            # AI_TURN.md: Direct access - NO DEFAULTS allowed
+            # Direct access - NO DEFAULTS allowed
             if "unitType" not in unit:
                 raise KeyError(f"Unit missing required 'unitType' field: {unit}")
             scenario_unit_type = unit["unitType"]

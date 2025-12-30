@@ -123,7 +123,7 @@ class ActionDecoder:
             pool_unit_ids = game_state["charge_activation_pool"]
             return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
         elif current_phase == "fight":
-            # AI_TURN.md: Fight phase has multiple sub-pools
+            # Fight phase has multiple sub-pools
             # Check all fight pools in priority order
             subphase = game_state.get("fight_subphase")
             if subphase == "charging":

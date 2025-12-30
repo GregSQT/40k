@@ -57,7 +57,7 @@ class GameStateManager:
             # Identity
             "id": config["id"],
             "player": config["player"],
-            "unitType": config["unitType"],  # AI_TURN.md: NO DEFAULTS - must be provided
+            "unitType": config["unitType"],  # NO DEFAULTS - must be provided
             
             # Position
             "col": config["col"],

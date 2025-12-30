@@ -465,15 +465,17 @@ def execute_action():
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
         
-        # AI_TURN.md: Route ALL actions through engine consistently
+        # Route ALL actions through engine consistently
         success, result = engine.execute_semantic_action(action)
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
 
         # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
+        # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
+        # Use active_shooting_unit from game_state (not shooterId from result which doesn't exist)
         if result and isinstance(result, dict) and "available_weapons" in result:
-            active_unit_id = result.get("shooterId") or engine.game_state.get("active_shooting_unit")
+            active_unit_id = engine.game_state.get("active_shooting_unit")
             if active_unit_id and "units" in serializable_state:
                 for unit in serializable_state["units"]:
                     if str(unit.get("id")) == str(active_unit_id):

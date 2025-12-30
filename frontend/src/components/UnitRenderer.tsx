@@ -209,7 +209,7 @@ export class UnitRenderer {
   private calculateEligibilityCompliant(): boolean {
     const { unit, phase, currentPlayer, unitsMoved, unitsFled } = this.props;
 
-    // AI_TURN.md: Basic eligibility checks
+    // Basic eligibility checks
     // Allow just-killed units to be rendered as grey ghosts
     interface UnitWithFlags extends Unit {
       isJustKilled?: boolean;
@@ -224,7 +224,7 @@ export class UnitRenderer {
       case "move":
         return !unitsMoved.includes(unit.id);
       case "shoot": {
-        // AI_TURN.md: Queue-based eligibility during active shooting phase
+        // Queue-based eligibility during active shooting phase
         // Type-safe checks with proper fallbacks
         if (unitsFled && unitsFled.includes(unit.id)) return false;
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has ranged weapons (imported at top)
@@ -234,12 +234,12 @@ export class UnitRenderer {
         return this.props.isEligible || false;
       }
       case "charge":
-        // AI_TURN.md: Charge phase uses pool-based eligibility (charge_activation_pool)
+        // Charge phase uses pool-based eligibility (charge_activation_pool)
         // Parent provides proper eligibility through isEligible prop
         // Lines 493-496: Must have enemies within charge_max_distance AND not already adjacent
         return this.props.isEligible || false;
       case "fight":
-        // AI_TURN.md: Fight phase uses pool-based eligibility (sub-phases)
+        // Fight phase uses pool-based eligibility (sub-phases)
         // Parent provides proper eligibility through isEligible prop
         return this.props.isEligible || false;
       default:
@@ -355,10 +355,10 @@ export class UnitRenderer {
         }
       });
     } else {
-      // AI_TURN.md: Block enemy unit clicks when no friendly unit is selected
+      // Block enemy unit clicks when no friendly unit is selected
       let addClickHandler = true;
 
-      // AI_TURN.md: Fight phase exception - allow clicking units in ALL fight subphases
+      // Fight phase exception - allow clicking units in ALL fight subphases
       // Lines 738, 765, 820, 847: "player activate one unit by left clicking on it"
       const isFightPhaseActive = phase === "fight" && (
         this.props.fightSubPhase === "charging" ||
@@ -375,7 +375,7 @@ export class UnitRenderer {
       }
       
       // CRITICAL FIX: Block enemy unit clicks during movement and charge phases
-      // AI_TURN.md: In movement/charge phases, only destinations are clickable, NOT units
+      // In movement/charge phases, only destinations are clickable, NOT units
       // Clicking enemy units during these phases breaks the game
       if ((phase === "move" || phase === "charge") && unit.player !== currentPlayer) {
         addClickHandler = false;
@@ -403,7 +403,7 @@ export class UnitRenderer {
             e.stopPropagation();
             
             if (e.button === 2 && phase === "shoot" && mode === "attackPreview" && selectedUnitId === unit.id) {
-              // AI_TURN.md: Right click behavior depends on SHOOT_LEFT
+              // Right click behavior depends on SHOOT_LEFT
               const shootLeft = unit.SHOOT_LEFT || 0;
               // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
               const selectedRngWeapon = getSelectedRangedWeapon(unit);
@@ -888,6 +888,16 @@ export class UnitRenderer {
     // Check if this unit should be blinking (multi-unit blinking for valid targets)
     const shouldBlink = this.props.isBlinkingActive && this.props.blinkingUnits?.includes(unit.id);
     
+    // Debug log for unit 4 (the blinking target)
+    if (unit.id === 4) {
+      console.log("💫 UnitRenderer renderHPBar for unit 4:", {
+        isBlinkingActive: this.props.isBlinkingActive,
+        blinkingUnits: this.props.blinkingUnits,
+        shouldBlink,
+        isTargetPreviewed
+      });
+    }
+    
     // Use either individual target preview OR multi-unit blinking
     const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;    
     const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
@@ -1009,7 +1019,8 @@ export class UnitRenderer {
         hpContainer.addChild(highlightSlice);
       }
       
-      // Create continuous blinking animation with PIXI render forcing
+      // Create continuous blinking animation with local interval (like old version)
+      // Use local blinkState instead of props.blinkState for reliable updates
       let blinkState = false;
       const blinkTicker = () => {
         blinkState = !blinkState;
@@ -1033,12 +1044,17 @@ export class UnitRenderer {
       const blinkInterval = setInterval(blinkTicker, 500);
       
       // Store cleanup function with proper interval reference
-      hpContainer.cleanupBlink = () => {
+      interface HPContainerWithBlink extends PIXI.Container {
+        cleanupBlink?: () => void;
+        blinkInterval?: ReturnType<typeof setInterval>;
+      }
+      const hpContainerWithBlink = hpContainer as HPContainerWithBlink;
+      hpContainerWithBlink.cleanupBlink = () => {
         if (blinkInterval) {
           clearInterval(blinkInterval);
         }
       };
-      hpContainer.blinkInterval = blinkInterval;
+      hpContainerWithBlink.blinkInterval = blinkInterval;
       
       app.stage.addChild(hpContainer);
       
@@ -1083,7 +1099,7 @@ export class UnitRenderer {
           const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
           displayProbability = hitProb * woundProb * saveFailProb;
         } else if (activeAttacker && this.props.phase === "fight") {
-          // AI_TURN.md: Fight phase uses CC_ stats instead of RNG_ stats
+          // Fight phase uses CC_ stats instead of RNG_ stats
           const ccWeapon = getSelectedMeleeWeapon(activeAttacker);
           const hitProb = Math.max(0, (7 - (ccWeapon?.ATK || 4)) / 6);
           const strength = ccWeapon?.STR || 4;
@@ -1134,7 +1150,7 @@ export class UnitRenderer {
       return;
     }
     
-    // AI_TURN.md: Show counter only for eligible units with shots remaining
+    // Show counter only for eligible units with shots remaining
     if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return;
     if (!isEligible) return;
 
@@ -1214,27 +1230,72 @@ export class UnitRenderer {
     
     // AI_TURN.md ligne 694: Human only: Display weapon selection icon (if CAN_SHOOT)
     // Show only during shoot phase for active unit with multiple weapons
-    if (phase !== 'shoot') return;
-    if (unit.player !== currentPlayer) return;
+    if (phase !== 'shoot') {
+      if (unit.id === 1 && unit.player === currentPlayer) {
+        console.log("🔫 WEAPON ICON DEBUG unit 1: phase !== 'shoot'", phase);
+      }
+      return;
+    }
+    if (unit.player !== currentPlayer) {
+      if (unit.id === 1) {
+        console.log("🔫 WEAPON ICON DEBUG unit 1: wrong player", unit.player, currentPlayer);
+      }
+      return;
+    }
     
     // Check if unit is active shooting unit (backend sets this when unit has valid targets)
-    // This indicates CAN_SHOOT = true (backend only sets active_shooting_unit when unit can shoot)
-    if (!gameState?.active_shooting_unit || gameState.active_shooting_unit !== unit.id.toString()) return;
+    if (!gameState?.active_shooting_unit || parseInt(gameState.active_shooting_unit) !== unit.id) {
+      if (unit.id === 1) {
+        console.log("🔫 WEAPON ICON DEBUG unit 1: not active_shooting_unit", {
+          hasGameState: !!gameState,
+          active_shooting_unit: gameState?.active_shooting_unit,
+          unitId: unit.id,
+          match: gameState?.active_shooting_unit && parseInt(gameState.active_shooting_unit) === unit.id
+        });
+      }
+      return;
+    }
     
-    // Check if unit has multiple available weapons (not just multiple weapons in list)
-    // Use available_weapons from backend if available, otherwise fallback to RNG_WEAPONS
+    // AI_TURN.md: Check if unit can actually shoot (CAN_SHOOT = true)
+    // If empty_target_pool is true, CAN_SHOOT = false, so don't show weapon icon
     interface UnitWithAvailableWeapons extends Unit {
       available_weapons?: Array<{ can_use: boolean }>;
     }
     const unitWithWeapons = unit as UnitWithAvailableWeapons;
     const availableWeapons = unitWithWeapons.available_weapons;
-    const usableWeapons = availableWeapons 
-      ? availableWeapons.filter(w => w.can_use)
-      : (unit.RNG_WEAPONS || []);
     
-    if (usableWeapons.length <= 1) return;
+    // CRITICAL: Only show icon if unit has usable weapons (CAN_SHOOT = true)
+    // If available_weapons is undefined or empty, unit cannot shoot
+    if (!availableWeapons || availableWeapons.length === 0) return;
     
-    // AI_TURN.md: Display for human players (autoSelectWeapon can be used to control auto-selection,
+    const usableWeapons = availableWeapons.filter(w => w.can_use);
+    
+    if (unit.id === 1) {
+      console.log("🔫 WEAPON ICON DEBUG unit 1: weapon checks", {
+        availableWeaponsCount: availableWeapons.length,
+        usableWeaponsCount: usableWeapons.length,
+        willShowIcon: usableWeapons.length > 0
+      });
+    }
+    
+    // AI_TURN.md ligne 1121: Display weapon selection icon (only if unit.CAN_SHOOT = true)
+    // CAN_SHOOT = true if usableWeapons.length > 0 (at least one weapon can be used)
+    // Note: Icon should be displayed if CAN_SHOOT = true, even with a single weapon
+    // The icon allows manual weapon selection even if only one weapon is available
+    if (usableWeapons.length === 0) return;
+    
+    if (unit.id === 1) {
+      console.log("🔫 WEAPON ICON DEBUG unit 1: RENDERING ICON", {
+        phase,
+        currentPlayer,
+        unitPlayer: unit.player,
+        active_shooting_unit: gameState?.active_shooting_unit,
+        availableWeaponsCount: availableWeapons.length,
+        usableWeaponsCount: usableWeapons.length
+      });
+    }
+    
+    // Display for human players (autoSelectWeapon can be used to control auto-selection,
     // but icon should always be shown for human players when CAN_SHOOT and multiple weapons available)
     // If autoSelectWeapon is explicitly false, show icon; if undefined or true, still show for manual selection option
     // Note: The icon allows manual weapon selection even if auto-selection is enabled
@@ -1281,7 +1342,7 @@ export class UnitRenderer {
   private renderAttackCounter(unitIconScale: number): void {
     const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, units, mode, selectedUnitId, fightSubPhase, isEligible } = this.props;
 
-    // AI_TURN.md: Attack counter shows for actively fighting units in fight phase
+    // Attack counter shows for actively fighting units in fight phase
     if (phase !== 'fight') return;
 
     // AI_TURN.md Lines 768, 777: ATTACK_LEFT visible during fight activation

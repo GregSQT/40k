@@ -7,7 +7,7 @@ import { useGameConfig } from '../hooks/useGameConfig';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
 import { drawBoard } from './BoardDisplay';
 import { renderUnit } from './UnitRenderer';
-import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine } from '../utils/gameHelpers';
+import { offsetToCube, cubeDistance, hasLineOfSight, getHexLine, areUnitsAdjacent } from '../utils/gameHelpers';
 import type { Position } from '../types/game';
 import { getMaxRangedRange, getMeleeRange } from '../utils/weaponHelpers';
 import { WeaponDropdown } from './WeaponDropdown';
@@ -207,7 +207,7 @@ export default function Board({
   // Blinking props
   blinkingUnits,
   isBlinkingActive,
-  blinkState,
+  blinkState: _blinkState, // eslint-disable-line @typescript-eslint/no-unused-vars
   onSelectUnit,
   onSkipUnit,
   onStartTargetPreview: _onStartTargetPreview, // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -396,10 +396,16 @@ export default function Board({
     JSON.stringify(units.map(u => ({ id: u.id, col: u.col, row: u.row, HP_CUR: u.HP_CUR, SHOOT_LEFT: u.SHOOT_LEFT, ATTACK_LEFT: u.ATTACK_LEFT }))),
     [units]
   );
-  const blinkingUnitsSignature = useMemo(() => 
-    JSON.stringify(blinkingUnits),
-    [blinkingUnits]
-  );
+  const blinkingUnitsSignature = useMemo(() => {
+    if (!blinkingUnits || blinkingUnits.length === 0) return '[]';
+    return JSON.stringify([...blinkingUnits].sort((a, b) => a - b));
+  }, [blinkingUnits]);
+  
+  const stableBlinkingUnits = useMemo(() => {
+    if (!blinkingUnits) return undefined;
+    const sorted = blinkingUnits.length > 0 ? [...blinkingUnits].sort((a, b) => a - b) : [];
+    return sorted;
+  }, [blinkingUnits]);
   const wallHexesOverrideSignature = useMemo(() => 
     JSON.stringify(wallHexesOverride),
     [wallHexesOverride]
@@ -689,13 +695,13 @@ export default function Board({
       // Target identification is handled by fightTargets array above
     }
 
-    // AI_TURN.md: Show charge destinations in both select and chargePreview modes
+    // Show charge destinations in both select and chargePreview modes
     if (phase === "charge" && (mode === "chargePreview" || mode === "select") && selectedUnit) {
       // Check if this unit is eligible to charge
       const isEligible = eligibleUnitIds.includes(typeof selectedUnit.id === 'number' ? selectedUnit.id : parseInt(selectedUnit.id as string));
 
       if (isEligible) {
-        // AI_TURN.md: Get charge destinations from backend (already rolled and calculated)
+        // Get charge destinations from backend (already rolled and calculated)
         const rawChargeCells = getChargeDestinations(selectedUnit.id);
         
         // CRITICAL FIX: Filter out occupied hexes - occupied hexes should NEVER be valid destinations
@@ -1188,23 +1194,23 @@ export default function Board({
         if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
         if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
 
-        // AI_TURN.md: Use backend's blinkingUnits list for shootability (authoritative LoS calculation)
+        // Use backend's blinkingUnits list for shootability (authoritative LoS calculation)
         // Backend has already calculated valid targets with proper LoS checks
         let isShootable = true;
         // ONLY apply greying in PvP mode when we have actual blinking data
         // - Replay mode: blinkingUnits is undefined → skip greying
         // - PvP mode before backend responds: blinkingUnits is [] → skip greying (prevents grey flash)
         // - PvP mode with targets: blinkingUnits has IDs → apply greying
-        if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && blinkingUnits && blinkingUnits.length > 0) {
+        if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && stableBlinkingUnits && stableBlinkingUnits.length > 0) {
           // Only grey out units that are NOT in the blinkingUnits list
-          isShootable = blinkingUnits.includes(unit.id);
+          isShootable = stableBlinkingUnits.includes(unit.id);
         }
         
         // Debug only for key units - EXACT UnitRenderer.tsx logic check
         if (unit.id === 8 || unit.id === 9) {
           // Debug code removed - variables were not used
         }
-        // AI_TURN.md: Calculate queue-based eligibility during shooting phase
+        // Calculate queue-based eligibility during shooting phase
         const isEligibleForRendering = (() => {
           if (phase === "shoot" && shootingActivationQueue && shootingActivationQueue.length > 0) {
             // During active shooting: unit is eligible if in queue OR is active unit
@@ -1224,7 +1230,7 @@ export default function Board({
           return eligibleUnitIds.includes(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
         })();
         
-        // AI_TURN.md: During charge phase, show selected unit as ghost (darkened) at origin
+        // During charge phase, show selected unit as ghost (darkened) at origin
         // This indicates the unit is about to move, similar to movement preview
         // In replay mode, a separate ghost unit is added, so we check if one already exists
         interface UnitWithGhost extends Unit {
@@ -1256,7 +1262,7 @@ export default function Board({
           units, chargeTargets, fightTargets, targetPreview,
           onConfirmMove, parseColor,
           // Pass blinking state
-          blinkingUnits, isBlinkingActive, blinkState,
+          blinkingUnits: stableBlinkingUnits, isBlinkingActive,
           // Pass shooting indicators
           shootingTargetId,
           shootingUnitId,
@@ -1286,14 +1292,29 @@ export default function Board({
           // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action props
           // Check if unit can advance: eligible, not fled, and hasn't already advanced this turn
           canAdvance: (() => {
-            const unitsAdvanced = gameState?.units_advanced || [];
-            const hasAdvanced = unitsAdvanced.includes(unit.id.toString());
-            const result = phase === 'shoot' && isEligibleForRendering && !unitsFled?.includes(unit.id) && !hasAdvanced;
-            return result ?? false;
+            // AI_TURN.md STEP 1: ELIGIBILITY CHECK (lignes 583-599)
+            // CAN_ADVANCE = true if unit is NOT adjacent to enemy AND not already advanced
+            if (phase !== 'shoot') return false;
+            if (unit.player !== currentPlayer) return false;
+            if (unitsFled?.includes(unit.id)) return false;
+            
+            // Check if unit has already advanced (AI_TURN.md ligne 671: After advance, CAN_ADVANCE = false)
+            const unitsAdvanced = gameState?.unitsAdvanced || [];
+            if (unitsAdvanced.includes(unit.id)) return false;
+            
+            // AI_TURN.md ligne 583-590: Check if unit is adjacent to enemy (melee range)
+            // CAN_ADVANCE = false if adjacent to enemy (AI_TURN.md ligne 585)
+            const isAdjacentToEnemy = units.some((enemy: Unit) => 
+              enemy.player !== unit.player && 
+              enemy.HP_CUR > 0 &&
+              areUnitsAdjacent(unit, enemy)
+            );
+            if (isAdjacentToEnemy) return false;
+            
+            // AI_TURN.md ligne 591: NOT adjacent to enemy → CAN_ADVANCE = true
+            return true;
           })(),
-          onAdvance: (unitId: number) => {
-            window.dispatchEvent(new CustomEvent('boardAdvanceClick', { detail: { unitId } }));
-          }
+          onAdvance: onAdvance
         });
       }
 
@@ -1543,27 +1564,26 @@ export default function Board({
         app.destroy(true, { children: true, texture: false, baseTexture: false });
       };
 
-      }, [
-        // Essential dependencies - all values used in the effect
-        units.length,
-        unitsSignature,
-        selectedUnitId,
-        mode,
-        phase,
-        boardConfig,
-        loading,
-        error,
-        activeShootingUnit,
-        advanceRoll,
-        advanceWarningPopup,
-        advancingUnitId,
-        attackPreview,
-        autoSelectWeapon,
-        availableCellsOverride,
-        blinkState,
-        blinkingUnits,
-        isBlinkingActive,
-        blinkingUnitsSignature,
+    }, [
+      // Essential dependencies - all values used in the effect
+      units.length,
+      unitsSignature,
+      selectedUnitId,
+      mode,
+      phase,
+      boardConfig,
+      loading,
+      error,
+      activeShootingUnit,
+      advanceRoll,
+      advanceWarningPopup,
+      advancingUnitId,
+      attackPreview,
+      autoSelectWeapon,
+      availableCellsOverride,
+      isBlinkingActive,
+      stableBlinkingUnits,
+      blinkingUnitsSignature,
         chargeRoll,
         chargeRollPopup,
         chargeSuccess,

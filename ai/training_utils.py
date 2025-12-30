@@ -77,7 +77,7 @@ def setup_imports():
 
         return W40KEngine, register_environment
     except ImportError as e:
-        raise ImportError(f"AI_TURN.md: w40k_engine import failed: {e}")
+        raise ImportError(f"w40k_engine import failed: {e}")
 
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      controlled_agent_key, unit_registry, step_logger_enabled=False,

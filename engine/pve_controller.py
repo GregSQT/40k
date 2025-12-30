@@ -141,7 +141,7 @@ class PvEController:
                     raise KeyError("game_state missing required 'shoot_activation_pool' field")
                 eligible_pool = game_state["shoot_activation_pool"]
             elif current_phase == "fight":
-                # AI_TURN.md: Fight phase has 3 sub-phases with different pools
+                # Fight phase has 3 sub-phases with different pools
                 fight_subphase = game_state.get("fight_subphase")
                 
                 if fight_subphase == "charging":

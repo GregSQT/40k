@@ -52,7 +52,7 @@ async function initializeUnitRegistry(): Promise<void> {
           throw new Error(`Unit class ${unitType} not found in ${unitPath}`);
         }
         
-        // AI_TURN.md: Validate required UPPERCASE properties
+        // Validate required UPPERCASE properties
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required (RNG_WEAPONS or CC_WEAPONS)
         const requiredProps = ['HP_MAX', 'MOVE', 'ICON'];
         requiredProps.forEach(prop => {
@@ -100,7 +100,7 @@ export function getUnitClass(type: string) {
   return UnitClass;
 }
 
-// AI_TURN.md: Create unit with UPPERCASE field validation
+// Create unit with UPPERCASE field validation
 export function createUnit(params: {
   id: number;
   name: string;
@@ -116,7 +116,7 @@ export function createUnit(params: {
   
   const UnitClass = getUnitClass(params.type);
   
-  // AI_TURN.md: Validate all UPPERCASE fields exist
+  // Validate all UPPERCASE fields exist
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required
   const requiredFields = ['HP_MAX', 'MOVE', 'ICON'];
   for (const field of requiredFields) {
@@ -145,12 +145,12 @@ export function createUnit(params: {
     col: params.col,
     row: params.row,
     color: params.color,
-    // AI_TURN.md: UPPERCASE field compliance
+    // UPPERCASE field compliance
     MOVE: UnitClass.MOVE,
     HP_MAX: UnitClass.HP_MAX,
     ICON: UnitClass.ICON,
     ICON_SCALE: UnitClass.ICON_SCALE,
-    HP_CUR: UnitClass.HP_MAX, // AI_TURN.md: Start at full health
+    HP_CUR: UnitClass.HP_MAX, // Start at full health
     T: UnitClass.T,
     ARMOR_SAVE: UnitClass.ARMOR_SAVE,
     INVUL_SAVE: UnitClass.INVUL_SAVE,

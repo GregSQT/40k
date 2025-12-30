@@ -51,11 +51,11 @@ interface UseGameActionsParams {
     actions,
   }: UseGameActionsParams) => {
     
-  // AI_TURN.md: Single source of truth eligibility function
+  // Single source of truth eligibility function
   const isUnitEligible = useCallback((unit: Unit): boolean => {
     const { phase, currentPlayer, unitsMoved = [], unitsCharged = [], unitsAttacked = [], unitsFled = [] } = gameState;
     
-    // AI_TURN.md: Universal eligibility checks
+    // Universal eligibility checks
     if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) return false;
     if (unit.player !== currentPlayer) return false;
     
@@ -66,7 +66,7 @@ interface UseGameActionsParams {
         // Check basic eligibility first
         if (unitsMoved.includes(unit.id) || unitsFled.includes(unit.id)) return false;
         
-        // AI_TURN.md: Units adjacent to enemies (melee range = 1) cannot shoot
+        // Units adjacent to enemies (melee range = 1) cannot shoot
         // This matches backend logic in shooting_handlers.py _has_valid_shooting_targets
         const hasAdjacentEnemy = gameState.units.some(enemy =>
           enemy.player !== unit.player &&
@@ -88,7 +88,7 @@ interface UseGameActionsParams {
     }
   }, [gameState]);
 
-  // AI_TURN.md: Simple unit selection with step counting
+  // Simple unit selection with step counting
   const selectUnit = useCallback((unitId: UnitId | null) => {
     if (unitId === null) {
       actions.setSelectedUnitId(null);
@@ -98,7 +98,7 @@ interface UseGameActionsParams {
 
     const unit = gameState.units.find(u => u.id === unitId);
 
-    // AI_TURN.md: Player validation with fight phase exception
+    // Player validation with fight phase exception
     // Fight phase alternating allows non-active player units to be selected
     const isFightPhaseAlternating = gameState.phase === "fight" &&
       (gameState.fight_subphase === "alternating_non_active" ||
@@ -117,7 +117,7 @@ interface UseGameActionsParams {
     actions.setMode("select");
   }, [gameState, isUnitEligible, actions]);
 
-  // AI_TURN.md: Simple move with step counting
+  // Simple move with step counting
   const directMove = useCallback((unitId: UnitId, col: number, row: number) => {
     const unit = gameState.units.find(u => u.id === unitId);
     if (!unit || !isUnitEligible(unit) || gameState.phase !== "move") return;
@@ -128,7 +128,7 @@ interface UseGameActionsParams {
     actions.setMode("select");
   }, [gameState, isUnitEligible, actions]);
 
-  // AI_TURN.md: Movement preview
+  // Movement preview
   const startMovePreview = useCallback((unitId: UnitId, col: number, row: number) => {
     const unit = gameState.units.find(u => u.id === unitId);
     if (!unit || !isUnitEligible(unit)) return;

@@ -30,7 +30,7 @@ export const usePhaseTransition = ({
   isUnitEligible,
   actions,
 }: UsePhaseTransitionParams) => {
-  // AI_TURN.md: Phase completion by eligibility (NOT step counts)
+  // Phase completion by eligibility (NOT step counts)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const shouldTransitionPhase = useCallback((_phase: string): boolean => {
     const playerUnits = gameState.units.filter(u => u.player === gameState.currentPlayer);
@@ -38,7 +38,7 @@ export const usePhaseTransition = ({
     return eligibleUnits.length === 0;
   }, [gameState.units, gameState.currentPlayer, isUnitEligible]);
 
-  // AI_TURN.md: Eligibility-based phase transitions (core principle)
+  // Eligibility-based phase transitions (core principle)
   useEffect(() => {
     if (shouldTransitionPhase(gameState.phase)) {
       // Phase transitions based on unit eligibility only
