@@ -1007,7 +1007,17 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
     elif click_target == "friendly_unit":
         return False, {"error": "unit_switch_not_implemented"}
     elif click_target == "active_unit":
-        return True, {"action": "no_effect"}
+        # AI_TURN.md Line 1409: Left click on active_unit → Charge postponed
+        # Clear preview but keep unit in pool (different from skip which removes from pool)
+        charge_clear_preview(game_state)
+        # Clear charge roll if exists (postpone discards the roll)
+        if unit_id in game_state.get("charge_roll_values", {}):
+            del game_state["charge_roll_values"][unit_id]
+        return True, {
+            "action": "postpone",
+            "unitId": unit_id,
+            "charge_postponed": True
+        }
     else:
         return True, {"action": "continue_selection"}
 

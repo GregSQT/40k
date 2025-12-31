@@ -356,11 +356,21 @@ export class UnitRenderer {
     unitCircle.cursor = "pointer";
     // Always add click handlers so we can detect clicks on all units
     
-    if (phase === "charge" && selectedUnitId === unit.id) {
-      // Cancel charge on second click of active unit
+    if (phase === "charge" && selectedUnitId === unit.id && this.props.mode === "chargePreview") {
+      // Handle clicks on active unit in chargePreview mode (left = deselect, right = skip)
       unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-        if (e.button === 0) {
-          window.dispatchEvent(new CustomEvent('boardCancelCharge'));
+        if (e.button === 0 || e.button === 2) { // Left or right click
+          e.preventDefault();
+          e.stopPropagation();
+          window.dispatchEvent(new CustomEvent('boardUnitClick', {
+            detail: {
+              unitId: unit.id,
+              phase: phase,
+              mode: this.props.mode,
+              selectedUnitId: selectedUnitId,
+              clickType: e.button === 0 ? 'left' : 'right'
+            }
+          }));
         }
       });
     } else if (phase === "shoot" && selectedUnitId === unit.id && this.props.mode === "advancePreview") {

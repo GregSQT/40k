@@ -89,6 +89,19 @@ export function setupBoardClickHandler(callbacks: {
           console.error("    - ERROR: onActivateCharge callback is undefined!");
         }
       }
+      return; // Prevent fallthrough to other handlers
+    } else if (phase === 'charge' && mode === 'chargePreview' && selectedUnitId !== null) {
+      console.log("  ✅ CHARGE PREVIEW LOGIC TRIGGERED");
+      if (selectedUnitId === unitId) {
+        if (clickType === 'right') {
+          console.log("    - Right click on active unit → cancel charge (skip)");
+          callbacks.onSkipUnit?.(unitId);
+        } else {
+          console.log("    - Left click on active unit → postpone charge (deselect)");
+          callbacks.onSelectUnit(null);
+        }
+      }
+      return; // Prevent fallthrough to other handlers
     } else if (mode === 'movePreview') {
       console.log("  ✅ MOVE PREVIEW LOGIC → calling onConfirmMove");
       callbacks.onConfirmMove();

@@ -804,9 +804,9 @@ export const useEngineAPI = () => {
   const handleSelectUnit = useCallback(async (unitId: number | string | null) => {
     const numericUnitId = typeof unitId === 'string' ? parseInt(unitId) : unitId;
     
-    // Block unit selection when in advancePreview mode (same as chargePreview)
-    if (mode === "advancePreview") {
-      console.log("🟠 Blocked unit selection: in advancePreview mode");
+    // Block unit selection when in advancePreview or chargePreview mode (but allow deselection with null)
+    if ((mode === "advancePreview" || mode === "chargePreview") && numericUnitId !== null) {
+      console.log("🟠 Blocked unit selection: in", mode, "mode");
       return;
     }
     
@@ -840,12 +840,27 @@ export const useEngineAPI = () => {
     }
     
     // Normal unit selection for other phases
+    // If deselecting in chargePreview mode, send postpone action to backend
+    if (numericUnitId === null && mode === "chargePreview" && selectedUnitId !== null) {
+      console.log("🧹 POSTPONING charge (deselecting in chargePreview mode), unitId:", selectedUnitId);
+      await executeAction({
+        action: "left_click",
+        unitId: selectedUnitId.toString(),
+        clickTarget: "active_unit"
+      });
+      setChargeDestinations([]);
+    } else if (numericUnitId === null && mode === "advancePreview") {
+      console.log("🧹 CLEARING advanceDestinations (deselecting in advancePreview mode)");
+      setAdvanceDestinations([]);
+      setAdvancingUnitId(null);
+      setAdvanceRoll(null);
+    }
     setSelectedUnitId(numericUnitId);
     setMode("select");
     setMovePreview(null);
     setTargetPreview(null);
     // Remove all frontend shooting state - backend manages everything
-  }, [gameState, executeAction, mode, determineClickTarget]);
+  }, [gameState, executeAction, mode, determineClickTarget, selectedUnitId]);
 
   // Right-click handler for shooting phase
   const handleRightClick = useCallback(async (unitId: number) => {
@@ -1358,6 +1373,7 @@ export const useEngineAPI = () => {
   }, [gameState]);
 
   const getChargeDestinations = useCallback(() => {
+    console.log("🔍 getChargeDestinations called, returning:", chargeDestinations.length, "destinations");
     return chargeDestinations;
   }, [chargeDestinations]);
 
