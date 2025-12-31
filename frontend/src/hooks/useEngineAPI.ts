@@ -329,11 +329,6 @@ export const useEngineAPI = () => {
             }
           }
           
-          // ADVANCE_IMPLEMENTATION_PLAN.md: Check for auto-advance BEFORE processing cleanup signals
-          // This ensures we can trigger advance even if backend sends cleanup signals
-          let shouldAutoAdvance = false;
-          let autoAdvanceUnitId: string | null = null;
-          
           // Handle advance execution with destination - display advance roll badge before cleanup
           // Clean up advance preview when advance is executed (advance_range returned), even if activation_ended is not set
           if (lastActionRef.current?.action === "advance" && 
@@ -357,34 +352,22 @@ export const useEngineAPI = () => {
           
           // Check if we just activated a unit in shoot phase (use lastActionRef phase, not current phase which may have changed)
           // Backend returns allow_advance: true when unit has no valid targets
+          // Don't auto-trigger advance - wait for user to click advance icon
+          // AI_TURN.md: "⚠️ POINT OF NO RETURN (Human: Click ADVANCE logo)"
+          // The advance roll should only be made when user explicitly clicks the advance icon
           if (lastActionRef.current?.action === "activate_unit" &&
             lastActionRef.current?.phase === "shoot" &&
             data.result?.unitId && 
             data.result?.unitId === lastActionRef.current?.unitId &&
             data.result?.allow_advance === true) {
-          shouldAutoAdvance = true;
-          autoAdvanceUnitId = data.result.unitId;
-          console.log("🟠 Unit activated with no targets in shoot phase - will auto-trigger advance for unit:", autoAdvanceUnitId, "current phase:", data.game_state?.phase);
-        }
-          
-          // Trigger auto-advance IMMEDIATELY if needed (BEFORE processing cleanup signals)
-          if (shouldAutoAdvance && autoAdvanceUnitId) {
-            const unitId = parseInt(autoAdvanceUnitId);
-            console.log("🟠 Showing advance warning popup for unit:", unitId);
-            // Clear last action ref to prevent double-triggering
-            lastActionRef.current = null;
-            // Ensure selectedUnitId is set before showing popup
+            // Set selectedUnitId to show advance icon, but don't trigger advance automatically
+            const unitId = parseInt(data.result.unitId);
             setSelectedUnitId(unitId);
-            // Show warning popup instead of executing directly
-            setAdvanceWarningPopup({
-              unitId: unitId,
-              timestamp: Date.now()
-            });
-            // Keep shouldAutoAdvance = true to prevent cleanup signals from interfering
-            // It will be reset on next render cycle
+            // Set mode to allow advance icon to be displayed
+            setMode("select");
           }
           
-          // Process backend cleanup signals (but don't clear selectedUnitId if we're about to auto-advance)
+          // Process backend cleanup signals
           if (data.result?.clear_preview) {
             console.log("🧹 Backend requested preview cleanup");
             setTargetPreview(null);
@@ -403,7 +386,7 @@ export const useEngineAPI = () => {
             setTargetPreview(null);
           }
           
-          if (data.result?.reset_mode && !shouldAutoAdvance) {
+          if (data.result?.reset_mode) {
             setMode("select");
             // Clear advance state when mode resets
             setAdvanceDestinations([]);
@@ -411,7 +394,7 @@ export const useEngineAPI = () => {
             setAdvanceRoll(null);
           }
           
-          if (data.result?.clear_selected_unit && !shouldAutoAdvance) {
+          if (data.result?.clear_selected_unit) {
             setSelectedUnitId(null);
             // Clear advance state when selected unit is cleared
             setAdvanceDestinations([]);
@@ -419,26 +402,9 @@ export const useEngineAPI = () => {
             setAdvanceRoll(null);
           }
           
-          if (data.result?.clear_attack_preview && !shouldAutoAdvance && !advanceWarningPopup) {
+          if (data.result?.clear_attack_preview && !advanceWarningPopup) {
             console.log("🧹 Backend requested attack preview clear");
             setMode("select");
-          }
-
-          // Trigger auto-advance IMMEDIATELY if needed (BEFORE processing cleanup signals that might remove unit from pool)
-          if (shouldAutoAdvance && autoAdvanceUnitId) {
-            const unitId = parseInt(autoAdvanceUnitId);
-            console.log("🟠 Triggering auto-advance IMMEDIATELY for unit:", unitId);
-            // Clear last action ref to prevent double-triggering
-            lastActionRef.current = null;
-            // Execute immediately, before cleanup signals are processed
-            executeAction({
-              action: "advance",
-              unitId: unitId.toString()
-            }).catch((error) => {
-              console.error("🟠 Error triggering auto-advance:", error);
-            });
-            // Set flag to prevent cleanup signals from interfering
-            shouldAutoAdvance = false;
           }
           
           // Auto-display Python console logs in browser (only during actions)

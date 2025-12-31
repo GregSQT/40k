@@ -51,7 +51,8 @@ Toute violation de ces règles est une erreur.
 TEMPLATE STRICT pour TOUTE modification de code :
 
 **Fichier :** `<chemin_complet>` 
-[Lien clickable](<chemin_complet>)
+[Lien clickable](<chemin_absolu_complet>)
+- Le lien doit être cliquable et ouvrir le fichier dans l'éditeur
 
 **CODE ACTUEL**
 ```langage

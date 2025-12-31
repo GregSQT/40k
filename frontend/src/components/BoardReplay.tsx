@@ -15,6 +15,7 @@ import { initializeUnitRegistry, getUnitClass } from '../data/UnitFactory';
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
 import type { Unit, GameState, Weapon } from '../types/game';
+import { SettingsMenu } from './SettingsMenu';
 
 // Extended Unit type for replay mode (with ghost units)
 interface UnitWithGhost extends Unit {
@@ -97,13 +98,25 @@ export const BoardReplay: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   
-  // Debug mode - read from localStorage only (managed in settings menu, no UI in replay mode)
-  const showHexCoordinates = (() => {
-    const saved = localStorage.getItem('showDebug');
-    return saved ? JSON.parse(saved) : false;
-  })();
+  // Settings menu state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const handleOpenSettings = () => setIsSettingsOpen(true);
   
-  // Settings menu state (future: add SettingsMenu to replay mode)
+  // Settings preferences (from localStorage)
+  const [settings, setSettings] = useState(() => {
+    const showDebugStr = localStorage.getItem('showDebug');
+    return {
+      showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
+    };
+  });
+  
+  const handleToggleDebug = (value: boolean) => {
+    setSettings(prev => ({ ...prev, showDebug: value }));
+    localStorage.setItem('showDebug', JSON.stringify(value));
+  };
+  
+  // Debug mode - read from settings state
+  const showHexCoordinates = settings.showDebug;
 
   const playbackInterval = useRef<number | null>(null);
 
@@ -813,6 +826,85 @@ export const BoardReplay: React.FC = () => {
             phases={["move", "shoot", "charge", "fight"]}
             maxTurns={gameConfig.game_rules.max_turns}
             className=""
+            onTurnClick={(turn) => {
+              // Find the first action of the selected turn
+              const targetTurn = `T${turn}`;
+              
+              // First, find the last action of the previous turn (turn - 1)
+              // This ensures we skip any actions from turn 1 that might have turn === "T2" (like death actions)
+              const previousTurn = `T${turn - 1}`;
+              let lastPreviousTurnIndex = -1;
+              
+              // Find the last action of the previous turn
+              for (let i = currentEpisode.actions.length - 1; i >= 0; i--) {
+                if (currentEpisode.actions[i].turn === previousTurn) {
+                  lastPreviousTurnIndex = i;
+                  break;
+                }
+              }
+              
+              // Now find the first action of the target turn that comes AFTER the last action of previous turn
+              const startSearchIndex = lastPreviousTurnIndex + 1;
+              const firstActionArrayIndex = currentEpisode.actions.findIndex(
+                (action, index) => index >= startSearchIndex && action.turn === targetTurn
+              );
+              
+              if (firstActionArrayIndex !== -1) {
+                // currentActionIndex represents number of actions executed
+                // To show the FIRST action of turn N (currentAction will be actions[firstActionArrayIndex]),
+                // we need currentActionIndex = firstActionArrayIndex + 1
+                // This makes currentAction = actions[currentActionIndex - 1] = actions[firstActionArrayIndex]
+                setCurrentActionIndex(firstActionArrayIndex + 1);
+                setIsPlaying(false); // Pause playback if playing
+              } else {
+                // If turn not found, go to start (turn 1, action 0)
+                setCurrentActionIndex(0);
+                setIsPlaying(false);
+              }
+            }}
+            onPhaseClick={(phase) => {
+              // Get the current turn from the state we're viewing
+              // We need to determine which turn we're currently in based on currentActionIndex
+              let currentTurn: string;
+              if (currentActionIndex === 0) {
+                // At initial state, get turn from first action
+                currentTurn = currentEpisode.actions[0]?.turn || 'T1';
+              } else {
+                // Get turn from the action that will be executed next (the one at currentActionIndex)
+                // Or from the last executed action if we're viewing its result
+                const nextAction = currentEpisode.actions[currentActionIndex];
+                if (nextAction) {
+                  currentTurn = nextAction.turn;
+                } else {
+                  // We're at the end, get turn from last action
+                  const lastAction = currentEpisode.actions[currentActionIndex - 1];
+                  currentTurn = lastAction?.turn || currentEpisode.actions[0]?.turn || 'T1';
+                }
+              }
+              
+              // Map phase names to action types
+              const phaseToActionTypes: Record<string, string[]> = {
+                'move': ['move', 'move_wait'],
+                'shoot': ['shoot', 'shoot_wait'],
+                'charge': ['charge', 'charge_wait', 'charge_fail'],
+                'fight': ['fight']
+              };
+              
+              const actionTypes = phaseToActionTypes[phase] || [phase];
+              
+              // Find the first action of the selected phase in the current turn
+              const firstPhaseActionArrayIndex = currentEpisode.actions.findIndex(action => {
+                return action.turn === currentTurn && actionTypes.includes(action.type);
+              });
+              
+              if (firstPhaseActionArrayIndex !== -1) {
+                // To show the FIRST action of the phase (currentAction will be actions[firstPhaseActionArrayIndex]),
+                // we need currentActionIndex = firstPhaseActionArrayIndex + 1
+                // This makes currentAction = actions[currentActionIndex - 1] = actions[firstPhaseActionArrayIndex]
+                setCurrentActionIndex(firstPhaseActionArrayIndex + 1);
+                setIsPlaying(false); // Pause playback if playing
+              }
+            }}
           />
         </div>
       )}
@@ -1147,10 +1239,23 @@ export const BoardReplay: React.FC = () => {
   );
 
   return (
-    <SharedLayout
-      rightColumnContent={rightColumnContent}
-    >
-      {centerContent}
-    </SharedLayout>
+    <>
+      <SharedLayout
+        rightColumnContent={rightColumnContent}
+        onOpenSettings={handleOpenSettings}
+      >
+        {centerContent}
+      </SharedLayout>
+      <SettingsMenu
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        showAdvanceWarning={false}
+        onToggleAdvanceWarning={() => {}}
+        showDebug={settings.showDebug}
+        onToggleDebug={handleToggleDebug}
+        autoSelectWeapon={true}
+        onToggleAutoSelectWeapon={() => {}}
+      />
+    </>
   );
 };

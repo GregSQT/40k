@@ -759,8 +759,9 @@ STEP : ADVANCED_SHOOTING_ACTION_SELECTION (Post-advance)
 STEP : EMPTY_TARGET_HANDLING
 └── unit.CAN_ADVANCE = true?
     ├── YES → Only action available is advance:
+    │   ├── Display ADVANCE icon (waiting for user click)
     │   ├── Human: Click ADVANCE logo → ⚠️ POINT OF NO RETURN
-    │   ├── Execute player_advance() → unit_advanced (boolean)
+    │   │   └── Execute player_advance() → Roll 1D6 → advance_range → Build destinations → unit_advanced (boolean)
     │   └── unit_advanced = true?
     │       ├── YES → end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1) → UNIT_ACTIVABLE_CHECK
     │       └── NO → end_activation(WAIT, 1, 0, SHOOTING, 1, 1) → UNIT_ACTIVABLE_CHECK

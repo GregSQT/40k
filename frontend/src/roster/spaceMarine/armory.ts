@@ -137,7 +137,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   },
   assault_intercessor_chainsword: {
     display_name: "Astartes Chainsword",
-    NB: 5,
+    NB: 4,
     ATK: 3,
     STR: 4,
     AP: -1,

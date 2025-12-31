@@ -594,9 +594,10 @@ class W40KEngine(gym.Env):
         # Convert gym integer action to semantic action
         semantic_action = self.action_decoder.convert_gym_action(action, self.game_state)
         
-        # CRITICAL: Capture phase, player, and positions BEFORE action execution for accurate logging
+        # CRITICAL: Capture phase, player, turn, and positions BEFORE action execution for accurate logging
         pre_action_phase = self.game_state["phase"]
         pre_action_player = self.game_state["current_player"]
+        pre_action_turn = self.game_state.get("turn", 1)  # Capture turn BEFORE action execution
         pre_action_positions = {}
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
             # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
@@ -645,6 +646,8 @@ class W40KEngine(gym.Env):
             success, result = True, action_result
         
         # Log action ONLY if it's a real agent action with valid unit
+        # Note: pre_action_phase, pre_action_player, and pre_action_turn are already captured
+        # at lines 598-600 BEFORE action execution
         if (self.step_logger and self.step_logger.enabled and success):
            
             # CHANGE 1: Read action from result dict FIRST (handlers populate actual executed action)
@@ -672,7 +675,7 @@ class W40KEngine(gym.Env):
                     if str(unit_id) in pre_action_positions and action_type == "move":
                         orig_col, orig_row = pre_action_positions[str(unit_id)]
                         action_details = {
-                            "current_turn": self.game_state["turn"],
+                            "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
                             "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
                             "semantic_action": semantic_action,
                             "start_pos": (orig_col, orig_row),
@@ -681,7 +684,7 @@ class W40KEngine(gym.Env):
                     else:
                         # Build complete action details for step logger with CURRENT coordinates
                         action_details = {
-                            "current_turn": self.game_state["turn"],
+                            "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
                             "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
                             "semantic_action": semantic_action
                         }
@@ -824,7 +827,7 @@ class W40KEngine(gym.Env):
                                 target_coords = (target_unit["col"], target_unit["row"])
                             
                             attack_details = {
-                                "current_turn": self.game_state["turn"],
+                                "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
                                 "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
                                 "semantic_action": semantic_action,
                                 "target_id": target_id,

@@ -7,6 +7,8 @@ interface TurnPhaseTrackerProps {
   phases: string[]; // Required - AI_TURN.md compliance: no config wrappers
   maxTurns: number; // Required - AI_TURN.md compliance: direct data flow
   className?: string;
+  onTurnClick?: (turn: number) => void; // Optional callback for turn button clicks (replay mode)
+  onPhaseClick?: (phase: string) => void; // Optional callback for phase button clicks (replay mode)
 }
 
 export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
@@ -14,7 +16,9 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   currentPhase,
   phases,
   maxTurns,
-  className = ""
+  className = "",
+  onTurnClick,
+  onPhaseClick
 }) => {
   
   // Validate required props (raise errors for missing data)
@@ -40,14 +44,14 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
     }
   };
 
-  const getTurnStyle = (status: 'passed' | 'current' | 'upcoming'): React.CSSProperties => {
+  const getTurnStyle = (status: 'passed' | 'current' | 'upcoming', hasClickHandler: boolean): React.CSSProperties => {
     const baseStyle: React.CSSProperties = {
       padding: '4px 8px',
       borderRadius: '4px',
       fontWeight: 'medium',
       fontSize: '14px',
       border: '1px solid',
-      cursor: 'default',
+      cursor: hasClickHandler ? 'pointer' : 'default',
       outline: 'none'
     };
     
@@ -97,14 +101,14 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
     }
   };
 
-  const getPhaseStyle = (status: 'passed' | 'current' | 'upcoming'): React.CSSProperties => {
+  const getPhaseStyle = (status: 'passed' | 'current' | 'upcoming', hasClickHandler: boolean): React.CSSProperties => {
     const baseStyle: React.CSSProperties = {
       padding: '4px 8px',
       borderRadius: '4px',
       fontWeight: 'medium',
       fontSize: '14px',
       border: '1px solid',
-      cursor: 'default',
+      cursor: hasClickHandler ? 'pointer' : 'default',
       outline: 'none'
     };
     
@@ -143,16 +147,17 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
     return (
     <div className={className} style={{ background: '#1f2937', border: '1px solid #555', borderRadius: '8px', padding: '8px' }}>
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        <div style={{ display: 'flex', gap: '2px' }}>
+      <div style={{ display: 'flex', gap: '2px' }}>
           {turns.map((turn) => {
             const status = getTurnStatus(turn);
-            const style = getTurnStyle(status);
+            const style = getTurnStyle(status, !!onTurnClick);
 
             return (
               <button
                 key={turn}
                 style={style}
-                disabled
+                disabled={!onTurnClick}
+                onClick={() => onTurnClick?.(turn)}
               >
                 Turn {turn}
               </button>
@@ -162,13 +167,14 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         <div style={{ display: 'flex', gap: '2px' }}>
           {phases.map((phase) => {
             const status = getPhaseStatus(phase);
-            const style = getPhaseStyle(status);
+            const style = getPhaseStyle(status, !!onPhaseClick);
 
             return (
               <button
                 key={phase}
                 style={style}
-                disabled
+                disabled={!onPhaseClick}
+                onClick={() => onPhaseClick?.(phase)}
               >
                 {formatPhaseName(phase)}
               </button>
