@@ -383,12 +383,42 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 weapon["shot"] = 0
             
             if rng_weapons:
-                selected_idx = unit.get("selectedRngWeaponIndex", 0)
-                if selected_idx < 0 or selected_idx >= len(rng_weapons):
-                    # Default to first weapon if index invalid (phase start, pas encore de sélection)
-                    selected_idx = 0
-                weapon = rng_weapons[selected_idx]
-                unit["SHOOT_LEFT"] = weapon["NB"]
+                # Initialize weapon selection using weapon_availability_check to ensure valid weapon
+                # This ensures PISTOL weapons are selected when unit is adjacent to enemy
+                unit_id_str = str(unit["id"])
+                has_advanced = unit_id_str in game_state.get("units_advanced", set())
+                is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                advance_status = 1 if has_advanced else 0
+                adjacent_status = 1 if is_adjacent else 0
+                
+                weapon_rule = game_state.get("weapon_rule", 1)
+                weapon_available_pool = weapon_availability_check(
+                    game_state, unit, weapon_rule, advance_status, adjacent_status
+                )
+                usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+                
+                if usable_weapons:
+                    # If adjacent, prioritize PISTOL weapons
+                    if is_adjacent:
+                        pistol_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w.get("weapon", {}))]
+                        if pistol_weapons:
+                            first_weapon = pistol_weapons[0]
+                        else:
+                            first_weapon = usable_weapons[0]
+                    else:
+                        first_weapon = usable_weapons[0]
+                    
+                    selected_idx = first_weapon["index"]
+                    unit["selectedRngWeaponIndex"] = selected_idx
+                    weapon = rng_weapons[selected_idx]
+                    unit["SHOOT_LEFT"] = weapon["NB"]
+                else:
+                    # No usable weapons, default to first weapon (will be validated later)
+                    selected_idx = unit.get("selectedRngWeaponIndex", 0)
+                    if selected_idx < 0 or selected_idx >= len(rng_weapons):
+                        selected_idx = 0
+                    weapon = rng_weapons[selected_idx]
+                    unit["SHOOT_LEFT"] = weapon["NB"]
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
@@ -2059,6 +2089,14 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             selected_weapon = get_selected_ranged_weapon(unit)
             if not selected_weapon or not _weapon_has_assault_rule(selected_weapon):
                 return False, {"error": "cannot_shoot_after_advance_without_assault", "unitId": unit_id_str}
+        
+        # PISTOL RULE VALIDATION: Block shooting non-PISTOL weapons when adjacent to enemy
+        is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+        if is_adjacent:
+            from engine.utils.weapon_helpers import get_selected_ranged_weapon
+            selected_weapon = get_selected_ranged_weapon(unit)
+            if not selected_weapon or not _weapon_has_pistol_rule(selected_weapon):
+                return False, {"error": "cannot_shoot_non_pistol_when_adjacent", "unitId": unit_id_str}
                 
         # Validate unit has shots remaining
         if "SHOOT_LEFT" not in unit:
@@ -2166,6 +2204,12 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     unit["selectedRngWeaponIndex"] = best_weapon_idx
                     weapon = unit["RNG_WEAPONS"][best_weapon_idx]
                     unit["SHOOT_LEFT"] = weapon["NB"]
+                    
+                    # PISTOL RULE VALIDATION: Re-validate after weapon selection
+                    # This ensures the newly selected weapon is valid for current context
+                    if is_adjacent:
+                        if not _weapon_has_pistol_rule(weapon):
+                            return False, {"error": "cannot_shoot_non_pistol_when_adjacent", "unitId": unit_id_str}
                 else:
                     unit["SHOOT_LEFT"] = 0
                     return False, {"error": "no_weapons_available", "unitId": unit_id}

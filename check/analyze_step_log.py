@@ -5,8 +5,14 @@ Run this locally: python check/analyze_step_log.py train_step.log
 """
 
 import sys
+import os
 import re
 from collections import defaultdict, Counter
+
+# Add project root to Python path for imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 
 def calculate_hex_distance(col1, row1, col2, row2):
@@ -53,6 +59,33 @@ def has_line_of_sight(shooter_col, shooter_row, target_col, target_row, wall_hex
 
 def parse_log(filepath):
     """Parse train_step.log and extract statistics."""
+    
+    # Load unit weapons at script start using existing system
+    from ai.unit_registry import UnitRegistry
+    
+    unit_registry = UnitRegistry()
+    unit_weapons_cache = {}  # unit_type -> list of RNG_WEAPONS with {display_name, RNG, WEAPON_RULES, is_pistol}
+    
+    # Load weapons for each unit type
+    for unit_type, unit_data in unit_registry.units.items():
+        rng_weapons = unit_data.get("RNG_WEAPONS", [])
+        # Extract relevant info: name, range, rules
+        weapons_info = []
+        for weapon in rng_weapons:
+            # Check if weapon is a dict (expected) or string (fallback)
+            if isinstance(weapon, dict):
+                weapon_rules = weapon.get("WEAPON_RULES", [])
+                weapons_info.append({
+                    'name': weapon.get('display_name', ''),
+                    'range': weapon.get('RNG', 0),
+                    'rules': weapon_rules,
+                    'is_pistol': 'PISTOL' in weapon_rules
+                })
+            elif isinstance(weapon, str):
+                # Weapon is a string (code name) - skip or try to resolve
+                # This shouldn't happen but handle gracefully
+                continue
+        unit_weapons_cache[unit_type] = weapons_info
 
     # Load wall hexes from scenario (will be populated per episode)
     wall_hexes = set()
@@ -68,8 +101,8 @@ def parse_log(filepath):
         'episode_lengths': [],
         'sample_games': {'win': None, 'loss': None, 'draw': None},
         'shoot_vs_wait_by_player': {
-            0: {'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0},
-            1: {'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0}
+            0: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0},
+            1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0}
         },
         'wall_collisions': {0: 0, 1: 0},
         # Target priority tracking - with LOS awareness
@@ -89,6 +122,8 @@ def parse_log(filepath):
             0: {'adjacent': 0, 'not_adjacent': 0},
             1: {'adjacent': 0, 'not_adjacent': 0}
         },
+        # Track non-PISTOL shots while adjacent (should not happen - rule violation)
+        'non_pistol_adjacent_shots': {0: 0, 1: 0},
         # Enemy death order tracking with unit types
         'death_orders': [],
         'current_episode_deaths': [],
@@ -265,15 +300,31 @@ def parse_log(filepath):
                         stats['shoot_vs_wait_by_player'][player]['shoot'] += 1
 
                         # Extract shooter and target info
-                        # Format: "Unit X(col, row) SHOT at unit Y"
+                        # Format: "Unit X(col, row) SHOT at unit Y(col, row)" (target coords now in log)
                         shooter_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
-                        target_match = re.search(r'SHOT at unit (\d+)', action_desc, re.IGNORECASE)
+                        # Updated regex to capture target coords if present: "SHOT at unit Y" or "SHOT at unit Y(col, row)"
+                        target_match = re.search(r'SHOT at unit (\d+)(?:\((\d+), (\d+)\))?', action_desc, re.IGNORECASE)
 
                         if shooter_match and target_match:
                             shooter_id = shooter_match.group(1)
                             shooter_col = int(shooter_match.group(2))
                             shooter_row = int(shooter_match.group(3))
                             target_id = target_match.group(1)
+                            
+                            # Extract target coordinates from log if present, otherwise use unit_positions
+                            if target_match.group(2) and target_match.group(3):
+                                # Target coords are in the log
+                                target_col = int(target_match.group(2))
+                                target_row = int(target_match.group(3))
+                                target_pos = (target_col, target_row)
+                                # Update unit_positions with current target position
+                                unit_positions[target_id] = target_pos
+                            elif target_id in unit_positions:
+                                # Fallback to unit_positions if coords not in log
+                                target_pos = unit_positions[target_id]
+                            else:
+                                # Target position unknown, skip adjacency check
+                                target_pos = None
 
                             # Update shooter position
                             unit_positions[shooter_id] = (shooter_col, shooter_row)
@@ -288,15 +339,19 @@ def parse_log(filepath):
                                 weapon_name = weapon_match.group(1).lower()
                                 is_pistol = 'pistol' in weapon_name
                                 
-                                if is_pistol:
-                                    # Calculate distance to target to determine adjacency
-                                    if target_id in unit_positions:
-                                        target_pos = unit_positions[target_id]
-                                        distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
+                                # Calculate distance to target to determine adjacency
+                                if target_pos:
+                                    distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
+                                    
+                                    if is_pistol:
                                         if distance == 1:
                                             stats['pistol_shots'][player]['adjacent'] += 1
                                         else:
                                             stats['pistol_shots'][player]['not_adjacent'] += 1
+                                    else:
+                                        # Non-PISTOL weapon - check if adjacent (rule violation)
+                                        if distance == 1:
+                                            stats['non_pistol_adjacent_shots'][player] += 1
 
                             stats['target_priority'][player]['total_shots'] += 1
 
@@ -352,31 +407,99 @@ def parse_log(filepath):
 
                         # Track waits by phase (MOVE or SHOOT)
                         if phase == 'SHOOT':
-                            # Extract unit position for LOS check
+                            # Extract unit position for validation
                             unit_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
                             if unit_match:
                                 wait_unit_id = unit_match.group(1)
                                 wait_col = int(unit_match.group(2))
                                 wait_row = int(unit_match.group(3))
-
-                                # Check if any enemy is in LOS (with wall checking)
+                                
+                                # Get unit type and weapons
+                                wait_unit_type = unit_types.get(wait_unit_id, 'Unknown')
+                                available_weapons = unit_weapons_cache.get(wait_unit_type, [])
+                                ranged_weapons = [w for w in available_weapons if w.get('range', 0) > 0]
+                                
+                                # Check if unit is adjacent to enemy
                                 enemy_player = 1 - player
-                                enemies_in_los = []
+                                is_adjacent = False
                                 for uid, p in unit_player.items():
                                     if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
                                         enemy_pos = unit_positions[uid]
-                                        if has_line_of_sight(wait_col, wait_row, enemy_pos[0], enemy_pos[1], wall_hexes):
-                                            enemies_in_los.append(uid)
+                                        distance = calculate_hex_distance(wait_col, wait_row, enemy_pos[0], enemy_pos[1])
+                                        if distance == 1:
+                                            is_adjacent = True
+                                            break
+                                
+                                # If adjacent and no PISTOL weapon → this is a SKIP (not a wait)
+                                if is_adjacent:
+                                    has_pistol = any(w.get('is_pistol', False) for w in ranged_weapons)
+                                    if not has_pistol:
+                                        # Can't shoot in melee without PISTOL → this is a skip, not a wait
+                                        stats['shoot_vs_wait']['wait'] -= 1
+                                        stats['shoot_vs_wait_by_player'][player]['wait'] -= 1
+                                        stats['shoot_vs_wait']['skip'] += 1
+                                        stats['shoot_vs_wait_by_player'][player]['skip'] += 1
+                                        continue  # Skip the rest of wait processing
+                                
+                                # Check if any enemy is a VALID target (not just LOS)
+                                valid_targets = []
+                                
+                                for uid, p in unit_player.items():
+                                    if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
+                                        enemy_pos = unit_positions[uid]
+                                        distance = calculate_hex_distance(wait_col, wait_row, enemy_pos[0], enemy_pos[1])
+                                        
+                                        # Check LOS
+                                        if not has_line_of_sight(wait_col, wait_row, enemy_pos[0], enemy_pos[1], wall_hexes):
+                                            continue
+                                        
+                                        # Check if any weapon can reach this target
+                                        can_reach = False
+                                        for weapon in ranged_weapons:
+                                            weapon_range = weapon.get('range', 0)
+                                            is_pistol = weapon.get('is_pistol', False)
+                                            
+                                            # Range check
+                                            if distance > weapon_range:
+                                                continue
+                                            
+                                            # Adjacent check: non-PISTOL can't shoot adjacent
+                                            if distance == 1 and not is_pistol:
+                                                continue
+                                            
+                                            # Melee check: can't shoot if target is in melee with friendly
+                                            target_in_melee = False
+                                            for friendly_id, friendly_p in unit_player.items():
+                                                if friendly_p == player and friendly_id != wait_unit_id:
+                                                    if friendly_id in unit_positions:
+                                                        friendly_pos = unit_positions[friendly_id]
+                                                        friendly_distance = calculate_hex_distance(enemy_pos[0], enemy_pos[1], friendly_pos[0], friendly_pos[1])
+                                                        if friendly_distance == 1:
+                                                            target_in_melee = True
+                                                            break
+                                            
+                                            if target_in_melee:
+                                                continue
+                                            
+                                            # All checks passed
+                                            can_reach = True
+                                            break
+                                        
+                                        if can_reach:
+                                            valid_targets.append(uid)
 
-                                if enemies_in_los:
-                                    # Has enemies in LOS - this is a "bad" wait
+                                if valid_targets:
+                                    # Has valid targets - this is a "bad" wait
                                     stats['wait_by_phase'][player]['shoot_wait_with_los'] += 1
+                                    stats['shoot_vs_wait_by_player'][player]['wait_with_targets'] += 1
                                 else:
-                                    # No enemies in LOS - this wait is fine (blocked by walls)
+                                    # No valid targets - this wait is fine
                                     stats['wait_by_phase'][player]['shoot_wait_no_los'] += 1
+                                    stats['shoot_vs_wait_by_player'][player]['wait_no_targets'] += 1
                             else:
                                 # Couldn't parse - count as no LOS
                                 stats['wait_by_phase'][player]['shoot_wait_no_los'] += 1
+                                stats['shoot_vs_wait_by_player'][player]['wait_no_targets'] += 1
                         elif phase == 'MOVE':
                             stats['wait_by_phase'][player]['move_wait'] += 1
 
@@ -554,12 +677,25 @@ def print_statistics(stats):
                       stats['shoot_vs_wait_by_player'][1]['skip'] +
                       stats['shoot_vs_wait_by_player'][1]['advance'])
 
-    for action in ['shoot', 'wait', 'skip', 'advance']:
+    for action in ['shoot', 'skip', 'advance']:
         agent_count = stats['shoot_vs_wait_by_player'][0][action]
         bot_count = stats['shoot_vs_wait_by_player'][1][action]
         agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
         bot_pct = (bot_count / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
         print(f"{action.capitalize():<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+    
+    # Wait actions - split by targets available
+    agent_wait_with = stats['shoot_vs_wait_by_player'][0]['wait_with_targets']
+    bot_wait_with = stats['shoot_vs_wait_by_player'][1]['wait_with_targets']
+    agent_wait_with_pct = (agent_wait_with / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
+    bot_wait_with_pct = (bot_wait_with / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
+    print(f"{'Wait (targets)':<12} {agent_wait_with:6d} ({agent_wait_with_pct:5.1f}%)   {bot_wait_with:6d} ({bot_wait_with_pct:5.1f}%)")
+    
+    agent_wait_no = stats['shoot_vs_wait_by_player'][0]['wait_no_targets']
+    bot_wait_no = stats['shoot_vs_wait_by_player'][1]['wait_no_targets']
+    agent_wait_no_pct = (agent_wait_no / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
+    bot_wait_no_pct = (bot_wait_no / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
+    print(f"{'Wait (no targets)':<12} {agent_wait_no:6d} ({agent_wait_no_pct:5.1f}%)   {bot_wait_no:6d} ({bot_wait_no_pct:5.1f}%)")
     
     # Shots after advance (Assault weapon rule)
     agent_shots_after_advance = stats['shots_after_advance'][0]
@@ -589,6 +725,11 @@ def print_statistics(stats):
     print(f"PISTOL shots (adjacent):       {agent_pistol_adj:6d} ({agent_pistol_adj_pct:5.1f}%)  {bot_pistol_adj:6d} ({bot_pistol_adj_pct:5.1f}%)")
     print(f"PISTOL shots (not adjacent):   {agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)  {bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)")
     print(f"Total PISTOL shots:            {agent_pistol_total:6d}           {bot_pistol_total:6d}")
+    
+    # Non-PISTOL shots while adjacent (rule violation)
+    agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][0]
+    bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
+    print(f"Non-PISTOL shots (adjacent):   {agent_non_pistol_adj:6d}           {bot_non_pistol_adj:6d}")
 
     # WAIT BEHAVIOR - shoot waits with LOS only
     print("\n" + "-" * 80)

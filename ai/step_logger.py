@@ -232,10 +232,13 @@ class StepLogger:
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
             weapon_name = details.get("weapon_name", "")
+            target_coords = details.get("target_coords")
+            target_coords_str = f"({target_coords[0]}, {target_coords[1]})" if target_coords else ""
+            
             if weapon_name:
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} with [{weapon_name}]"
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str} with [{weapon_name}]"
             else:
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}"
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str}"
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             
             # Add reward if available
@@ -269,7 +272,9 @@ class StepLogger:
                 wound_target = details["wound_target"]
                 save_target = details["save_target"]
                 
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} (Shot {shot_num}/{total_shots})"
+                target_coords = details.get("target_coords")
+                target_coords_str = f"({target_coords[0]}, {target_coords[1]})" if target_coords else ""
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots})"
                 if hit_result == "MISS":
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
                 elif wound_result == "FAIL":
@@ -280,7 +285,9 @@ class StepLogger:
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
                 return base_msg + detail_msg
             else:
-                return f"Unit {unit_id}{unit_coords} SHOT at unit {target_id} (Shot {shot_num}/{total_shots}) - MISS"
+                target_coords = details.get("target_coords")
+                target_coords_str = f"({target_coords[0]}, {target_coords[1]})" if target_coords else ""
+                return f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots}) - MISS"
                 
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence
@@ -296,7 +303,9 @@ class StepLogger:
             wounds = details.get("wounds")
             failed_saves = details.get("failed_saves")
             
-            return f"Unit {unit_id}{unit_coords} SHOOTING COMPLETE at unit {target_id} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
+            target_coords = details.get("target_coords")
+            target_coords_str = f"({target_coords[0]}, {target_coords[1]})" if target_coords else ""
+            return f"Unit {unit_id}{unit_coords} SHOOTING COMPLETE at unit {target_id}{target_coords_str} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
         elif action_type == "charge" and details:
             if "target_id" in details:
@@ -365,10 +374,13 @@ class StepLogger:
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
             weapon_name = details.get("weapon_name", "")
+            target_coords = details.get("target_coords")
+            target_coords_str = f"({target_coords[0]}, {target_coords[1]})" if target_coords else ""
+            
             if weapon_name:
-                base_msg = f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}]"
+                base_msg = f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id}{target_coords_str} with [{weapon_name}]"
             else:
-                base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}"
+                base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}{target_coords_str}"
             
             # Apply truncation logic like shooting phase - stop after first failure
             detail_parts = [f"Hit:{hit_target}+:{hit_roll}({hit_result})"]

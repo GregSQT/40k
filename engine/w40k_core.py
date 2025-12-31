@@ -720,8 +720,9 @@ class W40KEngine(gym.Env):
 
                     if action_type == "shoot":
                         # Add shooting-specific data with correct field names
+                        target_id = semantic_action.get("targetId")
                         action_details.update({
-                            "target_id": semantic_action.get("targetId"),  # StepLogger expects target_id
+                            "target_id": target_id,  # StepLogger expects target_id
                             "hit_roll": 0,  # Will be filled by actual shooting execution
                             "wound_roll": 0,
                             "save_roll": 0,
@@ -806,77 +807,42 @@ class W40KEngine(gym.Env):
                         # Check if we have multiple attack results from fight phase (CC_NB attacks)
                         all_attack_results = result.get("all_attack_results", [])
 
-                        if all_attack_results and len(all_attack_results) > 0:
-                            # Log EACH attack individually for proper step log output
-                            step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+                        if not all_attack_results:
+                            raise ValueError(
+                                f"combat action missing all_attack_results - this should never happen. "
+                                f"unit_id={unit_id}, result keys={list(result.keys())}"
+                            )
 
-                            for i, attack_result in enumerate(all_attack_results):
-                                attack_details = {
-                                    "current_turn": self.game_state["turn"],
-                                    "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
-                                    "semantic_action": semantic_action,
-                                    "target_id": attack_result.get("targetId", result.get("targetId")),
-                                    "hit_roll": attack_result.get("hit_roll", 0),
-                                    "wound_roll": attack_result.get("wound_roll", 0),
-                                    "save_roll": attack_result.get("save_roll", 0),
-                                    "damage_dealt": attack_result.get("damage_dealt", 0),
-                                    "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
-                                    "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
-                                    "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
-                                    "hit_target": attack_result.get("hit_target", 4),
-                                    "wound_target": attack_result.get("wound_target", 4),
-                                    "save_target": attack_result.get("save_target", 4),
-                                    "target_died": attack_result.get("target_died", False),
-                                    "weapon_name": attack_result.get("weapon_name", ""),  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
-                                    "reward": step_reward if i == 0 else 0.0  # Only first attack gets reward
-                                }
+                        # Log EACH attack individually for proper step log output
+                        step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
 
-                                self.step_logger.log_action(
-                                    unit_id=updated_unit["id"],
-                                    action_type=action_type,
-                                    phase=pre_action_phase,
-                                    player=pre_action_player,
-                                    success=success,
-                                    step_increment=(i == 0),  # Only first attack increments step
-                                    action_details=attack_details
-                                )
-                            # Multi-attack logging complete - skip to replay logging
-                        else:
-                            # Fallback: single attack or no attack results
-                            action_details.update({
-                                "target_id": result.get("targetId"),
-                                "hit_roll": 0,
-                                "wound_roll": 0,
-                                "save_roll": 0,
-                                "damage_dealt": 0,
-                                "hit_result": "PENDING",
-                                "wound_result": "PENDING",
-                                "save_result": "PENDING",
-                                "hit_target": 4,
-                                "wound_target": 4,
-                                "save_target": 4
-                            })
-                            # Populate with actual attack results from game_state
-                            if "last_attack_result" in self.game_state and self.game_state["last_attack_result"]:
-                                attack_result = self.game_state["last_attack_result"]
-                                action_details.update({
-                                    "hit_roll": attack_result.get("hit_roll", 0),
-                                    "wound_roll": attack_result.get("wound_roll", 0),
-                                    "save_roll": attack_result.get("save_roll", 0),
-                                    "damage_dealt": attack_result.get("damage_dealt", 0),
-                                    "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
-                                    "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
-                                    "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
-                                    "hit_target": attack_result.get("hit_target", 4),
-                                    "wound_target": attack_result.get("wound_target", 4),
-                                    "save_target": attack_result.get("save_target", 4),
-                                    "target_died": attack_result.get("target_died", False),
-                                    "weapon_name": attack_result.get("weapon_name", "")  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
-                                })
-
-                            # Log single combat action (fallback path)
-                            step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
-                            action_details["reward"] = step_reward
+                        for i, attack_result in enumerate(all_attack_results):
+                            target_id = attack_result.get("targetId", result.get("targetId"))
+                            target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
+                            target_coords = None
+                            if target_unit:
+                                target_coords = (target_unit["col"], target_unit["row"])
+                            
+                            attack_details = {
+                                "current_turn": self.game_state["turn"],
+                                "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
+                                "semantic_action": semantic_action,
+                                "target_id": target_id,
+                                "target_coords": target_coords,  # Add target coordinates
+                                "hit_roll": attack_result.get("hit_roll", 0),
+                                "wound_roll": attack_result.get("wound_roll", 0),
+                                "save_roll": attack_result.get("save_roll", 0),
+                                "damage_dealt": attack_result.get("damage_dealt", 0),
+                                "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
+                                "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
+                                "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
+                                "hit_target": attack_result.get("hit_target", 4),
+                                "wound_target": attack_result.get("wound_target", 4),
+                                "save_target": attack_result.get("save_target", 4),
+                                "target_died": attack_result.get("target_died", False),
+                                "weapon_name": attack_result.get("weapon_name", ""),  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
+                                "reward": step_reward if i == 0 else 0.0  # Only first attack gets reward
+                            }
 
                             self.step_logger.log_action(
                                 unit_id=updated_unit["id"],
@@ -884,9 +850,10 @@ class W40KEngine(gym.Env):
                                 phase=pre_action_phase,
                                 player=pre_action_player,
                                 success=success,
-                                step_increment=True,
-                                action_details=action_details
+                                step_increment=(i == 0),  # Only first attack increments step
+                                action_details=attack_details
                             )
+                        # Multi-attack logging complete - skip to replay logging
                     else:
                         # Non-specialized actions (move, shoot, wait)
                         # charge and combat have their own logging above with specialized multi-attack handling
@@ -904,6 +871,12 @@ class W40KEngine(gym.Env):
                                     step_reward = log["reward"]
                                     break
                             action_details["reward"] = step_reward
+                            
+                            # Get target coordinates AFTER action execution
+                            target_id = action_details.get("target_id")
+                            target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
+                            if target_unit:
+                                action_details["target_coords"] = (target_unit["col"], target_unit["row"])
                         else:
                             # For non-shoot actions, calculate normally
                             step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
