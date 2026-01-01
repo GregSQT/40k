@@ -1414,19 +1414,15 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
         game_state["units_shot"].add(unit["id"])
-        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} added to units_shot (arg3=SHOOTING)")
     elif arg3 == "ADVANCE":
         # Mark as units_advanced
         if "units_advanced" not in game_state:
             game_state["units_advanced"] = set()
         game_state["units_advanced"].add(unit["id"])
-        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} added to units_advanced (arg3=ADVANCE)")
     # arg3 == "PASS" → no tracking update
     elif arg3 == "PASS":
-        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} NOT added to units_shot/units_advanced (arg3=PASS)")
         units_shot = game_state.get("units_shot", set())
         units_advanced = game_state.get("units_advanced", set())
-        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} in units_shot? {unit['id'] in units_shot}, in units_advanced? {unit['id'] in units_advanced}")
     
     # Arg4/Arg5 pool removal (arg4 = phase, arg5 = remove_from_pool)
     # remove_from_pool = 0 means NOT_REMOVED, 1 means remove
@@ -1896,20 +1892,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
             
             # Debug output only in debug training mode
-            debug_mode = config.get('training_config_name') == 'debug'
-            if debug_mode:
-                print(f"EXECUTE DEBUG: Auto-target selection found {len(valid_targets)} targets: {valid_targets}")
-            
             if not valid_targets:
                 # No valid targets - end activation with wait
-                if debug_mode:
-                    print(f"EXECUTE DEBUG: No valid targets found, ending activation with PASS")
                 result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
                 return True, result
             target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
-            
-            if debug_mode:
-                print(f"EXECUTE DEBUG: AI selected target: {target_id}")
         
         # Execute shooting directly without UI loops
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
@@ -1962,8 +1949,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         
         # DIAGNOSTIC: Verify no cross-player contamination
         if unit["player"] != game_state["current_player"]:
-            print(f"🚨 BUG DETECTED: Unit {unit_id} (player {unit['player']}) trying to wait during player {game_state['current_player']}'s turn!")
-            print(f"   Current pool: {game_state.get('shoot_activation_pool', [])}")
             return False, {"error": "wrong_player_unit_wait", "unitId": unit_id, "unit_player": unit["player"], "current_player": game_state["current_player"]}
         
         if "shoot_activation_pool" not in game_state:
@@ -1983,22 +1968,17 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # AI_TURN.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
         has_shot = _unit_has_shot_with_any_weapon(unit)
         unit_id_str = str(unit["id"])
-        print(f"🔍 RIGHT_CLICK on unit {unit_id_str}: has_shot={has_shot}")
         if has_shot:
             # YES → end_activation(ACTION, 1, SHOOTING, SHOOTING, 1, 1)
-            print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} has shot → marking in units_shot")
             return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
         else:
             # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
             has_advanced = unit_id_str in game_state.get("units_advanced", set())
-            print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} has_advanced={has_advanced}")
             if has_advanced:
                 # NO → Unit has not shot yet (only advanced) → end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1)
-                print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} advanced → marking in units_advanced")
                 return _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
             else:
                 # NO → end_activation(WAIT, 1, 0, SHOOTING, 1, 1)
-                print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} cancel (no shot, no advance) → PASS (not marking in units_shot/units_advanced)")
                 return _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
     
     elif action_type == "skip":
@@ -2778,20 +2758,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                             # Don't override action_name - keep kill_target/damage_target as primary
                 except Exception as focus_fire_error:
                     # Don't crash training if focus fire bonus fails
-                    import traceback
-                    print(f"⚠️  Focus fire bonus calc failed: {focus_fire_error}")
-                    print(f"   Traceback: {traceback.format_exc()}")
                     pass
 
         except Exception as e:
-            print(f"🚨 REWARD CALC FAILED for {shooter.get('id', 'unknown')} (P{shooter.get('player', '?')}): {e}")
-            print(f"   shooter_scenario_type={shooter.get('unitType', 'missing')}")
-            if 'shooter_reward_key' in locals():
-                print(f"   shooter_reward_key={shooter_reward_key}")
-            if 'controlled_agent' in locals():
-                print(f"   controlled_agent={controlled_agent}")
-            if 'config' in locals():
-                print(f"   controlled_player={config.get('controlled_player', 'not_set')}")
+            pass
             raise
 
     # Update the shoot log entry with calculated reward and action_name

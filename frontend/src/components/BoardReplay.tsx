@@ -54,6 +54,8 @@ interface ReplayAction {
   // Charge action fields
   charge_roll?: number;
   charge_success?: boolean;
+  // Advance action fields
+  advance_roll?: number;
 }
 
 // Extended GameState for replay mode (with additional properties from parser)
@@ -441,6 +443,21 @@ export const BoardReplay: React.FC = () => {
     }
   }
 
+  // Add ghost unit at starting position for advance actions (like move)
+  if (currentAction?.type === 'advance' && currentAction?.from && currentAction.unit_id) {
+    // Add a ghost unit at the starting position
+    const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
+    if (originalUnit) {
+      unitsWithGhost.push({
+        ...originalUnit,
+        id: -3, // Special ID for advance ghost unit (different from move and charge)
+        col: currentAction.from.col,
+        row: currentAction.from.row,
+        isGhost: true // Mark as ghost for special rendering
+      } as UnitWithGhost);
+    }
+  }
+
   // Update game log when action index changes
   useEffect(() => {
     if (!currentEpisode) return;
@@ -454,6 +471,17 @@ export const BoardReplay: React.FC = () => {
 
       if (action.type === 'move' && action.from && action.to) {
         gameLog.logMoveAction(
+          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
+          action.from.col,
+          action.from.row,
+          action.to.col,
+          action.to.row,
+          turnNumber,
+          action.player
+        );
+      } else if (action.type === 'advance' && action.from && action.to) {
+        // Log advance actions using logAdvanceAction to match PvP/PvE format
+        gameLog.logAdvanceAction(
           { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
           action.from.col,
           action.from.row,
@@ -1041,15 +1069,26 @@ export const BoardReplay: React.FC = () => {
     ? (currentAction?.charge_success !== false && currentAction?.type !== 'charge_fail')  // charge_fail is always false
     : false;
 
+  // Get advance roll info for badge display
+  const advanceRoll = (currentAction?.type === 'advance' && currentAction?.advance_roll !== undefined)
+    ? currentAction.advance_roll
+    : null;
+  const advancingUnitId = (currentAction?.type === 'advance' && currentAction?.unit_id)
+    ? currentAction.unit_id
+    : null;
+
   // For move actions, select the ghost unit to show movement range
   // For shoot actions, select the shooter to show LoS/attack range
   // For charge actions, select the charging unit to show charge destination
-  // Ghost unit has ID -1 (move) or -2 (charge) and is at the starting position
+  // For advance actions, select the ghost unit to show advance destinations
+  // Ghost unit has ID -1 (move), -2 (charge), or -3 (advance) and is at the starting position
   const replaySelectedUnitId: number | null = currentAction?.type === 'move'
     ? -1
     : (currentAction?.type === 'charge'
       ? (currentAction.unit_id ?? null)  // Select the actual charging unit to trigger getChargeDestinations
-      : (currentAction?.type === 'shoot' ? (currentAction.shooter_id ?? null) : null));
+      : (currentAction?.type === 'advance'
+        ? -3  // Select the ghost unit to trigger getAdvanceDestinations
+        : (currentAction?.type === 'shoot' ? (currentAction.shooter_id ?? null) : null)));
 
   // Center column: Board
   const centerContent = currentState && gameConfig ? (
@@ -1058,8 +1097,10 @@ export const BoardReplay: React.FC = () => {
       selectedUnitId={replaySelectedUnitId}
       eligibleUnitIds={unitsWithGhost.map((u: Unit) => u.id)}
       showHexCoordinates={showHexCoordinates}
-      mode="select"
-      movePreview={null}
+      mode={currentAction?.type === 'advance' ? 'advancePreview' : 'select'}
+      movePreview={currentAction?.type === 'advance' && currentAction?.to && currentAction?.unit_id
+        ? { unitId: currentAction.unit_id, destCol: currentAction.to.col, destRow: currentAction.to.row }
+        : null}
       attackPreview={null}
       onSelectUnit={() => {}}
       onStartMovePreview={() => {}}
@@ -1213,6 +1254,107 @@ export const BoardReplay: React.FC = () => {
         }
         return [];
       }}
+      getAdvanceDestinations={(unitId: number) => {
+        // Calculate ALL valid advance destinations for replay mode using BFS
+        // For advance, unitId will be -3 (ghost unit), so we need to find the actual unit
+        if (currentAction?.type === 'advance' && currentAction?.from && currentAction?.advance_roll && unitId === -3) {
+          const advanceFrom = currentAction.from;
+          const advanceRollValue = currentAction.advance_roll;
+          
+          if (!advanceRollValue || advanceRollValue <= 0) {
+            return [];
+          }
+
+          // Find the advancing unit (actual unit, not ghost)
+          const advancingUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
+          if (!advancingUnit) {
+            return [];
+          }
+
+          // Helper function to get hex neighbors (6 directions)
+          const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
+            const parity = col & 1; // 0 for even, 1 for odd
+            if (parity === 0) { // Even column
+              return [
+                { col, row: row - 1 },      // N
+                { col: col + 1, row: row - 1 }, // NE
+                { col: col + 1, row },     // SE
+                { col, row: row + 1 },      // S
+                { col: col - 1, row },      // SW
+                { col: col - 1, row: row - 1 } // NW
+              ];
+            } else { // Odd column
+              return [
+                { col, row: row - 1 },      // N
+                { col: col + 1, row },      // NE
+                { col: col + 1, row: row + 1 }, // SE
+                { col, row: row + 1 },      // S
+                { col: col - 1, row: row + 1 }, // SW
+                { col: col - 1, row }       // NW
+              ];
+            }
+          };
+
+          // Helper function to check if hex is traversable (advance cannot end adjacent to enemies)
+          const isTraversable = (col: number, row: number): boolean => {
+            const boardCols = currentState?.board_cols || 25;
+            const boardRows = currentState?.board_rows || 21;
+            
+            // Check bounds
+            if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
+              return false;
+            }
+            
+            // Check walls
+            if (currentState?.walls?.some((w: { col: number; row: number }) => w.col === col && w.row === row)) {
+              return false;
+            }
+            
+            // Check if occupied by another unit (excluding the advancing unit)
+            if (unitsWithGhost.some((u: Unit) =>
+              u.col === col && u.row === row && u.id !== currentAction.unit_id && u.id >= 0 && u.HP_CUR > 0
+            )) {
+              return false;
+            }
+            
+            return true;
+          };
+
+          // BFS to find all reachable hexes within advance_roll distance
+          const validDestinations: { col: number; row: number }[] = [];
+          const visited = new Set<string>();
+          const queue: Array<{ col: number; row: number; distance: number }> = [{ col: advanceFrom.col, row: advanceFrom.row, distance: 0 }];
+          visited.add(`${advanceFrom.col},${advanceFrom.row}`);
+
+          while (queue.length > 0) {
+            const current = queue.shift()!;
+            const { col, row, distance } = current;
+
+            if (distance > 0 && distance <= advanceRollValue && isTraversable(col, row)) {
+              validDestinations.push({ col, row });
+            }
+
+            if (distance < advanceRollValue) {
+              const neighbors = getHexNeighbors(col, row);
+              for (const neighbor of neighbors) {
+                const neighborKey = `${neighbor.col},${neighbor.row}`;
+                if (!visited.has(neighborKey)) {
+                  visited.add(neighborKey);
+                  const neighborDistance = distance + 1;
+                  if (neighborDistance <= advanceRollValue && isTraversable(neighbor.col, neighbor.row)) {
+                    queue.push({ col: neighbor.col, row: neighbor.row, distance: neighborDistance });
+                  }
+                }
+              }
+            }
+          }
+
+          return validDestinations;
+        }
+        return [];
+      }}
+      advanceRoll={advanceRoll}
+      advancingUnitId={advancingUnitId}
       shootingTargetId={shootingTargetId}
       shootingUnitId={shootingUnitId}
       movingUnitId={movingUnitId}

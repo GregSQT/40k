@@ -34,6 +34,8 @@ interface ReplayAction {
   charge_roll?: number;
   charge_success?: boolean;
   charge_failed_reason?: string;
+  // Advance action fields
+  advance_roll?: number;
 }
 
 interface ReplayGameState {
@@ -249,7 +251,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Parse SHOOT actions
-    const shootMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+), (\d+)\) (SHOT|WAIT)/);
+    const shootMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+), (\d+)\) (SHOT|WAIT|ADVANCED)/);
     if (shootMatch) {
       // Removed verbose logging
       // console.log('Matched SHOOT line:', trimmed);
@@ -262,7 +264,46 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const actionType = shootMatch[7];
       // console.log('Action type:', actionType);
 
-      if (actionType === 'SHOT') {
+      if (actionType === 'ADVANCED') {
+        // Parse advance action: Unit X(col, row) ADVANCED from (col1, row1) to (col2, row2) [Roll: X]
+        const fromMatch = trimmed.match(/from \((\d+), (\d+)\)/);
+        const toMatch = trimmed.match(/to \((\d+), (\d+)\)/);
+        const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
+        const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
+
+        if (fromMatch && toMatch) {
+          const fromCol = parseInt(fromMatch[1]);
+          const fromRow = parseInt(fromMatch[2]);
+          const toCol = parseInt(toMatch[1]);
+          const toRow = parseInt(toMatch[2]);
+          const advanceRoll = rollMatch ? parseInt(rollMatch[1]) : undefined;
+
+          const action: ReplayAction = {
+            type: 'advance',
+            timestamp,
+            turn,
+            player,
+            unit_id: shooterId,
+            from: { col: fromCol, row: fromRow },
+            to: { col: toCol, row: toRow }
+          };
+
+          if (advanceRoll !== undefined) {
+            action.advance_roll = advanceRoll;
+          }
+          if (rewardMatch) {
+            action.reward = parseFloat(rewardMatch[1]);
+          }
+
+          currentEpisode.actions.push(action);
+
+          // Update unit position immediately (like move actions)
+          if (currentEpisode.units[shooterId]) {
+            currentEpisode.units[shooterId].col = toCol;
+            currentEpisode.units[shooterId].row = toRow;
+          }
+        }
+      } else if (actionType === 'SHOT') {
         const targetMatch = trimmed.match(/SHOT at unit (\d+)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 

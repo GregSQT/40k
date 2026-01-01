@@ -336,8 +336,19 @@ def parse_log(filepath):
                             # Check if weapon is PISTOL and track adjacency
                             weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
                             if weapon_match:
-                                weapon_name = weapon_match.group(1).lower()
-                                is_pistol = 'pistol' in weapon_name
+                                weapon_display_name = weapon_match.group(1)  # Keep original case for matching
+                                weapon_name_lower = weapon_display_name.lower()
+                                
+                                # Use unit_weapons_cache to check if weapon really has PISTOL rule
+                                is_pistol = False
+                                shooter_unit_type = unit_types.get(shooter_id, '')
+                                weapons_info = unit_weapons_cache.get(shooter_unit_type, [])
+                                
+                                # Find weapon in cache by display_name (case-insensitive match)
+                                for weapon_info in weapons_info:
+                                    if weapon_info['name'].lower() == weapon_name_lower:
+                                        is_pistol = weapon_info['is_pistol']  # Check WEAPON_RULES, not name
+                                        break
                                 
                                 # Calculate distance to target to determine adjacency
                                 if target_pos:

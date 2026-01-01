@@ -425,6 +425,23 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return advance_reward
 
+        elif action_type == "no_effect":
+            # No-effect action (e.g., skip attempted on non-active unit in charge phase)
+            # Treat same as pass - no reward, no penalty
+            no_effect_reward = 0.0
+            reward_breakdown['base_actions'] = no_effect_reward
+            reward_breakdown['total'] = no_effect_reward
+
+            # CRITICAL FIX: Add situational reward if game ended
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                no_effect_reward += situational_reward
+                reward_breakdown['total'] = no_effect_reward
+
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return no_effect_reward
+
         # NO FALLBACK - Raise error to identify missing action types
         raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")
     

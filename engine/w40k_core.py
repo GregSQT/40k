@@ -1124,35 +1124,25 @@ class W40KEngine(gym.Env):
         # For fight phase, check if AI has eligible units in the appropriate pool
         if current_phase == "fight":
             fight_subphase = self.game_state.get("fight_subphase")
-            print(f"🔍 [AI_TURN] Fight phase check: fight_subphase={fight_subphase}, current_player={current_player}")
             # Check if AI has eligible units in the current fight subphase pool
             has_eligible_ai = False
             pool_to_check = []
             
             if fight_subphase == "charging" and self.game_state.get("charging_activation_pool"):
                 pool_to_check = self.game_state.get("charging_activation_pool", [])
-                print(f"🔍 [AI_TURN] Using charging_activation_pool: {pool_to_check}")
             elif fight_subphase in ["alternating_non_active", "cleanup_non_active"] and self.game_state.get("non_active_alternating_activation_pool"):
                 pool_to_check = list(self.game_state.get("non_active_alternating_activation_pool", []))  # Make a copy to avoid reference issues
-                print(f"🔍 [AI_TURN] Using non_active_alternating_activation_pool: {pool_to_check} (original in game_state: {self.game_state.get('non_active_alternating_activation_pool')})")
             elif fight_subphase in ["alternating_active", "cleanup_active"] and self.game_state.get("active_alternating_activation_pool"):
                 pool_to_check = self.game_state.get("active_alternating_activation_pool", [])
-                print(f"🔍 [AI_TURN] Using active_alternating_activation_pool: {pool_to_check}")
-            else:
-                print(f"⚠️ [AI_TURN] No pool found for fight_subphase={fight_subphase}")
             
             # Check if any unit in the pool is an AI unit (player 1)
-            print(f"🔍 [AI_TURN] Checking {len(pool_to_check)} units in pool")
             for unit_id in pool_to_check:
                 unit = self._get_unit_by_id(str(unit_id))
-                print(f"🔍 [AI_TURN] Checking unit_id={unit_id} (str), unit={unit}, player={unit.get('player') if unit else None}")
                 if unit and unit.get("player") == 1:
                     has_eligible_ai = True
-                    print(f"✅ [AI_TURN] Found eligible AI unit: {unit_id}")
                     break
             
             if not has_eligible_ai:
-                print(f"❌ [AI_TURN] No eligible AI units found in pool. Returning error.")
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "no_eligible_ai_units_in_pool", "pool_checked": pool_to_check}
         
         # Check AI model availability
@@ -1161,17 +1151,14 @@ class W40KEngine(gym.Env):
         
         # Make AI decision - replaces human click
         try:
-            print(f"🔍 [AI_TURN] execute_ai_turn called: phase={current_phase}, player={current_player}, fight_subphase={self.game_state.get('fight_subphase')}")
             ai_semantic_action = self.pve_controller.make_ai_decision(self.game_state, self)
-            print(f"🔍 [AI_TURN] make_ai_decision returned: {ai_semantic_action}")
             
             # Execute through SAME path as humans
             result = self._process_semantic_action(ai_semantic_action)
-            print(f"🔍 [AI_TURN] _process_semantic_action returned: success={result[0]}")
             return result
             
         except Exception as e:
-            print(f"❌ [AI_TURN] Exception: {e}")
+            pass
             import traceback
             traceback.print_exc()
             return False, {"error": "ai_decision_failed", "message": str(e)}

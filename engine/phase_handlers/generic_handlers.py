@@ -114,10 +114,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             response["removed_from_shoot_pool"] = True
     elif arg4 == "CHARGE":
         if "charge_activation_pool" in game_state and unit_id in game_state["charge_activation_pool"]:
-            pool_before = game_state["charge_activation_pool"].copy()
             game_state["charge_activation_pool"].remove(unit_id)
-            pool_after = game_state["charge_activation_pool"]
-            print(f"🔍 end_activation CHARGE: Unit {unit_id} removed from charge_activation_pool. Pool before: {pool_before}, pool after: {pool_after}")
             response["removed_from_charge_pool"] = True
     elif arg4 == "FIGHT":
         # Fight phase has 3 sub-phase pools - check all 3

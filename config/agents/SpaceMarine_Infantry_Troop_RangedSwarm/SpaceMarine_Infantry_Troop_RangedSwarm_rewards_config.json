@@ -9,14 +9,15 @@
       "melee_attack": 3.0,
       "charge_success": 3.0,
       "move_wait": 0.0,
-      "shoot_wait": 0.0,
+      "shoot_wait": -2.0,
       "move_close": 0.0,
       "move_away": 0.0,
       "move_to_charge": 0.0,
       "move_to_los": 0.0
     },
     "result_bonuses": {
-      "kill_target": 30.0
+      "kill_target": 30.0,
+      "target_lowest_hp": 5.0
     },
     "situational_modifiers": {
       "win": 100.0,
