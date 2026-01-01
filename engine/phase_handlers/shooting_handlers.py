@@ -1409,16 +1409,24 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         game_state["episode_steps"] += 1
     
     # Arg3 tracking
+    unit_id_str = str(unit["id"])
     if arg3 == "SHOOTING":
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
         game_state["units_shot"].add(unit["id"])
+        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} added to units_shot (arg3=SHOOTING)")
     elif arg3 == "ADVANCE":
         # Mark as units_advanced
         if "units_advanced" not in game_state:
             game_state["units_advanced"] = set()
         game_state["units_advanced"].add(unit["id"])
+        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} added to units_advanced (arg3=ADVANCE)")
     # arg3 == "PASS" → no tracking update
+    elif arg3 == "PASS":
+        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} NOT added to units_shot/units_advanced (arg3=PASS)")
+        units_shot = game_state.get("units_shot", set())
+        units_advanced = game_state.get("units_advanced", set())
+        print(f"🔍 _shooting_activation_end: Unit {unit_id_str} in units_shot? {unit['id'] in units_shot}, in units_advanced? {unit['id'] in units_advanced}")
     
     # Arg4/Arg5 pool removal (arg4 = phase, arg5 = remove_from_pool)
     # remove_from_pool = 0 means NOT_REMOVED, 1 means remove
@@ -1481,7 +1489,11 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     # Signal phase completion if pool is empty - delegate to proper phase end function
     if pool_empty:
         # Don't just set a flag - call the complete phase transition function
-        return _shooting_phase_complete(game_state)
+        # But merge activation response info so logs are still generated
+        phase_complete_result = _shooting_phase_complete(game_state)
+        # Merge activation info into phase complete result so logs include unit activation details
+        phase_complete_result.update(response)
+        return phase_complete_result
     
     return response
 
@@ -1970,18 +1982,23 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     elif action_type == "right_click":
         # AI_TURN.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
         has_shot = _unit_has_shot_with_any_weapon(unit)
+        unit_id_str = str(unit["id"])
+        print(f"🔍 RIGHT_CLICK on unit {unit_id_str}: has_shot={has_shot}")
         if has_shot:
             # YES → end_activation(ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+            print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} has shot → marking in units_shot")
             return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
         else:
             # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
-            unit_id_str = str(unit["id"])
             has_advanced = unit_id_str in game_state.get("units_advanced", set())
+            print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} has_advanced={has_advanced}")
             if has_advanced:
                 # NO → Unit has not shot yet (only advanced) → end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+                print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} advanced → marking in units_advanced")
                 return _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
             else:
                 # NO → end_activation(WAIT, 1, 0, SHOOTING, 1, 1)
+                print(f"🔍 RIGHT_CLICK: Unit {unit_id_str} cancel (no shot, no advance) → PASS (not marking in units_shot/units_advanced)")
                 return _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
     
     elif action_type == "skip":
@@ -2033,16 +2050,39 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     elif click_target == "friendly_unit" and target_id:
-        # Left click on another unit in pool - switch units
+        # Left click on another unit in pool - switch units (only if current unit hasn't shot)
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         if target_id in game_state["shoot_activation_pool"]:
+            # Check if current unit has shot - if yes, block switch
+            current_unit = _get_unit_by_id(game_state, unit_id)
+            if current_unit:
+                has_shot = _unit_has_shot_with_any_weapon(current_unit)
+                if has_shot:
+                    # Unit has already shot - cannot switch (must finish shooting)
+                    return True, {"action": "no_effect", "unitId": unit_id, "error": "cannot_switch_after_shooting"}
             return _handle_unit_switch_with_context(game_state, unit_id, target_id, config)
         return False, {"error": "unit_not_in_pool", "targetId": target_id}
     
     elif click_target == "active_unit":
-        # Left click on active unit - no effect or show targets again
-        return _shooting_unit_execution_loop(game_state, unit_id, config)
+        # Left click on active unit - behavior depends on whether unit has shot
+        unit = _get_unit_by_id(game_state, unit_id)
+        if not unit:
+            return False, {"error": "unit_not_found", "unitId": unit_id}
+        has_shot = _unit_has_shot_with_any_weapon(unit)
+        if has_shot:
+            # Unit has already shot - no effect (must finish shooting)
+            return True, {"action": "no_effect", "unitId": unit_id}
+        else:
+            # Unit has not shot yet - postpone (deselect, return to pool)
+            if "active_shooting_unit" in game_state:
+                del game_state["active_shooting_unit"]
+            return True, {
+                "action": "postpone",
+                "unitId": unit_id,
+                "activation_ended": False,
+                "reset_mode": "select"
+            }
     
     else:
         # STEP 5A/5B: Postpone/Click elsewhere (Human only)
@@ -2949,11 +2989,14 @@ def _calculate_wound_target(strength: int, toughness: int) -> int:
 def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id: str, new_unit_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md: Handle switching between units in activation pool
+    Postpone current unit (if hasn't shot) and activate new unit
     """
-    # End current unit activation
+    # Postpone current unit activation (clear active unit, keep in pool)
     current_unit = _get_unit_by_id(game_state, current_unit_id)
     if current_unit:
-        _shooting_activation_end(game_state, current_unit, "WAIT", 1, "PASS", "SHOOTING", 1)
+        # Clear active unit but don't remove from pool
+        if "active_shooting_unit" in game_state:
+            del game_state["active_shooting_unit"]
     
     # Start new unit activation
     new_unit = _get_unit_by_id(game_state, new_unit_id)

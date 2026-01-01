@@ -430,25 +430,27 @@ export class UnitRenderer {
             e.preventDefault();
             e.stopPropagation();
             
-            if (e.button === 2 && phase === "shoot" && mode === "attackPreview" && selectedUnitId === unit.id) {
-              // Right click behavior depends on SHOOT_LEFT
-              const shootLeft = unit.SHOOT_LEFT || 0;
-              // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
-              const selectedRngWeapon = getSelectedRangedWeapon(unit);
-              const rngNb = selectedRngWeapon?.NB || 0;
-              
-              if (shootLeft === rngNb) {
-                // SHOOT_LEFT = RNG_NB: Cancel activation (WAIT)
-                window.dispatchEvent(new CustomEvent('boardCancelShoot', {
-                  detail: { unitId: unit.id, type: 'wait' }
-                }));
-              } else {
-                // SHOOT_LEFT < RNG_NB: Stop shooting (ACTION)
+            if (phase === "shoot" && mode === "attackPreview" && selectedUnitId === unit.id) {
+              // Handle clicks on active unit in attackPreview mode
+              if (e.button === 2) {
+                // Right click: always cancel (skip)
                 window.dispatchEvent(new CustomEvent('boardSkipShoot', {
                   detail: { unitId: unit.id, type: 'action' }
                 }));
+                return;
+              } else if (e.button === 0) {
+                // Left click: dispatch to boardClickHandler for postpone/no_effect logic
+                window.dispatchEvent(new CustomEvent('boardUnitClick', {
+                  detail: {
+                    unitId: unit.id,
+                    phase: phase,
+                    mode: mode,
+                    selectedUnitId: selectedUnitId,
+                    clickType: 'left'
+                  }
+                }));
+                return;
               }
-              return;
             }
             
             window.dispatchEvent(new CustomEvent('boardUnitClick', {

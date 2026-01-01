@@ -775,6 +775,12 @@ export const useEngineAPI = () => {
       if (unitId === activeShooterId) {
         return "active_unit";
       } else {
+        // Check if unit is in activation pool for "friendly_unit" detection
+        const shootPool = gameState.shoot_activation_pool || [];
+        const unitIdStr = unitId.toString();
+        if (shootPool.includes(unitIdStr)) {
+          return "friendly_unit";
+        }
         return "friendly";
       }
     } else {
@@ -811,9 +817,22 @@ export const useEngineAPI = () => {
     }
     
     // Shooting phase click handling
-    // Shooting phase click handling
     if (gameState && gameState.phase === "shoot") {
-      if (numericUnitId !== null) {
+      if (numericUnitId === null && mode === "attackPreview" && selectedUnitId !== null) {
+        // Shooting phase: postpone (deselect active unit, return to pool)
+        console.log("🧹 POSTPONING shoot (deselecting in attackPreview mode), unitId:", selectedUnitId);
+        const activeShooterId = gameState.active_shooting_unit;
+        if (activeShooterId) {
+          await executeAction({
+            action: "left_click",
+            unitId: activeShooterId.toString(),
+            clickTarget: "active_unit"
+          });
+        }
+        setSelectedUnitId(null);
+        setMode("select");
+        return;
+      } else if (numericUnitId !== null) {
         if (!gameState.shoot_activation_pool) {
           throw new Error(`API ERROR: Missing required shoot_activation_pool during shooting phase`);
         }
@@ -929,6 +948,11 @@ export const useEngineAPI = () => {
   }, [handleShootingPhaseClick]);
 
   const handleSkipShoot = useCallback(async (unitId: number | string, actionType: 'wait' | 'action' = 'action') => {
+    // Check if we're still in shooting phase - if phase changed, don't send skip action
+    if (gameState?.phase !== 'shoot') {
+      console.log("🔍 handleSkipShoot: Phase changed, ignoring skip action for unit", unitId);
+      return;
+    }
     // Convert to right_click or skip action
     if (actionType === 'wait') {
       await handleRightClick(typeof unitId === 'string' ? parseInt(unitId) : unitId);
@@ -938,7 +962,7 @@ export const useEngineAPI = () => {
         unitId: typeof unitId === 'string' ? unitId : unitId.toString()
       });
     }
-  }, [handleRightClick, executeAction]);
+  }, [handleRightClick, executeAction, gameState]);
 
   // Charge activation - sends left_click to trigger 2d6 roll and destination building
   const handleActivateCharge = useCallback(async (chargerId: number | string) => {
@@ -1324,10 +1348,13 @@ export const useEngineAPI = () => {
       }
       return gameState.shoot_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
     } else if (gameState.phase === 'charge') {
+      console.log("🔍 [FRONTEND] getEligibleUnitIds charge phase - charge_activation_pool:", gameState.charge_activation_pool);
       if (!gameState.charge_activation_pool || gameState.charge_activation_pool.length === 0) {
+        console.log("🔍 [FRONTEND] getEligibleUnitIds charge phase - pool is empty or missing");
         return []; // Empty pool is valid - phase will auto-advance
       }
       const eligible = gameState.charge_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+      console.log("🔍 [FRONTEND] getEligibleUnitIds charge phase - returning eligible:", eligible);
       return eligible;
     } else if (gameState.phase === 'fight') {
       // Fight phase has sub-phases - only show units from current sub-phase

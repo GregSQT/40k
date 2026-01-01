@@ -8,7 +8,7 @@ let globalHexClickHandler: ((e: Event) => void) | null = null;
 export function setupBoardClickHandler(callbacks: {
   onSelectUnit(unitId: number | null): void;
   onSkipUnit?(unitId: UnitId): void;
-  onSkipShoot?(unitId: UnitId): void;
+  onSkipShoot?(unitId: UnitId, actionType?: 'wait' | 'action'): void;
   onStartAttackPreview(shooterId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
@@ -67,11 +67,20 @@ export function setupBoardClickHandler(callbacks: {
       // Don't call onStartAttackPreview here - wait for backend response
       // Backend will return blinking_units (attackPreview) or allow_advance (advancePreview)
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
-      if (selectedUnitId !== unitId) {
-        callbacks.onShoot(selectedUnitId, unitId);  // Execute immediately
+      if (selectedUnitId === unitId) {
+        // Click on active unit
+        if (clickType === 'right') {
+          // Right click: cancel shooting (skip)
+          callbacks.onSkipShoot?.(unitId, 'action');
+        } else {
+          // Left click: postpone if hasn't shot, no effect if has shot
+          callbacks.onSelectUnit(null);
+        }
       } else {
-        return;
+        // Click on different unit - let backend handle via onSelectUnit
+        callbacks.onSelectUnit(unitId);
       }
+      return;
     } else if (phase === 'charge' && mode === 'select') {
       console.log("  ✅ CHARGE SELECT LOGIC TRIGGERED");
       if (selectedUnitId === unitId && clickType === 'right') {
@@ -80,7 +89,6 @@ export function setupBoardClickHandler(callbacks: {
       } else {
         console.log("    - Activating charge unit:", unitId);
         console.log("    - onActivateCharge callback exists?", !!callbacks.onActivateCharge);
-        callbacks.onSelectUnit(unitId);
         if (callbacks.onActivateCharge) {
           console.log("    - Calling onActivateCharge with unitId:", unitId);
           callbacks.onActivateCharge(unitId);

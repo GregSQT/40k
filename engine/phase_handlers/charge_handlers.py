@@ -15,6 +15,9 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Initialize charge phase and build activation pool
     """
+    print(f"🔍 CHARGE PHASE START CALLED - current phase: {game_state.get('phase')}, pool exists: {'charge_activation_pool' in game_state}")
+    if "charge_activation_pool" in game_state:
+        print(f"🔍 CHARGE PHASE START: Pool before rebuild: {game_state['charge_activation_pool']}")
     # Set phase
     game_state["phase"] = "charge"
 
@@ -29,6 +32,7 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Build activation pool
     charge_build_activation_pool(game_state)
+    print(f"🔍 CHARGE PHASE START: Pool immediately after charge_build_activation_pool = {game_state['charge_activation_pool']} (length: {len(game_state['charge_activation_pool'])})")
 
     # Console log
     if "console_logs" not in game_state:
@@ -36,12 +40,14 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["console_logs"].append("CHARGE POOL BUILT")
 
     # Check if phase complete immediately (no eligible units)
-    if not game_state["charge_activation_pool"]:
+    pool_after_build = game_state["charge_activation_pool"]
+    print(f"🔍 CHARGE PHASE START: Pool after build = {pool_after_build} (length: {len(pool_after_build)})")
+    if not pool_after_build:
         return charge_phase_end(game_state)
 
     return {
         "phase_initialized": True,
-        "eligible_units": len(game_state["charge_activation_pool"]),
+        "eligible_units": len(pool_after_build),
         "phase_complete": False
     }
 
@@ -51,7 +57,9 @@ def charge_build_activation_pool(game_state: Dict[str, Any]) -> None:
     Build charge activation pool with eligibility checks
     """
     eligible_units = get_eligible_units(game_state)
-    game_state["charge_activation_pool"] = eligible_units
+    game_state["charge_activation_pool"] = list(eligible_units)  # Ensure it's a new list, not a reference
+    print(f"🔍 CHARGE POOL BUILT: {len(eligible_units)} units in pool: {eligible_units}")
+    print(f"🔍 CHARGE POOL BUILT: game_state pool = {game_state['charge_activation_pool']}")
 
 
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
@@ -73,6 +81,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     for unit in game_state["units"]:
+        unit_id_str = str(unit["id"])
         # "unit.HP_CUR > 0?"
         if unit["HP_CUR"] <= 0:
             continue  # Dead unit
@@ -94,15 +103,24 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             continue  # Fled units cannot charge
 
         # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
-        if unit["id"] in game_state.get("units_advanced", set()):
+        units_advanced = game_state.get("units_advanced", set())
+        if unit["id"] in units_advanced:
+            print(f"🔍 CHARGE ELIGIBILITY: Unit {unit_id_str} EXCLUDED (in units_advanced)")
             continue  # Advanced units cannot charge
+
+        # Check units_shot for debugging (not used for exclusion in charge phase)
+        units_shot = game_state.get("units_shot", set())
+        in_units_shot = unit["id"] in units_shot
+        print(f"🔍 CHARGE ELIGIBILITY: Unit {unit_id_str} checking... in_units_shot={in_units_shot}, in_units_advanced={unit['id'] in units_advanced}")
 
         # "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)
         if not _has_valid_charge_target(game_state, unit):
+            print(f"🔍 CHARGE ELIGIBILITY: Unit {unit_id_str} EXCLUDED (no valid charge target)")
             continue  # No valid charge targets
 
         # Unit passes all conditions
+        print(f"🔍 CHARGE ELIGIBILITY: Unit {unit_id_str} ELIGIBLE for charge")
         eligible_units.append(unit["id"])
 
     return eligible_units
@@ -112,6 +130,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     """
     Charge phase handler action routing with complete autonomy
     """
+    print(f"🔍 CHARGE execute_action CALLED with action: {action}, unit: {unit}, phase: {game_state.get('phase')}")
 
     # Handler self-initialization on first action
     # AI_TURN.md COMPLIANCE: Direct field access with validation
@@ -207,6 +226,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return charge_destination_selection_handler(game_state, unit_id, action)
 
     elif action_type == "skip":
+        # Ignore skip action if unit is not active in charge phase
+        # This prevents skip actions from shooting phase being processed in charge phase
+        active_charge_unit = game_state.get("active_charge_unit")
+        if active_charge_unit != unit_id:
+            print(f"🔍 CHARGE skip: Ignoring skip action for unit {unit_id} - not active (active={active_charge_unit})")
+            # Unit is in pool but not active - return no effect (don't remove from pool)
+            return True, {"action": "no_effect", "unitId": unit_id, "reason": "unit_not_active_in_charge_phase"}
         # AI_TURN.md Line 515: Agent chooses wait (has valid destinations, chooses to skip)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=True)
 
