@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import calculate_hex_distance
 
 # Phase handlers (existing - keep these)
-from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers
+from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers
 
 # Import shared utilities FIRST (no circular dependencies)
 from engine.game_utils import get_unit_by_id
@@ -243,7 +243,7 @@ class W40KEngine(gym.Env):
             "current_player": 0,
             "gym_training_mode": self.config["gym_training_mode"],  # Embed for handler access
             "training_config_name": training_config_name if training_config_name else "",  # NEW: For debug mode detection
-            "phase": "move",
+            "phase": "command",
             "turn": 1,
             "episode_steps": 0,
             "game_over": False,
@@ -257,6 +257,7 @@ class W40KEngine(gym.Env):
             "units_attacked": set(),
             
             # Phase management
+            "command_activation_pool": [],
             "move_activation_pool": [],
             "shoot_activation_pool": [],
             "charge_activation_pool": [],
@@ -394,7 +395,7 @@ class W40KEngine(gym.Env):
         # Reset game state
         self.game_state.update({
             "current_player": 0,
-            "phase": "move",
+            "phase": "command",
             "turn": 1,
             "episode_steps": 0,
             "game_over": False,
@@ -404,6 +405,7 @@ class W40KEngine(gym.Env):
             "units_shot": set(),
             "units_charged": set(),
             "units_attacked": set(),
+            "command_activation_pool": [],
             "move_activation_pool": [],
             "fight_subphase": None,
             "charge_range_rolls": {},
@@ -457,8 +459,11 @@ class W40KEngine(gym.Env):
             else:
                 raise ValueError(f"Unit {unit['id']} not found in scenario config during reset")
         
-        # Initialize movement phase for game start using handler delegation
-        movement_handlers.movement_phase_start(self.game_state)
+        # Initialize command phase for game start using handler delegation
+        # CRITICAL: reset() is not in the cascade loop, so we need to handle initialization differently
+        # Call command_phase_start() to do the resets, then call movement_phase_start() directly
+        command_handlers.command_phase_start(self.game_state)  # Does the resets
+        movement_handlers.movement_phase_start(self.game_state)  # Initializes the move phase
         
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
@@ -1184,6 +1189,8 @@ class W40KEngine(gym.Env):
             elif from_phase == "charge":
                 result["next_phase"] = "fight"
             elif from_phase == "fight":
+                result["next_phase"] = "command"
+            elif from_phase == "command":
                 result["next_phase"] = "move"
             else:
                 result["next_phase"] = "move"
@@ -1194,6 +1201,8 @@ class W40KEngine(gym.Env):
             # Fall through to cascade loop below
 
         # Route to phase handlers with detailed logging (only if not advance_phase)
+        elif current_phase == "command":
+            success, result = self._process_command_phase(action)
         elif current_phase == "move":
             success, result = self._process_movement_phase(action)
         elif current_phase == "shoot":
@@ -1219,7 +1228,9 @@ class W40KEngine(gym.Env):
 
             # Initialize next phase using phase handlers
             phase_init_result = None
-            if next_phase == "shoot":
+            if next_phase == "command":
+                phase_init_result = command_handlers.command_phase_start(self.game_state)
+            elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
             elif next_phase == "charge":
                 phase_init_result = charge_handlers.charge_phase_start(self.game_state)
@@ -1322,6 +1333,16 @@ class W40KEngine(gym.Env):
         else:
             return True, handler_response
 
+    def _process_command_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Process command phase actions."""
+        unit_id = action.get("unitId")
+        current_unit = None
+        if unit_id:
+            current_unit = self._get_unit_by_id(unit_id)
+        
+        success, result = command_handlers.execute_action(self.game_state, current_unit, action, self.config)
+        return success, result
+    
     def _process_fight_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """AI_TURN.md EXACT: Pure delegation - handler manages complete fight phase."""
         # Get current unit for handler

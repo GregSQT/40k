@@ -201,6 +201,11 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             pool_empty = True
         else:
             pool_empty = len(game_state["charge_activation_pool"]) == 0
+    elif current_phase == "command":
+        if "command_activation_pool" not in game_state:
+            pool_empty = True
+        else:
+            pool_empty = len(game_state["command_activation_pool"]) == 0
     elif current_phase == "fight":
         # Fight phase complete when ALL 3 pools empty
         if "charging_activation_pool" not in game_state:

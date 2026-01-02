@@ -857,7 +857,8 @@ export const BoardReplay: React.FC = () => {
           <TurnPhaseTracker
             currentTurn={currentActionIndex > 0 ? parseInt(currentEpisode.actions[currentActionIndex - 1].turn.replace('T', '')) : 1}
             currentPhase={currentState.phase || 'move'}
-            phases={["move", "shoot", "charge", "fight"]}
+            phases={["command", "move", "shoot", "charge", "fight"]}
+            currentPlayer={currentState.currentPlayer}
             maxTurns={gameConfig.game_rules.max_turns}
             className=""
             onTurnClick={(turn) => {
@@ -936,6 +937,34 @@ export const BoardReplay: React.FC = () => {
                 // we need currentActionIndex = firstPhaseActionArrayIndex + 1
                 // This makes currentAction = actions[currentActionIndex - 1] = actions[firstPhaseActionArrayIndex]
                 setCurrentActionIndex(firstPhaseActionArrayIndex + 1);
+                setIsPlaying(false); // Pause playback if playing
+              }
+            }}
+            onPlayerClick={(player) => {
+              // Get the current turn from the state we're viewing
+              let currentTurn: string;
+              if (currentActionIndex === 0) {
+                currentTurn = currentEpisode.actions[0]?.turn || 'T1';
+              } else {
+                const nextAction = currentEpisode.actions[currentActionIndex];
+                if (nextAction) {
+                  currentTurn = nextAction.turn;
+                } else {
+                  const lastAction = currentEpisode.actions[currentActionIndex - 1];
+                  currentTurn = lastAction?.turn || currentEpisode.actions[0]?.turn || 'T1';
+                }
+              }
+              
+              // Find the first action of the current turn for the selected player
+              // The first action of a player's turn is typically in the "command" phase
+              const firstPlayerActionArrayIndex = currentEpisode.actions.findIndex(action => {
+                return action.turn === currentTurn && action.player === player;
+              });
+              
+              if (firstPlayerActionArrayIndex !== -1) {
+                // To show the FIRST action of the player's turn (currentAction will be actions[firstPlayerActionArrayIndex]),
+                // we need currentActionIndex = firstPlayerActionArrayIndex + 1
+                setCurrentActionIndex(firstPlayerActionArrayIndex + 1);
                 setIsPlaying(false); // Pause playback if playing
               }
             }}

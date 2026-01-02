@@ -640,7 +640,8 @@ class ObservationBuilder:
         
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
-        obs[1] = {"move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}[game_state["phase"]]
+        phase_encoding = {"command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
+        obs[1] = phase_encoding.get(game_state["phase"], 0.0)  # Fallback à 0.0 si phase inconnue
         obs[2] = min(1.0, game_state["turn"] / 5.0)  # Normalized by max 5 turns
         obs[3] = min(1.0, game_state["episode_steps"] / 100.0)
         obs[4] = active_unit["HP_CUR"] / active_unit["HP_MAX"]

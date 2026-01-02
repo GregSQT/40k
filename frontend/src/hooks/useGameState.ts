@@ -50,7 +50,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   const [gameState, setGameState] = useState<GameState>({
     units: [],
     currentPlayer: 0,
-    phase: "move",
+    phase: "command",
     mode: "select",
     selectedUnitId: null,
     currentTurn: 1,

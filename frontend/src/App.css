@@ -10,7 +10,7 @@
   --color-warning: #ff9900;
   
   /* HP Bar Colors */
-  --hp-bar-player0: #4da6ff;
+  --hp-bar-player0: #1D4ED8;
   --hp-bar-player1: #ff4d4d;
   --hp-bar-lost: #444444;
   --hp-bar-damage-preview: #444444;
@@ -1343,7 +1343,7 @@ textarea:focus {
 }
 
 .game-log-entry__player--blue {
-  background: #244488; /* Same blue as unit status table */
+  background: #1D4ED8; /* Same blue as unit status table */
 }
 
 .game-log-entry__player--red {

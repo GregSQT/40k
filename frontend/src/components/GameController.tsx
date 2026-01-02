@@ -247,7 +247,8 @@ export const GameController: React.FC<GameControllerProps> = ({
           <TurnPhaseTracker 
             currentTurn={gameState.currentTurn ?? 1} 
             currentPhase={gameState.phase}
-            phases={["move", "shoot", "charge", "fight"]}
+            phases={["command", "move", "shoot", "charge", "fight"]}
+            currentPlayer={gameState.currentPlayer}
             maxTurns={(() => {
             if (!gameConfig?.game_rules?.max_turns) {
               throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);

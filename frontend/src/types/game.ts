@@ -2,7 +2,7 @@
 
 export type PlayerId = 0 | 1;
 export type UnitId = number;
-export type GamePhase = "move" | "shoot" | "charge" | "fight";
+export type GamePhase = "command" | "move" | "shoot" | "charge" | "fight";
 export type GameMode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview" | "advancePreview";
 // AI_TURN.md COMPLIANCE: Fight subphase names match backend exactly
 export type FightSubPhase = "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null;

@@ -19,24 +19,6 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Set phase
     game_state["phase"] = "move"
     
-    # AI_TURN.md lines 238-242: Clear ALL tracking sets at START OF MOVEMENT PHASE
-    game_state["units_moved"] = set()
-    game_state["units_fled"] = set()
-    game_state["units_shot"] = set()
-    game_state["units_charged"] = set()
-    game_state["units_fought"] = set()  # AI_TURN.md line 242: ❌ Remove Mark units_fought
-    game_state["units_attacked"] = set()
-    game_state["units_advanced"] = set()  # ADVANCE_IMPLEMENTATION: Track units that advanced during shooting phase
-
-    # Clear movement preview state
-    game_state["valid_move_destinations_pool"] = []
-    game_state["preview_hexes"] = []
-    game_state["active_movement_unit"] = None
-
-    # Clear enemy reachable positions cache (enemy positions may have changed)
-    # Used by RewardCalculator._get_enemy_reachable_positions for defensive threat calculation
-    game_state["enemy_reachable_cache"] = {}
-    
     # Build activation pool
     movement_build_activation_pool(game_state)
     

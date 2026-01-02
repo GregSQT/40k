@@ -154,7 +154,7 @@ type BoardProps = {
   unitsFled?: number[];
   fightSubPhase?: FightSubPhase; // NEW
   fightActivePlayer?: PlayerId; // NEW
-  phase: "move" | "shoot" | "charge" | "fight";
+  phase: "command" | "move" | "shoot" | "charge" | "fight";
   onCharge?: (chargerId: number, targetId: number) => void;
   onActivateCharge?: (chargerId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;

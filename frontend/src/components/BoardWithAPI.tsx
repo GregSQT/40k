@@ -99,6 +99,10 @@ export const BoardWithAPI: React.FC = () => {
     
     // CRITICAL: Check if AI has eligible units in current phase
     // Use simple heuristic instead of missing activation pools
+    if (!apiProps.gameState) {
+      return;
+    }
+    
     const currentPhase = apiProps.gameState.phase;
     let hasEligibleAIUnits = false;
     
@@ -107,7 +111,7 @@ export const BoardWithAPI: React.FC = () => {
       if (apiProps.gameState.move_activation_pool) {
         hasEligibleAIUnits = apiProps.gameState.move_activation_pool.some(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState.units.find((u: Unit) => String(u.id) === String(unitId));
+          const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
           return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         });
       }
@@ -122,7 +126,7 @@ export const BoardWithAPI: React.FC = () => {
       if (apiProps.gameState.charge_activation_pool) {
         hasEligibleAIUnits = apiProps.gameState.charge_activation_pool.some(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState.units.find((u: Unit) => String(u.id) === String(unitId));
+          const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
           return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         });
       }
@@ -146,7 +150,7 @@ export const BoardWithAPI: React.FC = () => {
       
       hasEligibleAIUnits = fightPool.some(unitId => {
         // Normalize comparison: pools contain strings, unit.id might be number
-        const unit = apiProps.gameState.units.find((u: Unit) => String(u.id) === String(unitId));
+        const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
         const isAI = unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         return isAI;
       });
@@ -367,7 +371,8 @@ export const BoardWithAPI: React.FC = () => {
           <TurnPhaseTracker 
             currentTurn={apiProps.gameState?.currentTurn ?? 1} 
             currentPhase={apiProps.gameState?.phase ?? 'move'}
-            phases={["move", "shoot", "charge", "fight"]}
+            phases={["command", "move", "shoot", "charge", "fight"]}
+            currentPlayer={apiProps.gameState?.currentPlayer}
             maxTurns={(() => {
             if (!gameConfig?.game_rules?.max_turns) {
               throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
@@ -487,7 +492,6 @@ export const BoardWithAPI: React.FC = () => {
         } : null}
         blinkingUnits={apiProps.blinkingUnits}
         isBlinkingActive={apiProps.isBlinkingActive}
-        blinkState={apiProps.blinkState}
         onSelectUnit={apiProps.onSelectUnit}
         onSkipUnit={apiProps.onSkipUnit}
         onStartMovePreview={apiProps.onStartMovePreview}
@@ -512,7 +516,7 @@ export const BoardWithAPI: React.FC = () => {
         unitsCharged={apiProps.unitsCharged}
         unitsAttacked={apiProps.unitsAttacked}
         unitsFled={apiProps.unitsFled}
-        phase={apiProps.phase as "move" | "shoot" | "charge" | "fight"}
+        phase={apiProps.phase as "command" | "move" | "shoot" | "charge" | "fight"}
         fightSubPhase={apiProps.fightSubPhase}
         onCharge={apiProps.onCharge}
         onActivateCharge={apiProps.onActivateCharge}

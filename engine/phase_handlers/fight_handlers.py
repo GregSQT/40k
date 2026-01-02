@@ -779,21 +779,18 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Player progression logic
     if game_state["current_player"] == 0:
-        # Player 0 complete → Player 1 movement phase
+        # Player 0 complete → Player 1 command phase
         game_state["current_player"] = 1
-        game_state["phase"] = "move"  # Actually transition phase
+        game_state["phase"] = "command"  # Actually transition phase
 
-        # Initialize movement phase pools for P1
-        # CRITICAL: movement_phase_start() resets ALL tracking sets (units_fought, units_charged, etc.)
-        # This ensures P1 starts with clean state, allowing units that fought in P0's fight phase
-        # to fight again in P1's fight phase if they remain adjacent
-        from engine.phase_handlers import movement_handlers
-        movement_handlers.movement_phase_start(game_state)
+        # CRITICAL: Do NOT call command_phase_start() directly - cascade loop handles it
+        # The cascade loop in w40k_core.py will call command_phase_start() automatically
+        # when it sees next_phase="command"
 
         return {
             "phase_complete": True,
             "phase_transition": True,
-            "next_phase": "move",
+            "next_phase": "command",
             "current_player": 1,
             "units_processed": len(game_state.get("units_fought", set())),
             "clear_blinking_gentle": True,
@@ -818,21 +815,19 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "clear_attack_preview": True
             }
         else:
-            # Safe to increment turn and continue to P0's movement phase
+            # Safe to increment turn and continue to P0's command phase
             game_state["turn"] += 1
             game_state["current_player"] = 0
-            game_state["phase"] = "move"  # Actually transition phase
+            game_state["phase"] = "command"  # Actually transition phase
 
-            # Initialize movement phase pools for P0
-            # CRITICAL: movement_phase_start() resets ALL tracking sets (units_fought, units_charged, etc.)
-            # This ensures P0 starts with clean state at the beginning of each turn
-            from engine.phase_handlers import movement_handlers
-            movement_handlers.movement_phase_start(game_state)
+            # CRITICAL: Do NOT call command_phase_start() directly - cascade loop handles it
+            # The cascade loop in w40k_core.py will call command_phase_start() automatically
+            # when it sees next_phase="command"
 
             return {
                 "phase_complete": True,
                 "phase_transition": True,
-                "next_phase": "move",
+                "next_phase": "command",
                 "current_player": 0,
                 "new_turn": game_state["turn"],
                 "units_processed": len(game_state.get("units_fought", set())),

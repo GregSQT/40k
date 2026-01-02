@@ -9,7 +9,7 @@ from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance
 
 # Game phases - single source of truth for phase count
-GAME_PHASES = ["move", "shoot", "charge", "fight"]
+GAME_PHASES = ["command", "move", "shoot", "charge", "fight"]
 
 class ActionDecoder:
     """Decodes actions and computes valid action masks."""
@@ -39,7 +39,11 @@ class ActionDecoder:
             mask[11] = True  # WAIT triggers phase transition when pool is empty
             return mask
         
-        if current_phase == "move":
+        if current_phase == "command":
+            # Command phase: auto-advances, but enable WAIT for consistency
+            mask[11] = True  # WAIT action
+            return mask
+        elif current_phase == "move":
             # Movement phase: actions 0-3 (movement strategies) + 11 (wait)
             # Actions 0-3 now map to strategic heuristics:
             # 0 = aggressive (toward enemies)
@@ -104,7 +108,9 @@ class ActionDecoder:
         """Get eligible units for current phase using handler's authoritative pools."""
         current_phase = game_state["phase"]
         
-        if current_phase == "move":
+        if current_phase == "command":
+            return []  # Empty pool for now, ready for future
+        elif current_phase == "move":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
             if "move_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'move_activation_pool' field")

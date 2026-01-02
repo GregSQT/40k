@@ -179,6 +179,13 @@ class PvEController:
                     raise KeyError("game_state missing required 'charge_activation_pool' field")
                 eligible_pool = game_state["charge_activation_pool"]
                 print(f"🔍 [AI_DECISION] Charge activation pool: {eligible_pool}")
+            elif current_phase == "command":
+                # Command phase: empty pool for now, ready for future
+                if "command_activation_pool" not in game_state:
+                    eligible_pool = []
+                else:
+                    eligible_pool = game_state["command_activation_pool"]
+                print(f"🔍 [AI_DECISION] Command phase detected, pool: {eligible_pool}")
             else:
                 eligible_pool = []
             

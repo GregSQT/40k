@@ -1337,7 +1337,10 @@ export const useEngineAPI = () => {
       throw new Error(`API ERROR: gameState is null when getting eligible units`);
     }
 
-    if (gameState.phase === 'move') {
+    if (gameState.phase === 'command') {
+      // Command phase: empty pool for now, ready for future
+      return [];
+    } else if (gameState.phase === 'move') {
       if (!gameState.move_activation_pool) {
         throw new Error(`API ERROR: Missing move_activation_pool in move phase`);
       }

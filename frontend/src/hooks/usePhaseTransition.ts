@@ -44,6 +44,9 @@ export const usePhaseTransition = ({
       // Phase transitions based on unit eligibility only
       setTimeout(() => {
         switch (gameState.phase) {
+          case "command":
+            actions.setPhase("move");
+            break;
           case "move":
             actions.setPhase("shoot");
             break;
@@ -54,13 +57,11 @@ export const usePhaseTransition = ({
             actions.setPhase("fight");
             break;
           case "fight": {
-            // End turn
+            // End turn - transition to command phase (not move)
             const newPlayer = gameState.currentPlayer === 0 ? 1 : 0;
             actions.setCurrentPlayer(newPlayer);
-            actions.setPhase("move");
-            if (newPlayer === 0) {
-              actions.setCurrentTurn((gameState.currentTurn ?? 1) + 1);
-            }
+            actions.setPhase("command");  // Au lieu de "move"
+            // Note: Turn increment is handled by backend in fight_handlers
             break;
           }
         }
