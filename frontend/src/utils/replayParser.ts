@@ -265,10 +265,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
       // console.log('Action type:', actionType);
 
       if (actionType === 'ADVANCED') {
-        // Parse advance action: Unit X(col, row) ADVANCED from (col1, row1) to (col2, row2) [Roll: X]
+        // Parse advance action: Unit X(col, row) ADVANCED from (col1, row1) to (col2, row2) (Roll: X)
         const fromMatch = trimmed.match(/from \((\d+), (\d+)\)/);
         const toMatch = trimmed.match(/to \((\d+), (\d+)\)/);
-        const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
+        // Match both [Roll:X] and (Roll: X) formats
+        const rollMatch = trimmed.match(/(?:\[Roll:|\(Roll:)\s*(\d+)\)?/);
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
 
         if (fromMatch && toMatch) {

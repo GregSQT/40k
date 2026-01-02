@@ -246,7 +246,11 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
 
           // Shooting phase: use unified vivid blue tones for attack preview
           if (phase === "shoot") {
-            if (isAdvanceDestination) {
+            // In advancePreview mode, use light brown for availableCells
+            if (mode === "advancePreview" && isAvailable) {
+              // Light brown for advance destinations (0xD4A574 = light brown)
+              highlightCell.beginFill(0xD4A574, 0.5);
+            } else if (isAdvanceDestination) {
               // ADVANCE_IMPLEMENTATION_PLAN.md: Orange for advance destinations
               highlightCell.beginFill(0xFF8C00, 0.5);
             } else if (isAttackable) {

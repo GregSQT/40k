@@ -1169,9 +1169,9 @@ export default function Board({
         attackCells,
         coverCells,
         chargeCells,
-        advanceCells: (mode === "advancePreview" && selectedUnitId && getAdvanceDestinations) 
+        advanceCells: (mode === "advancePreview" && selectedUnitId && getAdvanceDestinations && !availableCellsOverride) 
           ? getAdvanceDestinations(selectedUnitId) 
-          : [],  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Populated when in advancePreview mode
+          : [],  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Populated when in advancePreview mode, but skip if availableCellsOverride is provided
         blockedTargets,
         coverTargets,
         phase,
@@ -1191,6 +1191,7 @@ export default function Board({
 
         // Skip units that are being previewed elsewhere
         if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
+        if (mode === "advancePreview" && movePreview && unit.id === movePreview.unitId) continue;
         if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
 
         // Use backend's blinkingUnits list for shootability (authoritative LoS calculation)
@@ -1336,6 +1337,32 @@ export default function Board({
             units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor,
             autoSelectWeapon,
+          });
+        }
+      }
+
+      // ✅ ADVANCE PREVIEW RENDERING (same as movePreview)
+      if (mode === "advancePreview" && movePreview) {
+        const previewUnit = units.find(u => u.id === movePreview.unitId);
+        if (previewUnit) {
+          const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = movePreview.destRow * HEX_VERT_SPACING + ((movePreview.destCol % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          
+          renderUnit({
+            unit: previewUnit, centerX, centerY, app,
+            isPreview: true, previewType: 'move',
+            isEligible: false, // Preview units are not eligible
+            boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
+            HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
+            SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
+            phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            fightSubPhase, fightActivePlayer,
+            units, chargeTargets, fightTargets, targetPreview,
+            onConfirmMove, parseColor,
+            autoSelectWeapon,
+            // Pass advance roll info for replay mode (use real unit ID, not ghost ID)
+            advanceRoll,
+            advancingUnitId: movePreview.unitId, // Use real unit ID for preview icon at destination
           });
         }
       }

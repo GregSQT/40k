@@ -480,16 +480,22 @@ export const BoardReplay: React.FC = () => {
           action.player
         );
       } else if (action.type === 'advance' && action.from && action.to) {
-        // Log advance actions using logAdvanceAction to match PvP/PvE format
-        gameLog.logAdvanceAction(
-          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
-          action.from.col,
-          action.from.row,
-          action.to.col,
-          action.to.row,
-          turnNumber,
-          action.player
-        );
+        // Calculate advance roll from distance between from and to
+        const fromCube = offsetToCube(action.from.col, action.from.row);
+        const toCube = offsetToCube(action.to.col, action.to.row);
+        const advanceRoll = cubeDistance(fromCube, toCube);
+        
+        // Log advance actions with roll to match PvP/PvE format
+        gameLog.addEvent({
+          type: 'advance',
+          message: `Unit ${action.unit_id} advanced from (${action.from.col}, ${action.from.row}) to (${action.to.col}, ${action.to.row}) (rolled ${advanceRoll})`,
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: 'shooting',
+          startHex: `(${action.from.col}, ${action.from.row})`,
+          endHex: `(${action.to.col}, ${action.to.row})`,
+          player: action.player
+        });
       } else if (action.type === 'move_wait' && action.pos) {
         gameLog.logNoMoveAction(
           { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
@@ -1073,8 +1079,8 @@ export const BoardReplay: React.FC = () => {
   const advanceRoll = (currentAction?.type === 'advance' && currentAction?.advance_roll !== undefined)
     ? currentAction.advance_roll
     : null;
-  const advancingUnitId = (currentAction?.type === 'advance' && currentAction?.unit_id)
-    ? currentAction.unit_id
+    const advancingUnitId = (currentAction?.type === 'advance' && currentAction?.unit_id)
+    ? currentAction.unit_id  // Use real unit ID so icon shows on preview at destination, not on ghost
     : null;
 
   // For move actions, select the ghost unit to show movement range
@@ -1110,7 +1116,7 @@ export const BoardReplay: React.FC = () => {
       onCancelMove={() => {}}
       currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 0 | 1) : (currentState.currentPlayer || 0)}
       unitsMoved={[]}
-      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
+      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' || currentAction?.type === 'advance' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
       onShoot={() => {}}
       gameState={currentState as GameState}
       getChargeDestinations={(unitId: number) => {
@@ -1366,6 +1372,109 @@ export const BoardReplay: React.FC = () => {
       chargeSuccess={chargeSuccess}
       wallHexesOverride={currentState.walls}
       objectivesOverride={currentState.objectives}
+      availableCellsOverride={(() => {
+        if (currentAction?.type === 'advance' && currentAction?.from && (currentAction?.advance_roll !== undefined || currentAction?.to)) {
+          return (() => {
+            const advanceFrom = currentAction.from;
+            // Use advance_roll from log (the actual dice roll), NOT the distance traveled
+            let advanceRollValue: number;
+            if (currentAction.advance_roll !== undefined) {
+              advanceRollValue = currentAction.advance_roll;
+            } else if (currentAction.to) {
+              // Fallback: calculate from distance (should not happen if parser works correctly)
+              const fromCube = offsetToCube(advanceFrom.col, advanceFrom.row);
+              const toCube = offsetToCube(currentAction.to.col, currentAction.to.row);
+              advanceRollValue = cubeDistance(fromCube, toCube);
+            } else {
+              return [];
+            }
+            
+            if (!advanceRollValue || advanceRollValue <= 0) {
+              return [];
+            }
+
+            const advancingUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
+            if (!advancingUnit) {
+              return [];
+            }
+
+            const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
+              const parity = col & 1;
+              if (parity === 0) {
+                return [
+                  { col, row: row - 1 },
+                  { col: col + 1, row: row - 1 },
+                  { col: col + 1, row },
+                  { col, row: row + 1 },
+                  { col: col - 1, row },
+                  { col: col - 1, row: row - 1 }
+                ];
+              } else {
+                return [
+                  { col, row: row - 1 },
+                  { col: col + 1, row },
+                  { col: col + 1, row: row + 1 },
+                  { col, row: row + 1 },
+                  { col: col - 1, row: row + 1 },
+                  { col: col - 1, row }
+                ];
+              }
+            };
+
+            const isTraversable = (col: number, row: number): boolean => {
+              const boardCols = currentState?.board_cols || 25;
+              const boardRows = currentState?.board_rows || 21;
+              
+              if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
+                return false;
+              }
+              
+              if (currentState?.walls?.some((w: { col: number; row: number }) => w.col === col && w.row === row)) {
+                return false;
+              }
+              
+              if (unitsWithGhost.some((u: Unit) =>
+                u.col === col && u.row === row && u.id !== currentAction.unit_id && u.id >= 0 && u.HP_CUR > 0
+              )) {
+                return false;
+              }
+              
+              return true;
+            };
+
+            const validDestinations: { col: number; row: number }[] = [];
+            const visited = new Set<string>();
+            const queue: Array<{ col: number; row: number; distance: number }> = [{ col: advanceFrom.col, row: advanceFrom.row, distance: 0 }];
+            visited.add(`${advanceFrom.col},${advanceFrom.row}`);
+
+            while (queue.length > 0) {
+              const current = queue.shift()!;
+              const { col, row, distance } = current;
+
+              if (distance > 0 && distance <= advanceRollValue && isTraversable(col, row)) {
+                validDestinations.push({ col, row });
+              }
+
+              if (distance < advanceRollValue) {
+                const neighbors = getHexNeighbors(col, row);
+                for (const neighbor of neighbors) {
+                  const neighborKey = `${neighbor.col},${neighbor.row}`;
+                  if (!visited.has(neighborKey)) {
+                    visited.add(neighborKey);
+                    const neighborDistance = distance + 1;
+                    if (neighborDistance <= advanceRollValue && isTraversable(neighbor.col, neighbor.row)) {
+                      queue.push({ col: neighbor.col, row: neighbor.row, distance: neighborDistance });
+                    }
+                  }
+                }
+              }
+            }
+
+            return validDestinations;
+          })();
+        }
+        return undefined;
+      })()}
     />
   ) : (
     <div className="replay-empty-state">

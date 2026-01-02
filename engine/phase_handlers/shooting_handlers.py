@@ -3217,10 +3217,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     # Temporarily override unit MOVE attribute with advance_range
     original_move = unit["MOVE"]
     unit["MOVE"] = advance_range
-    
+
     # Use movement pathfinding to get valid destinations
     valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
-    
+
     # Restore original MOVE
     unit["MOVE"] = original_move
     
@@ -3229,6 +3229,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     dest_row = action.get("destRow")
     
     if dest_col is not None and dest_row is not None:
+        # DEBUG: Calculate actual distance to destination
+        actual_distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
+        
         # Destination provided - validate and execute
         if (dest_col, dest_row) not in valid_destinations:
             return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
@@ -3257,13 +3260,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             # We track the advance but continue to shooting, so we don't use the return value
             _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 0)
         
-        # Clean up advance state
-        if "advance_range" in unit:
-            del unit["advance_range"]
-        
         # Log the advance action
         if "action_logs" not in game_state:
             game_state["action_logs"] = []
+                    
         game_state["action_logs"].append({
             "type": "advance",
             "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) (Roll: {advance_range})",
@@ -3279,6 +3279,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             "actually_moved": actually_moved,
             "timestamp": "server_time"
         })
+        
+        # Clean up advance state AFTER logging
+        if "advance_range" in unit:
+            del unit["advance_range"]
         
         # AI_TURN.md STEP 4: ADVANCE_ACTION post-advance logic (lines 666-679)
         # Continue only if unit actually moved
