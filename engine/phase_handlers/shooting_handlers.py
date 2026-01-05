@@ -2620,7 +2620,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # OPTIMIZATION: Only calculate rewards for controlled player's units
     # Bot units don't need rewards since they don't learn
     config = game_state.get("config", {})
-    controlled_player = config.get("controlled_player", 0)
+    controlled_player = config.get("controlled_player", 1)
 
     # Skip reward calculation for bot units (not the controlled player)
     if shooter["player"] != controlled_player:
