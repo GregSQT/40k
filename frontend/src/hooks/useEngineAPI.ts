@@ -2062,6 +2062,43 @@ export const useEngineAPI = () => {
               break;
             }
             
+          } else if (!activationData.result?.waiting_for_player && 
+                     !activationData.result?.validTargets && 
+                     !activationData.result?.valid_destinations) {
+            // No valid action available - skip this unit
+            // This can happen when unit has no valid targets in shoot phase
+            const unitId = activationData.result?.unitId || 
+                          (activationData.game_state?.active_shooting_unit) ||
+                          (activationData.game_state?.active_movement_unit);
+            
+            if (unitId) {
+              // Send skip action to backend
+              try {
+                const skipResponse = await fetch(`${API_BASE}/game/action`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'skip', unitId: String(unitId) })
+                });
+                
+                if (skipResponse.ok) {
+                  const skipData = await skipResponse.json();
+                  setGameState(skipData.game_state);
+                  totalUnitsProcessed++;
+                  
+                  if (skipData.result?.phase_complete) {
+                    break;
+                  }
+                }
+              } catch (err) {
+                console.error('Failed to skip unit:', err);
+                break; // Exit loop on error
+              }
+            } else {
+              // No unit ID available - exit loop to prevent infinite loop
+              console.warn('AI loop: No valid action and no unit ID - breaking');
+              break;
+            }
+            
             // CRITICAL: Check if pool size changed (unit was removed)
             const updatedGameState = activationData.game_state;
             const currentPhase = updatedGameState?.phase;
