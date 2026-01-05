@@ -1383,7 +1383,7 @@ def main():
     parser.add_argument("--test-integration", action="store_true",
                        help="Test scenario manager integration")
     parser.add_argument("--step", action="store_true",
-                       help="Enable step-by-step action logging to train_step.log")
+                       help="Enable step-by-step action logging to step.log")
     parser.add_argument("--convert-steplog", type=str, metavar="STEPLOG_FILE",
                        help="Convert existing steplog file to replay JSON format")
     parser.add_argument("--replay", action="store_true", 
@@ -1420,7 +1420,7 @@ def main():
     try:
         # Initialize global step logger based on --step argument
         global step_logger
-        step_logger = StepLogger("train_step.log", enabled=args.step)
+        step_logger = StepLogger("step.log", enabled=args.step)
         
         # Sync configs to frontend automatically
         try:

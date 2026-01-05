@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-analyze_step_log.py - Analyze train_step.log and output compact statistics
-Run this locally: python check/analyze_step_log.py train_step.log
+analyze_step_log.py - Analyze step.log and output compact statistics
+Run this locally: python check/analyze_step_log.py step.log
 """
 
 import sys
@@ -57,8 +57,19 @@ def has_line_of_sight(shooter_col, shooter_row, target_col, target_row, wall_hex
             return False
     return True
 
+def is_adjacent_to_enemy(col, row, unit_player_dict, unit_positions_dict, unit_hp_dict, player):
+    """Check if a hex is adjacent to any enemy unit."""
+    enemy_player = 1 - player
+    for uid, p in unit_player_dict.items():
+        if p == enemy_player and unit_hp_dict.get(uid, 0) > 0 and uid in unit_positions_dict:
+            enemy_pos = unit_positions_dict[uid]
+            distance = calculate_hex_distance(col, row, enemy_pos[0], enemy_pos[1])
+            if distance == 1:
+                return True
+    return False
+
 def parse_log(filepath):
-    """Parse train_step.log and extract statistics."""
+    """Parse step.log and extract statistics."""
     
     # Load unit weapons at script start using existing system
     from ai.unit_registry import UnitRegistry
@@ -105,6 +116,12 @@ def parse_log(filepath):
             1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0}
         },
         'wall_collisions': {0: 0, 1: 0},
+        # Charge validation tracking
+        'charge_from_adjacent': {0: 0, 1: 0},  # Charges starting from hex adjacent to enemy
+        # Unit position collision tracking
+        'unit_position_collisions': [],  # List of episodes with 2+ units in same hex
+        # Move validation tracking
+        'move_to_adjacent_enemy': {0: 0, 1: 0},  # Moves to hex adjacent to enemy
         # Target priority tracking - with LOS awareness
         'target_priority': {
             0: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0},
@@ -127,6 +144,8 @@ def parse_log(filepath):
         # Enemy death order tracking with unit types
         'death_orders': [],
         'current_episode_deaths': [],
+        # Parse error tracking (strict analyzer - no fallbacks)
+        'parse_errors': [],
         # Track enemy HP and positions
         'wounded_enemies': {0: set(), 1: set()},
         # Track unit types for death order display
@@ -141,10 +160,28 @@ def parse_log(filepath):
         'episodes_without_end': [],
         # Track episodes without win_method
         'episodes_without_method': [],
+        # Track wins by scenario
+        'wins_by_scenario': defaultdict(lambda: {'p0': 0, 'p1': 0, 'draws': 0}),
+        # Debug stats
+        'debug': {
+            'units_initialized': 0,  # number of units initialized from starting positions
+            'target_not_in_unit_hp': 0,  # target_id not found in unit_hp
+            'weapon_not_found': 0,  # weapon not found in cache
+            'shooter_unit_type_not_found': 0,  # shooter_unit_type not found in unit_types
+            'weapon_found_but_not_pistol': 0,  # weapon found but is_pistol is False
+            'weapon_is_pistol': 0,  # weapon found and is_pistol is True
+            'pistol_target_pos_none': 0,  # PISTOL weapon but target_pos is None
+            'pistol_shots_with_distance': 0,  # PISTOL shots that reached distance calculation
+            'pistol_distance_1': 0,  # PISTOL shots at distance 1 (adjacent)
+            'pistol_distance_not_1': 0,  # PISTOL shots at distance != 1 (not adjacent)
+            'damage_match_found': 0,  # damage_match found in action_desc
+            'damage_applied': 0,  # damage actually applied to unit_hp
+        },
     }
 
     current_episode = []
-    current_episode_num = 0
+    current_episode_num = 0  # Will be set to 1 when first episode starts
+    current_scenario = 'Unknown'  # Track current scenario
     episode_turn = 0
     episode_actions = 0
     last_turn = 0  # Track last turn to detect turn changes
@@ -155,15 +192,13 @@ def parse_log(filepath):
     unit_positions = {}  # unit_id -> (col, row)
     unit_types = {}  # unit_id -> unit_type
     units_advanced_this_turn = set()  # Track units that advanced this turn (for Assault rule)
+    positions_at_turn_start = {}  # unit_id -> (col, row) at start of current turn
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
-            # Skip header
-            if line.startswith('===') or line.startswith('AI_TURN') or line.startswith('STEP') or line.startswith('NO STEP') or line.startswith('FAILED') or not line.strip():
-                continue
-
-            # Episode start
-            if '=== EPISODE START ===' in line:
+            # Episode start - check BEFORE skipping lines starting with ===
+            # Format can be: === EPISODE START === or === EPISODE X START ===
+            if '=== EPISODE' in line and 'START ===' in line:
                 if current_episode:
                     # Previous episode ended without EPISODE END line
                     stats['episodes_without_end'].append({
@@ -182,8 +217,8 @@ def parse_log(filepath):
                     stats['turns_distribution'][episode_turn] += 1
 
                 current_episode = []
-                current_episode_num += 1
                 stats['total_episodes'] += 1
+                current_episode_num = stats['total_episodes']  # Use count of episodes processed
                 episode_turn = 0
                 episode_actions = 0
                 stats['current_episode_deaths'] = []
@@ -192,8 +227,22 @@ def parse_log(filepath):
                 unit_player = {}
                 unit_positions = {}
                 unit_types = {}
+                positions_at_turn_start = {}  # Reset for new episode
                 wall_hexes = set()
                 units_advanced_this_turn = set()  # Reset for new episode
+                current_scenario = 'Unknown'  # Reset scenario for new episode
+                # Note: unit_position_collisions is not reset - it accumulates across episodes
+                continue
+
+            # Skip header (but not EPISODE START lines which are handled above)
+            if line.startswith('===') or line.startswith('AI_TURN') or line.startswith('STEP') or line.startswith('NO STEP') or line.startswith('FAILED') or not line.strip():
+                continue
+
+            # Parse scenario name
+            # Format: [timestamp] Scenario: scenario_name
+            scenario_match = re.search(r'Scenario: (.+)$', line)
+            if scenario_match:
+                current_scenario = scenario_match.group(1).strip()
                 continue
 
             # Parse wall hexes from step log
@@ -209,8 +258,8 @@ def parse_log(filepath):
                 continue
 
             # Parse unit starting positions to get HP and type
-            # Format: Unit 1 (Intercessor) P0: Starting position (9, 12)
-            unit_start_match = re.match(r'.*Unit (\d+) \((\w+)\) P(\d+): Starting position \((\d+), (\d+)\)', line)
+            # Format: Unit 1 (Intercessor) P0: Starting position (9,12)
+            unit_start_match = re.match(r'.*Unit (\d+) \((\w+)\) P(\d+): Starting position \((\d+),\s*(\d+)\)', line)
             if unit_start_match:
                 unit_id = unit_start_match.group(1)
                 unit_type = unit_start_match.group(2)
@@ -225,6 +274,12 @@ def parse_log(filepath):
                 unit_player[unit_id] = player
                 unit_positions[unit_id] = (col, row)
                 unit_types[unit_id] = unit_type
+                stats['debug']['units_initialized'] = stats['debug'].get('units_initialized', 0) + 1
+                # CRITICAL: Initialize positions_at_turn_start when we read starting positions
+                # This ensures it's ready before any actions are processed
+                if not positions_at_turn_start:
+                    positions_at_turn_start = {}
+                positions_at_turn_start[unit_id] = (col, row)
                 stats['unit_types'][unit_id] = unit_type
                 continue
 
@@ -242,6 +297,14 @@ def parse_log(filepath):
                     winner = int(winner_match.group(1))
                     win_method = method_match.group(1) if method_match else None
 
+                    # Track wins by scenario
+                    if winner == 0:
+                        stats['wins_by_scenario'][current_scenario]['p0'] += 1
+                    elif winner == 1:
+                        stats['wins_by_scenario'][current_scenario]['p1'] += 1
+                    elif winner == -1:
+                        stats['wins_by_scenario'][current_scenario]['draws'] += 1
+
                     # Track win method (NO DEFAULT - log what's actually there)
                     if win_method:
                         if winner in stats['win_methods'] and win_method in stats['win_methods'][winner]:
@@ -257,13 +320,11 @@ def parse_log(filepath):
                             'line': line.strip()[:100]  # First 100 chars for debugging
                         })
 
-                    # Save sample games (first of each type) - 20 actions
+                    # Save sample games (first of each type) - 10 actions
                     if winner == 0 and not stats['sample_games']['win']:
-                        stats['sample_games']['win'] = '\n'.join(current_episode[:20])
-                    elif winner == 1 and not stats['sample_games']['loss']:
-                        stats['sample_games']['loss'] = '\n'.join(current_episode[:20])
+                        stats['sample_games']['win'] = '\n'.join(current_episode[:10])
                     elif winner == -1 and not stats['sample_games']['draw']:
-                        stats['sample_games']['draw'] = '\n'.join(current_episode[:20])
+                        stats['sample_games']['draw'] = '\n'.join(current_episode[:10])
 
                 stats['current_episode_deaths'] = []
                 stats['wounded_enemies'] = {0: set(), 1: set()}
@@ -284,7 +345,15 @@ def parse_log(filepath):
                 # Reset advanced units when turn changes
                 if turn != last_turn:
                     units_advanced_this_turn = set()
+                    # CRITICAL FIX: Save positions at turn start for accurate collision detection
+                    # Only detect collision if unit was at destination at turn start (real collision)
+                    # Not if unit moved there in a previous action this turn (false positive)
+                    positions_at_turn_start = unit_positions.copy()
                     last_turn = turn
+                # Ensure positions_at_turn_start is initialized even if turn hasn't changed yet
+                # (for first action of first turn)
+                if not positions_at_turn_start and unit_positions:
+                    positions_at_turn_start = unit_positions.copy()
 
                 episode_turn = max(episode_turn, turn)
 
@@ -301,9 +370,9 @@ def parse_log(filepath):
 
                         # Extract shooter and target info
                         # Format: "Unit X(col, row) SHOT at unit Y(col, row)" (target coords now in log)
-                        shooter_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
+                        shooter_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\)', action_desc)
                         # Updated regex to capture target coords if present: "SHOT at unit Y" or "SHOT at unit Y(col, row)"
-                        target_match = re.search(r'SHOT at unit (\d+)(?:\((\d+), (\d+)\))?', action_desc, re.IGNORECASE)
+                        target_match = re.search(r'SHOT at unit (\d+)(?:\((\d+),\s*(\d+)\))?', action_desc, re.IGNORECASE)
 
                         if shooter_match and target_match:
                             shooter_id = shooter_match.group(1)
@@ -317,8 +386,8 @@ def parse_log(filepath):
                                 target_col = int(target_match.group(2))
                                 target_row = int(target_match.group(3))
                                 target_pos = (target_col, target_row)
-                                # Update unit_positions with current target position
-                                unit_positions[target_id] = target_pos
+                                # DO NOT update unit_positions - units don't move during SHOOT phase
+                                # Only use for LOS/adjacency calculations in this action
                             elif target_id in unit_positions:
                                 # Fallback to unit_positions if coords not in log
                                 target_pos = unit_positions[target_id]
@@ -326,43 +395,66 @@ def parse_log(filepath):
                                 # Target position unknown, skip adjacency check
                                 target_pos = None
 
-                            # Update shooter position
-                            unit_positions[shooter_id] = (shooter_col, shooter_row)
+                            # DO NOT update shooter position - units don't move during SHOOT phase
+                            # shooter_col/shooter_row are used only for LOS/adjacency calculations
                             
                             # Check if this unit advanced this turn (Assault weapon rule)
                             if shooter_id in units_advanced_this_turn:
                                 stats['shots_after_advance'][player] += 1
 
                             # Check if weapon is PISTOL and track adjacency
+                            # Initialize variables before weapon_match check
+                            is_pistol = False
+                            weapon_found = False  # Track if weapon was found in cache
+                            
                             weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
                             if weapon_match:
                                 weapon_display_name = weapon_match.group(1)  # Keep original case for matching
                                 weapon_name_lower = weapon_display_name.lower()
                                 
                                 # Use unit_weapons_cache to check if weapon really has PISTOL rule
-                                is_pistol = False
                                 shooter_unit_type = unit_types.get(shooter_id, '')
+                                shooter_unit_type = unit_types.get(shooter_id, '')
+                                if not shooter_unit_type:
+                                    stats['debug']['shooter_unit_type_not_found'] += 1
                                 weapons_info = unit_weapons_cache.get(shooter_unit_type, [])
                                 
                                 # Find weapon in cache by display_name (case-insensitive match)
                                 for weapon_info in weapons_info:
                                     if weapon_info['name'].lower() == weapon_name_lower:
                                         is_pistol = weapon_info['is_pistol']  # Check WEAPON_RULES, not name
+                                        weapon_found = True
+                                        if is_pistol:
+                                            stats['debug']['weapon_is_pistol'] = stats['debug'].get('weapon_is_pistol', 0) + 1
+                                        else:
+                                            stats['debug']['weapon_found_but_not_pistol'] += 1
                                         break
                                 
+                                if not weapon_found:
+                                    stats['debug']['weapon_not_found'] += 1
+                                
                                 # Calculate distance to target to determine adjacency
+                                if weapon_found and is_pistol:
+                                    if not target_pos:
+                                        stats['debug']['pistol_target_pos_none'] = stats['debug'].get('pistol_target_pos_none', 0) + 1
+                                
                                 if target_pos:
                                     distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
                                     
-                                    if is_pistol:
-                                        if distance == 1:
-                                            stats['pistol_shots'][player]['adjacent'] += 1
+                                    if weapon_found:
+                                        if is_pistol:
+                                            stats['debug']['pistol_shots_with_distance'] = stats['debug'].get('pistol_shots_with_distance', 0) + 1
+                                            if distance == 1:
+                                                stats['debug']['pistol_distance_1'] = stats['debug'].get('pistol_distance_1', 0) + 1
+                                                stats['pistol_shots'][player]['adjacent'] += 1
+                                            else:
+                                                stats['debug']['pistol_distance_not_1'] = stats['debug'].get('pistol_distance_not_1', 0) + 1
+                                                stats['pistol_shots'][player]['not_adjacent'] += 1
                                         else:
-                                            stats['pistol_shots'][player]['not_adjacent'] += 1
-                                    else:
-                                        # Non-PISTOL weapon - check if adjacent (rule violation)
-                                        if distance == 1:
-                                            stats['non_pistol_adjacent_shots'][player] += 1
+                                            # Non-PISTOL weapon - check if adjacent (rule violation)
+                                            # Only count violation if weapon was found in cache
+                                            if distance == 1:
+                                                stats['non_pistol_adjacent_shots'][player] += 1
 
                             stats['target_priority'][player]['total_shots'] += 1
 
@@ -392,16 +484,20 @@ def parse_log(filepath):
                             damage_match = re.search(r'Dmg:(\d+)', action_desc)
                             killed = False
                             if damage_match:
+                                stats['debug']['damage_match_found'] += 1
                                 damage = int(damage_match.group(1))
                                 if damage > 0:
                                     # Apply damage to tracked HP
                                     if target_id in unit_hp:
+                                        stats['debug']['damage_applied'] += 1
                                         unit_hp[target_id] -= damage
                                         if unit_hp[target_id] <= 0:
                                             killed = True
                                         else:
                                             # Mark this unit as wounded (but not dead)
                                             stats['wounded_enemies'][player].add(target_id)
+                                    else:
+                                        stats['debug']['target_not_in_unit_hp'] += 1
 
                             # Track death order and remove from wounded
                             if killed:
@@ -410,6 +506,9 @@ def parse_log(filepath):
                                 stats['current_episode_deaths'].append((player, target_id, target_type))
                                 # Remove from wounded set since it's dead
                                 stats['wounded_enemies'][player].discard(target_id)
+                                # Remove dead unit position from tracking (maintain real-time catalog)
+                                if target_id in unit_positions:
+                                    del unit_positions[target_id]
 
                     elif 'wait' in action_desc.lower():
                         action_type = 'wait'
@@ -526,36 +625,178 @@ def parse_log(filepath):
                             stats['shoot_vs_wait']['advance'] += 1
                             stats['shoot_vs_wait_by_player'][player]['advance'] += 1
 
-                        # Update unit position (same as move)
-                        move_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
-                        if move_match:
-                            move_unit_id = move_match.group(1)
-                            dest_col = int(move_match.group(2))
-                            dest_row = int(move_match.group(3))
-                            unit_positions[move_unit_id] = (dest_col, dest_row)
+                        # Parse advance: "Unit X(col, row) ADVANCED from (start_col, start_row) to (end_col, end_row) [Roll: X]"
+                        advance_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) ADVANCED from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
+                        if advance_match:
+                            advance_unit_id = advance_match.group(1)
+                            log_col = int(advance_match.group(2))
+                            log_row = int(advance_match.group(3))
+                            start_col = int(advance_match.group(4))
+                            start_row = int(advance_match.group(5))
+                            dest_col = int(advance_match.group(6))
+                            dest_row = int(advance_match.group(7))
                             
-                            # Mark this unit as having advanced this turn (for Assault rule tracking)
-                            units_advanced_this_turn.add(move_unit_id)
-
-                            # Check if unit moved into a wall
-                            if (dest_col, dest_row) in wall_hexes:
-                                stats['wall_collisions'][player] += 1
+                            # Get current position from tracking table
+                            current_tracked_pos = unit_positions.get(advance_unit_id, None)
+                            
+                            # Verify unit is actually moving
+                            if (start_col, start_row) != (dest_col, dest_row):
+                                # RULE CHECK 1: Position collision
+                                # Check CURRENT positions (like charge and move do) to detect same-turn collisions
+                                colliding_units = [uid for uid, current_pos in unit_positions.items() 
+                                                  if current_pos == (dest_col, dest_row)
+                                                  and uid != advance_unit_id
+                                                  and unit_hp.get(uid, 0) > 0]
+                                if colliding_units:
+                                    stats['unit_position_collisions'].append({
+                                        'episode': current_episode_num,
+                                        'turn': turn,
+                                        'position': (dest_col, dest_row),
+                                        'units': colliding_units + [advance_unit_id],
+                                        'action': 'advance',
+                                        'advance_from': (start_col, start_row),
+                                        'advance_to': (dest_col, dest_row),
+                                        'tracked_before': current_tracked_pos
+                                    })
+                                
+                                # RULE CHECK 2: Move into wall
+                                if (dest_col, dest_row) in wall_hexes:
+                                    stats['wall_collisions'][player] += 1
+                                
+                                # UPDATE: Move unit to destination in tracking table
+                                unit_positions[advance_unit_id] = (dest_col, dest_row)
+                                
+                                # Mark this unit as having advanced this turn (for Assault rule tracking)
+                                units_advanced_this_turn.add(advance_unit_id)
+                        else:
+                            # Strict analyzer: reject non-standard format
+                            stats['parse_errors'].append({
+                                'episode': current_episode_num,
+                                'turn': turn,
+                                'phase': phase,
+                                'line': line.strip(),
+                                'error': f"Advance action missing 'from/to' format: {action_desc[:100]}"
+                            })
                     elif 'charge' in action_desc.lower():
                         action_type = 'charge'
+                        
+                        # Parse charge action: "Unit X(col, row) CHARGED unit Y from (start_col, start_row) to (end_col, end_row) [Roll:charge_roll]"
+                        charge_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) CHARGED unit \d+ from \((\d+),\s*(\d+)\)', action_desc)
+                        if charge_match:
+                            charge_unit_id = charge_match.group(1)
+                            # Destination position (after charge) - from log format
+                            dest_col = int(charge_match.group(2))
+                            dest_row = int(charge_match.group(3))
+                            # Starting position (before charge)
+                            start_col = int(charge_match.group(4))
+                            start_row = int(charge_match.group(5))
+                            
+                            # Get current position from our tracking table (should match start_col/start_row)
+                            current_tracked_pos = unit_positions.get(charge_unit_id, None)
+                            
+                            # CRITICAL: Verify tracking is synchronized with log
+                            # If current_tracked_pos doesn't match start position from log, tracking is desynced
+                            if current_tracked_pos is not None and current_tracked_pos != (start_col, start_row):
+                                # Tracking desync detected - skip collision check to avoid false positives
+                                # Update position to correct tracking
+                                pass  # We'll still update at the end
+            
+                            # Verify unit is actually moving
+                            if (start_col, start_row) != (dest_col, dest_row):
+                                # RULE CHECK 1: Charge from adjacent hex to enemy
+                                if is_adjacent_to_enemy(start_col, start_row, unit_player, unit_positions, unit_hp, player):
+                                    stats['charge_from_adjacent'][player] += 1
+                                
+                                # RULE CHECK 2: Position collision - check if destination is already occupied
+                                # Only check collision if tracking is synchronized
+                                if current_tracked_pos is None or current_tracked_pos == (start_col, start_row):
+                                    # CRITICAL FIX: Only detect collision if unit was at destination at turn start
+                                    # This avoids false positives when units move to same hex sequentially
+                                    # CRITICAL FIX: Check collision with CURRENT positions, not turn start positions
+                                    # An unit that was at destination at turn start but has moved away is NOT a collision
+                                    colliding_units = [uid for uid, current_pos in unit_positions.items() 
+                                                      if current_pos == (dest_col, dest_row)
+                                                      and uid != charge_unit_id  # Exclude charging unit
+                                                      and unit_hp.get(uid, 0) > 0]  # Must be alive
+                                    if colliding_units:
+                                        # DEBUG: Add action description and full line to help identify the source
+                                        stats['unit_position_collisions'].append({
+                                            'episode': current_episode_num,
+                                            'turn': turn,
+                                            'position': (dest_col, dest_row),
+                                            'units': colliding_units + [charge_unit_id],
+                                            'action': 'charge',
+                                            'charge_from': (start_col, start_row),
+                                            'charge_to': (dest_col, dest_row),
+                                            'tracked_before': current_tracked_pos,
+                                            'action_desc': action_desc[:100],  # First 100 chars for debugging
+                                            'log_line': line.strip()  # Full log line that triggered this collision
+                                        })
+                                
+                                # UPDATE: Move unit to destination in tracking table
+                                unit_positions[charge_unit_id] = (dest_col, dest_row)
                     elif 'moves' in action_desc.lower() or 'moved' in action_desc.lower():
                         action_type = 'move'
 
-                        # Update unit position
-                        move_match = re.search(r'Unit (\d+)\((\d+), (\d+)\)', action_desc)
+                        # Parse move action: "Unit X(col, row) MOVED from (start_col, start_row) to (end_col, end_row)"
+                        # Try full format first
+                        move_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) MOVED from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
                         if move_match:
                             move_unit_id = move_match.group(1)
-                            dest_col = int(move_match.group(2))
-                            dest_row = int(move_match.group(3))
-                            unit_positions[move_unit_id] = (dest_col, dest_row)
-
-                            # Check if unit moved into a wall
-                            if (dest_col, dest_row) in wall_hexes:
-                                stats['wall_collisions'][player] += 1
+                            # Current position in log (should be destination)
+                            log_col = int(move_match.group(2))
+                            log_row = int(move_match.group(3))
+                            start_col = int(move_match.group(4))
+                            start_row = int(move_match.group(5))
+                            dest_col = int(move_match.group(6))
+                            dest_row = int(move_match.group(7))
+                            
+                            # Get current position from tracking table
+                            current_tracked_pos = unit_positions.get(move_unit_id, None)
+                            
+                            # Verify unit is actually moving
+                            if (start_col, start_row) != (dest_col, dest_row):
+                                # RULE CHECK 1: Position collision - check if destination is already occupied
+                                # Check CURRENT positions (like charge does) to detect same-turn collisions
+                                colliding_units = [uid for uid, current_pos in unit_positions.items() 
+                                                  if current_pos == (dest_col, dest_row)
+                                                  and uid != move_unit_id  # Exclude moving unit
+                                                  and unit_hp.get(uid, 0) > 0]  # Must be alive
+                                if colliding_units:
+                                    stats['unit_position_collisions'].append({
+                                        'episode': current_episode_num,
+                                        'turn': turn,
+                                        'position': (dest_col, dest_row),
+                                        'units': colliding_units + [move_unit_id],
+                                        'action': 'move',
+                                        'move_from': (start_col, start_row),
+                                        'move_to': (dest_col, dest_row),
+                                        'tracked_before': current_tracked_pos,
+                                        'colliding_positions': {uid: unit_positions.get(uid, None) for uid in colliding_units},
+                                        'action_desc': action_desc[:100],
+                                        'log_line': line.strip()
+                                    })
+                                
+                                # RULE CHECK 2: Move to adjacent enemy
+                                # Check BEFORE updating position (use current tracking table)
+                                if is_adjacent_to_enemy(dest_col, dest_row, unit_player, unit_positions, unit_hp, player):
+                                    stats['move_to_adjacent_enemy'][player] += 1
+                                
+                                # RULE CHECK 3: Move into wall
+                                if (dest_col, dest_row) in wall_hexes:
+                                    stats['wall_collisions'][player] += 1
+                                
+                                # UPDATE: Move unit to destination in tracking table
+                                unit_positions[move_unit_id] = (dest_col, dest_row)
+                        else:
+                            # Strict analyzer: reject non-standard format
+                            stats['parse_errors'].append({
+                                'episode': current_episode_num,
+                                'turn': turn,
+                                'phase': phase,
+                                'line': line.strip(),
+                                'error': f"Move action missing 'from/to' format: {action_desc[:100]}"
+                            })
                     elif 'fought' in action_desc.lower() or 'attacked' in action_desc.lower():
                         action_type = 'fight'
                     else:
@@ -617,6 +858,36 @@ def print_statistics(stats):
     draw_pct = (draws / total_games * 100) if total_games > 0 else 0
     print(f"{'TOTAL WINS':<20} {p0_total:6d} ({p0_pct:5.1f}%)   {p1_total:6d} ({p1_pct:5.1f}%)")
     print(f"{'DRAWS':<20} {draws:6d} ({draw_pct:5.1f}%)")
+    
+    # WINS BY SCENARIO
+    if stats['wins_by_scenario']:
+        print("\n" + "-" * 80)
+        print("WINS BY SCENARIO")
+        print("-" * 80)
+        print(f"{'Scenario':<40} {'Agent (P0)':>15} {'Bot (P1)':>15} {'Draws':>10}")
+        print("-" * 80)
+        
+        # Sort scenarios by total games (descending)
+        scenario_totals = []
+        for scenario, wins in stats['wins_by_scenario'].items():
+            total = wins['p0'] + wins['p1'] + wins['draws']
+            scenario_totals.append((scenario, wins, total))
+        scenario_totals.sort(key=lambda x: -x[2])
+        
+        for scenario, wins, total in scenario_totals:
+            p0_count = wins['p0']
+            p1_count = wins['p1']
+            draws_count = wins['draws']
+            p0_pct = (p0_count / total * 100) if total > 0 else 0
+            p1_pct = (p1_count / total * 100) if total > 0 else 0
+            draws_pct = (draws_count / total * 100) if total > 0 else 0
+            # Extract "bot-X" from scenario name if present
+            bot_match = re.search(r'bot-(\d+)', scenario, re.IGNORECASE)
+            if bot_match:
+                scenario_display = f"bot-{bot_match.group(1)}"
+            else:
+                scenario_display = scenario[:39]  # Fallback: truncate if no bot-X pattern
+            print(f"{scenario_display:<40} {p0_count:5d} ({p0_pct:4.1f}%) {p1_count:5d} ({p1_pct:4.1f}%) {draws_count:5d} ({draws_pct:4.1f}%)")
     
     # Display episodes without win_method if any
     if 'episodes_without_method' in stats and stats['episodes_without_method']:
@@ -825,29 +1096,66 @@ def print_statistics(stats):
     bot_walls = stats['wall_collisions'][1]
     print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
     print(f"Moves into walls:             {agent_walls:6d}           {bot_walls:6d}")
+    
+    # Charge validation
+    agent_charge_adj = stats['charge_from_adjacent'][0]
+    bot_charge_adj = stats['charge_from_adjacent'][1]
+    print(f"Charges from adjacent hex:    {agent_charge_adj:6d}           {bot_charge_adj:6d}")
+    
+    # Move validation
+    agent_move_adj = stats['move_to_adjacent_enemy'][0]
+    bot_move_adj = stats['move_to_adjacent_enemy'][1]
+    print(f"Moves to adjacent enemy:      {agent_move_adj:6d}           {bot_move_adj:6d}")
+    
+    # Parse errors (strict analyzer)
+    if stats['parse_errors']:
+        print("\n" + "-" * 80)
+        print("⚠️  PARSE ERRORS (Non-standard log format)")
+        print("-" * 80)
+        print(f"Total parse errors: {len(stats['parse_errors'])}")
+        for i, error in enumerate(stats['parse_errors'][:10]):  # Show first 10
+            print(f"  {i+1}. Episode #{error['episode']}, Turn {error['turn']}, {error['phase']}: {error['error']}")
+            print(f"      Line: {error['line']}")
+        if len(stats['parse_errors']) > 10:
+            print(f"  ... and {len(stats['parse_errors']) - 10} more")
+    
+    # Position collisions
+    if stats['unit_position_collisions']:
+        print("\n" + "-" * 80)
+        print("⚠️  UNIT POSITION COLLISIONS (2+ units in same hex)")
+        print("-" * 80)
+        print(f"Total collisions: {len(stats['unit_position_collisions'])}")
+        for i, collision in enumerate(stats['unit_position_collisions'][:10]):  # Show first 10
+            units_str = ", ".join([f"Unit {uid}" for uid in collision['units']])
+            if 'charge_from' in collision:
+                debug_info = f" [DEBUG: {collision.get('action_desc', 'N/A')}]" if 'action_desc' in collision else ""
+                log_line_info = f"\n      LOG LINE: {collision.get('log_line', 'N/A')}" if 'log_line' in collision else ""
+                print(f"  {i+1}. Episode #{collision['episode']}, Turn {collision['turn']}, {collision['action']}: {units_str} at {collision['position']} (from {collision['charge_from']}){debug_info}{log_line_info}")
+                if 'colliding_positions' in collision:
+                    pos_info = ", ".join([f"Unit {uid}@{pos}" for uid, pos in collision['colliding_positions'].items()])
+                    print(f"      Colliding units positions: {pos_info}")
+            else:
+                debug_info = f" [from {collision.get('move_from', 'N/A')} to {collision.get('move_to', 'N/A')}]" if 'move_from' in collision else ""
+                colliding_pos_info = f"\n      Colliding units positions: {collision.get('colliding_positions', {})}" if 'colliding_positions' in collision else ""
+                log_line_info = f"\n      LOG LINE: {collision.get('log_line', 'N/A')}" if 'log_line' in collision else ""
+                print(f"  {i+1}. Episode #{collision['episode']}, Turn {collision['turn']}, {collision['action']}: {units_str} at {collision['position']}{debug_info}{colliding_pos_info}{log_line_info}")
+        if len(stats['unit_position_collisions']) > 10:
+            print(f"  ... and {len(stats['unit_position_collisions']) - 10} more")
 
-    # SAMPLE GAMES - 20 actions
+    # SAMPLE GAMES - 10 actions
     print("\n" + "=" * 80)
-    print("SAMPLE GAMES (first 20 actions)")
+    print("SAMPLE GAMES (first 10 actions)")
     print("=" * 80)
 
     if stats['sample_games']['win']:
         print("\n--- AGENT WIN GAME ---")
         print(stats['sample_games']['win'])
 
-    if stats['sample_games']['loss']:
-        print("\n--- AGENT LOSS GAME ---")
-        print(stats['sample_games']['loss'])
-
-    if stats['sample_games']['draw']:
-        print("\n--- DRAW GAME (most common) ---")
-        print(stats['sample_games']['draw'])
-
     print("\n" + "=" * 80)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python check/analyze_step_log.py train_step.log")
+        print("Usage: python check/analyze_step_log.py step.log")
         sys.exit(1)
 
     log_file = sys.argv[1]

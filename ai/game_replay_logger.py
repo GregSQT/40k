@@ -114,9 +114,9 @@ class GameReplayLogger:
                  reward: float, action_int: int):
         """Log movement action."""
         # Always provide hex coordinates, even for no-move actions
-        # Use space after comma to match frontend expectation: "(col, row)"
-        start_hex = f"({start_col}, {start_row})"
-        end_hex = f"({end_col}, {end_row})"
+        # Format coordinates without space after comma: "(col,row)"
+        start_hex = f"({start_col},{start_row})"
+        end_hex = f"({end_col},{end_row})"
         
         self.add_entry(
             entry_type="move",
@@ -152,8 +152,8 @@ class GameReplayLogger:
             action_name=self.action_names.get(action_int, f"action_{action_int}"),
             turn_number=turn_number,
             phase=phase,
-            start_hex=f"({unit['col']}, {unit['row']})",
-            end_hex=f"({unit['col']}, {unit['row']})"
+            start_hex=f"({unit['col']},{unit['row']})",
+            end_hex=f"({unit['col']},{unit['row']})"
         )
     
     def log_charge(self, charger: Dict, target: Dict, start_col: int, start_row: int,
@@ -165,8 +165,8 @@ class GameReplayLogger:
         charge_details = []
         if charge_roll is not None and die1 is not None and die2 is not None:
             # Use proper hex distance calculation for charge validation
-            from shared.gameRules import get_hex_distance
-            distance_needed = get_hex_distance(charger, target)
+            from engine.combat_utils import calculate_hex_distance
+            distance_needed = calculate_hex_distance(charger["col"], charger["row"], target["col"], target["row"])
             charge_details.append({
                 "rollType": "charge",
                 "die1": die1,
@@ -178,11 +178,12 @@ class GameReplayLogger:
             })
         else:
             # Generate missing charge roll data for logging consistency
-            from shared.gameRules import roll_d6, get_hex_distance
-            die1 = roll_d6()
-            die2 = roll_d6()
+            import random
+            from engine.combat_utils import calculate_hex_distance
+            die1 = random.randint(1, 6)
+            die2 = random.randint(1, 6)
             charge_roll = die1 + die2
-            distance_needed = get_hex_distance(charger, target)
+            distance_needed = calculate_hex_distance(charger["col"], charger["row"], target["col"], target["row"])
             # Use config value instead of hardcoded 12
             from config_loader import get_config_loader
             config = get_config_loader()
@@ -232,7 +233,8 @@ class GameReplayLogger:
             return None
         
         # Calculate real target numbers using the same rules as training
-        from shared.gameRules import calculate_wound_target, calculate_save_target
+        from engine.combat_utils import calculate_wound_target
+        from engine.phase_handlers.shooting_handlers import _calculate_save_target
         
         # Get actual target numbers from unit stats - NO DEFAULTS!
         if not shooter or not target:
@@ -266,7 +268,9 @@ class GameReplayLogger:
             raise ValueError(f"Missing unit stats - hit_target:{hit_target}, str:{shooter_str}, t:{target_t}, armor:{target_armor}, invul:{target_invul}, ap:{shooter_ap}")
         
         wound_target = calculate_wound_target(shooter_str, target_t)
-        save_target = calculate_save_target(target_armor, target_invul, shooter_ap)
+        # Create temporary target dict for _calculate_save_target
+        temp_target = {"ARMOR_SAVE": target_armor, "INVUL_SAVE": target_invul}
+        save_target = _calculate_save_target(temp_target, shooter_ap)
         
         # Check if we have detailed shot-by-shot data
         if "shots" in shoot_result and isinstance(shoot_result["shots"], list):
@@ -279,9 +283,8 @@ class GameReplayLogger:
                         raise ValueError("Cannot calculate save_target: missing target data")
                     if not shooter or "RNG_AP" not in shooter:
                         raise ValueError("Cannot calculate save_target: missing shooter data")
-                    save_target = calculate_save_target(
-                        target["ARMOR_SAVE"], 
-                        target["INVUL_SAVE"], 
+                    save_target = _calculate_save_target(
+                        target, 
                         shooter["RNG_AP"]
                     )
                 else:

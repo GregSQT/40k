@@ -179,6 +179,10 @@ class UnitRegistry:
         matches = re.findall(static_pattern, content)
         
         for prop_name, prop_value in matches:
+            # Skip RNG_WEAPONS and CC_WEAPONS - they are processed separately from RNG_WEAPON_CODES/CC_WEAPON_CODES
+            if prop_name in ["RNG_WEAPONS", "CC_WEAPONS"]:
+                continue
+            
             # Clean up the value
             prop_value = prop_value.strip().strip('"\'')
             

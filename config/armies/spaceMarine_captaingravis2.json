@@ -1,0 +1,12 @@
+{
+  "faction": "spaceMarine",
+  "description": "Space Marine army with 2 Captain Gravis",
+  "units": [
+    {
+      "unit_type": "CaptainGravis",
+      "count": 2
+    }
+  ]
+}
+
+

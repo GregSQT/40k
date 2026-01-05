@@ -19,7 +19,6 @@ import type { Weapon } from '../../types/game';
 export const TYRANID_ARMORY: Record<string, Weapon> = {
   // Ranged Weapons
   fleshborer: {
-    code_name: "fleshborer",
     display_name: "Fleshborer",
     RNG: 18,
     NB: 1,
@@ -28,8 +27,16 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     AP: 0,
     DMG: 1,
   },
+  deathspitter: {
+    display_name: "Deathspitter",
+    RNG: 24,
+    NB: 3,
+    ATK: 4,
+    STR: 5,
+    AP: -1,
+    DMG: 1,
+  },
   venom_cannon: {
-    code_name: "venom_cannon",
     display_name: "Venom Cannon",
     RNG: 24,
     NB: 6,
@@ -41,7 +48,6 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
   
   // Melee Weapons
   rending_claws: {
-    code_name: "rending_claws",
     display_name: "Rending Claws",
     NB: 4,
     ATK: 2,
@@ -49,8 +55,15 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     AP: -2,
     DMG: 1,
   },
+  rending_claws_warrior: {
+    display_name: "Rending Claws",
+    NB: 5,
+    ATK: 3,
+    STR: 5,
+    AP: -1,
+    DMG: 1,
+  },
   rending_claws_prime: {
-    code_name: "rending_claws_prime",
     display_name: "Rending Claws",
     NB: 5,
     ATK: 2,
@@ -59,7 +72,6 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     DMG: 2,
   },
   scything_talons: {
-    code_name: "scything_talons",
     display_name: "Scything Talons",
     NB: 3,
     ATK: 4,
@@ -68,7 +80,6 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     DMG: 1,
   },
   flesh_hooks: {
-    code_name: "flesh_hooks",
     display_name: "Flesh Hooks",
     NB: 1,
     ATK: 4,
@@ -77,7 +88,6 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     DMG: 1,
   },
   monstrous_scything_talons: {
-    code_name: "monstrous_scything_talons",
     display_name: "Monstrous Scything Talons",
     NB: 6,
     ATK: 4,

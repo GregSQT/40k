@@ -14,6 +14,7 @@ interface ReplayAction {
   shooter_id?: number;
   shooter_pos?: { col: number; row: number };
   target_id?: number;
+  target_pos?: { col: number; row: number };
   damage?: number;
   hit_roll?: number;
   wound_roll?: number;
@@ -169,7 +170,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Unit starting positions
-    const unitStart = trimmed.match(/Unit (\d+) \((.+?)\) P(\d+): Starting position \((\d+), (\d+)\)/);
+    const unitStart = trimmed.match(/Unit (\d+) \((.+?)\) P(\d+): Starting position \((\d+),\s*(\d+)\)/);
     if (unitStart) {
       const unitId = parseInt(unitStart[1]);
       const unitType = unitStart[2];
@@ -201,7 +202,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Parse MOVE actions
-    const moveMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) MOVE : Unit (\d+)\((\d+), (\d+)\) (MOVED|WAIT)/);
+    const moveMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT)/);
     if (moveMatch) {
       const timestamp = moveMatch[1];
       const turn = moveMatch[2];
@@ -212,7 +213,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const actionType = moveMatch[7];
 
       if (actionType === 'MOVED') {
-        const fromMatch = trimmed.match(/from \((\d+), (\d+)\)/);
+        const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         let fromCol = endCol;
         let fromRow = endRow;
         if (fromMatch) {
@@ -251,7 +252,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Parse SHOOT actions
-    const shootMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+), (\d+)\) (SHOT|WAIT|ADVANCED)/);
+    const shootMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) (SHOT at unit|WAIT|ADVANCED)/);
     if (shootMatch) {
       // Removed verbose logging
       // console.log('Matched SHOOT line:', trimmed);
@@ -266,8 +267,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
       if (actionType === 'ADVANCED') {
         // Parse advance action: Unit X(col, row) ADVANCED from (col1, row1) to (col2, row2) (Roll: X)
-        const fromMatch = trimmed.match(/from \((\d+), (\d+)\)/);
-        const toMatch = trimmed.match(/to \((\d+), (\d+)\)/);
+        const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
+        const toMatch = trimmed.match(/to \((\d+),(\d+)\)/);
         // Match both [Roll:X] and (Roll: X) formats
         const rollMatch = trimmed.match(/(?:\[Roll:|\(Roll:)\s*(\d+)\)?/);
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
@@ -304,8 +305,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
             currentEpisode.units[shooterId].row = toRow;
           }
         }
-      } else if (actionType === 'SHOT') {
-        const targetMatch = trimmed.match(/SHOT at unit (\d+)/);
+      } else if (actionType === 'SHOT at unit') {
+        const targetMatch = trimmed.match(/SHOT at unit (\d+)\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
         // Try to extract detailed combat rolls from format: Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED)
@@ -323,6 +324,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
         if (targetMatch) {
           const targetId = parseInt(targetMatch[1]);
+          const targetCol = parseInt(targetMatch[2]);
+          const targetRow = parseInt(targetMatch[3]);
           const damage = damageMatch ? parseInt(damageMatch[1]) : 0;
 
           const action: ReplayAction = {
@@ -333,6 +336,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             shooter_id: shooterId,
             shooter_pos: { col: shooterCol, row: shooterRow },
             target_id: targetId,
+            target_pos: { col: targetCol, row: targetRow },
             damage
           };
 
@@ -383,7 +387,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Format: [timestamp] T1 P0 CHARGE : Unit 2(9, 6) CHARGED unit 8 from (7, 13) to (9, 6) [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 1(19, 15) WAIT [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED]
-    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+), (\d+)\) (CHARGED|WAIT|FAILED charge)/);
+    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED unit|WAIT|FAILED charge to unit)/);
     if (chargeMatch) {
       const timestamp = chargeMatch[1];
       const turn = chargeMatch[2];
@@ -393,16 +397,18 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const unitRow = parseInt(chargeMatch[6]);
       const actionType = chargeMatch[7];
 
-      if (actionType === 'CHARGED') {
+      if (actionType === 'CHARGED unit') {
         // Parse target unit and positions
-        const targetMatch = trimmed.match(/CHARGED unit (\d+)/);
-        const fromMatch = trimmed.match(/from \((\d+), (\d+)\)/);
-        const toMatch = trimmed.match(/to \((\d+), (\d+)\)/);
+        const targetMatch = trimmed.match(/CHARGED unit (\d+)\((\d+),(\d+)\)/);
+        const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
+        const toMatch = trimmed.match(/to \((\d+),(\d+)\)/);
         // Parse actual charge roll (2d6) if available: [Roll:X]
         const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
 
         if (targetMatch && fromMatch && toMatch) {
           const targetId = parseInt(targetMatch[1]);
+          const targetCol = parseInt(targetMatch[2]);
+          const targetRow = parseInt(targetMatch[3]);
           const fromCol = parseInt(fromMatch[1]);
           const fromRow = parseInt(fromMatch[2]);
           const toCol = parseInt(toMatch[1]);
@@ -436,6 +442,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             player,
             unit_id: unitId,
             target_id: targetId,
+            target_pos: { col: targetCol, row: targetRow },
             from: { col: fromCol, row: fromRow },
             to: { col: toCol, row: toRow },
             charge_roll: chargeRoll,  // The actual 2d6 roll
@@ -461,7 +468,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           charge_roll: 0,  // Unknown roll, but too low
           charge_success: false
         });
-      } else if (actionType === 'FAILED charge') {
+      } else if (actionType === 'FAILED charge to unit') {
         // FAILED charge - parse target and roll
         const targetMatch = trimmed.match(/FAILED charge to unit (\d+)/);
         const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
@@ -489,7 +496,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse FIGHT actions
     // Format: [timestamp] T1 P0 FIGHT : Unit 2(9, 6) ATTACKED unit 8 with [weapon] - Hit:3+:2(MISS) [SUCCESS]
-    const fightMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+), (\d+)\) ATTACKED unit (\d+)/);
+    const fightMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)/);
     if (fightMatch) {
       const timestamp = fightMatch[1];
       const turn = fightMatch[2];
@@ -597,8 +604,6 @@ export function parse_log_file_from_text(text: string): ReplayData {
         HP_MAX: unitHP
       });
     }
-    // Removed verbose episode units logging
-    // console.log(`Episode ${episode.episode_num}: ${initialUnits.length} units`, initialUnits.map((u) => ({ id: u.id, player: u.player, pos: `(${u.col},${u.row})` })));
 
     const initialState = {
       units: initialUnits,
@@ -650,6 +655,13 @@ export function parse_log_file_from_text(text: string): ReplayData {
         }
       } else if (action.type === 'charge' && action.unit_id) {
         // Handle charge actions - update unit position
+        const unitId = action.unit_id;
+        if (currentUnits[unitId] && action.to) {
+          currentUnits[unitId].col = action.to.col;
+          currentUnits[unitId].row = action.to.row;
+        }
+      } else if (action.type === 'advance' && action.unit_id) {
+        // Handle advance actions - update unit position
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {
           currentUnits[unitId].col = action.to.col;
@@ -709,7 +721,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       let phase = 'move';
       if (action.type.includes('move')) {
         phase = 'move';
-      } else if (action.type.includes('shoot')) {
+      } else if (action.type.includes('shoot') || action.type === 'advance') {
         phase = 'shoot';
       } else if (action.type.includes('charge')) {
         phase = 'charge';

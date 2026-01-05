@@ -81,7 +81,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             <span>Debug mode</span>
           </label>
           <p style={{ color: '#9ca3af', fontSize: '14px', marginLeft: '30px', marginTop: '4px' }}>
-            Affiche les coordonnées des hex et les récompenses
+            Affiche les coordonnées des hex, les ID des unités et les récompenses
           </p>
           </div>
 

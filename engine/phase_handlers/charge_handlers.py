@@ -87,7 +87,19 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             continue  # Already charged
 
         # "NOT adjacent to enemy?"
-        if _is_adjacent_to_enemy(game_state, unit):
+        # CRITICAL FIX: Use direct hex distance calculation for reliable adjacency detection
+        # Convert coordinates to int to ensure consistent calculation
+        unit_col_int, unit_row_int = int(unit["col"]), int(unit["row"])
+        adjacent_found = False
+        for enemy in game_state["units"]:
+            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                enemy_col_int, enemy_row_int = int(enemy["col"]), int(enemy["row"])
+                hex_dist = _calculate_hex_distance(unit_col_int, unit_row_int, enemy_col_int, enemy_row_int)
+                if hex_dist <= 1:  # Distance 1 = adjacent (melee range is always 1)
+                    adjacent_found = True
+                    break  # Stop checking other enemies - this unit is adjacent
+        
+        if adjacent_found:
             continue  # Already in melee, cannot charge
 
         # "NOT in units_fled?"
@@ -99,16 +111,12 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if unit["id"] in units_advanced:
             continue  # Advanced units cannot charge
 
-        # Check units_shot for debugging (not used for exclusion in charge phase)
-        units_shot = game_state.get("units_shot", set())
-        in_units_shot = unit["id"] in units_shot
-
         # "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)
         if not _has_valid_charge_target(game_state, unit):
             continue  # No valid charge targets
 
-        # Unit passes all conditions
+        # Unit passes all conditions - add to pool
         eligible_units.append(unit["id"])
 
     return eligible_units
@@ -216,6 +224,21 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # This prevents skip actions from shooting phase being processed in charge phase
         active_charge_unit = game_state.get("active_charge_unit")
         if active_charge_unit != unit_id:
+            # CRITICAL FIX: In gym training mode, if skip is called on inactive unit,
+            # activate the unit first, then skip it to properly remove from pool
+            if is_gym_training:
+                # Activate unit first to get valid destinations
+                activation_result = _handle_unit_activation(game_state, active_unit, config)
+                if isinstance(activation_result, tuple) and activation_result[0]:
+                    # Unit is now activated, proceed with skip
+                    # Check if unit has valid destinations to determine skip type
+                    execution_result = activation_result[1]
+                    has_valid_dests = execution_result.get("valid_destinations", [])
+                    had_valid_destinations = len(has_valid_dests) > 0 if has_valid_dests else False
+                    return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
+                else:
+                    # Activation failed, skip anyway to remove from pool
+                    return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
             # Unit is in pool but not active - return no effect (don't remove from pool)
             return True, {"action": "no_effect", "unitId": unit_id, "reason": "unit_not_active_in_charge_phase"}
         # AI_TURN.md Line 515: Agent chooses wait (has valid destinations, chooses to skip)
@@ -289,10 +312,33 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             if valid_destinations:
                 # GYM TRAINING: Auto-select best destination (closest to target)
                 # Action space doesn't support destination selection, so handler chooses
-                best_dest = valid_destinations[0]  # First destination (closest to target)
+                # CRITICAL FIX: Filter out occupied destinations before selection
+                unoccupied_destinations = []
+                for dest in valid_destinations:
+                    dest_col_check, dest_row_check = dest
+                    is_occupied = False
+                    for check_unit in game_state["units"]:
+                        if (check_unit["id"] != unit["id"] and
+                            check_unit["HP_CUR"] > 0 and
+                            check_unit["col"] == dest_col_check and
+                            check_unit["row"] == dest_row_check):
+                            is_occupied = True
+                            break
+                    if not is_occupied:
+                        unoccupied_destinations.append(dest)
+                
+                if not unoccupied_destinations:
+                    # All destinations are occupied - skip
+                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
+                
+                best_dest = unoccupied_destinations[0]  # First unoccupied destination (closest to target)
 
                 # valid_destinations are tuples (col, row)
                 dest_col, dest_row = best_dest
+
+                # CRITICAL FIX: Reject destination if it's the current position (from==to bug)
+                if unit["col"] == dest_col and unit["row"] == dest_row:
+                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
                 # Find the adjacent enemy at this destination (target for charge)
                 target_id = _find_adjacent_enemy_at_destination(game_state, dest_col, dest_row, unit["player"])
@@ -513,9 +559,15 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     if distance_to_target > melee_range:
         return False  # Not adjacent to target
 
-    # Must be reachable within charge_range via pathfinding
-    # This is validated by charge_build_valid_destinations_pool
-    # If destination is in valid pool, it's reachable
+    # CRITICAL FIX: Verify destination is actually in the valid pool
+    # The pool was built with the actual charge_roll, so check membership
+    if "valid_charge_destinations_pool" not in game_state:
+        return False  # Pool not built - invalid destination
+    
+    valid_pool = game_state["valid_charge_destinations_pool"]
+    if (col, row) not in valid_pool:
+        return False  # Destination not in valid pool - not reachable with this charge_roll
+    
     return True
 
 
@@ -587,30 +639,25 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
 
     Check if unit is adjacent to enemy (used for charge eligibility).
 
-    CRITICAL: Use proper hexagonal distance, not Chebyshev distance.
+    CRITICAL: Use proper hexagonal adjacency check for consistency.
     MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
     """
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
-    unit_col, unit_row = unit["col"], unit["row"]
+    # CRITICAL: Convert to integers BEFORE any calculations to ensure proper tuple comparison
+    unit_col, unit_row = int(unit["col"]), int(unit["row"])
 
-    # Optimization: Melee range is always 1, check 6 neighbors directly
-    if cc_range == 1:
-        hex_neighbors = set(_get_hex_neighbors(unit_col, unit_row))
-        for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                enemy_pos = (enemy["col"], enemy["row"])
-                if enemy_pos in hex_neighbors:
-                    return True
-        return False
-    else:
-        # For longer ranges, use proper hex distance calculation
-        for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                hex_dist = _calculate_hex_distance(unit_col, unit_row, enemy["col"], enemy["row"])
-                if hex_dist <= cc_range:
-                    return True
-        return False
+    # CRITICAL FIX: Use hex distance calculation directly
+    # This is more reliable than _get_hex_neighbors() which may have bugs
+    # Distance <= cc_range = adjacent (cc_range is always 1 for melee)
+    for enemy in game_state["units"]:
+        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            # CRITICAL: Convert enemy coordinates to int before distance calculation
+            enemy_col, enemy_row = int(enemy["col"]), int(enemy["row"])
+            hex_dist = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+            if hex_dist <= cc_range:
+                return True
+    return False
 
 
 def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, player: int,
@@ -648,15 +695,32 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
 
     Used by gym training to auto-select charge target based on destination.
     Returns the ID of the first adjacent enemy, or None if no adjacent enemy.
+    
+    CRITICAL FIX: Also checks if enemy is ON the destination (distance == 0) and
+    verifies that the destination is not occupied before returning target_id.
     """
+    # First check if destination itself is occupied by an enemy (distance == 0)
+    for enemy in game_state["units"]:
+        if enemy["player"] != player and enemy["HP_CUR"] > 0:
+            enemy_pos = (enemy["col"], enemy["row"])
+            if enemy_pos == (col, row):
+                # Enemy is ON the destination - this is invalid for charge
+                return None
+    
+    # Then check neighbors (adjacent enemies, distance == 1)
     hex_neighbors = set(_get_hex_neighbors(col, row))
-
+    adjacent_enemies = []
     for enemy in game_state["units"]:
         if enemy["player"] != player and enemy["HP_CUR"] > 0:
             enemy_pos = (enemy["col"], enemy["row"])
             if enemy_pos in hex_neighbors:
-                return enemy["id"]
-    return None
+                adjacent_enemies.append(enemy["id"])
+    
+    if adjacent_enemies:
+        result_id = adjacent_enemies[0]
+        return result_id
+    else:
+        return None
 
 
 def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
@@ -719,7 +783,7 @@ def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
 
 
 def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any],
-                        occupied_positions: set = None) -> bool:
+                        occupied_positions: set) -> bool:
     """
     Check if a hex can be traversed (moved through) during pathfinding.
 
@@ -730,8 +794,8 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
 
     Note: We check enemy adjacency separately in _is_valid_destination
 
-    PERFORMANCE: Pass occupied_positions set for O(1) occupation check during BFS.
-    If not provided, falls back to O(n) unit iteration.
+    PERFORMANCE: Uses pre-computed occupied_positions set for O(1) lookup.
+    occupied_positions must be provided (use pre-computed set from BFS).
     """
     # Board bounds check
     if (col < 0 or row < 0 or
@@ -743,19 +807,11 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
     if (col, row) in game_state["wall_hexes"]:
         return False
 
-    # Unit occupation check - CRITICAL: Check ALL units including dead ones with HP check
-    # PERFORMANCE: Use pre-computed set if available (O(1) vs O(n))
-    if occupied_positions is not None:
-        if (col, row) in occupied_positions:
-            return False
-    else:
-        # Fallback to O(n) iteration if no cache provided
-        for other_unit in game_state["units"]:
-            if (other_unit["id"] != unit["id"] and
-                other_unit["HP_CUR"] > 0 and
-                other_unit["col"] == col and
-                other_unit["row"] == row):
-                return False
+    # Unit occupation check - CRITICAL: Use pre-computed set for O(1) lookup
+    # CRITICAL: Convert coordinates to int for consistent tuple comparison
+    col_int, row_int = int(col), int(row)
+    if (col_int, row_int) in occupied_positions:
+        return False
 
     return True
 
@@ -787,7 +843,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         return []  # No enemies to charge
 
     # PERFORMANCE: Pre-compute occupied positions
-    occupied_positions = {(u["col"], u["row"]) for u in game_state["units"]
+    # CRITICAL: Convert coordinates to int to ensure consistent tuple comparison
+    occupied_positions = {(int(u["col"]), int(u["row"])) for u in game_state["units"]
                          if u["HP_CUR"] > 0 and u["id"] != unit["id"]}
 
     # BFS pathfinding to find all reachable hexes within charge_range
@@ -821,20 +878,25 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             # Mark as visited
             visited[neighbor_pos] = neighbor_dist
 
-            # Check if this hex is adjacent to any enemy
+            # Check if this hex is adjacent to any enemy (but NOT on the hex itself)
             is_adjacent_to_enemy = False
+            hex_is_occupied_by_enemy = False
             from engine.utils.weapon_helpers import get_melee_range
             melee_range = get_melee_range()  # Always 1
             for enemy in enemies:
                 distance_to_enemy = _calculate_hex_distance(neighbor_col, neighbor_row, enemy["col"], enemy["row"])
-                if 0 < distance_to_enemy <= melee_range:
-                    is_adjacent_to_enemy = True
+                if distance_to_enemy == 0:
+                    # Enemy is ON this hex - mark as occupied and skip
+                    hex_is_occupied_by_enemy = True
                     break
+                elif 0 < distance_to_enemy <= melee_range:
+                    is_adjacent_to_enemy = True
+                    # Continue checking other enemies to ensure no enemy is ON the hex
 
             # CRITICAL: Only add as destination if adjacent to an enemy AND NOT OCCUPIED
             # Double-check occupation against actual game state (not just cached set)
-            if is_adjacent_to_enemy and neighbor_pos != start_pos:
-                # Verify hex is not occupied by checking actual game state
+            if is_adjacent_to_enemy and not hex_is_occupied_by_enemy and neighbor_pos != start_pos:
+                # Verify hex is not occupied by checking actual game state (redundant check)
                 hex_is_occupied = False
                 for check_unit in game_state["units"]:
                     if (check_unit["id"] != unit["id"] and
@@ -1057,6 +1119,30 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
+    # CRITICAL FIX: Check if destination is occupied BEFORE rolling and building pool
+    # This prevents charges to occupied destinations in gym training mode
+    occupied_by = []
+    for check_unit in game_state["units"]:
+        if (check_unit["id"] != unit["id"] and
+            check_unit["HP_CUR"] > 0 and
+            check_unit["col"] == dest_col and
+            check_unit["row"] == dest_row):
+            occupied_by.append({
+                "id": check_unit["id"],
+                "player": check_unit["player"],
+                "HP_CUR": check_unit["HP_CUR"],
+                "col": check_unit["col"],
+                "row": check_unit["row"]
+            })
+    
+    if occupied_by:
+        return False, {
+            "error": "destination_occupied",
+            "occupant_id": occupied_by[0]["id"],
+            "destination": (dest_col, dest_row),
+            "debug_occupants": occupied_by
+        }
+
     # NEW RULE: Roll 2d6 AFTER target selection
     import random
     charge_roll = random.randint(1, 6) + random.randint(1, 6)
@@ -1140,6 +1226,12 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     charge_success, charge_result = _attempt_charge_to_destination(game_state, unit, dest_col, dest_row, target_id, config)
 
     if not charge_success:
+        # CRITICAL FIX: When charge fails, FORCE action type to charge_fail and add missing fields for proper logging
+        # This prevents charge_fail actions from being logged as successful charges
+        charge_result["action"] = "charge_fail"
+        charge_result.setdefault("unitId", unit["id"])
+        charge_result.setdefault("targetId", target_id)  # May be None, but needed for logging
+        charge_result.setdefault("charge_failed_reason", charge_result.get("error", "unknown_error"))
         return False, charge_result
 
     # Extract charge info

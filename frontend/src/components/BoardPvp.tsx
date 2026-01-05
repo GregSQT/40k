@@ -24,10 +24,11 @@ function calculateObjectiveControl(
   units: Unit[],
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }> | undefined,
   flatObjectiveHexes: [number, number][] | undefined,
-  currentControllers: ObjectiveControllers  // Persistent control state
+  currentControllers: ObjectiveControllers,  // Persistent control state
+  usePersistentState: boolean = true  // If false, recalculate control based only on current state
 ): { controlMap: { [hexKey: string]: number | null }, updatedControllers: ObjectiveControllers } {
   const controlMap: { [hexKey: string]: number | null } = {};
-  const updatedControllers: ObjectiveControllers = { ...currentControllers };
+  const updatedControllers: ObjectiveControllers = usePersistentState ? { ...currentControllers } : {};
 
   // Build a map of hex -> objective for grouped objectives
   const hexToObjective = new Map<string, string>();
@@ -79,11 +80,11 @@ function calculateObjectiveControl(
       }
     }
 
-    // Get current controller from persistent state
-    const currentController = currentControllers[objName] ?? null;
+    // Get current controller from persistent state (only if using persistent state)
+    const currentController = usePersistentState ? (currentControllers[objName] ?? null) : null;
 
-    // Determine new controller with PERSISTENT control rules
-    let newController: number | null = currentController;  // Default: keep current
+    // Determine new controller with PERSISTENT control rules (or instant calculation if not using persistent state)
+    let newController: number | null = usePersistentState ? currentController : null;  // Default: keep current if persistent, otherwise null
 
     if (p0_oc > p1_oc) {
       // P0 has more OC - P0 captures/keeps
@@ -91,8 +92,11 @@ function calculateObjectiveControl(
     } else if (p1_oc > p0_oc) {
       // P1 has more OC - P1 captures/keeps
       newController = 1;
+    } else if (!usePersistentState) {
+      // If equal OC and not using persistent state: no control
+      newController = null;
     }
-    // If equal OC: current controller keeps control (no change)
+    // If equal OC and using persistent state: current controller keeps control (no change)
 
     // Update persistent state
     updatedControllers[objName] = newController;
@@ -1155,15 +1159,22 @@ export default function Board({
       lastTurnRef.current = currentTurn;
 
       // Calculate objective control based on unit positions with PERSISTENT control
+      // In replay mode (when objectivesOverride is provided), don't use persistent state
       const { controlMap: objectiveControl, updatedControllers } = calculateObjectiveControl(
         units,
         objectivesOverride,
         effectiveObjectiveHexes,
-        objectiveControllersRef.current
+        objectiveControllersRef.current,
+        !objectivesOverride  // Use persistent state only if not in replay mode
       );
-      // Update persistent state
-      objectiveControllersRef.current = updatedControllers;
+      // Update persistent state only if using persistent state
+      if (!objectivesOverride) {
+        objectiveControllersRef.current = updatedControllers;
+      }
 
+      // Map "command" phase to "move" for drawBoard and UnitRenderer (they don't support "command")
+      const effectivePhase = phase === "command" ? "move" : phase;
+      
       drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
         availableCells: effectiveAvailableCells,
         attackCells,
@@ -1174,7 +1185,7 @@ export default function Board({
           : [],  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Populated when in advancePreview mode, but skip if availableCellsOverride is provided
         blockedTargets,
         coverTargets,
-        phase,
+        phase: effectivePhase,
         selectedUnitId,
         mode,
         showHexCoordinates,
@@ -1256,7 +1267,7 @@ export default function Board({
           boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-          phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+          phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
           fightSubPhase, fightActivePlayer,
           gameState,
           units, chargeTargets, fightTargets, targetPreview,
@@ -1314,7 +1325,8 @@ export default function Board({
             // AI_TURN.md ligne 591: NOT adjacent to enemy → CAN_ADVANCE = true
             return true;
           })(),
-          onAdvance: onAdvance
+          onAdvance: onAdvance,
+          debugMode: showHexCoordinates
         });
       }
 
@@ -1332,11 +1344,12 @@ export default function Board({
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-            phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor,
             autoSelectWeapon,
+            debugMode: showHexCoordinates
           });
         }
       }
@@ -1355,7 +1368,7 @@ export default function Board({
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-            phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor,
@@ -1363,6 +1376,7 @@ export default function Board({
             // Pass advance roll info for replay mode (use real unit ID, not ghost ID)
             advanceRoll,
             advancingUnitId: movePreview.unitId, // Use real unit ID for preview icon at destination
+            debugMode: showHexCoordinates
           });
         }
       }
@@ -1381,11 +1395,12 @@ export default function Board({
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-            phase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor,
             autoSelectWeapon,
+            debugMode: showHexCoordinates
           });
         }
       }

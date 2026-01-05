@@ -105,12 +105,12 @@ export function useGameLog(currentTurn?: number) {
   ) => {
     addEvent({
       type: 'move',
-      message: `${unit.name} moved from (${startCol}, ${startRow}) to (${endCol}, ${endRow})`,
+      message: `${unit.name} moved from (${startCol},${startRow}) to (${endCol},${endRow})`,
       unitId: unit.id,
       turnNumber: currentTurn ?? turnNumber,
       phase: 'movement',
-      startHex: `(${startCol}, ${startRow})`,
-      endHex: `(${endCol}, ${endRow})`,
+      startHex: `(${startCol},${startRow})`,
+      endHex: `(${endCol},${endRow})`,
       player: player ?? unit.player
     });
   }, [addEvent, currentTurn]);

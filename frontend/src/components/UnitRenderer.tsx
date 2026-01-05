@@ -105,6 +105,9 @@ interface UnitRendererProps {
   // Callbacks
   onConfirmMove?: () => void;
   parseColor: (colorStr: string) => number;
+  
+  // Debug mode
+  debugMode?: boolean;
 }
 
 export class UnitRenderer {
@@ -221,8 +224,9 @@ export class UnitRenderer {
     this.renderChargeIndicator(iconZIndex);
     this.renderFightIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
-    this.renderChargeRollBadge(unitIconScale, iconZIndex);
-    this.renderAdvanceRollBadge(unitIconScale, iconZIndex);
+    this.renderChargeRollBadge(unitIconScale);
+    this.renderAdvanceRollBadge(unitIconScale);
+    this.renderUnitIdDebug(iconZIndex);
   }
   
   private calculateEligibilityCompliant(): boolean {
@@ -1305,7 +1309,7 @@ export class UnitRenderer {
     app.stage.addChild(attackText);
   }
 
-  private renderChargeRollBadge(unitIconScale: number, iconZIndex: number): void {
+  private renderChargeRollBadge(unitIconScale: number): void {
     const { unit, chargingUnitId, chargeRoll, chargeSuccess, centerX, centerY, app, HEX_RADIUS, uiElementsContainer } = this.props;
     
     // Use persistent UI container if provided, otherwise fall back to stage
@@ -1352,7 +1356,7 @@ export class UnitRenderer {
     badgeBg.drawRoundedRect(badgeX - badgeWidth / 2, badgeY - badgeHeight / 2, badgeWidth, badgeHeight, 4);
     badgeBg.endFill();
     badgeBg.name = `charge-badge-${unitIdNum}-bg`;
-    badgeBg.zIndex = iconZIndex + 150; // Above other indicators
+    badgeBg.zIndex = 10001; // Above everything
     targetContainer.addChild(badgeBg);
 
     // Create roll number text
@@ -1367,11 +1371,47 @@ export class UnitRenderer {
     rollText.anchor.set(0.5);
     rollText.position.set(badgeX, badgeY);
     rollText.name = `charge-badge-${unitIdNum}-text`;
-    rollText.zIndex = iconZIndex + 151; // Above badge background
+    rollText.zIndex = 10002; // Above badge background and everything else
     targetContainer.addChild(rollText);
   }
 
-  private renderAdvanceRollBadge(unitIconScale: number, iconZIndex: number): void {
+  private renderUnitIdDebug(iconZIndex: number): void {
+    const { unit, centerX, centerY, app, HEX_RADIUS, debugMode } = this.props;
+    
+    if (!debugMode) {
+      return;
+    }
+    
+    // Create square background at center of icon
+    const squareSize = HEX_RADIUS * 0.7; // Larger square for better visibility
+    const squareBg = new PIXI.Graphics();
+    squareBg.beginFill(0x000000, 0.65); // Black background with transparency
+    squareBg.lineStyle(0, 0xffffff, 1.0); // No border
+    squareBg.drawRoundedRect(
+      centerX - squareSize / 2,
+      centerY - squareSize / 2,
+      squareSize,
+      squareSize,
+      6
+    );
+    squareBg.endFill();
+    squareBg.zIndex = iconZIndex + 2000; // Very high z-index to be on top of everything
+    app.stage.addChild(squareBg);
+    
+    // Create text with unit ID
+    const unitIdText = new PIXI.Text(String(unit.id), {
+      fontSize: squareSize * 0.7,
+      align: 'center',
+      fill: 0xffffff,
+      fontWeight: 'bold',
+    });
+    unitIdText.anchor.set(0.5);
+    unitIdText.position.set(centerX, centerY);
+    unitIdText.zIndex = iconZIndex + 2001; // Very high z-index to be on top of everything
+    app.stage.addChild(unitIdText);
+  }
+
+  private renderAdvanceRollBadge(unitIconScale: number): void {
     const { unit, advancingUnitId, advanceRoll, centerX, centerY, app, HEX_RADIUS, uiElementsContainer } = this.props;
     
     // Use persistent UI container if provided, otherwise fall back to stage
@@ -1416,7 +1456,7 @@ export class UnitRenderer {
     badgeBg.drawRoundedRect(badgeX - badgeWidth / 2, badgeY - badgeHeight / 2, badgeWidth, badgeHeight, 4);
     badgeBg.endFill();
     badgeBg.name = `advance-badge-${unitIdNum}-bg`;
-    badgeBg.zIndex = iconZIndex + 150; // Above other indicators
+    badgeBg.zIndex = 10001; // Above everything
     targetContainer.addChild(badgeBg);
 
     // Create roll number text
@@ -1431,7 +1471,7 @@ export class UnitRenderer {
     rollText.anchor.set(0.5);
     rollText.position.set(badgeX, badgeY);
     rollText.name = `advance-badge-${unitIdNum}-text`;
-    rollText.zIndex = iconZIndex + 151; // Above badge background
+    rollText.zIndex = 10002; // Above badge background and everything else
     targetContainer.addChild(rollText);
   }
 }

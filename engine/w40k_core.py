@@ -681,7 +681,7 @@ class W40KEngine(gym.Env):
                         orig_col, orig_row = pre_action_positions[str(unit_id)]
                         action_details = {
                             "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                            "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
+                            "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
                             "semantic_action": semantic_action,
                             "start_pos": (orig_col, orig_row),
                             "end_pos": (updated_unit["col"], updated_unit["row"])
@@ -690,7 +690,7 @@ class W40KEngine(gym.Env):
                         # Build complete action details for step logger with CURRENT coordinates
                         action_details = {
                             "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                            "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
+                            "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
                             "semantic_action": semantic_action
                         }
                 
@@ -768,8 +768,13 @@ class W40KEngine(gym.Env):
                         dest_col = result.get("toCol", updated_unit["col"])
                         dest_row = result.get("toRow", updated_unit["row"])
                         end_pos = (dest_col, dest_row)
+                        # PROBLÈME 1 DEBUG: Log if targetId is missing or None
+                        target_id_from_result = result.get("targetId")
+                        if target_id_from_result is None:
+                            import warnings
+                            warnings.warn(f"STEP_LOGGER BUG: result.get('targetId') is None for unit {unit_id}, result keys: {list(result.keys())}")
                         action_details.update({
-                            "target_id": result.get("targetId"),
+                            "target_id": target_id_from_result,
                             "start_pos": start_pos,
                             "end_pos": end_pos,
                             "charge_roll": result.get("charge_roll")  # Add the actual 2d6 roll
@@ -778,6 +783,16 @@ class W40KEngine(gym.Env):
                         # Add reward and log for charge action
                         step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
                         action_details["reward"] = step_reward
+                        
+                        # CRITICAL FIX: Get target coordinates from game_state
+                        # Target position should not change during charge execution
+                        # Capture coordinates immediately after getting targetId from result
+                        target_id = action_details.get("target_id")
+                        if target_id:
+                            target_unit = self._get_unit_by_id(str(target_id))
+                            if target_unit:
+                                # Capture target coordinates - these should be stable (targets don't move during opponent's turn)
+                                action_details["target_coords"] = (int(target_unit["col"]), int(target_unit["row"]))
 
                         self.step_logger.log_action(
                             unit_id=updated_unit["id"],
@@ -833,7 +848,7 @@ class W40KEngine(gym.Env):
                             
                             attack_details = {
                                 "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                                "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']}, {updated_unit['row']})",
+                                "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
                                 "semantic_action": semantic_action,
                                 "target_id": target_id,
                                 "target_coords": target_coords,  # Add target coordinates

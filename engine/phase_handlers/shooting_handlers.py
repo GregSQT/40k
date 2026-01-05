@@ -2552,6 +2552,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Apply damage immediately per AI_TURN.md
     if attack_result["damage"] > 0:
         target["HP_CUR"] = max(0, target["HP_CUR"] - attack_result["damage"])
+        
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate kill probability cache for target
         from engine.ai.weapon_selector import invalidate_cache_for_target
         cache = game_state.get("kill_probability_cache", {})
@@ -3229,22 +3230,36 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     dest_row = action.get("destRow")
     
     if dest_col is not None and dest_row is not None:
-        # DEBUG: Calculate actual distance to destination
-        actual_distance = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
+        # CRITICAL: Convert coordinates to int for consistent tuple comparison
+        dest_col, dest_row = int(dest_col), int(dest_row)
         
         # Destination provided - validate and execute
         if (dest_col, dest_row) not in valid_destinations:
             return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
         
+        # CRITICAL: Final occupation check before position update (like _attempt_movement_to_destination)
+        dest_col_int, dest_row_int = int(dest_col), int(dest_row)
+        for check_unit in game_state["units"]:
+            if (check_unit["id"] != unit["id"] and
+                check_unit["HP_CUR"] > 0 and
+                int(check_unit["col"]) == dest_col_int and
+                int(check_unit["row"]) == dest_row_int):
+                return False, {
+                    "error": "advance_destination_occupied",
+                    "occupant_id": check_unit["id"],
+                    "destination": (dest_col, dest_row)
+                }
+        
         # Execute advance movement
         unit["col"] = dest_col
         unit["row"] = dest_row
         
-        # Mark as advanced ONLY if actually moved
+        # Check if unit actually moved (for cache invalidation and logging)
         actually_moved = (orig_col != dest_col) or (orig_row != dest_row)
+        
+        # CRITICAL: Invalidate LoS cache ONLY if unit actually moved
+        # The unit's position changed, so LoS cache entries are now stale
         if actually_moved:
-            # CRITICAL: Invalidate LoS cache for this unit after advance
-            # The unit's position changed, so LoS cache entries are now stale
             if "los_cache" in game_state and game_state["los_cache"]:
                 unit_id_str = str(unit["id"])
                 keys_to_remove = [
@@ -3253,12 +3268,14 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 ]
                 for key in keys_to_remove:
                     del game_state["los_cache"][key]
-            
-            # AI_TURN.md ligne 666: Log: end_activation(ACTION, 1, ADVANCE, NOT_REMOVED, 1, 0)
-            # This marks units_advanced (ligne 665 describes what this does)
-            # arg5=0 means NOT_REMOVED (do not remove from pool, do not end activation)
-            # We track the advance but continue to shooting, so we don't use the return value
-            _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 0)
+        
+        # CRITICAL FIX: Mark unit as advanced REGARDLESS of whether it moved
+        # Units must be marked as advanced even if they stay in place (for ASSAULT weapon rule)
+        # AI_TURN.md ligne 666: Log: end_activation(ACTION, 1, ADVANCE, NOT_REMOVED, 1, 0)
+        # This marks units_advanced (ligne 665 describes what this does)
+        # arg5=0 means NOT_REMOVED (do not remove from pool, do not end activation)
+        # We track the advance but continue to shooting, so we don't use the return value
+        _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 0)
         
         # Log the advance action
         if "action_logs" not in game_state:

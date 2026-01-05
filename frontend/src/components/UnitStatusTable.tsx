@@ -482,7 +482,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
 
   const getPlayerTypeLabel = (playerNumber: 0 | 1): string => {
     if (gameMode === 'training') {
-      return playerNumber === 0 ? 'Player 1 - Bot' : 'Player 2 - AI';
+      return playerNumber === 0 ? 'Player 1 - AI' : 'Player 2 - Bot';
     } else if (gameMode === 'pve') {
       return playerNumber === 0 ? 'Player 1 - Human' : 'Player 2 - AI';
     } else { // pvp

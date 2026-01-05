@@ -171,12 +171,18 @@ class GameStateManager:
                 shoot_left = 0
                 if rng_weapons and selected_rng_weapon_index is not None:
                     selected_weapon = rng_weapons[selected_rng_weapon_index]
-                    shoot_left = selected_weapon.get("NB", 0)
+                    if isinstance(selected_weapon, dict):
+                        shoot_left = selected_weapon.get("NB", 0)
+                    else:
+                        raise TypeError(f"Unit {unit_type}: RNG_WEAPONS[{selected_rng_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
                 
                 attack_left = 0
                 if cc_weapons and selected_cc_weapon_index is not None:
                     selected_weapon = cc_weapons[selected_cc_weapon_index]
-                    attack_left = selected_weapon.get("NB", 0)
+                    if isinstance(selected_weapon, dict):
+                        attack_left = selected_weapon.get("NB", 0)
+                    else:
+                        raise TypeError(f"Unit {unit_type}: CC_WEAPONS[{selected_cc_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
                 
                 enhanced_unit = {
                     "id": str(unit_data["id"]),

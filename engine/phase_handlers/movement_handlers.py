@@ -42,6 +42,7 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
     AI_MOVE.md: Build activation pool with eligibility checks
     """
+    current_player = game_state.get("current_player", "N/A")
     eligible_units = get_eligible_units(game_state)
     game_state["move_activation_pool"] = eligible_units
 
@@ -57,6 +58,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     for unit in game_state["units"]:
+        unit_id = unit["id"]
+        
         # "unit.HP_CUR > 0?"
         if unit["HP_CUR"] <= 0:
             continue  # Dead unit (Skip, no log)
@@ -303,8 +306,10 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
 
     Implements AI_TURN.md movement restrictions and flee detection.
     """
+    # Pre-compute enemy adjacent hexes for validation (required for _is_valid_destination)
+    enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit["player"])
     # Validate destination per AI_TURN.md rules
-    if not _is_valid_destination(game_state, dest_col, dest_row, unit, config):
+    if not _is_valid_destination(game_state, dest_col, dest_row, unit, config, enemy_adjacent_hexes):
         return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
     
     # AI_TURN.md flee detection: was adjacent to enemy before move
@@ -315,11 +320,13 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
 
     # FINAL SAFETY CHECK: Redundant occupation check right before position update
     # This catches occupation bugs that somehow bypass the validation above
+    # CRITICAL: Convert coordinates to int for consistent comparison
+    dest_col_int, dest_row_int = int(dest_col), int(dest_row)
     for check_unit in game_state["units"]:
         if (check_unit["id"] != unit["id"] and
             check_unit["HP_CUR"] > 0 and
-            check_unit["col"] == dest_col and
-            check_unit["row"] == dest_row):
+            int(check_unit["col"]) == dest_col_int and
+            int(check_unit["row"]) == dest_row_int):
             # Occupation detected - this should NEVER happen if validation worked correctly
             return False, {
                 "error": "occupation_safety_check_failed",
@@ -347,14 +354,14 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
 
 
 def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any], config: Dict[str, Any],
-                          enemy_adjacent_hexes: Set[Tuple[int, int]] = None) -> bool:
+                          enemy_adjacent_hexes: Set[Tuple[int, int]]) -> bool:
     """
     AI_TURN.md destination validation implementation.
 
     Validates movement destination per AI_TURN.md restrictions.
 
-    PERFORMANCE: If enemy_adjacent_hexes set is provided, uses O(1) set lookup
-    instead of O(n) iteration through all units for adjacency check.
+    PERFORMANCE: Uses pre-computed enemy_adjacent_hexes set for O(1) lookup.
+    enemy_adjacent_hexes must be provided (use _build_enemy_adjacent_hexes()).
     """
     # Board bounds check
     if (col < 0 or row < 0 or
@@ -367,11 +374,13 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
         return False
 
     # Unit occupation check
+    # CRITICAL: Convert coordinates to int for consistent comparison
+    col_int, row_int = int(col), int(row)
     for other_unit in game_state["units"]:
         if (other_unit["id"] != unit["id"] and
             other_unit["HP_CUR"] > 0 and
-            other_unit["col"] == col and
-            other_unit["row"] == row):
+            int(other_unit["col"]) == col_int and
+            int(other_unit["row"]) == row_int):
             return False
 
     # Cannot move TO hexes adjacent to enemies
@@ -394,14 +403,16 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     """
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
-    unit_col, unit_row = unit["col"], unit["row"]
+    # CRITICAL: Convert coordinates to int for consistent tuple comparison
+    unit_col, unit_row = int(unit["col"]), int(unit["row"])
 
     # Optimization: For CC_RNG=1 (most common), check 6 neighbors directly
     if cc_range == 1:
         hex_neighbors = set(_get_hex_neighbors(unit_col, unit_row))
         for enemy in game_state["units"]:
             if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                enemy_pos = (enemy["col"], enemy["row"])
+                # CRITICAL: Convert coordinates to int for consistent tuple comparison
+                enemy_pos = (int(enemy["col"]), int(enemy["row"]))
                 if enemy_pos in hex_neighbors:
                     return True
         return False
@@ -409,7 +420,7 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
         # For longer ranges, use proper hex distance calculation
         for enemy in game_state["units"]:
             if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                hex_dist = _calculate_hex_distance(unit_col, unit_row, enemy["col"], enemy["row"])
+                hex_dist = _calculate_hex_distance(unit_col, unit_row, int(enemy["col"]), int(enemy["row"]))
                 if hex_dist <= cc_range:
                     return True
         return False
@@ -427,21 +438,15 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
 
     PERFORMANCE: If enemy_adjacent_hexes set is provided, uses O(1) set lookup
     instead of O(n) iteration through all units.
+    
+    CRITICAL: enemy_adjacent_hexes must always be provided (no fallback).
     """
-    # PERFORMANCE: Use pre-computed set if available (5-10x speedup)
-    if enemy_adjacent_hexes is not None:
-        return (col, row) in enemy_adjacent_hexes
-
-    # Fallback: compute dynamically (original behavior)
-    hex_neighbors = set(_get_hex_neighbors(col, row))
-
-    for enemy in game_state["units"]:
-        if enemy["player"] != player and enemy["HP_CUR"] > 0:
-            enemy_pos = (enemy["col"], enemy["row"])
-            # Check if enemy is in our 6 neighbors (true hex adjacency)
-            if enemy_pos in hex_neighbors:
-                return True
-    return False
+    if enemy_adjacent_hexes is None:
+        raise ValueError("enemy_adjacent_hexes must be provided - use _build_enemy_adjacent_hexes() first")
+    
+    # CRITICAL: Convert coordinates to int for consistent tuple comparison
+    col_int, row_int = int(col), int(row)
+    return (col_int, row_int) in enemy_adjacent_hexes
 
 
 def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
@@ -462,8 +467,10 @@ def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[
 
     for enemy in game_state["units"]:
         if enemy["player"] != player and enemy["HP_CUR"] > 0:
+            # CRITICAL: Convert coordinates to int before calculating neighbors
+            enemy_col, enemy_row = int(enemy["col"]), int(enemy["row"])
             # Add all 6 neighbors of this enemy to the set
-            neighbors = _get_hex_neighbors(enemy["col"], enemy["row"])
+            neighbors = _get_hex_neighbors(enemy_col, enemy_row)
             for neighbor in neighbors:
                 enemy_adjacent_hexes.add(neighbor)
 
@@ -504,7 +511,7 @@ def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
 
 
 def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any],
-                        occupied_positions: set = None) -> bool:
+                        occupied_positions: set) -> bool:
     """
     Check if a hex can be traversed (moved through) during pathfinding.
 
@@ -515,8 +522,8 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
 
     Note: We check enemy adjacency separately in _is_valid_destination
 
-    PERFORMANCE: Pass occupied_positions set for O(1) occupation check during BFS.
-    If not provided, falls back to O(n) unit iteration.
+    PERFORMANCE: Uses pre-computed occupied_positions set for O(1) lookup.
+    occupied_positions must be provided (use pre-computed set from BFS).
     """
     # Board bounds check
     if (col < 0 or row < 0 or
@@ -528,19 +535,11 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
     if (col, row) in game_state["wall_hexes"]:
         return False
 
-    # Unit occupation check - CRITICAL: Check ALL units including dead ones with HP check
-    # PERFORMANCE: Use pre-computed set if available (O(1) vs O(n))
-    if occupied_positions is not None:
-        if (col, row) in occupied_positions:
-            return False
-    else:
-        # Fallback to O(n) iteration if no cache provided
-        for other_unit in game_state["units"]:
-            if (other_unit["id"] != unit["id"] and
-                other_unit["HP_CUR"] > 0 and
-                other_unit["col"] == col and
-                other_unit["row"] == row):
-                return False
+    # Unit occupation check - CRITICAL: Use pre-computed set for O(1) lookup
+    # CRITICAL: Convert coordinates to int for consistent tuple comparison
+    col_int, row_int = int(col), int(row)
+    if (col_int, row_int) in occupied_positions:
+        return False
 
     return True
 
@@ -559,7 +558,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         return []
 
     move_range = unit["MOVE"]
-    start_col, start_row = unit["col"], unit["row"]
+    # CRITICAL: Convert coordinates to int for consistent tuple comparison
+    start_col, start_row = int(unit["col"]), int(unit["row"])
     start_pos = (start_col, start_row)
 
     # DEBUG: Log board size ONCE per game (disabled by default)
@@ -574,7 +574,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     # PERFORMANCE: Pre-compute occupied positions once for this BFS
     # This reduces O(n) per-hex unit iteration to O(1) set lookup
-    occupied_positions = {(u["col"], u["row"]) for u in game_state["units"]
+    # CRITICAL: Convert coordinates to int to ensure consistent tuple comparison
+    occupied_positions = {(int(u["col"]), int(u["row"])) for u in game_state["units"]
                          if u["HP_CUR"] > 0 and u["id"] != unit["id"]}
 
     # BFS pathfinding to find all reachable hexes
@@ -801,6 +802,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     if dest_col is None or dest_row is None:
         return False, {"error": "missing_destination"}
+    
+    # CRITICAL: Convert coordinates to int for consistent tuple comparison
+    dest_col, dest_row = int(dest_col), int(dest_row)
     
     # CRITICAL FIX: ALWAYS rebuild pool fresh on validation to prevent stale data
     # This ensures frontend/backend pathfinding stay synchronized even if game state changed

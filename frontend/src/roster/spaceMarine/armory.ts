@@ -127,7 +127,22 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     AP: 0,
     DMG: 1,
   },
-  intercessor_chainsword: {
+  intercessor_sergeant_power_fist: {
+    display_name: "Power Fist",
+    NB: 3,
+    ATK: 3,
+    STR: 8,
+    AP: -2,
+    DMG: 2,
+  },intercessor_sergeant_power_weapon: {
+    display_name: "Power Weapon",
+    NB: 4,
+    ATK: 3,
+    STR: 5,
+    AP: -2,
+    DMG: 1,
+  },
+  intercessor_sergeant_chainsword: {
     display_name: "Astartes Chainsword",
     NB: 5,
     ATK: 3,

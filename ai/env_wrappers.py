@@ -79,7 +79,13 @@ class BotControlledEnv(gym.Wrapper):
         self.episode_length += 1
 
         # CRITICAL FIX: Loop through ALL bot turns until control returns to agent
+        bot_loop_count = 0
+        max_bot_iterations = 1000  # Safety guard against infinite loops
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+            bot_loop_count += 1
+            if bot_loop_count > max_bot_iterations:
+                print(f"\n[DEBUG] BotControlledEnv: Infinite loop detected! Loop count: {bot_loop_count}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
+                raise RuntimeError(f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={self.engine.game_state.get('phase', '?')}")
             debug_bot = self.episode_length < 10
             bot_action = self._get_bot_action(debug=debug_bot)
             obs, reward, terminated, truncated, info = self.env.step(bot_action)
@@ -213,11 +219,15 @@ class SelfPlayWrapper(gym.Wrapper):
         # Track P1 actions for diagnostic
         p1_actions_before = 0
         p1_terminal_reward = 0.0  # Capture lose penalty if P1 ends game before P0 acts
+        max_iterations = 1000  # Safety guard against infinite loops
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+            p1_actions_before += 1
+            if p1_actions_before > max_iterations:
+                print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 before loop! Count: {p1_actions_before}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
+                raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 before): {p1_actions_before} iterations, phase={self.engine.game_state.get('phase', '?')}")
             player1_action = self._get_frozen_model_action()
             obs, reward, terminated, truncated, info = self.env.step(player1_action)
             self.episode_length += 1
-            p1_actions_before += 1
 
             # If P1's action ended the game before P0 could act, capture the reward
             if terminated or truncated:
@@ -239,6 +249,10 @@ class SelfPlayWrapper(gym.Wrapper):
             # Handle any Player 1 turns that follow
             p1_actions_after = 0
             while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+                p1_actions_after += 1
+                if p1_actions_after > max_iterations:
+                    print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 after loop! Count: {p1_actions_after}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
+                    raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 after): {p1_actions_after} iterations, phase={self.engine.game_state.get('phase', '?')}")
                 player1_action = self._get_frozen_model_action()
                 # CRITICAL FIX: Capture reward when P1's action ends game!
                 # When P1 kills last P0 unit, reward contains P0's LOSE penalty

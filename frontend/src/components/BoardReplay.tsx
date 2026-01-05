@@ -35,6 +35,7 @@ interface ReplayAction {
   shooter_id?: number;
   shooter_pos?: { col: number; row: number };
   target_id?: number;
+  target_pos?: { col: number; row: number };
   damage?: number;
   hit_roll?: number;
   wound_roll?: number;
@@ -153,14 +154,14 @@ export const BoardReplay: React.FC = () => {
     loadAvailableFiles();
   }, []);
 
-  // Auto-load train_step.log on mount
+  // Auto-load step.log on mount
   useEffect(() => {
     const loadDefaultLog = async () => {
       try {
         const response = await fetch('http://localhost:5001/api/replay/default');
         if (!response.ok) {
           // Silent fail - file might not exist, user can still browse manually
-          console.log('No default train_step.log found, user can browse manually');
+          console.log('No default step.log found, user can browse manually');
           return;
         }
 
@@ -173,16 +174,16 @@ export const BoardReplay: React.FC = () => {
         // Type assertion with proper conversion
         const typedData = data as unknown as ReplayData;
         setReplayData(typedData);
-        setSelectedFileName('train_step.log');
-        setSelectedEpisode(null);
+        setSelectedFileName('step.log');
+        setSelectedEpisode(1);
         setCurrentActionIndex(0);
         setIsPlaying(false);
         setLoadError(null);
 
-        console.log(`Auto-loaded train_step.log with ${data.total_episodes} episodes`);
+        console.log(`Auto-loaded step.log with ${data.total_episodes} episodes`);
       } catch (error) {
         // Silent fail - user can still browse manually
-        console.log('Could not auto-load train_step.log:', error);
+        console.log('Could not auto-load step.log:', error);
       }
     };
 
@@ -488,12 +489,12 @@ export const BoardReplay: React.FC = () => {
         // Log advance actions with roll to match PvP/PvE format
         gameLog.addEvent({
           type: 'advance',
-          message: `Unit ${action.unit_id} advanced from (${action.from.col}, ${action.from.row}) to (${action.to.col}, ${action.to.row}) (rolled ${advanceRoll})`,
+          message: `Unit ${action.unit_id} advanced from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row}) (rolled ${advanceRoll})`,
           unitId: action.unit_id!,
           turnNumber: turnNumber,
           phase: 'shooting',
-          startHex: `(${action.from.col}, ${action.from.row})`,
-          endHex: `(${action.to.col}, ${action.to.row})`,
+          startHex: `(${action.from.col},${action.from.row})`,
+          endHex: `(${action.to.col},${action.to.row})`,
           player: action.player
         });
       } else if (action.type === 'move_wait' && action.pos) {
@@ -502,16 +503,21 @@ export const BoardReplay: React.FC = () => {
           turnNumber,
           action.player
         );
+      } else if (action.type === 'shoot_wait' && action.pos) {
+        gameLog.addEvent({
+          type: 'shoot',
+          message: `Unit ${action.unit_id} (${action.pos.col},${action.pos.row}) chose not to shoot`,
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: 'shooting',
+          player: action.player
+        });
       } else if (action.type === 'shoot') {
         // Parse shooting details from log format to match PvP mode
         const shooterId = action.shooter_id!;
         const targetId = action.target_id!;
-        const shooter = currentEpisode.actions.find((a: ReplayAction) => a.shooter_id === shooterId);
-        const shooterPos = shooter?.shooter_pos || action.shooter_pos || { col: 0, row: 0 };
-        // Get target from the state AFTER this action
-        const stateAfterAction = currentEpisode.states[i];
-        const target = stateAfterAction?.units?.find((u: Unit) => u.id === targetId);
-        const targetPos = target ? { col: target.col, row: target.row } : { col: 0, row: 0 };
+        const shooterPos = action.shooter_pos || { col: 0, row: 0 };
+        const targetPos = action.target_pos || { col: 0, row: 0 };
 
         // Reconstruct message in the same format as shooting_handlers.py
         let message = '';
@@ -530,11 +536,13 @@ export const BoardReplay: React.FC = () => {
         const woundTarget = 4; // Assuming 4+ for now
 
         // Check if THIS shot killed the target by comparing HP before and after
-        // Get target's HP from state BEFORE this action
+        // Get target's HP from state BEFORE and AFTER this action
         const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
+        const stateAfterAction = currentEpisode.states[i];
         const targetBefore = stateBeforeAction?.units?.find((u: Unit) => u.id === targetId);
+        const targetAfter = stateAfterAction?.units?.find((u: Unit) => u.id === targetId);
         const hpBefore = targetBefore ? targetBefore.HP_CUR : 0;
-        const hpAfter = target ? target.HP_CUR : 0;
+        const hpAfter = targetAfter ? targetAfter.HP_CUR : 0;
 
         // Target died if HP went from >0 to <=0 after this action
         const targetDied = hpBefore > 0 && hpAfter <= 0;
@@ -556,19 +564,19 @@ export const BoardReplay: React.FC = () => {
 
         if (hitRoll !== undefined && hitRoll < hitTarget) {
           // Hit failed
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) : FAILED !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) : FAILED !`;
         } else if (woundRoll !== undefined && woundRoll < woundTarget) {
           // Wound failed
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) : FAILED !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) : FAILED !`;
         } else if (saveRoll !== undefined && saveTarget > 0 && saveRoll >= saveTarget) {
           // Save succeeded
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) : SAVED !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) : SAVED !`;
         } else if (damage > 0) {
           // Damage dealt
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) - ${damage} DAMAGE DELT !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) - ${damage} DAMAGE DELT !`;
         } else {
           // Fallback
-          message = `Unit ${shooterId} (${shooterPos.col}, ${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col}, ${targetPos.row})${weaponSuffix}`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix}`;
         }
 
         // Use addEvent directly with custom formatted message to match PvP format
@@ -588,8 +596,8 @@ export const BoardReplay: React.FC = () => {
         });
 
         // Add separate death event if target was killed (like PvP mode does)
-        if (targetDied && target) {
-          const targetType = target.type || 'Unknown';
+        if (targetDied && targetAfter) {
+          const targetType = targetAfter.type || 'Unknown';
           gameLog.addEvent({
             type: 'death',
             message: `Unit ${targetId} (${targetType}) was DESTROYED!`,
@@ -605,17 +613,18 @@ export const BoardReplay: React.FC = () => {
         const targetId = action.target_id;
         const chargeRollValue = action.charge_roll;
         const rollInfo = chargeRollValue !== undefined ? ` (rolled ${chargeRollValue})` : '';
+        const targetPos = action.target_pos || { col: 0, row: 0 };
 
         gameLog.addEvent({
           type: 'charge',
-          message: `Unit ${unitId} CHARGED unit ${targetId}${rollInfo} from (${action.from.col}, ${action.from.row}) to (${action.to.col}, ${action.to.row})`,
+          message: `Unit ${unitId}(${action.to.col},${action.to.row}) CHARGED unit ${targetId}(${targetPos.col},${targetPos.row}) from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})${rollInfo}`,
           unitId: unitId,
           targetId: targetId,
           turnNumber: turnNumber,
           phase: 'charge',
           player: action.player,
-          startHex: `(${action.from.col}, ${action.from.row})`,
-          endHex: `(${action.to.col}, ${action.to.row})`
+          startHex: `(${action.from.col},${action.from.row})`,
+          endHex: `(${action.to.col},${action.to.row})`
         });
       } else if (action.type === 'charge_wait') {
         // Handle charge wait actions (failed charge or chose not to charge)
@@ -660,7 +669,7 @@ export const BoardReplay: React.FC = () => {
         const weaponSuffix = weaponName ? ` with [${weaponName}]` : '';
 
         // Build message based on combat results
-        let message = `Unit ${attackerId} (${attackerPos.col}, ${attackerPos.row}) FOUGHT Unit ${targetId}${weaponSuffix}`;
+        let message = `Unit ${attackerId} (${attackerPos.col},${attackerPos.row}) FOUGHT Unit ${targetId}${weaponSuffix}`;
         if (action.hit_roll !== undefined) {
           const hitResult = action.hit_result || (action.hit_roll >= (action.hit_target || 3) ? 'HIT' : 'MISS');
           message += ` : Hit ${action.hit_roll}(${action.hit_target || 3}+)`;
@@ -927,9 +936,14 @@ export const BoardReplay: React.FC = () => {
               
               const actionTypes = phaseToActionTypes[phase] || [phase];
               
-              // Find the first action of the selected phase in the current turn
+              // Get the current player from the state
+              const currentPlayer = currentState.currentPlayer;
+              
+              // Find the first action of the selected phase in the current turn for the current player
               const firstPhaseActionArrayIndex = currentEpisode.actions.findIndex(action => {
-                return action.turn === currentTurn && actionTypes.includes(action.type);
+                return action.turn === currentTurn && 
+                       action.player === currentPlayer &&
+                       actionTypes.includes(action.type);
               });
               
               if (firstPhaseActionArrayIndex !== -1) {
@@ -1145,7 +1159,7 @@ export const BoardReplay: React.FC = () => {
       onCancelMove={() => {}}
       currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 0 | 1) : (currentState.currentPlayer || 0)}
       unitsMoved={[]}
-      phase={currentAction?.type === 'move' ? 'move' : (currentAction?.type === 'shoot' || currentAction?.type === 'advance' ? 'shoot' : (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail' ? 'charge' : (currentAction?.type === 'fight' ? 'fight' : (currentState.phase || 'move'))))}
+      phase={currentState.phase || 'move'}
       onShoot={() => {}}
       gameState={currentState as GameState}
       getChargeDestinations={(unitId: number) => {

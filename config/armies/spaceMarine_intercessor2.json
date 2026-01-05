@@ -1,0 +1,12 @@
+{
+  "faction": "spaceMarine",
+  "description": "Space Marine army with 2 Intercessors",
+  "units": [
+    {
+      "unit_type": "Intercessor",
+      "count": 2
+    }
+  ]
+}
+
+

@@ -693,18 +693,18 @@ def parse_replay_log():
 @app.route('/api/replay/default', methods=['GET'])
 def get_default_replay_log():
     """
-    Get the default train_step.log file content for auto-loading in replay mode.
+    Get the default step.log file content for auto-loading in replay mode.
 
     Returns:
-        Raw text content of train_step.log
+        Raw text content of step.log
     """
     try:
         # Look in project root (one directory up from services/)
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        log_path = os.path.join(project_root, 'train_step.log')
+        log_path = os.path.join(project_root, 'step.log')
 
         if not os.path.exists(log_path):
-            return jsonify({"error": "train_step.log not found"}), 404
+            return jsonify({"error": "step.log not found"}), 404
 
         with open(log_path, 'r', encoding='utf-8') as f:
             content = f.read()

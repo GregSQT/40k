@@ -1988,6 +1988,11 @@ class RewardCalculator:
         move_range = enemy["MOVE"]
         start_pos = (enemy["col"], enemy["row"])
 
+        # PERFORMANCE: Pre-compute occupied positions once for this BFS
+        # CRITICAL: Convert coordinates to int to ensure consistent tuple comparison
+        occupied_positions = {(int(u["col"]), int(u["row"])) for u in game_state["units"]
+                             if u["HP_CUR"] > 0 and u["id"] != enemy["id"]}
+
         # BFS to find reachable positions
         visited = {start_pos: 0}
         queue = [(start_pos, 0)]
@@ -2008,7 +2013,7 @@ class RewardCalculator:
                     continue
 
                 # Simplified traversability check (ignore enemy adjacency rules for estimation)
-                if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, enemy):
+                if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, enemy, occupied_positions):
                     continue
 
                 visited[neighbor_pos] = current_dist + 1

@@ -174,11 +174,15 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     obs, info = bot_env.reset()
                     done = False
                     step_count = 0
+                    max_steps = 10000  # Safety guard
 
                     # Episodes terminate naturally when game conditions are met:
                     # - All enemy units eliminated, OR
                     # - Turn 5 completed (objective-based victory)
                     while not done:
+                        if step_count >= max_steps:
+                            print(f"ERROR: Episode exceeded {max_steps} steps! Forcing termination.", flush=True)
+                            break
                         action_masks = bot_env.engine.get_action_mask()
                         action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
 

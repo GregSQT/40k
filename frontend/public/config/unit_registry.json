@@ -7,6 +7,7 @@
         "Carnifex": "tyranid/units/Carnifex",
         "Genestealer": "tyranid/units/Genestealer",
         "Hormagaunt": "tyranid/units/Hormagaunt",  
-        "Termagant": "tyranid/units/Termagant"
+        "Termagant": "tyranid/units/Termagant",
+        "TyranidWarriorRanged": "tyranid/units/TyranidWarriorRanged"
     }  
 }
