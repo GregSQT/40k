@@ -108,52 +108,52 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0
         },
         'shoot_vs_wait_by_player': {
-            0: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0},
-            1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0}
+            1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0},
+            2: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0}
         },
-        'shots_after_advance': {0: 0, 1: 0},
+        'shots_after_advance': {1: 0, 2: 0},
         'pistol_shots': {
-            0: {'adjacent': 0, 'not_adjacent': 0},
-            1: {'adjacent': 0, 'not_adjacent': 0}
+            1: {'adjacent': 0, 'not_adjacent': 0},
+            2: {'adjacent': 0, 'not_adjacent': 0}
         },
-        'non_pistol_adjacent_shots': {0: 0, 1: 0},
+        'non_pistol_adjacent_shots': {1: 0, 2: 0},
         'wait_by_phase': {
-            0: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0},
-            1: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0}
+            1: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0},
+            2: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0}
         },
         'target_priority': {
-            0: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0},
-            1: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0}
+            1: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0},
+            2: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0}
         },
         'death_orders': [],
         'current_episode_deaths': [],
         'unit_types': {},
-        'wounded_enemies': {0: set(), 1: set()},
+        'wounded_enemies': {1: set(), 2: set()},
         # Rule violations
-        'wall_collisions': {0: 0, 1: 0},
-        'move_to_adjacent_enemy': {0: 0, 1: 0},
-        'charge_from_adjacent': {0: 0, 1: 0},
-        'advance_from_adjacent': {0: 0, 1: 0},
-        'shoot_through_wall': {0: 0, 1: 0},
-        'shoot_after_fled': {0: 0, 1: 0},
-        'shoot_at_friendly': {0: 0, 1: 0},
-        'shoot_at_engaged_enemy': {0: 0, 1: 0},
-        'charge_after_fled': {0: 0, 1: 0},
-        'fight_from_non_adjacent': {0: 0, 1: 0},
-        'fight_friendly': {0: 0, 1: 0},
+        'wall_collisions': {1: 0, 2: 0},
+        'move_to_adjacent_enemy': {1: 0, 2: 0},
+        'charge_from_adjacent': {1: 0, 2: 0},
+        'advance_from_adjacent': {1: 0, 2: 0},
+        'shoot_through_wall': {1: 0, 2: 0},
+        'shoot_after_fled': {1: 0, 2: 0},
+        'shoot_at_friendly': {1: 0, 2: 0},
+        'shoot_at_engaged_enemy': {1: 0, 2: 0},
+        'charge_after_fled': {1: 0, 2: 0},
+        'fight_from_non_adjacent': {1: 0, 2: 0},
+        'fight_friendly': {1: 0, 2: 0},
         # First occurrence lines for each error type (stores dict with 'episode' and 'line')
         'first_error_lines': {
-            'wall_collisions': {0: None, 1: None},
-            'move_to_adjacent_enemy': {0: None, 1: None},
-            'charge_from_adjacent': {0: None, 1: None},
-            'advance_from_adjacent': {0: None, 1: None},
-            'shoot_through_wall': {0: None, 1: None},
-            'shoot_after_fled': {0: None, 1: None},
-            'shoot_at_friendly': {0: None, 1: None},
-            'shoot_at_engaged_enemy': {0: None, 1: None},
-            'charge_after_fled': {0: None, 1: None},
-            'fight_from_non_adjacent': {0: None, 1: None},
-            'fight_friendly': {0: None, 1: None},
+            'wall_collisions': {1: None, 2: None},
+            'move_to_adjacent_enemy': {1: None, 2: None},
+            'charge_from_adjacent': {1: None, 2: None},
+            'advance_from_adjacent': {1: None, 2: None},
+            'shoot_through_wall': {1: None, 2: None},
+            'shoot_after_fled': {1: None, 2: None},
+            'shoot_at_friendly': {1: None, 2: None},
+            'shoot_at_engaged_enemy': {1: None, 2: None},
+            'charge_after_fled': {1: None, 2: None},
+            'fight_from_non_adjacent': {1: None, 2: None},
+            'fight_friendly': {1: None, 2: None},
         },
         'unit_position_collisions': [],
         'parse_errors': [],
@@ -208,7 +208,8 @@ def parse_step_log(filepath: str) -> Dict:
                         stats['death_orders'].append(tuple(stats['current_episode_deaths']))
 
                     stats['episode_lengths'].append(episode_actions)
-                    stats['turns_distribution'][episode_turn] += 1
+                    if episode_turn > 0:
+                        stats['turns_distribution'][episode_turn] += 1
 
                 current_episode = []
                 stats['total_episodes'] += 1
@@ -216,7 +217,7 @@ def parse_step_log(filepath: str) -> Dict:
                 episode_turn = 0
                 episode_actions = 0
                 stats['current_episode_deaths'] = []
-                stats['wounded_enemies'] = {0: set(), 1: set()}
+                stats['wounded_enemies'] = {1: set(), 2: set()}
                 unit_hp = {}
                 unit_player = {}
                 unit_positions = {}
@@ -280,6 +281,11 @@ def parse_step_log(filepath: str) -> Dict:
                 if stats['current_episode_deaths']:
                     stats['death_orders'].append(tuple(stats['current_episode_deaths']))
 
+                # Save turn distribution for this episode
+                if episode_turn > 0:
+                    stats['turns_distribution'][episode_turn] += 1
+                stats['episode_lengths'].append(episode_actions)
+
                 winner_match = re.search(r'Winner=(-?\d+)', line)
                 method_match = re.search(r'Method=(\w+)', line)
 
@@ -306,7 +312,7 @@ def parse_step_log(filepath: str) -> Dict:
                         })
 
                 stats['current_episode_deaths'] = []
-                stats['wounded_enemies'] = {0: set(), 1: set()}
+                stats['wounded_enemies'] = {1: set(), 2: set()}
                 current_episode = []
                 continue
 
@@ -612,13 +618,14 @@ def parse_step_log(filepath: str) -> Dict:
                     elif 'charge' in action_desc.lower():
                         action_type = 'charge'
                         
-                        charge_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) CHARGED unit \d+ from \((\d+),\s*(\d+)\)', action_desc)
+                        # Try successful charge format: "Unit X(col,row) CHARGED unit Y(col,row) from (start_col,start_row) to (dest_col,dest_row)"
+                        charge_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) CHARGED unit (?:\d+|None)(?:\((\d+),\s*(\d+)\))? from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
                         if charge_match:
                             charge_unit_id = charge_match.group(1)
-                            dest_col = int(charge_match.group(2))
-                            dest_row = int(charge_match.group(3))
-                            start_col = int(charge_match.group(4))
-                            start_row = int(charge_match.group(5))
+                            dest_col = int(charge_match.group(8))  # from "to (dest_col,dest_row)"
+                            dest_row = int(charge_match.group(9))
+                            start_col = int(charge_match.group(6))  # from "from (start_col,start_row)"
+                            start_row = int(charge_match.group(7))
                             
                             # RULE: Charge from adjacent
                             if is_adjacent_to_enemy(start_col, start_row, unit_player, unit_positions, unit_hp, player):
@@ -655,13 +662,17 @@ def parse_step_log(filepath: str) -> Dict:
                             if not stats['sample_actions']['charge']:
                                 stats['sample_actions']['charge'] = line.strip()
                         else:
-                            stats['parse_errors'].append({
-                                'episode': current_episode_num,
-                                'turn': turn,
-                                'phase': phase,
-                                'line': line.strip(),
-                                'error': f"Charge action missing expected format: {action_desc[:100]}"
-                            })
+                            # Check if it's a FAILED charge (valid format, just failed)
+                            failed_charge_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) FAILED charge to unit', action_desc)
+                            if not failed_charge_match:
+                                # Only log as parse error if it's not a FAILED charge
+                                stats['parse_errors'].append({
+                                    'episode': current_episode_num,
+                                    'turn': turn,
+                                    'phase': phase,
+                                    'line': line.strip(),
+                                    'error': f"Charge action missing expected format: {action_desc[:100]}"
+                                })
 
                     elif 'moves' in action_desc.lower() or 'moved' in action_desc.lower():
                         action_type = 'move'
@@ -776,6 +787,11 @@ def parse_step_log(filepath: str) -> Dict:
             'turn': episode_turn,
             'last_line': current_episode[-1][:100] if current_episode else 'N/A'
         })
+        
+        stats['episode_lengths'].append(episode_actions)
+        # Save turn distribution for last episode
+        if episode_turn > 0:
+            stats['turns_distribution'][episode_turn] += 1
 
     return stats
 
@@ -799,7 +815,7 @@ def print_statistics(stats: Dict):
     print("\n" + "-" * 80)
     print("WIN METHODS")
     print("-" * 80)
-    print(f"{'Method':<20} {'Agent Wins (P0)':>18} {'Bot Wins (P1)':>18}")
+    print(f"{'Method':<20} {'Agent Wins (P1)':>18} {'Bot Wins (P2)':>18}")
     print("-" * 80)
     
     p1_total = sum(stats['win_methods'][1].values())
@@ -827,7 +843,7 @@ def print_statistics(stats: Dict):
         print("\n" + "-" * 80)
         print("WINS BY SCENARIO")
         print("-" * 80)
-        print(f"{'Scenario':<40} {'Agent (P0)':>15} {'Bot (P1)':>15} {'Draws':>10}")
+        print(f"{'Scenario':<40} {'Agent (P1)':>15} {'Bot (P2)':>15} {'Draws':>10}")
         print("-" * 80)
         
         scenario_totals = []
@@ -854,29 +870,32 @@ def print_statistics(stats: Dict):
     print("\n" + "-" * 80)
     print("TURN DISTRIBUTION")
     print("-" * 80)
-    for turn in sorted(stats['turns_distribution'].keys()):
-        count = stats['turns_distribution'][turn]
-        pct = (count / stats['total_episodes'] * 100) if stats['total_episodes'] > 0 else 0
-        print(f"Turn {turn}: {count:3d} games ({pct:5.1f}%)")
+    if stats['turns_distribution']:
+        for turn in sorted(stats['turns_distribution'].keys()):
+            count = stats['turns_distribution'][turn]
+            pct = (count / stats['total_episodes'] * 100) if stats['total_episodes'] > 0 else 0
+            print(f"Turn {turn}: {count:3d} games ({pct:5.1f}%)")
+    else:
+        print("No turn data recorded.")
     
     # ACTIONS BY TYPE
     print("\n" + "-" * 80)
     print("ACTIONS BY TYPE")
     print("-" * 80)
-    print(f"{'Action':<12} {'Agent (P0)':>18} {'Bot (P1)':>18}")
+    print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
     print("-" * 80)
     
-    all_actions = set(stats['actions_by_player'][0].keys()) | set(stats['actions_by_player'][1].keys())
-    action_totals = [(a, stats['actions_by_player'][0].get(a, 0) + stats['actions_by_player'][1].get(a, 0))
+    all_actions = set(stats['actions_by_player'][1].keys()) | set(stats['actions_by_player'][2].keys())
+    action_totals = [(a, stats['actions_by_player'][1].get(a, 0) + stats['actions_by_player'][2].get(a, 0))
                      for a in all_actions]
     action_totals.sort(key=lambda x: -x[1])
     
-    agent_total = sum(stats['actions_by_player'][0].values())
-    bot_total = sum(stats['actions_by_player'][1].values())
+    agent_total = sum(stats['actions_by_player'][1].values())
+    bot_total = sum(stats['actions_by_player'][2].values())
     
     for action_type, _ in action_totals:
-        agent_count = stats['actions_by_player'][0].get(action_type, 0)
-        bot_count = stats['actions_by_player'][1].get(action_type, 0)
+        agent_count = stats['actions_by_player'][1].get(action_type, 0)
+        bot_count = stats['actions_by_player'][2].get(action_type, 0)
         agent_pct = (agent_count / agent_total * 100) if agent_total > 0 else 0
         bot_pct = (bot_count / bot_total * 100) if bot_total > 0 else 0
         print(f"{action_type:<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
@@ -885,39 +904,39 @@ def print_statistics(stats: Dict):
     print("\n" + "-" * 80)
     print("SHOOTING PHASE BEHAVIOR")
     print("-" * 80)
-    print(f"{'Action':<12} {'Agent (P0)':>18} {'Bot (P1)':>18}")
+    print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
     print("-" * 80)
     
-    agent_shoot_total = (stats['shoot_vs_wait_by_player'][0]['shoot'] +
-                        stats['shoot_vs_wait_by_player'][0]['wait'] +
-                        stats['shoot_vs_wait_by_player'][0]['skip'] +
-                        stats['shoot_vs_wait_by_player'][0]['advance'])
-    bot_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
-                      stats['shoot_vs_wait_by_player'][1]['wait'] +
-                      stats['shoot_vs_wait_by_player'][1]['skip'] +
-                      stats['shoot_vs_wait_by_player'][1]['advance'])
+    agent_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
+                        stats['shoot_vs_wait_by_player'][1]['wait'] +
+                        stats['shoot_vs_wait_by_player'][1]['skip'] +
+                        stats['shoot_vs_wait_by_player'][1]['advance'])
+    bot_shoot_total = (stats['shoot_vs_wait_by_player'][2]['shoot'] +
+                      stats['shoot_vs_wait_by_player'][2]['wait'] +
+                      stats['shoot_vs_wait_by_player'][2]['skip'] +
+                      stats['shoot_vs_wait_by_player'][2]['advance'])
     
     for action in ['shoot', 'skip', 'advance']:
-        agent_count = stats['shoot_vs_wait_by_player'][0][action]
-        bot_count = stats['shoot_vs_wait_by_player'][1][action]
+        agent_count = stats['shoot_vs_wait_by_player'][1][action]
+        bot_count = stats['shoot_vs_wait_by_player'][2][action]
         agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
         bot_pct = (bot_count / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
         print(f"{action.capitalize():<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
     
-    agent_wait_with = stats['shoot_vs_wait_by_player'][0]['wait_with_targets']
-    bot_wait_with = stats['shoot_vs_wait_by_player'][1]['wait_with_targets']
+    agent_wait_with = stats['shoot_vs_wait_by_player'][1]['wait_with_targets']
+    bot_wait_with = stats['shoot_vs_wait_by_player'][2]['wait_with_targets']
     agent_wait_with_pct = (agent_wait_with / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_wait_with_pct = (bot_wait_with / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
     print(f"{'Wait (targets)':<12} {agent_wait_with:6d} ({agent_wait_with_pct:5.1f}%)   {bot_wait_with:6d} ({bot_wait_with_pct:5.1f}%)")
     
-    agent_wait_no = stats['shoot_vs_wait_by_player'][0]['wait_no_targets']
-    bot_wait_no = stats['shoot_vs_wait_by_player'][1]['wait_no_targets']
+    agent_wait_no = stats['shoot_vs_wait_by_player'][1]['wait_no_targets']
+    bot_wait_no = stats['shoot_vs_wait_by_player'][2]['wait_no_targets']
     agent_wait_no_pct = (agent_wait_no / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_wait_no_pct = (bot_wait_no / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
     print(f"{'Wait (no targets)':<12} {agent_wait_no:6d} ({agent_wait_no_pct:5.1f}%)   {bot_wait_no:6d} ({bot_wait_no_pct:5.1f}%)")
     
-    agent_shots_after_advance = stats['shots_after_advance'][0]
-    bot_shots_after_advance = stats['shots_after_advance'][1]
+    agent_shots_after_advance = stats['shots_after_advance'][1]
+    bot_shots_after_advance = stats['shots_after_advance'][2]
     agent_pct_after_advance = (agent_shots_after_advance / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_pct_after_advance = (bot_shots_after_advance / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
     print(f"{'Shoot+Advance':<12} {agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)   {bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)")
@@ -926,12 +945,12 @@ def print_statistics(stats: Dict):
     print("\n" + "-" * 80)
     print("PISTOL WEAPON SHOTS BY ADJACENCY")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
     print("-" * 80)
-    agent_pistol_adj = stats['pistol_shots'][0]['adjacent']
-    bot_pistol_adj = stats['pistol_shots'][1]['adjacent']
-    agent_pistol_not_adj = stats['pistol_shots'][0]['not_adjacent']
-    bot_pistol_not_adj = stats['pistol_shots'][1]['not_adjacent']
+    agent_pistol_adj = stats['pistol_shots'][1]['adjacent']
+    bot_pistol_adj = stats['pistol_shots'][2]['adjacent']
+    agent_pistol_not_adj = stats['pistol_shots'][1]['not_adjacent']
+    bot_pistol_not_adj = stats['pistol_shots'][2]['not_adjacent']
     agent_pistol_total = agent_pistol_adj + agent_pistol_not_adj
     bot_pistol_total = bot_pistol_adj + bot_pistol_not_adj
     
@@ -944,22 +963,22 @@ def print_statistics(stats: Dict):
     print(f"PISTOL shots (not adjacent):   {agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)  {bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)")
     print(f"Total PISTOL shots:            {agent_pistol_total:6d}           {bot_pistol_total:6d}")
     
-    agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][0]
-    bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
+    agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
+    bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
     print(f"Non-PISTOL shots (adjacent):   {agent_non_pistol_adj:6d}           {bot_non_pistol_adj:6d}")
     
     # WAIT BEHAVIOR
     print("\n" + "-" * 80)
     print("WAIT BEHAVIOR BY PHASE")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
     print("-" * 80)
-    agent_move_wait = stats['wait_by_phase'][0]['move_wait']
-    bot_move_wait = stats['wait_by_phase'][1]['move_wait']
-    agent_shoot_wait_los = stats['wait_by_phase'][0]['shoot_wait_with_los']
-    bot_shoot_wait_los = stats['wait_by_phase'][1]['shoot_wait_with_los']
-    agent_shoot_wait_no_los = stats['wait_by_phase'][0]['shoot_wait_no_los']
-    bot_shoot_wait_no_los = stats['wait_by_phase'][1]['shoot_wait_no_los']
+    agent_move_wait = stats['wait_by_phase'][1]['move_wait']
+    bot_move_wait = stats['wait_by_phase'][2]['move_wait']
+    agent_shoot_wait_los = stats['wait_by_phase'][1]['shoot_wait_with_los']
+    bot_shoot_wait_los = stats['wait_by_phase'][2]['shoot_wait_with_los']
+    agent_shoot_wait_no_los = stats['wait_by_phase'][1]['shoot_wait_no_los']
+    bot_shoot_wait_no_los = stats['wait_by_phase'][2]['shoot_wait_no_los']
     
     print(f"MOVE phase waits:             {agent_move_wait:6d}           {bot_move_wait:6d}")
     print(f"SHOOT waits (enemies in LOS): {agent_shoot_wait_los:6d}           {bot_shoot_wait_los:6d}")
@@ -969,15 +988,15 @@ def print_statistics(stats: Dict):
     print("\n" + "-" * 80)
     print("TARGET PRIORITY ANALYSIS (Focus Fire)")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
     print("-" * 80)
     
-    agent_bad = stats['target_priority'][0]['shots_at_full_hp_while_wounded_in_los']
-    bot_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_in_los']
-    agent_good = stats['target_priority'][0]['shots_at_wounded_in_los']
-    bot_good = stats['target_priority'][1]['shots_at_wounded_in_los']
-    agent_total_shots = stats['target_priority'][0]['total_shots']
-    bot_total_shots = stats['target_priority'][1]['total_shots']
+    agent_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_in_los']
+    bot_bad = stats['target_priority'][2]['shots_at_full_hp_while_wounded_in_los']
+    agent_good = stats['target_priority'][1]['shots_at_wounded_in_los']
+    bot_good = stats['target_priority'][2]['shots_at_wounded_in_los']
+    agent_total_shots = stats['target_priority'][1]['total_shots']
+    bot_total_shots = stats['target_priority'][2]['total_shots']
     
     agent_bad_pct = (agent_bad / agent_total_shots * 100) if agent_total_shots > 0 else 0
     bot_bad_pct = (bot_bad / bot_total_shots * 100) if bot_total_shots > 0 else 0
@@ -1009,13 +1028,13 @@ def print_statistics(stats: Dict):
             order_str = " → ".join(order)
             print(f"  {order_str}: {count} times ({pct:.1f}%)")
         
-        player_kills = {0: 0, 1: 0}
+        player_kills = {1: 0, 2: 0}
         for death_order in stats['death_orders']:
             for player, unit_id, unit_type in death_order:
                 player_kills[player] += 1
         print(f"\nKills by player:")
-        print(f"  Agent (P0) kills: {player_kills[0]}")
-        print(f"  Bot (P1) kills:   {player_kills[1]}")
+        print(f"  Agent (P1) kills: {player_kills[1]}")
+        print(f"  Bot (P2) kills:   {player_kills[2]}")
     else:
         print("No kills recorded in any episode.")
     
@@ -1023,128 +1042,128 @@ def print_statistics(stats: Dict):
     print("\n" + "-" * 80)
     print("MOVEMENT ERRORS")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
     print("-" * 80)
-    agent_walls = stats['wall_collisions'][0]
-    bot_walls = stats['wall_collisions'][1]
+    agent_walls = stats['wall_collisions'][1]
+    bot_walls = stats['wall_collisions'][2]
     print(f"Moves into walls:             {agent_walls:6d}           {bot_walls:6d}")
-    if agent_walls > 0 and stats['first_error_lines']['wall_collisions'][0]:
-        first_err = stats['first_error_lines']['wall_collisions'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_walls > 0 and stats['first_error_lines']['wall_collisions'][1]:
+    if agent_walls > 0 and stats['first_error_lines']['wall_collisions'][1]:
         first_err = stats['first_error_lines']['wall_collisions'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_move_adj = stats['move_to_adjacent_enemy'][0]
-    bot_move_adj = stats['move_to_adjacent_enemy'][1]
+    if bot_walls > 0 and stats['first_error_lines']['wall_collisions'][2]:
+        first_err = stats['first_error_lines']['wall_collisions'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_move_adj = stats['move_to_adjacent_enemy'][1]
+    bot_move_adj = stats['move_to_adjacent_enemy'][2]
     print(f"Moves to adjacent enemy:      {agent_move_adj:6d}           {bot_move_adj:6d}")
-    if agent_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][0]:
-        first_err = stats['first_error_lines']['move_to_adjacent_enemy'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][1]:
+    if agent_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][1]:
         first_err = stats['first_error_lines']['move_to_adjacent_enemy'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][2]:
+        first_err = stats['first_error_lines']['move_to_adjacent_enemy'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # SHOOTING ERRORS
     print("\n" + "-" * 80)
     print("SHOOTING ERRORS")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
     print("-" * 80)
-    agent_advance_adj = stats['advance_from_adjacent'][0]
-    bot_advance_adj = stats['advance_from_adjacent'][1]
+    agent_advance_adj = stats['advance_from_adjacent'][1]
+    bot_advance_adj = stats['advance_from_adjacent'][2]
     print(f"Advances from adjacent hex:   {agent_advance_adj:6d}           {bot_advance_adj:6d}")
-    if agent_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][0]:
-        first_err = stats['first_error_lines']['advance_from_adjacent'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][1]:
+    if agent_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][1]:
         first_err = stats['first_error_lines']['advance_from_adjacent'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_shoot_wall = stats['shoot_through_wall'][0]
-    bot_shoot_wall = stats['shoot_through_wall'][1]
+    if bot_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][2]:
+        first_err = stats['first_error_lines']['advance_from_adjacent'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_shoot_wall = stats['shoot_through_wall'][1]
+    bot_shoot_wall = stats['shoot_through_wall'][2]
     print(f"Shoot through wall:           {agent_shoot_wall:6d}           {bot_shoot_wall:6d}")
-    if agent_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][0]:
-        first_err = stats['first_error_lines']['shoot_through_wall'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][1]:
+    if agent_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][1]:
         first_err = stats['first_error_lines']['shoot_through_wall'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_shoot_fled = stats['shoot_after_fled'][0]
-    bot_shoot_fled = stats['shoot_after_fled'][1]
+    if bot_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][2]:
+        first_err = stats['first_error_lines']['shoot_through_wall'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_shoot_fled = stats['shoot_after_fled'][1]
+    bot_shoot_fled = stats['shoot_after_fled'][2]
     print(f"Shoot after fled:             {agent_shoot_fled:6d}           {bot_shoot_fled:6d}")
-    if agent_shoot_fled > 0 and stats['first_error_lines']['shoot_after_fled'][0]:
-        first_err = stats['first_error_lines']['shoot_after_fled'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_shoot_fled > 0 and stats['first_error_lines']['shoot_after_fled'][1]:
+    if agent_shoot_fled > 0 and stats['first_error_lines']['shoot_after_fled'][1]:
         first_err = stats['first_error_lines']['shoot_after_fled'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_shoot_friendly = stats['shoot_at_friendly'][0]
-    bot_shoot_friendly = stats['shoot_at_friendly'][1]
+    if bot_shoot_fled > 0 and stats['first_error_lines']['shoot_after_fled'][2]:
+        first_err = stats['first_error_lines']['shoot_after_fled'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_shoot_friendly = stats['shoot_at_friendly'][1]
+    bot_shoot_friendly = stats['shoot_at_friendly'][2]
     print(f"Shoot at friendly unit:       {agent_shoot_friendly:6d}           {bot_shoot_friendly:6d}")
-    if agent_shoot_friendly > 0 and stats['first_error_lines']['shoot_at_friendly'][0]:
-        first_err = stats['first_error_lines']['shoot_at_friendly'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_shoot_friendly > 0 and stats['first_error_lines']['shoot_at_friendly'][1]:
+    if agent_shoot_friendly > 0 and stats['first_error_lines']['shoot_at_friendly'][1]:
         first_err = stats['first_error_lines']['shoot_at_friendly'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_shoot_engaged = stats['shoot_at_engaged_enemy'][0]
-    bot_shoot_engaged = stats['shoot_at_engaged_enemy'][1]
+    if bot_shoot_friendly > 0 and stats['first_error_lines']['shoot_at_friendly'][2]:
+        first_err = stats['first_error_lines']['shoot_at_friendly'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_shoot_engaged = stats['shoot_at_engaged_enemy'][1]
+    bot_shoot_engaged = stats['shoot_at_engaged_enemy'][2]
     print(f"Shoot at engaged enemy:       {agent_shoot_engaged:6d}           {bot_shoot_engaged:6d}")
-    if agent_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][0]:
-        first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][1]:
+    if agent_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][1]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
+        first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # CHARGE ERRORS
     print("\n" + "-" * 80)
     print("CHARGE ERRORS")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
     print("-" * 80)
-    agent_charge_adj = stats['charge_from_adjacent'][0]
-    bot_charge_adj = stats['charge_from_adjacent'][1]
+    agent_charge_adj = stats['charge_from_adjacent'][1]
+    bot_charge_adj = stats['charge_from_adjacent'][2]
     print(f"Charges from adjacent hex:     {agent_charge_adj:6d}           {bot_charge_adj:6d}")
-    if agent_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][0]:
-        first_err = stats['first_error_lines']['charge_from_adjacent'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][1]:
+    if agent_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][1]:
         first_err = stats['first_error_lines']['charge_from_adjacent'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_charge_fled = stats['charge_after_fled'][0]
-    bot_charge_fled = stats['charge_after_fled'][1]
+    if bot_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][2]:
+        first_err = stats['first_error_lines']['charge_from_adjacent'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_charge_fled = stats['charge_after_fled'][1]
+    bot_charge_fled = stats['charge_after_fled'][2]
     print(f"Charge after fled:            {agent_charge_fled:6d}           {bot_charge_fled:6d}")
-    if agent_charge_fled > 0 and stats['first_error_lines']['charge_after_fled'][0]:
-        first_err = stats['first_error_lines']['charge_after_fled'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_charge_fled > 0 and stats['first_error_lines']['charge_after_fled'][1]:
+    if agent_charge_fled > 0 and stats['first_error_lines']['charge_after_fled'][1]:
         first_err = stats['first_error_lines']['charge_after_fled'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_charge_fled > 0 and stats['first_error_lines']['charge_after_fled'][2]:
+        first_err = stats['first_error_lines']['charge_after_fled'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # FIGHT ERRORS
     print("\n" + "-" * 80)
     print("FIGHT ERRORS")
     print("-" * 80)
-    print(f"{'':30s} {'Agent (P0)':>15s} {'Bot (P1)':>15s}")
+    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
     print("-" * 80)
-    agent_fight_non_adj = stats['fight_from_non_adjacent'][0]
-    bot_fight_non_adj = stats['fight_from_non_adjacent'][1]
+    agent_fight_non_adj = stats['fight_from_non_adjacent'][1]
+    bot_fight_non_adj = stats['fight_from_non_adjacent'][2]
     print(f"Fight from non-adjacent hex:  {agent_fight_non_adj:6d}           {bot_fight_non_adj:6d}")
-    if agent_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][0]:
-        first_err = stats['first_error_lines']['fight_from_non_adjacent'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][1]:
+    if agent_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][1]:
         first_err = stats['first_error_lines']['fight_from_non_adjacent'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_fight_friendly = stats['fight_friendly'][0]
-    bot_fight_friendly = stats['fight_friendly'][1]
+    if bot_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][2]:
+        first_err = stats['first_error_lines']['fight_from_non_adjacent'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_fight_friendly = stats['fight_friendly'][1]
+    bot_fight_friendly = stats['fight_friendly'][2]
     print(f"Fight a friendly unit:        {agent_fight_friendly:6d}           {bot_fight_friendly:6d}")
-    if agent_fight_friendly > 0 and stats['first_error_lines']['fight_friendly'][0]:
-        first_err = stats['first_error_lines']['fight_friendly'][0]
-        print(f"  First P0 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_fight_friendly > 0 and stats['first_error_lines']['fight_friendly'][1]:
+    if agent_fight_friendly > 0 and stats['first_error_lines']['fight_friendly'][1]:
         first_err = stats['first_error_lines']['fight_friendly'][1]
         print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_fight_friendly > 0 and stats['first_error_lines']['fight_friendly'][2]:
+        first_err = stats['first_error_lines']['fight_friendly'][2]
+        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # POSITION COLLISIONS
     if stats['unit_position_collisions']:

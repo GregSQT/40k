@@ -557,6 +557,19 @@ export const useEngineAPI = () => {
           setSelectedUnitId(parseInt(data.result.unitId));
           setMode("advancePreview" as GameMode);
         }
+        // Handle movement activation response with valid destinations - DIAGNOSTIC LOGS
+        else if (data.result?.valid_destinations && data.result?.waiting_for_player && data.game_state?.phase === "move") {
+          console.log("🏃 MOVEMENT ACTIVATION RESPONSE:", {
+            unitId: data.result.unitId,
+            valid_destinations_count: data.result.valid_destinations.length,
+            valid_destinations: data.result.valid_destinations,
+            active_movement_unit: data.game_state.active_movement_unit,
+            valid_move_destinations_pool: data.game_state.valid_move_destinations_pool
+          });
+          setSelectedUnitId(parseInt(data.result.unitId));
+          // Note: valid_destinations are stored in game_state.valid_move_destinations_pool
+          // BoardPvp will read them from gameState to display green hexes
+        }
         // Handle charge activation response with valid destinations
         // MUST be after setGameState to prevent being overwritten
         else if (data.result?.valid_destinations && data.result?.waiting_for_player) {
@@ -858,6 +871,37 @@ export const useEngineAPI = () => {
       return;
     }
     
+    // Movement phase click handling - DIAGNOSTIC LOGS
+    if (gameState && gameState.phase === "move" && numericUnitId !== null) {
+      console.log("🏃 MOVEMENT SELECT DEBUG:", {
+        unitId: numericUnitId,
+        move_activation_pool: gameState.move_activation_pool,
+        isInPool: gameState.move_activation_pool?.includes(numericUnitId.toString()),
+        active_movement_unit: gameState.active_movement_unit,
+        selectedUnitId: selectedUnitId
+      });
+      
+      if (!gameState.move_activation_pool) {
+        console.error("❌ MOVEMENT SELECT ERROR: Missing move_activation_pool");
+        throw new Error(`API ERROR: Missing required move_activation_pool during movement phase`);
+      }
+      const moveActivationPool = gameState.move_activation_pool.map(id => parseInt(id));
+      
+      if (moveActivationPool.includes(numericUnitId)) {
+        console.log("✅ MOVEMENT SELECT: Unit is eligible, sending activate_unit");
+        await executeAction({
+          action: "activate_unit", 
+          unitId: numericUnitId.toString()
+        });
+        return;
+      } else {
+        console.warn("⚠️ MOVEMENT SELECT: Unit NOT in activation pool", {
+          unitId: numericUnitId,
+          pool: moveActivationPool
+        });
+      }
+    }
+    
     // Normal unit selection for other phases
     // If deselecting in chargePreview mode, send postpone action to backend
     if (numericUnitId === null && mode === "chargePreview" && selectedUnitId !== null) {
@@ -913,6 +957,14 @@ export const useEngineAPI = () => {
   }, []);
 
   const handleDirectMove = useCallback(async (unitId: number | string, col: number | string, row: number | string) => {
+    console.log("🏃 DIRECT MOVE DEBUG:", {
+      unitId,
+      destCol: col,
+      destRow: row,
+      phase: gameState?.phase,
+      active_movement_unit: gameState?.active_movement_unit,
+      move_activation_pool: gameState?.move_activation_pool
+    });
     
     const action = {
       action: "move",
@@ -922,13 +974,15 @@ export const useEngineAPI = () => {
     };
     
     try {
-      await executeAction(action);
+      const result = await executeAction(action);
+      console.log("✅ DIRECT MOVE SUCCESS:", result);
       setMovePreview(null);
       setMode("select");
     } catch (error) {
+      console.error("❌ DIRECT MOVE FAILED:", error);
       console.error("Move failed:", error);
     }
-  }, [executeAction]);
+  }, [executeAction, gameState]);
 
   const handleConfirmMove = useCallback(async () => {
     if (movePreview) {

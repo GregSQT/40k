@@ -44,6 +44,8 @@ export function setupBoardClickHandler(callbacks: {
       clickType?: 'left' | 'right';
     }>).detail;
 
+    console.log("🔵 UNIT CLICK HANDLER:", { unitId, phase, mode, selectedUnitId, clickType });
+
     // Ignore unit clicks in advancePreview mode - hex clicks are handled by hex handler
     if (mode === 'advancePreview') {
       return;
@@ -63,7 +65,25 @@ export function setupBoardClickHandler(callbacks: {
         callbacks.onSelectUnit(unitId);
       }
     } else if (phase === 'shoot' && mode === 'select') {
-      callbacks.onSelectUnit(unitId);
+      console.log("  🎯 SHOOT SELECT MODE:", { selectedUnitId, unitId, clickType, hasOnSkipShoot: !!callbacks.onSkipShoot });
+      if (selectedUnitId === unitId) {
+        if (clickType === 'right') {
+          console.log("    → Right click on selected unit → calling onSkipShoot");
+          callbacks.onSkipShoot?.(unitId, 'action');
+        } else {
+          console.log("    → Left click on selected unit → calling onSelectUnit(null)");
+          callbacks.onSelectUnit(null);
+        }
+      } else if (clickType === 'right' && selectedUnitId === null) {
+        // Handle right click on unit when nothing is selected
+        // This allows canceling activation of a unit that was just activated but backend deselecte
+        // (e.g., unit with no valid targets - backend responds and deselects before right click arrives)
+        console.log("    → Right click on unit (no selection) → calling onSkipShoot to cancel activation");
+        callbacks.onSkipShoot?.(unitId, 'action');
+      } else {
+        console.log("    → Click on different unit → calling onSelectUnit");
+        callbacks.onSelectUnit(unitId);
+      }
       // Don't call onStartAttackPreview here - wait for backend response
       // Backend will return blinking_units (attackPreview) or allow_advance (advancePreview)
     } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
