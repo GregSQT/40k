@@ -254,7 +254,7 @@ def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
         game_state["kill_probability_cache"] = {}
     
     cache = game_state["kill_probability_cache"]
-    current_player = game_state.get("current_player", 0)
+    current_player = game_state.get("current_player", 1)
     
     # Get active units (current player's units)
     active_units = [u for u in game_state["units"] if u.get("player") == current_player and u.get("HP_CUR", 0) > 0]
@@ -329,7 +329,7 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
         return
     
     perception_radius = game_state.get("perception_radius", 25)
-    current_player = game_state.get("current_player", 0)
+    current_player = game_state.get("current_player", 1)
     
     # Get active units
     active_units = [u for u in game_state["units"] if u.get("player") == current_player and u.get("HP_CUR", 0) > 0]

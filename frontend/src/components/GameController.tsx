@@ -36,8 +36,8 @@ export const GameController: React.FC<GameControllerProps> = ({
   const isPvE = gameMode === 'pve';
                    
   // Track UnitStatusTable collapse states
-  const [player0Collapsed, setPlayer0Collapsed] = useState(false);
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
+  const [player2Collapsed, setPlayer2Collapsed] = useState(false);
   
   // NEW: Debug mode state (shared with hex coordinates toggle)
   const [debugMode, setDebugMode] = useState(false);
@@ -73,10 +73,10 @@ export const GameController: React.FC<GameControllerProps> = ({
                 id: unit.id,
                 name: `${unit.unit_type}-${unit.id}`,
                 type: unit.unit_type,
-                player: unit.player as 0 | 1,
+                player: unit.player as 1 | 2,
                 col: unit.col,
                 row: unit.row,
-                color: unit.player === 0 ? 0x244488 : 0xff3333
+                color: unit.player === 1 ? 0x244488 : 0xff3333
               });
             });
             
@@ -137,20 +137,20 @@ export const GameController: React.FC<GameControllerProps> = ({
         return;
       }
       
-      const player0Table = allTables[0];
-      const player1Table = allTables[1];
+      const player1Table = allTables[0];
+      const player2Table = allTables[1];
       
       // Get actual heights from DOM measurements
       const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
-      const player0Height = player0Table.getBoundingClientRect().height;
       const player1Height = player1Table.getBoundingClientRect().height;
+      const player2Height = player2Table.getBoundingClientRect().height;
       const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
       
       // Calculate available space based purely on actual measurements
       const viewportHeight = window.innerHeight;
       const appContainer = document.querySelector('.app-container') || document.body;
       const appMargins = viewportHeight - appContainer.getBoundingClientRect().height;
-      const usedSpace = turnPhaseHeight + player0Height + player1Height + gameLogHeaderHeight;
+      const usedSpace = turnPhaseHeight + player1Height + player2Height + gameLogHeaderHeight;
       const availableForLogEntries = viewportHeight - usedSpace - appMargins;
     
     const sampleLogEntry = document.querySelector('.game-log-entry');
@@ -160,7 +160,7 @@ export const GameController: React.FC<GameControllerProps> = ({
       }
       setLogAvailableHeight(availableForLogEntries);
     }, 100); // Wait 100ms for DOM to render
-  }, [player0Collapsed, player1Collapsed, gameState.units, gameState.phase]);
+  }, [player1Collapsed, player2Collapsed, gameState.units, gameState.phase]);
 
   // Calculate eligible units by calling the useGameActions.isUnitEligible function (no duplicate logic)
   const eligibleUnitIds = React.useMemo(() => {
@@ -206,7 +206,7 @@ export const GameController: React.FC<GameControllerProps> = ({
       const currentPhaseKey = `${currentTurn}-${gameState.phase}-${gameState.currentPlayer}`;
       
       if (currentPhaseKey !== lastLoggedPhase.current) {
-        gameLog.logPhaseChange(gameState.phase, gameState.currentPlayer ?? 0, currentTurn);
+        gameLog.logPhaseChange(gameState.phase, gameState.currentPlayer ?? 1, currentTurn);
         lastLoggedPhase.current = currentPhaseKey;
       }
     }
@@ -280,22 +280,7 @@ export const GameController: React.FC<GameControllerProps> = ({
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
 
-      <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
-        <UnitStatusTable
-          units={gameState.units}
-          player={0}
-          selectedUnitId={gameState.selectedUnitId ?? null}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            gameActions.selectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-          gameMode={gameMode}
-          onCollapseChange={setPlayer0Collapsed}
-        />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
+<ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
         <UnitStatusTable
           units={gameState.units}
           player={1}
@@ -307,6 +292,21 @@ export const GameController: React.FC<GameControllerProps> = ({
           }}
           gameMode={gameMode}
           onCollapseChange={setPlayer1Collapsed}
+        />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
+        <UnitStatusTable
+          units={gameState.units}
+          player={2}
+          selectedUnitId={gameState.selectedUnitId ?? null}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            gameActions.selectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+          gameMode={gameMode}
+          onCollapseChange={setPlayer2Collapsed}
         />
       </ErrorBoundary>
 

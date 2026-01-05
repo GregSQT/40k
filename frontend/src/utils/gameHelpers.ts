@@ -410,15 +410,15 @@ export function getEnemyUnits(units: Unit[], playerId: number): Unit[] {
 }
 
 export function isGameOver(units: Unit[]): { gameOver: boolean; winner?: number } {
-  const player0Units = getPlayerUnits(units, 0);
   const player1Units = getPlayerUnits(units, 1);
-  
-  if (player0Units.length === 0) {
-    return { gameOver: true, winner: 1 };
-  }
+  const player2Units = getPlayerUnits(units, 2);
   
   if (player1Units.length === 0) {
-    return { gameOver: true, winner: 0 };
+    return { gameOver: true, winner: 2 };
+  }
+  
+  if (player2Units.length === 0) {
+    return { gameOver: true, winner: 1 };
   }
   
   return { gameOver: false };

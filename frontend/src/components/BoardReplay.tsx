@@ -590,7 +590,7 @@ export const BoardReplay: React.FC = () => {
           player: action.player,
           shootDetails,  // Include for color coding
           // Add reward info for debug mode display (player 0 = agent)
-          is_ai_action: action.player === 0,
+          is_ai_action: action.player === 2,
           reward: action.reward,
           action_name: 'shoot'
         });
@@ -727,7 +727,7 @@ export const BoardReplay: React.FC = () => {
           phase: 'fight',
           player: attackerPlayer,
           shootDetails: fightDetails,
-          is_ai_action: action.player === 0,
+          is_ai_action: action.player === 2,
           reward: action.reward,
           action_name: 'fight'
         });
@@ -1050,7 +1050,7 @@ export const BoardReplay: React.FC = () => {
           <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
             <UnitStatusTable
               units={currentState.units || []}
-              player={0}
+              player={1}
               selectedUnitId={null}
               clickedUnitId={null}
               onSelectUnit={() => {}}
@@ -1062,7 +1062,7 @@ export const BoardReplay: React.FC = () => {
           <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
             <UnitStatusTable
               units={currentState.units || []}
-              player={1}
+              player={2}
               selectedUnitId={null}
               clickedUnitId={null}
               onSelectUnit={() => {}}
@@ -1157,7 +1157,7 @@ export const BoardReplay: React.FC = () => {
       onStartAttackPreview={() => {}}
       onConfirmMove={() => {}}
       onCancelMove={() => {}}
-      currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 0 | 1) : (currentState.currentPlayer || 0)}
+      currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 1 | 2) : (currentState.currentPlayer || 1)}
       unitsMoved={[]}
       phase={currentState.phase || 'move'}
       onShoot={() => {}}

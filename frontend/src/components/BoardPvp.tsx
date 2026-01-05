@@ -63,8 +63,8 @@ function calculateObjectiveControl(
     const hexSet = new Set(hexes.map(h => `${h.col},${h.row}`));
 
     // Count OC per player for units on this objective's hexes
-    let p0_oc = 0;
     let p1_oc = 0;
+    let p2_oc = 0;
 
     for (const unit of units) {
       if (unit.HP_CUR <= 0) continue; // Dead units don't control
@@ -72,10 +72,10 @@ function calculateObjectiveControl(
       const unitHex = `${unit.col},${unit.row}`;
       if (hexSet.has(unitHex)) {
         const oc = unit.OC ?? 1; // Default OC=1 if not specified
-        if (unit.player === 0) {
-          p0_oc += oc;
-        } else {
+        if (unit.player === 1) {
           p1_oc += oc;
+        } else {
+          p2_oc += oc;
         }
       }
     }
@@ -86,12 +86,12 @@ function calculateObjectiveControl(
     // Determine new controller with PERSISTENT control rules (or instant calculation if not using persistent state)
     let newController: number | null = usePersistentState ? currentController : null;  // Default: keep current if persistent, otherwise null
 
-    if (p0_oc > p1_oc) {
-      // P0 has more OC - P0 captures/keeps
-      newController = 0;
-    } else if (p1_oc > p0_oc) {
+    if (p1_oc > p2_oc) {
       // P1 has more OC - P1 captures/keeps
       newController = 1;
+    } else if (p2_oc > p1_oc) {
+      // P2 has more OC - P2 captures/keeps
+      newController = 2;
     } else if (!usePersistentState) {
       // If equal OC and not using persistent state: no control
       newController = null;
@@ -151,7 +151,7 @@ type BoardProps = {
   onShoot: (shooterId: number, targetId: number) => void;
   onFightAttack?: (attackerId: number, targetId: number | null) => void;
   onActivateFight?: (fighterId: number) => void;
-  currentPlayer: 0 | 1;
+  currentPlayer: 1 | 2;
   unitsMoved: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
@@ -1107,8 +1107,8 @@ export default function Board({
           objective: string;
           objective_zone: string;
           wall: string;
-          player_0: string;
           player_1: string;
+          player_2: string;
           hp_full: string;
           hp_damaged: string;
           [key: string]: string;

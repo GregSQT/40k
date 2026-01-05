@@ -46,8 +46,8 @@ export const getPhaseLabelMap = (phases: string[]) => {
 
 // Player Configuration
 export const PLAYERS = {
-  HUMAN: 0,
-  AI: 1,
+  HUMAN: 1,
+  AI: 2,
 } as const;
 
 export const PLAYER_LABELS = {

@@ -81,7 +81,7 @@ interface UnitRendererProps {
   // Game state
   phase: "move" | "shoot" | "charge" | "fight";
   mode: string;
-  currentPlayer: 0 | 1;
+  currentPlayer: 1 | 2;
   selectedUnitId: number | null;
   unitsMoved: number[];
   unitsCharged?: number[];
@@ -488,7 +488,7 @@ export class UnitRenderer {
     if (unit.ICON) {
       try {
         // Use red border icon for Player 2 units
-        const iconPath = unit.player === 1 ? unit.ICON.replace('.webp', '_red.webp') : unit.ICON;
+        const iconPath = unit.player === 2 ? unit.ICON.replace('.webp', '_red.webp') : unit.ICON;
         
         // Get or create texture (PIXI.Texture.from uses cache if available)
         // This ensures textures are reused from cache, preventing black flashing
@@ -1064,7 +1064,7 @@ export class UnitRenderer {
       for (let i = 0; i < unit.HP_MAX; i++) {
         const slice = new PIXI.Graphics();
         const hpDamagedColor = (boardConfig && typeof boardConfig === 'object' && 'colors' in boardConfig && boardConfig.colors && typeof boardConfig.colors === 'object' && 'hp_damaged' in boardConfig.colors) ? (boardConfig.colors as { hp_damaged?: string }).hp_damaged : undefined;
-        const color = i < displayHP ? (unit.player === 0 ? this.getCSSColor('--hp-bar-player0') : this.getCSSColor('--hp-bar-player1')) : parseColor(hpDamagedColor || '#666666');
+        const color = i < displayHP ? (unit.player === 1 ? this.getCSSColor('--hp-bar-player1') : this.getCSSColor('--hp-bar-player2')) : parseColor(hpDamagedColor || '#666666');
         slice.beginFill(color, 1);
         slice.drawRoundedRect(finalBarX + i * sliceWidth + 1, finalBarY + 1, sliceWidth - 2, finalBarHeight - 2, 2);
         slice.endFill();

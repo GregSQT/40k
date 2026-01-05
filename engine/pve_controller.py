@@ -43,9 +43,9 @@ class PvEController:
                 print(f"DEBUG: Default AI model key: {ai_model_key}")
             
             if self.unit_registry:
-                player1_units = [u for u in game_state["units"] if u["player"] == 1]
-                if player1_units:
-                    unit_type = player1_units[0]["unitType"]
+                player2_units = [u for u in game_state["units"] if u["player"] == 2]
+                if player2_units:
+                    unit_type = player2_units[0]["unitType"]
                     ai_model_key = self.unit_registry.get_model_key(unit_type)
             
             model_path = f"ai/models/current/model_{ai_model_key}.zip"
@@ -121,7 +121,7 @@ class PvEController:
         
         # Ensure AI player context
         current_player = game_state["current_player"]
-        if current_player == 1:  # AI player
+        if current_player == 2:  # AI player
             # Get eligible units from current phase pool
             current_phase = game_state["phase"]
             print(f"🔍 [AI_DECISION] Current phase: {current_phase}, player: {current_player}")
@@ -193,7 +193,7 @@ class PvEController:
             ai_unit_id = None
             for unit_id in eligible_pool:
                 unit = engine._get_unit_by_id(str(unit_id))
-                if unit and unit["player"] == 1:
+                if unit and unit["player"] == 2:
                     ai_unit_id = str(unit_id)
                     break
             

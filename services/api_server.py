@@ -583,7 +583,7 @@ def get_available_actions():
                 },
                 "example": {
                     "action": "move",
-                    "unitId": "player0_unit1",
+                    "unitId": "player1_unit1",
                     "destCol": 5,
                     "destRow": 3
                 }

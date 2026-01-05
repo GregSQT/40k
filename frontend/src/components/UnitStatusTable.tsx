@@ -4,7 +4,7 @@ import type { Unit, UnitId } from '../types/game';
 
 interface UnitStatusTableProps {
   units: Unit[];
-  player: 0 | 1;
+  player: 1 | 2;
   selectedUnitId: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
@@ -480,13 +480,13 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
     );
   }, [units, player]);
 
-  const getPlayerTypeLabel = (playerNumber: 0 | 1): string => {
+  const getPlayerTypeLabel = (playerNumber: 1 | 2): string => {
     if (gameMode === 'training') {
-      return playerNumber === 0 ? 'Player 1 - AI' : 'Player 2 - Bot';
+      return playerNumber === 2 ? 'Player 1 - AI' : 'Player 2 - Bot';
     } else if (gameMode === 'pve') {
-      return playerNumber === 0 ? 'Player 1 - Human' : 'Player 2 - AI';
+      return playerNumber === 1 ? 'Player 1 - Human' : 'Player 2 - AI';
     } else { // pvp
-      return playerNumber === 0 ? 'Player 1 - Human' : 'Player 2 - Human';
+      return playerNumber === 1 ? 'Player 1 - Human' : 'Player 2 - Human';
     }
   };
 
@@ -505,9 +505,9 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
       <div className="unit-status-table-wrapper">
         {/* Player Header */}
         <div 
-          className={`unit-status-player-header ${player === 1 ? 'unit-status-player-header--red' : ''}`}
+          className={`unit-status-player-header ${player === 2 ? 'unit-status-player-header--red' : ''}`}
           style={{
-            backgroundColor: player === 1 ? 'var(--hp-bar-player1)' : 'var(--hp-bar-player0)',
+            backgroundColor: player === 2 ? 'var(--hp-bar-player2)' : 'var(--hp-bar-player1)',
             padding: '4px 8px',
             textAlign: 'left',
             fontWeight: 'bold',

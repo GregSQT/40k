@@ -1333,14 +1333,14 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["console_logs"].append("SHOOTING PHASE COMPLETE")
     
     # Player progression logic
-    if game_state["current_player"] == 0:
-        # AI_TURN.md Line 105: P0 Move → P0 Shoot → P0 Charge → P0 Fight
-        # Player stays 0, advance to charge phase
+    if game_state["current_player"] == 1:
+        # AI_TURN.md Line 105: P1 Move → P1 Shoot → P1 Charge → P1 Fight
+        # Player stays 1, advance to charge phase
         return {
             "phase_complete": True,
             "phase_transition": True,
             "next_phase": "charge",
-            "current_player": 0,
+            "current_player": 1,
             # Direct field access
             "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
             # Add missing frontend cleanup signals
@@ -1349,8 +1349,8 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_selected_unit": True,
             "clear_attack_preview": True
         }
-    elif game_state["current_player"] == 1:
-        # Player 1 complete → Check if incrementing turn would exceed limit
+    elif game_state["current_player"] == 2:
+        # Player 2 complete → Check if incrementing turn would exceed limit
         max_turns = game_state.get("config", {}).get("training_config", {}).get("max_turns_per_episode")
         if max_turns and (game_state["turn"] + 1) > max_turns:
             # Incrementing would exceed turn limit - end game without incrementing
@@ -1366,14 +1366,14 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "clear_attack_preview": True
             }
         else:
-            # AI_TURN.md Line 105: P1 Move → P1 Shoot → P1 Charge → P1 Fight
-            # Player stays 1, advance to charge phase
-            # Turn increment happens at P1 Fight end (fight_handlers.py:797)
+            # AI_TURN.md Line 105: P2 Move → P2 Shoot → P2 Charge → P2 Fight
+            # Player stays 2, advance to charge phase
+            # Turn increment happens at P2 Fight end (fight_handlers.py:797)
             return {
                 "phase_complete": True,
                 "phase_transition": True,
                 "next_phase": "charge",
-                "current_player": 1,
+                "current_player": 2,
                 # Direct field access
                 "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
                 # Add missing frontend cleanup signals
@@ -1667,8 +1667,8 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         
         # CLEAN FLAG DETECTION: Use config parameter
         unit_check = _get_unit_by_id(game_state, unit_id)
-        is_pve_ai = config.get("pve_mode", False) and unit_check and unit_check["player"] == 1
-        is_gym_training = config.get("gym_training_mode", False) and unit_check and unit_check["player"] == 1
+        is_pve_ai = config.get("pve_mode", False) and unit_check and unit_check["player"] == 2
+        is_gym_training = config.get("gym_training_mode", False) and unit_check and unit_check["player"] == 2
         
         # For AI/gym: end activation as before
         if is_pve_ai or is_gym_training:
@@ -1698,12 +1698,12 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # CLEAN FLAG DETECTION: Use config parameter
     unit = _get_unit_by_id(game_state, unit_id)
-    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
     
     # CHANGE 1: Add gym_training_mode detection
     # Gym agents have already made shoot/skip decisions via action selection (actions 4-8 or 11)
     # The execution loop reaches here when SHOOT_LEFT > 0 after a shot, so we need to auto-execute
-    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 1
+    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 2
     
     # CHANGE 2: Auto-execute for BOTH PvE AI and gym training
     if (is_pve_ai or is_gym_training) and valid_targets:
@@ -3372,7 +3372,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # No destination - return valid destinations for player/AI to choose
         # For AI, auto-select best destination
         is_gym_training = config.get("gym_training_mode", False)
-        is_pve_ai = config.get("pve_mode", False) and unit["player"] == 1
+        is_pve_ai = config.get("pve_mode", False) and unit["player"] == 2
         
         if (is_gym_training or is_pve_ai) and valid_destinations:
             # Auto-select: move toward nearest enemy (aggressive strategy)

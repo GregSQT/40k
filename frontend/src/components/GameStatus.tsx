@@ -13,6 +13,7 @@ interface GameStatusProps {
 }
 
 const PHASE_LABELS = {
+  command: 'Command',
   move: 'Movement',
   shoot: 'Shooting',
   charge: 'Charge',
@@ -20,8 +21,8 @@ const PHASE_LABELS = {
 } as const;
 
 const PLAYER_LABELS = {
-  0: 'Player 1',
-  1: 'Player 2 (AI)',
+  1: 'Player 1',
+  2: 'Player 2 (AI)',
 } as const;
 
 export const GameStatus = memo<GameStatusProps>(({
@@ -56,8 +57,8 @@ export const GameStatus = memo<GameStatusProps>(({
   const actedUnitNames = actedUnits.map(u => u.name).join(', ') || 'None';
 
   // Calculate game statistics
-  const player1Units = units.filter(u => u.player === 0);
-  const player2Units = units.filter(u => u.player === 1);
+  const player1Units = units.filter(u => u.player === 1);
+  const player2Units = units.filter(u => u.player === 2);
   
   const player1HP = player1Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
   const player2HP = player2Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);

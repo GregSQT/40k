@@ -45,8 +45,8 @@ interface BoardConfig {
     cell_even: string;
     cell_odd: string;
     cell_border: string;
-    player_0: string;
     player_1: string;
+    player_2: string;
     hp_full: string;
     hp_damaged: string;
     highlight: string;

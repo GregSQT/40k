@@ -32,8 +32,8 @@ export const BoardWithAPI: React.FC = () => {
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
   
   // Track UnitStatusTable collapse states
-  const [player0Collapsed, setPlayer0Collapsed] = useState(false);
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
+  const [player2Collapsed, setPlayer2Collapsed] = useState(false);
   
   // Settings menu state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -93,16 +93,12 @@ export const BoardWithAPI: React.FC = () => {
     const isPvEMode = apiProps.gameState.pve_mode || isPvE;
     
     // Check if game is over by examining unit health
-    const player0Alive = apiProps.gameState.units.some(u => u.player === 0 && (u.HP_CUR ?? u.HP_MAX) > 0);
     const player1Alive = apiProps.gameState.units.some(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
-    const gameNotOver = player0Alive && player1Alive;
+    const player2Alive = apiProps.gameState.units.some(u => u.player === 2 && (u.HP_CUR ?? u.HP_MAX) > 0);
+    const gameNotOver = player1Alive && player2Alive;
     
     // CRITICAL: Check if AI has eligible units in current phase
     // Use simple heuristic instead of missing activation pools
-    if (!apiProps.gameState) {
-      return;
-    }
-    
     const currentPhase = apiProps.gameState.phase;
     let hasEligibleAIUnits = false;
     
@@ -112,13 +108,13 @@ export const BoardWithAPI: React.FC = () => {
         hasEligibleAIUnits = apiProps.gameState.move_activation_pool.some(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
-          return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+          return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         });
       }
     } else if (currentPhase === 'shoot') {
       // Let backend handle shooting phase logic - it will auto-advance if no valid targets
       hasEligibleAIUnits = apiProps.gameState.units.some(unit => 
-        unit.player === 1 && 
+        unit.player === 2 && 
         (unit.HP_CUR ?? unit.HP_MAX) > 0
       );
     } else if (currentPhase === 'charge') {
@@ -127,7 +123,7 @@ export const BoardWithAPI: React.FC = () => {
         hasEligibleAIUnits = apiProps.gameState.charge_activation_pool.some(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
-          return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+          return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         });
       }
     } else if (currentPhase === 'fight') {
@@ -151,18 +147,30 @@ export const BoardWithAPI: React.FC = () => {
       hasEligibleAIUnits = fightPool.some(unitId => {
         // Normalize comparison: pools contain strings, unit.id might be number
         const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
-        const isAI = unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+        const isAI = unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
         return isAI;
       });
     }
     
-    // CRITICAL: In fight phase, currentPlayer stays 0, but AI can still act in alternating phase
+    // CRITICAL: In fight phase, currentPlayer stays 1, but AI can still act in alternating phase
     const fightSubphaseForCheck = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase;
+    const currentPlayer = apiProps.gameState?.currentPlayer;
     const isAITurn = currentPhase === 'fight' 
-      ? hasEligibleAIUnits && (fightSubphaseForCheck === 'alternating_non_active' || 
-                               fightSubphaseForCheck === 'cleanup_non_active' ||
-                               (fightSubphaseForCheck === 'charging' && apiProps.gameState?.currentPlayer === 1))
-      : apiProps.gameState?.currentPlayer === 1;
+      ? hasEligibleAIUnits && (
+          // Charging subphase: AI turn if currentPlayer is 2
+          (fightSubphaseForCheck === 'charging' && currentPlayer === 2) ||
+          // Alternating active: AI turn if currentPlayer is 2 (active pool = current player's units)
+          (fightSubphaseForCheck === 'alternating_active' && currentPlayer === 2) ||
+          // Alternating non-active: AI turn if currentPlayer is 1 (non-active = opposite of current player)
+          // When currentPlayer is 2, non-active pool contains P1 units, so it's NOT AI turn
+          // When currentPlayer is 1, non-active pool contains P2 units, so it IS AI turn
+          (fightSubphaseForCheck === 'alternating_non_active' && currentPlayer === 1) ||
+          // Cleanup active: AI turn if currentPlayer is 2
+          (fightSubphaseForCheck === 'cleanup_active' && currentPlayer === 2) ||
+          // Cleanup non-active: AI turn if currentPlayer is 1
+          (fightSubphaseForCheck === 'cleanup_non_active' && currentPlayer === 1)
+        )
+      : currentPlayer === 2;
     
     // Removed duplicate log - now handled below with change detection
     
@@ -214,7 +222,7 @@ export const BoardWithAPI: React.FC = () => {
       }
     
     if (shouldTriggerAI) {
-      console.log(`✅ [BOARD_WITH_API] Triggering AI turn for Player 1 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
+      console.log(`✅ [BOARD_WITH_API] Triggering AI turn for Player 2 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
       isAIProcessingRef.current = true;
       // Don't set lastProcessedTurn here - wait until AI completes successfully
       
@@ -289,20 +297,20 @@ export const BoardWithAPI: React.FC = () => {
         return;
       }
       
-      const player0Table = allTables[0];
-      const player1Table = allTables[1];
+      const player1Table = allTables[0];
+      const player2Table = allTables[1];
       
       // Get actual heights from DOM measurements
       const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
-      const player0Height = player0Table.getBoundingClientRect().height;
       const player1Height = player1Table.getBoundingClientRect().height;
+      const player2Height = player2Table.getBoundingClientRect().height;
       const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
       
       // Calculate available space based purely on actual measurements
       const viewportHeight = window.innerHeight;
       const appContainer = document.querySelector('.app-container') || document.body;
       const appMargins = viewportHeight - appContainer.getBoundingClientRect().height;
-      const usedSpace = turnPhaseHeight + player0Height + player1Height + gameLogHeaderHeight;
+      const usedSpace = turnPhaseHeight + player1Height + player2Height + gameLogHeaderHeight;
       const availableForLogEntries = viewportHeight - usedSpace - appMargins;
     
       const sampleLogEntry = document.querySelector('.game-log-entry');
@@ -312,7 +320,7 @@ export const BoardWithAPI: React.FC = () => {
       }
       setLogAvailableHeight(availableForLogEntries);
     }, 100); // Wait 100ms for DOM to render
-  }, [player0Collapsed, player1Collapsed, apiProps.gameState?.units, apiProps.gameState?.phase]);
+  }, [player1Collapsed, player2Collapsed, apiProps.gameState?.units, apiProps.gameState?.phase]);
 
   if (apiProps.loading) {
     return (
@@ -371,8 +379,7 @@ export const BoardWithAPI: React.FC = () => {
           <TurnPhaseTracker 
             currentTurn={apiProps.gameState?.currentTurn ?? 1} 
             currentPhase={apiProps.gameState?.phase ?? 'move'}
-            phases={["command", "move", "shoot", "charge", "fight"]}
-            currentPlayer={apiProps.gameState?.currentPlayer}
+            phases={["move", "shoot", "charge", "fight"]}
             maxTurns={(() => {
             if (!gameConfig?.game_rules?.max_turns) {
               throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
@@ -389,16 +396,16 @@ export const BoardWithAPI: React.FC = () => {
       {/* AI Status Display */}
       {isPvE && (
         <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
-          apiProps.gameState?.currentPlayer === 1 
+          apiProps.gameState?.currentPlayer === 2 
             ? isAIProcessingRef.current 
               ? 'bg-purple-900 border border-purple-700' 
               : 'bg-purple-800 border border-purple-600'
             : 'bg-gray-800 border border-gray-600'
         }`}>
           <span className="text-sm font-medium text-white">
-            {apiProps.gameState?.currentPlayer === 1 ? '🤖 AI Turn' : '👤 Your Turn'}
+            {apiProps.gameState?.currentPlayer === 2 ? '🤖 AI Turn' : '👤 Your Turn'}
           </span>
-          {apiProps.gameState?.currentPlayer === 1 && isAIProcessingRef.current && (
+          {apiProps.gameState?.currentPlayer === 2 && isAIProcessingRef.current && (
             <>
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
               <span className="text-purple-200 text-sm">AI thinking...</span>
@@ -423,21 +430,6 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
 
-      <ErrorBoundary fallback={<div>Failed to load player 0 status</div>}>
-        <UnitStatusTable
-          units={apiProps.gameState?.units ?? []}
-          player={0}
-          selectedUnitId={apiProps.selectedUnitId ?? null}
-          clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            apiProps.onSelectUnit(unitId);
-            setClickedUnitId(null);
-          }}
-          gameMode={gameMode}
-          onCollapseChange={setPlayer0Collapsed}
-        />
-      </ErrorBoundary>
-
       <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
         <UnitStatusTable
           units={apiProps.gameState?.units ?? []}
@@ -450,6 +442,21 @@ export const BoardWithAPI: React.FC = () => {
           }}
           gameMode={gameMode}
           onCollapseChange={setPlayer1Collapsed}
+        />
+      </ErrorBoundary>
+
+      <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
+        <UnitStatusTable
+          units={apiProps.gameState?.units ?? []}
+          player={2}
+          selectedUnitId={apiProps.selectedUnitId ?? null}
+          clickedUnitId={clickedUnitId}
+          onSelectUnit={(unitId) => {
+            apiProps.onSelectUnit(unitId);
+            setClickedUnitId(null);
+          }}
+          gameMode={gameMode}
+          onCollapseChange={setPlayer2Collapsed}
         />
       </ErrorBoundary>
 
@@ -516,7 +523,7 @@ export const BoardWithAPI: React.FC = () => {
         unitsCharged={apiProps.unitsCharged}
         unitsAttacked={apiProps.unitsAttacked}
         unitsFled={apiProps.unitsFled}
-        phase={apiProps.phase as "command" | "move" | "shoot" | "charge" | "fight"}
+        phase={apiProps.phase as "move" | "shoot" | "charge" | "fight"}
         fightSubPhase={apiProps.fightSubPhase}
         onCharge={apiProps.onCharge}
         onActivateCharge={apiProps.onActivateCharge}

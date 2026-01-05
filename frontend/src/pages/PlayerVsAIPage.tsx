@@ -1,31 +1,49 @@
 // frontend/src/pages/PlayerVsAIPage.tsx
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { GameController } from "../components/GameController";
 import "../App.css";
-import { initializeUnitRegistry } from "../data/UnitFactory";
+import { initializeUnitRegistry, createUnit } from "../data/UnitFactory";
+import type { Unit } from "../types/game";
+
+interface ScenarioUnit {
+  id: number;
+  unit_type: string;
+  player: number;
+  col: number;
+  row: number;
+}
 
 export default function PlayerVsAIPage() {
   const [registryInitialized, setRegistryInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
-  const [initialUnits, setInitialUnits] = useState<Array<Record<string, unknown>>>([]);
+  const [initialUnits, setInitialUnits] = useState<Unit[]>([]);
 
   useEffect(() => {
     const initRegistry = async () => {
       try {
         await initializeUnitRegistry();
         
-        // Import PvE scenario AFTER registry is ready
-        // Use same scenario as PvP but mark Player 1 as AI-controlled
-        const { default: units } = await import("../data/Scenario");
+        // Load scenario data from JSON (same as GameController)
+        const response = await fetch('/config/scenario.json');
+        const scenarioData = await response.json();
         
-        // Ensure Player 1 units are marked for AI control
-        const pveUnits = units.map(unit => ({
-          ...unit,
-          // Add AI metadata for Player 1 units
-          isAIControlled: unit.player === 1,
-          aiDifficulty: 'normal', // Could be configurable later
-        }));
+        if (!scenarioData.units) {
+          throw new Error('No units found in scenario.json');
+        }
+        
+        // Transform scenario data using UnitFactory.createUnit()
+        const pveUnits = scenarioData.units.map((unit: ScenarioUnit) => {
+          return createUnit({
+            id: unit.id,
+            name: `${unit.unit_type}-${unit.id}`,
+            type: unit.unit_type,
+            player: unit.player as 1 | 2,
+            col: unit.col,
+            row: unit.row,
+            color: unit.player === 1 ? 0x244488 : 0xff3333
+          });
+        });
         
         setInitialUnits(pveUnits);
         setRegistryInitialized(true);
@@ -77,7 +95,7 @@ export default function PlayerVsAIPage() {
               🤖 Player vs AI Mode
             </h1>
             <div className="text-purple-300 text-sm">
-              You are Player 0 (Blue) • AI is Player 1 (Red)
+              You are Player 1 (Blue) • AI is Player 2 (Red)
             </div>
           </div>
         </div>

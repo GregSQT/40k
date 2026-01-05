@@ -58,7 +58,7 @@ export const usePhaseTransition = ({
             break;
           case "fight": {
             // End turn - transition to command phase (not move)
-            const newPlayer = gameState.currentPlayer === 0 ? 1 : 0;
+            const newPlayer = gameState.currentPlayer === 1 ? 2 : 1;
             actions.setCurrentPlayer(newPlayer);
             actions.setPhase("command");  // Au lieu de "move"
             // Note: Turn increment is handled by backend in fight_handlers

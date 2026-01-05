@@ -193,7 +193,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     # Determine winner - track wins/losses/draws
                     # CRITICAL FIX: Learning agent is ALWAYS Player 0, regardless of controlled_agent name
                     # controlled_agent is the agent key string (e.g., "SpaceMarine_phase1"), NOT a player ID
-                    agent_player = 0  # Learning agent is always Player 0
+                    agent_player = 1  # Learning agent is always Player 1
                     winner = info.get('winner')
 
                     if winner == agent_player:

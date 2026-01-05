@@ -9,8 +9,8 @@
       "cell_even": "0x002200", 
       "cell_odd": "0x001a00",
       "cell_border": "0x00ff00",
-      "player_0": "0x244488",
-      "player_1": "0x882222",
+      "player_1": "0x1D4ED8",
+      "player_2": "0x882222",
       "hp_full": "0x36e36b",
       "hp_damaged": "0x444444",
       "highlight": "0x90d090",
@@ -21,8 +21,8 @@
       "objective_zone": "0xff9933",
       "wall": "0x808080",
       "objective": "0xff9900",
-      "objective_p0": "0x4488cc",
-      "objective_p1": "0xcc4444"
+      "objective_p1": "0x4488cc",
+      "objective_p2": "0xcc4444"
     },
     "wall_hexes": [
       [2,5],[2,6],[2,7],[3,4],[4,4],[5,3],[6,3],[7,2],[8,2],[9,1],

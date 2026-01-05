@@ -240,7 +240,7 @@ class W40KEngine(gym.Env):
         self.game_state = {
             # Core game state
             "units": [],
-            "current_player": 0,
+            "current_player": 1,
             "gym_training_mode": self.config["gym_training_mode"],  # Embed for handler access
             "training_config_name": training_config_name if training_config_name else "",  # NEW: For debug mode detection
             "phase": "command",
@@ -394,7 +394,7 @@ class W40KEngine(gym.Env):
 
         # Reset game state
         self.game_state.update({
-            "current_player": 0,
+            "current_player": 1,
             "phase": "command",
             "turn": 1,
             "episode_steps": 0,
@@ -1063,8 +1063,8 @@ class W40KEngine(gym.Env):
             }
             
             # Calculate units killed/lost
-            # Controlled agent is always player 0 in training
-            controlled_player = 0
+            # Controlled agent is always player 1 in training
+            controlled_player = 1
             
             surviving_ally_units = sum(1 for u in self.game_state["units"] 
                                       if u["player"] == controlled_player and u["HP_CUR"] > 0)
@@ -1136,9 +1136,9 @@ class W40KEngine(gym.Env):
         current_player = self.game_state["current_player"]
         current_phase = self.game_state["phase"]
         
-        # CRITICAL: In fight phase, current_player can be 0 but AI can still act in alternating phase
+        # CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
         # Only check current_player for non-fight phases
-        if current_phase != "fight" and current_player != 1:  # AI is player 1
+        if current_phase != "fight" and current_player != 2:  # AI is player 2
             return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase}
         
         # For fight phase, check if AI has eligible units in the appropriate pool
@@ -1155,10 +1155,10 @@ class W40KEngine(gym.Env):
             elif fight_subphase in ["alternating_active", "cleanup_active"] and self.game_state.get("active_alternating_activation_pool"):
                 pool_to_check = self.game_state.get("active_alternating_activation_pool", [])
             
-            # Check if any unit in the pool is an AI unit (player 1)
+            # Check if any unit in the pool is an AI unit (player 2)
             for unit_id in pool_to_check:
                 unit = self._get_unit_by_id(str(unit_id))
-                if unit and unit.get("player") == 1:
+                if unit and unit.get("player") == 2:
                     has_eligible_ai = True
                     break
             
@@ -1407,10 +1407,10 @@ class W40KEngine(gym.Env):
     def _advance_to_next_player(self):
         """Advance to next player per AI_TURN.md turn progression."""
         # Player switching logic
-        if self.game_state["current_player"] == 0:
+        if self.game_state["current_player"] == 1:
+            self.game_state["current_player"] = 2
+        elif self.game_state["current_player"] == 2:
             self.game_state["current_player"] = 1
-        elif self.game_state["current_player"] == 1:
-            self.game_state["current_player"] = 0
             self.game_state["turn"] += 1
             
             # Check turn limit immediately after P1 completes turn

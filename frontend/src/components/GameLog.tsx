@@ -129,8 +129,8 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
                     </span>
                   )}
                   {event.player !== undefined && (
-                    <span className={`game-log-entry__player ${event.player === 0 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
-                      {event.player === 0 ? 'P1' : 'P2'}
+                    <span className={`game-log-entry__player ${event.player === 1 ? 'game-log-entry__player--blue' : 'game-log-entry__player--red'}`}>
+                      {event.player === 1 ? 'P1' : 'P2'}
                     </span>
                   )}
                   <span className="game-log-entry__message">

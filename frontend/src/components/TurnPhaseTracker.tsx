@@ -6,7 +6,7 @@ interface TurnPhaseTrackerProps {
   currentPhase: string;
   phases: string[]; // Required - AI_TURN.md compliance: no config wrappers
   maxTurns: number; // Required - AI_TURN.md compliance: direct data flow
-  currentPlayer?: number; // Current player (0 or 1) for P0/P1 buttons
+  currentPlayer?: number; // Current player (1 or 2) for P1/P2 buttons
   className?: string;
   onTurnClick?: (turn: number) => void; // Optional callback for turn button clicks (replay mode)
   onPhaseClick?: (phase: string) => void; // Optional callback for phase button clicks (replay mode)
@@ -180,7 +180,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
       outline: 'none'
     };
 
-    const playerColor = player === 0 
+    const playerColor = player === 1 
       ? { bg: '#1D4ED8', border: '#1E3A8A' } // blue-700, blue-900
       : { bg: '#dc2626', border: '#dc2626' }; // red
 
@@ -227,15 +227,15 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         {currentPlayer !== undefined && (
           <div style={{ display: 'flex', gap: '2px' }}>
             <button
-              style={getPlayerStyle(0, currentPlayer === 0, !!onPlayerClick)}
-              onClick={() => onPlayerClick?.(0)}
+              style={getPlayerStyle(1, currentPlayer === 1, !!onPlayerClick)}
+              onClick={() => onPlayerClick?.(1)}
               disabled={!onPlayerClick}
             >
               P1
             </button>
             <button
-              style={getPlayerStyle(1, currentPlayer === 1, !!onPlayerClick)}
-              onClick={() => onPlayerClick?.(1)}
+              style={getPlayerStyle(2, currentPlayer === 2, !!onPlayerClick)}
+              onClick={() => onPlayerClick?.(2)}
               disabled={!onPlayerClick}
             >
               P2

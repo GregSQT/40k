@@ -610,7 +610,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       walls: episode.walls || [],
       objectives: episode.objectives || [],
       currentTurn: 1,
-      currentPlayer: 0,
+      currentPlayer: 1,
       phase: 'move'
     };
 

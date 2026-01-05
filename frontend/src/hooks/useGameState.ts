@@ -49,7 +49,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   // Single source of truth - one game_state object
   const [gameState, setGameState] = useState<GameState>({
     units: [],
-    currentPlayer: 0,
+    currentPlayer: 1,
     phase: "command",
     mode: "select",
     selectedUnitId: null,

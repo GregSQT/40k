@@ -1,6 +1,6 @@
 // frontend/src/types/game.ts
 
-export type PlayerId = 0 | 1;
+export type PlayerId = 1 | 2;
 export type UnitId = number;
 export type GamePhase = "command" | "move" | "shoot" | "charge" | "fight";
 export type GameMode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview" | "advancePreview";

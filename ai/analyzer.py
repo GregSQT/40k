@@ -42,7 +42,7 @@ def is_adjacent(col1: int, row1: int, col2: int, row2: int) -> bool:
 def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
                          unit_hp: Dict[str, int], player: int) -> bool:
     """Check if a hex is adjacent to any enemy unit."""
-    enemy_player = 1 - player
+    enemy_player = 3 - player
     for uid, p in unit_player.items():
         if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
             enemy_pos = unit_positions[uid]
@@ -97,13 +97,13 @@ def parse_step_log(filepath: str) -> Dict:
         'turns_distribution': Counter(),
         'actions_by_type': Counter(),
         'actions_by_phase': Counter(),
-        'actions_by_player': {0: Counter(), 1: Counter()},
+        'actions_by_player': {1: Counter(), 2: Counter()},
         'win_methods': {
-            0: {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},
             1: {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},
+            2: {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},
             -1: {'draw': 0}
         },
-        'wins_by_scenario': defaultdict(lambda: {'p0': 0, 'p1': 0, 'draws': 0}),
+        'wins_by_scenario': defaultdict(lambda: {'p1': 0, 'p2': 0, 'draws': 0}),
         'shoot_vs_wait': {
             'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0
         },
@@ -287,10 +287,10 @@ def parse_step_log(filepath: str) -> Dict:
                     winner = int(winner_match.group(1))
                     win_method = method_match.group(1) if method_match else None
 
-                    if winner == 0:
-                        stats['wins_by_scenario'][current_scenario]['p0'] += 1
-                    elif winner == 1:
+                    if winner == 1:
                         stats['wins_by_scenario'][current_scenario]['p1'] += 1
+                    elif winner == 2:
+                        stats['wins_by_scenario'][current_scenario]['p2'] += 1
                     elif winner == -1:
                         stats['wins_by_scenario'][current_scenario]['draws'] += 1
 
@@ -477,7 +477,7 @@ def parse_step_log(filepath: str) -> Dict:
                                 available_weapons = unit_weapons_cache.get(wait_unit_type, [])
                                 ranged_weapons = [w for w in available_weapons if w.get('range', 0) > 0]
                                 
-                                enemy_player = 1 - player
+                                enemy_player = 3 - player
                                 is_adj = False
                                 for uid, p in unit_player.items():
                                     if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
@@ -802,24 +802,24 @@ def print_statistics(stats: Dict):
     print(f"{'Method':<20} {'Agent Wins (P0)':>18} {'Bot Wins (P1)':>18}")
     print("-" * 80)
     
-    p0_total = sum(stats['win_methods'][0].values())
     p1_total = sum(stats['win_methods'][1].values())
+    p2_total = sum(stats['win_methods'][2].values())
     draws = stats['win_methods'][-1]['draw']
     
     for method in ['elimination', 'objectives', 'value_tiebreaker']:
-        p0_count = stats['win_methods'][0].get(method, 0)
         p1_count = stats['win_methods'][1].get(method, 0)
-        p0_pct = (p0_count / p0_total * 100) if p0_total > 0 else 0
+        p2_count = stats['win_methods'][2].get(method, 0)
         p1_pct = (p1_count / p1_total * 100) if p1_total > 0 else 0
+        p2_pct = (p2_count / p2_total * 100) if p2_total > 0 else 0
         method_display = method.replace('_', ' ').title()
-        print(f"{method_display:<20} {p0_count:6d} ({p0_pct:5.1f}%)   {p1_count:6d} ({p1_pct:5.1f}%)")
+        print(f"{method_display:<20} {p1_count:6d} ({p1_pct:5.1f}%)   {p2_count:6d} ({p2_pct:5.1f}%)")
     
     print("-" * 80)
-    total_games = p0_total + p1_total + draws
-    p0_pct = (p0_total / total_games * 100) if total_games > 0 else 0
+    total_games = p1_total + p2_total + draws
     p1_pct = (p1_total / total_games * 100) if total_games > 0 else 0
+    p2_pct = (p2_total / total_games * 100) if total_games > 0 else 0
     draw_pct = (draws / total_games * 100) if total_games > 0 else 0
-    print(f"{'TOTAL WINS':<20} {p0_total:6d} ({p0_pct:5.1f}%)   {p1_total:6d} ({p1_pct:5.1f}%)")
+    print(f"{'TOTAL WINS':<20} {p1_total:6d} ({p1_pct:5.1f}%)   {p2_total:6d} ({p2_pct:5.1f}%)")
     print(f"{'DRAWS':<20} {draws:6d} ({draw_pct:5.1f}%)")
     
     # WINS BY SCENARIO
@@ -832,23 +832,23 @@ def print_statistics(stats: Dict):
         
         scenario_totals = []
         for scenario, wins in stats['wins_by_scenario'].items():
-            total = wins['p0'] + wins['p1'] + wins['draws']
+            total = wins['p1'] + wins['p2'] + wins['draws']
             scenario_totals.append((scenario, wins, total))
         scenario_totals.sort(key=lambda x: -x[2])
         
         for scenario, wins, total in scenario_totals:
-            p0_count = wins['p0']
             p1_count = wins['p1']
+            p2_count = wins['p2']
             draws_count = wins['draws']
-            p0_pct = (p0_count / total * 100) if total > 0 else 0
             p1_pct = (p1_count / total * 100) if total > 0 else 0
+            p2_pct = (p2_count / total * 100) if total > 0 else 0
             draws_pct = (draws_count / total * 100) if total > 0 else 0
             bot_match = re.search(r'bot-(\d+)', scenario, re.IGNORECASE)
             if bot_match:
                 scenario_display = f"bot-{bot_match.group(1)}"
             else:
                 scenario_display = scenario[:39]
-            print(f"{scenario_display:<40} {p0_count:5d} ({p0_pct:4.1f}%) {p1_count:5d} ({p1_pct:4.1f}%) {draws_count:5d} ({draws_pct:4.1f}%)")
+            print(f"{scenario_display:<40} {p1_count:5d} ({p1_pct:4.1f}%) {p2_count:5d} ({p2_pct:4.1f}%) {draws_count:5d} ({draws_pct:4.1f}%)")
     
     # TURN DISTRIBUTION
     print("\n" + "-" * 80)

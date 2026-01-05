@@ -163,9 +163,9 @@ export function createBlinkingHPBar(
     // Normal HP slice
     const normalSlice = new PIXI.Graphics();
     const normalColor = i < currentHP
-      ? (unit.player === 0 
-          ? getCSSColor('--hp-bar-player0') 
-          : getCSSColor('--hp-bar-player1'))
+      ? (unit.player === 1 
+          ? getCSSColor('--hp-bar-player1') 
+          : getCSSColor('--hp-bar-player2'))
       : getCSSColor('--hp-bar-lost');
     normalSlice.beginFill(normalColor, 1);
     normalSlice.drawRoundedRect(
@@ -186,9 +186,9 @@ export function createBlinkingHPBar(
     const highlightColor = wouldBeDamaged
       ? getCSSColor('--hp-bar-damage-preview')
       : (i < currentHP
-          ? (unit.player === 0
-              ? getCSSColor('--hp-bar-player0')
-              : getCSSColor('--hp-bar-player1'))
+          ? (unit.player === 1
+            ? getCSSColor('--hp-bar-player1')
+            : getCSSColor('--hp-bar-player2'))
           : getCSSColor('--hp-bar-lost'));
     highlightSlice.beginFill(highlightColor, 1);
     highlightSlice.drawRoundedRect(

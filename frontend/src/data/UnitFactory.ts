@@ -105,7 +105,7 @@ export function createUnit(params: {
   id: number;
   name: string;
   type: string;
-  player: 0 | 1;
+  player: 1 | 2;
   col: number;
   row: number;
   color: number;

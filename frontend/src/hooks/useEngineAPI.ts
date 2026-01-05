@@ -732,7 +732,7 @@ export const useEngineAPI = () => {
         player: unit.player as PlayerId,
         col: unit.col,
         row: unit.row,
-        color: unit.player === 0 ? 0x244488 : 0x882222,
+        color: unit.player === 1 ? 0x244488 : 0x882222,
         MOVE: unit.MOVE,
         HP_MAX: unit.HP_MAX,
         HP_CUR: unit.HP_CUR,
@@ -1646,17 +1646,17 @@ export const useEngineAPI = () => {
       if (phaseCheck === 'shoot' && gameState?.shoot_activation_pool) {
         aiUnitsInPoolForLog = gameState.shoot_activation_pool.filter(id => {
           const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 1;
+          return unit?.player === 2;
         }).length;
       } else if (phaseCheck === 'move' && gameState?.move_activation_pool) {
         aiUnitsInPoolForLog = gameState.move_activation_pool.filter(id => {
           const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 1;
+          return unit?.player === 2;
         }).length;
       } else if (phaseCheck === 'charge' && gameState?.charge_activation_pool) {
         aiUnitsInPoolForLog = gameState.charge_activation_pool.filter(id => {
           const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 1;
+          return unit?.player === 2;
         }).length;
       } else if (phaseCheck === 'fight') {
         const fightSubphase = gameState?.fight_subphase;
@@ -1674,7 +1674,7 @@ export const useEngineAPI = () => {
         }
         aiUnitsInPoolForLog = fightPool.filter(id => {
           const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 1;
+          return unit?.player === 2;
         }).length;
       }
       
@@ -1695,9 +1695,9 @@ export const useEngineAPI = () => {
         return;
       }
       
-      // CRITICAL: In fight phase, current_player can be 0 but AI can still act in alternating phase
+      // CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
       // Only check current_player for non-fight phases
-      if (phaseCheck !== 'fight' && gameState.current_player !== 1) {
+      if (phaseCheck !== 'fight' && gameState.current_player !== 2) {
         console.log(`executeAITurn skipped - not AI player turn (current: ${gameState.current_player}, phase: ${phaseCheck})`);
         aiTurnInProgress = false;
         return;
@@ -1708,19 +1708,19 @@ export const useEngineAPI = () => {
         eligibleAICount = gameState.shoot_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
       } else       if (phaseCheck === 'move' && gameState.move_activation_pool) {
         eligibleAICount = gameState.move_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
       } else if (phaseCheck === 'charge' && gameState.charge_activation_pool) {
         eligibleAICount = gameState.charge_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
         console.log(`🔍 [FRONTEND] Charge phase AI eligible count: ${eligibleAICount} from pool size ${gameState.charge_activation_pool.length}`);
       } else if (phaseCheck === 'fight') {
@@ -1744,7 +1744,7 @@ export const useEngineAPI = () => {
         eligibleAICount = fightPool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
         console.log(`🔍 [FRONTEND] Fight phase AI eligible count: ${eligibleAICount} from pool size ${fightPool.length}`);
       }
@@ -1764,18 +1764,18 @@ export const useEngineAPI = () => {
       if (currentPhase === 'move' && gameState.move_activation_pool) {
         aiEligibleUnits = gameState.move_activation_pool.filter(unitId => {
           const unit = gameState.units.find(u => u.id === unitId);
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
       } else if (currentPhase === 'shoot' && gameState.shoot_activation_pool) {
         aiEligibleUnits = gameState.shoot_activation_pool.filter(unitId => {
           const unit = gameState.units.find(u => u.id === unitId);
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
       } else if (currentPhase === 'charge' && gameState.charge_activation_pool) {
         aiEligibleUnits = gameState.charge_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
       } else if (currentPhase === 'fight') {
         // Same fight pool logic as above
@@ -1796,7 +1796,7 @@ export const useEngineAPI = () => {
         aiEligibleUnits = fightPool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
-          return unit && unit.player === 1;
+          return unit && unit.player === 2;
         }).length;
       }
       
@@ -1817,7 +1817,7 @@ export const useEngineAPI = () => {
         }
         
         // Strategy: Move toward nearest enemy using FRESH game state
-        const enemies = currentGameState?.units.filter((u) => u.player === 0 && u.HP_CUR > 0) || [];
+        const enemies = currentGameState?.units.filter((u) => u.player === 1 && u.HP_CUR > 0) || [];
         
         if (enemies.length === 0) {
           // No enemies - just take first destination
@@ -2236,17 +2236,17 @@ export const useEngineAPI = () => {
               
               hasMoreEligibleUnits = fightPool.some(unitId => {
                 const unit = updatedGameState?.units?.find((u: APIGameState['units'][0]) => String(u.id) === String(unitId));
-                return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+                return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
               });
             } else if (currentPhase === 'move' && updatedGameState?.move_activation_pool) {
               hasMoreEligibleUnits = updatedGameState.move_activation_pool.some((unitId: string) => {
                 const unit = updatedGameState?.units?.find((u: APIGameState['units'][0]) => String(u.id) === String(unitId));
-                return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+                return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
               });
             } else if (currentPhase === 'charge' && updatedGameState?.charge_activation_pool) {
               hasMoreEligibleUnits = updatedGameState.charge_activation_pool.some((unitId: string) => {
                 const unit = updatedGameState?.units?.find((u: APIGameState['units'][0]) => String(u.id) === String(unitId));
-                return unit && unit.player === 1 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+                return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
               });
             }
             

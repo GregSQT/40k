@@ -108,9 +108,9 @@ class RewardCalculator:
         if not acting_unit:
             raise ValueError(f"Acting unit not found: {acting_unit_id}")
 
-        # CRITICAL: Only give rewards to the controlled player (P0 during training)
-        # Player 1's actions are part of the environment, not the learning agent
-        controlled_player = self.config.get("controlled_player", 0)
+        # CRITICAL: Only give rewards to the controlled player (P1 during training)
+        # Player 2's actions are part of the environment, not the learning agent
+        controlled_player = self.config.get("controlled_player", 1)
         if acting_unit.get("player") != controlled_player:
             # No action rewards for opponent, BUT check if game ended
             # If P1's action ended the game, P0 still needs the win/lose reward!
@@ -502,8 +502,8 @@ class RewardCalculator:
             modifiers = unit_rewards["situational_modifiers"]
             winner = self._determine_winner(game_state)
 
-            # Player 0 is always the controlled player during training
-            if winner == 0:  # Player 0 wins
+            # Player 1 is always the controlled player during training
+            if winner == 1:  # Player 1 wins
                 if "win" not in modifiers:
                     raise KeyError(f"Situational modifiers missing required 'win' reward")
                 win_bonus = modifiers["win"]
@@ -518,7 +518,7 @@ class RewardCalculator:
                     'penalties': 0.0
                 }
 
-            elif winner == 1:  # Player 1 wins (controlled player loses)
+            elif winner == 2:  # Player 2 wins (controlled player loses)
                 if "lose" not in modifiers:
                     raise KeyError(f"Situational modifiers missing required 'lose' reward")
                 lose_penalty = modifiers["lose"]
@@ -592,10 +592,10 @@ class RewardCalculator:
             return 0.0
 
         # Get any Player 0 unit to access reward config (learning agent is P0)
-        # CRITICAL FIX: Learning agent is Player 0, not Player 1!
+        # CRITICAL FIX: Learning agent is Player 1, not Player 2!
         acting_unit = None
         for unit in game_state["units"]:
-            if unit["player"] == 0:  # Learning agent is Player 0
+            if unit["player"] == 1:  # Learning agent is Player 1
                 acting_unit = unit
                 break
 
@@ -611,12 +611,12 @@ class RewardCalculator:
                 modifiers = unit_rewards["situational_modifiers"]
                 winner = self._determine_winner(game_state)
 
-                # CRITICAL FIX: Learning agent is Player 0!
-                # winner == 0 means Player 0 (learning agent) wins
-                # winner == 1 means Player 1 (opponent) wins, so learning agent loses
-                if winner == 0:  # Learning agent wins
+                # CRITICAL FIX: Learning agent is Player 1!
+                # winner == 1 means Player 1 (learning agent) wins
+                # winner == 2 means Player 2 (opponent) wins, so learning agent loses
+                if winner == 1:  # Learning agent wins
                     base_reward = modifiers.get("win", 0.0)
-                elif winner == 1:  # Learning agent loses
+                elif winner == 2:  # Learning agent loses
                     base_reward = modifiers.get("lose", 0.0)
                 elif winner == -1:  # Draw
                     base_reward = modifiers.get("draw", 0.0)

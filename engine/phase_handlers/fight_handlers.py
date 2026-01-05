@@ -89,7 +89,7 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     CRITICAL: Non-active player goes first in alternating phase per AI_TURN.md.
     """
     current_player = game_state["current_player"]
-    non_active_player = 1 - current_player
+    non_active_player = 3 - current_player
 
     # AI_TURN.md COMPLIANCE: Ensure units_fought exists before any checks
     if "units_fought" not in game_state:
@@ -778,9 +778,9 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["console_logs"].append("FIGHT PHASE COMPLETE")
 
     # Player progression logic
-    if game_state["current_player"] == 0:
-        # Player 0 complete → Player 1 command phase
-        game_state["current_player"] = 1
+    if game_state["current_player"] == 1:
+        # Player 1 complete → Player 2 command phase
+        game_state["current_player"] = 2
         game_state["phase"] = "command"  # Actually transition phase
 
         # CRITICAL: Do NOT call command_phase_start() directly - cascade loop handles it
@@ -791,15 +791,15 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "phase_complete": True,
             "phase_transition": True,
             "next_phase": "command",
-            "current_player": 1,
+            "current_player": 2,
             "units_processed": len(game_state.get("units_fought", set())),
             "clear_blinking_gentle": True,
             "reset_mode": "select",
             "clear_selected_unit": True,
             "clear_attack_preview": True
         }
-    elif game_state["current_player"] == 1:
-        # Player 1 complete → Check if incrementing turn would exceed limit
+    elif game_state["current_player"] == 2:
+        # Player 2 complete → Check if incrementing turn would exceed limit
         max_turns = game_state.get("config", {}).get("training_config", {}).get("max_turns_per_episode")
         if max_turns and (game_state["turn"] + 1) > max_turns:
             # Incrementing would exceed turn limit - end game without incrementing
@@ -815,9 +815,9 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "clear_attack_preview": True
             }
         else:
-            # Safe to increment turn and continue to P0's command phase
+            # Safe to increment turn and continue to P1's command phase
             game_state["turn"] += 1
-            game_state["current_player"] = 0
+            game_state["current_player"] = 1
             game_state["phase"] = "command"  # Actually transition phase
 
             # CRITICAL: Do NOT call command_phase_start() directly - cascade loop handles it
@@ -828,7 +828,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "phase_complete": True,
                 "phase_transition": True,
                 "next_phase": "command",
-                "current_player": 0,
+                "current_player": 1,
                 "new_turn": game_state["turn"],
                 "units_processed": len(game_state.get("units_fought", set())),
                 "clear_blinking_gentle": True,
@@ -956,12 +956,12 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # CLEAN FLAG DETECTION: Use config parameter
     unit = _get_unit_by_id(game_state, unit_id)
-    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
     
     # CHANGE 1: Add gym_training_mode detection
     # Gym agents have already made shoot/skip decisions via action selection (actions 4-8 or 11)
     # The execution loop reaches here when SHOOT_LEFT > 0 after a shot, so we need to auto-execute
-    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 1
+    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 2
     
     # CHANGE 2: Auto-execute for BOTH PvE AI and gym training
     if (is_pve_ai or is_gym_training) and valid_targets:
@@ -1035,14 +1035,14 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
         # Determine which pool to use based on whose turn it is
         current_turn = game_state["fight_alternating_turn"]
-        current_player = game_state.get("current_player", 0)
+        current_player = game_state.get("current_player", 1)
 
         if current_turn == "non_active" and non_active_alternating:
             current_sub_phase = "alternating_non_active"
             current_pool = non_active_alternating
             # CRITICAL: non_active pool contains units of OPPOSITE player
             # Check if there are units for the non-active player (opposite of current_player)
-            opposite_player = 1 - current_player
+            opposite_player = 3 - current_player
             eligible_units = [uid for uid in current_pool 
                             if _get_unit_by_id(game_state, uid) 
                             and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
@@ -1072,7 +1072,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             current_sub_phase = "cleanup_non_active"
             current_pool = non_active_alternating
             # CRITICAL: non_active pool contains units of OPPOSITE player
-            opposite_player = 1 - current_player
+            opposite_player = 3 - current_player
             eligible_units = [uid for uid in current_pool 
                             if _get_unit_by_id(game_state, uid) 
                             and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
@@ -1140,7 +1140,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
     # Check for gym training mode and PvE AI mode
     is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
-    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
 
     # GYM TRAINING / PvE AI: Auto-activate unit if not already active
     active_fight_unit = game_state.get("active_fight_unit")
@@ -1325,7 +1325,7 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         return True, result
 
     # Check for PvE AI auto-execution (similar to shooting phase)
-    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
     
     if is_pve_ai and valid_targets:
         # AUTO-FIGHT: PvE AI auto-selects target and executes attack
@@ -1553,7 +1553,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             # More attacks and targets available
             # AI_TURN.md COMPLIANCE: Check if gym training mode or PvE AI - auto-continue attack loop
             is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
-            is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 1
+            is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
 
             if is_gym_training or is_pve_ai:
                 # GYM TRAINING / PvE AI: Auto-continue attack loop until ATTACK_LEFT = 0 or no targets

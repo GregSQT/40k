@@ -17,7 +17,7 @@ __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
 
 
 class BotControlledEnv(gym.Wrapper):
-    """Wrapper for bot-controlled Player 1 evaluation."""
+    """Wrapper for bot-controlled Player 2 evaluation."""
 
     def __init__(self, base_env, bot, unit_registry):
         super().__init__(base_env)
@@ -81,7 +81,7 @@ class BotControlledEnv(gym.Wrapper):
         # CRITICAL FIX: Loop through ALL bot turns until control returns to agent
         bot_loop_count = 0
         max_bot_iterations = 1000  # Safety guard against infinite loops
-        while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+        while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
             bot_loop_count += 1
             if bot_loop_count > max_bot_iterations:
                 print(f"\n[DEBUG] BotControlledEnv: Infinite loop detected! Loop count: {bot_loop_count}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
@@ -156,11 +156,11 @@ class BotControlledEnv(gym.Wrapper):
 
 class SelfPlayWrapper(gym.Wrapper):
     """
-    Wrapper for self-play training where Player 1 is controlled by a frozen copy of the model.
+    Wrapper for self-play training where Player 2 is controlled by a frozen copy of the model.
 
     Key features:
-    - Player 0: Learning agent (receives gradient updates from SB3)
-    - Player 1: Frozen opponent (uses copy of model from N episodes ago)
+    - Player 1: Learning agent (receives gradient updates from SB3)
+    - Player 2: Frozen opponent (uses copy of model from N episodes ago)
     - Frozen model updates periodically to keep opponent challenging
     - Naturally targets ~50% win rate as learning agent improves
     """
@@ -169,7 +169,7 @@ class SelfPlayWrapper(gym.Wrapper):
         """
         Args:
             base_env: W40KEngine wrapped in ActionMasker
-            frozen_model: Initial frozen model for Player 1 (optional, will use random if None)
+            frozen_model: Initial frozen model for Player 2 (optional, will use random if None)
             update_frequency: Episodes between frozen model updates
         """
         super().__init__(base_env)
@@ -190,8 +190,8 @@ class SelfPlayWrapper(gym.Wrapper):
         self.episode_length = 0
 
         # Self-play statistics
-        self.player0_wins = 0
         self.player1_wins = 0
+        self.player2_wins = 0
         self.draws = 0
 
     def reset(self, seed=None, options=None):
@@ -205,10 +205,10 @@ class SelfPlayWrapper(gym.Wrapper):
         """
         Execute one step in the environment.
 
-        If it's Player 0's turn: Execute the provided action
-        If it's Player 1's turn: Use frozen model action instead
+        If it's Player 1's turn: Execute the provided action
+        If it's Player 2's turn: Use frozen model action instead
         """
-        # CRITICAL: First handle any pending Player 1 turns before Player 0's action
+        # CRITICAL: First handle any pending Player 2 turns before Player 1's action
         # This shouldn't happen normally, but safety check
         obs = None
         reward = 0.0
@@ -220,7 +220,7 @@ class SelfPlayWrapper(gym.Wrapper):
         p1_actions_before = 0
         p1_terminal_reward = 0.0  # Capture lose penalty if P1 ends game before P0 acts
         max_iterations = 1000  # Safety guard against infinite loops
-        while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+        while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
             p1_actions_before += 1
             if p1_actions_before > max_iterations:
                 print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 before loop! Count: {p1_actions_before}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
@@ -248,7 +248,7 @@ class SelfPlayWrapper(gym.Wrapper):
 
             # Handle any Player 1 turns that follow
             p1_actions_after = 0
-            while not (terminated or truncated) and self.engine.game_state["current_player"] == 1:
+            while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
                 p1_actions_after += 1
                 if p1_actions_after > max_iterations:
                     print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 after loop! Count: {p1_actions_after}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
@@ -280,10 +280,10 @@ class SelfPlayWrapper(gym.Wrapper):
 
             # Track wins/losses
             winner = info.get("winner", -1)
-            if winner == 0:
-                self.player0_wins += 1
-            elif winner == 1:
+            if winner == 1:
                 self.player1_wins += 1
+            elif winner == 2:
+                self.player2_wins += 1
             else:
                 self.draws += 1
 
@@ -291,7 +291,7 @@ class SelfPlayWrapper(gym.Wrapper):
 
     def _get_frozen_model_action(self) -> int:
         """
-        Get action from frozen model for Player 1.
+        Get action from frozen model for Player 2.
         Falls back to random valid action if no frozen model available.
         """
         if self.frozen_model is None:
@@ -302,7 +302,7 @@ class SelfPlayWrapper(gym.Wrapper):
                 # AI_IMPLEMENTATION.md: Empty masks indicate a flow/phase bug;
                 # SelfPlayWrapper must not silently inject dummy actions.
                 raise RuntimeError(
-                    "SelfPlayWrapper encountered an empty action mask for Player 1. "
+                    "SelfPlayWrapper encountered an empty action mask for Player 2. "
                     "Engine must advance phase/turn instead of exposing empty masks."
                 )
             return random.choice(valid_actions)
@@ -336,22 +336,22 @@ class SelfPlayWrapper(gym.Wrapper):
         return self.episodes_since_update >= self.update_frequency
 
     def get_win_rate_stats(self) -> dict:
-        """Get win rate statistics for Player 0 (learning agent)."""
-        total_games = self.player0_wins + self.player1_wins + self.draws
+        """Get win rate statistics for Player 1 (learning agent)."""
+        total_games = self.player1_wins + self.player2_wins + self.draws
         if total_games == 0:
             return {
-                'player0_wins': 0,
                 'player1_wins': 0,
+                'player2_wins': 0,
                 'draws': 0,
-                'player0_win_rate': 0.0,
+                'player1_win_rate': 0.0,
                 'total_games': 0
             }
 
         return {
-            'player0_wins': self.player0_wins,
             'player1_wins': self.player1_wins,
+            'player2_wins': self.player2_wins,
             'draws': self.draws,
-            'player0_win_rate': self.player0_wins / total_games * 100,
+            'player1_win_rate': self.player1_wins / total_games * 100,
             'total_games': total_games
         }
 

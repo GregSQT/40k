@@ -10,8 +10,8 @@
   --color-warning: #ff9900;
   
   /* HP Bar Colors */
-  --hp-bar-player0: #1D4ED8;
-  --hp-bar-player1: #ff4d4d;
+  --hp-bar-player1: #1D4ED8;
+  --hp-bar-player2: #ff4d4d;
   --hp-bar-lost: #444444;
   --hp-bar-damage-preview: #444444;
 

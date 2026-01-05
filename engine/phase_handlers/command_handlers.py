@@ -77,7 +77,8 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "phase_complete": True,
         "next_phase": "move",
-        "phase_transition": True
+        "phase_transition": True,
+        "clear_blinking_gentle": True
     }
 
 

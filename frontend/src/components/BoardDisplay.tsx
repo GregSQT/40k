@@ -131,17 +131,17 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
     } = options || {};
 
     // Parse objective control colors - use same colors as player units
-    if (!boardConfig.colors.player_0) {
-      throw new Error('Missing required configuration value: boardConfig.colors.player_0');
-    }
     if (!boardConfig.colors.player_1) {
       throw new Error('Missing required configuration value: boardConfig.colors.player_1');
+    }
+    if (!boardConfig.colors.player_2) {
+      throw new Error('Missing required configuration value: boardConfig.colors.player_2');
     }
     if (!boardConfig.colors.objective) {
       throw new Error('Missing required configuration value: boardConfig.colors.objective');
     }
-    const OBJECTIVE_P0_COLOR = parseColor(boardConfig.colors.player_0);
-    const OBJECTIVE_P1_COLOR = parseColor(boardConfig.colors.player_1);
+    const OBJECTIVE_P0_COLOR = parseColor(boardConfig.colors.player_1);
+    const OBJECTIVE_P1_COLOR = parseColor(boardConfig.colors.player_2);
     const OBJECTIVE_NEUTRAL_COLOR = parseColor(boardConfig.colors.objective);
 
     // ✅ OPTIMIZED: Create containers for hex batching - EXACT from Board.tsx
@@ -213,10 +213,10 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
           // Check if this objective hex is controlled by a player
           const hexKey = `${col},${row}`;
           const controller = objectiveControl[hexKey];
-          if (controller === 0) {
-            cellColor = OBJECTIVE_P0_COLOR;  // Blue for Player 0
-          } else if (controller === 1) {
-            cellColor = OBJECTIVE_P1_COLOR;  // Red for Player 1
+          if (controller === 1) {
+            cellColor = OBJECTIVE_P0_COLOR;  // Blue for Player 1
+          } else if (controller === 2) {
+            cellColor = OBJECTIVE_P1_COLOR;  // Red for Player 2
           } else {
             cellColor = OBJECTIVE_NEUTRAL_COLOR;  // Yellow/Orange for neutral/contested
           }
