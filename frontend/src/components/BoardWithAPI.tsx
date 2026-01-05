@@ -222,7 +222,6 @@ export const BoardWithAPI: React.FC = () => {
       }
     
     if (shouldTriggerAI) {
-      console.log(`✅ [BOARD_WITH_API] Triggering AI turn for Player 2 (AI) - Phase: ${currentPhase}, Eligible AI units: ${hasEligibleAIUnits}`);
       isAIProcessingRef.current = true;
       // Don't set lastProcessedTurn here - wait until AI completes successfully
       
@@ -231,7 +230,6 @@ export const BoardWithAPI: React.FC = () => {
         try {
           if (apiProps.executeAITurn) {
             await apiProps.executeAITurn();
-            console.log('✅ [BOARD_WITH_API] AI turn completed');
             // Don't set lastProcessedTurn here - allow multiple activations in same phase
             // lastProcessedTurn will be set when phase actually changes (via useEffect dependency)
           } else {

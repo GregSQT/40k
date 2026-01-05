@@ -146,12 +146,12 @@ interface UseGameActionsParams {
         // Check for flee detection
         const enemyUnits = gameState.units.filter(u => u.player !== unit.player);
         const wasAdjacentToEnemy = enemyUnits.some(enemy => 
-          Math.max(Math.abs(unit.col - enemy.col), Math.abs(unit.row - enemy.row)) === 1
+          cubeDistance(offsetToCube(unit.col, unit.row), offsetToCube(enemy.col, enemy.row)) === 1
         );
         
         if (wasAdjacentToEnemy) {
           const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
-            Math.max(Math.abs(movePreview.destCol - enemy.col), Math.abs(movePreview.destRow - enemy.row)) === 1
+            cubeDistance(offsetToCube(movePreview.destCol, movePreview.destRow), offsetToCube(enemy.col, enemy.row)) === 1
           );
           
           if (!willBeAdjacentToEnemy) {

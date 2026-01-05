@@ -1637,7 +1637,11 @@ class ObservationBuilder:
                         min_distance = dist
         
         elif search_type in ["friendly", "enemy"]:
-            target_player = unit["player"] if search_type == "friendly" else 1 - unit["player"]
+            # P1/P2: friendly = same player, enemy = opposite player (1->2, 2->1)
+            if search_type == "friendly":
+                target_player = unit["player"]
+            else:
+                target_player = 3 - unit["player"]  # 1->2, 2->1
             for other_unit in game_state["units"]:
                 if other_unit["HP_CUR"] <= 0:
                     continue

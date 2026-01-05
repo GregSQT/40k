@@ -255,6 +255,7 @@ def _ai_select_movement_destination_pve(game_state: Dict[str, Any], unit: Dict[s
         # Find nearest enemy using hex distance
         nearest_enemy = min(enemies, key=lambda e: calculate_hex_distance(unit["col"], unit["row"], e["col"], e["row"]))
         enemy_pos = (nearest_enemy["col"], nearest_enemy["row"])
+        nearest_dist = calculate_hex_distance(unit["col"], unit["row"], nearest_enemy["col"], nearest_enemy["row"])
 
         # Select move that gets closest to nearest enemy using hex distance
         best_move = min(actual_moves,
@@ -929,7 +930,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "timestamp": "server_time",
         "action_name": action_name,  # NEW: For debug display
         "reward": round(action_reward, 2),  # NEW: Calculated reward
-        "is_ai_action": unit["player"] == 1  # NEW: PvE AI detection
+        "is_ai_action": unit["player"] == 2  # FIXED: PvE AI is player 2 (was P0/P1, now P1/P2)
     })
     
     # Clear preview
@@ -973,10 +974,15 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
 
 def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """AI_MOVE.md: Simplified flee detection (distance <= 1, no CC_RNG)"""
+    """AI_MOVE.md: Simplified flee detection (distance <= 1, no CC_RNG)
+    
+    CRITICAL: Uses proper hex distance, not Chebyshev distance.
+    Hexagonal grids require hex distance calculation for accurate adjacency.
+    """
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = max(abs(unit["col"] - enemy["col"]), abs(unit["row"] - enemy["row"]))
+            # AI_TURN.md COMPLIANCE: Use proper hex distance calculation
+            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
             if distance <= 1:
                 return True
     return False

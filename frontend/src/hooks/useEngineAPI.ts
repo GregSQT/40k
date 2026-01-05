@@ -243,25 +243,7 @@ export const useEngineAPI = () => {
       
       const data = await response.json();
 
-      // Debug: log advance action responses
-      if (action.action === "advance" || data.result?.advance_destinations) {
-        console.log("🟠 ADVANCE ACTION RESPONSE:", {
-          action: action.action,
-          unitId: action.unitId,
-          result: data.result,
-          hasAdvanceDestinations: !!data.result?.advance_destinations,
-          advanceRoll: data.result?.advance_roll,
-          phase: data.game_state?.phase,
-          fullResult: JSON.stringify(data.result, null, 2),
-          error: data.result?.error
-        });
-      }
 
-      // ONLY LOG FIGHT PHASE FOR DEBUGGING
-      if (data.game_state?.phase === "fight") {
-        console.log("🎯 Backend result:", data.result);
-        console.log("🎯 game_state.action_logs:", data.game_state?.action_logs);
-      }
 
       // Process detailed backend action logs FIRST
       if (data.action_logs && data.action_logs.length > 0) {
@@ -336,7 +318,6 @@ export const useEngineAPI = () => {
           // Advance was executed - show badge with the roll value
           const unitId = parseInt(data.result.unitId || lastActionRef.current.unitId);
           const advanceRollValue = data.result.advance_range; // Backend returns advance_range, use as advance_roll
-          console.log("🟠 ADVANCE EXECUTED: Displaying advance roll badge", { unitId, advanceRollValue });
           setAdvanceRoll(advanceRollValue);
           setAdvancingUnitId(unitId);
           // Keep selected unit to show badge
@@ -369,7 +350,6 @@ export const useEngineAPI = () => {
           
           // Process backend cleanup signals
           if (data.result?.clear_preview) {
-            console.log("🧹 Backend requested preview cleanup");
             setTargetPreview(null);
           }
           
@@ -403,7 +383,6 @@ export const useEngineAPI = () => {
           }
           
           if (data.result?.clear_attack_preview && !advanceWarningPopup) {
-            console.log("🧹 Backend requested attack preview clear");
             setMode("select");
           }
           
@@ -537,9 +516,6 @@ export const useEngineAPI = () => {
 
         // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance activation response
         if (data.result?.advance_destinations && data.result?.advance_roll) {
-          console.log("🟠 ADVANCE ACTIVATION: Valid destinations received, switching to advancePreview mode");
-          console.log("🟠 Advance roll:", data.result.advance_roll);
-          console.log("🟠 Valid destinations count:", data.result.advance_destinations.length);
           // Clear shooting preview when entering advancePreview mode (from either advance button click or unit activation)
           if (targetPreview?.blinkTimer) {
             clearInterval(targetPreview.blinkTimer);
@@ -557,15 +533,8 @@ export const useEngineAPI = () => {
           setSelectedUnitId(parseInt(data.result.unitId));
           setMode("advancePreview" as GameMode);
         }
-        // Handle movement activation response with valid destinations - DIAGNOSTIC LOGS
+        // Handle movement activation response with valid destinations
         else if (data.result?.valid_destinations && data.result?.waiting_for_player && data.game_state?.phase === "move") {
-          console.log("🏃 MOVEMENT ACTIVATION RESPONSE:", {
-            unitId: data.result.unitId,
-            valid_destinations_count: data.result.valid_destinations.length,
-            valid_destinations: data.result.valid_destinations,
-            active_movement_unit: data.game_state.active_movement_unit,
-            valid_move_destinations_pool: data.game_state.valid_move_destinations_pool
-          });
           setSelectedUnitId(parseInt(data.result.unitId));
           // Note: valid_destinations are stored in game_state.valid_move_destinations_pool
           // BoardPvp will read them from gameState to display green hexes
@@ -573,10 +542,6 @@ export const useEngineAPI = () => {
         // Handle charge activation response with valid destinations
         // MUST be after setGameState to prevent being overwritten
         else if (data.result?.valid_destinations && data.result?.waiting_for_player) {
-          console.log("🎯 CHARGE ACTIVATION: Valid destinations received, switching to chargePreview mode");
-          console.log("🎯 Valid destinations count:", data.result.valid_destinations.length);
-          console.log("🎯 Charge roll:", data.result.charge_roll);
-          console.log("🎯 Setting selectedUnitId to:", data.result.unitId);
           setChargeDestinations(data.result.valid_destinations);
           setSelectedUnitId(parseInt(data.result.unitId));
           setMode("chargePreview");
@@ -584,7 +549,6 @@ export const useEngineAPI = () => {
         // NEW RULE: Handle charge failure - show failed roll badge
         // Use EXACT same logic as successful charges: reset mode immediately, store targetId
         else if (data.result?.charge_failed && data.result?.charge_roll !== undefined) {
-          console.log("🎯 CHARGE FAILED: Roll too low", data.result.charge_roll);
           const failedUnitId = parseInt(data.result.unitId || "0");
           const targetId = data.result.targetId ? parseInt(data.result.targetId) : undefined;
           // Store failed charge info for badge display
@@ -627,10 +591,6 @@ export const useEngineAPI = () => {
         }
         // Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
         else if (data.game_state?.phase === "fight" && data.result?.waiting_for_player && data.result?.valid_targets) {
-          console.log("✅ FIGHT CONDITION MATCHED - staying in attackPreview");
-          console.log("🎯 FIGHT ATTACK: Unit still has attacks left, staying in attackPreview mode");
-          console.log("🎯 Valid targets:", data.result.valid_targets);
-          console.log("🎯 ATTACK_LEFT:", data.result.ATTACK_LEFT);
 
           // Keep the attacking unit selected and show valid targets
           const unitId = parseInt(data.result.unitId || data.game_state.active_fight_unit);
@@ -662,13 +622,6 @@ export const useEngineAPI = () => {
         }
         // Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
         else if (data.game_state?.phase === "fight" && data.result?.activation_ended) {
-          console.log("🎯 FIGHT COMPLETE: Activation ended, resetting to select mode");
-          console.log("🔍 FIGHT POOLS AFTER ACTIVATION:", {
-            fight_subphase: data.game_state.fight_subphase,
-            charging_pool: data.game_state.charging_activation_pool,
-            non_active_pool: data.game_state.non_active_alternating_activation_pool,
-            active_pool: data.game_state.active_alternating_activation_pool
-          });
           // Clear blinking
           if (blinkingUnits.blinkTimer) {
             clearInterval(blinkingUnits.blinkTimer);
@@ -825,7 +778,6 @@ export const useEngineAPI = () => {
     
     // Block unit selection when in advancePreview or chargePreview mode (but allow deselection with null)
     if ((mode === "advancePreview" || mode === "chargePreview") && numericUnitId !== null) {
-      console.log("🟠 Blocked unit selection: in", mode, "mode");
       return;
     }
     
@@ -833,7 +785,6 @@ export const useEngineAPI = () => {
     if (gameState && gameState.phase === "shoot") {
       if (numericUnitId === null && mode === "attackPreview" && selectedUnitId !== null) {
         // Shooting phase: postpone (deselect active unit, return to pool)
-        console.log("🧹 POSTPONING shoot (deselecting in attackPreview mode), unitId:", selectedUnitId);
         const activeShooterId = gameState.active_shooting_unit;
         if (activeShooterId) {
           await executeAction({
@@ -894,18 +845,12 @@ export const useEngineAPI = () => {
           unitId: numericUnitId.toString()
         });
         return;
-      } else {
-        console.warn("⚠️ MOVEMENT SELECT: Unit NOT in activation pool", {
-          unitId: numericUnitId,
-          pool: moveActivationPool
-        });
       }
     }
     
     // Normal unit selection for other phases
     // If deselecting in chargePreview mode, send postpone action to backend
     if (numericUnitId === null && mode === "chargePreview" && selectedUnitId !== null) {
-      console.log("🧹 POSTPONING charge (deselecting in chargePreview mode), unitId:", selectedUnitId);
       await executeAction({
         action: "left_click",
         unitId: selectedUnitId.toString(),
@@ -913,7 +858,6 @@ export const useEngineAPI = () => {
       });
       setChargeDestinations([]);
     } else if (numericUnitId === null && mode === "advancePreview") {
-      console.log("🧹 CLEARING advanceDestinations (deselecting in advancePreview mode)");
       setAdvanceDestinations([]);
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
@@ -1020,24 +964,17 @@ export const useEngineAPI = () => {
 
   // Charge activation - sends left_click to trigger 2d6 roll and destination building
   const handleActivateCharge = useCallback(async (chargerId: number | string) => {
-    console.log("🎯 handleActivateCharge called with chargerId:", chargerId);
     const numericChargerId = typeof chargerId === 'string' ? parseInt(chargerId) : chargerId;
-    console.log("🎯 Converted to numeric:", numericChargerId);
 
     // Send left_click action to backend
     // Backend will call _handle_unit_activation which:
     // 1. Rolls 2d6 for charge_range
     // 2. Builds valid_charge_destinations_pool via BFS pathfinding
     // 3. Returns destinations for orange highlighting
-    console.log("🎯 Sending executeAction with:", {
-      action: "left_click",
-      unitId: numericChargerId.toString()
-    });
     await executeAction({
       action: "left_click",
       unitId: numericChargerId.toString()
     });
-    console.log("🎯 executeAction completed");
   }, [executeAction]);
 
   // Fight activation - sends activate_unit to activate unit and get valid targets
@@ -1058,8 +995,6 @@ export const useEngineAPI = () => {
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
   const handleAdvance = useCallback(async (unitId: number) => {
-    console.log("🟠 handleAdvance called with unitId:", unitId);
-    
     // Cancel target preview IMMEDIATELY (replace shooting preview with advance preview)
     // Clear blinking timer if it exists
     if (targetPreview?.blinkTimer) {
@@ -1088,7 +1023,6 @@ export const useEngineAPI = () => {
       });
     } else {
       // Auto-confirm: execute advance directly (bypass popup)
-      console.log("🟠 Advance warning disabled - auto-confirming");
       await executeAction({
         action: "advance",
         unitId: unitId.toString()
@@ -1101,8 +1035,6 @@ export const useEngineAPI = () => {
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Cancel advance action
   const handleCancelAdvance = useCallback(async () => {
-    console.log("🟠 handleCancelAdvance called");
-    
     // Get the advancing unit ID before clearing state
     const unitIdToSkip = advancingUnitId;
     
@@ -1127,7 +1059,6 @@ export const useEngineAPI = () => {
     if (!advanceWarningPopup) return;
     
     const unitId = advanceWarningPopup.unitId;
-    console.log("🟠 Advance warning confirmed, executing advance for unit:", unitId);
     
     // Clear popup
     setAdvanceWarningPopup(null);
@@ -1154,7 +1085,6 @@ export const useEngineAPI = () => {
 
   // Handle advance warning popup cancellation
   const handleCancelAdvanceWarning = useCallback(() => {
-    console.log("🟠 Advance warning cancelled, resetting selection");
     // Clear popup
     setAdvanceWarningPopup(null);
     // Clear all advance-related state and reset to selection mode
@@ -1171,7 +1101,6 @@ export const useEngineAPI = () => {
     if (!advanceWarningPopup) return;
     
     const unitIdToSkip = advanceWarningPopup.unitId;
-    console.log("🟠 Advance warning skipped, skipping unit:", unitIdToSkip);
     
     // Clear popup
     setAdvanceWarningPopup(null);
@@ -1192,7 +1121,6 @@ export const useEngineAPI = () => {
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance move to destination
   const handleAdvanceMove = useCallback(async (unitId: number | string, destCol: number, destRow: number) => {
-    console.log("🟠 handleAdvanceMove called with:", { unitId, destCol, destRow });
     const numericUnitId = typeof unitId === 'string' ? parseInt(unitId) : unitId;
 
     // Send advance action with destination to backend
@@ -1225,7 +1153,6 @@ export const useEngineAPI = () => {
   }, [executeAction]);
 
   const handleMoveCharger = useCallback(async (chargerId: number | string, destCol: number, destRow: number) => {
-    console.log("🎯 handleMoveCharger called with:", { chargerId, destCol, destRow });
     const numericChargerId = typeof chargerId === 'string' ? parseInt(chargerId) : chargerId;
 
     // Find target enemy adjacent to destination
@@ -1261,8 +1188,6 @@ export const useEngineAPI = () => {
       return;
     }
 
-    console.log("🎯 Target enemy found:", targetEnemy.id);
-
     // Send charge action with correct field names
     await executeAction({
       action: "charge",
@@ -1271,7 +1196,6 @@ export const useEngineAPI = () => {
       destRow: destRow,
       targetId: targetEnemy.id.toString()
     });
-    console.log("🎯 handleMoveCharger completed");
   }, [executeAction, gameState]);
 
   const handleStartTargetPreview = useCallback(async (shooterId: number | string, targetId: number | string) => {
@@ -1405,13 +1329,10 @@ export const useEngineAPI = () => {
       }
       return gameState.shoot_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
     } else if (gameState.phase === 'charge') {
-      console.log("🔍 [FRONTEND] getEligibleUnitIds charge phase - charge_activation_pool:", gameState.charge_activation_pool);
       if (!gameState.charge_activation_pool || gameState.charge_activation_pool.length === 0) {
-        console.log("🔍 [FRONTEND] getEligibleUnitIds charge phase - pool is empty or missing");
         return []; // Empty pool is valid - phase will auto-advance
       }
       const eligible = gameState.charge_activation_pool.map(id => parseInt(id)).filter(id => !isNaN(id));
-      console.log("🔍 [FRONTEND] getEligibleUnitIds charge phase - returning eligible:", eligible);
       return eligible;
     } else if (gameState.phase === 'fight') {
       // Fight phase has sub-phases - only show units from current sub-phase
@@ -1457,7 +1378,6 @@ export const useEngineAPI = () => {
   }, [gameState]);
 
   const getChargeDestinations = useCallback(() => {
-    console.log("🔍 getChargeDestinations called, returning:", chargeDestinations.length, "destinations");
     return chargeDestinations;
   }, [chargeDestinations]);
 
@@ -1676,15 +1596,11 @@ export const useEngineAPI = () => {
     // Export charge target ID for target icon display (for both successful and failed charges)
     chargeTargetId: (() => {
       const targetId = failedChargeRoll?.targetId || successfulChargeTarget?.targetId || null;
-      if (targetId) {
-        console.log("🎯 Exporting chargeTargetId:", targetId, "from failedChargeRoll:", failedChargeRoll?.targetId, "from successfulChargeTarget:", successfulChargeTarget?.targetId);
-      }
       return targetId;
     })(),
     // Add AI turn execution for PvE mode
     executeAITurn: async () => {
       if (aiTurnInProgress) {
-        console.log('executeAITurn already running, skipping');
         return;
       }
       aiTurnInProgress = true;
@@ -1695,56 +1611,7 @@ export const useEngineAPI = () => {
       // Check if AI has eligible units in current phase FIRST
       const phaseCheck = gameState.phase;
       
-      // Calculate aiUnitsInPool for logging (all phases)
-      let aiUnitsInPoolForLog = 0;
-      if (phaseCheck === 'shoot' && gameState?.shoot_activation_pool) {
-        aiUnitsInPoolForLog = gameState.shoot_activation_pool.filter(id => {
-          const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 2;
-        }).length;
-      } else if (phaseCheck === 'move' && gameState?.move_activation_pool) {
-        aiUnitsInPoolForLog = gameState.move_activation_pool.filter(id => {
-          const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 2;
-        }).length;
-      } else if (phaseCheck === 'charge' && gameState?.charge_activation_pool) {
-        aiUnitsInPoolForLog = gameState.charge_activation_pool.filter(id => {
-          const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 2;
-        }).length;
-      } else if (phaseCheck === 'fight') {
-        const fightSubphase = gameState?.fight_subphase;
-        let fightPool: string[] = [];
-        if (fightSubphase === 'charging' && gameState?.charging_activation_pool) {
-          fightPool = gameState.charging_activation_pool;
-        } else if (fightSubphase === 'alternating_active' && gameState?.active_alternating_activation_pool) {
-          fightPool = gameState.active_alternating_activation_pool;
-        } else if (fightSubphase === 'alternating_non_active' && gameState?.non_active_alternating_activation_pool) {
-          fightPool = gameState.non_active_alternating_activation_pool;
-        } else if (fightSubphase === 'cleanup_active' && gameState?.active_alternating_activation_pool) {
-          fightPool = gameState.active_alternating_activation_pool;
-        } else if (fightSubphase === 'cleanup_non_active' && gameState?.non_active_alternating_activation_pool) {
-          fightPool = gameState.non_active_alternating_activation_pool;
-        }
-        aiUnitsInPoolForLog = fightPool.filter(id => {
-          const unit = gameState?.units.find(u => String(u.id) === String(id));
-          return unit?.player === 2;
-        }).length;
-      }
-      
-      console.log('executeAITurn check:', {
-        hasGameState: !!gameState,
-        gameStatePveMode: gameState?.pve_mode,
-        isPvEFromURL,
-        currentPlayer: gameState?.current_player,
-        phase: phaseCheck,
-        fight_subphase: gameState?.fight_subphase,
-        aiUnitsInPool: aiUnitsInPoolForLog,
-        willProceed: !(!gameState || (!gameState.pve_mode && !isPvEFromURL))
-      });
-      
       if (!gameState || (!gameState.pve_mode && !isPvEFromURL)) {
-        console.log('executeAITurn returning early - not PvE mode');
         aiTurnInProgress = false;
         return;
       }
@@ -1752,7 +1619,6 @@ export const useEngineAPI = () => {
       // CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
       // Only check current_player for non-fight phases
       if (phaseCheck !== 'fight' && gameState.current_player !== 2) {
-        console.log(`executeAITurn skipped - not AI player turn (current: ${gameState.current_player}, phase: ${phaseCheck})`);
         aiTurnInProgress = false;
         return;
       }
@@ -1776,11 +1642,9 @@ export const useEngineAPI = () => {
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
           return unit && unit.player === 2;
         }).length;
-        console.log(`🔍 [FRONTEND] Charge phase AI eligible count: ${eligibleAICount} from pool size ${gameState.charge_activation_pool.length}`);
       } else if (phaseCheck === 'fight') {
         // Fight phase has 3 sub-phases with different pools
         const fightSubphase = gameState.fight_subphase;
-        console.log(`🔍 [FRONTEND] Fight phase detected: fight_subphase=${fightSubphase}`);
         
         let fightPool: string[] = [];
         if (fightSubphase === 'charging' && gameState.charging_activation_pool) {
@@ -1800,16 +1664,12 @@ export const useEngineAPI = () => {
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
           return unit && unit.player === 2;
         }).length;
-        console.log(`🔍 [FRONTEND] Fight phase AI eligible count: ${eligibleAICount} from pool size ${fightPool.length}`);
       }
       
       if (eligibleAICount === 0) {
-        console.log(`executeAITurn skipped - AI has no eligible units in ${phaseCheck} phase`);
         aiTurnInProgress = false;
         return;
       }
-      
-      console.log(`executeAITurn proceeding - AI has ${eligibleAICount} eligible units in ${phaseCheck} phase`);
       
       // Check if AI has eligible units in current phase (already checked above, but keeping for clarity)
       const currentPhase = gameState.phase;
@@ -1855,14 +1715,9 @@ export const useEngineAPI = () => {
       }
       
       if (aiEligibleUnits === 0) {
-        console.log(`executeAITurn returning early - no eligible AI units in ${currentPhase} phase`);
         aiTurnInProgress = false;
         return;
       }
-      
-      console.log(`executeAITurn proceeding - AI has ${aiEligibleUnits} eligible units in ${currentPhase} phase`);
-      
-      console.log('executeAITurn proceeding with sequential AI processing');
       
       // Helper function to make AI movement decision
       const makeMovementDecision = (validDestinations: number[][], unitId: string, currentGameState: APIGameState) => {
@@ -1897,25 +1752,19 @@ export const useEngineAPI = () => {
           };
         }
         
+        // CRITICAL FIX: Use proper hex distance calculation (cubeDistance from gameHelpers)
         const nearestEnemy = enemies.reduce((nearest, enemy) => {
-          const distToCurrent = Math.abs(enemy.col - currentUnit.col) + Math.abs(enemy.row - currentUnit.row);
-          const distToNearest = Math.abs(nearest.col - currentUnit.col) + Math.abs(nearest.row - currentUnit.row);
+          const distToCurrent = cubeDistance(offsetToCube(currentUnit.col, currentUnit.row), offsetToCube(enemy.col, enemy.row));
+          const distToNearest = cubeDistance(offsetToCube(currentUnit.col, currentUnit.row), offsetToCube(nearest.col, nearest.row));
           return distToCurrent < distToNearest ? enemy : nearest;
         });
         
-        console.log(`AI DECISION DEBUG: Nearest enemy at (${nearestEnemy.col}, ${nearestEnemy.row})`);
-        
         // Pick destination closest to nearest enemy FROM VALID DESTINATIONS ONLY
         const bestDestination = validDestinations.reduce((best, dest) => {
-          const distToEnemy = Math.abs(dest[0] - nearestEnemy.col) + Math.abs(dest[1] - nearestEnemy.row);
-          const bestDistToEnemy = Math.abs(best[0] - nearestEnemy.col) + Math.abs(best[1] - nearestEnemy.row);
-          // console.log(`AI DECISION CALC: Destination (${dest[0]}, ${dest[1]}) distance to enemy: ${distToEnemy}, current best: ${bestDistToEnemy}`);
+          const distToEnemy = cubeDistance(offsetToCube(dest[0], dest[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
+          const bestDistToEnemy = cubeDistance(offsetToCube(best[0], best[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
           return distToEnemy < bestDistToEnemy ? dest : best;
         });
-        
-        console.log(`AI DECISION FINAL: Selected destination (${bestDestination[0]}, ${bestDestination[1]}) from ${validDestinations.length} valid options`);
-        console.log(`AI DECISION FINAL: Target enemy at (${nearestEnemy.col}, ${nearestEnemy.row})`);
-        console.log(`AI DECISION FINAL: Is selected destination in valid list?`, validDestinations.some(dest => dest[0] === bestDestination[0] && dest[1] === bestDestination[1]));
         
         return {
           action: 'move',
@@ -1948,8 +1797,8 @@ export const useEngineAPI = () => {
           
           if (!target || !nearestTargetUnit) return nearest;
           
-          const distToCurrent = Math.abs(target.col - shooter.col) + Math.abs(target.row - shooter.row);
-          const distToNearest = Math.abs(nearestTargetUnit.col - shooter.col) + Math.abs(nearestTargetUnit.row - shooter.row);
+          const distToCurrent = cubeDistance(offsetToCube(target.col, target.row), offsetToCube(shooter.col, shooter.row));
+          const distToNearest = cubeDistance(offsetToCube(nearestTargetUnit.col, nearestTargetUnit.row), offsetToCube(shooter.col, shooter.row));
           
           return distToCurrent < distToNearest ? targetId : nearest;
         });
@@ -1987,7 +1836,6 @@ export const useEngineAPI = () => {
           }
           
           const activationData = await aiResponse.json();
-          console.log(`AI Step ${iteration} ACTIVATION:`, activationData);
           
           // Process AI activation logs immediately
           if (activationData.action_logs && activationData.action_logs.length > 0) {
@@ -2012,8 +1860,6 @@ export const useEngineAPI = () => {
               [key: string]: unknown;
             }
             activationData.action_logs.forEach((logEntry: ActivationLogEntry) => {
-              console.log(`🎯 AI ACTIVATION LOG: ${logEntry.message}`);
-              
               window.dispatchEvent(new CustomEvent('backendLogEvent', {
                 detail: {
                   type: logEntry.type,
@@ -2049,8 +1895,6 @@ export const useEngineAPI = () => {
           
           // Step 2: Check if we got a preview response requiring decision
           if (activationData.result?.waiting_for_player) {
-            console.log(`AI Step ${iteration}: Preview received - making immediate decision`);
-            
             let aiDecision;
             const unitId = activationData.result?.unitId || 
                           (activationData.game_state?.active_movement_unit) ||
@@ -2082,21 +1926,21 @@ export const useEngineAPI = () => {
                   
                   // Find nearest enemy
                   const nearestEnemy = enemies.reduce((nearest: ChargeUnit, enemy: ChargeUnit) => {
-                    const distToCurrent = Math.abs(enemy.col - currentUnit.col) + Math.abs(enemy.row - currentUnit.row);
-                    const distToNearest = Math.abs(nearest.col - currentUnit.col) + Math.abs(nearest.row - currentUnit.row);
+                    const distToCurrent = cubeDistance(offsetToCube(enemy.col, enemy.row), offsetToCube(currentUnit.col, currentUnit.row));
+                    const distToNearest = cubeDistance(offsetToCube(nearest.col, nearest.row), offsetToCube(currentUnit.col, currentUnit.row));
                     return distToCurrent < distToNearest ? enemy : nearest;
                   });
                   
                   // Pick destination closest to nearest enemy
                   const bestDestination = validDestinations.reduce((best: number[], dest: number[]) => {
-                    const distToEnemy = Math.abs(dest[0] - nearestEnemy.col) + Math.abs(dest[1] - nearestEnemy.row);
-                    const bestDistToEnemy = Math.abs(best[0] - nearestEnemy.col) + Math.abs(best[1] - nearestEnemy.row);
+                    const distToEnemy = cubeDistance(offsetToCube(dest[0], dest[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
+                    const bestDistToEnemy = cubeDistance(offsetToCube(best[0], best[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
                     return distToEnemy < bestDistToEnemy ? dest : best;
                   });
                   
                   // Find enemy adjacent to destination (target for charge)
                   const targetEnemy = enemies.find((enemy: ChargeUnit) => {
-                    const dist = Math.abs(enemy.col - bestDestination[0]) + Math.abs(enemy.row - bestDestination[1]);
+                    const dist = cubeDistance(offsetToCube(enemy.col, enemy.row), offsetToCube(bestDestination[0], bestDestination[1]));
                     return dist === 1; // Adjacent
                   });
                   
@@ -2133,8 +1977,6 @@ export const useEngineAPI = () => {
               break;
             }
             
-            console.log(`AI Step ${iteration}: Decision made:`, aiDecision);
-            
             // Step 4: Send AI decision immediately
             const decisionResponse = await fetch(`${API_BASE}/game/action`, {
               method: 'POST',
@@ -2147,7 +1989,6 @@ export const useEngineAPI = () => {
             }
             
             const decisionData = await decisionResponse.json();
-            console.log(`AI Step ${iteration}: Decision executed:`, decisionData);
             
             if (decisionData.success) {
               // Process action logs
@@ -2173,9 +2014,6 @@ export const useEngineAPI = () => {
                   [key: string]: unknown;
                 }
                 decisionData.action_logs.forEach((logEntry: DecisionLogEntry) => {
-                  console.log(`🎯 AI ACTION LOG: ${logEntry.message}`);
-                  console.log("🎯 ACTION LOG FULL DATA:", logEntry);
-                  
                   window.dispatchEvent(new CustomEvent('backendLogEvent', {
                     detail: {
                       type: logEntry.type,
@@ -2207,7 +2045,6 @@ export const useEngineAPI = () => {
               
               // Check if phase complete
               if (decisionData.result?.phase_complete) {
-                console.log(`AI Step ${iteration}: Phase complete`);
                 break;
               }
               
@@ -2218,12 +2055,10 @@ export const useEngineAPI = () => {
             
           } else if (activationData.result?.activation_ended) {
             // Unit completed activation immediately (SKIP, no valid targets, etc.)
-            console.log(`AI Step ${iteration}: Unit completed immediately - ${activationData.result.endType}`);
             totalUnitsProcessed++;
             
             // Check if phase complete after unit completion
             if (activationData.result?.phase_complete) {
-              console.log(`AI Step ${iteration}: Phase complete after unit completion`);
               break;
             }
             
@@ -2251,11 +2086,8 @@ export const useEngineAPI = () => {
               currentPoolSize = updatedGameState.charge_activation_pool.length;
             }
             
-            console.log(`AI Step ${iteration}: Pool size after skip: ${currentPoolSize}`);
-            
             // If pool is empty, break
             if (currentPoolSize === 0) {
-              console.log(`AI Step ${iteration}: Pool is empty - breaking`);
               break;
             }
             
@@ -2305,7 +2137,6 @@ export const useEngineAPI = () => {
             }
             
             if (!hasMoreEligibleUnits) {
-              console.log(`AI Step ${iteration}: No more eligible AI units in pool - breaking`);
               break;
             }
             
@@ -2317,12 +2148,10 @@ export const useEngineAPI = () => {
             
           } else if (activationData.result?.phase_complete) {
             // Phase already complete
-            console.log(`AI Step ${iteration}: Phase complete - no more units`);
             break;
             
           } else {
-            // Unexpected response format
-            console.log(`AI Step ${iteration}: Unexpected response - continuing`);
+            // Unexpected response format - continue
           }
           
           // Small delay for UX
@@ -2332,8 +2161,6 @@ export const useEngineAPI = () => {
         if (iteration >= maxIterations) {
           console.warn(`AI reached maximum iterations (${maxIterations})`);
         }
-        
-        console.log(`AI Turn Complete: processed ${totalUnitsProcessed} units in ${iteration} steps`);
         
       } catch (err) {
         console.error('AI turn error:', err);

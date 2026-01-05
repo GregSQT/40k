@@ -106,37 +106,28 @@ class PvEController:
             valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
             if valid_actions:
                 action_int = valid_actions[0]
-                print(f"🔍 [AI_DECISION] Predicted action {predicted_action} was invalid, using first valid action: {action_int}")
             else:
                 # No valid actions - should not happen, but fallback to wait
                 action_int = 11
-                print(f"⚠️ [AI_DECISION] No valid actions in mask, using wait action")
         else:
             action_int = predicted_action
         
         # Convert to semantic action using engine's method
         semantic_action = engine.action_decoder.convert_gym_action(action_int, game_state)
-        print(f"🔍 [AI_DECISION] Model predicted action_int={predicted_action}, masked to {action_int}, phase={game_state.get('phase')}")
-        print(f"🔍 [AI_DECISION] convert_gym_action returned: {semantic_action}")
         
         # Ensure AI player context
         current_player = game_state["current_player"]
         if current_player == 2:  # AI player
             # Get eligible units from current phase pool
             current_phase = game_state["phase"]
-            print(f"🔍 [AI_DECISION] Current phase: {current_phase}, player: {current_player}")
             if current_phase == "move":
-                print(f"🔍 [AI_DECISION] Move phase detected")
                 if "move_activation_pool" not in game_state:
                     raise KeyError("game_state missing required 'move_activation_pool' field")
                 eligible_pool = game_state["move_activation_pool"]
-                print(f"🔍 [AI_DECISION] Move activation pool: {eligible_pool}")
             elif current_phase == "shoot":
-                print(f"🔍 [AI_DECISION] Shoot phase detected")
                 if "shoot_activation_pool" not in game_state:
                     raise KeyError("game_state missing required 'shoot_activation_pool' field")
                 eligible_pool = game_state["shoot_activation_pool"]
-                print(f"🔍 [AI_DECISION] Shoot activation pool: {eligible_pool}")
                 if "shoot_activation_pool" not in game_state:
                     raise KeyError("game_state missing required 'shoot_activation_pool' field")
                 eligible_pool = game_state["shoot_activation_pool"]
@@ -174,18 +165,15 @@ class PvEController:
                     eligible_pool = []
             elif current_phase == "charge":
                 # Charge phase
-                print(f"🔍 [AI_DECISION] Charge phase detected")
                 if "charge_activation_pool" not in game_state:
                     raise KeyError("game_state missing required 'charge_activation_pool' field")
                 eligible_pool = game_state["charge_activation_pool"]
-                print(f"🔍 [AI_DECISION] Charge activation pool: {eligible_pool}")
             elif current_phase == "command":
                 # Command phase: empty pool for now, ready for future
                 if "command_activation_pool" not in game_state:
                     eligible_pool = []
                 else:
                     eligible_pool = game_state["command_activation_pool"]
-                print(f"🔍 [AI_DECISION] Command phase detected, pool: {eligible_pool}")
             else:
                 eligible_pool = []
             
@@ -199,7 +187,6 @@ class PvEController:
             
             if ai_unit_id:
                 semantic_action["unitId"] = ai_unit_id
-                print(f"🔍 [AI_DECISION] Found AI unit in pool: {ai_unit_id}")
             else:
                 print(f"⚠️ [AI_DECISION] No AI unit found in eligible pool: {eligible_pool}")
             

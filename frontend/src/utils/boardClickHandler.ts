@@ -44,8 +44,6 @@ export function setupBoardClickHandler(callbacks: {
       clickType?: 'left' | 'right';
     }>).detail;
 
-    console.log("🔵 UNIT CLICK HANDLER:", { unitId, phase, mode, selectedUnitId, clickType });
-
     // Ignore unit clicks in advancePreview mode - hex clicks are handled by hex handler
     if (mode === 'advancePreview') {
       return;
@@ -119,7 +117,6 @@ export function setupBoardClickHandler(callbacks: {
       }
       return; // Prevent fallthrough to other handlers
     } else if (phase === 'charge' && mode === 'chargePreview' && selectedUnitId !== null) {
-      console.log("  ✅ CHARGE PREVIEW LOGIC TRIGGERED");
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
           console.log("    - Right click on active unit → cancel charge (skip)");

@@ -177,23 +177,10 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
         // chargeCells come as [col, row] arrays from backend, not {col, row} objects
         const isChargeable = chargeCells.some(cell => {
           if (Array.isArray(cell)) {
-            const matches = cell[0] === col && cell[1] === row;
-            if (matches) {
-              console.log(`🟠 ARRAY FORMAT MATCH at (${col}, ${row}) from cell:`, cell);
-            }
-            return matches;
+            return cell[0] === col && cell[1] === row;
           }
-          const matches = cell.col === col && cell.row === row;
-          if (matches) {
-            console.log(`🟠 OBJECT FORMAT MATCH at (${col}, ${row}) from cell:`, cell);
-          }
-          return matches;
+          return cell.col === col && cell.row === row;
         });
-
-        // Debug charge hex detection
-        if (isChargeable) {
-          console.log(`🟠 CHARGE HEX DETECTED at (${col}, ${row})`);
-        }
 
         // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance destinations (orange)
         const isAdvanceDestination = advanceCells.some(cell => cell.col === col && cell.row === row);
