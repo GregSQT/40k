@@ -146,8 +146,8 @@ class UnitRegistry:
         
         # Extract faction from base class name
         # Handle both 4-part and 2-part base class naming patterns
-        # 4-part: SpaceMarineInfantryTroopRangedSwarm → SpaceMarine
-        # 2-part: SpaceMarineMeleeUnit → SpaceMarine
+        # 4-part: SpaceMarineInfantryTroopRangedSwarm -> SpaceMarine
+        # 2-part: SpaceMarineMeleeUnit -> SpaceMarine
         if base_class.startswith('SpaceMarine'):
             faction = 'SpaceMarine'
         elif base_class.startswith('Tyranid'):

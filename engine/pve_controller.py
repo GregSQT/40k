@@ -248,7 +248,7 @@ class PvEController:
         # Filter out current position to force actual movement
         actual_moves = [dest for dest in valid_destinations if dest != current_pos]
         
-        # AI_TURN.md COMPLIANCE: No actual moves available → unit must WAIT, not attempt invalid move
+        # AI_TURN.md COMPLIANCE: No actual moves available -> unit must WAIT, not attempt invalid move
         if not actual_moves:
             raise ValueError(f"No valid movement destinations for unit {unit_id} - should use WAIT action")
         

@@ -141,7 +141,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if game_state_phase != "charge" or not charge_pool_exists:
         charge_phase_start(game_state)
 
-    # Pool empty? → Phase complete
+    # Pool empty? -> Phase complete
     if not game_state["charge_activation_pool"]:
         return True, charge_phase_end(game_state)
     
@@ -480,11 +480,13 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     orig_col, orig_row = unit["col"], unit["row"]
 
     # FINAL SAFETY CHECK: Redundant occupation check
+    # CRITICAL: Convert coordinates to int for consistent comparison
+    dest_col_int, dest_row_int = int(dest_col), int(dest_row)
     for check_unit in game_state["units"]:
         if (check_unit["id"] != unit["id"] and
             check_unit["HP_CUR"] > 0 and
-            check_unit["col"] == dest_col and
-            check_unit["row"] == dest_row):
+            int(check_unit["col"]) == dest_col_int and
+            int(check_unit["row"]) == dest_row_int):
             return False, {
                 "error": "occupation_safety_check_failed",
                 "occupant_id": check_unit["id"],
@@ -492,8 +494,23 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
             }
 
     # Execute charge
+    # CRITICAL: Log ALL position changes to detect unauthorized modifications
+    # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    phase = game_state.get("phase", "charge")
+    if "console_logs" not in game_state:
+        game_state["console_logs"] = []
+    log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via CHARGE"
+    game_state["console_logs"].append(log_message)
+    print(log_message)
+    
+    # CRITICAL: Log BEFORE each assignment to catch any modification
+    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col} row={dest_row}")
     unit["col"] = dest_col
+    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
     unit["row"] = dest_row
+    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
 
     # Mark as units_charged (NOT units_moved)
     game_state["units_charged"].add(unit["id"])
@@ -846,6 +863,18 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # CRITICAL: Convert coordinates to int to ensure consistent tuple comparison
     occupied_positions = {(int(u["col"]), int(u["row"])) for u in game_state["units"]
                          if u["HP_CUR"] > 0 and u["id"] != unit["id"]}
+    
+    # CRITICAL: Log occupied positions and all units for debugging position bugs
+    if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        phase = game_state.get("phase", "charge")
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        all_units_info = [f"Unit {u['id']} at ({int(u['col'])},{int(u['row'])}) HP={u.get('HP_CUR', 0)}" for u in game_state["units"]]
+        log_message = f"[CHARGE DEBUG] E{episode} T{turn} {phase} charge_build_valid_destinations Unit {unit_id}: occupied_positions={occupied_positions} all_units={all_units_info}"
+        game_state["console_logs"].append(log_message)
+        print(log_message)
 
     # BFS pathfinding to find all reachable hexes within charge_range
     visited = {start_pos: 0}
@@ -1080,7 +1109,7 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
     elif click_target == "friendly_unit":
         return False, {"error": "unit_switch_not_implemented"}
     elif click_target == "active_unit":
-        # AI_TURN.md Line 1409: Left click on active_unit → Charge postponed
+        # AI_TURN.md Line 1409: Left click on active_unit -> Charge postponed
         # Clear preview but keep unit in pool (different from skip which removes from pool)
         charge_clear_preview(game_state)
         # Clear charge roll if exists (postpone discards the roll)
@@ -1208,6 +1237,8 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "charge_roll": charge_roll,
             "charge_failed": True,
             "charge_failed_reason": "roll_too_low",
+            "start_pos": (unit["col"], unit["row"]),  # Position actuelle (from)
+            "end_pos": (dest_col, dest_row),  # Destination prévue (to)
             "activation_complete": True,
             # CRITICAL: Include action_logs in result so they're sent to frontend
             "action_logs": game_state.get("action_logs", [])
@@ -1373,8 +1404,8 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
     Handle skip action during charge phase
 
     Two cases per AI_TURN.md:
-    - Line 515: Valid destinations exist, agent chooses wait → end_activation (WAIT, 1, PASS, CHARGE)
-    - Line 518/536: No valid destinations OR cancel → end_activation (PASS, 0, PASS, CHARGE)
+    - Line 515: Valid destinations exist, agent chooses wait -> end_activation (WAIT, 1, PASS, CHARGE)
+    - Line 518/536: No valid destinations OR cancel -> end_activation (PASS, 0, PASS, CHARGE)
     """
     # Clear charge roll if unit skips
     if unit["id"] in game_state["charge_roll_values"]:

@@ -66,20 +66,20 @@ export function setupBoardClickHandler(callbacks: {
       console.log("  🎯 SHOOT SELECT MODE:", { selectedUnitId, unitId, clickType, hasOnSkipShoot: !!callbacks.onSkipShoot });
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
-          console.log("    → Right click on selected unit → calling onSkipShoot");
+          console.log("    -> Right click on selected unit -> calling onSkipShoot");
           callbacks.onSkipShoot?.(unitId, 'action');
         } else {
-          console.log("    → Left click on selected unit → calling onSelectUnit(null)");
+          console.log("    -> Left click on selected unit -> calling onSelectUnit(null)");
           callbacks.onSelectUnit(null);
         }
       } else if (clickType === 'right' && selectedUnitId === null) {
         // Handle right click on unit when nothing is selected
         // This allows canceling activation of a unit that was just activated but backend deselecte
         // (e.g., unit with no valid targets - backend responds and deselects before right click arrives)
-        console.log("    → Right click on unit (no selection) → calling onSkipShoot to cancel activation");
+        console.log("    -> Right click on unit (no selection) -> calling onSkipShoot to cancel activation");
         callbacks.onSkipShoot?.(unitId, 'action');
       } else {
-        console.log("    → Click on different unit → calling onSelectUnit");
+        console.log("    -> Click on different unit -> calling onSelectUnit");
         callbacks.onSelectUnit(unitId);
       }
       // Don't call onStartAttackPreview here - wait for backend response
@@ -102,7 +102,7 @@ export function setupBoardClickHandler(callbacks: {
     } else if (phase === 'charge' && mode === 'select') {
       console.log("  ✅ CHARGE SELECT LOGIC TRIGGERED");
       if (selectedUnitId === unitId && clickType === 'right') {
-        console.log("    - Right click on selected unit → skip charge");
+        console.log("    - Right click on selected unit -> skip charge");
         callbacks.onSkipUnit?.(unitId);
       } else {
         console.log("    - Activating charge unit:", unitId);
@@ -119,20 +119,20 @@ export function setupBoardClickHandler(callbacks: {
     } else if (phase === 'charge' && mode === 'chargePreview' && selectedUnitId !== null) {
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
-          console.log("    - Right click on active unit → cancel charge (skip)");
+          console.log("    - Right click on active unit -> cancel charge (skip)");
           callbacks.onSkipUnit?.(unitId);
         } else {
-          console.log("    - Left click on active unit → postpone charge (deselect)");
+          console.log("    - Left click on active unit -> postpone charge (deselect)");
           callbacks.onSelectUnit(null);
         }
       }
       return; // Prevent fallthrough to other handlers
     } else if (mode === 'movePreview') {
-      console.log("  ✅ MOVE PREVIEW LOGIC → calling onConfirmMove");
+      console.log("  ✅ MOVE PREVIEW LOGIC -> calling onConfirmMove");
       callbacks.onConfirmMove();
     } else if (phase === 'fight' && mode === 'select') {
       // Fight phase select mode - selecting a unit to activate
-      console.log("  ✅ FIGHT SELECT LOGIC → calling onSelectUnit and onActivateFight");
+      console.log("  ✅ FIGHT SELECT LOGIC -> calling onSelectUnit and onActivateFight");
       callbacks.onSelectUnit(unitId);
       if (callbacks.onActivateFight) {
         console.log("    - Calling onActivateFight with unitId:", unitId);
@@ -142,14 +142,14 @@ export function setupBoardClickHandler(callbacks: {
       }
     } else if (phase === 'fight' && mode === 'attackPreview' && selectedUnitId != null && selectedUnitId !== unitId) {
       // Fight phase attack preview - clicking on enemy to attack
-      console.log("  ✅ FIGHT ATTACK LOGIC (different unit) → calling onCombatAttack");
+      console.log("  ✅ FIGHT ATTACK LOGIC (different unit) -> calling onCombatAttack");
       callbacks.onCombatAttack(selectedUnitId, unitId);
     } else if (phase === 'fight' && mode === 'attackPreview' && selectedUnitId === unitId) {
       // Fight phase attack preview - clicking on self (no-op or cancel)
-      console.log("  ✅ FIGHT ATTACK LOGIC (same unit) → calling onCombatAttack");
+      console.log("  ✅ FIGHT ATTACK LOGIC (same unit) -> calling onCombatAttack");
       callbacks.onCombatAttack(selectedUnitId, null);
     } else {
-      console.log("  ✅ DEFAULT LOGIC → calling onSelectUnit");
+      console.log("  ✅ DEFAULT LOGIC -> calling onSelectUnit");
       console.log("    - No specific condition matched");
       console.log("    - Expected for shooting: phase='shoot' && mode='select'");
       console.log("    - Actual: phase='" + phase + "' && mode='" + mode + "'");
@@ -226,7 +226,7 @@ export function setupBoardClickHandler(callbacks: {
     }
   } else if (mode === 'advancePreview' && selectedUnitId !== null && phase === 'shoot') {
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance mode - clicking orange hex moves the unit
-    console.log("  ✅ ADVANCE MOVE LOGIC → calling onAdvanceMove");
+    console.log("  ✅ ADVANCE MOVE LOGIC -> calling onAdvanceMove");
     if (callbacks.onAdvanceMove) {
       callbacks.onAdvanceMove(selectedUnitId, col, row);
     }

@@ -710,14 +710,14 @@ class W40KMetricsTracker:
 
         PPO HEALTH (5 metrics):
         - 0_critical/d_loss_mean           - Overall learning health
-        - 0_critical/e_explained_variance  - >0.3 → Value function working
-        - 0_critical/f_clip_fraction       - [0.1-0.3] → Tune learning_rate
-        - 0_critical/g_approx_kl           - <0.02 → Policy stability
-        - 0_critical/h_entropy_loss        - [0.5-2.0] → Tune ent_coef
+        - 0_critical/e_explained_variance  - >0.3 -> Value function working
+        - 0_critical/f_clip_fraction       - [0.1-0.3] -> Tune learning_rate
+        - 0_critical/g_approx_kl           - <0.02 -> Policy stability
+        - 0_critical/h_entropy_loss        - [0.5-2.0] -> Tune ent_coef
 
         TECHNICAL HEALTH (2 metrics):
-        - 0_critical/i_gradient_norm       - <10 → No gradient explosion
-        - 0_critical/j_immediate_reward_ratio - <0.9 → Reward balance
+        - 0_critical/i_gradient_norm       - <10 -> No gradient explosion
+        - 0_critical/j_immediate_reward_ratio - <0.9 -> Reward balance
 
         NOTE: position_score moved to combat/ category
         """

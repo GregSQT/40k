@@ -426,11 +426,11 @@ class GameStateManager:
         if len(living_players) == 1:
             winner = living_players[0]
             if not self.quiet:
-                print(f"   → Winner: Player {winner} (elimination)")
+                print(f"   -> Winner: Player {winner} (elimination)")
             return winner
         elif len(living_players) == 0:
             if not self.quiet:
-                print(f"   → Draw: No survivors")
+                print(f"   -> Draw: No survivors")
             return -1
 
         # Check if game ended due to turn limit (turn 5 end or training config)
@@ -449,11 +449,11 @@ class GameStateManager:
 
             if obj_counts[0] > obj_counts[1]:
                 if not self.quiet:
-                    print(f"   → Winner: Player 0 ({obj_counts[0]} > {obj_counts[1]} objectives)")
+                    print(f"   -> Winner: Player 0 ({obj_counts[0]} > {obj_counts[1]} objectives)")
                 return 0
             elif obj_counts[1] > obj_counts[0]:
                 if not self.quiet:
-                    print(f"   → Winner: Player 1 ({obj_counts[1]} > {obj_counts[0]} objectives)")
+                    print(f"   -> Winner: Player 1 ({obj_counts[1]} > {obj_counts[0]} objectives)")
                 return 1
             else:
                 # Tiebreaker: More cumulated VALUE of living units wins
@@ -466,20 +466,20 @@ class GameStateManager:
 
                 if p0_value > p1_value:
                     if not self.quiet:
-                        print(f"   → Winner: Player 0 (tiebreaker: {p0_value} > {p1_value} VALUE)")
+                        print(f"   -> Winner: Player 0 (tiebreaker: {p0_value} > {p1_value} VALUE)")
                     return 0
                 elif p1_value > p0_value:
                     if not self.quiet:
-                        print(f"   → Winner: Player 1 (tiebreaker: {p1_value} > {p0_value} VALUE)")
+                        print(f"   -> Winner: Player 1 (tiebreaker: {p1_value} > {p0_value} VALUE)")
                     return 1
                 else:
                     if not self.quiet:
-                        print(f"   → Draw: Equal objectives and VALUE")
+                        print(f"   -> Draw: Equal objectives and VALUE")
                     return -1
 
         # Game still ongoing
         if not self.quiet:
-            print(f"   → Game ongoing: turn {current_turn}, both players have units")
+            print(f"   -> Game ongoing: turn {current_turn}, both players have units")
         return None
 
     def determine_winner_with_method(self, game_state: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:

@@ -280,9 +280,9 @@ export class UnitRenderer {
     
     // Grey-out enemies that are NOT valid shooting targets during shooting phase
     // ONLY apply when we have actual blinking data (prevents grey flash during loading)
-    // - Replay mode: blinkingUnits is undefined → skip greying
-    // - PvP mode before backend responds: blinkingUnits is [] or undefined → skip greying
-    // - PvP mode with targets: blinkingUnits has IDs → apply greying
+    // - Replay mode: blinkingUnits is undefined -> skip greying
+    // - PvP mode before backend responds: blinkingUnits is [] or undefined -> skip greying
+    // - PvP mode with targets: blinkingUnits has IDs -> apply greying
     if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
       const isShootable = this.props.isShootable !== undefined 
         ? this.props.isShootable 

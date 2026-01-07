@@ -456,7 +456,7 @@ class MetricsCollectionCallback(BaseCallback):
     def _on_rollout_start(self) -> None:
         """Called at start of rollout - capture training metrics from PREVIOUS policy update.
 
-        SB3 flow: rollout → train() → rollout → train() → ...
+        SB3 flow: rollout -> train() -> rollout -> train() -> ...
         The train() metrics are available at the START of the next rollout.
         """
         if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
@@ -506,9 +506,9 @@ class MetricsCollectionCallback(BaseCallback):
             clip_status = "✅" if 0.1 <= recent_clip <= 0.3 else "⚠️ "
             print(f"   Clip Fraction:      {recent_clip:.3f} {clip_status} (target: 0.1-0.3)")
             if recent_clip < 0.1:
-                print(f"      → Increase learning_rate (policy not updating enough)")
+                print(f"      ->  Increase learning_rate (policy not updating enough)")
             elif recent_clip > 0.3:
-                print(f"      → Decrease learning_rate (too aggressive updates)")
+                print(f"      -> Decrease learning_rate (too aggressive updates)")
         
         # Check explained_variance
         if len(self.metrics_tracker.hyperparameter_tracking['explained_variances']) >= 20:
@@ -516,7 +516,7 @@ class MetricsCollectionCallback(BaseCallback):
             ev_status = "✅" if recent_ev > 0.3 else "⚠️ "
             print(f"   Explained Variance: {recent_ev:.3f} {ev_status} (target: >0.3)")
             if recent_ev < 0.3:
-                print(f"      → Value function struggling - check reward signal")
+                print(f"      -> Value function struggling - check reward signal")
         
         # Check entropy
         if len(self.metrics_tracker.hyperparameter_tracking['entropy_losses']) >= 20:
@@ -524,9 +524,9 @@ class MetricsCollectionCallback(BaseCallback):
             entropy_status = "✅" if 0.5 <= recent_entropy <= 2.0 else "⚠️ "
             print(f"   Entropy Loss:       {recent_entropy:.3f} {entropy_status} (target: 0.5-2.0)")
             if recent_entropy < 0.5:
-                print(f"      → Increase ent_coef (exploration too low)")
+                print(f"      -> Increase ent_coef (exploration too low)")
             elif recent_entropy > 2.0:
-                print(f"      → Decrease ent_coef (exploration too high)")
+                print(f"      -> Decrease ent_coef (exploration too high)")
         
         # Check gradient_norm
         if hasattr(self.metrics_tracker, 'latest_gradient_norm') and self.metrics_tracker.latest_gradient_norm:
@@ -534,10 +534,10 @@ class MetricsCollectionCallback(BaseCallback):
             grad_status = "✅" if grad_norm < 10 else "⚠️ "
             print(f"   Gradient Norm:      {grad_norm:.3f} {grad_status} (target: <10)")
             if grad_norm > 10:
-                print(f"      → Reduce max_grad_norm or learning_rate")
+                print(f"      -> Reduce max_grad_norm or learning_rate")
         
         print(f"\n💡 TensorBoard: {self.metrics_tracker.log_dir}")
-        print(f"   → Focus on 0_critical/ namespace for hyperparameter tuning")
+        print(f"   -> Focus on 0_critical/ namespace for hyperparameter tuning")
         print("="*80 + "\n")
     
     def _run_final_bot_eval(self, model, training_config, training_config_name, rewards_config_name):

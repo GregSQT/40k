@@ -31,9 +31,9 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
     }
     
     # ├── Arg1 = ?
-    # │   ├── CASE Arg1 = ACTION → log the action
-    # │   ├── CASE Arg1 = WAIT → log the wait action
-    # │   └── CASE Arg1 = NO → do not log the action
+    # │   ├── CASE Arg1 = ACTION -> log the action
+    # │   ├── CASE Arg1 = WAIT -> log the wait action
+    # │   └── CASE Arg1 = NO -> do not log the action
     if arg1 == "ACTION":
         # Log the action (action already logged by handlers)
         response["action_logged"] = True
@@ -62,18 +62,18 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         response["no_logging"] = True
     
     # ├── Arg2 = 1 ?
-    # │   ├── YES → +1 step
-    # │   └── NO → No step increase
+    # │   ├── YES -> +1 step
+    # │   └── NO -> No step increase
     if arg2 == 1:
         game_state["episode_steps"] = game_state.get("episode_steps", 0) + 1
         response["step_incremented"] = True
     
     # ├── Arg3 =
-    # │ ├── CASE Arg3 = MOVE → Mark as units_moved
-    # │ ├── CASE Arg3 = FLED → Mark as units_moved AND Mark as units_fled
-    # │ ├── CASE Arg3 = SHOOTING → Mark as units_shot
-    # │ ├── CASE Arg3 = CHARGE → Mark as units_charged
-    # │ └── CASE Arg3 = FIGHT → Mark as units_fought
+    # │ ├── CASE Arg3 = MOVE -> Mark as units_moved
+    # │ ├── CASE Arg3 = FLED -> Mark as units_moved AND Mark as units_fled
+    # │ ├── CASE Arg3 = SHOOTING -> Mark as units_shot
+    # │ ├── CASE Arg3 = CHARGE -> Mark as units_charged
+    # │ └── CASE Arg3 = FIGHT -> Mark as units_fought
     if arg3 == "MOVE":
         if "units_moved" not in game_state:
             game_state["units_moved"] = set()
@@ -99,11 +99,11 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         game_state["units_fought"].add(unit_id)
     
     # ├── Arg4 = ?
-    # │ ├── CASE Arg4 = MOVE → Unit removed from move_activation_pool
-    # │ ├── CASE Arg4 = FLED → Unit removed from move_activation_pool
-    # │ ├── CASE Arg4 = SHOOTING → Unit removed from shoot_activation_pool
-    # │ ├── CASE Arg4 = CHARGE → Unit removed from charge_activation_pool
-    # │ └── CASE Arg4 = FIGHT → Unit removed from fight_activation_pool
+    # │ ├── CASE Arg4 = MOVE -> Unit removed from move_activation_pool
+    # │ ├── CASE Arg4 = FLED -> Unit removed from move_activation_pool
+    # │ ├── CASE Arg4 = SHOOTING -> Unit removed from shoot_activation_pool
+    # │ ├── CASE Arg4 = CHARGE -> Unit removed from charge_activation_pool
+    # │ └── CASE Arg4 = FIGHT -> Unit removed from fight_activation_pool
     if arg4 in ["MOVE", "FLED"]:
         if "move_activation_pool" in game_state and unit_id in game_state["move_activation_pool"]:
             game_state["move_activation_pool"].remove(unit_id)
@@ -153,8 +153,8 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             response["removed_from_fight_pool"] = True  # Generic flag for compatibility
     
     # ├── Arg5 = 1 ?
-    # │   ├── YES → log the error
-    # │   └── NO → No action
+    # │   ├── YES -> log the error
+    # │   └── NO -> No action
     if arg5 == 1:
         if "error_logs" not in game_state:
             game_state["error_logs"] = []
@@ -207,13 +207,28 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         else:
             pool_empty = len(game_state["command_activation_pool"]) == 0
     elif current_phase == "fight":
+        # DEBUG: Check if unit is ending activation without attacking when it should
+        if arg3 == "PASS" and unit.get("ATTACK_LEFT", 0) > 0:
+            # Unit is passing but has attacks left - check if adjacent to enemy
+            from .fight_handlers import _is_adjacent_to_enemy_within_cc_range
+            is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+            if is_adjacent:
+                if "episode_number" in game_state and "turn" in game_state:
+                    episode = game_state["episode_number"]
+                    turn = game_state["turn"]
+                    if "console_logs" not in game_state:
+                        game_state["console_logs"] = []
+                    log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight end_activation: Unit {unit['id']} ADJACENT to enemy but PASSING with ATTACK_LEFT={unit.get('ATTACK_LEFT', 0)}"
+                    game_state["console_logs"].append(log_msg)
+                    print(log_msg)
+        
         # Fight phase complete when ALL 3 pools empty
         if "charging_activation_pool" not in game_state:
             charging_empty = True
         else:
             charging_empty = len(game_state["charging_activation_pool"]) == 0
 
-        # AI_TURN.md line 727: "All charging units processed → GO TO STEP : ATLERNATE_FIGHT"
+        # AI_TURN.md line 727: "All charging units processed -> GO TO STEP : ATLERNATE_FIGHT"
         # AI_TURN.md lines 731-755: Build alternating pools ONLY when transitioning from charging to alternating
         # This happens when charging pool becomes empty AND we're removing a unit from charging pool
         # We do NOT rebuild after every activation - only when entering alternating phase

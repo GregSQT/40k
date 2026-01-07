@@ -117,6 +117,19 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
 
     game_state["charging_activation_pool"] = charging_activation_pool
     game_state["console_logs"].append(f"CHARGING POOL SIZE: {len(charging_activation_pool)}")
+    
+    # DEBUG: Log all units in charging pool
+    if "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        for unit_id in charging_activation_pool:
+            unit = _get_unit_by_id(game_state, unit_id)
+            if unit:
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight build_pools: Unit {unit_id} (player {unit['player']}) ADDED to charging_pool"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
 
     # Sub-Phase 2: Alternating activation (units NOT in units_charged, adjacent to enemies)
     active_alternating = []
@@ -757,8 +770,8 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     Complete fight phase with player progression and turn management.
 
     CRITICAL: Fight is the LAST phase. After fight:
-    - P0 → P1 movement phase
-    - P1 → increment turn, P0 movement phase
+    - P0 ->    P1 movement phase
+    - P1 ->       increment turn, P0 movement phase
     """
     # Final cleanup
     game_state["charging_activation_pool"] = []
@@ -779,7 +792,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Player progression logic
     if game_state["current_player"] == 1:
-        # Player 1 complete → Player 2 command phase
+        # Player 1 complete ->    Player 2 command phase
         game_state["current_player"] = 2
         game_state["phase"] = "command"  # Actually transition phase
 
@@ -799,7 +812,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_attack_preview": True
         }
     elif game_state["current_player"] == 2:
-        # Player 2 complete → Check if incrementing turn would exceed limit
+        # Player 2 complete -> Check if incrementing turn would exceed limit
         max_turns = game_state.get("config", {}).get("training_config", {}).get("max_turns_per_episode")
         if max_turns and (game_state["turn"] + 1) > max_turns:
             # Incrementing would exceed turn limit - end game without incrementing
@@ -868,7 +881,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
         game_state["units_shot"].add(unit["id"])
-    # arg3 == "PASS" → no tracking update
+    # arg3 == "PASS" -> no tracking update
     
     # Arg4 pool removal
     if arg4 == "SHOOTING":
@@ -1047,11 +1060,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                             if _get_unit_by_id(game_state, uid) 
                             and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
             if not eligible_units and active_alternating:
-                # Non-active player has no units, but active pool has units → switch to active
+                # Non-active player has no units, but active pool has units ->  switch to active
                 current_sub_phase = "alternating_active"
                 current_pool = active_alternating
             elif not eligible_units:
-                # Neither player has units → end phase
+                # Neither player has units -> end phase
                 return True, fight_phase_end(game_state)
         elif current_turn == "active" and active_alternating:
             current_sub_phase = "alternating_active"
@@ -1061,14 +1074,14 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                             if _get_unit_by_id(game_state, uid) 
                             and _get_unit_by_id(game_state, uid).get("player") == current_player]
             if not eligible_units and non_active_alternating:
-                # Active player has no units, but non_active pool has units → switch to non_active
+                # Active player has no units, but non_active pool has units -> switch to non_active
                 current_sub_phase = "alternating_non_active"
                 current_pool = non_active_alternating
             elif not eligible_units:
-                # Neither player has units → end phase
+                # Neither player has units -> end phase
                 return True, fight_phase_end(game_state)
         elif non_active_alternating:
-            # Active pool empty but non_active has units → Sub-phase 3 (cleanup)
+            # Active pool empty but non_active has units -> Sub-phase 3 (cleanup)
             current_sub_phase = "cleanup_non_active"
             current_pool = non_active_alternating
             # CRITICAL: non_active pool contains units of OPPOSITE player
@@ -1077,10 +1090,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                             if _get_unit_by_id(game_state, uid) 
                             and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
             if not eligible_units:
-                # Non-active player has no units in cleanup pool → end phase
+                # Non-active player has no units in cleanup pool -> end phase
                 return True, fight_phase_end(game_state)
         elif active_alternating:
-            # Non-active pool empty but active has units → Sub-phase 3 (cleanup)
+            # Non-active pool empty but active has units -> Sub-phase 3 (cleanup)
             current_sub_phase = "cleanup_active"
             current_pool = active_alternating
             # CRITICAL: active pool contains units of CURRENT player
@@ -1088,7 +1101,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                             if _get_unit_by_id(game_state, uid) 
                             and _get_unit_by_id(game_state, uid).get("player") == current_player]
             if not eligible_units:
-                # Active player has no units in cleanup pool → end phase
+                # Active player has no units in cleanup pool -> end phase
                 return True, fight_phase_end(game_state)
         else:
             # Both pools empty
@@ -1148,7 +1161,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         activation_result = _handle_fight_unit_activation(game_state, unit, config)
         if not activation_result[0]:
             return activation_result  # Activation failed
-        # Check if activation ended (no targets → end_activation was called)
+        # Check if activation ended (no targets -> end_activation was called)
         # This happens when unit has no valid targets and was auto-skipped
         if activation_result[1].get("activation_ended") or activation_result[1].get("phase_complete"):
             return activation_result
@@ -1182,6 +1195,19 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                         first_target = valid_targets[0]
                         action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
                 else:
+                    # DEBUG: Check if unit is adjacent to enemy but not attacking
+                    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                    if "episode_number" in game_state and "turn" in game_state:
+                        episode = game_state["episode_number"]
+                        turn = game_state["turn"]
+                        if "console_logs" not in game_state:
+                            game_state["console_logs"] = []
+                        if is_adjacent:
+                            attack_left = unit.get("ATTACK_LEFT", 0)
+                            log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight execute_action: Unit {unit_id} ADJACENT to enemy but NO TARGETS (ATTACK_LEFT={attack_left}) - skipping without attack"
+                            game_state["console_logs"].append(log_msg)
+                            print(log_msg)
+                    
                     # No targets - skip this unit
                     result = end_activation(
                         game_state, unit,
@@ -1229,7 +1255,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _handle_fight_postpone(game_state, unit)
 
     elif action_type == "invalid":
-        # AI_TURN.md line 667: INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, FIGHT)
+        # AI_TURN.md line 667: INVALID ACTION ERROR -> end_activation (ERROR, 0, PASS, FIGHT)
         # We follow AI_TURN.md strictly. The _rebuild_alternating_pools_for_fight call in end_activation
         # is skipped for this case to prevent the unit from being re-added to the pool.
         result = end_activation(
@@ -1247,18 +1273,41 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         else:
             result["attempted_action"] = action["attempted_action"]
 
-        # Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty ->  phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
+            # CRITICAL: Preserve action and all_attack_results before merging phase transition
+            preserved_action = result.get("action")
+            preserved_attack_results = result.get("all_attack_results")
+            preserved_unit_id = result.get("unitId")
+            
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
             result.update(phase_result)
+            
+            # CRITICAL: Restore preserved combat data for logging
+            if preserved_action:
+                result["action"] = preserved_action
+            if preserved_attack_results:
+                result["all_attack_results"] = preserved_attack_results
+            if preserved_unit_id:
+                result["unitId"] = preserved_unit_id
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
             _toggle_fight_alternation(game_state)
             # CRITICAL: Recalculate fight_subphase after pool changes
             _update_fight_subphase(game_state)
+
+        # DEBUG: Log final result before return (ATTACK_LEFT > 0 case)
+        if "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING (ATTACK_LEFT>0) - result['action']={result.get('action')} result['unitId']={result.get('unitId')} result_keys={list(result.keys())}"
+            game_state["console_logs"].append(log_msg)
+            print(log_msg)
 
         return True, result
 
@@ -1278,6 +1327,10 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     """
     unit_id = unit["id"]
 
+    # CRITICAL: Clear fight_attack_results at the start of each new unit activation
+    # This ensures attacks from different units are not mixed together
+    game_state["fight_attack_results"] = []
+
     # Set ATTACK_LEFT = CC_NB at activation start
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon
     from engine.utils.weapon_helpers import get_selected_melee_weapon
@@ -1291,12 +1344,44 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     else:
         unit["ATTACK_LEFT"] = 0  # Pas d'armes melee
 
+    # DEBUG: Log unit activation
+    if "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight unit_activation: Unit {unit_id} ACTIVATED with ATTACK_LEFT={unit['ATTACK_LEFT']}"
+        game_state["console_logs"].append(log_msg)
+        print(log_msg)
+
     # Build valid target pool (enemies adjacent within CC_RNG)
     valid_targets = _fight_build_valid_target_pool(game_state, unit)
+    
+    # DEBUG: Log valid targets
+    if "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight unit_activation: Unit {unit_id} valid_targets={valid_targets} count={len(valid_targets)}"
+        game_state["console_logs"].append(log_msg)
+        print(log_msg)
 
     if not valid_targets:
+        # DEBUG: Check if unit is adjacent to enemy but not attacking
+        is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+        if "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            if is_adjacent and unit["ATTACK_LEFT"] > 0:
+                log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight unit_activation: Unit {unit_id} ADJACENT to enemy but NO VALID TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without attack"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
+        
         # No targets - end activation with PASS
-        # ATTACK_LEFT = CC_NB? YES → no attack → end_activation (PASS, 1, PASS, FIGHT)
+        # ATTACK_LEFT = CC_NB? YES -> no attack -> end_activation (PASS, 1, PASS, FIGHT)
         result = end_activation(
             game_state, unit,
             "PASS",        # Arg1: Pass logging
@@ -1309,18 +1394,41 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         game_state["active_fight_unit"] = None
         game_state["valid_fight_targets"] = []
 
-        # Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty -> phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
+            # CRITICAL: Preserve action and all_attack_results before merging phase transition
+            preserved_action = result.get("action")
+            preserved_attack_results = result.get("all_attack_results")
+            preserved_unit_id = result.get("unitId")
+            
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
             result.update(phase_result)
+            
+            # CRITICAL: Restore preserved combat data for logging
+            if preserved_action:
+                result["action"] = preserved_action
+            if preserved_attack_results:
+                result["all_attack_results"] = preserved_attack_results
+            if preserved_unit_id:
+                result["unitId"] = preserved_unit_id
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
             _toggle_fight_alternation(game_state)
             # CRITICAL: Recalculate fight_subphase after pool changes
             _update_fight_subphase(game_state)
+
+        # DEBUG: Log final result before return (ATTACK_LEFT = 0 case)
+        if "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING (ATTACK_LEFT=0) - result['action']={result.get('action')} result['unitId']={result.get('unitId')} result_keys={list(result.keys())}"
+            game_state["console_logs"].append(log_msg)
+            print(log_msg)
 
         return True, result
 
@@ -1372,16 +1480,16 @@ def _toggle_fight_alternation(game_state: Dict[str, Any]) -> None:
         non_active_pool = game_state["non_active_alternating_activation_pool"]
 
     # AI_TURN.md Lines 762-764, 844-846: "Check: Either pool empty?"
-    # If BOTH pools have units → continue alternating (toggle)
-    # If ONE pool empty → exit loop to cleanup phase (don't toggle)
+    # If BOTH pools have units -> continue alternating (toggle)
+    # If ONE pool empty ->  exit loop to cleanup phase (don't toggle)
     if active_pool and non_active_pool:
-        # Both pools have units → toggle
+        # Both pools have units -> toggle
         current_turn = game_state["fight_alternating_turn"]
         if current_turn == "non_active":
             game_state["fight_alternating_turn"] = "active"
         else:
             game_state["fight_alternating_turn"] = "non_active"
-    # else: One pool empty → cleanup phase, don't toggle
+    # else: One pool empty -> cleanup phase, don't toggle
 
 
 def _update_fight_subphase(game_state: Dict[str, Any]) -> None:
@@ -1523,11 +1631,35 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
 
     # Initialize accumulated attack results list for this unit's activation
     # This stores ALL attacks made during the weapon NB attack loop
+    # CRITICAL: Only initialize if not already exists (don't clear on recursive calls)
+    # fight_attack_results is cleared at the start of unit activation in _handle_fight_unit_activation
     if "fight_attack_results" not in game_state:
         game_state["fight_attack_results"] = []
 
     # Execute attack sequence using selected weapon
     attack_result = _execute_fight_attack_sequence(game_state, unit, target_id)
+
+    # DEBUG: Log attack execution
+    if "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        damage = attack_result.get("damage", 0)
+        target_died = attack_result.get("target_died", False)
+        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
+        game_state["console_logs"].append(log_msg)
+        print(log_msg)
+        # DEBUG: Verify log was added
+        print(f"[DEBUG] Added attack_executed log to console_logs (count={len(game_state['console_logs'])})")
+    else:
+        # DEBUG: Log why condition failed
+        missing_keys = []
+        if "episode_number" not in game_state:
+            missing_keys.append("episode_number")
+        if "turn" not in game_state:
+            missing_keys.append("turn")
+        print(f"[DEBUG] attack_executed log NOT added - missing keys: {missing_keys}")
 
     # Store this attack result with metadata for step logging
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
@@ -1540,6 +1672,17 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     attack_result["attack_number"] = total_attacks - unit["ATTACK_LEFT"]  # 1-indexed (before decrement)
     attack_result["total_attacks"] = total_attacks
     game_state["fight_attack_results"].append(attack_result)
+    
+    # DEBUG: Log accumulation in fight_attack_results
+    if "episode_number" in game_state and "turn" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        total_results = len(game_state.get("fight_attack_results", []))
+        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} fight_attack_results count={total_results}"
+        game_state["console_logs"].append(log_msg)
+        print(log_msg)
 
     # Decrement ATTACK_LEFT
     unit["ATTACK_LEFT"] -= 1
@@ -1560,24 +1703,130 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 # Select next target (use AI selection logic)
                 next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets_after)
                 if next_target_id:
+                    # CRITICAL: Capture fight_attack_results BEFORE recursive call
+                    # The recursive call may clear fight_attack_results, so we need to preserve
+                    # the attacks accumulated so far in this activation
+                    attacks_before_recursive = list(game_state.get("fight_attack_results", []))
+                    
                     # Recursively call to continue the attack loop
-                    return _handle_fight_attack(game_state, unit, next_target_id, config)
+                    recursive_result = _handle_fight_attack(game_state, unit, next_target_id, config)
+                    if isinstance(recursive_result, tuple) and len(recursive_result) == 2:
+                        rec_success, rec_result = recursive_result
+                        if rec_success and isinstance(rec_result, dict):
+                            # CRITICAL: Ensure all_attack_results includes ALL accumulated attacks
+                            # Merge attacks from before recursive call with recursive results
+                            recursive_attack_results = rec_result.get("all_attack_results", [])
+                            
+                            # Combine: attacks before recursive + recursive results
+                            # Remove duplicates by checking targetId and attack_number
+                            seen_attacks = {(ar.get("targetId"), ar.get("attack_number")) for ar in attacks_before_recursive}
+                            combined_results = list(attacks_before_recursive)
+                            for ar in recursive_attack_results:
+                                key = (ar.get("targetId"), ar.get("attack_number"))
+                                if key not in seen_attacks:
+                                    combined_results.append(ar)
+                                    seen_attacks.add(key)
+                            
+                            # Update result with combined attack results
+                            rec_result["all_attack_results"] = combined_results
+                            
+                            # DEBUG: Log the merge
+                            if "episode_number" in game_state and "turn" in game_state:
+                                episode = game_state["episode_number"]
+                                turn = game_state["turn"]
+                                if "console_logs" not in game_state:
+                                    game_state["console_logs"] = []
+                                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: MERGED recursive results - before={len(attacks_before_recursive)} recursive={len(recursive_attack_results)} combined={len(combined_results)}"
+                                game_state["console_logs"].append(log_msg)
+                                print(log_msg)
+                        else:
+                            # CRITICAL: If recursive call failed, preserve attacks_before_recursive
+                            # Restore fight_attack_results from attacks_before_recursive to ensure they're not lost
+                            if attacks_before_recursive:
+                                game_state["fight_attack_results"] = list(attacks_before_recursive)
+                                # Ensure result includes all_attack_results even if recursive call failed
+                                if isinstance(rec_result, dict):
+                                    rec_result["all_attack_results"] = list(attacks_before_recursive)
+                    else:
+                        # CRITICAL: If recursive_result is invalid, preserve attacks_before_recursive
+                        # Restore fight_attack_results to ensure they're not lost
+                        if attacks_before_recursive:
+                            game_state["fight_attack_results"] = list(attacks_before_recursive)
+                            # CRITICAL: If recursive_result is not a valid tuple, create a valid result with all_attack_results
+                            if not isinstance(recursive_result, tuple) or len(recursive_result) != 2:
+                                # Create a valid result structure with preserved attacks
+                                recursive_result = (True, {
+                                    "action": "combat",
+                                    "unitId": unit_id,
+                                    "all_attack_results": list(attacks_before_recursive),
+                                    "error": "recursive_call_failed"
+                                })
+                            else:
+                                # recursive_result is a tuple but rec_result might not have all_attack_results
+                                rec_success, rec_result = recursive_result
+                                if isinstance(rec_result, dict) and "all_attack_results" not in rec_result:
+                                    rec_result["all_attack_results"] = list(attacks_before_recursive)
+                                    recursive_result = (rec_success, rec_result)
+                    
+                    return recursive_result
                 # No valid target selected - fall through to end activation
 
             else:
                 # HUMAN PLAYER: Return waiting_for_player for manual target selection
+                # CRITICAL: Include all_attack_results even when waiting_for_player
+                # This ensures attacks already executed are logged to step.log
+                # CRITICAL: Always get ALL attacks from fight_attack_results
+                fight_attack_results = game_state.get("fight_attack_results", [])
+                if not fight_attack_results and attack_result:
+                    # Fallback: if fight_attack_results is empty but we have attack_result, use it
+                    # This should never happen if attacks are properly added to fight_attack_results
+                    fight_attack_results = [attack_result]
+                all_attack_results = fight_attack_results
+                # CRITICAL ASSERTION: If we have attack_result, it MUST be in all_attack_results
+                if attack_result and attack_result not in all_attack_results:
+                    # This should never happen - add it to ensure it's logged
+                    all_attack_results.append(attack_result)
+                # DEBUG: Log all_attack_results being returned with waiting_for_player
+                if "episode_number" in game_state and "turn" in game_state:
+                    episode = game_state["episode_number"]
+                    turn = game_state["turn"]
+                    if "console_logs" not in game_state:
+                        game_state["console_logs"] = []
+                    log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING waiting_for_player=True with all_attack_results count={len(all_attack_results)} for Unit {unit_id}"
+                    game_state["console_logs"].append(log_msg)
+                    print(log_msg)
+                    for i, ar in enumerate(all_attack_results):
+                        target_id = ar.get("targetId", "?")
+                        damage = ar.get("damage", 0)
+                        log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: waiting_for_player attack[{i}] -> Unit {target_id} damage={damage}"
+                        game_state["console_logs"].append(log_msg)
+                        print(log_msg)
                 return True, {
                     "attack_executed": True,
                     "attack_result": attack_result,
                     "unitId": unit["id"],
                     "ATTACK_LEFT": unit["ATTACK_LEFT"],
                     "valid_targets": valid_targets_after,
-                    "waiting_for_player": True
+                    "waiting_for_player": True,
+                    "action": "combat",  # CRITICAL: Must be "combat" for step_logger
+                    "all_attack_results": all_attack_results  # Include for logging
                 }
         # No more targets or no valid target selected - fall through to end activation
 
+        # DEBUG: Check if unit is adjacent to enemy but has no more targets
+        is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+        if "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            if is_adjacent and unit["ATTACK_LEFT"] > 0:
+                log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight attack: Unit {unit_id} ADJACENT to enemy but NO MORE TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without completing all attacks"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
+        
         # No more targets - end activation
-        # ATTACK_LEFT > 0 but no targets → end_activation (ACTION, 1, FIGHT, FIGHT)
+        # ATTACK_LEFT > 0 but no targets -> end_activation (ACTION, 1, FIGHT, FIGHT)
         result = end_activation(
             game_state, unit,
             "ACTION",      # Arg1: Log action
@@ -1590,6 +1839,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         game_state["active_fight_unit"] = None
         game_state["valid_fight_targets"] = []
 
+        # CRITICAL: Set action BEFORE checking phase_complete to ensure it's preserved
         result["action"] = "combat"  # Must be "combat" for step_logger (not "fight")
         result["phase"] = "fight"  # For metrics tracking
         result["unitId"] = unit_id  # For step_logger
@@ -1599,16 +1849,71 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["reason"] = "no_more_targets"
 
         # Include ALL attack results from this activation for step logging
-        result["all_attack_results"] = game_state.get("fight_attack_results", [attack_result])
+        # CRITICAL: Always use fight_attack_results - it should contain ALL attacks from this activation
+        fight_attack_results = game_state.get("fight_attack_results", [])
+        if not fight_attack_results and attack_result:
+            # Fallback: if fight_attack_results is empty but we have attack_result, use it
+            # This should never happen if attacks are properly added to fight_attack_results
+            fight_attack_results = [attack_result]
+        result["all_attack_results"] = fight_attack_results
+        # DEBUG: Log all_attack_results being set in result (no_more_targets path)
+        if "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (no_more_targets)"
+            game_state["console_logs"].append(log_msg)
+            print(log_msg)
+            for i, ar in enumerate(result["all_attack_results"]):
+                target_id = ar.get("targetId", "?")
+                damage = ar.get("damage", 0)
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: no_more_targets attack[{i}] -> Unit {target_id} damage={damage}"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
-        # Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty -> phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
+            # CRITICAL: Preserve action and all_attack_results before merging phase transition
+            # action is already set above, so preserved_action will be "combat"
+            preserved_action = result.get("action")
+            preserved_attack_results = result.get("all_attack_results")
+            preserved_unit_id = result.get("unitId")
+            
+            # DEBUG: Log preservation before phase transition
+            if "episode_number" in game_state and "turn" in game_state:
+                episode = game_state["episode_number"]
+                turn = game_state["turn"]
+                if "console_logs" not in game_state:
+                    game_state["console_logs"] = []
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
+            
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
             result.update(phase_result)
+            
+            # CRITICAL: Restore preserved combat data for logging
+            # ALWAYS restore action, even if preserved_action is None (defensive)
+            result["action"] = preserved_action if preserved_action else "combat"
+            if preserved_attack_results:
+                result["all_attack_results"] = preserved_attack_results
+            if preserved_unit_id:
+                result["unitId"] = preserved_unit_id
+            
+            # DEBUG: Log restoration after phase transition
+            if "episode_number" in game_state and "turn" in game_state:
+                episode = game_state["episode_number"]
+                turn = game_state["turn"]
+                if "console_logs" not in game_state:
+                    game_state["console_logs"] = []
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete - result['action']={result.get('action')} result_keys={list(result.keys())}"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
@@ -1641,16 +1946,72 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["reason"] = "attacks_complete"
 
         # Include ALL attack results from this activation for step logging
-        result["all_attack_results"] = game_state.get("fight_attack_results", [attack_result])
+        # CRITICAL: fight_attack_results MUST contain all attacks from this activation
+        # If it's empty, something is wrong - but we still need to return attack_result
+        fight_attack_results = game_state.get("fight_attack_results", [])
+        if not fight_attack_results:
+            # This should never happen - all attacks should be in fight_attack_results
+            # But if it does, at least return the current attack_result
+            if attack_result:
+                fight_attack_results = [attack_result]
+        result["all_attack_results"] = fight_attack_results
+        # DEBUG: Log all_attack_results being set in result (attacks_complete path)
+        if "episode_number" in game_state and "turn" in game_state:
+            episode = game_state["episode_number"]
+            turn = game_state["turn"]
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (attacks_complete)"
+            game_state["console_logs"].append(log_msg)
+            print(log_msg)
+            for i, ar in enumerate(result["all_attack_results"]):
+                target_id = ar.get("targetId", "?")
+                damage = ar.get("damage", 0)
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: attacks_complete attack[{i}] -> Unit {target_id} damage={damage}"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
-        # Check if ALL pools are empty → phase complete
+        # Check if ALL pools are empty -> phase complete
         if result.get("phase_complete"):
             # All fight pools empty - transition to next phase
+            # CRITICAL: Preserve action and all_attack_results before merging phase transition
+            preserved_action = result.get("action")
+            preserved_attack_results = result.get("all_attack_results")
+            preserved_unit_id = result.get("unitId")
+            
+            # DEBUG: Log preservation before phase transition
+            if "episode_number" in game_state and "turn" in game_state:
+                episode = game_state["episode_number"]
+                turn = game_state["turn"]
+                if "console_logs" not in game_state:
+                    game_state["console_logs"] = []
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete (ATTACK_LEFT=0) - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
+            
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
             result.update(phase_result)
+            
+            # CRITICAL: Restore preserved combat data for logging
+            # ALWAYS restore action, even if preserved_action is None (defensive)
+            result["action"] = preserved_action if preserved_action else "combat"
+            if preserved_attack_results:
+                result["all_attack_results"] = preserved_attack_results
+            if preserved_unit_id:
+                result["unitId"] = preserved_unit_id
+            
+            # DEBUG: Log restoration after phase transition
+            if "episode_number" in game_state and "turn" in game_state:
+                episode = game_state["episode_number"]
+                turn = game_state["turn"]
+                if "console_logs" not in game_state:
+                    game_state["console_logs"] = []
+                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete (ATTACK_LEFT=0) - result['action']={result.get('action')} result_keys={list(result.keys())}"
+                game_state["console_logs"].append(log_msg)
+                print(log_msg)
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
@@ -1681,7 +2042,7 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
         return False, {"error": "no_melee_weapon", "unitId": unit["id"]}
     
     if unit["ATTACK_LEFT"] == selected_weapon["NB"]:
-        # YES → Postpone allowed
+        # YES -> Postpone allowed
         # Do NOT call end_activation - just return postpone signal
         # Unit stays in pool for later activation
         return True, {
@@ -1690,7 +2051,7 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
             "postpone_allowed": True
         }
     else:
-        # NO → Must complete activation
+        # NO -> Must complete activation
         return False, {
             "error": "postpone_not_allowed",
             "reason": "unit_has_already_attacked",
@@ -1763,7 +2124,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     weapon_name = weapon.get("display_name", "")
     weapon_prefix = f" with [{weapon_name}]" if weapon_name else ""
     
-    # Hit roll → hit_roll >= weapon.ATK
+    # Hit roll -> hit_roll >= weapon.ATK
     hit_roll = random.randint(1, 6)
     hit_target = weapon["ATK"]
     hit_success = hit_roll >= hit_target
@@ -1772,7 +2133,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         # MISS case
         attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) : MISSED !"
     else:
-        # HIT → Continue to wound roll
+        # HIT -> Continue to wound roll
         wound_roll = random.randint(1, 6)
         wound_target = _calculate_wound_target(weapon["STR"], target["T"])
         wound_success = wound_roll >= wound_target
@@ -1781,7 +2142,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
             # FAIL TO WOUND case
             attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) : FAILED !"
         else:
-            # WOUND → Continue to save roll
+            # WOUND -> Continue to save roll
             save_roll = random.randint(1, 6)
             save_target = _calculate_save_target(target, weapon["AP"])
             save_success = save_roll >= save_target
@@ -2221,7 +2582,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
     attacker_id = attacker["id"] 
     target_id = target["id"]
     
-    # Hit roll → hit_roll >= attacker.RNG_ATK
+    # Hit roll -> hit_roll >= attacker.RNG_ATK
     hit_roll = random.randint(1, 6)
     hit_target = attacker["RNG_ATK"]
     hit_success = hit_roll >= hit_target
@@ -2243,7 +2604,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
             "attack_log": attack_log
         }
     
-    # HIT → Continue to wound roll
+    # HIT -> Continue to wound roll
     wound_roll = random.randint(1, 6)
     wound_target = _calculate_wound_target(attacker["RNG_STR"], target["T"])
     wound_success = wound_roll >= wound_target
@@ -2265,7 +2626,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
             "attack_log": attack_log
         }
     
-    # WOUND → Continue to save roll
+    # WOUND -> Continue to save roll
     save_roll = random.randint(1, 6)
     save_target = _calculate_save_target(target, attacker["RNG_AP"])
     save_success = save_roll >= save_target
@@ -2287,7 +2648,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any]) -> Di
             "attack_log": attack_log
         }
     
-    # FAIL → Continue to damage
+    # FAIL -> Continue to damage
     damage_dealt = attacker["RNG_DMG"]
     new_hp = max(0, target["HP_CUR"] - damage_dealt)
     

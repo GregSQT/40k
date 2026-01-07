@@ -170,6 +170,25 @@ class StepLogger:
 
             return base_msg
 
+        elif action_type == "flee" and details:
+            # FLEE: Unit flees from enemy (same format as move but indicates flee)
+            if "start_pos" in details and "end_pos" in details:
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                base_msg = f"Unit {unit_id}{unit_coords} FLED from ({start_col},{start_row}) to ({end_col},{end_row})"
+            elif "col" in details and "row" in details:
+                # Use destination coordinates
+                base_msg = f"Unit {unit_id}{unit_coords} FLED to ({details['col']},{details['row']})"
+            else:
+                raise KeyError("Flee action missing required position data")
+
+            # Add position reward if available
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+
+            return base_msg
+
         elif action_type == "advance" and details:
             # ADVANCE_IMPLEMENTATION: Format advance action message
             if "start_pos" in details and "end_pos" in details:
@@ -340,10 +359,17 @@ class StepLogger:
             charge_roll = details.get("charge_roll")
             charge_failed_reason = details.get("charge_failed_reason", "roll_too_low")
             
-            if charge_roll is not None:
-                base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [Roll:{charge_roll}] [FAILED: {charge_failed_reason}]"
+            # Get start and end positions for format: "from (x,y) to (a,b)"
+            if "start_pos" in details and "end_pos" in details:
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                base_msg = f"Unit {unit_id}{unit_coords} FAILED CHARGE unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
-                base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [FAILED: {charge_failed_reason}]"
+                # Fallback if positions not available (backward compatibility)
+                if charge_roll is not None:
+                    base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [Roll:{charge_roll}] [FAILED: {charge_failed_reason}]"
+                else:
+                    base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [FAILED: {charge_failed_reason}]"
 
             # Add reward if available (should be negative penalty)
             reward = details.get("reward")
@@ -396,8 +422,8 @@ class StepLogger:
                 if wound_result == "WOUND":
                     detail_parts.append(f"Save:{save_target}+:{save_roll}({save_result})")
                     
-                    # Only show damage if save failed (damage > 0)
-                    if damage > 0:
+                    # Show damage if save failed (even if damage is 0, it should be logged)
+                    if save_result == "FAIL":
                         detail_parts.append(f"Dmg:{damage}HP")
             
             detail_msg = f" - {' '.join(detail_parts)}"

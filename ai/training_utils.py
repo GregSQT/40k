@@ -242,10 +242,10 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         pattern = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-*.json")
         matching_files = sorted(glob.glob(pattern))
         if len(matching_files) == 1:
-            # Exactly one variant → unambiguous
+            # Exactly one variant -> unambiguous
             return matching_files[0]
         elif len(matching_files) > 1:
-            # Multiple variants for this phase → require explicit override
+            # Multiple variants for this phase -> require explicit override
             variant_names = [os.path.basename(f) for f in matching_files]
             raise FileNotFoundError(
                 f"Multiple scenario variants found for agent '{agent_key}' and phase '{training_config_name}': "

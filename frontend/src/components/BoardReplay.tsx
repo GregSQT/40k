@@ -929,7 +929,7 @@ export const BoardReplay: React.FC = () => {
               // Map phase names to action types
               const phaseToActionTypes: Record<string, string[]> = {
                 'move': ['move', 'move_wait'],
-                'shoot': ['shoot', 'shoot_wait'],
+                'shoot': ['shoot', 'shoot_wait', 'advance'],
                 'charge': ['charge', 'charge_wait', 'charge_fail'],
                 'fight': ['fight']
               };

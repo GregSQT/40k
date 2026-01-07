@@ -1831,6 +1831,28 @@ export const useEngineAPI = () => {
           
           if (!aiResponse.ok) {
             const errorData = await aiResponse.json().catch(() => ({}));
+            const errorInfo = errorData.error || errorData;
+            
+            // Handle expected errors gracefully (no eligible AI units = phase complete for AI)
+            if (errorInfo.error === 'not_ai_player_turn' && 
+                errorInfo.reason === 'no_eligible_ai_units_in_pool') {
+              // No more eligible AI units - fetch current game state and exit gracefully
+              try {
+                const stateResponse = await fetch(`${API_BASE}/game/state`);
+                if (stateResponse.ok) {
+                  const stateData = await stateResponse.json();
+                  if (stateData.game_state) {
+                    setGameState(stateData.game_state);
+                  }
+                }
+              } catch (stateErr) {
+                console.warn('Failed to fetch game state after AI error:', stateErr);
+              }
+              // Exit loop - no more AI units eligible
+              break;
+            }
+            
+            // For other errors, log and throw
             console.error(`❌ [FRONTEND] AI activation failed: status=${aiResponse.status}, error=`, errorData);
             throw new Error(`AI activation failed: ${aiResponse.status} - ${JSON.stringify(errorData)}`);
           }

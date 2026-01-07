@@ -128,7 +128,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         start_val = float(ent_config["start"])
         end_val = float(ent_config["end"])
         model_params["ent_coef"] = start_val  # Use initial value
-        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
 
     # Import environment
     W40KEngine, register_environment = setup_imports()
@@ -414,7 +414,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         start_val = float(ent_config["start"])
         end_val = float(ent_config["end"])
         model_params["ent_coef"] = start_val  # Use initial value
-        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
 
     # Import environment
     W40KEngine, register_environment = setup_imports()
@@ -737,7 +737,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         start_val = float(ent_config["start"])
         end_val = float(ent_config["end"])
         model_params["ent_coef"] = start_val  # Use initial value
-        print(f"✅ Entropy coefficient schedule: {start_val} → {end_val} (will be applied via callback)")
+        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
 
     # Use specific log directory for continuous TensorBoard graphs across runs
     tb_log_name = f"{training_config_name}_{agent_key}"
@@ -1049,7 +1049,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 verbose=1
             )
             callbacks.append(entropy_callback)
-            print(f"✅ Added entropy schedule callback: {start_ent} → {end_ent} over {total_eps} episodes")
+            print(f"✅ Added entropy schedule callback: {start_ent} -> {end_ent} over {total_eps} episodes")
 
     # Evaluation callback - test model periodically with logging enabled
     # Load scenario and unit registry for evaluation callback

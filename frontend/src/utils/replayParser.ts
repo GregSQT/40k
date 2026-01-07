@@ -386,8 +386,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Parse CHARGE actions
     // Format: [timestamp] T1 P0 CHARGE : Unit 2(9, 6) CHARGED unit 8 from (7, 13) to (9, 6) [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 1(19, 15) WAIT [SUCCESS]
-    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED]
-    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED unit|WAIT|FAILED charge to unit)/);
+    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED CHARGE unit 7 from (23,6) to (a,b) [R:+0.0] [SUCCESS] [STEP: YES]
+    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED] (old format)
+    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED unit|WAIT|FAILED CHARGE unit|FAILED charge to unit)/);
     if (chargeMatch) {
       const timestamp = chargeMatch[1];
       const turn = chargeMatch[2];
@@ -468,15 +469,30 @@ export function parse_log_file_from_text(text: string): ReplayData {
           charge_roll: 0,  // Unknown roll, but too low
           charge_success: false
         });
-      } else if (actionType === 'FAILED charge to unit') {
-        // FAILED charge - parse target and roll
-        const targetMatch = trimmed.match(/FAILED charge to unit (\d+)/);
-        const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
-        const failedReasonMatch = trimmed.match(/\[FAILED: (.+?)\]/);
+      } else if (actionType === 'FAILED CHARGE unit' || actionType === 'FAILED charge to unit') {
+        // FAILED charge - parse target and positions (new format) or roll (old format)
+        let targetId: number | undefined;
+        let chargeRoll: number = 0;
+        let failedReason: string = 'roll_too_low';
+        let fromPos: { col: number; row: number } | undefined;
+        let toPos: { col: number; row: number } | undefined;
         
-        const targetId = targetMatch ? parseInt(targetMatch[1]) : undefined;
-        const chargeRoll = rollMatch ? parseInt(rollMatch[1]) : 0;
-        const failedReason = failedReasonMatch ? failedReasonMatch[1] : 'roll_too_low';
+        // Try new format first: "FAILED CHARGE unit X from (x,y) to (a,b)"
+        const newFormatMatch = trimmed.match(/FAILED CHARGE unit (\d+) from \((\d+),(\d+)\) to \((\d+),(\d+)\)/);
+        if (newFormatMatch) {
+          targetId = parseInt(newFormatMatch[1]);
+          fromPos = { col: parseInt(newFormatMatch[2]), row: parseInt(newFormatMatch[3]) };
+          toPos = { col: parseInt(newFormatMatch[4]), row: parseInt(newFormatMatch[5]) };
+        } else {
+          // Fallback to old format: "FAILED charge to unit X [Roll:Y] [FAILED: reason]"
+          const targetMatch = trimmed.match(/FAILED charge to unit (\d+)/);
+          const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
+          const failedReasonMatch = trimmed.match(/\[FAILED: (.+?)\]/);
+          
+          targetId = targetMatch ? parseInt(targetMatch[1]) : undefined;
+          chargeRoll = rollMatch ? parseInt(rollMatch[1]) : 0;
+          failedReason = failedReasonMatch ? failedReasonMatch[1] : 'roll_too_low';
+        }
         
         currentEpisode.actions.push({
           type: 'charge_fail',
@@ -485,11 +501,16 @@ export function parse_log_file_from_text(text: string): ReplayData {
           player,
           unit_id: unitId,
           target_id: targetId,
-          pos: { col: unitCol, row: unitRow },
+          pos: { col: unitCol, row: unitRow },  // Position actuelle de l'unité (from regex match)
+          from: fromPos,  // Position de départ (new format)
+          to: toPos,  // Position de destination prévue (new format)
           charge_roll: chargeRoll,
           charge_success: false,
           charge_failed_reason: failedReason
         });
+        
+        // CRITICAL: Unit position stays at unitCol/unitRow (from regex match) - no movement on failed charge
+        // The unit position is already correct from the regex match, no need to update
       }
       continue;
     }

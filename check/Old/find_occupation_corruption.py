@@ -9,9 +9,9 @@ Strategy:
 3. Compare with what the occupation check must have seen
 
 From the log:
-- T1 P0: Unit 2 moves (11,12) → (11,11)
+- T1 P0: Unit 2 moves (11,12) -> (11,11)
 - T2 P0: Units 1,3,4 move (Unit 2 does NOT move - stays at (11,11))
-- T2 P1: Unit 7 moves (13,10) → (11,11) ← BUG! Should be blocked!
+- T2 P1: Unit 7 moves (13,10) -> (11,11) ← BUG! Should be blocked!
 """
 
 import sys

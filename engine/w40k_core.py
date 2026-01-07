@@ -350,6 +350,19 @@ class W40KEngine(gym.Env):
         # Episode-level metrics accumulation for MetricsCollectionCallback
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
+        self.episode_number = 0  # Track episode number for debug logging
+        
+        # Clear movement_debug.log at engine initialization (before first episode)
+        # This ensures each training session starts with a clean log file
+        movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'movement_debug.log')
+        try:
+            if os.path.exists(movement_debug_path):
+                with open(movement_debug_path, 'w', encoding='utf-8', errors='replace') as f:
+                    f.write("=== MOVEMENT DEBUG LOG ===\n")
+                    f.write("Cleared at engine initialization\n")
+                    f.write("=" * 80 + "\n\n")
+        except Exception as e:
+            print(f"⚠️ Failed to clear movement_debug.log: {e}")
         self.episode_tactical_data = {
             'shots_fired': 0,
             'hits': 0,
@@ -392,12 +405,18 @@ class W40KEngine(gym.Env):
             self._current_scenario_file = random.choice(self._scenario_files)
             self._reload_scenario(self._current_scenario_file)
 
+        # Reset episode-level metric accumulators
+        self.episode_reward_accumulator = 0.0
+        self.episode_length_accumulator = 0
+        self.episode_number += 1  # Increment episode number BEFORE adding to game_state (first episode = 1, not 0)
+        
         # Reset game state
         self.game_state.update({
             "current_player": 1,
             "phase": "command",
             "turn": 1,
             "episode_steps": 0,
+            "episode_number": self.episode_number,  # Add episode number for debug logging (now correctly incremented)
             "game_over": False,
             "winner": None,
             "units_moved": set(),
@@ -464,10 +483,6 @@ class W40KEngine(gym.Env):
         # Call command_phase_start() to do the resets, then call movement_phase_start() directly
         command_handlers.command_phase_start(self.game_state)  # Does the resets
         movement_handlers.movement_phase_start(self.game_state)  # Initializes the move phase
-        
-        # Reset episode-level metric accumulators
-        self.episode_reward_accumulator = 0.0
-        self.episode_length_accumulator = 0
         self.episode_tactical_data = {
             'shots_fired': 0,
             'hits': 0,
@@ -653,6 +668,21 @@ class W40KEngine(gym.Env):
         # Log action ONLY if it's a real agent action with valid unit
         # Note: pre_action_phase, pre_action_player, and pre_action_turn are already captured
         # at lines 598-600 BEFORE action execution
+        
+        # DEBUG: Log why logging might be skipped
+        episode = self.game_state.get("episode_number", "?")
+        turn = self.game_state.get("turn", "?")
+        phase = self.game_state.get("phase", "?")
+        if "console_logs" not in self.game_state:
+            self.game_state["console_logs"] = []
+        
+        # Check step_logger status
+        has_step_logger = self.step_logger is not None
+        step_logger_enabled = has_step_logger and self.step_logger.enabled if has_step_logger else False
+        log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: step_logger exists={has_step_logger} enabled={step_logger_enabled} success={success}"
+        self.game_state["console_logs"].append(log_msg)
+        print(log_msg)
+        
         if (self.step_logger and self.step_logger.enabled and success):
            
             # CHANGE 1: Read action from result dict FIRST (handlers populate actual executed action)
@@ -666,12 +696,24 @@ class W40KEngine(gym.Env):
             unit_id = result.get("unitId") if isinstance(result, dict) else None
             if not unit_id:
                 unit_id = semantic_action.get("unitId") if isinstance(semantic_action, dict) else None
+            
+            # DEBUG: Log action_type and unit_id extraction
+            log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: action_type={action_type} unit_id={unit_id} result_keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}"
+            self.game_state["console_logs"].append(log_msg)
+            print(log_msg)
            
             # CHANGE 3: STRICT validation - only log if action_type in StepLogger whitelist
             # Prevents "Unknown action_type 'activate_unit'" errors
-            valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance"]
-            if (action_type in valid_action_types and
-                unit_id and unit_id != "none" and unit_id != "SYSTEM"):
+            valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee"]
+            action_type_valid = action_type in valid_action_types
+            unit_id_valid = unit_id and unit_id != "none" and unit_id != "SYSTEM"
+            
+            # DEBUG: Log validation results
+            log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: action_type_valid={action_type_valid} unit_id_valid={unit_id_valid}"
+            self.game_state["console_logs"].append(log_msg)
+            print(log_msg)
+            
+            if (action_type_valid and unit_id_valid):
                
                 # Get unit coordinates AFTER action execution using semantic action unitId
                 updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
@@ -697,13 +739,20 @@ class W40KEngine(gym.Env):
                     # Add specific data for different action types
                     # NOTE: move, shoot, wait use the common logging path below
                     # charge and combat have their own specialized logging
-                    if action_type == "move":
+                    if action_type == "move" or action_type == "flee":
                         # Use semantic action coordinates for accurate logging
-                        start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                        # CRITICAL: Use semantic action destination, not unit's current position
-                        dest_col = semantic_action.get("destCol", updated_unit["col"])
-                        dest_row = semantic_action.get("destRow", updated_unit["row"])
-                        end_pos = (dest_col, dest_row)
+                        # For flee, get positions from result (populated by movement handler)
+                        if action_type == "flee":
+                            start_pos = (result.get("fromCol"), result.get("fromRow")) if isinstance(result, dict) else pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
+                            end_pos = (result.get("toCol"), result.get("toRow")) if isinstance(result, dict) else (updated_unit["col"], updated_unit["row"])
+                            dest_col = result.get("toCol", updated_unit["col"]) if isinstance(result, dict) else updated_unit["col"]
+                            dest_row = result.get("toRow", updated_unit["row"]) if isinstance(result, dict) else updated_unit["row"]
+                        else:
+                            start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
+                            # CRITICAL: Use semantic action destination, not unit's current position
+                            dest_col = semantic_action.get("destCol", updated_unit["col"])
+                            dest_row = semantic_action.get("destRow", updated_unit["row"])
+                            end_pos = (dest_col, dest_row)
                         action_details.update({
                             "start_pos": start_pos,
                             "end_pos": end_pos,
@@ -809,7 +858,9 @@ class W40KEngine(gym.Env):
                         action_details.update({
                             "target_id": result.get("targetId"),
                             "charge_roll": result.get("charge_roll"),
-                            "charge_failed_reason": result.get("charge_failed_reason", "roll_too_low")
+                            "charge_failed_reason": result.get("charge_failed_reason", "roll_too_low"),
+                            "start_pos": result.get("start_pos"),  # Position actuelle (from)
+                            "end_pos": result.get("end_pos")  # Destination prévue (to)
                         })
 
                         # Add reward and log for failed charge action
@@ -827,56 +878,121 @@ class W40KEngine(gym.Env):
                         )
 
                     elif action_type == "combat":
-                        # Check if we have multiple attack results from fight phase (CC_NB attacks)
-                        all_attack_results = result.get("all_attack_results", [])
-
-                        if not all_attack_results:
-                            raise ValueError(
-                                f"combat action missing all_attack_results - this should never happen. "
-                                f"unit_id={unit_id}, result keys={list(result.keys())}"
-                            )
-
-                        # Log EACH attack individually for proper step log output
-                        step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
-
-                        for i, attack_result in enumerate(all_attack_results):
-                            target_id = attack_result.get("targetId", result.get("targetId"))
-                            target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
-                            target_coords = None
-                            if target_unit:
-                                target_coords = (target_unit["col"], target_unit["row"])
+                        # Check if combat was already logged before phase transition
+                        if not result.get("combat_already_logged"):
+                            # Only log if not already logged in _process_semantic_action before phase transition
                             
-                            attack_details = {
-                                "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                                "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
-                                "semantic_action": semantic_action,
-                                "target_id": target_id,
-                                "target_coords": target_coords,  # Add target coordinates
-                                "hit_roll": attack_result.get("hit_roll", 0),
-                                "wound_roll": attack_result.get("wound_roll", 0),
-                                "save_roll": attack_result.get("save_roll", 0),
-                                "damage_dealt": attack_result.get("damage_dealt", 0),
-                                "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
-                                "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
-                                "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
-                                "hit_target": attack_result.get("hit_target", 4),
-                                "wound_target": attack_result.get("wound_target", 4),
-                                "save_target": attack_result.get("save_target", 4),
-                                "target_died": attack_result.get("target_died", False),
-                                "weapon_name": attack_result.get("weapon_name", ""),  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
-                                "reward": step_reward if i == 0 else 0.0  # Only first attack gets reward
-                            }
+                            # Check if we have multiple attack results from fight phase (CC_NB attacks)
+                            all_attack_results = result.get("all_attack_results", [])
 
-                            self.step_logger.log_action(
-                                unit_id=updated_unit["id"],
-                                action_type=action_type,
-                                phase=pre_action_phase,
-                                player=pre_action_player,
-                                success=success,
-                                step_increment=(i == 0),  # Only first attack increments step
-                                action_details=attack_details
-                            )
-                        # Multi-attack logging complete - skip to replay logging
+                            # DEBUG: Log all_attack_results received with detailed info
+                            # CRITICAL: Use pre_action_turn instead of current turn to match step.log
+                            episode = self.game_state.get("episode_number", "?")
+                            turn = pre_action_turn  # Use turn captured BEFORE action execution
+                            if "console_logs" not in self.game_state:
+                                self.game_state["console_logs"] = []
+                            waiting_for_player = result.get("waiting_for_player", False)
+                            combat_already_logged = result.get("combat_already_logged", False)
+                            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} w40k_core combat: Unit {unit_id} RECEIVED all_attack_results count={len(all_attack_results)} waiting_for_player={waiting_for_player} combat_already_logged={combat_already_logged} result_keys={list(result.keys())}"
+                            self.game_state["console_logs"].append(log_msg)
+                            print(log_msg)
+                            for i, attack_result in enumerate(all_attack_results):
+                                target_id = attack_result.get("targetId", "?")
+                                damage = attack_result.get("damage", 0)
+                                log_msg = f"[FIGHT DEBUG] E{episode} T{turn} w40k_core combat: Unit {unit_id} RECEIVED attack[{i}] -> Unit {target_id} damage={damage}"
+                                self.game_state["console_logs"].append(log_msg)
+                                print(log_msg)
+
+                            # CRITICAL FIX: Handle empty all_attack_results gracefully
+                            # If waiting_for_player=True and no attacks executed yet, don't log (will log when target selected)
+                            # If waiting_for_player=False and no attacks, this is an error (should have attack results)
+                            # CRITICAL: Check if fight_attack_results exists and has attacks that weren't included
+                            if not all_attack_results:
+                                # Check if there are attacks in fight_attack_results that weren't included
+                                fight_attack_results = self.game_state.get("fight_attack_results", [])
+                                if fight_attack_results:
+                                    # CRITICAL: fight_attack_results has attacks but all_attack_results is empty
+                                    # This means attacks were lost - use fight_attack_results instead
+                                    all_attack_results = fight_attack_results
+                                    result["all_attack_results"] = all_attack_results
+                                    # Log the recovery
+                                    log_msg = f"[FIGHT DEBUG] E{episode} T{turn} w40k_core combat: Unit {unit_id} RECOVERED {len(all_attack_results)} attacks from fight_attack_results"
+                                    self.game_state["console_logs"].append(log_msg)
+                                    print(log_msg)
+                                
+                                if not all_attack_results:
+                                    if waiting_for_player:
+                                        # Waiting for player to select target - no attacks executed yet
+                                        # Don't log yet, will be logged when target is selected and attack executed
+                                        pass  # Skip logging for now
+                                    else:
+                                        # No waiting_for_player but no attack results - this is an error
+                                        raise ValueError(
+                                            f"combat action missing all_attack_results - this should never happen. "
+                                            f"unit_id={unit_id}, result keys={list(result.keys())}, waiting_for_player={waiting_for_player}"
+                                        )
+                            else:
+                                # We have attack results to log - proceed with logging
+                                # Log EACH attack individually for proper step log output
+                                step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+
+                                for i, attack_result in enumerate(all_attack_results):
+                                    # DEBUG: Log each attack being logged to step.log
+                                    # CRITICAL: Use pre_action_turn instead of current turn to match step.log
+                                    episode = self.game_state.get("episode_number", "?")
+                                    turn = pre_action_turn  # Use turn captured BEFORE action execution
+                                    target_id = attack_result.get("targetId", "?")
+                                    damage = attack_result.get("damage", 0)
+                                    log_msg = f"[FIGHT DEBUG] E{episode} T{turn} w40k_core combat: Unit {unit_id} logging attack[{i}] -> Unit {target_id} damage={damage} to step.log"
+                                    self.game_state["console_logs"].append(log_msg)
+                                    print(log_msg)
+                                    target_id = attack_result.get("targetId", result.get("targetId"))
+                                    target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
+                                    target_coords = None
+                                    if target_unit:
+                                        target_coords = (target_unit["col"], target_unit["row"])
+                                    
+                                    attack_details = {
+                                        "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
+                                        "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
+                                        "semantic_action": semantic_action,
+                                        "target_id": target_id,
+                                        "target_coords": target_coords,  # Add target coordinates
+                                        "hit_roll": attack_result.get("hit_roll", 0),
+                                        "wound_roll": attack_result.get("wound_roll", 0),
+                                        "save_roll": attack_result.get("save_roll", 0),
+                                        "damage_dealt": attack_result.get("damage", 0),  # FIX: Use "damage" not "damage_dealt"
+                                        "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
+                                        "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
+                                        "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
+                                        "hit_target": attack_result.get("hit_target", 4),
+                                        "wound_target": attack_result.get("wound_target", 4),
+                                        "save_target": attack_result.get("save_target", 4),
+                                        "target_died": attack_result.get("target_died", False),
+                                        "weapon_name": attack_result.get("weapon_name", ""),  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
+                                        "reward": step_reward if i == 0 else 0.0  # Only first attack gets reward
+                                    }
+
+                                    # DEBUG: Log before calling step_logger.log_action
+                                    log_msg = f"[FIGHT DEBUG] E{episode} T{turn} w40k_core combat: Unit {unit_id} CALLING step_logger.log_action for attack[{i}] -> Unit {target_id} damage={damage}"
+                                    self.game_state["console_logs"].append(log_msg)
+                                    print(log_msg)
+                                    
+                                    self.step_logger.log_action(
+                                        unit_id=updated_unit["id"],
+                                        action_type=action_type,
+                                        phase=pre_action_phase,
+                                        player=pre_action_player,
+                                        success=success,
+                                        step_increment=(i == 0),  # Only first attack increments step
+                                        action_details=attack_details
+                                    )
+                                    
+                                    # DEBUG: Log after calling step_logger.log_action
+                                    log_msg = f"[FIGHT DEBUG] E{episode} T{turn} w40k_core combat: Unit {unit_id} COMPLETED step_logger.log_action for attack[{i}] -> Unit {target_id} damage={damage}"
+                                    self.game_state["console_logs"].append(log_msg)
+                                    print(log_msg)
+                            # Multi-attack logging complete - skip to replay logging
                     else:
                         # Non-specialized actions (move, shoot, wait)
                         # charge and combat have their own logging above with specialized multi-attack handling
@@ -905,6 +1021,11 @@ class W40KEngine(gym.Env):
                             step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
                             action_details["reward"] = step_reward
 
+                        # DEBUG: Log before calling log_action
+                        log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: CALLING log_action for {action_type} Unit {unit_id} from {action_details.get('start_pos', '?')} to {action_details.get('end_pos', '?')}"
+                        self.game_state["console_logs"].append(log_msg)
+                        print(log_msg)
+                        
                         self.step_logger.log_action(
                             unit_id=updated_unit["id"],
                             action_type=action_type,  # CHANGE 4: Use validated action_type variable from line 406
@@ -914,6 +1035,16 @@ class W40KEngine(gym.Env):
                             step_increment=True,
                             action_details=action_details
                         )
+                        
+                        # DEBUG: Log after calling log_action
+                        log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: log_action COMPLETED for {action_type} Unit {unit_id}"
+                        self.game_state["console_logs"].append(log_msg)
+                        print(log_msg)
+            else:
+                # DEBUG: Log why action is NOT being logged
+                log_msg = f"[STEP LOGGER DEBUG] ⚠️ E{episode} T{turn} {phase}: SKIPPING log_action - action_type_valid={action_type_valid} unit_id_valid={unit_id_valid} action_type={action_type} unit_id={unit_id}"
+                self.game_state["console_logs"].append(log_msg)
+                print(log_msg)
 
         # Log to replay_logger for replay file generation (independent of step_logger)
         # Log action for replay/debugging
@@ -1108,6 +1239,37 @@ class W40KEngine(gym.Env):
                 raise KeyError(f"Unit missing required position fields: {unit}")
             unit_id = str(unit["id"])
             self.last_unit_positions[unit_id] = (unit["col"], unit["row"])
+        
+        # Write console_logs to movement_debug.log (for hidden_action_finder.py)
+        if "console_logs" in self.game_state and self.game_state["console_logs"]:
+            # DEBUG: Log what we're about to write
+            fight_debug_count = sum(1 for msg in self.game_state["console_logs"] if "[FIGHT DEBUG]" in msg)
+            attack_executed_count = sum(1 for msg in self.game_state["console_logs"] if "attack_executed" in msg)
+            print(f"[DEBUG] Writing {len(self.game_state['console_logs'])} console_logs to movement_debug.log (FIGHT DEBUG: {fight_debug_count}, attack_executed: {attack_executed_count})")
+            
+            movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'movement_debug.log')
+            try:
+                with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
+                    for log_msg in self.game_state["console_logs"]:
+                        # Ensure log message is a string and encode safely
+                        if not isinstance(log_msg, str):
+                            log_msg = str(log_msg)
+                        # Replace any problematic characters that might cause encoding issues
+                        log_msg = log_msg.encode('utf-8', errors='replace').decode('utf-8')
+                        f.write(log_msg + "\n")
+                    f.flush()  # Force flush to ensure logs are written immediately
+                # DEBUG: Verify write succeeded
+                print(f"[DEBUG] Successfully wrote {len(self.game_state['console_logs'])} logs to movement_debug.log")
+                # Clear console_logs after writing to avoid duplicates
+                self.game_state["console_logs"] = []
+            except Exception as e:
+                print(f"⚠️ Failed to write to movement_debug.log: {e}")
+        else:
+            # DEBUG: Log why we're not writing
+            if "console_logs" not in self.game_state:
+                print("[DEBUG] console_logs not in game_state - skipping write")
+            elif not self.game_state["console_logs"]:
+                print("[DEBUG] console_logs is empty - skipping write")
             
         return observation, reward, terminated, truncated, info
     
@@ -1189,6 +1351,9 @@ class W40KEngine(gym.Env):
         Process semantic action with detailed execution debugging.
         """
         current_phase = self.game_state["phase"]
+        # Capture turn and player for logging (before they might change during phase transition)
+        current_turn = self.game_state.get("turn", 1)
+        current_player = self.game_state.get("current_player", 1)
 
         # Handle special "advance_phase" action when pool is empty
         if action.get("action") == "advance_phase":
@@ -1226,11 +1391,87 @@ class W40KEngine(gym.Env):
             success, result = self._process_charge_phase(action)
         elif current_phase == "fight":
             success, result = self._process_fight_phase(action)
+            
+            # CRITICAL: If fight phase completed with combat action, log it BEFORE phase transition
+            # This ensures combat actions are logged in the fight phase, not the next phase
+            if (success and result.get("action") == "combat" and 
+                result.get("phase_complete") and result.get("next_phase")):
+                # Log combat action before phase transition
+                # This is a temporary logging - the main logging in step() will also happen
+                # but this ensures it's logged in the correct phase context
+                if (hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled and
+                    result.get("unitId") and "all_attack_results" in result):
+                    unit_id = result.get("unitId")
+                    all_attack_results = result.get("all_attack_results", [])
+                    updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
+                    
+                    # CRITICAL: Check if fight_attack_results exists and has attacks that weren't included
+                    if not all_attack_results:
+                        # Check if there are attacks in fight_attack_results that weren't included
+                        fight_attack_results = self.game_state.get("fight_attack_results", [])
+                        if fight_attack_results:
+                            # CRITICAL: fight_attack_results has attacks but all_attack_results is empty
+                            # This means attacks were lost - use fight_attack_results instead
+                            all_attack_results = fight_attack_results
+                            result["all_attack_results"] = all_attack_results
+                            # Log the recovery
+                            episode = self.game_state.get("episode_number", "?")
+                            turn = current_turn
+                            log_msg = f"[FIGHT DEBUG] E{episode} T{turn} w40k_core combat (phase_complete): Unit {unit_id} RECOVERED {len(all_attack_results)} attacks from fight_attack_results"
+                            if "console_logs" not in self.game_state:
+                                self.game_state["console_logs"] = []
+                            self.game_state["console_logs"].append(log_msg)
+                            print(log_msg)
+                    
+                    if updated_unit and all_attack_results:
+                        # Use pre-captured values for accurate logging
+                        step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+                        
+                        for i, attack_result in enumerate(all_attack_results):
+                            target_id = attack_result.get("targetId", result.get("targetId"))
+                            target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
+                            target_coords = None
+                            if target_unit:
+                                target_coords = (target_unit["col"], target_unit["row"])
+                            
+                            attack_details = {
+                                "current_turn": current_turn,
+                                "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
+                                "semantic_action": action,
+                                "target_id": target_id,
+                                "target_coords": target_coords,
+                                "hit_roll": attack_result.get("hit_roll", 0),
+                                "wound_roll": attack_result.get("wound_roll", 0),
+                                "save_roll": attack_result.get("save_roll", 0),
+                                "damage_dealt": attack_result.get("damage", 0),
+                                "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
+                                "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
+                                "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
+                                "hit_target": attack_result.get("hit_target", 4),
+                                "wound_target": attack_result.get("wound_target", 4),
+                                "save_target": attack_result.get("save_target", 4),
+                                "target_died": attack_result.get("target_died", False),
+                                "weapon_name": attack_result.get("weapon_name", ""),
+                                "reward": step_reward if i == 0 else 0.0
+                            }
+                            
+                            self.step_logger.log_action(
+                                unit_id=updated_unit["id"],
+                                action_type="combat",
+                                phase=current_phase,  # Use current_phase (fight) before transition
+                                player=current_player,
+                                success=success,
+                                step_increment=(i == 0),
+                                action_details=attack_details
+                            )
+                        
+                        # Mark as already logged to prevent double logging in step()
+                        result["combat_already_logged"] = True
         else:
             return False, {"error": "invalid_phase", "phase": current_phase}
 
         # Auto-advance to next phase when current phase completes
-        # Loop to handle cascading empty phases (e.g., charge → fight → move if all empty)
+        # Loop to handle cascading empty phases (e.g., charge -> fight -> move if all empty)
         max_cascade = 10  # Prevent infinite loops
         cascade_count = 0
         while success and result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
@@ -1239,7 +1480,7 @@ class W40KEngine(gym.Env):
 
             if "console_logs" not in self.game_state:
                 self.game_state["console_logs"] = []
-            self.game_state["console_logs"].append(f"🔄 PHASE TRANSITION: {current_phase} → {next_phase} (cascade #{cascade_count})")
+            self.game_state["console_logs"].append(f"🔄 PHASE TRANSITION: {current_phase} -> {next_phase} (cascade #{cascade_count})")
 
             # Initialize next phase using phase handlers
             phase_init_result = None
@@ -1258,7 +1499,21 @@ class W40KEngine(gym.Env):
 
             # If phase_start returns phase_complete, cascade to next phase
             if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
+                # CRITICAL: Preserve combat action data before replacing result
+                # When fight phase completes and transitions to next phase, we must preserve
+                # the combat action data (action, unitId, all_attack_results) for logging
+                preserved_combat_data = {}
+                combat_keys = ["action", "unitId", "all_attack_results", "targetId", "attack_result", "target_died", "reason", "phase"]
+                for key in combat_keys:
+                    if key in result:
+                        preserved_combat_data[key] = result[key]
+                
                 result = phase_init_result  # Update result for next iteration
+                
+                # CRITICAL: Restore preserved combat data for logging
+                for key, value in preserved_combat_data.items():
+                    if value is not None:  # Only restore non-None values
+                        result[key] = value
             else:
                 break  # Phase has eligible units, stop cascading
 

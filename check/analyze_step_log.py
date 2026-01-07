@@ -540,11 +540,11 @@ def parse_log(filepath):
                                             is_adjacent = True
                                             break
                                 
-                                # If adjacent and no PISTOL weapon → this is a SKIP (not a wait)
+                                # If adjacent and no PISTOL weapon -> this is a SKIP (not a wait)
                                 if is_adjacent:
                                     has_pistol = any(w.get('is_pistol', False) for w in ranged_weapons)
                                     if not has_pistol:
-                                        # Can't shoot in melee without PISTOL → this is a skip, not a wait
+                                        # Can't shoot in melee without PISTOL -> this is a skip, not a wait
                                         stats['shoot_vs_wait']['wait'] -= 1
                                         stats['shoot_vs_wait_by_player'][player]['wait'] -= 1
                                         stats['shoot_vs_wait']['skip'] += 1
@@ -1074,7 +1074,7 @@ def print_statistics(stats):
         print(f"\nMost common death orders:")
         for order, count in death_order_counter.most_common(10):
             pct = (count / len(stats['death_orders']) * 100)
-            order_str = " → ".join(order)
+            order_str = " -> ".join(order)
             print(f"  {order_str}: {count} times ({pct:.1f}%)")
 
         # Also show who killed whom

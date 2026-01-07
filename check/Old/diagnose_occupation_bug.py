@@ -109,7 +109,7 @@ for i, bug in enumerate(bugs_found, 1):
     print(f"{'='*80}")
     print(f"Episode: {bug['episode']}")
     print(f"Phase: {bug['phase']}")
-    print(f"Moving unit: {bug['moving_unit']} → destination: {bug['destination']}")
+    print(f"Moving unit: {bug['moving_unit']} -> destination: {bug['destination']}")
     print(f"BUT Unit {bug['occupied_by']} is already there with HP={bug['occupied_hp']}")
     print()
     print("What the LOG PARSER sees (from sequential log reading):")

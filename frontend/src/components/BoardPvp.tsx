@@ -1209,9 +1209,9 @@ export default function Board({
         // Backend has already calculated valid targets with proper LoS checks
         let isShootable = true;
         // ONLY apply greying in PvP mode when we have actual blinking data
-        // - Replay mode: blinkingUnits is undefined → skip greying
-        // - PvP mode before backend responds: blinkingUnits is [] → skip greying (prevents grey flash)
-        // - PvP mode with targets: blinkingUnits has IDs → apply greying
+        // - Replay mode: blinkingUnits is undefined -> skip greying
+        // - PvP mode before backend responds: blinkingUnits is [] -> skip greying (prevents grey flash)
+        // - PvP mode with targets: blinkingUnits has IDs -> apply greying
         if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && stableBlinkingUnits && stableBlinkingUnits.length > 0) {
           // Only grey out units that are NOT in the blinkingUnits list
           isShootable = stableBlinkingUnits.includes(unit.id);
@@ -1322,7 +1322,7 @@ export default function Board({
             );
             if (isAdjacentToEnemy) return false;
             
-            // AI_TURN.md ligne 591: NOT adjacent to enemy → CAN_ADVANCE = true
+            // AI_TURN.md ligne 591: NOT adjacent to enemy -> CAN_ADVANCE = true
             return true;
           })(),
           onAdvance: onAdvance,

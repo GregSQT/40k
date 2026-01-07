@@ -60,7 +60,7 @@ def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
     
     Args:
         scenario_file: Path to scenario.json
-        unit_registry: UnitRegistry instance for unit_type → agent_key mapping
+        unit_registry: UnitRegistry instance for unit_type -> agent_key mapping
         
     Returns:
         Set of unique agent keys found in scenario
