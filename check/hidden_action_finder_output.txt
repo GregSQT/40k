@@ -1,138 +1,32 @@
 ================================================================================
 VÉRIFICATION DES LOGS - Détection des actions non loguées
-Généré le: 2026-01-07 19:31:52
+Généré le: 2026-01-08 00:06:58
 ================================================================================
 
 📖 Parsing des logs...
-  - Position changes: 45
-  - Attaques (debug): 107
-  - Mouvements (step.log): 239
-  - Charges (step.log): 146
-  - Advances (step.log): 36
-  - Attaques (step.log): 1302
-  - Activations fight: 28
+  - Position changes: 27
+  - Attaques (debug): 67
+  - Mouvements (step.log): 5852
+  - Charges (step.log): 2892
+  - Advances (step.log): 650
+  - Attaques (step.log): 24737
+  - Activations fight: 16
   - Avertissements manquants: 0
 
 ================================================================================
 1. MOUVEMENTS FAITS MAIS NON LOGUÉS DANS STEP.LOG
 ================================================================================
-⚠️  26 mouvement(s) non logué(s):
-  E1 T1 move: Unit 2 (7, 14)→(6, 11) (MOVE)
-  E1 T1 move: Unit 4 (1, 13)→(4, 9) (MOVE)
-  E1 T1 move: Unit 5 (16, 5)→(16, 4) (MOVE)
-  E1 T1 move: Unit 6 (23, 6)→(23, 5) (MOVE)
-  E1 T1 move: Unit 7 (6, 8)→(6, 7) (MOVE)
-  E1 T1 move: Unit 8 (8, 6)→(7, 7) (MOVE)
-  E1 T2 move: Unit 1 (23, 7)→(24, 7) (MOVE)
-  E1 T2 move: Unit 2 (7, 11)→(4, 9) (MOVE)
-  E1 T2 move: Unit 3 (17, 5)→(18, 5) (MOVE)
-  E1 T2 move: Unit 4 (5, 8)→(5, 9) (MOVE)
-  E1 T2 move: Unit 6 (23, 5)→(23, 4) (MOVE)
-  E1 T2 move: Unit 7 (6, 7)→(7, 7) (MOVE)
-  E1 T2 move: Unit 8 (6, 8)→(6, 7) (MOVE)
-  E1 T3 move: Unit 1 (24, 6)→(23, 6) (MOVE)
-  E1 T3 move: Unit 2 (5, 8)→(4, 9) (MOVE)
-  E1 T3 move: Unit 3 (18, 5)→(21, 5) (MOVE)
-  E1 T3 move: Unit 7 (6, 8)→(8, 3) (MOVE)
-  E1 T3 move: Unit 8 (6, 7)→(7, 7) (MOVE)
-  E1 T4 move: Unit 2 (4, 9)→(4, 8) (MOVE)
-  E1 T4 move: Unit 3 (21, 6)→(21, 5) (MOVE)
-  ... et 6 autres
+✅ Tous les mouvements sont logués
 
 ================================================================================
 2. ATTAQUES FAITES MAIS NON LOGUÉES DANS STEP.LOG
 ================================================================================
-⚠️  44 attaque(s) non loguée(s):
-
-  Groupées par (episode, turn, phase, attacker, target): 35 groupe(s)
-  Groupe 1: E1 T1 fight Unit 4 -> Unit 7: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T1 fight attack_executed: Unit 4 -> Unit 7 damage=0 target_died...
-  Groupe 2: E1 T1 fight Unit 7 -> Unit 4: 2 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T1 fight attack_executed: Unit 7 -> Unit 4 damage=0 target_died...
-  Groupe 3: E1 T1 fight Unit 8 -> Unit 4: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T1 fight attack_executed: Unit 8 -> Unit 4 damage=0 target_died...
-  Groupe 4: E1 T1 fight Unit 4 -> Unit 8: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T1 fight attack_executed: Unit 4 -> Unit 8 damage=0 target_died...
-  Groupe 5: E1 T2 fight Unit 2 -> Unit 8: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T2 fight attack_executed: Unit 2 -> Unit 8 damage=0 target_died...
-  Groupe 6: E1 T2 fight Unit 8 -> Unit 2: 2 attaque(s) manquante(s)
-    Exemple: damage=1, died=False, line=[FIGHT DEBUG] E1 T2 fight attack_executed: Unit 8 -> Unit 2 damage=1 target_died...
-  Groupe 7: E1 T2 fight Unit 7 -> Unit 2: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T2 fight attack_executed: Unit 7 -> Unit 2 damage=0 target_died...
-  Groupe 8: E1 T2 fight Unit 2 -> Unit 7: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T2 fight attack_executed: Unit 2 -> Unit 7 damage=0 target_died...
-  Groupe 9: E1 T3 fight Unit 1 -> Unit 6: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T3 fight attack_executed: Unit 1 -> Unit 6 damage=0 target_died...
-  Groupe 10: E1 T3 fight Unit 4 -> Unit 7: 1 attaque(s) manquante(s)
-    Exemple: damage=0, died=False, line=[FIGHT DEBUG] E1 T3 fight attack_executed: Unit 4 -> Unit 7 damage=0 target_died...
-
-  ... et 24 autres attaques individuelles
+✅ Toutes les attaques sont loguées
 
 ================================================================================
 3. ATTAQUES MANQUANTES EN PHASE FIGHT (unités avec cibles valides mais AUCUNE attaque)
 ================================================================================
-⚠️  24 unité(s) avec cibles valides mais SANS AUCUNE attaque loguée:
-  E1 T1: Unit 4
-    Valid targets: ['7']
-    Attacked targets: ['12']
-  E1 T1: Unit 7
-    Valid targets: ['4']
-    Attacked targets: []
-  E1 T1: Unit 8
-    Valid targets: ['4']
-    Attacked targets: ['3']
-  E1 T1: Unit 4
-    Valid targets: ['8']
-    Attacked targets: ['12']
-  E1 T2: Unit 1
-    Valid targets: ['6']
-    Attacked targets: ['9']
-  E1 T2: Unit 2
-    Valid targets: ['8']
-    Attacked targets: []
-  E1 T2: Unit 6
-    Valid targets: ['1']
-    Attacked targets: []
-  E1 T2: Unit 8
-    Valid targets: ['2']
-    Attacked targets: []
-  E1 T2: Unit 7
-    Valid targets: ['2']
-    Attacked targets: []
-  E1 T2: Unit 2
-    Valid targets: ['7']
-    Attacked targets: []
-  E1 T3: Unit 1
-    Valid targets: ['6']
-    Attacked targets: []
-  E1 T3: Unit 4
-    Valid targets: ['7']
-    Attacked targets: []
-  E1 T3: Unit 6
-    Valid targets: ['1']
-    Attacked targets: []
-  E1 T3: Unit 7
-    Valid targets: ['4']
-    Attacked targets: ['2']
-  E1 T3: Unit 6
-    Valid targets: ['3']
-    Attacked targets: []
-  E1 T3: Unit 8
-    Valid targets: ['2']
-    Attacked targets: []
-  E1 T3: Unit 2
-    Valid targets: ['8']
-    Attacked targets: ['7']
-  E1 T3: Unit 3
-    Valid targets: ['6']
-    Attacked targets: []
-  E1 T4: Unit 2
-    Valid targets: ['7']
-    Attacked targets: ['8', '13']
-  E1 T4: Unit 7
-    Valid targets: ['2']
-    Attacked targets: []
-  ... et 4 autres
+✅ Toutes les unités avec cibles valides ont attaqué au moins une cible
 
 ================================================================================
 4. AVERTISSEMENTS DÉTECTÉS DANS MOVEMENT_DEBUG.LOG
@@ -142,10 +36,6 @@ Généré le: 2026-01-07 19:31:52
 ================================================================================
 RÉSUMÉ
 ================================================================================
-⚠️  94 problème(s) détecté(s):
-  - Mouvements non logués: 26
-  - Attaques non loguées: 44
-  - Attaques manquantes (aucune attaque): 24
-  - Avertissements: 0
+✅ Aucun problème détecté - tous les logs sont cohérents
 
 ✅ Output sauvegardé dans: check/hidden_action_finder_output.txt

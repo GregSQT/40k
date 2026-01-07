@@ -75,7 +75,7 @@ def parse_attacks_from_debug(movement_log: str) -> List[Dict]:
 def parse_episodes_from_step(step_log: str) -> Dict[int, int]:
     """Parse episode boundaries from step.log and return line -> episode mapping
     Uses EPISODE START markers in priority (with explicit episode numbers),
-    falls back to EPISODE END markers if START markers don't exist
+    but also uses EPISODE END markers to correctly determine episode boundaries
     """
     episode_map = {}
     lines = step_log.split('\n')
@@ -89,9 +89,16 @@ def parse_episodes_from_step(step_log: str) -> Dict[int, int]:
                 episode_num = int(match.group(1))
                 episode_starts[line_num] = episode_num
     
+    # Second pass: find all EPISODE END markers
+    episode_ends = {}
+    for line_num, line in enumerate(lines, 1):
+        if 'EPISODE END' in line:
+            episode_ends[line_num] = None  # We don't know episode number from END marker
+    
     # Use EPISODE START markers if they exist (they have explicit episode numbers)
     if episode_starts:
         sorted_starts = sorted(episode_starts.items())
+        sorted_ends = sorted(episode_ends.keys())
         
         # Lines before first EPISODE START get the first episode number
         first_episode_line = sorted_starts[0][0]
@@ -99,11 +106,36 @@ def parse_episodes_from_step(step_log: str) -> Dict[int, int]:
         for line_num in range(1, first_episode_line):
             episode_map[line_num] = first_episode
         
-        # Assign episodes based on EPISODE START markers
+        # Assign episodes based on EPISODE START markers, but respect EPISODE END boundaries
         for i, (start_line, episode) in enumerate(sorted_starts):
-            end_line = sorted_starts[i + 1][0] if i + 1 < len(sorted_starts) else len(lines) + 1
-            for line_num in range(start_line, end_line):
-                episode_map[line_num] = episode
+            # Find the next EPISODE START or use end of file
+            next_start_line = sorted_starts[i + 1][0] if i + 1 < len(sorted_starts) else len(lines) + 1
+            
+            # Find the EPISODE END for this episode (should be before next_start_line)
+            # EPISODE END marks the end of the previous episode, so actions after EPISODE END
+            # but before next EPISODE START belong to the next episode
+            episode_end_line = None
+            for end_line in sorted_ends:
+                if start_line <= end_line < next_start_line:
+                    episode_end_line = end_line
+                    break
+            
+            # If we found an EPISODE END, actions after it belong to next episode
+            # Otherwise, all lines from start_line to next_start_line belong to this episode
+            if episode_end_line and episode_end_line < next_start_line:
+                # Lines from start_line to episode_end_line belong to this episode
+                for line_num in range(start_line, episode_end_line + 1):
+                    episode_map[line_num] = episode
+                # Lines after episode_end_line but before next_start_line belong to next episode
+                # (if next episode exists)
+                if i + 1 < len(sorted_starts):
+                    next_episode = sorted_starts[i + 1][1]
+                    for line_num in range(episode_end_line + 1, next_start_line):
+                        episode_map[line_num] = next_episode
+            else:
+                # No EPISODE END found, assign all lines to this episode
+                for line_num in range(start_line, next_start_line):
+                    episode_map[line_num] = episode
     else:
         # Fallback: use EPISODE END markers if START markers don't exist
         episode_ends = {}
@@ -158,41 +190,101 @@ def _get_episode_with_fallback(line_num: int, episode_map: Dict[int, int]) -> in
     return episode
 
 def parse_moves_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Dict]:
-    """Parse MOVE actions from step.log with episode tracking"""
+    """Parse MOVE and FLED actions from step.log with episode tracking
+    Now supports both old format (without E{episode}) and new format (with E{episode})
+    """
     moves = []
-    pattern = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern for MOVED with episode: [timestamp] E{episode} T{turn} P{player} MOVE : ...
+    moved_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern for MOVED without episode (old format): [timestamp] T{turn} P{player} MOVE : ...
+    moved_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern for FLED with episode
+    fled_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) FLED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern for FLED without episode (old format)
+    fled_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) FLED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     
     for line_num, line in enumerate(step_log.split('\n'), 1):
-        match = re.search(pattern, line)
+        # Try MOVED with episode first (new format)
+        match = re.search(moved_pattern_with_ep, line)
         if match:
-            episode = _get_episode_with_fallback(line_num, episode_map)
-                
-            timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+            timestamp, episode, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
             moves.append({
-                'episode': episode,
+                'episode': int(episode),  # Use episode from log line
                 'turn': int(turn),
                 'player': int(player),
                 'unit_id': unit_id,
                 'from': (int(from_col), int(from_row)),
                 'to': (int(to_col), int(to_row)),
+                'type': 'MOVED',
                 'line': line
             })
+        else:
+            # Try MOVED without episode (old format)
+            match = re.search(moved_pattern_old, line)
+            if match:
+                episode = _get_episode_with_fallback(line_num, episode_map)
+                timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+                moves.append({
+                    'episode': episode,
+                    'turn': int(turn),
+                    'player': int(player),
+                    'unit_id': unit_id,
+                    'from': (int(from_col), int(from_row)),
+                    'to': (int(to_col), int(to_row)),
+                    'type': 'MOVED',
+                    'line': line
+                })
+            else:
+                # Try FLED with episode (new format)
+                match = re.search(fled_pattern_with_ep, line)
+                if match:
+                    timestamp, episode, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+                    moves.append({
+                        'episode': int(episode),  # Use episode from log line
+                        'turn': int(turn),
+                        'player': int(player),
+                        'unit_id': unit_id,
+                        'from': (int(from_col), int(from_row)),
+                        'to': (int(to_col), int(to_row)),
+                        'type': 'FLED',
+                        'line': line
+                    })
+                else:
+                    # Try FLED without episode (old format)
+                    match = re.search(fled_pattern_old, line)
+                    if match:
+                        episode = _get_episode_with_fallback(line_num, episode_map)
+                        timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+                        moves.append({
+                            'episode': episode,
+                            'turn': int(turn),
+                            'player': int(player),
+                            'unit_id': unit_id,
+                            'from': (int(from_col), int(from_row)),
+                            'to': (int(to_col), int(to_row)),
+                            'type': 'FLED',
+                            'line': line
+                        })
     
     return moves
 
 def parse_charges_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Dict]:
-    """Parse CHARGE actions from step.log (they also move units) with episode tracking"""
+    """Parse CHARGE actions from step.log (they also move units) with episode tracking
+    Now supports both old format (without E{episode}) and new format (with E{episode})
+    """
     charges = []
-    pattern = r'\[([^\]]+)\] T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern with episode (new format)
+    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern without episode (old format)
+    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     
     for line_num, line in enumerate(step_log.split('\n'), 1):
-        match = re.search(pattern, line)
+        # Try with episode first (new format)
+        match = re.search(pattern_with_ep, line)
         if match:
-            episode = _get_episode_with_fallback(line_num, episode_map)
-                
-            timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+            timestamp, episode, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
             charges.append({
-                'episode': episode,
+                'episode': int(episode),  # Use episode from log line
                 'turn': int(turn),
                 'player': int(player),
                 'unit_id': unit_id,
@@ -200,22 +292,41 @@ def parse_charges_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                 'to': (int(to_col), int(to_row)),
                 'line': line
             })
+        else:
+            # Try without episode (old format)
+            match = re.search(pattern_old, line)
+            if match:
+                episode = _get_episode_with_fallback(line_num, episode_map)
+                timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+                charges.append({
+                    'episode': episode,
+                    'turn': int(turn),
+                    'player': int(player),
+                    'unit_id': unit_id,
+                    'from': (int(from_col), int(from_row)),
+                    'to': (int(to_col), int(to_row)),
+                    'line': line
+                })
     
     return charges
 
 def parse_advances_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Dict]:
-    """Parse ADVANCE actions from step.log (they also move units) with episode tracking"""
+    """Parse ADVANCE actions from step.log (they also move units) with episode tracking
+    Now supports both old format (without E{episode}) and new format (with E{episode})
+    """
     advances = []
-    pattern = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ADVANCED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern with episode (new format)
+    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ADVANCED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    # Pattern without episode (old format)
+    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ADVANCED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     
     for line_num, line in enumerate(step_log.split('\n'), 1):
-        match = re.search(pattern, line)
+        # Try with episode first (new format)
+        match = re.search(pattern_with_ep, line)
         if match:
-            episode = _get_episode_with_fallback(line_num, episode_map)
-                
-            timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+            timestamp, episode, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
             advances.append({
-                'episode': episode,
+                'episode': int(episode),  # Use episode from log line
                 'turn': int(turn),
                 'player': int(player),
                 'unit_id': unit_id,
@@ -223,23 +334,41 @@ def parse_advances_from_step(step_log: str, episode_map: Dict[int, int]) -> List
                 'to': (int(to_col), int(to_row)),
                 'line': line
             })
+        else:
+            # Try without episode (old format)
+            match = re.search(pattern_old, line)
+            if match:
+                episode = _get_episode_with_fallback(line_num, episode_map)
+                timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
+                advances.append({
+                    'episode': episode,
+                    'turn': int(turn),
+                    'player': int(player),
+                    'unit_id': unit_id,
+                    'from': (int(from_col), int(from_row)),
+                    'to': (int(to_col), int(to_row)),
+                    'line': line
+                })
     
     return advances
 
 def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Dict]:
-    """Parse SHOOT and FIGHT attacks from step.log with episode tracking"""
+    """Parse SHOOT and FIGHT attacks from step.log with episode tracking
+    Now supports both old format (without E{episode}) and new format (with E{episode})
+    """
     attacks = []
     
-    # SHOOT attacks
-    shoot_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at unit (\d+)\((\d+),(\d+)\)'
+    # SHOOT attacks with episode (new format)
+    shoot_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at unit (\d+)\((\d+),(\d+)\)'
+    # SHOOT attacks without episode (old format)
+    shoot_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at unit (\d+)\((\d+),(\d+)\)'
     for line_num, line in enumerate(step_log.split('\n'), 1):
-        match = re.search(shoot_pattern, line)
+        # Try with episode first (new format)
+        match = re.search(shoot_pattern_with_ep, line)
         if match:
-            episode = _get_episode_with_fallback(line_num, episode_map)
-                
-            timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
+            timestamp, episode, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
             attacks.append({
-                'episode': episode,
+                'episode': int(episode),  # Use episode from log line
                 'turn': int(turn),
                 'player': int(player),
                 'phase': 'shoot',
@@ -247,17 +376,33 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                 'target': target,
                 'line': line
             })
+        else:
+            # Try without episode (old format)
+            match = re.search(shoot_pattern_old, line)
+            if match:
+                episode = _get_episode_with_fallback(line_num, episode_map)
+                timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
+                attacks.append({
+                    'episode': episode,
+                    'turn': int(turn),
+                    'player': int(player),
+                    'phase': 'shoot',
+                    'attacker': attacker,
+                    'target': target,
+                    'line': line
+                })
     
-    # FIGHT attacks
-    fight_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)\((\d+),(\d+)\)'
+    # FIGHT attacks with episode (new format)
+    fight_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)\((\d+),(\d+)\)'
+    # FIGHT attacks without episode (old format)
+    fight_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)\((\d+),(\d+)\)'
     for line_num, line in enumerate(step_log.split('\n'), 1):
-        match = re.search(fight_pattern, line)
+        # Try with episode first (new format)
+        match = re.search(fight_pattern_with_ep, line)
         if match:
-            episode = _get_episode_with_fallback(line_num, episode_map)
-                
-            timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
+            timestamp, episode, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
             attacks.append({
-                'episode': episode,
+                'episode': int(episode),  # Use episode from log line
                 'turn': int(turn),
                 'player': int(player),
                 'phase': 'fight',
@@ -265,6 +410,21 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                 'target': target,
                 'line': line
             })
+        else:
+            # Try without episode (old format)
+            match = re.search(fight_pattern_old, line)
+            if match:
+                episode = _get_episode_with_fallback(line_num, episode_map)
+                timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
+                attacks.append({
+                    'episode': episode,
+                    'turn': int(turn),
+                    'player': int(player),
+                    'phase': 'fight',
+                    'attacker': attacker,
+                    'target': target,
+                    'line': line
+                })
     
     return attacks
 

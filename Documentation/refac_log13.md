@@ -85,16 +85,17 @@ game_state["fight_attack_results"] = []  # Vidé après ajout au result
 
 ### Principe Fondamental
 
-**UN SEUL POINT DE LOGGING**: Dans `step()` de `w40k_core.py`, APRÈS réception du `result` des handlers.
+**UN SEUL POINT DE LOGGING**: Dans `_process_semantic_action()` de `w40k_core.py`, APRÈS réception du `result` des handlers.
 
 ### Flux Simplifié
 
 ```
-Handler → result (avec all_attack_results complet) → step() → step_logger.log_action()
+Handler → result (avec all_attack_results complet) → _process_semantic_action() → step_logger.log_action()
 ```
 
 **Avantages:**
 - ✅ Point unique de logging
+- ✅ Toutes les actions sont loguées (training via `step()`, frontend via `execute_semantic_action()`, PvE via `execute_ai_turn()`)
 - ✅ Pas de race condition (pas d'état partagé)
 - ✅ Flux simple et prévisible
 - ✅ Conforme AI_TURN.md
@@ -106,10 +107,16 @@ Handler → result (avec all_attack_results complet) → step() → step_logger.
 - **INTERDIT**: Faire du logging directement
 - **INTERDIT**: Utiliser `fight_attack_results` comme état partagé
 
-#### `w40k_core.py` - `step()`
+#### `w40k_core.py` - `_process_semantic_action()`
 - **RESPONSABILITÉ UNIQUE**: Logger TOUTES les actions (réussies ET échouées)
-- **UN SEUL ENDROIT**: Lignes 880-1035 (section existante)
-- **INTERDIT**: Logging dans `_process_semantic_action()`
+- **UN SEUL ENDROIT**: À la fin de `_process_semantic_action()`, APRÈS réception du `result` des handlers
+- **CAPTURE MÉTADONNÉES**: Capture `pre_action_phase`, `pre_action_player`, `pre_action_turn`, `pre_action_positions` AVANT l'exécution de l'action
+- **LOGGING**: Log toutes les actions (réussies ET échouées) avec validation stricte
+
+#### `w40k_core.py` - `step()`
+- **RESPONSABILITÉ**: Interface Gym, conversion gym action → semantic action, gestion episode_steps
+- **INTERDIT**: Logging des actions (déplacé vers `_process_semantic_action()`)
+- **AUTORISÉ**: Logging pour `replay_logger` (replay file generation, indépendant de `step_logger`)
 
 #### `step_logger.py`
 - **AUCUN CHANGEMENT**: Déjà correct et produit le format attendu

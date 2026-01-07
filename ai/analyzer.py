@@ -338,7 +338,8 @@ def parse_step_log(filepath: str) -> Dict:
                 continue
 
             # Parse action line
-            match = re.match(r'\[.*?\] T(\d+) P(\d+) (\w+) : (.*?) \[(SUCCESS|FAILED)\] \[STEP: (YES|NO)\]', line)
+            # Support both old format (T\d+) and new format (E\d+ T\d+)
+            match = re.match(r'\[.*?\] (?:E\d+ )?T(\d+) P(\d+) (\w+) : (.*?) \[(SUCCESS|FAILED)\] \[STEP: (YES|NO)\]', line)
             if match:
                 turn = int(match.group(1))
                 player = int(match.group(2))

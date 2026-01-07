@@ -716,6 +716,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     unit["valid_target_pool"] = []
     unit["TOTAL_ATTACK_LOG"] = ""
     
+    # CRITICAL: Clear shoot_attack_results at the start of each new unit activation
+    # This ensures attacks from different units are not mixed together
+    game_state["shoot_attack_results"] = []
+    
     # Determine adjacency
     unit_is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
     
@@ -1320,6 +1324,10 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Complete shooting phase with player progression and turn management
     """
+    # CRITICAL: Include all_attack_results if attacks were executed before phase completion
+    # This ensures attacks already executed are logged to step.log
+    shoot_attack_results = game_state.get("shoot_attack_results", [])
+    
     # Final cleanup
     game_state["shoot_activation_pool"] = []
     
@@ -1332,11 +1340,17 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["console_logs"] = []
     game_state["console_logs"].append("SHOOTING PHASE COMPLETE")
     
+    # Base result with all_attack_results if present
+    base_result = {}
+    if shoot_attack_results:
+        base_result["all_attack_results"] = list(shoot_attack_results)
+    
     # Player progression logic
     if game_state["current_player"] == 1:
         # AI_TURN.md Line 105: P1 Move -> P1 Shoot -> P1 Charge -> P1 Fight
         # Player stays 1, advance to charge phase
         return {
+            **base_result,
             "phase_complete": True,
             "phase_transition": True,
             "next_phase": "charge",
@@ -1356,6 +1370,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             # Incrementing would exceed turn limit - end game without incrementing
             game_state["game_over"] = True
             return {
+                **base_result,
                 "phase_complete": True,
                 "game_over": True,
                 "turn_limit_reached": True,
@@ -1370,6 +1385,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             # Player stays 2, advance to charge phase
             # Turn increment happens at P2 Fight end (fight_handlers.py:797)
             return {
+                **base_result,
                 "phase_complete": True,
                 "phase_transition": True,
                 "next_phase": "charge",
@@ -1481,6 +1497,12 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         "reset_mode": "select",
         "clear_selected_unit": True
     }
+    
+    # CRITICAL: Include all_attack_results if attacks were executed before ending activation
+    # This ensures attacks already executed are logged to step.log
+    shoot_attack_results = game_state.get("shoot_attack_results", [])
+    if shoot_attack_results:
+        response["all_attack_results"] = list(shoot_attack_results)
     
     # Signal phase completion if pool is empty - delegate to proper phase end function
     if pool_empty:
@@ -2419,6 +2441,15 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         # Execute shooting attack
         attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
 
+        # CRITICAL: Add attack result to shoot_attack_results for logging
+        # This ensures all attacks are logged even if waiting_for_player=True
+        if "shoot_attack_results" not in game_state:
+            game_state["shoot_attack_results"] = []
+        # Convert attack_result dict to match format expected by logger (with targetId)
+        attack_result_with_id = attack_result.copy()
+        attack_result_with_id["targetId"] = selected_target_id
+        game_state["shoot_attack_results"].append(attack_result_with_id)
+
         # Update SHOOT_LEFT and continue loop per AI_TURN.md
         unit["SHOOT_LEFT"] -= 1
         
@@ -2478,10 +2509,25 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 loop_result["target_died"] = attack_result.get("target_died", False)
                 loop_result["damage"] = attack_result.get("damage", 0)
                 loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
+                # CRITICAL: Ensure action and unitId are set for logging
+                if "action" not in loop_result:
+                    loop_result["action"] = "shoot"
+                if "unitId" not in loop_result:
+                    loop_result["unitId"] = unit_id
+                # CRITICAL: Include all_attack_results even when waiting_for_player
+                # This ensures attacks already executed are logged to step.log
+                shoot_attack_results = game_state.get("shoot_attack_results", [])
+                if shoot_attack_results:
+                    loop_result["all_attack_results"] = list(shoot_attack_results)
                 return success, loop_result
             else:
                 # NO -> All weapons exhausted -> End activation
                 result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                # CRITICAL: Include all_attack_results even when ending activation
+                # This ensures attacks already executed are logged to step.log
+                shoot_attack_results = game_state.get("shoot_attack_results", [])
+                if shoot_attack_results:
+                    result["all_attack_results"] = list(shoot_attack_results)
                 return True, result
         else:
             # NO -> Continue normally (SHOOT_LEFT > 0)
@@ -2498,6 +2544,11 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 # valid_target_pool empty? -> YES -> End activation (Slaughter handling)
                 if not unit.get("valid_target_pool"):
                     result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                    # CRITICAL: Include all_attack_results even when ending activation
+                    # This ensures attacks already executed are logged to step.log
+                    shoot_attack_results = game_state.get("shoot_attack_results", [])
+                    if shoot_attack_results:
+                        result["all_attack_results"] = list(shoot_attack_results)
                     return True, result
                 # NO -> Continue to shooting action selection step
             # else: Target survives
@@ -2507,6 +2558,11 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             if not valid_targets and unit["SHOOT_LEFT"] > 0:
                 # YES -> End activation (Slaughter handling)
                 result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                # CRITICAL: Include all_attack_results even when ending activation
+                # This ensures attacks already executed are logged to step.log
+                shoot_attack_results = game_state.get("shoot_attack_results", [])
+                if shoot_attack_results:
+                    result["all_attack_results"] = list(shoot_attack_results)
                 return True, result
             # NO -> Continue to shooting action selection step
             
@@ -2516,6 +2572,16 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             loop_result["target_died"] = attack_result.get("target_died", False)
             loop_result["damage"] = attack_result.get("damage", 0)
             loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
+            # CRITICAL: Ensure action and unitId are set for logging
+            if "action" not in loop_result:
+                loop_result["action"] = "shoot"
+            if "unitId" not in loop_result:
+                loop_result["unitId"] = unit_id
+            # CRITICAL: Include all_attack_results even when waiting_for_player
+            # This ensures attacks already executed are logged to step.log
+            shoot_attack_results = game_state.get("shoot_attack_results", [])
+            if shoot_attack_results:
+                loop_result["all_attack_results"] = list(shoot_attack_results)
             return success, loop_result
     
     except Exception as e:

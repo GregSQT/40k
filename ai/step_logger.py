@@ -67,9 +67,11 @@ class StepLogger:
                 success_status = "SUCCESS" if success else "FAILED"
                 phase_upper = phase.upper()
                 
-                # Get turn from SINGLE SOURCE OF TRUTH
+                # Get turn and episode from SINGLE SOURCE OF TRUTH
                 turn_number = action_details.get('current_turn', 1) if action_details else 1
-                f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n")
+                episode_number = action_details.get('current_episode', 1) if action_details else 1
+                # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
+                f.write(f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n")
                 
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")

@@ -1,14 +1,14 @@
 Analyzing step.log...
-Généré le: 2026-01-07 19:31:52
+Généré le: 2026-01-08 00:06:58
 ================================================================================
 ================================================================================
 STEP.LOG ANALYSIS - GAME RULES VALIDATION
 ================================================================================
 
-Total Episodes: 15
-Total Actions: 1129
-Average Actions per Episode: 75.3
-Min/Max Actions per Episode: 43/109
+Total Episodes: 300
+Total Actions: 21427
+Average Actions per Episode: 71.4
+Min/Max Actions per Episode: 28/136
 
 --------------------------------------------------------------------------------
 WIN METHODS
@@ -21,19 +21,19 @@ SAMPLE ACTIONS
 ================================================================================
 
 --- MOVE ---
-[19:31:44] T1 P1 MOVE : Unit 1(21,7) MOVED from (18,12) to (21,7) [R:+0.7] [SUCCESS] [STEP: YES]
+[00:03:53] E1 T1 P1 MOVE : Unit 1(21,7) MOVED from (18,12) to (21,7) [R:+0.7] [SUCCESS] [STEP: YES]
 
 --- SHOOT ---
-[19:31:44] T1 P1 SHOOT : Unit 1(21,7) SHOT at unit 11(17,5) with [Bolt Rifle] - Hit:3+:4(HIT) Wound:3+:3(WOUND) Save:6+:4(FAIL) Dmg:1HP [R:+38.0] [SUCCESS] [STEP: YES]
+[00:03:54] E1 T1 P1 SHOOT : Unit 1(21,7) SHOT at unit 11(17,5) - Hit:4+:0(MISS) Wound:4+:0(FAIL) Save:4+:0(FAIL) Dmg:0HP [R:+8.0] [SUCCESS] [STEP: YES]
 
 --- ADVANCE ---
-[19:31:44] T1 P1 SHOOT : Unit 2(3,10) ADVANCED from (4,11) to (3,10) [Roll: 4] [R:+0.1] [SUCCESS] [STEP: YES]
+[00:03:54] E1 T1 P1 SHOOT : Unit 2(3,10) ADVANCED from (4,11) to (3,10) [Roll: 2] [R:+0.1] [SUCCESS] [STEP: YES]
 
 --- CHARGE ---
-[19:31:44] T1 P1 CHARGE : Unit 1(21,6) CHARGED unit 13(20,6) from (21,7) to (21,6) [Roll:6] [R:+3.0] [SUCCESS] [STEP: YES]
+[00:03:54] E1 T1 P1 CHARGE : Unit 1(21,6) CHARGED unit 13(20,6) from (21,7) to (21,6) [Roll:8] [R:+3.0] [SUCCESS] [STEP: YES]
 
 --- FIGHT ---
-[19:31:44] T1 P1 FIGHT : Unit 1(21,6) ATTACKED unit 13(20,6) with [Close Combat Weapon] - Hit:3+:1(MISS) [R:+3.0] [SUCCESS] [STEP: YES]
+[00:03:54] E1 T1 P1 FIGHT : Unit 1(21,6) ATTACKED unit 13(20,6) with [Close Combat Weapon] - Hit:3+:5(HIT) Wound:3+:2(FAIL) [R:+3.0] [SUCCESS] [STEP: YES]
 
 ================================================================================
 

@@ -1393,6 +1393,11 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         # CRITICAL: Clear active_fight_unit so next unit can be activated
         game_state["active_fight_unit"] = None
         game_state["valid_fight_targets"] = []
+        
+        # CRITICAL: Set action for logging (wait action since no attack was made)
+        result["action"] = "wait"
+        result["phase"] = "fight"
+        result["unitId"] = unit_id
 
         # Check if ALL pools are empty -> phase complete
         if result.get("phase_complete"):
@@ -1407,8 +1412,12 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
             result.update(phase_result)
             
             # CRITICAL: Restore preserved combat data for logging
-            if preserved_action:
+            # Always restore action (even if None, to ensure it's not overwritten by phase_result)
+            if preserved_action is not None:
                 result["action"] = preserved_action
+            elif "action" not in result:
+                # If action was not preserved and phase_result doesn't have it, set default
+                result["action"] = "wait"
             if preserved_attack_results:
                 result["all_attack_results"] = preserved_attack_results
             if preserved_unit_id:
@@ -1809,7 +1818,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                     "valid_targets": valid_targets_after,
                     "waiting_for_player": True,
                     "action": "combat",  # CRITICAL: Must be "combat" for step_logger
-                    "all_attack_results": all_attack_results  # Include for logging
+                    "all_attack_results": list(all_attack_results) if all_attack_results else []  # Copie explicite pour sécurité
                 }
         # No more targets or no valid target selected - fall through to end activation
 
@@ -1855,7 +1864,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             # Fallback: if fight_attack_results is empty but we have attack_result, use it
             # This should never happen if attacks are properly added to fight_attack_results
             fight_attack_results = [attack_result]
-        result["all_attack_results"] = fight_attack_results
+        result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pour sécurité
         # DEBUG: Log all_attack_results being set in result (no_more_targets path)
         if "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
@@ -1954,7 +1963,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             # But if it does, at least return the current attack_result
             if attack_result:
                 fight_attack_results = [attack_result]
-        result["all_attack_results"] = fight_attack_results
+        result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pour sécurité
         # DEBUG: Log all_attack_results being set in result (attacks_complete path)
         if "episode_number" in game_state and "turn" in game_state:
             episode = game_state["episode_number"]
