@@ -874,8 +874,15 @@ def valid_target_pool_build(
         if enemy["HP_CUR"] <= 0:
             continue
         
+        # CRITICAL: Skip the shooter unit itself (cannot shoot self)
+        if str(enemy["id"]) == str(unit["id"]):
+            continue
+        
         # unit.player != current_player? -> NO -> Skip enemy unit
-        if enemy["player"] == current_player:
+        # CRITICAL: Convert to int for consistent comparison (player can be int or string)
+        enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
+        current_player_int = int(current_player) if current_player is not None else None
+        if enemy_player == current_player_int:
             continue
         
         # Unit NOT adjacent to friendly unit (excluding active unit)? -> NO -> Skip enemy unit
@@ -883,7 +890,9 @@ def valid_target_pool_build(
         melee_range = get_melee_range()
         enemy_adjacent_to_friendly = False
         for friendly in game_state["units"]:
-            if (friendly["player"] == current_player and 
+            # CRITICAL: Convert to int for consistent comparison (player can be int or string)
+            friendly_player = int(friendly["player"]) if friendly["player"] is not None else None
+            if (friendly_player == current_player_int and 
                 friendly["HP_CUR"] > 0 and 
                 friendly["id"] != unit["id"]):
                 friendly_distance = _calculate_hex_distance(
@@ -913,8 +922,9 @@ def valid_target_pool_build(
                     break
         
         # ALL conditions met -> ✅ Add unit to valid_target_pool
+        # CRITICAL: Convert ID to string for consistent comparison (target_id is passed as str)
         if unit_within_range:
-            valid_target_pool.append(enemy["id"])
+            valid_target_pool.append(str(enemy["id"]))
     
     return valid_target_pool
 
@@ -954,9 +964,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     else:
         adjacent_status = 1 if _is_adjacent_to_enemy_within_cc_range(game_state, unit) else 0
 
-    # Create cache key from unit identity, position, AND context (advance_status, adjacent_status)
+    # Create cache key from unit identity, position, player, AND context (advance_status, adjacent_status)
     # Cache must include context to avoid wrong results after advance
-    cache_key = (unit_id, unit["col"], unit["row"], advance_status, adjacent_status)
+    # CRITICAL: Include unit["player"] to ensure cache is invalidated when player changes
+    cache_key = (unit_id, unit["col"], unit["row"], advance_status, adjacent_status, unit["player"])
 
     # Check cache
     if cache_key in _target_pool_cache:
@@ -966,14 +977,29 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         cached_pool = _target_pool_cache[cache_key]
 
         # Filter out units that died AND re-validate targets that might have changed melee status
+        # CRITICAL: Also check that target is not a friendly unit (defense in depth)
+        # CRITICAL: Also check that target player hasn't changed (cache invalidation)
         alive_targets = []
-        for target_id in cached_pool:
-            target = _get_unit_by_id(game_state, target_id)
+        current_player = unit["player"]
+        # CRITICAL: Convert to int for consistent comparison (player can be int or string)
+        current_player_int = int(current_player) if current_player is not None else None
+        for target_id_str in cached_pool:  # Iterate over string IDs
+            target = _get_unit_by_id(game_state, target_id_str)
             if target and target["HP_CUR"] > 0:
+                # CRITICAL: First check - target must not be friendly (fast check)
+                # This is the most important check - friendly units should NEVER be in the pool
+                # CRITICAL: Convert to int for consistent comparison (player can be int or string)
+                target_player = int(target["player"]) if target["player"] is not None else None
+                if target_player == current_player_int:
+                    # This is a bug - log it for debugging
+                    from engine.game_utils import add_console_log
+                    add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
+                    continue  # Skip friendly units
+                
                 # Re-validate target - melee status might have changed (friendly unit died)
                 # This is necessary because cache only checks (unit_id, col, row), not surrounding units
                 if _is_valid_shooting_target(game_state, unit, target):
-                    alive_targets.append(target_id)
+                    alive_targets.append(target_id_str)  # Ensure ID is string
 
         # Update unit's target pool
         unit["valid_target_pool"] = alive_targets
@@ -1042,8 +1068,25 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
     # Pre-calculate priorities for all targets
     target_priorities = []  # [(target_id, priority_tuple)]
-
+    
+    # CRITICAL: Filter out self and friendly units before priority calculation
+    # This prevents friendly units from being included in priorities
+    unit_id_str = str(unit["id"])
+    current_player = unit["player"]
+    filtered_targets = []
     for target_id in valid_target_pool:
+        target = _get_unit_by_id(game_state, target_id)
+        if target:
+            # Skip self
+            if str(target["id"]) == unit_id_str:
+                continue
+            # Skip friendly units
+            if target["player"] == current_player:
+                continue
+            filtered_targets.append(target_id)
+    
+    # Use filtered targets for priority calculation
+    for target_id in filtered_targets:
         target = _get_unit_by_id(game_state, target_id)
         if not target:
             target_priorities.append((target_id, (999, 0, 999)))
@@ -1174,6 +1217,26 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
     # Extract sorted target IDs
     valid_target_pool = [tp[0] for tp in target_priorities]
+    
+    # CRITICAL: Final safety check - filter out any friendly units that might have slipped through
+    # This should never happen if valid_target_pool_build is correct, but adds defense in depth
+    current_player = unit["player"]
+    # CRITICAL: Convert to int for consistent comparison (player can be int or string)
+    current_player_int = int(current_player) if current_player is not None else None
+    filtered_pool = []
+    for target_id in valid_target_pool:
+        target = _get_unit_by_id(game_state, target_id)
+        if target:
+            # CRITICAL: Convert to int for consistent comparison (player can be int or string)
+            target_player = int(target["player"]) if target["player"] is not None else None
+            if target_player != current_player_int:
+                filtered_pool.append(target_id)
+            else:
+                # If target is friendly, it's a bug in valid_target_pool_build - log it
+                from engine.game_utils import add_console_log
+                add_console_log(game_state, f"[BUG] valid_target_pool_build included friendly unit {target_id} for shooter {unit_id}")
+    
+    valid_target_pool = filtered_pool
 
     # Store in cache
     _target_pool_cache[cache_key] = valid_target_pool
@@ -1336,9 +1399,8 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["los_cache"] = {}
     
     # Console log
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("SHOOTING PHASE COMPLETE")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "SHOOTING PHASE COMPLETE")
     
     # Base result with all_attack_results if present
     base_result = {}
@@ -1506,11 +1568,27 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     
     # Signal phase completion if pool is empty - delegate to proper phase end function
     if pool_empty:
+        # CRITICAL: Preserve action and all_attack_results before merging phase transition
+        preserved_action = response.get("action")
+        preserved_attack_results = response.get("all_attack_results")
+        preserved_unit_id = response.get("unitId")
+        
         # Don't just set a flag - call the complete phase transition function
         # But merge activation response info so logs are still generated
         phase_complete_result = _shooting_phase_complete(game_state)
         # Merge activation info into phase complete result so logs include unit activation details
         phase_complete_result.update(response)
+        
+        # CRITICAL: Restore preserved action for logging
+        if preserved_action is not None:
+            phase_complete_result["action"] = preserved_action
+        elif "action" not in phase_complete_result:
+            phase_complete_result["action"] = "wait"
+        if preserved_attack_results:
+            phase_complete_result["all_attack_results"] = preserved_attack_results
+        if preserved_unit_id:
+            phase_complete_result["unitId"] = preserved_unit_id
+        
         return phase_complete_result
     
     return response
@@ -1726,9 +1804,11 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     # Gym agents have already made shoot/skip decisions via action selection (actions 4-8 or 11)
     # The execution loop reaches here when SHOOT_LEFT > 0 after a shot, so we need to auto-execute
     is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 2
+    # Bots (player 2) should also auto-continue attacks like gym training
+    is_bot = unit and unit["player"] == 2 and not is_pve_ai
     
-    # CHANGE 2: Auto-execute for BOTH PvE AI and gym training
-    if (is_pve_ai or is_gym_training) and valid_targets:
+    # CHANGE 2: Auto-execute for BOTH PvE AI, gym training, and bots
+    if (is_pve_ai or is_gym_training or is_bot) and valid_targets:
         # AUTO-SHOOT: PvE AI and gym training
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
         
@@ -1778,6 +1858,10 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
     
+    # CRITICAL: Include all_attack_results if attacks were executed before (in a loop)
+    # This ensures attacks already executed are logged to step.log
+    shoot_attack_results = game_state.get("shoot_attack_results", [])
+    
     response = {
         "while_loop_active": True,
         "validTargets": valid_targets,
@@ -1786,8 +1870,19 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         "blinking_units": valid_targets,
         "start_blinking": True,
         "waiting_for_player": True,
-        "available_weapons": available_weapons
+        "available_weapons": available_weapons,
+        "action": "wait",  # CRITICAL: Set action for logging (waiting for target selection)
+        "unitId": unit_id,
+        "phase": "shoot"
     }
+    
+    # CRITICAL: Include all_attack_results if attacks were executed
+    # This ensures attacks already executed are logged even when waiting_for_player=True
+    if shoot_attack_results:
+        response["all_attack_results"] = list(shoot_attack_results)
+        # Change action to "shoot" if attacks were executed (not just waiting)
+        response["action"] = "shoot"
+    
     return True, response
 
 def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -2023,10 +2118,18 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             if isinstance(result, tuple) and len(result) >= 2:
                 success, loop_result = result
                 loop_result["invalid_action_penalty"] = True
-                loop_result["attempted_action"] = action.get("attempted_action", "unknown")
+                # CRITICAL: No default value - require explicit attempted_action
+                attempted_action = action.get("attempted_action")
+                if attempted_action is None:
+                    raise ValueError(f"Action missing 'attempted_action' field: {action}")
+                loop_result["attempted_action"] = attempted_action
                 return success, loop_result
             else:
-                return True, {"invalid_action_penalty": True, "attempted_action": action.get("attempted_action", "unknown")}
+                # CRITICAL: No default value - require explicit attempted_action
+                attempted_action = action.get("attempted_action")
+                if attempted_action is None:
+                    raise ValueError(f"Action missing 'attempted_action' field: {action}")
+                return True, {"invalid_action_penalty": True, "attempted_action": attempted_action}
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     else:
@@ -2116,12 +2219,19 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     """
     AI_SHOOT.md: Handle target selection and shooting execution.
     Supports both agent-selected targetId and auto-selection fallback for humans.
+    
+    CRITICAL: Rebuild target pool just before execution to ensure it's up-to-date.
+    Other units may have moved since the pool was first built.
     """    
     try:
         unit = _get_unit_by_id(game_state, unit_id)
         
         if not unit:
             return False, {"error": "unit_not_found"}
+        
+        # CRITICAL: Check units_fled just before execution (may have changed during phase)
+        if unit["id"] in game_state.get("units_fled", set()):
+            return False, {"error": "unit_has_fled", "unitId": unit_id}
         
         # ASSAULT RULE VALIDATION: Block shooting if unit advanced without ASSAULT weapon
         unit_id_str = str(unit["id"])
@@ -2160,7 +2270,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             # current_weapon_is_pistol is already set above
             pass
         
-        # Build valid target
+        # CRITICAL: Rebuild target pool just before execution to ensure it's up-to-date
+        # Other units may have moved since the pool was first built
         # shooting_build_valid_target_pool() now correctly determines context
         # including arg2=1, arg3=0 if unit has advanced
         valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
@@ -2169,15 +2280,37 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if len(valid_targets) == 0:
             return False, {"error": "no_valid_targets", "unitId": unit_id}
         
+        # NOTE: Friendly fire check is already done in valid_target_pool_build().
+        # No need for redundant double-check here.
+        
         # Handle target selection: agent-provided or auto-select
-        if target_id and target_id in valid_targets:
+        # CRITICAL: Convert target_id to string for consistent comparison with valid_targets
+        target_id_str = str(target_id) if target_id else None
+        if target_id_str and target_id_str in valid_targets:
             # Agent provided valid target
-            selected_target_id = target_id
+            selected_target_id = target_id_str
             
             # === MULTIPLE_WEAPONS_IMPLEMENTATION.md: Sélection d'arme pour cette cible ===
-            target = _get_unit_by_id(game_state, target_id)
+            target = _get_unit_by_id(game_state, selected_target_id)
             if not target:
-                return False, {"error": "target_not_found", "targetId": target_id}
+                return False, {"error": "target_not_found", "targetId": selected_target_id}
+            
+            # CRITICAL: Final safety check - target must not be friendly or self (defense in depth)
+            # Check if target is the shooter itself
+            if str(target["id"]) == str(unit["id"]):
+                return False, {
+                    "error": "cannot_shoot_self",
+                    "targetId": selected_target_id,
+                    "unitId": unit["id"]
+                }
+            # Check if target is friendly
+            if target["player"] == unit["player"]:
+                return False, {
+                    "error": "cannot_shoot_friendly_unit",
+                    "targetId": selected_target_id,
+                    "targetPlayer": target["player"],
+                    "shooterPlayer": unit["player"]
+                }
             
             # Only auto-select weapon if autoSelectWeapon is enabled
             config = game_state.get("config", {})
@@ -2344,6 +2477,22 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             # === MULTIPLE_WEAPONS_IMPLEMENTATION.md: Sélection d'arme pour cible auto-sélectionnée ===
             target = _get_unit_by_id(game_state, selected_target_id)
             if target:
+                # CRITICAL: Final safety check - target must not be friendly or self (defense in depth)
+                # Check if target is the shooter itself
+                if str(target["id"]) == str(unit["id"]):
+                    return False, {
+                        "error": "cannot_shoot_self",
+                        "targetId": selected_target_id,
+                        "unitId": unit["id"]
+                    }
+                # Check if target is friendly
+                if target["player"] == unit["player"]:
+                    return False, {
+                        "error": "cannot_shoot_friendly_unit",
+                        "targetId": selected_target_id,
+                        "targetPlayer": target["player"],
+                        "shooterPlayer": unit["player"]
+                    }
                 # Only auto-select weapon if autoSelectWeapon is enabled
                 config = game_state.get("config", {})
                 auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
@@ -2427,10 +2576,12 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         # Determine selected_target_id if not already set (from if/elif blocks above)
         if 'selected_target_id' not in locals():
-            if target_id and target_id in valid_targets:
-                selected_target_id = target_id
-            elif target_id:
-                return False, {"error": "target_not_valid", "targetId": target_id}
+            # CRITICAL: Convert target_id to string for consistent comparison with valid_targets
+            target_id_str = str(target_id) if target_id else None
+            if target_id_str and target_id_str in valid_targets:
+                selected_target_id = target_id_str
+            elif target_id_str:
+                return False, {"error": "target_not_valid", "targetId": target_id_str, "valid_targets": valid_targets[:5]}
             else:
                 selected_target_id = valid_targets[0]
         
@@ -2438,17 +2589,37 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if not target:
             return False, {"error": "target_not_found", "targetId": selected_target_id}
         
+        # CRITICAL: Final safety check - target must not be friendly (defense in depth)
+        # This should never happen if valid_targets is correct, but adds extra protection
+        if target["player"] == unit["player"]:
+            return False, {
+                "error": "cannot_shoot_friendly_unit",
+                "targetId": selected_target_id,
+                "targetPlayer": target["player"],
+                "shooterPlayer": unit["player"],
+                "valid_targets": valid_targets[:5]
+            }
+        
         # Execute shooting attack
         attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
-
+        
+        # CRITICAL: Check if attack_result is an error before adding to shoot_attack_results
+        # Error results don't have required fields like hit_roll, wound_roll, etc.
+        if "error" in attack_result:
+            return False, attack_result
+        
         # CRITICAL: Add attack result to shoot_attack_results for logging
         # This ensures all attacks are logged even if waiting_for_player=True
         if "shoot_attack_results" not in game_state:
             game_state["shoot_attack_results"] = []
-        # Convert attack_result dict to match format expected by logger (with targetId)
-        attack_result_with_id = attack_result.copy()
-        attack_result_with_id["targetId"] = selected_target_id
-        game_state["shoot_attack_results"].append(attack_result_with_id)
+        # CRITICAL: Extract nested attack_result from wrapper (shooting_attack_controller returns wrapper)
+        # The actual attack data is in attack_result["attack_result"]
+        actual_attack_result = attack_result["attack_result"].copy()
+        actual_attack_result["targetId"] = selected_target_id
+        # CRITICAL: Ensure target_died is always present (it's added in shooting_attack_controller but may be missing)
+        if "target_died" not in actual_attack_result:
+            actual_attack_result["target_died"] = attack_result.get("target_died", False)
+        game_state["shoot_attack_results"].append(actual_attack_result)
 
         # Update SHOOT_LEFT and continue loop per AI_TURN.md
         unit["SHOOT_LEFT"] -= 1
@@ -2691,8 +2862,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         damage = attack_result.get("damage", 0)
         target_died = attack_result.get("target_died", False)
         log_msg = f"[SHOOT DEBUG] E{episode} T{turn} shoot attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
-        game_state["console_logs"].append(log_msg)
-        print(log_msg)
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
 
     # Calculate reward for this action using progressive bonus system
     # OPTIMIZATION: Only calculate rewards for controlled player's units
@@ -3315,18 +3488,51 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if (dest_col, dest_row) not in valid_destinations:
             return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
         
-        # CRITICAL: Final occupation check before position update (like _attempt_movement_to_destination)
+        # CRITICAL: Final occupation check IMMEDIATELY before position assignment
+        # This prevents race conditions where multiple units select the same destination
+        # before any of them have moved. Must check JUST before assignment, not earlier.
         dest_col_int, dest_row_int = int(dest_col), int(dest_row)
+        
+        # DEBUG: Log occupation check for debugging collisions
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "shoot")
+        from engine.game_utils import conditional_debug_print
+        conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} checking advance destination ({dest_col_int},{dest_row_int})")
+        
+        # Check all units for occupation - CRITICAL: Use explicit int conversion for all comparisons
         for check_unit in game_state["units"]:
+            # CRITICAL: Force int conversion for both check_unit position and destination
+            # This prevents type mismatch bugs (int vs float vs string)
+            try:
+                check_col = int(float(check_unit["col"]))  # Handle float->int conversion
+                check_row = int(float(check_unit["row"]))  # Handle float->int conversion
+            except (ValueError, TypeError):
+                # Skip units with invalid positions (should not happen, but defensive)
+                continue
+            
+            conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Checking Unit {check_unit['id']} at ({check_col},{check_row}) - HP={check_unit['HP_CUR']}")
+            
+            # CRITICAL: Compare as integers to avoid type mismatch
             if (check_unit["id"] != unit["id"] and
                 check_unit["HP_CUR"] > 0 and
-                int(check_unit["col"]) == dest_col_int and
-                int(check_unit["row"]) == dest_row_int):
+                check_col == dest_col_int and
+                check_row == dest_row_int):
+                # Another unit already occupies this destination - prevent collision
+                if "console_logs" not in game_state:
+                    game_state["console_logs"] = []
+                log_msg = f"[ADVANCE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot advance to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_unit['id']}"
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
                 return False, {
                     "error": "advance_destination_occupied",
                     "occupant_id": check_unit["id"],
                     "destination": (dest_col, dest_row)
                 }
+        
+        conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} advance destination ({dest_col_int},{dest_row_int}) is FREE - proceeding with advance")
         
         # Execute advance movement
         # CRITICAL: Log ALL position changes to detect unauthorized modifications
@@ -3338,15 +3544,18 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via ADVANCE"
-        game_state["console_logs"].append(log_message)
-        print(log_message)
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_message)
+        safe_print(game_state, log_message)
         
         # CRITICAL: Log BEFORE each assignment to catch any modification
-        print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col} row={dest_row}")
+        from engine.game_utils import conditional_debug_print
+        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col} row={dest_row}")
         unit["col"] = dest_col
-        print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
+        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
         unit["row"] = dest_row
-        print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
+        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
         
         # Check if unit actually moved (for cache invalidation and logging)
         actually_moved = (orig_col != dest_col) or (orig_row != dest_row)
@@ -3362,6 +3571,11 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 ]
                 for key in keys_to_remove:
                     del game_state["los_cache"][key]
+            
+            # CRITICAL: Invalidate all destination pools after advance movement
+            # Positions have changed, so all pools (move, charge, shoot) are now stale
+            from .movement_handlers import _invalidate_all_destination_pools_after_movement
+            _invalidate_all_destination_pools_after_movement(game_state)
         
         # CRITICAL FIX: Mark unit as advanced REGARDLESS of whether it moved
         # Units must be marked as advanced even if they stay in place (for ASSAULT weapon rule)

@@ -29,6 +29,14 @@ from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
 from engine.pve_controller import PvEController
 
+# Global flag to ensure debug.log is cleared only once per training session
+_debug_log_cleared = False
+
+def reset_debug_log_flag():
+    """Reset the debug log cleared flag. Call this at the start of each training run."""
+    global _debug_log_cleared
+    _debug_log_cleared = False
+
 
 class W40KEngine(gym.Env):
     """
@@ -43,7 +51,7 @@ class W40KEngine(gym.Env):
     def __init__(self, config=None, rewards_config=None, training_config_name=None,
                 controlled_agent=None, active_agents=None, scenario_file=None,
                 scenario_files=None,  # NEW: List of scenarios for random selection per episode
-                unit_registry=None, quiet=True, gym_training_mode=False, **kwargs):
+                unit_registry=None, quiet=True, gym_training_mode=False, debug_mode=False, **kwargs):
         """Initialize W40K engine with AI_TURN.md compliance - training system compatible.
 
         Args:
@@ -53,6 +61,7 @@ class W40KEngine(gym.Env):
 
         # Store gym training mode for handler access
         self.gym_training_mode = gym_training_mode
+        self.debug_mode = debug_mode
 
         # Store scenario files list for random selection during reset
         # If scenario_files provided, use it; otherwise create single-item list from scenario_file
@@ -164,6 +173,7 @@ class W40KEngine(gym.Env):
                 "active_agents": active_agents,
                 "quiet": quiet,
                 "gym_training_mode": gym_training_mode,  # CRITICAL: Pass flag to handlers
+                "debug_mode": debug_mode,  # CRITICAL: Pass debug flag to handlers
                 "pve_mode": pve_mode_value,  # CRITICAL: Add PvE mode for handler detection
                 "controlled_player": 1  # FIXED: Agent controls player 1 (matches scenario setup)
             }
@@ -171,6 +181,7 @@ class W40KEngine(gym.Env):
             # Use provided config directly and add gym_training_mode
             self.config = config.copy()
             self.config["gym_training_mode"] = gym_training_mode
+            self.config["debug_mode"] = debug_mode
             # CRITICAL: Ensure pve_mode is in config for handler delegation
             if "pve_mode" not in self.config:
                 self.config["pve_mode"] = config.get("pve_mode", False)
@@ -242,6 +253,7 @@ class W40KEngine(gym.Env):
             "units": [],
             "current_player": 1,
             "gym_training_mode": self.config["gym_training_mode"],  # Embed for handler access
+            "debug_mode": self.config.get("debug_mode", False),  # Embed for handler access
             "training_config_name": training_config_name if training_config_name else "",  # NEW: For debug mode detection
             "phase": "command",
             "turn": 1,
@@ -352,17 +364,21 @@ class W40KEngine(gym.Env):
         self.episode_length_accumulator = 0
         self.episode_number = 0  # Track episode number for debug logging
         
-        # Clear movement_debug.log at engine initialization (before first episode)
+        # Clear debug.log ONCE at the start of training (before first episode)
         # This ensures each training session starts with a clean log file
-        movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'movement_debug.log')
-        try:
-            if os.path.exists(movement_debug_path):
+        # Use global flag to prevent clearing if multiple engine instances are created
+        global _debug_log_cleared
+        if not _debug_log_cleared:
+            movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+            try:
                 with open(movement_debug_path, 'w', encoding='utf-8', errors='replace') as f:
                     f.write("=== MOVEMENT DEBUG LOG ===\n")
-                    f.write("Cleared at engine initialization\n")
+                    f.write("Cleared at training session start\n")
                     f.write("=" * 80 + "\n\n")
-        except Exception as e:
-            print(f"⚠️ Failed to clear movement_debug.log: {e}")
+                    f.flush()
+                _debug_log_cleared = True
+            except Exception as e:
+                print(f"⚠️ Failed to clear debug.log: {e}")
         self.episode_tactical_data = {
             'shots_fired': 0,
             'hits': 0,
@@ -408,7 +424,9 @@ class W40KEngine(gym.Env):
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
-        self.episode_number += 1  # Increment episode number BEFORE adding to game_state (first episode = 1, not 0)
+        
+        # Increment episode number (original logic - works fine for everything except debug.log)
+        self.episode_number += 1
         
         # Reset game state
         self.game_state.update({
@@ -416,7 +434,7 @@ class W40KEngine(gym.Env):
             "phase": "command",
             "turn": 1,
             "episode_steps": 0,
-            "episode_number": self.episode_number,  # Add episode number for debug logging (now correctly incremented)
+            "episode_number": self.episode_number,
             "game_over": False,
             "winner": None,
             "units_moved": set(),
@@ -430,9 +448,21 @@ class W40KEngine(gym.Env):
             "charge_range_rolls": {},
             "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
             "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
+            "debug_mode": self.debug_mode,  # ADDED: For handler access
+            "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
             "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
+        
+        # DIAGNOSTIC: Log debug_mode status on reset (write to debug.log) - DISABLED TEMPORARILY
+        # if self.debug_mode:
+        #     movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+        #     try:
+        #         with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
+        #             f.write(f"[DIAGNOSTIC] DEBUG MODE ENABLED: gym_training_mode={self.gym_training_mode}, debug_mode={self.debug_mode}\n")
+        #             f.flush()
+        #     except Exception:
+        #         pass
 
         # Reset unit health and positions to original scenario values
         # AI_TURN.md COMPLIANCE: Direct access - units must be provided
@@ -503,7 +533,6 @@ class W40KEngine(gym.Env):
             if not scenario_name or scenario_name == "Unknown Scenario":
                 # Extract from filename: AgentName_scenario_phase1-bot3.json -> phase1-bot3
                 if hasattr(self, '_current_scenario_file') and self._current_scenario_file:
-                    import os
                     filename = os.path.basename(self._current_scenario_file)
                     # Match pattern: *_scenario_*.json
                     import re
@@ -529,7 +558,13 @@ class W40KEngine(gym.Env):
             walls = [{"col": w[0], "row": w[1]} for w in raw_walls] if raw_walls else []
             # Use _scenario_objectives (set during scenario loading)
             objectives = self._scenario_objectives if hasattr(self, '_scenario_objectives') else None
+            
             self.step_logger.log_episode_start(self.game_state["units"], scenario_name, bot_name=bot_name, walls=walls, objectives=objectives)
+            
+            # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number
+            # This ensures debug.log uses the same episode number as step.log
+            # step_logger.episode_number was incremented in log_episode_start()
+            self.game_state["episode_number"] = self.step_logger.episode_number
         
         observation = self.obs_builder.build_observation(self.game_state)
         info = {"phase": self.game_state["phase"]}
@@ -614,6 +649,16 @@ class W40KEngine(gym.Env):
         # Convert gym integer action to semantic action
         semantic_action = self.action_decoder.convert_gym_action(action, self.game_state)
         
+        # CRITICAL: Capture pre-action state for replay_logger BEFORE action execution
+        # These are needed for replay logging (independent of step_logger)
+        pre_action_phase = self.game_state.get("phase", "unknown")
+        pre_action_positions = {}
+        if "unitId" in semantic_action:
+            unit_id = semantic_action["unitId"]
+            if unit_id:
+                pre_unit = self._get_unit_by_id(str(unit_id))
+                if pre_unit:
+                    pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
         
         # Process semantic action with AI_TURN.md compliance
         action_result = self._process_semantic_action(semantic_action)
@@ -658,13 +703,17 @@ class W40KEngine(gym.Env):
         # Log action for replay/debugging
         if hasattr(self, 'replay_logger') and self.replay_logger and success:
             # Get action_type and unit_id using same logic as step_logger
-            action_type = result.get("action") if isinstance(result, dict) else None
-            if not action_type:
-                action_type = semantic_action.get("action") if isinstance(semantic_action, dict) else None
-
-            unit_id = result.get("unitId") if isinstance(result, dict) else None
-            if not unit_id:
-                unit_id = semantic_action.get("unitId") if isinstance(semantic_action, dict) else None
+            # CRITICAL: No fallbacks - require explicit values in result
+            if not isinstance(result, dict):
+                raise TypeError(f"result must be a dict for replay logger, got {type(result).__name__}")
+            
+            action_type = result.get("action")
+            if action_type is None:
+                raise ValueError(f"result missing 'action' field for replay logger. result keys: {list(result.keys())}")
+            
+            unit_id = result.get("unitId")
+            if unit_id is None:
+                raise ValueError(f"result missing 'unitId' field for replay logger. result keys: {list(result.keys())}")
 
             valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait"]
             if action_type in valid_action_types and unit_id and unit_id != "none" and unit_id != "SYSTEM":
@@ -674,9 +723,19 @@ class W40KEngine(gym.Env):
                     step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
 
                     if action_type == "move":
-                        start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                        dest_col = semantic_action.get("destCol", updated_unit["col"])
-                        dest_row = semantic_action.get("destRow", updated_unit["row"])
+                        # CRITICAL: No fallbacks - require explicit coordinates
+                        if str(unit_id) not in pre_action_positions:
+                            raise ValueError(f"Replay logger move missing start position in pre_action_positions: unit_id={unit_id}")
+                        start_pos = pre_action_positions[str(unit_id)]
+                        # Use result destination, then action, no fallback to updated_unit
+                        if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
+                            dest_col = result.get("toCol")
+                            dest_row = result.get("toRow")
+                        elif isinstance(semantic_action, dict) and semantic_action.get("destCol") is not None and semantic_action.get("destRow") is not None:
+                            dest_col = semantic_action.get("destCol")
+                            dest_row = semantic_action.get("destRow")
+                        else:
+                            raise ValueError(f"Replay logger move missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={semantic_action.get('destCol') if isinstance(semantic_action, dict) else None}, action.destRow={semantic_action.get('destRow') if isinstance(semantic_action, dict) else None}")
                         self.replay_logger.log_move(
                             updated_unit,
                             start_pos[0], start_pos[1],
@@ -684,8 +743,11 @@ class W40KEngine(gym.Env):
                             current_turn, step_reward, 0
                         )
                     elif action_type == "shoot":
-                        target_id = result.get("targetId") or semantic_action.get("targetId")
-                        target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
+                        # CRITICAL: No fallbacks - require explicit targetId in result
+                        target_id = result.get("targetId")
+                        if target_id is None:
+                            raise ValueError(f"Replay logger shoot missing targetId: result keys: {list(result.keys())}")
+                        target_unit = self._get_unit_by_id(str(target_id))
                         if target_unit:
                             # Build shoot_details from last_attack_result
                             attack_result = self.game_state.get("last_attack_result", {})
@@ -717,9 +779,19 @@ class W40KEngine(gym.Env):
                         target_id = result.get("targetId")
                         target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                         if target_unit:
-                            start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                            dest_col = result.get("toCol", updated_unit["col"])
-                            dest_row = result.get("toRow", updated_unit["row"])
+                            # CRITICAL: No fallbacks - require explicit coordinates
+                            if str(unit_id) not in pre_action_positions:
+                                raise ValueError(f"Replay logger charge missing start position in pre_action_positions: unit_id={unit_id}")
+                            start_pos = pre_action_positions[str(unit_id)]
+                            # Use result destination, then action, no fallback to updated_unit
+                            if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
+                                dest_col = result.get("toCol")
+                                dest_row = result.get("toRow")
+                            elif isinstance(semantic_action, dict) and semantic_action.get("destCol") is not None and semantic_action.get("destRow") is not None:
+                                dest_col = semantic_action.get("destCol")
+                                dest_row = semantic_action.get("destRow")
+                            else:
+                                raise ValueError(f"Replay logger charge missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={semantic_action.get('destCol') if isinstance(semantic_action, dict) else None}, action.destRow={semantic_action.get('destRow') if isinstance(semantic_action, dict) else None}")
                             self.replay_logger.log_charge(
                                 updated_unit, target_unit,
                                 start_pos[0], start_pos[1],
@@ -848,14 +920,22 @@ class W40KEngine(gym.Env):
             unit_id = str(unit["id"])
             self.last_unit_positions[unit_id] = (unit["col"], unit["row"])
         
-        # Write console_logs to movement_debug.log (for hidden_action_finder.py)
+        # Write console_logs to debug.log (for hidden_action_finder.py)
         if "console_logs" in self.game_state and self.game_state["console_logs"]:
-            # DEBUG: Log what we're about to write
-            fight_debug_count = sum(1 for msg in self.game_state["console_logs"] if "[FIGHT DEBUG]" in msg)
-            attack_executed_count = sum(1 for msg in self.game_state["console_logs"] if "attack_executed" in msg)
-            print(f"[DEBUG] Writing {len(self.game_state['console_logs'])} console_logs to movement_debug.log (FIGHT DEBUG: {fight_debug_count}, attack_executed: {attack_executed_count})")
+            movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+            log_count = len(self.game_state["console_logs"])
+            step_logger_debug_count = sum(1 for log in self.game_state["console_logs"] if "[STEP LOGGER DEBUG]" in str(log))
             
-            movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'movement_debug.log')
+            # DIAGNOSTIC: Log before writing (write to debug.log) - DISABLED TEMPORARILY
+            # if step_logger_debug_count > 0:
+            #     diagnostic_msg = f"[DIAGNOSTIC] Writing {log_count} console logs to debug.log ({step_logger_debug_count} STEP LOGGER DEBUG messages)"
+            #     try:
+            #         with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
+            #             f.write(diagnostic_msg + "\n")
+            #             f.flush()
+            #     except Exception:
+            #         pass
+            
             try:
                 with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
                     for log_msg in self.game_state["console_logs"]:
@@ -866,18 +946,23 @@ class W40KEngine(gym.Env):
                         log_msg = log_msg.encode('utf-8', errors='replace').decode('utf-8')
                         f.write(log_msg + "\n")
                     f.flush()  # Force flush to ensure logs are written immediately
-                # DEBUG: Verify write succeeded
-                print(f"[DEBUG] Successfully wrote {len(self.game_state['console_logs'])} logs to movement_debug.log")
+                
+                # DIAGNOSTIC: Log after writing (write to debug.log) - DISABLED TEMPORARILY
+                # if step_logger_debug_count > 0:
+                #     diagnostic_msg = f"[DIAGNOSTIC] Successfully wrote {log_count} logs to debug.log"
+                #     try:
+                #         with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
+                #             f.write(diagnostic_msg + "\n")
+                #             f.flush()
+                #     except Exception:
+                #         pass
+                
                 # Clear console_logs after writing to avoid duplicates
                 self.game_state["console_logs"] = []
             except Exception as e:
-                print(f"⚠️ Failed to write to movement_debug.log: {e}")
-        else:
-            # DEBUG: Log why we're not writing
-            if "console_logs" not in self.game_state:
-                print("[DEBUG] console_logs not in game_state - skipping write")
-            elif not self.game_state["console_logs"]:
-                print("[DEBUG] console_logs is empty - skipping write")
+                print(f"⚠️ Failed to write to debug.log: {e}")
+                import traceback
+                traceback.print_exc()
             
         return observation, reward, terminated, truncated, info
     
@@ -1018,219 +1103,220 @@ class W40KEngine(gym.Env):
         else:
             return False, {"error": "invalid_phase", "phase": current_phase}
 
-        # Auto-advance to next phase when current phase completes
-        # Loop to handle cascading empty phases (e.g., charge -> fight -> move if all empty)
-        max_cascade = 10  # Prevent infinite loops
-        cascade_count = 0
-        while success and result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
-            next_phase = result["next_phase"]
-            cascade_count += 1
-
-            if "console_logs" not in self.game_state:
-                self.game_state["console_logs"] = []
-            self.game_state["console_logs"].append(f"🔄 PHASE TRANSITION: {current_phase} -> {next_phase} (cascade #{cascade_count})")
-
-            # Initialize next phase using phase handlers
-            phase_init_result = None
-            if next_phase == "command":
-                phase_init_result = command_handlers.command_phase_start(self.game_state)
-            elif next_phase == "shoot":
-                phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
-            elif next_phase == "charge":
-                phase_init_result = charge_handlers.charge_phase_start(self.game_state)
-            elif next_phase == "fight":
-                phase_init_result = fight_handlers.fight_phase_start(self.game_state)
-            elif next_phase == "move":
-                phase_init_result = movement_handlers.movement_phase_start(self.game_state)
-
-            self.game_state["console_logs"].append(f"🔄 PHASE NOW: {self.game_state.get('phase', 'UNKNOWN')}")
-
-            # If phase_start returns phase_complete, cascade to next phase
-            if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
-                # CRITICAL: Preserve combat action data before replacing result
-                # When fight phase completes and transitions to next phase, we must preserve
-                # the combat action data (action, unitId, all_attack_results) for logging
-                preserved_combat_data = {}
-                combat_keys = ["action", "unitId", "all_attack_results", "targetId", "attack_result", "target_died", "reason", "phase"]
-                for key in combat_keys:
-                    if key in result:
-                        preserved_combat_data[key] = result[key]
-                
-                result = phase_init_result  # Update result for next iteration
-                
-                # CRITICAL: Restore preserved combat data for logging
-                for key, value in preserved_combat_data.items():
-                    if value is not None:  # Only restore non-None values
-                        result[key] = value
-            else:
-                break  # Phase has eligible units, stop cascading
-
+        # CRITICAL FIX: Log action BEFORE cascade to ensure action is logged even if phase completes
+        # Log action with result (before cascade modifies it)
         if (self.step_logger and self.step_logger.enabled):
-           
-            # CHANGE 1: Read action from result dict FIRST (handlers populate actual executed action)
-            # Diagnostic proved: result.get('action')='move' but action.get('action')='activate_unit'
-            action_type = result.get("action") if isinstance(result, dict) else None
-            if not action_type:
-                # Fall back to action only if result has no action
-                action_type = action.get("action") if isinstance(action, dict) else None
-                # CRITICAL: If fallback returns "fight", it's invalid - handlers must set proper action
-                if action_type == "fight":
-                    # "fight" is not a valid action_type for logging - handlers must return "combat" or "wait"
-                    raise ValueError(f"Invalid action_type 'fight' from action fallback. Handlers must set proper action in result. result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
-            
-            # Skip logging for system actions (advance_phase, etc.)
-            if action_type in ["advance_phase"]:
-                # System action - skip logging
-                pass
-            # Skip logging for intermediate actions (waiting states that will be logged when complete)
-            elif action_type in ["advance_select_destination", "empty_target_advance_available", "advance_cancelled", "waiting_for_movement_choice"]:
-                # Intermediate action - skip logging, will be logged when action completes
-                pass
-            elif action_type:  # Only process if action_type is not None and not empty
-                # CHANGE 2: Get unitId from result first (handlers populate this field)
-                unit_id = result.get("unitId") if isinstance(result, dict) else None
-                if not unit_id:
-                    unit_id = action.get("unitId") if isinstance(action, dict) else None
+            try:
                 
-                # Check waiting_for_player state
-                # For combat: log attacks already executed even if waiting_for_player=True
-                # For other actions: skip logging if waiting_for_player=True (action not yet complete)
-                waiting_for_player = result.get("waiting_for_player", False) if isinstance(result, dict) else False
+                # CHANGE 1: Read action from result dict FIRST (handlers populate actual executed action)
+                # Diagnostic proved: result.get('action')='move' but action.get('action')='activate_unit'
+                action_type = result.get("action") if isinstance(result, dict) else None
                 
-                # Special case: combat or shoot with waiting_for_player but all_attack_results present
-                # These attacks were already executed and must be logged
-                all_attack_results = result.get("all_attack_results", []) if isinstance(result, dict) else []
-                is_action_with_attacks = (
-                    action_type in ["combat", "shoot"] and 
-                    waiting_for_player and 
-                    len(all_attack_results) > 0
-                )
+                # CRITICAL: No diagnostic logging - errors should be explicit, not masked
                 
-                if waiting_for_player and not is_action_with_attacks:
-                    # Skip logging - waiting for player input, action not yet complete
-                    # Will be logged when the actual action completes (e.g., move after destination selection)
-                    # Exception: combat actions with all_attack_results are logged below
-                    # DEBUG: Log why we're skipping
-                    episode = self.game_state.get("episode_number", "?")
-                    turn = self.game_state.get("turn", "?")
-                    phase = self.game_state.get("phase", "?")
-                    if "console_logs" not in self.game_state:
-                        self.game_state["console_logs"] = []
-                    log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: SKIPPING logging - waiting_for_player=True, action_type={action_type}, unit_id={unit_id}"
-                    self.game_state["console_logs"].append(log_msg)
-                    print(log_msg)
+                # CRITICAL: action_type must be a string from result - no fallbacks, no workarounds
+                if not isinstance(result, dict):
+                    raise TypeError(f"result must be a dict, got {type(result).__name__}")
+                
+                action_type = result.get("action")
+                if action_type is None:
+                    # Check if this is a phase transition without action (system response, not an action)
+                    if result.get("phase_complete") or result.get("phase_transition"):
+                        # Phase transition without action - skip logging (will be handled by cascade loop)
+                        action_type = None
+                    else:
+                        # No action in result and not a phase transition - this is an error
+                        raise ValueError(f"result missing 'action' field and is not a phase transition. result keys: {list(result.keys())}")
+                elif not isinstance(action_type, str):
+                    raise TypeError(f"result['action'] must be a string, got {type(action_type).__name__}: {action_type}")
+                elif action_type == "fight":
+                    # "fight" is not a valid action_type - handlers must return "combat" or "wait"
+                    raise ValueError(f"Invalid action_type 'fight' in result. Handlers must set proper action ('combat' or 'wait'). result keys: {list(result.keys())}")
+                
+                # Skip logging for system actions and intermediate actions
+                skip_logging_action_types = [
+                    "advance_phase",  # System action
+                    "advance_select_destination",  # Intermediate action
+                    "empty_target_advance_available",  # Intermediate action
+                    "advance_cancelled",  # Intermediate action
+                    "waiting_for_movement_choice"  # Intermediate action
+                ]
+                
+                if action_type in skip_logging_action_types:
+                    # System or intermediate action - skip logging
                     pass
-                else:
-                    # Validation stricte - pas de fallback, pas de skip silencieux
-                    # DEBUG: Log validation attempt
-                    episode = self.game_state.get("episode_number", "?")
-                    turn = self.game_state.get("turn", "?")
-                    phase = self.game_state.get("phase", "?")
-                    if "console_logs" not in self.game_state:
-                        self.game_state["console_logs"] = []
-                    log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: VALIDATING - action_type={action_type}, unit_id={unit_id}, waiting_for_player={waiting_for_player}, is_action_with_attacks={is_action_with_attacks}"
-                    self.game_state["console_logs"].append(log_msg)
-                    print(log_msg)
+                elif action_type is not None:
+                    # CRITICAL: unitId must be in result - no fallbacks
+                    unit_id = result.get("unitId")
+                    if unit_id is None:
+                        raise ValueError(f"result missing 'unitId' field for action_type '{action_type}'. result keys: {list(result.keys())}")
                     
-                    if not action_type:
-                        raise ValueError(f"action_type is None or empty - cannot log action. result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+                    # Check waiting_for_player state
+                    # For combat/shoot: log attacks already executed even if waiting_for_player=True
+                    # For other actions: skip logging if waiting_for_player=True (action not yet complete)
+                    waiting_for_player = result.get("waiting_for_player", False)
+                    
+                    # Special case: combat or shoot with waiting_for_player but all_attack_results present
+                    # These attacks were already executed and must be logged
+                    all_attack_results = result.get("all_attack_results", [])
+                    is_action_with_attacks = (
+                        action_type in ["combat", "shoot"] and 
+                        waiting_for_player and 
+                        len(all_attack_results) > 0
+                    )
+                    
+                    if waiting_for_player and not is_action_with_attacks:
+                        # Skip logging - waiting for player input, action not yet complete
+                        # Will be logged when the actual action completes (e.g., move after destination selection)
+                        pass
+                    else:
+                        # Validation - action_type should already be validated above, but double-check
+                        if not action_type:
+                            raise ValueError(f"action_type is None or empty - cannot log action. result keys: {list(result.keys())}")
 
-                    valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee"]
-                    if action_type not in valid_action_types:
-                        raise ValueError(f"Invalid action_type '{action_type}'. Valid types: {valid_action_types}")
+                        valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee"]
+                        if action_type not in valid_action_types:
+                            raise ValueError(f"Invalid action_type '{action_type}'. Valid types: {valid_action_types}")
 
-                    if not unit_id:
-                        raise ValueError(f"unit_id is None or empty - cannot log action. action_type={action_type}")
+                        if not unit_id:
+                            raise ValueError(f"unit_id is None or empty - cannot log action. action_type={action_type}")
 
-                    if unit_id == "none" or unit_id == "SYSTEM":
-                        raise ValueError(f"Invalid unit_id '{unit_id}' - cannot log system actions. action_type={action_type}")
+                        if unit_id == "none" or unit_id == "SYSTEM":
+                            raise ValueError(f"Invalid unit_id '{unit_id}' - cannot log system actions. action_type={action_type}")
 
-                    # Validation passée - procéder au logging
-                    log_msg = f"[STEP LOGGER DEBUG] E{episode} T{turn} {phase}: VALIDATION PASSED - proceeding to log action_type={action_type}, unit_id={unit_id}"
-                    self.game_state["console_logs"].append(log_msg)
-                    print(log_msg)
-                   
-                    # Get unit coordinates AFTER action execution using semantic action unitId
-                    updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
-                    if updated_unit:
-                        # Use PRE-ACTION position from captured data for movement logging
-                        if str(unit_id) in pre_action_positions and action_type == "move":
-                            orig_col, orig_row = pre_action_positions[str(unit_id)]
-                            action_details = {
-                                "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                                "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
-                                "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
-                                "action": action,
-                                "start_pos": (orig_col, orig_row),
-                                "end_pos": (updated_unit["col"], updated_unit["row"])
-                            }
-                        else:
-                            # Build complete action details for step logger with CURRENT coordinates
-                            action_details = {
-                                "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
-                                "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
-                                "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
-                                "action": action
-                            }
+                        # Get unit coordinates AFTER action execution using semantic action unitId
+                        updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
+                        
+                        if updated_unit:
+                            # Use PRE-ACTION position from captured data for movement logging
+                            # CRITICAL FIX: Also use pre_action_positions for "flee" actions
+                            if str(unit_id) in pre_action_positions and (action_type == "move" or action_type == "flee"):
+                                orig_col, orig_row = pre_action_positions[str(unit_id)]
+                                action_details = {
+                                    "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
+                                    "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                    # unit_with_coords sera mis à jour plus bas avec result
+                                    "action": action,
+                                    "start_pos": (orig_col, orig_row)
+                                    # end_pos et unit_with_coords seront définis dans action_details.update() avec result
+                                }
+                            else:
+                                # Build complete action details for step logger
+                                action_details = {
+                                    "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
+                                    "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                    # unit_with_coords sera mis à jour plus bas avec result
+                                    "action": action
+                                }
                     
                         # Add specific data for different action types
                         # NOTE: move, shoot, wait use the common logging path below
                         # charge and combat have their own specialized logging
                         if action_type == "move" or action_type == "flee":
                             # Use semantic action coordinates for accurate logging
-                            # For flee, get positions from result (populated by movement handler)
+                            # CRITICAL FIX: Always use result for positions (populated by movement handler)
+                            # This ensures correct positions even if pre_action_positions is missing
                             if action_type == "flee":
-                                start_pos = (result.get("fromCol"), result.get("fromRow")) if isinstance(result, dict) else pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                                end_pos = (result.get("toCol"), result.get("toRow")) if isinstance(result, dict) else (updated_unit["col"], updated_unit["row"])
-                                dest_col = result.get("toCol", updated_unit["col"]) if isinstance(result, dict) else updated_unit["col"]
-                                dest_row = result.get("toRow", updated_unit["row"]) if isinstance(result, dict) else updated_unit["row"]
+                                # CRITICAL: No fallbacks - require explicit coordinates from result or action
+                                if not isinstance(result, dict):
+                                    raise ValueError(f"Flee action missing result dict: unit_id={unit_id}")
+                                if result.get("fromCol") is None or result.get("fromRow") is None:
+                                    raise ValueError(f"Flee action missing fromCol/fromRow in result: unit_id={unit_id}, result keys={list(result.keys())}")
+                                if result.get("toCol") is None or result.get("toRow") is None:
+                                    # Try action as fallback
+                                    if isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
+                                        dest_col = action.get("destCol")
+                                        dest_row = action.get("destRow")
+                                    else:
+                                        raise ValueError(f"Flee action missing toCol/toRow: result.toCol={result.get('toCol')}, result.toRow={result.get('toRow')}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
+                                else:
+                                    dest_col = result.get("toCol")
+                                    dest_row = result.get("toRow")
+                                start_pos = (result.get("fromCol"), result.get("fromRow"))
+                                end_pos = (dest_col, dest_row)
                             else:
-                                start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                                # CRITICAL: Use semantic action destination, not unit's current position
-                                dest_col = action.get("destCol", updated_unit["col"])
-                                dest_row = action.get("destRow", updated_unit["row"])
+                                # CRITICAL: No fallbacks - require explicit coordinates from result or pre_action_positions
+                                if isinstance(result, dict) and result.get("fromCol") is not None and result.get("fromRow") is not None:
+                                    start_pos = (result.get("fromCol"), result.get("fromRow"))
+                                elif str(unit_id) in pre_action_positions:
+                                    start_pos = pre_action_positions[str(unit_id)]
+                                else:
+                                    raise ValueError(f"Move action missing start position: unit_id={unit_id}, result.fromCol={result.get('fromCol') if isinstance(result, dict) else None}, result.fromRow={result.get('fromRow') if isinstance(result, dict) else None}, pre_action_positions has unit={str(unit_id) in pre_action_positions}")
+                                # CRITICAL: Use semantic action destination from result (set by movement handler)
+                                # NO FALLBACK to action - result must contain toCol/toRow (set by movement_destination_selection_handler)
+                                if not isinstance(result, dict):
+                                    raise TypeError(f"result must be a dict for move action, got {type(result).__name__}")
+                                dest_col = result.get("toCol")
+                                dest_row = result.get("toRow")
+                                if dest_col is None or dest_row is None:
+                                    raise ValueError(f"Move action missing destination in result: result.toCol={dest_col}, result.toRow={dest_row}, result keys={list(result.keys())}")
+                                # CRITICAL DEBUG: Log exact values from result AND action
+                                from engine.game_utils import add_console_log, safe_print
+                                action_dest_col = action.get("destCol") if isinstance(action, dict) else None
+                                action_dest_row = action.get("destRow") if isinstance(action, dict) else None
+                                debug_msg = f"[W40K_CORE DEBUG] E{pre_action_episode} T{pre_action_turn} Unit {unit_id}: result.toCol={dest_col} result.toRow={dest_row} action.destCol={action_dest_col} action.destRow={action_dest_row} result keys={list(result.keys())}"
+                                add_console_log(self.game_state, debug_msg)
+                                safe_print(self.game_state, debug_msg)
                                 end_pos = (dest_col, dest_row)
                             action_details.update({
                                 "start_pos": start_pos,
                                 "end_pos": end_pos,
                                 "col": dest_col,  # Use semantic action destination
-                                "row": dest_row   # Use semantic action destination
+                                "row": dest_row,  # Use semantic action destination
+                                "unit_with_coords": f"{unit_id}({dest_col},{dest_row})"  # CRITICAL FIX: Update with correct destination coordinates
                             })
+                            
 
                         if action_type == "advance":
                             # ADVANCE_IMPLEMENTATION: Handle advance action logging (similar to move)
-                            start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                            # Use result destination (from advance handler)
-                            dest_col = result.get("toCol", updated_unit["col"])
-                            dest_row = result.get("toRow", updated_unit["row"])
+                            # CRITICAL: No fallbacks - require explicit coordinates
+                            if str(unit_id) not in pre_action_positions:
+                                raise ValueError(f"Advance action missing start position in pre_action_positions: unit_id={unit_id}")
+                            start_pos = pre_action_positions[str(unit_id)]
+                            # Use result destination (from advance handler) or action, no fallback to updated_unit
+                            if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
+                                dest_col = result.get("toCol")
+                                dest_row = result.get("toRow")
+                            elif isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
+                                dest_col = action.get("destCol")
+                                dest_row = action.get("destRow")
+                            else:
+                                raise ValueError(f"Advance action missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
                             end_pos = (dest_col, dest_row)
                             action_details.update({
                                 "start_pos": start_pos,
                                 "end_pos": end_pos,
                                 "col": dest_col,
                                 "row": dest_row,
-                                "advance_range": result.get("advance_range")  # Include advance roll
+                                "advance_range": result.get("advance_range"),  # Include advance roll
+                                "unit_with_coords": f"{unit_id}({dest_col},{dest_row})"  # CRITICAL FIX: Update with correct destination coordinates
                             })
 
                         # shoot actions now use all_attack_results (like combat) - handled in specialized block above
                         # charge and combat have specialized logging with early return
                         if action_type == "charge":
                             # Add charge-specific data with position info for step logger
-                            start_pos = pre_action_positions.get(str(unit_id), (updated_unit["col"], updated_unit["row"]))
-                            # Get destination from result (populated by charge handler)
-                            dest_col = result.get("toCol", updated_unit["col"])
-                            dest_row = result.get("toRow", updated_unit["row"])
+                            # CRITICAL: No fallbacks - require explicit coordinates
+                            if str(unit_id) not in pre_action_positions:
+                                raise ValueError(f"Charge action missing start position in pre_action_positions: unit_id={unit_id}")
+                            start_pos = pre_action_positions[str(unit_id)]
+                            # Get destination from result (populated by charge handler) or action, no fallback to updated_unit
+                            if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
+                                dest_col = result.get("toCol")
+                                dest_row = result.get("toRow")
+                            elif isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
+                                dest_col = action.get("destCol")
+                                dest_row = action.get("destRow")
+                            else:
+                                raise ValueError(f"Charge action missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
                             end_pos = (dest_col, dest_row)
-                            # PROBLÈME 1 DEBUG: Log if targetId is missing or None
                             target_id_from_result = result.get("targetId")
-                            if target_id_from_result is None:
-                                import warnings
-                                warnings.warn(f"STEP_LOGGER BUG: result.get('targetId') is None for unit {unit_id}, result keys: {list(result.keys())}")
                             action_details.update({
                                 "target_id": target_id_from_result,
                                 "start_pos": start_pos,
                                 "end_pos": end_pos,
-                                "charge_roll": result.get("charge_roll")  # Add the actual 2d6 roll
+                                "charge_roll": result.get("charge_roll"),  # Add the actual 2d6 roll
+                                "unit_with_coords": f"{unit_id}({dest_col},{dest_row})"  # CRITICAL FIX: Update with correct destination coordinates
                             })
 
                             # Add reward and log for charge action
@@ -1263,12 +1349,32 @@ class W40KEngine(gym.Env):
 
                         elif action_type == "charge_fail":
                             # Add charge_fail-specific data for step logger
+                            # CRITICAL: No fallbacks - require explicit coordinates
+                            if str(unit_id) not in pre_action_positions:
+                                raise ValueError(f"Charge_fail missing start position in pre_action_positions: unit_id={unit_id}")
+                            start_pos = pre_action_positions[str(unit_id)]
+                            # For failed charges, end_pos is the intended destination (from result, action, or error)
+                            end_pos = result.get("end_pos")
+                            if end_pos is None:
+                                # Try action as fallback
+                                if isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
+                                    end_pos = (action.get("destCol"), action.get("destRow"))
+                                else:
+                                    # Unit didn't move, so end_pos should equal start_pos, but we require explicit value
+                                    raise ValueError(f"Charge_fail missing end_pos: result.end_pos={result.get('end_pos')}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
+                            
+                            # CRITICAL: No default values - require explicit charge_failed_reason
+                            charge_failed_reason = result.get("charge_failed_reason")
+                            if charge_failed_reason is None:
+                                raise ValueError(f"Charge_fail missing charge_failed_reason: unit_id={unit_id}, result keys={list(result.keys())}")
+                            
                             action_details.update({
                                 "target_id": result.get("targetId"),
                                 "charge_roll": result.get("charge_roll"),
-                                "charge_failed_reason": result.get("charge_failed_reason", "roll_too_low"),
-                                "start_pos": result.get("start_pos"),  # Position actuelle (from)
-                                "end_pos": result.get("end_pos")  # Destination prévue (to)
+                                "charge_failed_reason": charge_failed_reason,
+                                "start_pos": start_pos,  # Position actuelle (from) - unit didn't move
+                                "end_pos": end_pos,  # Destination prévue (to)
+                                "unit_with_coords": f"{unit_id}({start_pos[0]},{start_pos[1]})"  # CRITICAL FIX: Unit didn't move, use start_pos
                             })
 
                             # Add reward and log for failed charge action
@@ -1312,6 +1418,16 @@ class W40KEngine(gym.Env):
                                 step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
 
                                 for i, attack_result in enumerate(all_attack_results):
+                                    # CRITICAL: Validate attack_result has all required fields
+                                    required_fields = ["hit_roll", "wound_roll", "save_roll", "damage", "hit_success", "wound_success", "save_success", "hit_target", "wound_target", "save_target", "target_died", "weapon_name"]
+                                    missing_fields = [field for field in required_fields if field not in attack_result]
+                                    if missing_fields:
+                                        raise KeyError(
+                                            f"attack_result[{i}] in all_attack_results missing required fields: {missing_fields}. "
+                                            f"attack_result keys: {list(attack_result.keys())}. "
+                                            f"action_type={action_type}, unit_id={unit_id}"
+                                        )
+                                    
                                     target_id = attack_result.get("targetId", result.get("targetId"))
                                     target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                                     target_coords = None
@@ -1325,18 +1441,18 @@ class W40KEngine(gym.Env):
                                         "action": action,
                                         "target_id": target_id,
                                         "target_coords": target_coords,
-                                        "hit_roll": attack_result.get("hit_roll", 0),
-                                        "wound_roll": attack_result.get("wound_roll", 0),
-                                        "save_roll": attack_result.get("save_roll", 0),
-                                        "damage_dealt": attack_result.get("damage", 0),
-                                        "hit_result": "HIT" if attack_result.get("hit_success") else "MISS",
-                                        "wound_result": "WOUND" if attack_result.get("wound_success") else "FAIL",
-                                        "save_result": "SAVED" if attack_result.get("save_success") else "FAIL",
-                                        "hit_target": attack_result.get("hit_target", 4),
-                                        "wound_target": attack_result.get("wound_target", 4),
-                                        "save_target": attack_result.get("save_target", 4),
-                                        "target_died": attack_result.get("target_died", False),
-                                        "weapon_name": attack_result.get("weapon_name", ""),
+                                        "hit_roll": attack_result["hit_roll"],
+                                        "wound_roll": attack_result["wound_roll"],
+                                        "save_roll": attack_result["save_roll"],
+                                        "damage_dealt": attack_result["damage"],
+                                        "hit_result": "HIT" if attack_result["hit_success"] else "MISS",
+                                        "wound_result": "WOUND" if attack_result["wound_success"] else "FAIL",
+                                        "save_result": "SAVED" if attack_result["save_success"] else "FAIL",
+                                        "hit_target": attack_result["hit_target"],
+                                        "wound_target": attack_result["wound_target"],
+                                        "save_target": attack_result["save_target"],
+                                        "target_died": attack_result["target_died"],
+                                        "weapon_name": attack_result["weapon_name"],
                                         "reward": step_reward if i == 0 else 0.0
                                     }
                                     
@@ -1358,6 +1474,19 @@ class W40KEngine(gym.Env):
                             # charge, combat, and shoot have their own logging above with specialized multi-attack handling
                             # Use pre-captured phase for accurate logging (phase may have changed during action)
 
+                            # CRITICAL FIX: For move actions, ensure unit_with_coords uses destination coordinates, not current unit position
+                            if action_type == "move" and "end_pos" in action_details:
+                                end_col, end_row = action_details["end_pos"]
+                                # CRITICAL DEBUG: Log exact values being used
+                                from engine.game_utils import add_console_log, safe_print
+                                debug_msg = f"[W40K_CORE DEBUG] E{action_details.get('current_episode', '?')} T{action_details.get('current_turn', '?')} Unit {unit_id}: end_pos=({end_col},{end_row}) unit_with_coords before={action_details.get('unit_with_coords', 'N/A')}"
+                                add_console_log(self.game_state, debug_msg)
+                                safe_print(self.game_state, debug_msg)
+                                action_details["unit_with_coords"] = f"{unit_id}({end_col},{end_row})"
+                                debug_msg2 = f"[W40K_CORE DEBUG] E{action_details.get('current_episode', '?')} T{action_details.get('current_turn', '?')} Unit {unit_id}: unit_with_coords after={action_details['unit_with_coords']}"
+                                add_console_log(self.game_state, debug_msg2)
+                                safe_print(self.game_state, debug_msg2)
+
                             # Calculate reward normally
                             step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
                             action_details["reward"] = step_reward
@@ -1365,7 +1494,14 @@ class W40KEngine(gym.Env):
                             # Déterminer step_increment selon le type d'action et success
                             # Pour les autres actions, step_increment = success (cohérent avec ligne 642)
                             step_increment = success
-                            
+
+                            # CRITICAL DEBUG: Log exact values just before log_action
+                            if action_type == "move":
+                                from engine.game_utils import add_console_log, safe_print
+                                debug_msg = f"[W40K_CORE DEBUG] E{action_details.get('current_episode', '?')} T{action_details.get('current_turn', '?')} Unit {unit_id}: BEFORE log_action - unit_with_coords={action_details.get('unit_with_coords', 'N/A')} end_pos={action_details.get('end_pos', 'N/A')} col={action_details.get('col', 'N/A')} row={action_details.get('row', 'N/A')}"
+                                add_console_log(self.game_state, debug_msg)
+                                safe_print(self.game_state, debug_msg)
+
                             self.step_logger.log_action(
                                 unit_id=updated_unit["id"],
                                 action_type=action_type,
@@ -1375,6 +1511,66 @@ class W40KEngine(gym.Env):
                                 step_increment=step_increment,
                                 action_details=action_details
                             )
+            except Exception as e:
+                # CRITICAL: Logging errors must NOT interrupt action execution
+                # Log the error but continue with action processing
+                import traceback
+                from engine.game_utils import add_console_log, safe_print
+                episode = self.game_state.get("episode_number", "?")
+                turn = self.game_state.get("turn", "?")
+                phase = self.game_state.get("phase", "?")
+                error_msg = f"[STEP LOGGER ERROR] E{episode} T{turn} {phase}: Logging failed but action continues - {type(e).__name__}: {str(e)}"
+                add_console_log(self.game_state, error_msg)
+                safe_print(self.game_state, error_msg)
+                # Don't re-raise - let action execution continue
+        
+        # Auto-advance to next phase when current phase completes
+        # Loop to handle cascading empty phases (e.g., charge -> fight -> move if all empty)
+        # CRITICAL: This must happen AFTER logging to allow logging of actions before phase transitions
+        max_cascade = 10  # Prevent infinite loops
+        cascade_count = 0
+        while success and result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
+            next_phase = result["next_phase"]
+            cascade_count += 1
+
+            from engine.game_utils import add_console_log
+            add_console_log(self.game_state, f"🔄 PHASE TRANSITION: {current_phase} -> {next_phase} (cascade #{cascade_count})")
+
+            # Initialize next phase using phase handlers
+            phase_init_result = None
+            if next_phase == "command":
+                phase_init_result = command_handlers.command_phase_start(self.game_state)
+            elif next_phase == "shoot":
+                phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
+            elif next_phase == "charge":
+                phase_init_result = charge_handlers.charge_phase_start(self.game_state)
+            elif next_phase == "fight":
+                phase_init_result = fight_handlers.fight_phase_start(self.game_state)
+            elif next_phase == "move":
+                phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+
+            add_console_log(self.game_state, f"🔄 PHASE NOW: {self.game_state.get('phase', 'UNKNOWN')}")
+
+            # If phase_start returns phase_complete, cascade to next phase
+            if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
+                # CRITICAL: Preserve combat action data before replacing result
+                # When fight phase completes and transitions to next phase, we must preserve
+                # the combat action data (action, unitId, all_attack_results) for logging
+                preserved_combat_data = {}
+                combat_keys = ["action", "unitId", "all_attack_results", "targetId", "attack_result", "target_died", "reason", "phase"]
+                for key in combat_keys:
+                    if key in result:
+                        preserved_combat_data[key] = result[key]
+                
+                result = phase_init_result  # Update result for next iteration
+                
+                # CRITICAL: Restore preserved combat data for logging
+                for key, value in preserved_combat_data.items():
+                    if value is not None:  # Only restore non-None values
+                        result[key] = value
+            else:
+                break  # Phase has eligible units, stop cascading
+        
         return success, result
     
     
@@ -1400,19 +1596,17 @@ class W40KEngine(gym.Env):
             if unit_id:
                 unit = self._get_unit_by_id(unit_id)
                 if unit:
-                    expected_col = action.get("destCol", "unknown")
-                    expected_row = action.get("destRow", "unknown") 
-                    if expected_col == unit["col"] and expected_row == unit["row"]:
-                        pass
+                    # CRITICAL: No default values - require explicit coordinates for debug check
+                    if "destCol" in action and "destRow" in action:
+                        expected_col = action["destCol"]
+                        expected_row = action["destRow"]
+                        if expected_col == unit["col"] and expected_row == unit["row"]:
+                            pass
+                    # If destCol/destRow missing, skip debug check (not an error, just incomplete debug data)
         
-        # CRITICAL FIX: Handle failed actions to prevent infinite loops
-        if not success and result.get("error") == "invalid_destination":
-            skip_unit = self._get_unit_by_id(action.get("unitId")) if action.get("unitId") else None
-            skip_result = movement_handlers.execute_action(self.game_state, skip_unit, {"action": "skip", "unitId": action.get("unitId")}, self.config)
-            if isinstance(skip_result, tuple):
-                success, result = skip_result
-            else:
-                success, result = True, skip_result
+        # CRITICAL: No workaround for invalid_destination - let error propagate
+        # If destination is invalid, the error should be raised, not masked by auto-skip
+        # The agent should learn not to select invalid destinations
         
         # Check response for phase_complete flag
         if result.get("phase_complete"):

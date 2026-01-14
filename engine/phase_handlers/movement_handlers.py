@@ -12,6 +12,81 @@ from .generic_handlers import end_activation
 from engine.combat_utils import calculate_hex_distance
 
 
+def _normalize_coordinate(coord: Any) -> int:
+    """
+    Normalize coordinate to int. Raises ValueError if conversion fails.
+    
+    CRITICAL: All coordinates must be int. This function ensures type consistency
+    and raises clear errors if coordinates are invalid.
+    """
+    if isinstance(coord, int):
+        return coord
+    elif isinstance(coord, float):
+        return int(coord)
+    elif isinstance(coord, str):
+        try:
+            return int(float(coord))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid coordinate string '{coord}': {e}")
+    else:
+        raise TypeError(f"Invalid coordinate type {type(coord).__name__}: {coord}. Expected int, float, or numeric string.")
+
+
+def _normalize_coordinates(col: Any, row: Any) -> Tuple[int, int]:
+    """
+    Normalize both coordinates to int. Raises ValueError if conversion fails.
+    """
+    return _normalize_coordinate(col), _normalize_coordinate(row)
+
+
+def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any]) -> None:
+    """
+    CRITICAL: Invalidate all destination pools after any unit movement.
+    
+    After a unit moves, all destination pools become stale because:
+    - Occupied positions have changed
+    - Enemy adjacent hexes have changed
+    - Friendly adjacent hexes have changed (for future use)
+    
+    This function clears:
+    - valid_move_destinations_pool (for all units)
+    - valid_charge_destinations_pool (for all units)
+    - valid_target_pool (for all units in shoot phase)
+    - _target_pool_cache (global cache in shooting_handlers)
+    
+    Called after every movement in move, shoot (advance), and charge phases.
+    """
+    # Clear movement destination pools
+    if "valid_move_destinations_pool" in game_state:
+        game_state["valid_move_destinations_pool"] = []
+    
+    # Clear charge destination pools
+    if "valid_charge_destinations_pool" in game_state:
+        game_state["valid_charge_destinations_pool"] = []
+    
+    # Clear target pools for all units (shoot phase)
+    for unit in game_state.get("units", []):
+        if "valid_target_pool" in unit:
+            unit["valid_target_pool"] = []
+    
+    # Clear global target pool cache (shooting_handlers)
+    from .shooting_handlers import _target_pool_cache
+    _target_pool_cache.clear()
+    
+    # Log invalidation (only in training context)
+    if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
+        episode = game_state["episode_number"]
+        turn = game_state["turn"]
+        phase = game_state.get("phase", "?")
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        log_message = f"[POOL INVALIDATION] E{episode} T{turn} {phase}: All destination pools invalidated after movement"
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_message)
+        safe_print(game_state, log_message)
+
+
 def _log_movement_debug(game_state: Dict[str, Any], function_name: str, unit_id: str, message: str) -> None:
     """Helper function to log movement debug information with episode/turn/phase context."""
     # Only log if episode_number exists (training mode), otherwise skip silently
@@ -26,8 +101,10 @@ def _log_movement_debug(game_state: Dict[str, Any], function_name: str, unit_id:
         game_state["console_logs"] = []
     
     log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} {function_name} Unit {unit_id}: {message}"
-    game_state["console_logs"].append(log_message)
-    print(log_message)  # Also print to console for immediate visibility
+    from engine.game_utils import add_console_log
+    from engine.game_utils import safe_print
+    add_console_log(game_state, log_message)
+    safe_print(game_state, log_message)  # Also print to console for immediate visibility
 
 
 def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,13 +114,16 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Set phase
     game_state["phase"] = "move"
     
+    # CRITICAL: Invalidate all destination pools at the START of the phase
+    # This ensures pools are clean and don't contain stale data from previous phases
+    _invalidate_all_destination_pools_after_movement(game_state)
+    
     # Build activation pool
     movement_build_activation_pool(game_state)
     
     # Console log
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("MOVEMENT POOL BUILT")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "MOVEMENT POOL BUILT")
     
     # Check if phase complete immediately (no eligible units)
     if not game_state["move_activation_pool"]:
@@ -72,8 +152,10 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} movement_build_activation_pool: pool_size={len(eligible_units)} units={eligible_units}"
-        game_state["console_logs"].append(log_message)
-        print(log_message)  # Also print to console for immediate visibility
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_message)
+        safe_print(game_state, log_message)  # Also print to console for immediate visibility
 
 
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
@@ -97,9 +179,49 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if unit["player"] != current_player:
             continue  # Wrong player (Skip, no log)
 
-        # "unit.id not in units_moved?"
-        if unit["id"] in game_state["units_moved"]:
-            continue  # Already moved (Skip, no log)
+        # Check if unit has at least one adjacent hex that is not occupied and not adjacent to enemy
+        # This ensures the unit can actually move
+        unit_col, unit_row = _normalize_coordinates(unit["col"], unit["row"])
+        neighbors = _get_hex_neighbors(unit_col, unit_row)
+        
+        # Pre-compute occupied positions and enemy adjacent hexes for this check
+        occupied_positions = set()
+        for u in game_state["units"]:
+            if u["HP_CUR"] > 0 and u["id"] != unit["id"]:
+                col_int, row_int = _normalize_coordinates(u["col"], u["row"])
+                occupied_positions.add((col_int, row_int))
+        # CRITICAL: Convert player to int for consistent comparison in _build_enemy_adjacent_hexes
+        unit_player_int = int(unit["player"]) if unit["player"] is not None else None
+        enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit_player_int)
+        
+        has_valid_adjacent_hex = False
+        for neighbor_col, neighbor_row in neighbors:
+            neighbor_pos = (int(neighbor_col), int(neighbor_row))
+            
+            # Check bounds
+            if (neighbor_col < 0 or neighbor_row < 0 or
+                neighbor_col >= game_state["board_cols"] or
+                neighbor_row >= game_state["board_rows"]):
+                continue
+            
+            # Check wall
+            if neighbor_pos in game_state["wall_hexes"]:
+                continue
+            
+            # Check occupied
+            if neighbor_pos in occupied_positions:
+                continue
+            
+            # Check adjacent to enemy
+            if neighbor_pos in enemy_adjacent_hexes:
+                continue
+            
+            # Found a valid adjacent hex
+            has_valid_adjacent_hex = True
+            break
+        
+        if not has_valid_adjacent_hex:
+            continue  # Unit cannot move (no valid adjacent hex)
 
         # Unit passes all conditions
         eligible_units.append(unit["id"])
@@ -112,8 +234,10 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} get_eligible_units: eligible={eligible_units} count={len(eligible_units)}"
-        game_state["console_logs"].append(log_message)
-        print(log_message)  # Also print to console for immediate visibility
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_message)
+        safe_print(game_state, log_message)  # Also print to console for immediate visibility
 
     return eligible_units
 
@@ -177,10 +301,28 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
     
     # Auto-activate unit if not already activated and preview not shown
+    # AI_TURN.md COMPLIANCE: In gym training, ActionDecoder constructs complete movement with destCol/destRow
+    # So we should NOT return waiting_for_player=True if action already has destination
     if not game_state.get("active_movement_unit") and action_type in ["move", "left_click"]:
         if is_gym_training:
-            # Gym training: return immediately to trigger auto-movement
-            return _handle_unit_activation(game_state, active_unit, config)
+            # Gym training: Check if action already has destination (ActionDecoder constructed it)
+            if "destCol" in action and "destRow" in action:
+                # Action already has destination - execute movement directly, no waiting needed
+                # Just ensure unit is activated, then continue to movement_destination_selection_handler
+                movement_unit_activation_start(game_state, unit_id)
+                # Build valid destinations pool for validation
+                movement_build_valid_destinations_pool(game_state, unit_id)
+                # Continue to execute movement directly (fall through to movement_destination_selection_handler below)
+            else:
+                # DIAGNOSTIC: ActionDecoder should always provide destination, but it doesn't
+                # This should not happen in gym training - log for debugging
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                from engine.game_utils import add_console_log
+                diagnostic_msg = f"[MOVE DIAGNOSTIC] E{episode} T{turn} Unit {unit_id}: ActionDecoder did not provide destCol/destRow. action keys: {list(action.keys())}"
+                add_console_log(game_state, diagnostic_msg)
+                # No destination yet - return waiting_for_player to get destination selection
+                return _handle_unit_activation(game_state, active_unit, config)
         else:
             # Human players: activate but don't return, continue to normal flow
             _handle_unit_activation(game_state, active_unit, config)
@@ -189,6 +331,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return _handle_unit_activation(game_state, active_unit, config)
     
     elif action_type == "move":
+        # AI_TURN.md COMPLIANCE: Execute movement directly (destination already in action for gym training)
         return movement_destination_selection_handler(game_state, unit_id, action)
     
     elif action_type == "skip":
@@ -216,7 +359,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 1              # Arg5: Same error logging as shooting
             )
             result["invalid_action_penalty"] = True
-            result["attempted_action"] = action.get("attempted_action", "unknown")
+            # CRITICAL: No default value - require explicit attempted_action
+            attempted_action = action.get("attempted_action")
+            if attempted_action is None:
+                raise ValueError(f"Action missing 'attempted_action' field: {action}")
+            result["attempted_action"] = attempted_action
             return True, result
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
@@ -236,6 +383,8 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
     # AI_TURN.md COMPLIANCE: Check both config and game_state for gym_training_mode
     is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
 
+    # AI_TURN.md COMPLIANCE: In gym training, ActionDecoder constructs complete movement with destCol/destRow
+    # So we should NOT return waiting_for_player=True - the action will have destination when it arrives
     if is_gym_training and isinstance(execution_result, tuple) and execution_result[0]:
         # AI_TURN.md COMPLIANCE: Direct field access
         if "waiting_for_player" not in execution_result[1]:
@@ -243,27 +392,18 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
         else:
             waiting_for_player = execution_result[1]["waiting_for_player"]
 
-        if waiting_for_player:
-            if "valid_destinations" not in execution_result[1]:
-                raise KeyError("Execution result missing required 'valid_destinations' field")
-            valid_destinations = execution_result[1]["valid_destinations"]
-
-            if valid_destinations:
-                # ✅ FIX: Store destinations in game_state for agent's action to reference
-                # Agent will choose destination via action 0-3, converted by ActionDecoder
-                game_state["pending_movement_destinations"] = valid_destinations
-                game_state["pending_movement_unit_id"] = unit["id"]
-
-                # Return waiting_for_player=True - agent must now choose destination
-                return True, {
-                    "waiting_for_player": True,
-                    "unitId": unit["id"],
-                    "valid_destinations": valid_destinations,
-                    "action": "waiting_for_movement_choice"
-                }
-            else:
-                # No valid destinations - auto skip
-                return True, {"action": "skip", "unitId": unit["id"], "reason": "no_valid_destinations"}
+        # AI_TURN.md: In gym training, ActionDecoder always provides destination in action
+        # So we should NOT return waiting_for_player=True or waiting_for_movement_choice
+        # Just return activation result without action (activation is not an action to log)
+        # The movement will be executed in the same step when action with destCol/destRow is processed
+        # Return result without action to skip logging (activation is not logged, only the movement is)
+        return True, {
+            "unit_activated": True,
+            "unitId": unit["id"],
+            "valid_destinations": execution_result[1].get("valid_destinations", []),
+            # No action field - activation is not an action to log
+            # Movement will be logged when action with destCol/destRow is processed
+        }
 
     # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
     return execution_result
@@ -324,13 +464,29 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     preview_data = movement_preview(game_state["valid_move_destinations_pool"])
     game_state["preview_hexes"] = game_state["valid_move_destinations_pool"]
     
-    return True, {
-        "unit_activated": True,
-        "unitId": unit_id,  # ADDED: Required for reward calculation
-        "valid_destinations": game_state["valid_move_destinations_pool"],
-        "preview_data": preview_data,
-        "waiting_for_player": True
-    }
+    # AI_TURN.md COMPLIANCE: In gym training, ActionDecoder constructs complete movement with destCol/destRow
+    # So we should NOT return waiting_for_player=True - the action will have destination when it arrives
+    is_gym_training = game_state.get("gym_training_mode", False)
+    
+    if is_gym_training:
+        # Gym training: Don't return waiting_for_player=True - ActionDecoder will provide destination in action
+        # Return result without waiting_for_player so movement can be executed directly
+        return True, {
+            "unit_activated": True,
+            "unitId": unit_id,
+            "valid_destinations": game_state["valid_move_destinations_pool"],
+            "preview_data": preview_data,
+            "waiting_for_player": False  # AI_TURN.md: AI executes movement directly, no waiting
+        }
+    else:
+        # Human players: return waiting_for_player for destination selection
+        return True, {
+            "unit_activated": True,
+            "unitId": unit_id,  # ADDED: Required for reward calculation
+            "valid_destinations": game_state["valid_move_destinations_pool"],
+            "preview_data": preview_data,
+            "waiting_for_player": True
+        }
 
 
 def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str, Any], dest_col: int, dest_row: int, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -338,101 +494,104 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     AI_TURN.md movement execution with destination validation.
 
     Implements AI_TURN.md movement restrictions and flee detection.
+    
+    NOTE: Pool is already built in movement_unit_execution_loop() just after activation.
+    Since system is sequential, pool is already built and validated.
+    However, we still verify critical restrictions here as a safety check.
     """
-    # Pre-compute enemy adjacent hexes for validation (required for _is_valid_destination)
-    enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit["player"])
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    dest_col_int, dest_row_int = _normalize_coordinates(dest_col, dest_row)
     
-    # Log specific destination check for debugging
-    if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
-        dest_tuple = (int(dest_col), int(dest_row))
-        is_in_set = dest_tuple in enemy_adjacent_hexes
-        # Check if destination is adjacent to any enemy by checking all enemies
-        adjacent_enemies = []
-        for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                enemy_col, enemy_row = int(enemy["col"]), int(enemy["row"])
-                neighbors = _get_hex_neighbors(enemy_col, enemy_row)
-                if dest_tuple in neighbors:
-                    adjacent_enemies.append(f"Unit {enemy['id']} at ({enemy_col},{enemy_row})")
-        
-        if adjacent_enemies:
-            episode = game_state["episode_number"]
-            turn = game_state["turn"]
-            phase = game_state.get("phase", "move")
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
-            log_message = f"[MOVE DEBUG] ⚠️ E{episode} T{turn} {phase} attempt_movement: dest ({dest_col},{dest_row}) NOT in enemy_adjacent_hexes={is_in_set} but IS adjacent to: {adjacent_enemies}"
-            game_state["console_logs"].append(log_message)
-            print(log_message)
+    # NOTE: Adjacency check is done in build_valid_destinations_pool via enemy_adjacent_hexes.
+    # The pool should already exclude all hexes adjacent to enemies, so no redundant check here.
     
-    # Validate destination per AI_TURN.md rules
-    if not _is_valid_destination(game_state, dest_col, dest_row, unit, config, enemy_adjacent_hexes):
-        _log_movement_debug(game_state, "attempt_movement", str(unit["id"]), f"({unit['col']},{unit['row']})→({dest_col},{dest_row}) FAILED: invalid_destination")
-        return False, {"error": "invalid_destination", "target": (dest_col, dest_row)}
+    # Store original position - normalize to ensure consistency
+    orig_col, orig_row = _normalize_coordinates(unit["col"], unit["row"])
     
     # AI_TURN.md flee detection: was adjacent to enemy before move
     was_adjacent = _is_adjacent_to_enemy(game_state, unit)
-    
-    # Store original position
-    orig_col, orig_row = unit["col"], unit["row"]
 
-    # FINAL SAFETY CHECK: Redundant occupation check right before position update
-    # This catches occupation bugs that somehow bypass the validation above
-    # CRITICAL: Convert coordinates to int for consistent comparison
-    dest_col_int, dest_row_int = int(dest_col), int(dest_row)
-    for check_unit in game_state["units"]:
-        if (check_unit["id"] != unit["id"] and
-            check_unit["HP_CUR"] > 0 and
-            int(check_unit["col"]) == dest_col_int and
-            int(check_unit["row"]) == dest_row_int):
-            # Occupation detected - this should NEVER happen if validation worked correctly
-            _log_movement_debug(game_state, "attempt_movement", str(unit["id"]), f"({orig_col},{orig_row})→({dest_col},{dest_row}) FAILED: occupation_safety_check_failed occupant={check_unit['id']}")
-            return False, {
-                "error": "occupation_safety_check_failed",
-                "occupant_id": check_unit["id"],
-                "destination": (dest_col, dest_row)
-            }
-
-    # Execute movement
-    # CRITICAL: Log ALL position changes to detect unauthorized modifications
-    # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
+    # CRITICAL: Final occupation check IMMEDIATELY before position assignment
+    # This prevents race conditions where multiple units select the same destination
+    # before any of them have moved. Must check JUST before assignment, not earlier.
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     phase = game_state.get("phase", "move")
+    
+    # Check all units for occupation - CRITICAL: Normalize coordinates, raise error if invalid
+    for check_unit in game_state["units"]:
+        # CRITICAL: Normalize coordinates - raises clear error if invalid (no defensive try/except)
+        check_col, check_row = _normalize_coordinates(check_unit["col"], check_unit["row"])
+        
+        # CRITICAL: Compare as integers to avoid type mismatch
+        if (check_unit["id"] != unit["id"] and
+            check_unit["HP_CUR"] > 0 and
+            check_col == dest_col_int and
+            check_row == dest_row_int):
+            # Another unit already occupies this destination - prevent collision
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            log_msg = f"[MOVE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot move to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_unit['id']}"
+            from engine.game_utils import add_console_log, safe_print
+            add_console_log(game_state, log_msg)
+            safe_print(game_state, log_msg)
+            import logging
+            logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
+            logging.info(log_msg)
+            return False, {
+                "error": "destination_occupied",
+                "occupant_id": check_unit["id"],
+                "destination": (dest_col_int, dest_row_int)
+            }
+
+    # Execute movement - position assignment
+    # CRITICAL: Log ALL position changes to detect unauthorized modifications
+    # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
-    log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via MOVE"
-    game_state["console_logs"].append(log_message)
-    print(log_message)
+    log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col_int},{dest_row_int}) via MOVE"
+    from engine.game_utils import add_console_log
+    from engine.game_utils import safe_print
+    add_console_log(game_state, log_message)
+    safe_print(game_state, log_message)
     
     # CRITICAL: Log BEFORE each assignment to catch any modification
-    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col} row={dest_row}")
-    unit["col"] = dest_col
-    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
-    unit["row"] = dest_row
-    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
+    from engine.game_utils import conditional_debug_print
+    conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col_int} row={dest_row_int}")
+    # CRITICAL: Assign normalized int coordinates - dest_col_int and dest_row_int are already int from _normalize_coordinates
+    unit["col"] = dest_col_int
+    conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
+    unit["row"] = dest_row_int
+    conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
     
     # Apply AI_TURN.md tracking
     game_state["units_moved"].add(unit["id"])
     if was_adjacent:
         game_state["units_fled"].add(unit["id"])
+        # CRITICAL: Units that fled are also marked as moved
+        # (units_fled is a subset of units_moved)
+    
+    # Pools are invalidated at the START of the phase, not after each movement
+    # This prevents invalidating the "moved" tracking of units that just moved
     
     # Log successful movement
     action_type = "FLEE" if was_adjacent else "MOVE"
-    _log_movement_debug(game_state, "attempt_movement", str(unit["id"]), f"({orig_col},{orig_row})→({dest_col},{dest_row}) SUCCESS {action_type}")
+    _log_movement_debug(game_state, "attempt_movement", str(unit["id"]), f"({orig_col},{orig_row})→({dest_col_int},{dest_row_int}) SUCCESS {action_type}")
     
+    # CRITICAL: Use normalized coordinates (dest_col_int, dest_row_int) in result
+    # NOT dest_col/dest_row which might not be normalized
     return True, {
         "action": "flee" if was_adjacent else "move",
         "unitId": unit["id"],
         "fromCol": orig_col,
         "fromRow": orig_row,
-        "toCol": dest_col,
-        "toRow": dest_row
+        "toCol": dest_col_int,  # CRITICAL: Use normalized coordinates
+        "toRow": dest_row_int    # CRITICAL: Use normalized coordinates
     }
 
 
 def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any], config: Dict[str, Any],
-                          enemy_adjacent_hexes: Set[Tuple[int, int]]) -> bool:
+                          enemy_adjacent_hexes: Set[Tuple[int, int]], occupied_positions: Set[Tuple[int, int]]) -> bool:
     """
     AI_TURN.md destination validation implementation.
 
@@ -441,8 +600,8 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
     PERFORMANCE: Uses pre-computed enemy_adjacent_hexes set for O(1) lookup.
     enemy_adjacent_hexes must be provided (use _build_enemy_adjacent_hexes()).
     """
-    # CRITICAL: Convert coordinates to int for consistent comparison
-    col_int, row_int = int(col), int(row)
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    col_int, row_int = _normalize_coordinates(col, row)
     
     # Board bounds check (use converted coordinates)
     if (col_int < 0 or row_int < 0 or
@@ -455,12 +614,10 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
         return False
 
     # Unit occupation check
-    for other_unit in game_state["units"]:
-        if (other_unit["id"] != unit["id"] and
-            other_unit["HP_CUR"] > 0 and
-            int(other_unit["col"]) == col_int and
-            int(other_unit["row"]) == row_int):
-            return False
+    # CRITICAL: Use pre-computed occupied_positions set for O(1) lookup and consistency
+    # This ensures we use the same data as _is_traversable_hex
+    if (col_int, row_int) in occupied_positions:
+        return False
 
     # Cannot move TO hexes adjacent to enemies
     # CRITICAL: Direct check in enemy_adjacent_hexes set for consistent comparison
@@ -476,13 +633,14 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
             adjacent_enemies = []
             for enemy in game_state["units"]:
                 if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                    enemy_col, enemy_row = int(enemy["col"]), int(enemy["row"])
+                    enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
                     neighbors = _get_hex_neighbors(enemy_col, enemy_row)
                     if (col_int, row_int) in neighbors:
                         adjacent_enemies.append(f"Unit {enemy['id']} at ({enemy_col},{enemy_row})")
             log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} is_valid_destination: hex ({col_int},{row_int}) INVALID - adjacent to enemy (in enemy_adjacent_hexes) enemies={adjacent_enemies}"
-            game_state["console_logs"].append(log_message)
-            print(log_message)
+            from engine.game_utils import add_console_log, safe_print
+            add_console_log(game_state, log_message)
+            safe_print(game_state, log_message)
         return False
 
     return True
@@ -501,8 +659,8 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     """
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
-    # CRITICAL: Convert coordinates to int for consistent tuple comparison
-    unit_col, unit_row = int(unit["col"]), int(unit["row"])
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    unit_col, unit_row = _normalize_coordinates(unit["col"], unit["row"])
 
     # Optimization: For CC_RNG=1 (most common), check 6 neighbors directly
     result = False
@@ -510,8 +668,9 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
         hex_neighbors = set(_get_hex_neighbors(unit_col, unit_row))
         for enemy in game_state["units"]:
             if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                # CRITICAL: Convert coordinates to int for consistent tuple comparison
-                enemy_pos = (int(enemy["col"]), int(enemy["row"]))
+                # CRITICAL: Normalize coordinates to int - raises error if invalid
+                enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
+                enemy_pos = (enemy_col, enemy_row)
                 if enemy_pos in hex_neighbors:
                     result = True
                     break
@@ -548,8 +707,8 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
     if enemy_adjacent_hexes is None:
         raise ValueError("enemy_adjacent_hexes must be provided - use _build_enemy_adjacent_hexes() first")
     
-    # CRITICAL: Convert coordinates to int for consistent tuple comparison
-    col_int, row_int = int(col), int(row)
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    col_int, row_int = _normalize_coordinates(col, row)
     return (col_int, row_int) in enemy_adjacent_hexes
 
 
@@ -567,55 +726,90 @@ def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[
     Returns:
         Set of hex coordinates adjacent to any living enemy unit
     """
+    # DEBUG: Always log when function is called to diagnose logging issues
+    if "console_logs" not in game_state:
+        game_state["console_logs"] = []
+    debug_mode_val = game_state.get("debug_mode", False)
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    phase = game_state.get("phase", "?")
+    test_log = f"[DEBUG TEST] _build_enemy_adjacent_hexes called: debug_mode={debug_mode_val}, episode={episode}, turn={turn}, phase={phase}, player={player}"
+    game_state["console_logs"].append(test_log)
+    
     enemy_adjacent_hexes = set()
     enemies_processed = []  # Track enemies for debugging
     all_units_info = []  # Track all units for debugging
 
+    enemies_detailed = []  # Track detailed enemy info for debugging
     for enemy in game_state["units"]:
         # Log all units for debugging
         unit_info = f"Unit {enemy['id']} player={enemy['player']} HP={enemy.get('HP_CUR', 0)} at ({int(enemy['col'])},{int(enemy['row'])})"
         all_units_info.append(unit_info)
         
-        if enemy["player"] != player and enemy["HP_CUR"] > 0:
-            # CRITICAL: Convert coordinates to int before calculating neighbors
-            enemy_col, enemy_row = int(enemy["col"]), int(enemy["row"])
-            enemies_processed.append(f"Unit {enemy['id']} at ({enemy_col},{enemy_row})")
-            # Log neighbors for specific enemies to debug adjacency issues
-            if enemy["id"] == "6" or enemy["id"] == "5":
-                neighbors = _get_hex_neighbors(enemy_col, enemy_row)
-                if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
-                    episode = game_state["episode_number"]
-                    turn = game_state["turn"]
-                    phase = game_state.get("phase", "move")
-                    if "console_logs" not in game_state:
-                        game_state["console_logs"] = []
-                    log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes: Unit {enemy['id']} at ({enemy_col},{enemy_row}) neighbors={neighbors}"
-                    game_state["console_logs"].append(log_message)
-                    print(log_message)
-            # Add all 6 neighbors of this enemy to the set
-            neighbors = _get_hex_neighbors(enemy_col, enemy_row)
-            for neighbor in neighbors:
-                # CRITICAL: Ensure neighbor coordinates are int tuples for consistent comparison
-                neighbor_col, neighbor_row = neighbor
-                hex_tuple = (int(neighbor_col), int(neighbor_row))
-                enemy_adjacent_hexes.add(hex_tuple)
+        # CRITICAL: Convert player to int for consistent comparison
+        enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
+        player_int = int(player) if player is not None else None
+        
+        # Build detailed enemy info for debugging
+        hp_cur_raw = enemy.get("HP_CUR", 0)
+        # CRITICAL: Ensure hp_cur is always an int (handle None and string cases)
+        try:
+            hp_cur = int(float(hp_cur_raw)) if hp_cur_raw is not None else 0
+        except (ValueError, TypeError):
+            hp_cur = 0
+        hp_max = enemy.get("HP_MAX", "?")
+        # CRITICAL: Normalize coordinates to int - raises error if invalid
+        enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
+        is_dead = hp_cur <= 0
+        is_friendly = enemy_player == player_int
+        
+        if is_friendly:
+            status = "FRIENDLY"
+        elif is_dead:
+            status = "DEAD"
+        else:
+            status = "ALIVE_ENEMY"
+        
+        enemy_detail = f"Unit {enemy['id']} player={enemy_player} HP_CUR={hp_cur} HP_MAX={hp_max} at ({enemy_col},{enemy_row}) status={status}"
+        enemies_detailed.append(enemy_detail)
+        
+        # Debug: Log why units are skipped
+        if enemy_player == player_int:
+            continue  # Skip friendly units
+        if hp_cur <= 0:
+            continue  # Skip dead units
+        
+        # CRITICAL: Convert coordinates to int before calculating neighbors
+        # CRITICAL: Normalize coordinates to int - raises error if invalid
+        enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
+        
+        enemies_processed.append(f"Unit {enemy['id']} at ({enemy_col},{enemy_row})")
+        # Add all 6 neighbors of this enemy to the set
+        neighbors = _get_hex_neighbors(enemy_col, enemy_row)
+        for neighbor in neighbors:
+            # CRITICAL: Ensure neighbor coordinates are int tuples for consistent comparison
+            neighbor_col, neighbor_row = neighbor
+            hex_tuple = (int(neighbor_col), int(neighbor_row))
+            enemy_adjacent_hexes.add(hex_tuple)
 
-    # Log enemy adjacent hexes result (only if episode_number exists to avoid errors in non-episode contexts)
-    if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
-        episode = game_state["episode_number"]
-        turn = game_state["turn"]
-        phase = game_state.get("phase", "move")
+    # Log enemy adjacent hexes result (only in debug mode to avoid performance impact)
+    # Always log for P1 to debug the (4,8) issue
+    should_log = game_state.get("debug_mode", False) or player == 1
+    if should_log:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "?")
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         # Convert set to sorted list for readable output
         sorted_hexes = sorted(enemy_adjacent_hexes)
-        log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes: enemy_adjacent_hexes count={len(enemy_adjacent_hexes)} enemies={enemies_processed} all_units={all_units_info}"
-        game_state["console_logs"].append(log_message)
-        print(log_message)  # Also print to console for immediate visibility
-        # Log the full set content for debugging
-        log_message_hexes = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes: full_set={sorted_hexes}"
-        game_state["console_logs"].append(log_message_hexes)
-        print(log_message_hexes)
+        # CRITICAL: Log the complete list of hexes in enemy_adjacent_hexes
+        hexes_list_str = str(sorted_hexes) if len(sorted_hexes) <= 100 else str(sorted_hexes[:100]) + f"... (total {len(sorted_hexes)})"
+        log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes player={player}: enemy_adjacent_hexes count={len(enemy_adjacent_hexes)} enemies={enemies_processed} enemies_detailed={enemies_detailed} all_units={all_units_info} hexes={hexes_list_str}"
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_message)
+        safe_print(game_state, log_message)  # Also print to console for immediate visibility
 
     return enemy_adjacent_hexes
 
@@ -630,8 +824,8 @@ def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
     
     CRITICAL: Explicitly ensures all returned tuples are (int, int) for type consistency.
     """
-    # CRITICAL: Convert to int to guarantee type consistency (handles edge cases)
-    col_int, row_int = int(col), int(row)
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    col_int, row_int = _normalize_coordinates(col, row)
     
     # Determine if column is even or odd
     parity = col_int & 1  # 0 for even, 1 for odd
@@ -685,7 +879,8 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
 
     # Unit occupation check - CRITICAL: Use pre-computed set for O(1) lookup
     # CRITICAL: Convert coordinates to int for consistent tuple comparison
-    col_int, row_int = int(col), int(row)
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    col_int, row_int = _normalize_coordinates(col, row)
     if (col_int, row_int) in occupied_positions:
         return False
 
@@ -707,18 +902,54 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     move_range = unit["MOVE"]
     # CRITICAL: Convert coordinates to int for consistent tuple comparison
-    start_col, start_row = int(unit["col"]), int(unit["row"])
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    start_col, start_row = _normalize_coordinates(unit["col"], unit["row"])
     start_pos = (start_col, start_row)
 
     # PERFORMANCE: Pre-compute enemy adjacent hexes once for this BFS
     # This reduces O(n) per hex check to O(1) set lookup
-    enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit["player"])
+    # CRITICAL: Convert player to int for consistent comparison in _build_enemy_adjacent_hexes
+    unit_player_int = int(unit["player"]) if unit["player"] is not None else None
+    enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit_player_int)
 
     # PERFORMANCE: Pre-compute occupied positions once for this BFS
     # This reduces O(n) per-hex unit iteration to O(1) set lookup
     # CRITICAL: Convert coordinates to int to ensure consistent tuple comparison
-    occupied_positions = {(int(u["col"]), int(u["row"])) for u in game_state["units"]
-                         if u["HP_CUR"] > 0 and u["id"] != unit["id"]}
+    # Use int(float(...)) to handle both int and float coordinates correctly
+    # CRITICAL: Rebuild occupied_positions at the START of BFS to ensure it's current
+    # This is done at the start of unit activation, so no other unit can move during this activation
+    occupied_positions = set()
+    units_processed = 0
+    units_skipped = 0
+    for u in game_state["units"]:
+        units_processed += 1
+        if u["HP_CUR"] > 0 and u["id"] != unit["id"]:
+            # CRITICAL: Normalize coordinates - raises clear error if invalid (no defensive try/except)
+            col_int, row_int = _normalize_coordinates(u["col"], u["row"])
+            occupied_positions.add((col_int, row_int))
+    
+    # DEBUG: Log all units and their positions for collision debugging
+    if "episode_number" in game_state and "turn" in game_state:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        total_units = len(game_state["units"])
+        active_units = sum(1 for u in game_state["units"] if u["HP_CUR"] > 0)
+        occupied_count = len(occupied_positions)
+        expected_count = active_units - (1 if unit["HP_CUR"] > 0 else 0)  # Minus the active unit itself
+        
+        # Log all units and their positions
+        units_info = []
+        for u in game_state["units"]:
+            if u["HP_CUR"] > 0:
+                # CRITICAL: Normalize coordinates - raises clear error if invalid (no defensive try/except)
+                col_int, row_int = _normalize_coordinates(u["col"], u["row"])
+                in_occupied = (col_int, row_int) in occupied_positions
+                units_info.append(f"Unit {u['id']}@({col_int},{row_int}){'✓' if in_occupied else '✗'}")
+        
+        from engine.game_utils import add_console_log, safe_print
+        log_msg = f"[OCCUPIED_POSITIONS] E{episode} T{turn} Unit {unit['id']}: total={total_units}, active={active_units}, occupied={occupied_count}, expected={expected_count}, units={','.join(units_info[:10])}"
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
 
     # BFS pathfinding to find all reachable hexes
     visited = {start_pos: 0}  # {(col, row): distance_from_start}
@@ -765,8 +996,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     if "console_logs" not in game_state:
                         game_state["console_logs"] = []
                     log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_valid_destinations: hex ({neighbor_col_int},{neighbor_row_int}) BLOCKED - in enemy_adjacent_hexes"
-                    game_state["console_logs"].append(log_message)
-                    print(log_message)
+                    from engine.game_utils import add_console_log
+                    from engine.game_utils import safe_print
+                    add_console_log(game_state, log_message)
+                    safe_print(game_state, log_message)
                 continue  # Cannot move through this hex - don't add to queue or destinations
 
             # Mark as visited AFTER all blocking checks pass
@@ -774,10 +1007,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
             # Check if this is a valid destination (not wall, not occupied, not adjacent to enemy)
             # PERFORMANCE: Uses pre-computed set for O(1) lookup
-            if _is_valid_destination(game_state, neighbor_col_int, neighbor_row_int, unit, {}, enemy_adjacent_hexes):
+            # NOTE: Enemy adjacency already checked at line 1021, so this should never be adjacent
+            if _is_valid_destination(game_state, neighbor_col_int, neighbor_row_int, unit, {}, enemy_adjacent_hexes, occupied_positions):
                 # Don't add start position as a destination
                 if neighbor_pos != start_pos:
-                    # CRITICAL BUG DETECTION: Check if hex is in enemy_adjacent_hexes (should never happen)
+                    # CRITICAL BUG DETECTION: Check if hex is in enemy_adjacent_hexes (should never happen after our check above)
                     if neighbor_pos in enemy_adjacent_hexes:
                         # This is a BUG - hex adjacent to enemy should not be in valid_destinations
                         if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
@@ -787,8 +1021,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                             if "console_logs" not in game_state:
                                 game_state["console_logs"] = []
                             log_message = f"[MOVE DEBUG] ⚠️ BUG DETECTED E{episode} T{turn} {phase} build_valid_destinations: hex ({neighbor_col_int},{neighbor_row_int}) is BOTH in valid_destinations AND enemy_adjacent_hexes! enemy_adjacent_hexes sample: {list(enemy_adjacent_hexes)[:5]}"
-                            game_state["console_logs"].append(log_message)
-                            print(log_message)
+                            from engine.game_utils import add_console_log
+                            from engine.game_utils import safe_print
+                            add_console_log(game_state, log_message)
+                            safe_print(game_state, log_message)
                         # DO NOT ADD - this is a bug, skip this hex
                         continue
                     valid_destinations.append(neighbor_pos)
@@ -799,6 +1035,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             queue.append((neighbor_pos, neighbor_dist))
 
     game_state["valid_move_destinations_pool"] = valid_destinations
+
+    # DEBUG: Log occupied_positions and valid_destinations for collision debugging
+    if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "move")
+        from engine.game_utils import add_console_log, safe_print
+        log_msg = f"[POOL DEBUG] E{episode} T{turn} {phase} Unit {unit_id}: occupied_positions={sorted(occupied_positions)[:10]}... (total={len(occupied_positions)}), valid_destinations={len(valid_destinations)}"
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
 
     # Log valid destinations result
     _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations={valid_destinations} count={len(valid_destinations)}")
@@ -979,12 +1225,11 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         return False, {"error": "missing_destination"}
     
     # CRITICAL: Convert coordinates to int for consistent tuple comparison
-    dest_col, dest_row = int(dest_col), int(dest_row)
+    # CRITICAL: Normalize coordinates to int - raises error if invalid
+    dest_col, dest_row = _normalize_coordinates(dest_col, dest_row)
     
-    # CRITICAL FIX: ALWAYS rebuild pool fresh on validation to prevent stale data
-    # This ensures frontend/backend pathfinding stay synchronized even if game state changed
-    movement_build_valid_destinations_pool(game_state, unit_id)
-    
+    # Pool is already built during activation - no need to rebuild here
+    # System is sequential, so pool is still valid
     if "valid_move_destinations_pool" not in game_state:
         raise KeyError("game_state missing required 'valid_move_destinations_pool' field")
     valid_pool = game_state["valid_move_destinations_pool"]
@@ -998,6 +1243,31 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
+    
+    # CRITICAL DEBUG: Check if destination is adjacent to enemy even though it's in the pool
+    # This should never happen if the pool is correctly constructed
+    unit_player_int = int(unit["player"]) if unit["player"] is not None else None
+    current_enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit_player_int)
+    if (dest_col, dest_row) in current_enemy_adjacent_hexes:
+        # This is a BUG - destination is in pool but adjacent to enemy
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        from engine.game_utils import add_console_log, safe_print
+        log_msg = f"[MOVE BUG] E{episode} T{turn} Unit {unit_id} destination ({dest_col},{dest_row}) is IN POOL but ADJACENT TO ENEMY! Pool size={len(valid_pool)}, enemy_adjacent_hexes count={len(current_enemy_adjacent_hexes)}"
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
+        # Find which enemy makes this hex adjacent
+        for enemy in game_state["units"]:
+            enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
+            if enemy_player != unit_player_int and enemy["HP_CUR"] > 0:
+                enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
+                from engine.combat_utils import calculate_hex_distance
+                distance = calculate_hex_distance(dest_col, dest_row, enemy_col, enemy_row)
+                if distance == 1:
+                    log_msg2 = f"[MOVE BUG] Adjacent to Unit {enemy['id']} at ({enemy_col},{enemy_row})"
+                    add_console_log(game_state, log_msg2)
+                    safe_print(game_state, log_msg2)
+                    break
 
     # CRITICAL FIX: Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.
@@ -1006,20 +1276,53 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     if not move_success:
         # Move was blocked (occupied hex, adjacent to enemy, etc.)
-        _log_movement_debug(game_state, "destination_selection", str(unit_id), f"destination ({dest_col},{dest_row}) BLOCKED error={move_result.get('error', 'unknown')}")
+        error_type = move_result.get('error', 'unknown')
+        _log_movement_debug(game_state, "destination_selection", str(unit_id), f"destination ({dest_col},{dest_row}) BLOCKED error={error_type}")
+        
+        # CRITICAL FIX: If destination is invalid (adjacent to enemy), remove it from pool
+        # to prevent infinite loops where agent keeps trying invalid destinations
+        if error_type == "destination_adjacent_to_enemy" and "valid_move_destinations_pool" in game_state:
+            invalid_dest = (dest_col, dest_row)
+            if invalid_dest in game_state["valid_move_destinations_pool"]:
+                game_state["valid_move_destinations_pool"].remove(invalid_dest)
+                # Also update pending_movement_destinations if it exists
+                if "pending_movement_destinations" in game_state and invalid_dest in game_state["pending_movement_destinations"]:
+                    game_state["pending_movement_destinations"].remove(invalid_dest)
+                
+                # If pool is now empty, force skip this unit to prevent infinite loop
+                if not game_state["valid_move_destinations_pool"]:
+                    _log_movement_debug(game_state, "destination_selection", str(unit_id), "ALL destinations invalid - forcing skip to prevent infinite loop")
+                    return _handle_skip_action(game_state, unit)
+        
         return False, move_result
     
     # Extract movement info from result
     # Log successful destination selection
     _log_movement_debug(game_state, "destination_selection", str(unit_id), f"destination ({dest_col},{dest_row}) SELECTED")
     was_adjacent = (move_result.get("action") == "flee")
+    # CRITICAL: Use fromCol/fromRow from move_result (set by _attempt_movement_to_destination before movement)
+    # These are the original coordinates BEFORE the movement
     orig_col = move_result.get("fromCol")
     orig_row = move_result.get("fromRow")
+    if orig_col is None or orig_row is None:
+        raise ValueError(f"move_result missing fromCol/fromRow: move_result keys={list(move_result.keys())}")
 
     # Position has already been updated by _attempt_movement_to_destination()
     # Validate it actually changed
     if unit["col"] != dest_col or unit["row"] != dest_row:
         return False, {"error": "position_update_failed"}
+    
+    # CRITICAL DEBUG: Log exact values before using unit coordinates
+    from engine.game_utils import add_console_log, safe_print
+    episode = game_state.get('episode_number', '?')
+    turn = game_state.get('turn', '?')
+    debug_msg = f"[MOVEMENT DEBUG] E{episode} T{turn} Unit {unit_id}: dest_col={dest_col} dest_row={dest_row} unit_col={unit['col']} unit_row={unit['row']} move_result_toCol={move_result.get('toCol')} move_result_toRow={move_result.get('toRow')}"
+    add_console_log(game_state, debug_msg)
+    safe_print(game_state, debug_msg)
+    
+    # CRITICAL FIX: Invalidate all destination pools after movement
+    # Positions have changed, so all pools (move, charge, shoot) are now stale
+    _invalidate_all_destination_pools_after_movement(game_state)
     
     # Generate movement log per requested format
     if "action_logs" not in game_state:
@@ -1127,14 +1430,30 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     else:
         action_name = "move"
     
+    # CRITICAL: Use unit coordinates AFTER movement - SINGLE SOURCE OF TRUTH
+    # NOT move_result.get("toCol")/toRow which comes from action["destCol"]/destRow
+    # NOT action["destCol"]/destRow which might be incorrect
+    # The unit's position is the ONLY reliable source after movement execution
+    result_to_col = unit["col"]
+    result_to_row = unit["row"]
+    
+    # CRITICAL DEBUG: Log exact values being used for result
+    from engine.game_utils import add_console_log, safe_print
+    episode = game_state.get('episode_number', '?')
+    turn = game_state.get('turn', '?')
+    debug_msg = f"[MOVEMENT DEBUG] E{episode} T{turn} Unit {unit_id}: Using result_to_col={result_to_col} result_to_row={result_to_row} (unit_col={unit['col']} unit_row={unit['row']} move_result_toCol={move_result.get('toCol')} move_result_toRow={move_result.get('toRow')}) for logging"
+    add_console_log(game_state, debug_msg)
+    safe_print(game_state, debug_msg)
+    
     result.update({
         "action": action_name,
         "unitId": unit["id"],
         "fromCol": orig_col,
         "fromRow": orig_row,
-        "toCol": dest_col,
-        "toRow": dest_row,
-        "activation_complete": True
+        "toCol": result_to_col,  # CRITICAL: Use unit coordinates after movement - SINGLE SOURCE OF TRUTH
+        "toRow": result_to_row,  # CRITICAL: Use unit coordinates after movement - SINGLE SOURCE OF TRUTH
+        "activation_complete": True,
+        "waiting_for_player": False  # AI_TURN.md: Movement is complete, no waiting needed
     })
     
     return True, result
@@ -1190,9 +1509,8 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state['last_compliance_data'] = {}
     game_state['last_compliance_data']['phase_end_reason'] = 'eligibility'
     
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("MOVEMENT PHASE COMPLETE")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "MOVEMENT PHASE COMPLETE")
     
     return {
         "phase_complete": True,

@@ -1,39 +1,199 @@
 Analyzing step.log...
-Généré le: 2026-01-08 00:06:58
+Généré le: 2026-01-14 18:58:21
 ================================================================================
 ================================================================================
 STEP.LOG ANALYSIS - GAME RULES VALIDATION
 ================================================================================
 
-Total Episodes: 300
-Total Actions: 21427
-Average Actions per Episode: 71.4
-Min/Max Actions per Episode: 28/136
+Total Episodes: 15
+Total Actions: 1254
+Average Actions per Episode: 83.6
+Min/Max Actions per Episode: 42/102
 
 --------------------------------------------------------------------------------
 WIN METHODS
 --------------------------------------------------------------------------------
 Method                  Agent Wins (P1)      Bot Wins (P2)
 --------------------------------------------------------------------------------
+Elimination               5 ( 41.7%)        1 (100.0%)
+Objectives                0 (  0.0%)        0 (  0.0%)
+Value Tiebreaker          7 ( 58.3%)        0 (  0.0%)
+--------------------------------------------------------------------------------
+TOTAL WINS               12 ( 80.0%)        1 (  6.7%)
+DRAWS                     2 ( 13.3%)
+
+--------------------------------------------------------------------------------
+WINS BY SCENARIO
+--------------------------------------------------------------------------------
+Scenario                                      Agent (P1)        Bot (P2)      Draws
+--------------------------------------------------------------------------------
+bot-1                                        2 (66.7%)     0 ( 0.0%)     1 (33.3%)
+bot-2                                        3 (100.0%)     0 ( 0.0%)     0 ( 0.0%)
+bot-3                                        1 (33.3%)     1 (33.3%)     1 (33.3%)
+bot-4                                        3 (100.0%)     0 ( 0.0%)     0 ( 0.0%)
+bot-5                                        3 (100.0%)     0 ( 0.0%)     0 ( 0.0%)
+
+--------------------------------------------------------------------------------
+TURN DISTRIBUTION
+--------------------------------------------------------------------------------
+Turn 2:   1 games (  6.7%)
+Turn 4:   2 games ( 13.3%)
+Turn 5:  12 games ( 80.0%)
+
+--------------------------------------------------------------------------------
+ACTIONS BY TYPE
+--------------------------------------------------------------------------------
+Action               Agent (P1)           Bot (P2)
+--------------------------------------------------------------------------------
+shoot           273 ( 35.6%)       51 ( 10.5%)
+move            170 ( 22.2%)      117 ( 24.0%)
+fight           104 ( 13.6%)       87 ( 17.9%)
+charge          112 ( 14.6%)       76 ( 15.6%)
+wait             33 (  4.3%)      117 ( 24.0%)
+other            36 (  4.7%)       39 (  8.0%)
+advance          39 (  5.1%)        0 (  0.0%)
+
+--------------------------------------------------------------------------------
+SHOOTING PHASE BEHAVIOR
+--------------------------------------------------------------------------------
+Action               Agent (P1)           Bot (P2)
+--------------------------------------------------------------------------------
+Shoot           273 ( 79.1%)       51 ( 30.4%)
+Skip              0 (  0.0%)        0 (  0.0%)
+Advance          39 ( 11.3%)        0 (  0.0%)
+Wait (targets)      0 (  0.0%)        0 (  0.0%)
+Wait (no targets)      0 (  0.0%)       40 ( 23.8%)
+Shoot+Advance      0 (  0.0%)        0 (  0.0%)
+
+--------------------------------------------------------------------------------
+PISTOL WEAPON SHOTS BY ADJACENCY
+--------------------------------------------------------------------------------
+                                    Agent (P1)        Bot (P2)
+--------------------------------------------------------------------------------
+PISTOL shots (adjacent):            4 ( 44.4%)       0 (  0.0%)
+PISTOL shots (not adjacent):        5 ( 55.6%)       0 (  0.0%)
+Total PISTOL shots:                 9                0
+Non-PISTOL shots (adjacent):        0                0
+
+--------------------------------------------------------------------------------
+WAIT BEHAVIOR BY PHASE
+--------------------------------------------------------------------------------
+                                    Agent (P1)        Bot (P2)
+--------------------------------------------------------------------------------
+MOVE phase waits:                  0               11
+SHOOT waits (enemies in LOS):      0                0
+SHOOT waits (no LOS):              0               40
+
+--------------------------------------------------------------------------------
+TARGET PRIORITY ANALYSIS (Focus Fire)
+--------------------------------------------------------------------------------
+                                    Agent (P1)        Bot (P2)
+--------------------------------------------------------------------------------
+FAILURES (shot full HP while
+  wounded in LOS):                13 (  4.8%)       8 ( 15.7%)
+SUCCESS (shot wounded or
+  no wounded in LOS):            260 ( 95.2%)      43 ( 84.3%)
+Total shots:                     273               51
+
+--------------------------------------------------------------------------------
+ENEMY DEATH ORDER ANALYSIS
+--------------------------------------------------------------------------------
+Total episodes with kills: 13
+
+Most common death orders:
+  TyranidWarriorRanged(5): 2 times (15.4%)
+  Hormagaunt(8) -> Hormagaunt(12) -> Hormagaunt(11) -> Hormagaunt(14) -> Hormagaunt(10) -> Hormagaunt(7): 1 times (7.7%)
+  Hormagaunt(7) -> Hormagaunt(9): 1 times (7.7%)
+  Hormagaunt(8) -> TyranidWarriorRanged(6): 1 times (7.7%)
+  TyranidWarriorRanged(7): 1 times (7.7%)
+  Hormagaunt(8) -> Hormagaunt(14) -> TyranidWarriorRanged(5) -> Hormagaunt(10) -> Hormagaunt(13): 1 times (7.7%)
+  Hormagaunt(10) -> Termagant(8) -> Hormagaunt(7) -> Hormagaunt(9) -> TyranidWarriorRanged(6): 1 times (7.7%)
+  Intercessor(8) -> Intercessor(1): 1 times (7.7%)
+  Hormagaunt(9) -> Hormagaunt(7) -> Hormagaunt(8) -> Hormagaunt(11) -> TyranidWarriorRanged(5): 1 times (7.7%)
+  Hormagaunt(10) -> Termagant(8) -> Hormagaunt(9): 1 times (7.7%)
+
+Kills by player:
+  Agent (P1) kills: 28
+  Bot (P2) kills:   9
+
+--------------------------------------------------------------------------------
+MOVEMENT ERRORS
+--------------------------------------------------------------------------------
+                                    Agent (P1)        Bot (P2)
+--------------------------------------------------------------------------------
+Moves into walls:                  0                0
+Moves to adjacent enemy:           8                6
+  First P1 occurrence (Episode 1): [18:58:11] E1 T2 P1 MOVE : Unit 4(1,8) MOVED from (1,9) to (1,8) [R:+0.7] [SUCCESS] [STEP: YES]
+    Adjacent before move: none
+    Adjacent after move: Unit 14
+  First P2 occurrence (Episode 3): [18:58:12] E3 T4 P2 MOVE : Unit 6(23,0) MOVED from (22,0) to (23,0) [R:+0.0] [SUCCESS] [STEP: YES]
+    Adjacent before move: none
+    Adjacent after move: Unit 1
+
+--------------------------------------------------------------------------------
+SHOOTING ERRORS
+--------------------------------------------------------------------------------
+                                    Agent (P1)        Bot (P2)
+--------------------------------------------------------------------------------
+Advances from adjacent hex:        3                0
+  First P1 occurrence (Episode 7): [18:58:15] E7 T2 P1 SHOOT : Unit 3(11,5) ADVANCED from (11,4) to (11,5) [Roll: 3] [R:+0.1] [SUCCESS] [STEP: YES]
+Shoot through wall:                8                0
+  First P1 occurrence (Episode 7): [18:58:15] E7 T1 P1 SHOOT : Unit 1(21,6) SHOT at unit 10(14,7) with [Bolt Rifle] - Hit:3+:6(HIT) Wound:3+:4(WOUND) Save:6+:3(FAIL) Dmg:1HP [R:+33.0] [SUCCESS] [STEP: YES]
+Shoot after fled:                114               20
+  First P1 occurrence (Episode 1): [18:58:11] E1 T3 P1 SHOOT : Unit 1(21,8) SHOT at unit 10(20,6) with [Bolt Rifle] - Hit:3+:6(HIT) Wound:3+:4(WOUND) Save:6+:5(FAIL) Dmg:1HP [R:+38.0] [SUCCESS] [STEP: YES]
+  First P2 occurrence (Episode 3): [18:58:12] E3 T3 P2 SHOOT : Unit 6(22,0) SHOT at unit 4(13,0) with [Deathspitter] - Hit:4+:2(MISS) Wound:0+:0(FAIL) Save:0+:0(FAIL) Dmg:0HP [R:+0.0] [SUCCESS] [STEP: YES]
+Shoot at friendly unit:            5                0
+  First P1 occurrence (Episode 10): [18:58:16] E10 T4 P1 SHOOT : Unit 2(9,9) SHOT at unit 2(9,9) with [Bolt Rifle] - Hit:3+:4(HIT) Wound:4+:3(FAIL) Save:0+:0(FAIL) Dmg:0HP [R:+0.0] [SUCCESS] [STEP: YES]
+Shoot at engaged enemy:           42               17
+  First P1 occurrence (Episode 1): [18:58:11] E1 T2 P1 SHOOT : Unit 1(21,7) SHOT at unit 11(21,8) with [Bolt Pistol] - Hit:3+:3(HIT) Wound:3+:5(WOUND) Save:5+:1(FAIL) Dmg:1HP [R:+38.0] [SUCCESS] [STEP: YES]
+  First P2 occurrence (Episode 1): [18:58:11] E1 T2 P2 SHOOT : Unit 5(11,0) SHOT at unit 1(21,7) with [Deathspitter] - Hit:4+:2(MISS) Wound:0+:0(FAIL) Save:0+:0(FAIL) Dmg:0HP [R:+0.0] [SUCCESS] [STEP: YES]
+
+--------------------------------------------------------------------------------
+CHARGE ERRORS
+--------------------------------------------------------------------------------
+                                    Agent (P1)        Bot (P2)
+--------------------------------------------------------------------------------
+Charges from adjacent hex:         13                4
+  First P1 occurrence (Episode 3): [18:58:12] E3 T2 P1 CHARGE : Unit 3(10,5) CHARGED unit 5(10,4) from (10,6) to (10,5) [Roll:10] [R:+3.0] [SUCCESS] [STEP: YES]
+  First P2 occurrence (Episode 3): [18:58:12] E3 T3 P2 CHARGE : Unit 7(10,5) CHARGED unit 3(10,4) from (10,6) to (10,5) [Roll:11] [R:+0.0] [SUCCESS] [STEP: YES]
+Charge after fled:                40               17
+  First P1 occurrence (Episode 1): [18:58:11] E1 T4 P1 CHARGE : Unit 1(12,1) CHARGED unit 5(11,0) from (18,4) to (12,1) [Roll:11] [R:+3.0] [SUCCESS] [STEP: YES]
+  First P2 occurrence (Episode 4): [18:58:13] E4 T2 P2 CHARGE : Unit 7(9,5) CHARGED unit 2(9,6) from (9,2) to (9,5) [Roll:8] [R:+0.0] [SUCCESS] [STEP: YES]
+
+--------------------------------------------------------------------------------
+FIGHT ERRORS
+--------------------------------------------------------------------------------
+                                    Agent (P1)        Bot (P2)
+--------------------------------------------------------------------------------
+Fight from non-adjacent hex:       0                0
+Fight a friendly unit:             0                0
+
+--------------------------------------------------------------------------------
+⚠️  UNIT POSITION COLLISIONS (2+ units in same hex)
+--------------------------------------------------------------------------------
+Total collisions: 3
+  1. Episode #7, Turn 1, charge: Unit 1, Unit 6 at (21, 7) (from (23, 5))
+  2. Episode #10, Turn 4, charge: Unit 2, Unit 7 at (9, 8) (from (7, 8))
+  3. Episode #12, Turn 1, charge: Unit 1, Unit 6 at (21, 7) (from (23, 5))
 
 ================================================================================
 SAMPLE ACTIONS
 ================================================================================
 
 --- MOVE ---
-[00:03:53] E1 T1 P1 MOVE : Unit 1(21,7) MOVED from (18,12) to (21,7) [R:+0.7] [SUCCESS] [STEP: YES]
+[18:58:11] E1 T1 P1 MOVE : Unit 1(21,7) MOVED from (18,12) to (21,7) [R:+0.7] [SUCCESS] [STEP: YES]
 
 --- SHOOT ---
-[00:03:54] E1 T1 P1 SHOOT : Unit 1(21,7) SHOT at unit 11(17,5) - Hit:4+:0(MISS) Wound:4+:0(FAIL) Save:4+:0(FAIL) Dmg:0HP [R:+8.0] [SUCCESS] [STEP: YES]
+[18:58:11] E1 T1 P1 SHOOT : Unit 1(21,7) SHOT at unit 9(15,4) with [Bolt Rifle] - Hit:3+:4(HIT) Wound:3+:6(WOUND) Save:6+:6(SAVED) Dmg:0HP [R:+8.0] [SUCCESS] [STEP: YES]
 
 --- ADVANCE ---
-[00:03:54] E1 T1 P1 SHOOT : Unit 2(3,10) ADVANCED from (4,11) to (3,10) [Roll: 2] [R:+0.1] [SUCCESS] [STEP: YES]
+[18:58:11] E1 T1 P1 SHOOT : Unit 2(3,10) ADVANCED from (4,11) to (3,10) [Roll: 2] [R:+0.1] [SUCCESS] [STEP: YES]
 
 --- CHARGE ---
-[00:03:54] E1 T1 P1 CHARGE : Unit 1(21,6) CHARGED unit 13(20,6) from (21,7) to (21,6) [Roll:8] [R:+3.0] [SUCCESS] [STEP: YES]
+[18:58:11] E1 T1 P1 CHARGE : Unit 1(21,7) FAILED CHARGE unit 5 from (21,7) to (21,7) [R:-0.1] [SUCCESS] [STEP: YES]
 
 --- FIGHT ---
-[00:03:54] E1 T1 P1 FIGHT : Unit 1(21,6) ATTACKED unit 13(20,6) with [Close Combat Weapon] - Hit:3+:5(HIT) Wound:3+:2(FAIL) [R:+3.0] [SUCCESS] [STEP: YES]
+[18:58:11] E1 T1 P1 FIGHT : Unit 3(11,5) ATTACKED unit 5(10,5) with [Close Combat Weapon] - Hit:3+:1(MISS) [R:+3.0] [SUCCESS] [STEP: YES]
 
 ================================================================================
 

@@ -1,16 +1,16 @@
 ================================================================================
 VÉRIFICATION DES LOGS - Détection des actions non loguées
-Généré le: 2026-01-08 00:06:58
+Généré le: 2026-01-14 18:58:21
 ================================================================================
 
 📖 Parsing des logs...
-  - Position changes: 27
-  - Attaques (debug): 67
-  - Mouvements (step.log): 5852
-  - Charges (step.log): 2892
-  - Advances (step.log): 650
-  - Attaques (step.log): 24737
-  - Activations fight: 16
+  - Position changes: 555
+  - Attaques (debug): 975
+  - Mouvements (step.log): 362
+  - Charges (step.log): 131
+  - Advances (step.log): 39
+  - Attaques (step.log): 1136
+  - Activations fight: 137
   - Avertissements manquants: 0
 
 ================================================================================
@@ -29,7 +29,7 @@ Généré le: 2026-01-08 00:06:58
 ✅ Toutes les unités avec cibles valides ont attaqué au moins une cible
 
 ================================================================================
-4. AVERTISSEMENTS DÉTECTÉS DANS MOVEMENT_DEBUG.LOG
+4. AVERTISSEMENTS DÉTECTÉS DANS DEBUG.LOG
 ================================================================================
 ✅ Aucun avertissement détecté
 

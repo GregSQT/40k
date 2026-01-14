@@ -11,7 +11,7 @@ from collections import defaultdict, Counter
 from typing import Dict, List, Tuple, Set, Optional
 
 def parse_position_changes(movement_log: str) -> List[Dict]:
-    """Parse [POSITION CHANGE] logs from movement_debug.log"""
+    """Parse [POSITION CHANGE] logs from debug.log"""
     position_changes = []
     pattern = r'\[POSITION CHANGE\] E(\d+) T(\d+) (\w+) Unit (\d+): \((\d+),(\d+)\)→\((\d+),(\d+)\) via (\w+)'
     
@@ -33,7 +33,7 @@ def parse_position_changes(movement_log: str) -> List[Dict]:
     return position_changes
 
 def parse_attacks_from_debug(movement_log: str) -> List[Dict]:
-    """Parse attack_executed logs from movement_debug.log"""
+    """Parse attack_executed logs from debug.log"""
     attacks = []
     
     # FIGHT attacks
@@ -610,10 +610,10 @@ def main():
         
         # Read logs
         try:
-            with open('movement_debug.log', 'r') as f:
+            with open('debug.log', 'r') as f:
                 movement_log = f.read()
         except FileNotFoundError:
-            log_print("❌ ERREUR: movement_debug.log introuvable")
+            log_print("❌ ERREUR: debug.log introuvable")
             output_f.close()
             return
         
@@ -707,7 +707,7 @@ def main():
         
         # Check 4: Warnings from debug logs
         log_print("\n" + "=" * 80)
-        log_print("4. AVERTISSEMENTS DÉTECTÉS DANS MOVEMENT_DEBUG.LOG")
+        log_print("4. AVERTISSEMENTS DÉTECTÉS DANS DEBUG.LOG")
         log_print("=" * 80)
         if missing_warnings:
             log_print(f"⚠️  {len(missing_warnings)} avertissement(s) détecté(s):")

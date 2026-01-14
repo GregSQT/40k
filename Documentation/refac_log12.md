@@ -1,13 +1,11 @@
-# REFONTE DU SYSTÈME DE LOGGING - PLAN DÉTAILLÉ (VERSION AMÉLIORÉE)
+# REFONTE DU SYSTÈME DE LOGGING - PLAN DÉTAILLÉ VERSION AMÉLIORÉE
 
-**Date**: 2025-01-XX  
-**Version**: 1.3 (basé sur refac_log2.md avec améliorations)  
+**Date**: 2025-01-21  
+**Version**: 1.2 (Amélioration de refac_log2.md avec éléments de refac_log3.md)  
 **Objectif**: Centraliser le logging dans un seul point pour éliminer les pertes d'actions
 
-**Améliorations par rapport à refac_log2.md**:
-- ✅ Section complète sur le logging des actions échouées
-- ✅ Section sur la validation stricte
-- ✅ Tests mis à jour pour inclure les actions échouées
+**Base**: `refac_log2.md`  
+**Améliorations**: Éléments pertinents de `refac_log3.md`
 
 ---
 
@@ -60,24 +58,37 @@ game_state["fight_attack_results"] = []  # Vidé après ajout au result
 - Logging après transition (ligne 880) peut avoir phase incorrecte
 - Merge de `result` avec phase transition peut écraser données
 
-### Problème 5: Actions Échouées Non Loguées
+### Problème 5: Actions Échouées Potentiellement Non Loguées (DE REFAC_LOG3.MD)
+
+**Localisation**: `engine/w40k_core.py:686`
 
 **Situation actuelle:**
-- Ligne 686: `if (self.step_logger and self.step_logger.enabled and success):`
-- Cette condition filtre les actions avec `success=False`
-- Ligne 642: `episode_steps` n'est incrémenté QUE si `success=True`
-- **Conséquence**: Actions échouées ne sont pas loguées
+```python
+if (self.step_logger and self.step_logger.enabled and success):
+```
 
-**Impact**: Si `hidden_action_finder.py` détecte des actions échouées exécutées mais non loguées, elles apparaîtront comme "manquantes"
+**Problème identifié dans refac_log3.md:**
+- Si `success=False`, aucune action n'est loguée dans `step.log`
+- Selon `step_logger.py` ligne 36: `"STEP INCREMENT ACTIONS: move, shoot, charge, combat, wait (SUCCESS OR FAILURE)"`
+- `step_logger.py` supporte le logging des actions échouées
+- **MAIS**: Ligne 642 montre que `episode_steps` n'est incrémenté QUE si `success=True`
 
-### Problème 6: Validation Trop Permissive
+**Analyse**:
+- Actions échouées n'incrémentent PAS le step (ligne 642)
+- Si pas d'incrément de step, cohérent de ne pas logger? (comportement actuel ligne 686)
+- **À VÉRIFIER**: Est-ce que `hidden_action_finder.py` détecte des actions échouées manquantes?
+
+**Impact**: Potentiellement des actions échouées invisibles dans les logs de training
+
+### Problème 6: Incohérence Turn Number (DE REFAC_LOG3.MD)
 
 **Situation actuelle:**
-- Lignes 707-709: Validation avec whitelist mais skip silencieux si invalide
-- Pas de validation stricte des données requises
-- Actions peuvent être ignorées silencieusement
+- `step_logger.py:71`: `turn_number = action_details.get('current_turn', 1)`
+- `w40k_core.py:725`: utilise `pre_action_turn`
 
-**Impact**: Actions valides peuvent être non loguées si validation échoue
+**Problème**: Deux sources de vérité différentes pour le turn
+
+**Solution**: Utiliser UNIQUEMENT `pre_action_turn` capturé AVANT action (déjà fait dans refac_log2.md)
 
 ---
 
@@ -85,20 +96,20 @@ game_state["fight_attack_results"] = []  # Vidé après ajout au result
 
 ### Principe Fondamental
 
-**UN SEUL POINT DE LOGGING**: Dans `_process_semantic_action()` de `w40k_core.py`, APRÈS réception du `result` des handlers.
+**UN SEUL POINT DE LOGGING**: Dans `step()` de `w40k_core.py`, APRÈS réception du `result` des handlers.
 
 ### Flux Simplifié
 
 ```
-Handler → result (avec all_attack_results complet) → _process_semantic_action() → step_logger.log_action()
+Handler → result (avec all_attack_results complet) → step() → step_logger.log_action()
 ```
 
 **Avantages:**
 - ✅ Point unique de logging
-- ✅ Toutes les actions sont loguées (training via `step()`, frontend via `execute_semantic_action()`, PvE via `execute_ai_turn()`)
 - ✅ Pas de race condition (pas d'état partagé)
 - ✅ Flux simple et prévisible
 - ✅ Conforme AI_TURN.md
+- ✅ Conserve `step_logger.py` existant qui fonctionne déjà
 
 ### Responsabilités
 
@@ -107,25 +118,21 @@ Handler → result (avec all_attack_results complet) → _process_semantic_actio
 - **INTERDIT**: Faire du logging directement
 - **INTERDIT**: Utiliser `fight_attack_results` comme état partagé
 
-#### `w40k_core.py` - `_process_semantic_action()`
-- **RESPONSABILITÉ UNIQUE**: Logger TOUTES les actions (réussies ET échouées)
-- **UN SEUL ENDROIT**: À la fin de `_process_semantic_action()`, APRÈS réception du `result` des handlers
-- **CAPTURE MÉTADONNÉES**: Capture `pre_action_phase`, `pre_action_player`, `pre_action_turn`, `pre_action_positions` AVANT l'exécution de l'action
-- **LOGGING**: Log toutes les actions (réussies ET échouées) avec validation stricte
-
 #### `w40k_core.py` - `step()`
-- **RESPONSABILITÉ**: Interface Gym, conversion gym action → semantic action, gestion episode_steps
-- **INTERDIT**: Logging des actions (déplacé vers `_process_semantic_action()`)
-- **AUTORISÉ**: Logging pour `replay_logger` (replay file generation, indépendant de `step_logger`)
+- **RESPONSABILITÉ UNIQUE**: Logger TOUTES les actions
+- **UN SEUL ENDROIT**: Lignes 880-1035 (section existante)
+- **INTERDIT**: Logging dans `_process_semantic_action()`
+- **SOURCE DE VÉRITÉ UNIQUE**: `pre_action_turn`, `pre_action_phase`, `pre_action_player` capturés AVANT action
 
 #### `step_logger.py`
 - **AUCUN CHANGEMENT**: Déjà correct et produit le format attendu
+- **VALIDATION INTERNE**: `step_logger` valide déjà les données requises (lignes 216-237)
 
 ---
 
 ## 📝 FORMAT DE SORTIE À CONSERVER {#format-output}
 
-### Format Actuel (À CONSERVER)
+### Format Actuel (À CONSERVER EXACTEMENT)
 
 Le format de `step.log` doit rester **EXACTEMENT** comme actuellement:
 
@@ -146,20 +153,6 @@ Le format de `step.log` doit rester **EXACTEMENT** comme actuellement:
 [19:31:44] T1 P1 FIGHT : Unit 1(21,6) ATTACKED unit 13(20,6) with [Close Combat Weapon] - Hit:3+:1(MISS) [R:+3.0] [SUCCESS] [STEP: YES]
 ```
 
-### Format Actions Échouées (À AJOUTER)
-
-Pour les actions échouées, le format doit être:
-
-```
---- CHARGE ---
-[19:31:44] T1 P1 CHARGE : Unit 1(21,7) FAILED CHARGE unit 13(20,6) from (21,7) to (21,6) [Roll:3] [R:-1.0] [FAILED] [STEP: NO]
-```
-
-**Points clés**:
-- `[FAILED]` au lieu de `[SUCCESS]`
-- `[STEP: NO]` car les actions échouées n'incrémentent pas `episode_steps` (ligne 642)
-- Message indique "FAILED CHARGE" avec raison si disponible
-
 ### Structure Format
 
 - **En-têtes de section**: `--- ACTION_TYPE ---` (pour MOVE, SHOOT, ADVANCE, CHARGE, FIGHT)
@@ -169,19 +162,53 @@ Pour les actions échouées, le format doit être:
 ### Contraintes
 
 ✅ **CONSERVER**:
-- Format des timestamps
+- Format des timestamps `[HH:MM:SS]`
 - Format des sections `--- ACTION_TYPE ---`
 - Format des messages détaillés (avec hit_roll, wound_roll, etc.)
-- Placement de `[R:reward]`, `[SUCCESS/FAILED]`, `[STEP: YES/NO]`
+- Placement de `[R:{reward:+.1f}]`, `[SUCCESS/FAILED]`, `[STEP: YES/NO]`
+- Ordre exact des champs
 
 ❌ **NE PAS MODIFIER**:
 - L'ordre des champs
 - Le formatage des nombres
 - Les séparateurs et espaces
+- `step_logger.py` (génère déjà le bon format)
 
-### Note Importante
+### En-têtes de Section `--- ACTION_TYPE ---`
 
-`step_logger.py` génère déjà ce format correctement. La refonte ne doit **PAS** modifier le format, seulement garantir que toutes les actions sont loguées (réussies ET échouées).
+**IMPORTANT**: Ces en-têtes sont générés automatiquement par `step_logger.py` dans `log_action()` via `_format_replay_style_message()`. La refonte ne modifie **PAS** cette fonction, donc les en-têtes sont **automatiquement conservés**. Pas d'action requise.
+
+**Preuve**: Le code actuel produit déjà ces en-têtes, donc ils seront conservés.
+
+### Format Multi-Attack Combat (Exemple Complet)
+
+Pour une unité avec CC_NB=3 qui attaque 3 fois:
+
+```
+--- FIGHT ---
+[19:31:44] T1 P1 FIGHT : Unit 1(21,6) ATTACKED unit 13(20,6) with [Close Combat Weapon] - Hit:3+:4(HIT) Wound:3+:5(WOUND) Save:6+:2(FAIL) Dmg:1HP [R:+3.0] [SUCCESS] [STEP: YES]
+[19:31:44] T1 P1 FIGHT : Unit 1(21,6) ATTACKED unit 13(20,6) with [Close Combat Weapon] - Hit:3+:6(HIT) Wound:3+:4(WOUND) Save:6+:3(FAIL) Dmg:1HP [R:+0.0] [SUCCESS] [STEP: NO]
+[19:31:44] T1 P1 FIGHT : Unit 1(21,6) ATTACKED unit 13(20,6) with [Close Combat Weapon] - Hit:3+:1(MISS) [R:+0.0] [SUCCESS] [STEP: NO]
+```
+
+**Points clés**:
+- 3 lignes distinctes (une par attaque)
+- **En-tête** `--- FIGHT ---` présent (généré automatiquement)
+- Première ligne: `[STEP: YES]` avec reward non-nul (`[R:+3.0]`)
+- Lignes suivantes: `[STEP: NO]` avec reward = 0.0 (`[R:+0.0]`)
+- Chaque ligne contient tous les détails de l'attaque
+- Format identique pour chaque ligne
+
+### Format Actions Échouées (Exemple - Si Applicable)
+
+Si une charge échoue (roll trop bas):
+
+```
+--- CHARGE ---
+[19:31:44] T1 P1 CHARGE : Unit 1(21,7) FAILED CHARGE unit 13(20,6) from (21,7) to (21,6) [Roll:3] [R:-1.0] [FAILED] [STEP: YES]
+```
+
+**Note**: Ce format sera produit automatiquement par `step_logger._format_replay_style_message()` si `success=False` est passé.
 
 ---
 
@@ -220,6 +247,13 @@ if (success and result.get("action") == "combat" and
 
 **Raison**: Les handlers doivent retourner `all_attack_results` complet, pas besoin de récupération.
 
+#### Étape 1.4: Supprimer DEBUG excessif
+
+**Fichier**: `engine/w40k_core.py`  
+**Lignes à SUPPRIMER**: 889-904 (DEBUG excessif dans section combat)
+
+**Raison**: Code pollué, garder seulement erreurs critiques si nécessaire.
+
 ### Phase 2: Garantir `all_attack_results` Complet dans Handlers
 
 #### Étape 2.1: Vérifier que handlers retournent `all_attack_results`
@@ -233,7 +267,7 @@ if (success and result.get("action") == "combat" and
 
 **CONFIRMATION**: Les handlers RETOURNENT déjà `all_attack_results`. ✅
 
-#### Étape 2.2: Vérifier copie explicite dans handlers
+#### Étape 2.2: Vérifier copie explicite dans handlers (Recommandé)
 
 **Fichier**: `engine/phase_handlers/fight_handlers.py`
 
@@ -244,7 +278,7 @@ if (success and result.get("action") == "combat" and
 result["all_attack_results"] = fight_attack_results
 ```
 
-**Code recommandé (pour clarté):**
+**Code recommandé (pour clarté et sécurité):**
 ```python
 result["all_attack_results"] = list(fight_attack_results)  # Copie explicite
 ```
@@ -261,7 +295,7 @@ result["all_attack_results"] = list(fight_attack_results)  # Copie explicite
 **Changements:**
 1. Supprimer vérification `combat_already_logged` (ligne 882)
 2. Supprimer code de récupération (lignes 909-933)
-3. Supprimer DEBUG excessif (garder seulement erreurs critiques)
+3. Supprimer DEBUG excessif (lignes 889-904)
 4. Garder UNIQUEMENT le logging direct avec `all_attack_results`
 
 ---
@@ -353,7 +387,7 @@ elif action_type == "combat":
                 target_coords = (target_unit["col"], target_unit["row"])
             
             attack_details = {
-                "current_turn": pre_action_turn,
+                "current_turn": pre_action_turn,  # Source de vérité unique
                 "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
                 "semantic_action": semantic_action,
                 "target_id": target_id,
@@ -376,10 +410,10 @@ elif action_type == "combat":
             self.step_logger.log_action(
                 unit_id=updated_unit["id"],
                 action_type=action_type,
-                phase=pre_action_phase,
-                player=pre_action_player,
+                phase=pre_action_phase,  # Source de vérité unique
+                player=pre_action_player,  # Source de vérité unique
                 success=success,
-                step_increment=(i == 0),
+                step_increment=(i == 0),  # Only first attack increments step
                 action_details=attack_details
             )
 ```
@@ -390,6 +424,7 @@ elif action_type == "combat":
 3. ✅ Supprimé DEBUG excessif (garder seulement erreurs)
 4. ✅ Simplifié logique: si `all_attack_results` vide et pas `waiting_for_player` → erreur
 5. ✅ **FORMAT CONSERVÉ**: `step_logger.log_action()` génère déjà le format correct
+6. ✅ **SOURCE DE VÉRITÉ UNIQUE**: Utilise `pre_action_turn`, `pre_action_phase`, `pre_action_player`
 
 ### Modification 3: Vérifier Copies Explicites dans Handlers (Optionnel mais Recommandé)
 
@@ -409,7 +444,7 @@ result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pou
 
 **Note**: Cette modification est optionnelle mais recommandée pour éviter toute référence partagée.
 
-### Modification 4: Logger les Actions Échouées
+### Modification 4: Vérifier Logging Actions Échouées (DÉCISION REQUISE)
 
 **Fichier**: `engine/w40k_core.py`  
 **Ligne**: 686
@@ -419,154 +454,61 @@ result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pou
 if (self.step_logger and self.step_logger.enabled and success):
 ```
 
-**PROBLÈME**:
-- Cette condition filtre les actions avec `success=False`
-- Les actions échouées ne sont pas loguées
-- Si `hidden_action_finder.py` détecte des actions échouées exécutées, elles apparaîtront comme "manquantes"
+**ANALYSE COMPLÈTE** (inspirée de refac_log3.md):
 
-**ANALYSE**:
+**Problème identifié**:
+- Cette condition filtre les actions avec `success=False`
+- Selon `step_logger.py` ligne 36: `"STEP INCREMENT ACTIONS: move, shoot, charge, combat, wait (SUCCESS OR FAILURE)"`
+- Selon `step_logger.py` ligne 59: `success_status = "SUCCESS" if success else "FAILED"`
+- `step_logger.py` supporte le logging des actions échouées
+
+**Comportement actuel**:
 - Ligne 642: `episode_steps` n'est incrémenté QUE si `success=True`
 - Donc: Actions échouées n'incrémentent PAS le step
-- **DÉCISION**: Logger les actions échouées avec `step_increment=False` pour visibilité complète
+- Logique actuelle: Si pas d'incrément de step, pas de logging? (cohérent avec ligne 686)
 
-**CODE MIS À JOUR:**
-```python
-# Logger toutes les actions (réussies ET échouées) pour visibilité complète
-# Les actions échouées n'incrémentent pas episode_steps (ligne 642) donc step_increment=False
-if (self.step_logger and self.step_logger.enabled):
-    # success peut être True ou False - logger dans les deux cas
-    # step_increment sera déterminé selon le type d'action et success
-```
+**PROCESSUS DE DÉCISION**:
 
-**IMPLÉMENTATION DÉTAILLÉE**:
+1. **Vérifier avec `hidden_action_finder.py`**:
+   - Lancer un training
+   - Vérifier si des actions échouées sont détectées comme "manquantes"
+   - Si OUI → Actions échouées doivent être loguées
+   - Si NON → Comportement actuel est correct
 
-Dans la section de logging (après ligne 686), pour chaque type d'action:
-
-```python
-if (self.step_logger and self.step_logger.enabled):
-    # Déterminer step_increment selon le type d'action et success
-    # Pour les actions qui incrémentent episode_steps (ligne 642), step_increment = success
-    # Pour les actions qui n'incrémentent pas (ex: multi-attack après la première), step_increment = False
-    
-    if action_type == "combat":
-        # Pour combat, step_increment seulement pour la première attaque ET si success
-        step_increment = (i == 0) and success
-    else:
-        # Pour les autres actions, step_increment = success (cohérent avec ligne 642)
-        step_increment = success
-    
-    # Logger l'action (réussie ou échouée)
-    self.step_logger.log_action(
-        unit_id=updated_unit["id"],
-        action_type=action_type,
-        phase=pre_action_phase,
-        player=pre_action_player,
-        success=success,  # True ou False
-        step_increment=step_increment,  # False pour actions échouées
-        action_details=action_details
-    )
-```
-
-**Raison**: 
-- Visibilité complète dans les logs (toutes les actions exécutées)
-- Cohérent avec `step_logger.py` qui supporte `success=False` et `step_increment=False`
-- Permet à `hidden_action_finder.py` de détecter correctement toutes les actions
-
-**⚠️ NOTE IMPORTANTE**:
-Cette modification assume que les actions échouées doivent être loguées pour visibilité complète.
-Si le comportement actuel (ne pas logger les actions échouées) est intentionnel et cohérent avec votre workflow,
-vous pouvez **optionnellement** vérifier avec `hidden_action_finder.py` avant d'appliquer cette modification :
-
-1. **ÉTAPE 1**: Appliquer les Modifications 1-3 uniquement
-2. **ÉTAPE 2**: Lancer un training et exécuter `check/hidden_action_finder.py`
-3. **ÉTAPE 3**: 
-   - Si des actions échouées sont détectées comme "manquantes" → Appliquer Modification 4
-   - Si aucune action échouée manquante → Garder comportement actuel (ne pas appliquer Modification 4)
-
-Si vous choisissez de ne pas appliquer cette modification, garder la condition actuelle :
-```python
-if (self.step_logger and self.step_logger.enabled and success):
-    # Actions échouées ne sont pas loguées (comportement actuel conservé)
-```
-
-### Modification 5: Validation Stricte
-
-**Fichier**: `engine/w40k_core.py`  
-**Lignes**: 707-709
-
-**CODE ACTUEL:**
-```python
-valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee"]
-action_type_valid = action_type in valid_action_types
-unit_id_valid = unit_id and unit_id != "none" and unit_id != "SYSTEM"
-
-if (action_type_valid and unit_id_valid):
-    # ... logging
-```
-
-**PROBLÈME**:
-- Skip silencieux si validation échoue
-- Pas d'erreur explicite si données invalides
-- Actions peuvent être ignorées sans trace
-
-**CODE MIS À JOUR:**
-```python
-# Validation stricte - pas de fallback, pas de skip silencieux
-if not action_type:
-    raise ValueError(f"action_type is None or empty - cannot log action. result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
-
-valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee"]
-if action_type not in valid_action_types:
-    raise ValueError(f"Invalid action_type '{action_type}'. Valid types: {valid_action_types}")
-
-if not unit_id:
-    raise ValueError(f"unit_id is None or empty - cannot log action. action_type={action_type}")
-
-if unit_id == "none" or unit_id == "SYSTEM":
-    raise ValueError(f"Invalid unit_id '{unit_id}' - cannot log system actions. action_type={action_type}")
-
-# Validation passée - procéder au logging
-```
-
-**Raison**: 
-- Validation stricte évite les actions silencieusement ignorées
-- Erreurs explicites facilitent le debugging
-- Pas de fallback = pas de comportement imprévisible
-
-**⚠️ NOTE IMPORTANTE**:
-Cette validation stricte lève des `ValueError` qui peuvent **interrompre le training** si des données invalides sont détectées.
-Si des données invalides sont légitimes dans certains cas (ex: actions système, actions spéciales),
-vous devez **adapter la validation** en conséquence pour éviter de casser le système.
-
-**Options d'adaptation**:
-1. **Ajouter des exceptions** pour des cas légitimes :
+2. **Si actions échouées doivent être loguées**:
    ```python
-   # Exemple: Permettre certaines actions système si nécessaire
-   if unit_id == "SYSTEM" and action_type == "system_action":
-       # Log action système spéciale
-       pass
-   else:
-       # Validation stricte pour actions normales
-       if not unit_id or unit_id == "none":
-           raise ValueError(...)
+   if (self.step_logger and self.step_logger.enabled):  # Log toutes les actions
    ```
+   - **AVANTAGE**: Visibilité complète dans les logs
+   - **INCONVÉNIENT**: Logs plus longs, mais cohérent avec `step_logger.py` ligne 36
 
-2. **Logger un warning au lieu de lever une exception** :
+3. **Si actions échouées ne doivent PAS être loguées** (comportement actuel):
    ```python
-   if action_type not in valid_action_types:
-       import warnings
-       warnings.warn(f"Invalid action_type '{action_type}' - skipping logging")
-       return  # Skip logging mais ne pas casser le training
+   # Aucun changement - garder la condition actuelle
+   if (self.step_logger and self.step_logger.enabled and success):
+       # Actions échouées ne sont pas loguées (cohérent: pas d'incrément de step)
    ```
+   - **AVANTAGE**: Logs plus courts, seulement actions qui incrémentent step
+   - **INCONVÉNIENT**: Actions échouées invisibles (mais peut-être intentionnel)
 
-3. **Garder validation permissive** si le comportement actuel est intentionnel :
-   ```python
-   # Garder le code actuel si skip silencieux est acceptable
-   if (action_type_valid and unit_id_valid):
-       # ... logging
-   ```
+**RECOMMANDATION**: 
+- **ÉTAPE 1**: Vérifier avec `hidden_action_finder.py` après Modification 1-3
+- **ÉTAPE 2**: Si actions échouées détectées comme manquantes → Supprimer `and success`
+- **ÉTAPE 3**: Si aucune action échouée manquante → Garder comportement actuel (cohérent)
 
-**Recommandation**: Tester cette modification sur un training court avant de l'appliquer en production.
+**CODE MIS À JOUR (décision après vérification):**
+
+**Option A (si actions échouées doivent être loguées):**
+```python
+if (self.step_logger and self.step_logger.enabled):  # Log toutes les actions
+```
+
+**Option B (si comportement actuel est correct):**
+```python
+if (self.step_logger and self.step_logger.enabled and success):  # Garder comportement actuel
+```
+
+**Note**: Cette modification doit être faite **APRÈS** vérification avec `hidden_action_finder.py`.
 
 ---
 
@@ -583,7 +525,8 @@ vous devez **adapter la validation** en conséquence pour éviter de casser le s
    ```
 2. ✅ Phase = "FIGHT" (pas la phase suivante)
 3. ✅ Détails complets (hit_roll, wound_roll, save_roll, damage)
-4. ✅ Format identique à l'exemple fourni (lignes 854-867)
+4. ✅ Format identique à l'exemple fourni (lignes 854-868)
+5. ✅ En-tête `--- FIGHT ---` présent (généré automatiquement)
 
 ### Test 2: Combat Action Multi-Attaque (CC_NB > 1)
 
@@ -616,53 +559,46 @@ vous devez **adapter la validation** en conséquence pour éviter de casser le s
 2. ✅ Logging quand attaque exécutée après sélection
 3. ✅ Format correct quand logging effectué
 
-### Test 5: Comparaison avec `movement_debug.log`
+### Test 5: Comparaison avec `debug.log`
 
 **Scénario**: Lancer `check/hidden_action_finder.py` après training.
 
 **Vérifications:**
 1. ✅ `hidden_action_finder_output.txt` montre 0 attaques non loguées
 2. ✅ `hidden_action_finder_output.txt` montre 0 mouvements non logués
+3. ✅ **NOUVEAU**: Vérifier si des actions échouées sont détectées comme manquantes
 
 ### Test 6: Format de Sortie Identique
 
 **Scénario**: Comparer `step.log` avant et après refonte.
 
 **Vérifications:**
-1. ✅ Format des timestamps identique
+1. ✅ Format des timestamps identique `[HH:MM:SS]`
 2. ✅ Format des sections `--- ACTION_TYPE ---` identique (en-têtes générés automatiquement)
 3. ✅ Format des messages détaillés identique
-4. ✅ Placement de `[R:reward]`, `[SUCCESS/FAILED]`, `[STEP: YES/NO]` identique
+4. ✅ Placement de `[R:{reward:+.1f}]`, `[SUCCESS/FAILED]`, `[STEP: YES/NO]` identique
 5. ✅ Format multi-attack conforme à l'exemple fourni
+6. ✅ Ordre exact des champs préservé
 
-### Test 7: Actions Échouées
+### Test 7: Actions Échouées (Validation Décision Modification 4)
 
 **Scénario**: Tester une action qui échoue (ex: charge avec roll trop bas).
 
 **Vérifications:**
-1. ✅ Action échouée est loguée dans `step.log`
-2. ✅ Format: `[FAILED]` présent (pas `[SUCCESS]`)
-3. ✅ Format: `[STEP: NO]` présent (actions échouées n'incrémentent pas episode_steps)
-4. ✅ Message indique "FAILED CHARGE" ou similaire
-5. ✅ `hidden_action_finder.py` ne détecte pas cette action comme "manquante"
-6. ✅ Format conforme à l'exemple dans section "Format Actions Échouées"
+1. ✅ Vérifier si action échouée est loguée ou non (selon décision Modification 4)
+2. ✅ Si loguée: format `[FAILED]` présent et conforme à l'exemple
+3. ✅ Si non loguée: vérifier avec `hidden_action_finder.py` qu'elle n'est pas détectée comme manquante
+4. ✅ Vérifier que le comportement est cohérent avec incrément de step (ligne 642)
 
-**Exemple attendu:**
-```
---- CHARGE ---
-[19:31:44] T1 P1 CHARGE : Unit 1(21,7) FAILED CHARGE unit 13(20,6) from (21,7) to (21,6) [Roll:3] [R:-1.0] [FAILED] [STEP: NO]
-```
+### Test 8: Source de Vérité Unique pour Turn/Phase/Player
 
-### Test 8: Validation Stricte
-
-**Scénario**: Tester avec des données invalides.
+**Scénario**: Vérifier que turn/phase/player sont corrects dans les logs.
 
 **Vérifications:**
-1. ✅ Si `action_type` est None → ValueError levée (pas de skip silencieux)
-2. ✅ Si `action_type` invalide → ValueError levée avec message explicite
-3. ✅ Si `unit_id` est None → ValueError levée
-4. ✅ Si `unit_id` est "none" ou "SYSTEM" → ValueError levée
-5. ✅ Pas d'actions silencieusement ignorées
+1. ✅ Turn dans log = turn AVANT action (pas après)
+2. ✅ Phase dans log = phase AVANT action (pas après transition)
+3. ✅ Player dans log = player AVANT action
+4. ✅ Aucune incohérence détectée par `analyzer.py`
 
 ---
 
@@ -673,36 +609,40 @@ vous devez **adapter la validation** en conséquence pour éviter de casser le s
 - [ ] Backup de `engine/w40k_core.py`
 - [ ] Backup de `engine/phase_handlers/fight_handlers.py`
 - [ ] Comprendre le flux actuel (lire ce document)
-- [ ] Comprendre le format de sortie attendu (lignes 854-867)
+- [ ] Comprendre le format de sortie attendu (lignes 854-868)
+- [ ] Lire `refac_log2.md` (base) et `refac_log3.md` (problèmes additionnels)
 
 ### Pendant Modification
 
 - [ ] **Modification 1**: Supprimer lignes 1395-1469 dans `w40k_core.py`
 - [ ] **Modification 2**: Simplifier section combat lignes 880-995
 - [ ] **Modification 3**: Vérifier/corriger copies dans handlers (optionnel mais recommandé)
-- [ ] **Modification 4**: Modifier condition ligne 686 pour logger actions échouées
-  - [ ] **Optionnel**: Vérifier avec `hidden_action_finder.py` avant application (voir NOTE IMPORTANTE Modification 4)
-- [ ] **Modification 5**: Remplacer validation permissive par validation stricte (lignes 707-709)
-  - [ ] **Attention**: Tester sur training court avant production (voir NOTE IMPORTANTE Modification 5)
+- [ ] **Modification 4**: Vérifier/valider condition ligne 686 pour actions échouées (documenter décision)
 
-### Après Modification
+### Après Modification (Modifications 1-3)
 
 - [ ] Tests unitaires passent
 - [ ] Training tourne sans erreur
 - [ ] `step.log` généré correctement
-- [ ] **Format de sortie identique** à l'exemple fourni
-- [ ] Actions échouées sont loguées avec `[FAILED]` et `[STEP: NO]`
+- [ ] **Format de sortie identique** à l'exemple fourni (lignes 854-868)
 - [ ] `hidden_action_finder.py` montre 0 problèmes
 - [ ] `analyzer.py` analyse `step.log` sans erreur
 
+### Validation Actions Échouées (Modification 4)
+
+- [ ] Lancer `hidden_action_finder.py` sur training
+- [ ] Vérifier si actions échouées sont détectées comme manquantes
+- [ ] **Décision**: Loguer actions échouées ou non
+- [ ] Appliquer Modification 4 selon décision
+- [ ] Re-valider avec `hidden_action_finder.py`
+
 ### Validation Finale
 
-- [ ] Comparer `movement_debug.log` vs `step.log` → 0 différence
+- [ ] Comparer `debug.log` vs `step.log` → 0 différence
 - [ ] Vérifier qu'aucune attaque n'est perdue
 - [ ] Vérifier qu'aucun mouvement n'est perdu
-- [ ] **Vérifier format de sortie ligne par ligne** avec exemple (lignes 854-867)
-- [ ] Vérifier format actions échouées conforme à l'exemple
-- [ ] Vérifier validation stricte (erreurs explicites, pas de skip silencieux)
+- [ ] **Vérifier format de sortie ligne par ligne** avec exemple (lignes 854-868)
+- [ ] Vérifier source de vérité unique (turn/phase/player corrects)
 - [ ] Documenter résultats dans ce fichier
 
 ---
@@ -713,9 +653,9 @@ vous devez **adapter la validation** en conséquence pour éviter de casser le s
 2. **HANDLERS RETOURNENT TOUT**: Les handlers doivent retourner `all_attack_results` complet
 3. **PAS D'ÉTAT PARTAGÉ**: Ne pas utiliser `fight_attack_results` comme état partagé
 4. **SIMPLICITÉ**: Supprimer tout code de récupération/fallback (signe de problème architectural)
-5. **FORMAT CONSERVÉ**: Le format de sortie doit rester **EXACTEMENT** identique à l'exemple fourni
-6. **LOGGING COMPLET**: Logger toutes les actions (réussies ET échouées) pour visibilité complète
-7. **VALIDATION STRICTE**: Pas de fallback, pas de skip silencieux - erreurs explicites
+5. **FORMAT CONSERVÉ**: Le format de sortie doit rester **EXACTEMENT** identique à l'exemple fourni (lignes 854-868)
+6. **SOURCE DE VÉRITÉ UNIQUE**: Utiliser `pre_action_turn`, `pre_action_phase`, `pre_action_player` capturés AVANT action
+7. **VALIDATION AVANT ACTION**: Vérifier avec `hidden_action_finder.py` avant Modification 4
 
 ---
 
@@ -724,7 +664,9 @@ vous devez **adapter la validation** en conséquence pour éviter de casser le s
 - `AI_TURN.md`: Spécifications du système de tour
 - `check/hidden_action_finder.py`: Vérification des actions non loguées
 - `ai/analyzer.py`: Analyse de `step.log`
-- Format de sortie attendu: Voir exemple lignes 854-867 (terminal selection)
+- Format de sortie attendu: Voir exemple lignes 854-868 (terminal selection)
+- `refac_log2.md`: Base de cette approche (simplification minimaliste)
+- `refac_log3.md`: Analyse complète des problèmes (inclus Problème 5 et 6)
 
 ---
 
@@ -739,23 +681,40 @@ Le format de sortie est généré par `step_logger._format_replay_style_message(
 - ⚠️ Ne pas modifier `step_logger.py` (format déjà correct)
 - ⚠️ S'assurer que `pre_action_phase` est utilisé (pas `current_phase`)
 - ⚠️ S'assurer que `pre_action_turn` est utilisé (pas `current_turn`)
+- ⚠️ S'assurer que `pre_action_player` est utilisé (pas `current_player`)
 - ⚠️ Vérifier que les handlers retournent bien `all_attack_results` complet
-- ⚠️ Actions échouées: `step_increment=False` (cohérent avec ligne 642)
-- ⚠️ Validation stricte: lever des erreurs explicites, pas de skip silencieux
+- ⚠️ **NOUVEAU**: Vérifier actions échouées avec `hidden_action_finder.py` avant Modification 4
 
-### Logging des Actions Échouées
+### Validation Stricte (Inspirée de refac_log3.md)
 
-**Décision**: Logger toutes les actions (réussies ET échouées) pour visibilité complète.
+Bien que `step_logger.py` fasse déjà de la validation (lignes 216-237), la validation dans `w40k_core.py` (ligne 686-716) est également importante:
 
-**Raison**:
-- `hidden_action_finder.py` peut détecter des actions échouées exécutées
-- Visibilité complète dans les logs de training
-- `step_logger.py` supporte déjà `success=False` et `step_increment=False`
+- ✅ Validation `action_type` dans whitelist (ligne 707)
+- ✅ Validation `unit_id` non-null (ligne 709)
+- ✅ Validation données requises pour combat (Modification 2)
 
-**Implémentation**:
-- Supprimer `and success` de la condition ligne 686
-- Déterminer `step_increment` selon le type d'action et `success`
-- Actions échouées: `step_increment=False` (cohérent avec ligne 642)
+**Pas de fallback silencieux**: Si données manquantes → erreur explicite (Modification 2 ligne 315-318)
+
+---
+
+## 🎯 DIFFÉRENCES AVEC REFAC_LOG3.MD
+
+**Pourquoi cette approche plutôt que refac_log3.md**:
+
+1. ✅ **Garde `step_logger.py` existant**: Ne réimplémente pas le formatage (risque de perdre le format)
+2. ✅ **Changements minimaux**: Suppression seulement, pas de refonte complète
+3. ✅ **Risque minimal**: Format garanti car code existant conservé
+4. ✅ **Conforme `.cursorrules`**: Modifications ciblées, une à la fois
+
+**Éléments pris de refac_log3.md**:
+- Problème 5: Actions échouées (Modification 4)
+- Problème 6: Incohérence turn (déjà résolu dans refac_log2.md avec `pre_action_turn`)
+- Validation stricte (concept appliqué dans Modification 2)
+
+**Éléments NON pris de refac_log3.md**:
+- Nouveau module `ActionLogger` (trop de changements, risque élevé)
+- Réécriture formatage (risque de perdre format exact)
+- Logging synchrone step.log + debug.log (pas nécessaire, step_logger fonctionne)
 
 ---
 

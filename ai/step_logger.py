@@ -41,6 +41,17 @@ class StepLogger:
     
     def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
         """Log action with step increment information using clear format"""
+        # CRITICAL DEBUG: Log when log_action is called for move actions (BEFORE enabled check)
+        # Add unique call ID to track multiple calls
+        import time
+        call_id = f"{time.time():.6f}_{id(self)}_{self.action_count}"
+        if action_type == "move" and action_details:
+            try:
+                with open("debug.log", "a") as f:
+                    f.write(f"[STEP_LOGGER log_action CALLED] ID={call_id} Unit {unit_id}: enabled={self.enabled} unit_with_coords={action_details.get('unit_with_coords', 'N/A')} end_pos={action_details.get('end_pos', 'N/A')} col={action_details.get('col', 'N/A')} row={action_details.get('row', 'N/A')}\n")
+            except Exception:
+                pass
+        
         if not self.enabled:
             return
             
@@ -62,6 +73,14 @@ class StepLogger:
                 # Format message using gameLogUtils.ts style
                 message = self._format_replay_style_message(unit_id, action_type, action_details)
                 
+                # CRITICAL DEBUG: Log message just before writing to step.log
+                if action_type == "move":
+                    try:
+                        with open("debug.log", "a") as f_debug:
+                            f_debug.write(f"[STEP_LOGGER BEFORE WRITE] ID={call_id} Unit {unit_id}: message={message} unit_with_coords={action_details.get('unit_with_coords', 'N/A') if action_details else 'N/A'}\n")
+                    except Exception:
+                        pass
+                
                 # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
                 step_status = "STEP: YES" if step_increment else "STEP: NO"
                 success_status = "SUCCESS" if success else "FAILED"
@@ -69,9 +88,19 @@ class StepLogger:
                 
                 # Get turn and episode from SINGLE SOURCE OF TRUTH
                 turn_number = action_details.get('current_turn', 1) if action_details else 1
-                episode_number = action_details.get('current_episode', 1) if action_details else 1
+                # Use self.episode_number which is updated in log_episode_start()
+                episode_number = self.episode_number
                 # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
-                f.write(f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n")
+                log_line = f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n"
+                f.write(log_line)
+                
+                # CRITICAL DEBUG: Log what was actually written to step.log
+                if action_type == "move":
+                    try:
+                        with open("debug.log", "a") as f_debug:
+                            f_debug.write(f"[STEP_LOGGER AFTER WRITE] ID={call_id} Unit {unit_id}: log_line written={log_line.strip()}\n")
+                    except Exception:
+                        pass
                 
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
@@ -144,6 +173,10 @@ class StepLogger:
     
     def _format_replay_style_message(self, unit_id, action_type, details):
         """Format messages with detailed combat info - enhanced replay format"""
+        # CRITICAL: Handle None details gracefully
+        if details is None:
+            details = {}
+        
         # Extract unit coordinates from action_details for consistent format
         unit_coords = ""
         if details and "unit_with_coords" in details:
@@ -155,9 +188,15 @@ class StepLogger:
         
         if action_type == "move" and details:
             # Extract position info for move message
-            if "start_pos" in details and "end_pos" in details:
+            if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
+                # CRITICAL DEBUG: Log exact values in _format_replay_style_message to debug.log
+                try:
+                    with open("debug.log", "a") as f:
+                        f.write(f"[STEP_LOGGER DEBUG] Unit {unit_id}: unit_coords={unit_coords} start_pos=({start_col},{start_row}) end_pos=({end_col},{end_row}) unit_with_coords={details.get('unit_with_coords', 'N/A')} col={details.get('col', 'N/A')} row={details.get('row', 'N/A')}\n")
+                except Exception:
+                    pass  # Don't fail if logging fails
                 base_msg = f"Unit {unit_id}{unit_coords} MOVED from ({start_col},{start_row}) to ({end_col},{end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates from mirror_action
@@ -174,7 +213,7 @@ class StepLogger:
 
         elif action_type == "flee" and details:
             # FLEE: Unit flees from enemy (same format as move but indicates flee)
-            if "start_pos" in details and "end_pos" in details:
+            if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
                 base_msg = f"Unit {unit_id}{unit_coords} FLED from ({start_col},{start_row}) to ({end_col},{end_row})"
@@ -193,7 +232,7 @@ class StepLogger:
 
         elif action_type == "advance" and details:
             # ADVANCE_IMPLEMENTATION: Format advance action message
-            if "start_pos" in details and "end_pos" in details:
+            if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
                 advance_range = details.get("advance_range", 0)
@@ -331,7 +370,7 @@ class StepLogger:
         elif action_type == "charge" and details:
             if "target_id" in details:
                 target_id = details["target_id"]
-                if "start_pos" in details and "end_pos" in details:
+                if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                     start_col, start_row = details["start_pos"]
                     end_col, end_row = details["end_pos"]
                     # Include target coordinates if available
@@ -362,7 +401,7 @@ class StepLogger:
             charge_failed_reason = details.get("charge_failed_reason", "roll_too_low")
             
             # Get start and end positions for format: "from (x,y) to (a,b)"
-            if "start_pos" in details and "end_pos" in details:
+            if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
                 base_msg = f"Unit {unit_id}{unit_coords} FAILED CHARGE unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"

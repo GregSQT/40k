@@ -134,7 +134,7 @@ export const useEngineAPI = () => {
 } | null>(null);
   
   // State for multi-unit HP bar blinking
-  const [blinkingUnits, setBlinkingUnits] = useState<{unitIds: number[], blinkTimer: number | null}>({unitIds: [], blinkTimer: null});
+  const [blinkingUnits, setBlinkingUnits] = useState<{unitIds: number[], blinkTimer: number | null, attackerId?: number | null}>({unitIds: [], blinkTimer: null, attackerId: null});
   
   // State for failed charge roll display
   const [failedChargeRoll, setFailedChargeRoll] = useState<{unitId: number, roll: number, targetId?: number} | null>(null);
@@ -242,8 +242,6 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
-
-
 
       // Process detailed backend action logs FIRST
       if (data.action_logs && data.action_logs.length > 0) {
@@ -358,7 +356,7 @@ export const useEngineAPI = () => {
             if (blinkingUnits.blinkTimer) {
               clearInterval(blinkingUnits.blinkTimer);
             }
-            setBlinkingUnits({unitIds: [], blinkTimer: null});
+            setBlinkingUnits({unitIds: [], blinkTimer: null, attackerId: null});
             
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
@@ -396,26 +394,41 @@ export const useEngineAPI = () => {
           
           // STEP 1: Start blinking if blinking_units is present (regardless of empty_target_pool)
           if (data.result?.blinking_units && data.result?.start_blinking) {
-            // Only start blinking if not already started (avoid duplicate timers)
             const newUnitIds = data.result.blinking_units.map((id: string) => parseInt(id));
-            const needsNewTimer = !blinkingUnits.blinkTimer || 
-              !blinkingUnits.unitIds.some(id => newUnitIds.includes(id));
+            const newAttackerId = (data.game_state?.phase === "charge" && data.result?.unitId) 
+              ? parseInt(data.result.unitId) 
+              : null;
             
-              if (needsNewTimer) {
-                // Clear any existing blinking timer
-                if (blinkingUnits.blinkTimer) {
-                  clearInterval(blinkingUnits.blinkTimer);
-                }
+            // Check if we need to update: different unitIds, different attackerId, or no timer
+            const unitIdsChanged = newUnitIds.length !== blinkingUnits.unitIds.length ||
+              !newUnitIds.every((id: number) => blinkingUnits.unitIds.includes(id));
+            const attackerIdChanged = newAttackerId !== blinkingUnits.attackerId;
+            const needsUpdate = !blinkingUnits.blinkTimer || unitIdsChanged || attackerIdChanged;
+            
+            if (needsUpdate) {
+              // Clear any existing blinking timer
+              if (blinkingUnits.blinkTimer) {
+                clearInterval(blinkingUnits.blinkTimer);
+              }
   
-                // Start blinking for all valid targets
-                // Note: Actual blinking animation is handled locally in UnitRenderer
-                // We only track which units should blink, not the blink state itself
-                const timer = window.setInterval(() => {
-                  // Empty interval - blinking is handled locally in UnitRenderer
-                  // This timer is kept for cleanup purposes only
-                }, 500);
+              // Start blinking for all valid targets
+              // Note: Actual blinking animation is handled locally in UnitRenderer
+              // We only track which units should blink, not the blink state itself
+              const timer = window.setInterval(() => {
+                // Empty interval - blinking is handled locally in UnitRenderer
+                // This timer is kept for cleanup purposes only
+              }, 500);
+              
+              // Also update gameState and selectedUnitId for consistency
+              if (data.game_state?.phase === "charge" && data.result?.unitId) {
+                data.game_state = {
+                  ...data.game_state,
+                  active_charge_unit: data.result.unitId
+                };
+                setSelectedUnitId(parseInt(data.result.unitId));
+              }
   
-                setBlinkingUnits({unitIds: newUnitIds, blinkTimer: timer});
+              setBlinkingUnits({unitIds: newUnitIds, blinkTimer: timer, attackerId: newAttackerId});
             }
           } else if (data.result?.blinking_units && !data.result?.start_blinking) {
             console.warn("💫 WARNING: blinking_units present but start_blinking is false");
@@ -526,7 +539,7 @@ export const useEngineAPI = () => {
           if (blinkingUnits.blinkTimer) {
             clearInterval(blinkingUnits.blinkTimer);
           }
-          setBlinkingUnits({unitIds: [], blinkTimer: null});
+          setBlinkingUnits({unitIds: [], blinkTimer: null, attackerId: null});
           setAdvanceDestinations(data.result.advance_destinations);
           setAdvanceRoll(data.result.advance_roll);
           setAdvancingUnitId(parseInt(data.result.unitId));
@@ -542,6 +555,46 @@ export const useEngineAPI = () => {
         // Handle charge activation response with valid destinations
         // MUST be after setGameState to prevent being overwritten
         else if (data.result?.valid_destinations && data.result?.waiting_for_player) {
+          // STEP 1: Start blinking if blinking_units is present (for charge phase)
+          if (data.result?.blinking_units && data.result?.start_blinking) {
+            const newUnitIds = data.result.blinking_units.map((id: string) => parseInt(id));
+            const needsNewTimer = !blinkingUnits.blinkTimer || 
+              !blinkingUnits.unitIds.some(id => newUnitIds.includes(id));
+            
+            if (needsNewTimer) {
+              // Clear any existing blinking timer
+              if (blinkingUnits.blinkTimer) {
+                clearInterval(blinkingUnits.blinkTimer);
+              }
+  
+              // Start blinking for all valid targets
+              // Note: Actual blinking animation is handled locally in UnitRenderer
+              // We only track which units should blink, not the blink state itself
+              const timer = window.setInterval(() => {
+                // Empty interval - blinking is handled locally in UnitRenderer
+                // This timer is kept for cleanup purposes only
+              }, 500);
+  
+              // For charge phase, store attacker ID directly in blinkingUnits to avoid React timing issues
+              const attackerId = (data.game_state?.phase === "charge" && data.result?.unitId) 
+                ? parseInt(data.result.unitId) 
+                : null;
+              
+              // Also update gameState for consistency
+              if (data.game_state?.phase === "charge" && data.result?.unitId) {
+                data.game_state = {
+                  ...data.game_state,
+                  active_charge_unit: data.result.unitId
+                };
+                setSelectedUnitId(parseInt(data.result.unitId));
+              }
+              
+              setBlinkingUnits({unitIds: newUnitIds, blinkTimer: timer, attackerId});
+            }
+          } else if (data.result?.blinking_units && !data.result?.start_blinking) {
+            console.warn("💫 WARNING: blinking_units present but start_blinking is false (charge phase)");
+          }
+          
           setChargeDestinations(data.result.valid_destinations);
           setSelectedUnitId(parseInt(data.result.unitId));
           setMode("chargePreview");
@@ -617,7 +670,7 @@ export const useEngineAPI = () => {
               // Empty interval - blinking is handled locally in UnitRenderer
               // This timer is kept for cleanup purposes only
             }, 500);
-            setBlinkingUnits({unitIds, blinkTimer: timer});
+            setBlinkingUnits({unitIds, blinkTimer: timer, attackerId: null});
           }
         }
         // Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
@@ -668,7 +721,7 @@ export const useEngineAPI = () => {
     } catch (err) {
       console.error('Action error:', err);
     }
-  }, [gameState, advanceWarningPopup, blinkingUnits.blinkTimer, blinkingUnits.unitIds, targetPreview?.blinkTimer]);
+  }, [gameState, advanceWarningPopup, blinkingUnits.blinkTimer, blinkingUnits.unitIds, blinkingUnits.attackerId, targetPreview?.blinkTimer]);
 
   // Convert API units to frontend format
   const convertUnits = useCallback((apiUnits: APIGameState['units']): Unit[] => {
@@ -1527,6 +1580,7 @@ export const useEngineAPI = () => {
         onCancelAdvanceWarning: () => {},
         onSkipAdvanceWarning: async () => {},
         blinkingUnits: [],
+        blinkingAttackerId: null,
         isBlinkingActive: false,
         // blinkState removed - blinking is handled locally in UnitRenderer
         fightSubPhase: null,
@@ -1587,6 +1641,7 @@ export const useEngineAPI = () => {
     onSkipAdvanceWarning: handleSkipAdvanceWarning,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnitsIds,
+    blinkingAttackerId: blinkingUnits.attackerId ?? null,
     isBlinkingActive: isBlinkingActiveMemo,
     // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display

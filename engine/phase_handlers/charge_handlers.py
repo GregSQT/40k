@@ -26,14 +26,16 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["preview_hexes"] = []
     game_state["active_charge_unit"] = None
     game_state["charge_roll_values"] = {}  # Store 2d6 rolls per unit
+    game_state["charge_target_selections"] = {}  # Store target selections per unit
+    game_state["pending_charge_targets"] = []  # Store targets for gym training target selection
+    game_state["pending_charge_unit_id"] = None  # Store unit ID waiting for target selection
 
     # Build activation pool
     charge_build_activation_pool(game_state)
 
-    # Console log
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("CHARGE POOL BUILT")
+    # Console log (disabled in training mode for performance)
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "CHARGE POOL BUILT")
 
     # Check if phase complete immediately (no eligible units)
     pool_after_build = game_state["charge_activation_pool"]
@@ -194,30 +196,39 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         active_charge_unit_exists = bool(game_state["active_charge_unit"])
 
     if not active_charge_unit_exists and action_type in ["charge", "left_click"]:
-        # Both gym and human players need activation result
-        # Returns charge roll, valid destinations, and preview state
-        return _handle_unit_activation(game_state, active_unit, config)
+        if is_gym_training:
+            # AI_TURN.md COMPLIANCE: In gym training, ActionDecoder may construct complete charge action
+            # Check if action already has targetId and destCol/destRow (complete charge action)
+            if "targetId" in action and "destCol" in action and "destRow" in action:
+                # Action already has target and destination - execute charge directly, no waiting needed
+                # Just ensure unit is activated, then execute charge via destination selection handler
+                charge_unit_activation_start(game_state, unit_id)
+                # Roll 2d6 and build destinations for validation (needed for charge execution)
+                execution_result = charge_unit_execution_loop(game_state, unit_id)
+                # Execute charge directly via destination selection handler
+                return charge_destination_selection_handler(game_state, unit_id, action)
+            else:
+                # No target/destination yet - activate unit to get targets (will auto-select and execute)
+                return _handle_unit_activation(game_state, active_unit, config)
+        else:
+            # Human players: activate and return waiting_for_player
+            return _handle_unit_activation(game_state, active_unit, config)
 
     if action_type == "activate_unit":
         return _handle_unit_activation(game_state, active_unit, config)
 
     elif action_type == "charge":
-        # GYM TRAINING: If unit already active and no destCol provided, auto-select destination
-        if is_gym_training and "destCol" not in action:
-            pending_dests = game_state.get("pending_charge_destinations", [])
-            if pending_dests:
-                best_dest = pending_dests[0]  # First = closest to target
-                # pending_charge_destinations are tuples (col, row)
-                action["destCol"], action["destRow"] = best_dest
-                # Find adjacent enemy target
-                target_id = _find_adjacent_enemy_at_destination(game_state, action["destCol"], action["destRow"], active_unit["player"])
-                if not target_id:
-                    return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
-                action["targetId"] = target_id
-            else:
-                # No valid destinations - skip this unit
-                return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
-        return charge_destination_selection_handler(game_state, unit_id, action)
+        # Route based on what's in the action:
+        # - If targetId but no destCol/destRow -> target selection (roll, build pool, preview)
+        # - If destCol/destRow -> destination selection (execute charge)
+        if "targetId" in action and "destCol" not in action:
+            # Target selection step
+            return charge_target_selection_handler(game_state, unit_id, action)
+        elif "destCol" in action and "destRow" in action:
+            # Destination selection step
+            return charge_destination_selection_handler(game_state, unit_id, action)
+        else:
+            return False, {"error": "invalid_charge_action", "action": action}
 
     elif action_type == "skip":
         # Ignore skip action if unit is not active in charge phase
@@ -267,7 +278,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 1              # Arg5: Error logging
             )
             result["invalid_action_penalty"] = True
-            result["attempted_action"] = action.get("attempted_action", "unknown")
+            # CRITICAL: No default value - require explicit attempted_action
+            attempted_action = action.get("attempted_action")
+            if attempted_action is None:
+                raise ValueError(f"Action missing 'attempted_action' field: {action}")
+            result["attempted_action"] = attempted_action
             return True, result
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
 
@@ -297,6 +312,8 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
 
     is_gym_training = config_gym_mode or state_gym_mode
 
+    # AI_TURN.md COMPLIANCE: In gym training, AI executes charge directly without waiting_for_player
+    # AI_TURN.md lines 1375-1402: AI selects target, builds destinations, selects destination, executes charge - all in one sequence
     if is_gym_training and isinstance(execution_result, tuple) and execution_result[0]:
         # AI_TURN.md COMPLIANCE: Direct field access
         if "waiting_for_player" not in execution_result[1]:
@@ -305,59 +322,28 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             waiting_for_player = execution_result[1]["waiting_for_player"]
 
         if waiting_for_player:
-            if "valid_destinations" not in execution_result[1]:
-                raise KeyError("Execution result missing required 'valid_destinations' field")
-            valid_destinations = execution_result[1]["valid_destinations"]
+            if "valid_targets" not in execution_result[1]:
+                raise KeyError("Execution result missing required 'valid_targets' field")
+            valid_targets = execution_result[1]["valid_targets"]
 
-            if valid_destinations:
-                # GYM TRAINING: Auto-select best destination (closest to target)
-                # Action space doesn't support destination selection, so handler chooses
-                # CRITICAL FIX: Filter out occupied destinations before selection
-                unoccupied_destinations = []
-                for dest in valid_destinations:
-                    dest_col_check, dest_row_check = dest
-                    is_occupied = False
-                    for check_unit in game_state["units"]:
-                        if (check_unit["id"] != unit["id"] and
-                            check_unit["HP_CUR"] > 0 and
-                            check_unit["col"] == dest_col_check and
-                            check_unit["row"] == dest_row_check):
-                            is_occupied = True
-                            break
-                    if not is_occupied:
-                        unoccupied_destinations.append(dest)
+            if valid_targets:
+                # AI_TURN.md: AI selects best target automatically and executes charge directly
+                # Do NOT return waiting_for_player=True - execute charge automatically
+                # Select best target (first target for now, can be improved with strategic selection)
+                selected_target = valid_targets[0]
+                target_id = selected_target["id"]
                 
-                if not unoccupied_destinations:
-                    # All destinations are occupied - skip
-                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
-                
-                best_dest = unoccupied_destinations[0]  # First unoccupied destination (closest to target)
-
-                # valid_destinations are tuples (col, row)
-                dest_col, dest_row = best_dest
-
-                # CRITICAL FIX: Reject destination if it's the current position (from==to bug)
-                if unit["col"] == dest_col and unit["row"] == dest_row:
-                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
-
-                # Find the adjacent enemy at this destination (target for charge)
-                target_id = _find_adjacent_enemy_at_destination(game_state, dest_col, dest_row, unit["player"])
-                if not target_id:
-                    # No target found - skip
-                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
-
-                # Execute the charge to the selected destination
-                charge_action = {
+                # Execute target selection handler which will roll 2d6, build destinations, and execute charge
+                # This follows AI_TURN.md: roll → select target → build destinations → select destination → execute
+                from engine.phase_handlers.charge_handlers import charge_target_selection_handler
+                target_action = {
                     "action": "charge",
                     "unitId": unit["id"],
-                    "destCol": dest_col,
-                    "destRow": dest_row,
                     "targetId": target_id
                 }
-                return charge_destination_selection_handler(game_state, unit["id"], charge_action)
+                return charge_target_selection_handler(game_state, unit["id"], target_action)
             else:
-                # No valid destinations - auto skip (properly remove from pool)
-                # CRITICAL FIX: Call _handle_skip_action to remove from pool and trigger phase transition
+                # No valid targets - auto skip
                 return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
     # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
@@ -419,42 +405,125 @@ def charge_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> No
     # Do NOT roll 2d6 here - roll happens after target selection
 
 
+def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List[Dict[str, Any]]:
+    """
+    Build list of valid charge targets for unit activation.
+    
+    Valid target criteria:
+    - Enemy unit
+    - within charge_max_distance hexes (via BFS pathfinding)
+    - having non occupied adjacent hex(es) at 12 hexes or less from the active unit
+    
+    Returns list of target dicts with unit info.
+    """
+    unit = _get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return []
+    
+    CHARGE_MAX_DISTANCE = 12
+    valid_targets = []
+    
+    # Build all hexes reachable via BFS within max charge distance
+    try:
+        reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, CHARGE_MAX_DISTANCE)
+    except Exception as e:
+        from engine.game_utils import add_console_log
+        add_console_log(game_state, f"ERROR: BFS failed for unit {unit_id}: {str(e)}")
+        return []
+    
+    if not reachable_hexes:
+        return []  # No reachable hexes
+    
+    # Get all enemies
+    enemies = [u for u in game_state["units"]
+               if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+    
+    from engine.utils.weapon_helpers import get_melee_range
+    melee_range = get_melee_range()  # Always 1
+    
+    # For each enemy, check if:
+    # 1. Enemy is within charge_max_distance (via BFS - at least one reachable hex is adjacent to enemy)
+    # 2. Enemy has at least one non-occupied adjacent hex that is reachable
+    for enemy in enemies:
+        enemy_col_int, enemy_row_int = int(enemy["col"]), int(enemy["row"])
+        
+        # Check if any reachable hex is adjacent to this enemy
+        has_adjacent_reachable_hex = False
+        non_occupied_adjacent_hexes = []
+        
+        for dest_col, dest_row in reachable_hexes:
+            distance_to_enemy = _calculate_hex_distance(dest_col, dest_row, enemy_col_int, enemy_row_int)
+            if 0 < distance_to_enemy <= melee_range:
+                # This reachable hex is adjacent to enemy
+                has_adjacent_reachable_hex = True
+                
+                # Check if this hex is not occupied
+                is_occupied = False
+                for check_unit in game_state["units"]:
+                    if (check_unit["id"] != unit["id"] and
+                        check_unit["HP_CUR"] > 0 and
+                        int(check_unit["col"]) == dest_col and
+                        int(check_unit["row"]) == dest_row):
+                        is_occupied = True
+                        break
+                
+                if not is_occupied:
+                    non_occupied_adjacent_hexes.append((dest_col, dest_row))
+        
+        # Target is valid if it has at least one non-occupied adjacent hex reachable
+        if has_adjacent_reachable_hex and non_occupied_adjacent_hexes:
+            valid_targets.append({
+                "id": enemy["id"],
+                "col": enemy["col"],
+                "row": enemy["row"],
+                "HP_CUR": enemy["HP_CUR"],
+                "player": enemy["player"]
+            })
+    
+    return valid_targets
+
+
 def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
     """
-    Charge unit execution loop - show all possible targets (targets can be at distance 13).
+    Charge unit execution loop - build and return valid charge targets.
     
     NEW RULE: At activation, show all possible charge targets without rolling.
     The roll happens AFTER target selection.
-    
-    NOTE: Target can be at distance 13 because charge of 12 can reach adjacent to target at 13.
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
-    # Build valid destinations using MAX charge distance (12) to show all possible targets
-    # No roll yet - roll happens after target selection
-    # BFS pathfinding naturally includes hexes adjacent to enemies at any reachable distance
-    CHARGE_MAX_DISTANCE = 12
-    charge_build_valid_destinations_pool(game_state, unit_id, CHARGE_MAX_DISTANCE)
+    # Build valid targets (enemies with non-occupied adjacent hexes reachable within 12 hexes)
+    valid_targets = charge_build_valid_targets(game_state, unit_id)
 
-    # Check if valid destinations exist
-    if not game_state["valid_charge_destinations_pool"]:
-        # No valid destinations - pass (no step increment, no tracking)
+    # Check if valid targets exist
+    if not valid_targets:
+        # No valid targets - pass (no step increment, no tracking)
         return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
-    # Generate preview
-    preview_data = charge_preview(game_state["valid_charge_destinations_pool"])
-    game_state["preview_hexes"] = game_state["valid_charge_destinations_pool"]
-
-    return True, {
+    # Extract target IDs for blinking effect (PvP and PvE modes only)
+    target_ids = [str(target["id"]) for target in valid_targets]
+    
+    # Check if PvP or PvE mode (not gym training)
+    is_pve = game_state.get("pve_mode", False) or game_state.get("is_pve_mode", False)
+    is_gym = game_state.get("gym_training_mode", False)
+    should_blink = not is_gym  # Blink in PvP and PvE, not in gym training
+    
+    result = {
         "unit_activated": True,
         "unitId": unit_id,
         "charge_roll": None,  # No roll yet - will be rolled after target selection
-        "valid_destinations": game_state["valid_charge_destinations_pool"],
-        "preview_data": preview_data,
+        "valid_targets": valid_targets,  # List of target dicts
         "waiting_for_player": True
     }
+    
+    # Add blinking effect for PvP and PvE modes
+    if should_blink:
+        result["blinking_units"] = target_ids
+        result["start_blinking"] = True
+    
+    return True, result
 
 
 def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, Any], dest_col: int, dest_row: int, target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -466,57 +535,114 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     - Within charge_range (2d6 roll result)
     - Path must be reachable via BFS pathfinding
     """
-    # Validate destination per AI_TURN.md charge rules
-    # Get charge roll for this unit
+    # CRITICAL: Check units_fled just before execution (may have changed during phase)
+    if unit["id"] in game_state.get("units_fled", set()):
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        from engine.game_utils import add_console_log, safe_print
+        log_msg = f"[CHARGE ERROR] E{episode} T{turn} Unit {unit['id']} attempted to charge but has fled - REJECTED"
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
+        import logging
+        logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
+        logging.info(log_msg)
+        return False, {"error": "unit_has_fled", "unitId": unit["id"]}
+    
+    # NOTE: Pool is already built in charge_destination_selection_handler() after roll.
+    # Since system is sequential, no need to rebuild here. Only verify destination is in pool.
     unit_id = unit["id"]
     if unit_id not in game_state["charge_roll_values"]:
         raise KeyError(f"Unit {unit_id} missing charge_roll_values")
     charge_roll = game_state["charge_roll_values"][unit_id]
-
+    
+    # Check if destination is in the pool (built after roll in charge_destination_selection_handler)
+    dest_tuple = (int(dest_col), int(dest_row))
+    if dest_tuple not in game_state.get("valid_charge_destinations_pool", []):
+        return False, {"error": "destination_not_in_pool", "target": (dest_col, dest_row)}
+    
+    # Validate destination per AI_TURN.md charge rules
     if not _is_valid_charge_destination(game_state, dest_col, dest_row, unit, target_id, charge_roll, config):
         return False, {"error": "invalid_charge_destination", "target": (dest_col, dest_row)}
 
     # Store original position
     orig_col, orig_row = unit["col"], unit["row"]
 
-    # FINAL SAFETY CHECK: Redundant occupation check
-    # CRITICAL: Convert coordinates to int for consistent comparison
-    dest_col_int, dest_row_int = int(dest_col), int(dest_row)
-    for check_unit in game_state["units"]:
-        if (check_unit["id"] != unit["id"] and
-            check_unit["HP_CUR"] > 0 and
-            int(check_unit["col"]) == dest_col_int and
-            int(check_unit["row"]) == dest_row_int):
-            return False, {
-                "error": "occupation_safety_check_failed",
-                "occupant_id": check_unit["id"],
-                "destination": (dest_col, dest_row)
-            }
-
-    # Execute charge
-    # CRITICAL: Log ALL position changes to detect unauthorized modifications
-    # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
+    # CRITICAL: Final occupation check IMMEDIATELY before position assignment
+    # This prevents race conditions where multiple units select the same destination
+    # before any of them have moved. Must check JUST before assignment, not earlier.
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     phase = game_state.get("phase", "charge")
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
+    # CRITICAL: Use int(float(...)) for consistency with check_unit position conversion
+    # This ensures type consistency and handles string/float/int inputs correctly
+    dest_col_int, dest_row_int = int(float(dest_col)), int(float(dest_row))
+    
+    # Check all units for occupation - CRITICAL: Use explicit int conversion for all comparisons
+    for check_unit in game_state["units"]:
+        # CRITICAL: Force int conversion for both check_unit position and destination
+        # This prevents type mismatch bugs (int vs float vs string)
+        try:
+            check_col = int(float(check_unit["col"]))  # Handle float->int conversion
+            check_row = int(float(check_unit["row"]))  # Handle float->int conversion
+        except (ValueError, TypeError):
+            # Skip units with invalid positions (should not happen, but defensive)
+            continue
+        
+        # CRITICAL: Compare as integers to avoid type mismatch
+        if (check_unit["id"] != unit["id"] and
+            check_unit["HP_CUR"] > 0 and
+            check_col == dest_col_int and
+            check_row == dest_row_int):
+            # Another unit already occupies this destination - prevent collision
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            log_msg = f"[CHARGE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot charge to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_unit['id']}"
+            from engine.game_utils import add_console_log, safe_print
+            add_console_log(game_state, log_msg)
+            safe_print(game_state, log_msg)
+            import logging
+            logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
+            logging.info(log_msg)
+            return False, {
+                "error": "charge_destination_occupied",
+                "occupant_id": check_unit["id"],
+                "destination": (dest_col_int, dest_row_int)
+            }
+
+    # Execute charge - position assignment happens immediately after occupation check
+    # CRITICAL: Log ALL position changes to detect unauthorized modifications
+    # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
+    from engine.game_utils import add_console_log
     log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via CHARGE"
-    game_state["console_logs"].append(log_message)
-    print(log_message)
+    from engine.game_utils import safe_print
+    add_console_log(game_state, log_message)
+    safe_print(game_state, log_message)
     
     # CRITICAL: Log BEFORE each assignment to catch any modification
-    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col} row={dest_row}")
+    from engine.game_utils import conditional_debug_print
+    conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col} row={dest_row}")
     unit["col"] = dest_col
-    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
+    conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
     unit["row"] = dest_row
-    print(f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
+    conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
 
     # Mark as units_charged (NOT units_moved)
     game_state["units_charged"].add(unit["id"])
 
-    # Clear charge roll after use
-    del game_state["charge_roll_values"][unit_id]
+    # CRITICAL: Invalidate all destination pools after charge movement
+    # Positions have changed, so all pools (move, charge, shoot) are now stale
+    from .movement_handlers import _invalidate_all_destination_pools_after_movement
+    _invalidate_all_destination_pools_after_movement(game_state)
+
+    # Clear charge roll, target selection, and pending targets after use
+    if unit_id in game_state.get("charge_roll_values", {}):
+        del game_state["charge_roll_values"][unit_id]
+    if unit_id in game_state.get("charge_target_selections", {}):
+        del game_state["charge_target_selections"][unit_id]
+    if "pending_charge_targets" in game_state:
+        del game_state["pending_charge_targets"]
+    if "pending_charge_unit_id" in game_state:
+        del game_state["pending_charge_unit_id"]
 
     return True, {
         "action": "charge",
@@ -539,51 +665,40 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     - Within board bounds
     - NOT a wall
     - NOT occupied by another unit
-    - Adjacent to target enemy (distance <= melee_range from target)
-    - Reachable within charge_range (2d6 roll) via BFS pathfinding
+    - Adjacent to target enemy (distance <= melee_range from target) - GUARANTEED by pool
+    - Reachable within charge_range (2d6 roll) via BFS pathfinding - GUARANTEED by pool
 
-    CRITICAL: Unlike movement, charges MUST end adjacent to enemy.
+    NOTE: Pool already guarantees adjacency and reachability. This function only does defensive checks.
     """
+    # CRITICAL: Convert coordinates to int for consistent comparison
+    col_int, row_int = int(col), int(row)
+    
     # Board bounds check
-    if (col < 0 or row < 0 or
-        col >= game_state["board_cols"] or
-        row >= game_state["board_rows"]):
+    if (col_int < 0 or row_int < 0 or
+        col_int >= game_state["board_cols"] or
+        row_int >= game_state["board_rows"]):
         return False
 
     # Wall collision check
-    if (col, row) in game_state["wall_hexes"]:
+    if (col_int, row_int) in game_state["wall_hexes"]:
         return False
 
-    # Unit occupation check
+    # Unit occupation check (defensive - pool already filters occupied hexes)
     for other_unit in game_state["units"]:
         if (other_unit["id"] != unit["id"] and
             other_unit["HP_CUR"] > 0 and
-            other_unit["col"] == col and
-            other_unit["row"] == row):
+            int(other_unit["col"]) == col_int and
+            int(other_unit["row"]) == row_int):
             return False
 
-    # MUST be adjacent to target enemy
-    target = _get_unit_by_id(game_state, target_id)
-    if not target:
-        return False
-
-    distance_to_target = _calculate_hex_distance(col, row, target["col"], target["row"])
-    if distance_to_target == 0:
-        return False  # Cannot stand ON enemy
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
-    from engine.utils.weapon_helpers import get_melee_range
-    melee_range = get_melee_range()  # Always 1
-    if distance_to_target > melee_range:
-        return False  # Not adjacent to target
-
-    # CRITICAL FIX: Verify destination is actually in the valid pool
-    # The pool was built with the actual charge_roll, so check membership
+    # CRITICAL: Verify destination is in the valid pool
+    # The pool guarantees: adjacent to enemy, not occupied, reachable with charge_roll
     if "valid_charge_destinations_pool" not in game_state:
         return False  # Pool not built - invalid destination
     
     valid_pool = game_state["valid_charge_destinations_pool"]
-    if (col, row) not in valid_pool:
-        return False  # Destination not in valid pool - not reachable with this charge_roll
+    if (col_int, row_int) not in valid_pool:
+        return False  # Destination not in valid pool - not reachable with this charge_roll or not adjacent to enemy
     
     return True
 
@@ -615,9 +730,8 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
         reachable_hexes = charge_build_valid_destinations_pool(game_state, unit["id"], CHARGE_MAX_DISTANCE)
     except Exception as e:
         # If BFS fails, log error and return False (no valid targets)
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
-        game_state["console_logs"].append(f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
+        from engine.game_utils import add_console_log
+        add_console_log(game_state, f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
         return False
 
     # Check if any enemy is within melee range of any reachable hex
@@ -759,9 +873,14 @@ def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[
     for enemy in game_state["units"]:
         if enemy["player"] != player and enemy["HP_CUR"] > 0:
             # Add all 6 neighbors of this enemy to the set
-            neighbors = _get_hex_neighbors(enemy["col"], enemy["row"])
+            # CRITICAL: Convert coordinates to int for consistent tuple comparison
+            enemy_col_int = int(float(enemy["col"]))
+            enemy_row_int = int(float(enemy["row"]))
+            neighbors = _get_hex_neighbors(enemy_col_int, enemy_row_int)
             for neighbor in neighbors:
-                enemy_adjacent_hexes.add(neighbor)
+                # CRITICAL: Ensure neighbor coordinates are int for consistent set membership
+                neighbor_col_int, neighbor_row_int = int(neighbor[0]), int(neighbor[1])
+                enemy_adjacent_hexes.add((neighbor_col_int, neighbor_row_int))
 
     return enemy_adjacent_hexes
 
@@ -826,55 +945,89 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
 
     # Unit occupation check - CRITICAL: Use pre-computed set for O(1) lookup
     # CRITICAL: Convert coordinates to int for consistent tuple comparison
-    col_int, row_int = int(col), int(row)
+    # Use int(float(...)) to match the conversion used in occupied_positions construction
+    col_int, row_int = int(float(col)), int(float(row))
     if (col_int, row_int) in occupied_positions:
         return False
 
     return True
 
 
-def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int) -> List[Tuple[int, int]]:
+def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int, target_id: Optional[str] = None) -> List[Tuple[int, int]]:
     """
     Build valid charge destinations using BFS pathfinding.
 
     CRITICAL: Charge destinations must:
     - Be reachable within charge_roll distance (2d6) via BFS
-    - End adjacent to at least one enemy (within melee range)
+    - End adjacent to target enemy (within melee range) if target_id provided, or any enemy if not
     - Not be blocked by walls or units
 
     Unlike movement, charges CAN move through hexes adjacent to enemies.
+    
+    Args:
+        target_id: Optional target unit ID. If provided, only hexes adjacent to this target are included.
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
 
     charge_range = charge_roll  # 2d6 result
-    start_col, start_row = unit["col"], unit["row"]
+    # CRITICAL: Convert coordinates to int for consistent tuple comparison
+    # Use int(float(...)) to handle both int and float coordinates correctly
+    start_col, start_row = int(float(unit["col"])), int(float(unit["row"]))
     start_pos = (start_col, start_row)
 
-    # Get all enemy positions for adjacency checks
-    enemies = [u for u in game_state["units"]
-               if u["player"] != unit["player"] and u["HP_CUR"] > 0]
-
-    if not enemies:
-        return []  # No enemies to charge
+    # Get target enemy if specified, otherwise all enemies
+    if target_id:
+        target = _get_unit_by_id(game_state, target_id)
+        if not target or target["player"] == unit["player"] or target["HP_CUR"] <= 0:
+            return []  # Invalid target
+        enemies = [target]
+    else:
+        # Get all enemy positions for adjacency checks (used during activation preview)
+        enemies = [u for u in game_state["units"]
+                   if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        if not enemies:
+            return []  # No enemies to charge
 
     # PERFORMANCE: Pre-compute occupied positions
     # CRITICAL: Convert coordinates to int to ensure consistent tuple comparison
-    occupied_positions = {(int(u["col"]), int(u["row"])) for u in game_state["units"]
-                         if u["HP_CUR"] > 0 and u["id"] != unit["id"]}
+    # Use int(float(...)) to handle both int and float coordinates correctly
+    # CRITICAL: Use try-except to handle invalid coordinates gracefully
+    occupied_positions = set()
+    for u in game_state["units"]:
+        if u["HP_CUR"] > 0 and u["id"] != unit["id"]:
+            try:
+                col_int = int(float(u["col"]))
+                row_int = int(float(u["row"]))
+                occupied_positions.add((col_int, row_int))
+            except (ValueError, TypeError) as e:
+                # Skip units with invalid positions (should not happen, but defensive)
+                # Log this as it indicates a data integrity issue
+                if "episode_number" in game_state and "turn" in game_state:
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    from engine.game_utils import add_console_log, safe_print
+                    # CRITICAL: Use actual values if available, otherwise indicate missing
+                    unit_id_log = u.get('id') if 'id' in u else 'MISSING_ID'
+                    unit_col_log = u.get('col') if 'col' in u else 'MISSING_COL'
+                    unit_row_log = u.get('row') if 'row' in u else 'MISSING_ROW'
+                    log_msg = f"[CHARGE OCCUPIED_POSITIONS] E{episode} T{turn} SKIPPED Unit {unit_id_log} at ({unit_col_log},{unit_row_log}) - Error: {e}"
+                    add_console_log(game_state, log_msg)
+                    safe_print(game_state, log_msg)
+                continue
     
     # CRITICAL: Log occupied positions and all units for debugging position bugs
     if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
         episode = game_state["episode_number"]
         turn = game_state["turn"]
         phase = game_state.get("phase", "charge")
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
+        from engine.game_utils import add_console_log
         all_units_info = [f"Unit {u['id']} at ({int(u['col'])},{int(u['row'])}) HP={u.get('HP_CUR', 0)}" for u in game_state["units"]]
         log_message = f"[CHARGE DEBUG] E{episode} T{turn} {phase} charge_build_valid_destinations Unit {unit_id}: occupied_positions={occupied_positions} all_units={all_units_info}"
-        game_state["console_logs"].append(log_message)
-        print(log_message)
+        add_console_log(game_state, log_message)
+        from engine.game_utils import safe_print
+        safe_print(game_state, log_message)
 
     # BFS pathfinding to find all reachable hexes within charge_range
     visited = {start_pos: 0}
@@ -893,7 +1046,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         neighbors = _get_hex_neighbors(current_col, current_row)
 
         for neighbor_col, neighbor_row in neighbors:
-            neighbor_pos = (neighbor_col, neighbor_row)
+            # CRITICAL: Convert coordinates to int IMMEDIATELY to ensure all tuples are (int, int)
+            # This prevents type mismatch bugs in visited dict, valid_destinations list, and queue
+            neighbor_col_int, neighbor_row_int = int(neighbor_col), int(neighbor_row)
+            neighbor_pos = (neighbor_col_int, neighbor_row_int)
             neighbor_dist = current_dist + 1
 
             # Skip if already visited
@@ -901,42 +1057,39 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 continue
 
             # Check if traversable (not wall, not occupied)
-            if not _is_traversable_hex(game_state, neighbor_col, neighbor_row, unit, occupied_positions):
+            if not _is_traversable_hex(game_state, neighbor_col_int, neighbor_row_int, unit, occupied_positions):
                 continue
 
             # Mark as visited
             visited[neighbor_pos] = neighbor_dist
 
-            # Check if this hex is adjacent to any enemy (but NOT on the hex itself)
+            # Check if this hex is adjacent to target enemy (or any enemy if no target specified)
+            # CRITICAL: If target_id provided, only check adjacency to that specific target
             is_adjacent_to_enemy = False
             hex_is_occupied_by_enemy = False
             from engine.utils.weapon_helpers import get_melee_range
             melee_range = get_melee_range()  # Always 1
             for enemy in enemies:
-                distance_to_enemy = _calculate_hex_distance(neighbor_col, neighbor_row, enemy["col"], enemy["row"])
+                # CRITICAL: Convert enemy coordinates to int for consistent distance calculation
+                enemy_col_int, enemy_row_int = int(enemy["col"]), int(enemy["row"])
+                distance_to_enemy = _calculate_hex_distance(neighbor_col_int, neighbor_row_int, enemy_col_int, enemy_row_int)
                 if distance_to_enemy == 0:
                     # Enemy is ON this hex - mark as occupied and skip
                     hex_is_occupied_by_enemy = True
                     break
                 elif 0 < distance_to_enemy <= melee_range:
                     is_adjacent_to_enemy = True
-                    # Continue checking other enemies to ensure no enemy is ON the hex
+                    # If target_id specified, we only need to check this one target
+                    if target_id:
+                        break
+                    # Otherwise continue checking other enemies to ensure no enemy is ON the hex
 
             # CRITICAL: Only add as destination if adjacent to an enemy AND NOT OCCUPIED
-            # Double-check occupation against actual game state (not just cached set)
+            # Use pre-computed occupied_positions set for O(1) lookup (no redundant loop)
             if is_adjacent_to_enemy and not hex_is_occupied_by_enemy and neighbor_pos != start_pos:
-                # Verify hex is not occupied by checking actual game state (redundant check)
-                hex_is_occupied = False
-                for check_unit in game_state["units"]:
-                    if (check_unit["id"] != unit["id"] and
-                        check_unit["HP_CUR"] > 0 and
-                        check_unit["col"] == neighbor_col and
-                        check_unit["row"] == neighbor_row):
-                        hex_is_occupied = True
-                        break
-                
-                # Only add if NOT occupied
-                if not hex_is_occupied:
+                # CRITICAL: Use pre-computed occupied_positions set for O(1) lookup
+                # This is consistent with movement_handlers.py and avoids redundant loops
+                if neighbor_pos not in occupied_positions:
                     valid_destinations.append(neighbor_pos)
 
             # Continue exploring (charges can move through enemy-adjacent hexes)
@@ -1077,9 +1230,9 @@ def _select_strategic_destination(
 
 
 def charge_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:
-    """Generate preview data for green hexes (charge destinations)"""
+    """Generate preview data for violet hexes (charge destinations)"""
     return {
-        "green_hexes": valid_destinations,
+        "violet_hexes": valid_destinations,  # Changed from green_hexes to violet_hexes
         "show_preview": True
     }
 
@@ -1112,9 +1265,11 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
         # AI_TURN.md Line 1409: Left click on active_unit -> Charge postponed
         # Clear preview but keep unit in pool (different from skip which removes from pool)
         charge_clear_preview(game_state)
-        # Clear charge roll if exists (postpone discards the roll)
+        # Clear charge roll and target selection if exists (postpone discards the roll)
         if unit_id in game_state.get("charge_roll_values", {}):
             del game_state["charge_roll_values"][unit_id]
+        if unit_id in game_state.get("charge_target_selections", {}):
+            del game_state["charge_target_selections"][unit_id]
         return True, {
             "action": "postpone",
             "unitId": unit_id,
@@ -1123,74 +1278,204 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
     else:
         return True, {"action": "continue_selection"}
 
+def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Handle charge target selection: roll 2d6, build pool, display preview.
+    
+    Flow:
+    1. Agent chooses a target
+    2. Roll 2d6
+    3. Build pool of destinations for this target with the roll
+    4. Display preview (violet hexes) for PvP/PvE modes
+    5. Return waiting_for_player for destination selection
+    """
+    if "targetId" not in action:
+        raise KeyError(f"Action missing required 'targetId' field: {action}")
+    
+    target_id = action["targetId"]
+    if target_id is None:
+        return False, {"error": "missing_target"}
+
+    unit = _get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return False, {"error": "unit_not_found", "unit_id": unit_id}
+
+    # Roll 2d6 AFTER target selection
+    import random
+    charge_roll = random.randint(1, 6) + random.randint(1, 6)
+    game_state["charge_roll_values"][unit_id] = charge_roll
+    # Store target_id for destination selection
+    if "charge_target_selections" not in game_state:
+        game_state["charge_target_selections"] = {}
+    game_state["charge_target_selections"][unit_id] = target_id
+    
+    # Clear pending targets after selection
+    if "pending_charge_targets" in game_state:
+        del game_state["pending_charge_targets"]
+    if "pending_charge_unit_id" in game_state:
+        del game_state["pending_charge_unit_id"]
+
+    # Build pool with actual roll for THIS SPECIFIC TARGET
+    charge_build_valid_destinations_pool(game_state, unit_id, charge_roll, target_id=target_id)
+    
+    if "valid_charge_destinations_pool" not in game_state:
+        raise KeyError("game_state missing required 'valid_charge_destinations_pool' field")
+    valid_pool = game_state["valid_charge_destinations_pool"]
+
+    # Check if pool is empty (roll too low)
+    if not valid_pool:
+        # Charge roll too low - charge failed
+        if "action_logs" not in game_state:
+            game_state["action_logs"] = []
+        
+        if "current_turn" not in game_state:
+            current_turn = 1
+        else:
+            current_turn = game_state["current_turn"]
+        
+        game_state["action_logs"].append({
+            "type": "charge_fail",
+            "message": f"Unit {unit['id']} ({unit['col']}, {unit['row']}) FAILED charge to target {target_id} (Roll: {charge_roll} too low)",
+            "turn": current_turn,
+            "phase": "charge",
+            "unitId": unit["id"],
+            "player": unit["player"],
+            "targetId": target_id,
+            "charge_roll": charge_roll,
+            "charge_failed": True,
+            "timestamp": "server_time"
+        })
+        
+        # Clear charge roll after use
+        if unit_id in game_state["charge_roll_values"]:
+            del game_state["charge_roll_values"][unit_id]
+        if unit_id in game_state.get("charge_target_selections", {}):
+            del game_state["charge_target_selections"][unit_id]
+        
+        # Clear preview
+        charge_clear_preview(game_state)
+        
+        # End activation with failure
+        result = end_activation(
+            game_state, unit,
+            "PASS",        # Arg1: Pass logging (charge failed)
+            1,             # Arg2: +1 step increment (action was attempted)
+            "PASS",        # Arg3: NO tracking (charge didn't happen)
+            "CHARGE",      # Arg4: Remove from charge_activation_pool
+            0              # Arg5: No error logging
+        )
+        
+        # CRITICAL: Add start_pos and end_pos for proper logging (unit didn't move, so both are current position)
+        # For failed charges with roll too low, there's no destination, so end_pos equals start_pos
+        current_pos = (unit["col"], unit["row"])
+        result.update({
+            "action": "charge_fail",
+            "unitId": unit["id"],
+            "targetId": target_id,
+            "charge_roll": charge_roll,
+            "charge_failed": True,
+            "charge_failed_reason": "roll_too_low",
+            "start_pos": current_pos,  # Position actuelle (from) - unit didn't move
+            "end_pos": current_pos,  # No destination (roll too low), so equals start_pos
+            "activation_complete": True,
+            "action_logs": game_state.get("action_logs", [])
+        })
+        
+        # Check if pool is now empty after removing this unit
+        if not game_state["charge_activation_pool"]:
+            phase_end_result = charge_phase_end(game_state)
+            result.update(phase_end_result)
+        
+        return True, result
+
+    # Pool is valid - display preview (violet hexes) for PvP/PvE modes
+    # Check if PvP or PvE mode
+    is_pve = game_state.get("pve_mode", False) or game_state.get("is_pve_mode", False)
+    is_gym = game_state.get("gym_training_mode", False)
+    
+    if not is_gym:  # PvP or PvE mode
+        # Generate preview with violet hexes (charge destinations)
+        preview_data = charge_preview(valid_pool)
+        game_state["preview_hexes"] = valid_pool
+        
+        # Human players: return waiting_for_player for destination selection
+        return True, {
+            "action": "charge_target_selected",
+            "unitId": unit_id,
+            "targetId": target_id,
+            "charge_roll": charge_roll,
+            "valid_destinations": valid_pool,
+            "preview_data": preview_data,
+            "clear_blinking_gentle": True,  # Stop blinking when target is selected
+            "waiting_for_player": True  # Wait for destination selection
+        }
+    else:
+        # AI_TURN.md COMPLIANCE: In gym training, AI selects destination automatically and executes charge
+        # AI_TURN.md lines 1393-1396: Select destination hex → Move unit → end_activation
+        # No preview needed, auto-select first valid destination
+        preview_data = {}
+        game_state["preview_hexes"] = []
+        
+        # Select first valid destination (AI chooses best destination automatically)
+        if valid_pool:
+            dest_col, dest_row = valid_pool[0]
+            # Execute charge directly with selected destination
+            destination_action = {
+                "action": "charge",
+                "unitId": unit_id,
+                "targetId": target_id,
+                "destCol": dest_col,
+                "destRow": dest_row
+            }
+            return charge_destination_selection_handler(game_state, unit_id, destination_action)
+        else:
+            # No valid destinations (should not happen after pool check, but defensive)
+            return False, {"error": "no_valid_destinations_after_target_selection"}
+
+
 def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Handle charge destination selection and execute charge.
     
-    NEW RULE: Roll 2d6 AFTER target selection, then check if charge can reach target.
+    This is called AFTER target selection and roll (charge_target_selection_handler).
     """
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     if "destCol" not in action:
         raise KeyError(f"Action missing required 'destCol' field: {action}")
     if "destRow" not in action:
         raise KeyError(f"Action missing required 'destRow' field: {action}")
-    if "targetId" not in action:
-        raise KeyError(f"Action missing required 'targetId' field for charge: {action}")
 
     dest_col = action["destCol"]
     dest_row = action["destRow"]
-    target_id = action["targetId"]
 
-    if dest_col is None or dest_row is None or target_id is None:
-        return False, {"error": "missing_destination_or_target"}
+    if dest_col is None or dest_row is None:
+        return False, {"error": "missing_destination"}
 
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
-    # CRITICAL FIX: Check if destination is occupied BEFORE rolling and building pool
-    # This prevents charges to occupied destinations in gym training mode
-    occupied_by = []
-    for check_unit in game_state["units"]:
-        if (check_unit["id"] != unit["id"] and
-            check_unit["HP_CUR"] > 0 and
-            check_unit["col"] == dest_col and
-            check_unit["row"] == dest_row):
-            occupied_by.append({
-                "id": check_unit["id"],
-                "player": check_unit["player"],
-                "HP_CUR": check_unit["HP_CUR"],
-                "col": check_unit["col"],
-                "row": check_unit["row"]
-            })
+    # Get target_id and charge_roll from previous step
+    if unit_id not in game_state.get("charge_target_selections", {}):
+        return False, {"error": "target_not_selected", "unit_id": unit_id}
+    if unit_id not in game_state.get("charge_roll_values", {}):
+        return False, {"error": "charge_roll_missing", "unit_id": unit_id}
     
-    if occupied_by:
-        return False, {
-            "error": "destination_occupied",
-            "occupant_id": occupied_by[0]["id"],
-            "destination": (dest_col, dest_row),
-            "debug_occupants": occupied_by
-        }
+    target_id = game_state["charge_target_selections"][unit_id]
+    charge_roll = game_state["charge_roll_values"][unit_id]
 
-    # NEW RULE: Roll 2d6 AFTER target selection
-    import random
-    charge_roll = random.randint(1, 6) + random.randint(1, 6)
-    game_state["charge_roll_values"][unit_id] = charge_roll
-
-    # Check if charge roll allows reaching the target destination
-    # Calculate distance from unit to destination
-    distance_to_dest = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
-    
-    # Check if destination is reachable within charge_roll distance via pathfinding
-    charge_build_valid_destinations_pool(game_state, unit_id, charge_roll)
-    
+    # Verify pool exists and destination is in it
     if "valid_charge_destinations_pool" not in game_state:
-        raise KeyError("game_state missing required 'valid_charge_destinations_pool' field")
+        return False, {"error": "destination_pool_not_built"}
+    
     valid_pool = game_state["valid_charge_destinations_pool"]
 
     # Check if destination is in valid pool (reachable with this roll)
     if (dest_col, dest_row) not in valid_pool:
         # Charge roll too low - charge failed
+        # Calculate distance for logging
+        distance_to_dest = _calculate_hex_distance(unit["col"], unit["row"], dest_col, dest_row)
+        
         # Log failure in action_logs
         if "action_logs" not in game_state:
             game_state["action_logs"] = []
@@ -1263,6 +1548,11 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         charge_result.setdefault("unitId", unit["id"])
         charge_result.setdefault("targetId", target_id)  # May be None, but needed for logging
         charge_result.setdefault("charge_failed_reason", charge_result.get("error", "unknown_error"))
+        # CRITICAL: Add start_pos and end_pos for proper logging
+        if "start_pos" not in charge_result:
+            charge_result["start_pos"] = (unit["col"], unit["row"])  # Position actuelle (from) - unit didn't move
+        if "end_pos" not in charge_result:
+            charge_result["end_pos"] = (dest_col, dest_row)  # Destination prévue (to) - even though charge failed
         return False, charge_result
 
     # Extract charge info
@@ -1407,9 +1697,15 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
     - Line 515: Valid destinations exist, agent chooses wait -> end_activation (WAIT, 1, PASS, CHARGE)
     - Line 518/536: No valid destinations OR cancel -> end_activation (PASS, 0, PASS, CHARGE)
     """
-    # Clear charge roll if unit skips
-    if unit["id"] in game_state["charge_roll_values"]:
+    # Clear charge roll, target selection, and pending targets if unit skips
+    if unit["id"] in game_state.get("charge_roll_values", {}):
         del game_state["charge_roll_values"][unit["id"]]
+    if unit["id"] in game_state.get("charge_target_selections", {}):
+        del game_state["charge_target_selections"][unit["id"]]
+    if "pending_charge_targets" in game_state:
+        del game_state["pending_charge_targets"]
+    if "pending_charge_unit_id" in game_state:
+        del game_state["pending_charge_unit_id"]
 
     charge_clear_preview(game_state)
 
@@ -1462,9 +1758,8 @@ def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state['last_compliance_data'] = {}
     game_state['last_compliance_data']['phase_end_reason'] = 'eligibility'
 
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("CHARGE PHASE COMPLETE")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "CHARGE PHASE COMPLETE")
 
     return {
         "phase_complete": True,

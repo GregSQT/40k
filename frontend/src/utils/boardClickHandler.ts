@@ -19,6 +19,7 @@ export function setupBoardClickHandler(callbacks: {
   onActivateFight?(fighterId: UnitId): void;
   onValidateCharge?(chargerId: UnitId): void;
   onMoveCharger?(chargerId: UnitId, destCol: number, destRow: number): void;
+  onChargeEnemyUnit?(chargerId: UnitId, enemyUnitId: UnitId): void;
   onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
   onDirectMove?(unitId: UnitId, col: number, row: number): void;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
@@ -124,6 +125,12 @@ export function setupBoardClickHandler(callbacks: {
         } else {
           console.log("    - Left click on active unit -> postpone charge (deselect)");
           callbacks.onSelectUnit(null);
+        }
+      } else {
+        // Click on enemy unit -> find adjacent hex and move charger
+        console.log("    - Click on enemy unit -> calling onChargeEnemyUnit");
+        if (callbacks.onChargeEnemyUnit) {
+          callbacks.onChargeEnemyUnit(selectedUnitId, unitId);
         }
       }
       return; // Prevent fallthrough to other handlers

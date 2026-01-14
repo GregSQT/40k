@@ -272,6 +272,8 @@ For each unit
 │   │   └── NO → ❌ Dead unit (Skip, no log)
 │   ├── unit.player === current_player?
 │   │   └── NO → ❌ Wrong player (Skip, no log)
+│   ├── Has at least one valid adjacent hex (not occupied, not adjacent to enemy, not a wall)?
+│   │   └── NO → ❌ Unit cannot move (Skip, no log)
 │   └── ALL conditions met → ✅ Add to move_activation_pool
 │
 ├── STEP : UNIT_ACTIVABLE_CHECK → is move_activation_pool NOT empty ?
@@ -1368,55 +1370,73 @@ For each unit
 │   │   └── YES → ❌ Advanced unit cannot charge (Skip, no log)
 │   ├── Adjacent to enemy unit within CC_RNG?
 │   │   └── YES → ❌ Already in fight (Skip, no log)
-│   ├── Enemies exist within charge_max_distance hexes?
+│   ├── Enemies exist within charge_max_distance hexes AND has non occupied adjacent hex(es) at 12 hexes or less ?
 │   │   └── NO → ❌ No charge targets (Skip, no log)
 │   └── ALL conditions met → ✅ Add to charge_activation_pool
 │
 ├── STEP : UNIT_ACTIVABLE_CHECK → Is charge_activation_pool NOT empty ?
 │   ├── YES → Current player is an AI player ?
-│   │   ├── YES → pick one unit in charge_activation_pool → Roll 2d6 charge dice at START of activation
-│   │   │   ├── Roll 2d6 to define charge_range value at START of activation
-│   │   │   ├── Build valid_charge_destinations_pool : reacheable hexes adjacent to enemy unit using BFS pathfinding AND within charge_range distance
-│   │   │   │   └── valid_charge_destinations_pool NOT empty ?
-│   │   │   │       ├── YES → CHARGE PHASE ACTIONS AVAILABLE
-│   │   │   │       │   ├── 🎯 VALID ACTIONS: [charge, wait]
-│   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, attack] → end_activation (ERROR, 0, PASS, CHARGE, 1, 1)
-│   │   │   │       │   └── AGENT ACTION SELECTION → Choose charge?
-│   │   │   │       │       ├── YES → ✅ VALID → Execute charge
-│   │   │   │       │       │   ├── Select destination hex from valid_charge_destinations_pool
-│   │   │   │       │       │   ├── Move unit to destination
-│   │   │   │       │       │   └── end_activation (ACTION, 1, CHARGE, CHARGE, 1, 1)
-│   │   │   │       │       └── NO → Agent chooses: wait?
-│   │   │   │       │           ├── YES → ✅ VALID → Execute wait action
-│   │   │   │       │           │   └── end_activation (WAIT, 1, PASS, CHARGE, 1, 1)
-│   │   │   │       │           └── NO → Agent chooses invalid action (move/shoot/attack)?
-│   │   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, CHARGE, 1, 1)
-│   │   │   │       └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
-│   │   │   └── Discard charge_range roll (whether used or not)
+│   │   ├── YES → pick one unit in charge_activation_pool
+│   │   │   ├── Build valid_targets_pool : Enemy units that are:
+│   │   │   │   ├── within charge_max_distance hexes
+│   │   │   │   └── having non occupied adjacent hex(es) at 12 hexes or less from the active unit
+│   │   │   ├── valid_targets_pool NOT empty ?
+│   │   │   │   ├── YES → AGENT TARGET SELECTION → Agent choisit une cible parmi valid_targets_pool
+│   │   │   │   │   ├── Roll 2d6 to define charge_range value for selected target
+│   │   │   │   │   ├── Build valid_charge_destinations_pool for selected target : All hexes that are:
+│   │   │   │   │   │   ├── adjacent to the selected target
+│   │   │   │   │   │   ├── at distance <= charge_range (using BFS pathfinding)
+│   │   │   │   │   │   └── unoccupied
+│   │   │   │   │   │   └── valid_charge_destinations_pool NOT empty ?
+│   │   │   │   │   │       ├── YES → CHARGE PHASE ACTIONS AVAILABLE
+│   │   │   │   │   │       │   ├── 🎯 VALID ACTIONS: [charge, wait]
+│   │   │   │   │   │       │   ├── ❌ INVALID ACTIONS: [move, shoot, attack] → end_activation (ERROR, 0, PASS, CHARGE, 1, 1)
+│   │   │   │   │   │       │   └── AGENT ACTION SELECTION → Choose charge?
+│   │   │   │   │   │       │       ├── YES → ✅ VALID → Execute charge
+│   │   │   │   │   │       │       │   ├── Select destination hex from valid_charge_destinations_pool
+│   │   │   │   │   │       │       │   ├── Move unit to destination
+│   │   │   │   │   │       │       │   └── end_activation (ACTION, 1, CHARGE, CHARGE, 1, 1)
+│   │   │   │   │   │       │       └── NO → Agent chooses: wait?
+│   │   │   │   │   │       │           ├── YES → ✅ VALID → Execute wait action
+│   │   │   │   │   │       │           │   └── end_activation (WAIT, 1, PASS, CHARGE, 1, 1)
+│   │   │   │   │   │       │           └── NO → Agent chooses invalid action (move/shoot/attack)?
+│   │   │   │   │   │       │               └── ❌ INVALID ACTION ERROR → end_activation (ERROR, 0, PASS, CHARGE, 1, 1)
+│   │   │   │   │   │       └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
+│   │   │   │   │   └── Discard charge_range roll (whether used or not)
+│   │   │   │   └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
 │   │   │
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION → player activate one unit by left clicking on it
 │   │       ├── If any, cancel the Highlight of the hexes in valid_charge_destinations_pool
 │   │       ├── Player activate one unit by left clicking on it
-│   │       ├── Roll 2d6 to define charge_range value at START of activation
-│   │       ├── Build valid_charge_destinations_pool : hexes adjacent to enemy, reacheable using BFS pathfinding within charge_range distance
-│   │       │   └── valid_charge_destinations_pool not empty ?
-│   │       │       ├── YES → STEP : PLAYER_ACTION_SELECTION
-│   │       │       │   ├── Highlight the valid_charge_destinations_pool hexes by making them orange
-│   │       │       │   └── Player select the action to execute
-│   │       │       │       ├── Left click on a hex in valid_charge_destinations_pool → Move the icon of the unit to the selected hex
-│   │       │       │       │   ├── end_activation (ACTION, 1, CHARGE, CHARGE, 1, 1)
-│   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       ├── Left click on the active_unit → Charge postponed
-│   │       │       │       │   └── GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       ├── Right click on the active_unit → Charge cancelled
-│   │       │       │       │   ├── end_activation (NO, 0, PASS, CHARGE, 1, 1)
-│   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       ├── Left click on another unit in activation pool → Charge postponed
-│   │       │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       │       └── Left OR Right click anywhere else on the board → Cancel charge hex selection
-│   │       │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
-│   │       │       └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
-│   │       └── Discard charge_range roll (whether used or not)
+│   │       ├── Build valid_targets_pool : Enemy units that are:
+│   │       │   ├── within charge_max_distance hexes
+│   │       │   └── having non occupied adjacent hex(es) at 12 hexes or less from the active unit
+│   │       ├── valid_targets_pool NOT empty ?
+│   │       │   ├── YES → STEP : PLAYER_TARGET_SELECTION → Player choisit une cible parmi valid_targets_pool by left clicking on it
+│   │       │   │   ├── Roll 2d6 to define charge_range value for selected target
+│   │       │   │   ├── Build valid_charge_destinations_pool for selected target : All hexes that are:
+│   │       │   │   │   ├── adjacent to the selected target
+│   │       │   │   │   ├── at distance <= charge_range (using BFS pathfinding)
+│   │       │   │   │   └── unoccupied
+│   │       │   │   │   └── valid_charge_destinations_pool not empty ?
+│   │       │   │   │       ├── YES → STEP : PLAYER_ACTION_SELECTION
+│   │       │   │   │       │   ├── Highlight the valid_charge_destinations_pool hexes by making them orange
+│   │       │   │   │       │   └── Player select the action to execute
+│   │       │   │   │       │       ├── Left click on a hex in valid_charge_destinations_pool → Move the icon of the unit to the selected hex
+│   │       │   │   │       │       │   ├── end_activation (ACTION, 1, CHARGE, CHARGE, 1, 1)
+│   │       │   │   │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │   │   │       │       ├── Left click on the active_unit → Charge postponed
+│   │       │   │   │       │       │   └── GO TO STEP : STEP : UNIT_ACTIVABLE_CHECK
+│   │       │   │   │       │       ├── Right click on the active_unit → Charge cancelled
+│   │       │   │   │       │       │   ├── end_activation (NO, 0, PASS, CHARGE, 1, 1)
+│   │       │   │   │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │   │   │       │       ├── Left click on another unit in activation pool → Charge postponed
+│   │       │   │   │       │       │   └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │   │   │       │       └── Left OR Right click anywhere else on the board → Cancel charge hex selection
+│   │       │   │   │       │           └── GO TO STEP : UNIT_ACTIVABLE_CHECK
+│   │       │   │   │       └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
+│   │       │   │   └── Discard charge_range roll (whether used or not)
+│   │       │   └── NO → end_activation (NO, 0, PASS, CHARGE, 1, 1)
 │   └── NO → If any, cancel the Highlight of the hexes in valid_charge_destinations_pool
 │       └── No more activable units → pass
 └── End of charge phase → Advance to Fight Phase

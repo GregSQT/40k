@@ -16,7 +16,7 @@ __all__ = ['evaluate_against_bots']
 
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
-                         step_logger=None):
+                         step_logger=None, debug_mode=False):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -155,7 +155,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         scenario_file=scenario_file,
                         unit_registry=unit_registry,
                         quiet=True,
-                        gym_training_mode=True
+                        gym_training_mode=True,
+                        debug_mode=debug_mode
                     )
 
                     # Connect step_logger if provided and enabled

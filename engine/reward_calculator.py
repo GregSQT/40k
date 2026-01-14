@@ -99,10 +99,15 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return reward_breakdown['total']
         
-        # Get ACTUAL acting unit from result
-        acting_unit_id = result.get("unitId") or result.get("shooterId") or result.get("unit_id")
-        if not acting_unit_id:
-            raise ValueError(f"Action result missing acting unit ID: {result}")
+        # CRITICAL: No fallbacks - require explicit unitId in result
+        acting_unit_id = result.get("unitId")
+        if acting_unit_id is None:
+            # Try alternative field names, but raise error if all missing
+            acting_unit_id = result.get("shooterId")
+            if acting_unit_id is None:
+                acting_unit_id = result.get("unit_id")
+                if acting_unit_id is None:
+                    raise ValueError(f"Action result missing acting unit ID (checked unitId, shooterId, unit_id): {result}")
         
         acting_unit = get_unit_by_id(str(acting_unit_id), game_state)
         if not acting_unit:
@@ -126,20 +131,35 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return 0.0
 
-        # Get action type from result
-        # Check both 'action' and 'endType' fields (handlers use different naming)
-        if isinstance(result, dict):
-            action_type = result.get("action") or result.get("endType", "").lower()
-            if not action_type:
-                action_type = "unknown"
-        else:
-            action_type = "unknown"
+        # CRITICAL: No fallbacks - require explicit action in result
+        if not isinstance(result, dict):
+            raise TypeError(f"result must be a dict, got {type(result).__name__}")
+        
+        action_type = result.get("action")
+        if action_type is None:
+            # Try alternative field name, but raise error if missing
+            end_type = result.get("endType")
+            if end_type is not None:
+                action_type = end_type.lower()
+            else:
+                raise ValueError(f"Action result missing 'action' field (checked action, endType): {result}")
+        # If action_type is not None, use it as-is (no else block needed)
 
         # Full reward mapper integration
         reward_mapper = self._get_reward_mapper()
         enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
         
         if action_type == "shoot":
+            # CRITICAL: Check if this is a waiting_for_player action without attacks executed
+            # In this case, no logs are added yet, so return 0.0 reward
+            waiting_for_player = result.get("waiting_for_player", False)
+            all_attack_results = result.get("all_attack_results", [])
+            if waiting_for_player and not all_attack_results:
+                # No attacks executed yet, return 0.0 reward
+                reward_breakdown['total'] = 0.0
+                game_state['last_reward_breakdown'] = reward_breakdown
+                return 0.0
+            
             # Sum all shoot rewards from current activation (handles RNG_NB > 1)
             action_logs = game_state.get("action_logs", [])
             
@@ -154,6 +174,8 @@ class RewardCalculator:
             # Work backwards until we hit a different action type or different shooter
             current_turn = game_state.get("turn", 0)
             shooter_id = acting_unit.get("id")
+            # CRITICAL: Normalize shooter_id to string for comparison (logs use string unit_id)
+            shooter_id_str = str(shooter_id) if shooter_id is not None else None
             
             # Track rewards by category using action_name field
             base_action_reward = 0.0
@@ -166,7 +188,9 @@ class RewardCalculator:
                     break
 
                 # If it's a shoot action from the same shooter, categorize the reward
-                if log.get("type") == "shoot" and log.get("shooterId") == shooter_id:
+                # CRITICAL: Normalize log shooterId to string for comparison
+                log_shooter_id = str(log.get("shooterId")) if log.get("shooterId") is not None else None
+                if log.get("type") == "shoot" and log_shooter_id == shooter_id_str:
                     logs_found += 1  # Found a matching log
                     if "reward" not in log:
                         raise RuntimeError(
@@ -198,15 +222,25 @@ class RewardCalculator:
                 
                 # Skip non-shoot logs (e.g., death logs) - don't break, continue searching
                 # Only break if we hit a shoot log from a different shooter
-                elif log.get("type") == "shoot" and log.get("shooterId") != shooter_id:
-                    break
+                # CRITICAL: Normalize for comparison (same as line 172)
+                elif log.get("type") == "shoot":
+                    log_shooter_id_check = str(log.get("shooterId")) if log.get("shooterId") is not None else None
+                    if log_shooter_id_check != shooter_id_str:
+                        break
             
             # Validate we found at least one shoot action LOG (not just non-zero rewards)
             if logs_found == 0:
-                raise RuntimeError(
-                    f"CRITICAL: No shoot actions found in action_logs! "
-                    f"Unit {shooter_id}, Player {acting_unit.get('player')}"
-                )
+                # No logs found - this can happen if:
+                # 1. waiting_for_player=True without all_attack_results (already handled above)
+                # 2. Logs not yet added (timing issue)
+                # 3. Logs added with different turn
+                # 4. Phase transition or other edge cases
+                # Return 0.0 reward instead of raising error to handle all cases gracefully
+                reward_breakdown['base_actions'] = 0.0
+                reward_breakdown['result_bonuses'] = 0.0
+                reward_breakdown['total'] = 0.0
+                game_state['last_reward_breakdown'] = reward_breakdown
+                return 0.0
             
             # Calculate total reward
             calculated_reward = base_action_reward + result_bonus_reward

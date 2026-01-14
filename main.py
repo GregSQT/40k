@@ -83,6 +83,11 @@ def load_unit_definitions_from_ts(unit_registry):
             
             for field_name, value_str in matches:
                 value_str = value_str.strip().strip('"\'')
+                # Remove comments (everything after // or #)
+                if '//' in value_str:
+                    value_str = value_str.split('//')[0].strip()
+                if '#' in value_str:
+                    value_str = value_str.split('#')[0].strip()
                 if value_str.isdigit() or (value_str.startswith('-') and value_str[1:].isdigit()):
                     unit_stats[field_name] = int(value_str)
                 elif value_str.replace('.', '').isdigit():

@@ -18,6 +18,7 @@ interface UnitRendererProps {
 
   // Blinking state for multi-unit HP bars
   blinkingUnits?: number[];
+  blinkingAttackerId?: number | null;
   isBlinkingActive?: boolean;
   blinkState?: boolean;
 
@@ -407,10 +408,13 @@ export class UnitRenderer {
         addClickHandler = false;
       }
       
-      // CRITICAL FIX: Block enemy unit clicks during movement and charge phases
-      // In movement/charge phases, only destinations are clickable, NOT units
-      // Clicking enemy units during these phases breaks the game
-      if ((phase === "move" || phase === "charge") && unit.player !== currentPlayer) {
+      // CRITICAL FIX: Block enemy unit clicks during movement phase
+      // In movement phase, only destinations are clickable, NOT units
+      // In charge phase, block enemy clicks except in chargePreview mode where enemy units are clickable
+      if (phase === "move" && unit.player !== currentPlayer) {
+        addClickHandler = false;
+      }
+      if (phase === "charge" && unit.player !== currentPlayer && this.props.mode !== "chargePreview") {
         addClickHandler = false;
       }
       
@@ -992,12 +996,17 @@ export class UnitRenderer {
         attacker = units.find(u => u.id === targetPreview.shooterId) || null;
       } else if (shouldBlink) {
         // For multi-unit blinking
-        const activeAttackerId = this.props.gameState?.active_shooting_unit 
+        // CRITICAL FIX: Use blinkingAttackerId prop first (avoids React timing issues with gameState)
+        // Fallback to gameState fields for shoot/fight phases
+        const activeAttackerId = this.props.blinkingAttackerId
+          || this.props.gameState?.active_shooting_unit 
           || this.props.gameState?.active_fight_unit 
+          || this.props.gameState?.active_charge_unit
           || this.props.selectedUnitId;
         const activeAttackerIdNum = activeAttackerId
           ? (typeof activeAttackerId === 'string' ? parseInt(activeAttackerId) : activeAttackerId)
           : null;
+        
         attacker = activeAttackerIdNum
           ? this.props.units.find(u => {
               const unitIdNum = typeof u.id === 'string' ? parseInt(u.id) : u.id;
@@ -1010,7 +1019,7 @@ export class UnitRenderer {
         createBlinkingHPBar({
           unit,
           attacker,
-          phase: this.props.phase as "shoot" | "fight",
+          phase: this.props.phase as "shoot" | "fight" | "charge",
           app: this.props.app,
           centerX: this.props.centerX,
           finalBarX,

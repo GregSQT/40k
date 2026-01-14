@@ -8,7 +8,7 @@ import type { Unit } from '../types/game';
 export interface BlinkingHPBarConfig {
     unit: Unit;
     attacker: Unit | null;
-    phase: "shoot" | "fight";
+    phase: "shoot" | "fight" | "charge";
     app: PIXI.Application;
     centerX: number;
     finalBarX: number;
@@ -35,8 +35,9 @@ export interface BlinkingHPBarResult {
 export function calculateWoundProbability(
   attacker: Unit,
   target: Unit,
-  phase: "shoot" | "fight"
+  phase: "shoot" | "fight" | "charge"
 ): number {
+  // For charge phase, use melee weapon (charge leads to fight)
   let weapon;
   if (phase === "shoot") {
     weapon = getSelectedRangedWeapon(attacker);
@@ -76,8 +77,9 @@ export function calculateWoundProbability(
 // Calculate damage per attack
 export function calculateDamagePerAttack(
   attacker: Unit,
-  phase: "shoot" | "fight"
+  phase: "shoot" | "fight" | "charge"
 ): number {
+  // For charge phase, use melee weapon (charge leads to fight)
   let weapon;
   if (phase === "shoot") {
     weapon = getSelectedRangedWeapon(attacker);
@@ -122,12 +124,23 @@ export function createBlinkingHPBar(
   ) as HPBlinkContainer | undefined;
 
   // If container exists and is still blinking, reuse it
-  if (existingContainer && existingContainer.blinkTicker) {
-    return {
-      container: existingContainer,
-      cleanup: existingContainer.cleanupBlink || (() => {})
-    };
-  }
+      if (existingContainer && existingContainer.blinkTicker) {
+        return {
+          container: existingContainer,
+          cleanup: existingContainer.cleanupBlink || (() => {})
+        };
+      }
+
+      // If container exists but ticker was removed, clean it up and create a new one
+      if (existingContainer && !existingContainer.blinkTicker) {
+        if (existingContainer.cleanupBlink) {
+          existingContainer.cleanupBlink();
+        }
+        if (existingContainer.parent) {
+          existingContainer.parent.removeChild(existingContainer);
+        }
+        existingContainer.destroy({ children: true });
+      }
 
   // Create container
   const hpContainer = new PIXI.Container() as HPBlinkContainer;

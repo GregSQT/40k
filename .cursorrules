@@ -1,12 +1,18 @@
 # SYSTEM OVERRIDE - HIGHEST PRIORITY
 
+=== MODE PAR DÉFAUT : ASK ===
+Par défaut, suivre les règles "MODE ASK" (validation stricte).
+Si un prompt explicite active "MODE AUTO" ou "MODE AGENT", suivre les règles correspondantes.
+
+=== MODE ASK (PAR DÉFAUT) ===
+
 MODE ÉCONOME STRICT — PRIORITÉ ABSOLUE AU QUOTA
 
 OBJECTIF PRINCIPAL :
 Minimiser la consommation de tokens.
 L'autonomie est secondaire.
 
-=== RÈGLES FONDAMENTALES (NON NÉGOCIABLES) ===
+=== RÈGLES FONDAMENTALES MODE ASK (NON NÉGOCIABLES) ===
 
 1. AUCUNE ACTION SANS VALIDATION
 - Ne jamais lancer de tests, scripts ou commandes sans autorisation explicite.
@@ -37,7 +43,7 @@ L'autonomie est secondaire.
 - Ne renvoyer QUE des diffs.
 - Ne jamais répéter le code inchangé.
 
-=== WORKFLOW OBLIGATOIRE ===
+=== WORKFLOW OBLIGATOIRE MODE ASK ===
 
 Étape 1 : Expliquer brièvement l'hypothèse et le plan.
 Étape 2 : Attendre ma validation.
@@ -100,3 +106,45 @@ RÈGLES NON NÉGOCIABLES :
 Si le format ne peut pas être respecté → STOP et demander instruction.
 
 Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.
+
+=== MODE AGENT/AUTO (ACTIVÉ PAR PROMPT EXPLICITE) ===
+
+OBJECTIF :
+Workflow automatique itératif avec validation à des checkpoints stratégiques.
+Optimisation tokens toujours prioritaire, mais autonomie accrue pour les workflows définis.
+
+RÈGLES FONDAMENTALES MODE AGENT/AUTO :
+
+1. WORKFLOW ITÉRATIF AUTORISÉ
+- Peut exécuter des commandes définies dans le prompt (ex: scripts de test/analyse)
+- Peut relancer automatiquement un workflow après un fix
+- DOIT respecter les checkpoints de validation définis dans le prompt
+
+2. ANALYSE AVANT ACTION (RELÂCHÉE)
+- Expliquer l'hypothèse et le plan AVANT toute modification
+- Peut proposer plusieurs hypothèses si le prompt le permet
+- Peut continuer automatiquement si le prompt définit un workflow clair
+
+3. MODIFICATIONS MULTIPLES AUTORISÉES
+- Peut faire plusieurs modifications dans la même itération si le prompt le permet
+- DOIT suivre l'ordre défini dans le prompt
+- DOIT vérifier après chaque modification que tout fonctionne
+
+4. PÉRIMÈTRE DES FICHIERS (RELÂCHÉ)
+- Peut lire les fichiers nécessaires pour l'investigation
+- DOIT lister les fichiers si le prompt l'exige
+- Ne pas explorer au-delà de ce qui est nécessaire au workflow
+
+5. EXPLORATION CIBLÉE AUTORISÉE
+- Peut rechercher des patterns similaires si pertinent pour le workflow
+- Peut refactorer si le prompt l'exige explicitement
+- Toujours ciblé sur l'objectif du workflow
+
+6. SORTIE OPTIMISÉE
+- Format de mise à jour strict OBLIGATOIRE (CODE ACTUEL + CODE MIS À JOUR)
+- Peut inclure des rapports itératifs si le prompt le demande
+- Minimiser la répétition de code inchangé
+
+=== FORMAT DE MISE À JOUR OBLIGATOIRE (TOUS MODES) ===
+
+Le format strict défini ci-dessus s'applique à TOUS les modes (ASK et AGENT/AUTO).

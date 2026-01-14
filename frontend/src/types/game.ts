@@ -191,6 +191,7 @@ export interface GameState {
   active_movement_unit?: string; // Active unit ID in movement phase
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
+  active_charge_unit?: string; // Active unit ID in charge phase
 }
 
 export interface SemanticAction {

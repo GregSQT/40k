@@ -1,4 +1,4 @@
-﻿# ai/train.py
+# ai/train.py
 #!/usr/bin/env python3
 """
 ai/train.py - Main training script following AI_INSTRUCTIONS.md exactly
@@ -196,7 +196,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 training_config_name=training_config_name,
                 controlled_agent_key=controlled_agent_key,
                 unit_registry=unit_registry,
-                step_logger_enabled=False  # Disabled for parallel envs
+                step_logger_enabled=False,  # Disabled for parallel envs
+                debug_mode=args.debug
             )
             for i in range(n_envs)
         ])
@@ -214,7 +215,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             scenario_file=scenario_file,
             unit_registry=unit_registry,
             quiet=True,
-            gym_training_mode=True
+            gym_training_mode=True,
+            debug_mode=args.debug
         )
         
         # Connect step logger after environment creation - compliant engine compatibility
@@ -388,7 +390,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     return model, env, training_config, model_path
 
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
-                            agent_key=None, new_model=False, append_training=False, scenario_override=None):
+                            agent_key=None, new_model=False, append_training=False, scenario_override=None, debug_mode=False):
     """Create or load PPO model for specific agent with configuration following AI_INSTRUCTIONS.md."""
     
     # Check GPU availability
@@ -452,7 +454,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 training_config_name=training_config_name,
                 controlled_agent_key=effective_agent_key,
                 unit_registry=unit_registry,
-                step_logger_enabled=False
+                step_logger_enabled=False,
+                debug_mode=debug_mode
             )
             for i in range(n_envs)
         ])
@@ -470,7 +473,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             scenario_file=scenario_file,
             unit_registry=unit_registry,
             quiet=True,
-            gym_training_mode=True
+            gym_training_mode=True,
+            debug_mode=debug_mode
         )
         
         # Connect step logger after environment creation - compliant engine compatibility
@@ -618,7 +622,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, total_episodes,
-                                 new_model=False, append_training=False, use_bots=False):
+                                 new_model=False, append_training=False, use_bots=False, debug_mode=False):
     """Train model with random scenario selection per episode.
     
     Args:
@@ -703,7 +707,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         scenario_files=scenario_list,  # NEW: Random scenario selection per episode
         unit_registry=unit_registry,
         quiet=True,
-        gym_training_mode=True
+        gym_training_mode=True,
+        debug_mode=debug_mode
     )
 
     # Wrap environment
@@ -855,7 +860,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         scenario_files=scenario_list,  # Random scenario selection per episode
         unit_registry=unit_registry,
         quiet=True,
-        gym_training_mode=True
+        gym_training_mode=True,
+        debug_mode=debug_mode
     )
 
     # Wrap environment with action masking first
@@ -1237,7 +1243,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         traceback.print_exc()
         return False
 
-def test_trained_model(model, num_episodes, training_config_name="default", agent_key=None, rewards_config_name="default"):
+def test_trained_model(model, num_episodes, training_config_name="default", agent_key=None, rewards_config_name="default", debug_mode=False):
     """Test the trained model."""
     
     W40KEngine, _ = setup_imports()
@@ -1254,7 +1260,8 @@ def test_trained_model(model, num_episodes, training_config_name="default", agen
         active_agents=None,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
-        quiet=True
+        quiet=True,
+        debug_mode=debug_mode
     )
     wins = 0
     total_rewards = []
@@ -1394,6 +1401,8 @@ def main():
                        help="Scenario template name from scenario_templates.json for replay generation")
     parser.add_argument("--scenario", type=str, default=None,
                        help="Specific scenario to use (e.g., 'phase2-3') or 'all' for rotation through all scenarios")
+    parser.add_argument("--debug", action="store_true",
+                       help="Enable debug console output (verbose logging)")
     
     args = parser.parse_args()
     
@@ -1407,6 +1416,7 @@ def main():
     print(f"Multi-agent: {args.multi_agent}")
     print(f"Orchestrate: {args.orchestrate}")
     print(f"Step logging: {args.step}")
+    print(f"Debug mode: {args.debug}")
     if hasattr(args, 'convert_steplog') and args.convert_steplog:
         print(f"Convert steplog: {args.convert_steplog}")
     if hasattr(args, 'replay') and args.replay:
@@ -1418,6 +1428,11 @@ def main():
     print()
     
     try:
+        # Reset debug.log cleared flag at the start of each training run
+        # This ensures debug.log is cleared even if the module was already loaded
+        from engine.w40k_core import reset_debug_log_flag
+        reset_debug_log_flag()
+        
         # Initialize global step logger based on --step argument
         global step_logger
         step_logger = StepLogger("step.log", enabled=args.step)
@@ -1520,7 +1535,8 @@ def main():
                 scenario_file=scenario_file,
                 unit_registry=unit_registry,
                 quiet=True,
-                gym_training_mode=True
+                gym_training_mode=True,
+                debug_mode=args.debug
             )
             
             def mask_fn(env):
@@ -1556,6 +1572,7 @@ def main():
                 model=model,
                 training_config_name=args.training_config,
                 rewards_config_name=args.rewards_config,
+                debug_mode=args.debug,
                 n_episodes=episodes_per_bot,
                 controlled_agent=effective_agent_key,
                 show_progress=True,
@@ -1627,11 +1644,12 @@ def main():
                         total_episodes=total_episodes,
                         new_model=args.new,
                         append_training=args.append,
+                        debug_mode=args.debug,
                         use_bots=(args.scenario == "bot")
                     )
                     
                     if success and args.test_episodes > 0:
-                        test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config)
+                        test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
                     
                     return 0 if success else 1
             
@@ -1643,7 +1661,8 @@ def main():
                 agent_key=args.agent,
                 new_model=args.new,
                 append_training=args.append,
-                scenario_override=args.scenario
+                scenario_override=args.scenario,
+                debug_mode=args.debug
             )
             
             # Setup callbacks with agent-specific model path
@@ -1657,7 +1676,7 @@ def main():
             if success:
                 # Only test if episodes > 0
                 if args.test_episodes > 0:
-                    test_trained_model(model, args.test_episodes, args.training_config)
+                    test_trained_model(model, args.test_episodes, args.training_config, debug_mode=args.debug)
                 else:
                     print("📊 Skipping testing (--test-episodes 0)")
                 return 0
@@ -1685,7 +1704,7 @@ def main():
         if success:
             # Only test if episodes > 0
             if args.test_episodes > 0:
-                test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config)
+                test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
                 
                 # Save training replay with our unified system
                 if hasattr(env, 'replay_logger'):

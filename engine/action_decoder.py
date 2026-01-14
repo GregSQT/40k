@@ -80,8 +80,36 @@ class ActionDecoder:
             
             mask[11] = True  # Wait always valid (can choose not to shoot)
         elif current_phase == "charge":
-            # Charge phase: action 9 (charge) + 11 (wait)
-            mask[[9, 11]] = True
+            # Charge phase: Check if unit is activated and has targets waiting
+            active_unit = eligible_units[0] if eligible_units else None
+            if active_unit:
+                active_charge_unit = game_state.get("active_charge_unit")
+                if active_charge_unit == active_unit["id"]:
+                    # Unit is activated - check if waiting for target selection
+                    if "pending_charge_targets" in game_state:
+                        valid_targets = game_state["pending_charge_targets"]
+                        num_targets = len(valid_targets)
+                        if num_targets > 0:
+                            # Enable target slots (actions 4-8) for available targets
+                            for i in range(min(5, num_targets)):
+                                mask[4 + i] = True
+                    # Check if waiting for destination selection (after target selected and roll)
+                    elif "valid_charge_destinations_pool" in game_state and game_state.get("valid_charge_destinations_pool"):
+                        # After target selection and roll, destinations are available
+                        # Enable destination slots (actions 4-8) for available destinations
+                        valid_destinations = game_state.get("valid_charge_destinations_pool", [])
+                        num_destinations = len(valid_destinations)
+                        if num_destinations > 0:
+                            # Enable destination actions for available destinations (up to 5 slots)
+                            for i in range(min(5, num_destinations)):
+                                mask[4 + i] = True
+                    else:
+                        # Unit activated but no targets/destinations - should not happen
+                        mask[9] = True
+                else:
+                    # Unit not activated yet - action 9 activates it
+                    mask[9] = True
+            mask[11] = True  # Wait always valid
         elif current_phase == "fight":
             # Fight phase: action 10 (fight) only - no wait in fight
             # CRITICAL FIX: Only enable fight action if there are eligible units
@@ -273,7 +301,44 @@ class ActionDecoder:
                 }
                 
         elif current_phase == "charge":
-            if action_int == 9:  # Charge action - handler selects target internally
+            active_charge_unit = game_state.get("active_charge_unit")
+            
+            # Check if unit is activated and waiting for target selection
+            if active_charge_unit == selected_unit_id and "pending_charge_targets" in game_state:
+                valid_targets = game_state["pending_charge_targets"]
+                if action_int in [4, 5, 6, 7, 8]:  # Target slots 0-4
+                    target_slot = action_int - 4
+                    if target_slot < len(valid_targets):
+                        target_id = valid_targets[target_slot]["id"]
+                        return {
+                            "action": "charge",
+                            "unitId": selected_unit_id,
+                            "targetId": target_id
+                        }
+                    else:
+                        return {
+                            "action": "invalid",
+                            "unitId": selected_unit_id,
+                            "error": "invalid_target_slot",
+                            "attempted_action": action_int
+                        }
+            
+            # Check if unit is activated and waiting for destination selection (after target and roll)
+            if active_charge_unit == selected_unit_id and "valid_charge_destinations_pool" in game_state:
+                valid_destinations = game_state.get("valid_charge_destinations_pool", [])
+                if valid_destinations and action_int in [4, 5, 6, 7, 8]:
+                    # Destination selection (gym mode auto-selects, but allow manual for consistency)
+                    dest_slot = action_int - 4
+                    if dest_slot < len(valid_destinations):
+                        dest_col, dest_row = valid_destinations[dest_slot]
+                        return {
+                            "action": "charge",
+                            "unitId": selected_unit_id,
+                            "destCol": dest_col,
+                            "destRow": dest_row
+                        }
+            
+            if action_int == 9:  # Charge action - activates unit or triggers charge
                 return {
                     "action": "charge",
                     "unitId": selected_unit_id

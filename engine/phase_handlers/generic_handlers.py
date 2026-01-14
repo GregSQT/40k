@@ -208,6 +208,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             pool_empty = len(game_state["command_activation_pool"]) == 0
     elif current_phase == "fight":
         # DEBUG: Check if unit is ending activation without attacking when it should
+        from engine.game_utils import add_console_log, safe_print
         if arg3 == "PASS" and unit.get("ATTACK_LEFT", 0) > 0:
             # Unit is passing but has attacks left - check if adjacent to enemy
             from .fight_handlers import _is_adjacent_to_enemy_within_cc_range
@@ -219,8 +220,8 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                     if "console_logs" not in game_state:
                         game_state["console_logs"] = []
                     log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight end_activation: Unit {unit['id']} ADJACENT to enemy but PASSING with ATTACK_LEFT={unit.get('ATTACK_LEFT', 0)}"
-                    game_state["console_logs"].append(log_msg)
-                    print(log_msg)
+                    add_console_log(game_state, log_msg)
+                    safe_print(game_state, log_msg)
         
         # Fight phase complete when ALL 3 pools empty
         if "charging_activation_pool" not in game_state:

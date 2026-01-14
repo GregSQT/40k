@@ -341,8 +341,11 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
     
     for unit in active_units:
         unit_id = str(unit["id"])
-        unit_col = unit.get("col", 0)
-        unit_row = unit.get("row", 0)
+        # CRITICAL: No default values - require explicit coordinates
+        if "col" not in unit or "row" not in unit:
+            raise ValueError(f"Unit {unit_id} missing coordinates: has_col={'col' in unit}, has_row={'row' in unit}")
+        unit_col = int(unit["col"])
+        unit_row = int(unit["row"])
         
         rng_weapons = unit.get("RNG_WEAPONS", [])
         
@@ -351,8 +354,11 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
             
             for target in enemy_units:
                 target_id = str(target["id"])
-                target_col = target.get("col", 0)
-                target_row = target.get("row", 0)
+                # CRITICAL: No default values - require explicit coordinates
+                if "col" not in target or "row" not in target:
+                    raise ValueError(f"Target {target_id} missing coordinates: has_col={'col' in target}, has_row={'row' in target}")
+                target_col = int(target["col"])
+                target_row = int(target["row"])
                 
                 # Check if target is in range
                 distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)

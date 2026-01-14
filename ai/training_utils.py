@@ -81,7 +81,7 @@ def setup_imports():
 
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
-                     scenario_files=None):
+                     scenario_files=None, debug_mode=False):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -112,7 +112,8 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             scenario_files=scenario_files,  # NEW: Pass list for random selection
             unit_registry=unit_registry,
             quiet=True,
-            gym_training_mode=True
+            gym_training_mode=True,
+            debug_mode=debug_mode
         )
         
         # ✓ CHANGE 9: Removed seed() call - W40KEngine uses reset(seed=...) instead

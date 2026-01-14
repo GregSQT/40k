@@ -47,9 +47,8 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     command_build_activation_pool(game_state)
     
     # Console log
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("COMMAND PHASE START")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "COMMAND PHASE START")
     
     # Auto-advance: transition directly to move (pool is empty)
     return command_phase_end(game_state)
@@ -69,9 +68,8 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     CRITICAL: Returns ONLY the dict, does NOT call movement_phase_start() directly.
     The cascade loop in w40k_core.py handles the transition automatically.
     """
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("COMMAND PHASE COMPLETE")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "COMMAND PHASE COMPLETE")
     
     # Return only the dict - cascade loop will call movement_phase_start()
     return {

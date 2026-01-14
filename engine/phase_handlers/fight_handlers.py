@@ -40,9 +40,8 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     precompute_kill_probability_cache(game_state, "fight")
 
     # Console log
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("FIGHT PHASE START")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "FIGHT PHASE START")
 
     # Check if phase complete immediately (no eligible units)
     # AI_TURN.md COMPLIANCE: Direct field access - pools are set by fight_build_activation_pools()
@@ -101,10 +100,8 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
 
     # Sub-Phase 1: Charging units (current player only, units in units_charged AND adjacent)
     charging_activation_pool = []
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-
-    game_state["console_logs"].append(f"FIGHT POOL BUILD: Building charging pool for player {current_player}")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, f"FIGHT POOL BUILD: Building charging pool for player {current_player}")
     for unit in game_state["units"]:
         if unit["HP_CUR"] > 0:
             if unit["player"] == current_player:
@@ -113,10 +110,12 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
                     is_not_fought = unit["id"] not in game_state["units_fought"]
                     if is_adjacent and is_not_fought:
                         charging_activation_pool.append(unit["id"])
-                        game_state["console_logs"].append(f"ADDED TO CHARGING POOL: Unit {unit['id']}")
+                        from engine.game_utils import add_console_log
+                        add_console_log(game_state, f"ADDED TO CHARGING POOL: Unit {unit['id']}")
 
     game_state["charging_activation_pool"] = charging_activation_pool
-    game_state["console_logs"].append(f"CHARGING POOL SIZE: {len(charging_activation_pool)}")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, f"CHARGING POOL SIZE: {len(charging_activation_pool)}")
     
     # DEBUG: Log all units in charging pool
     if "episode_number" in game_state and "turn" in game_state:
@@ -128,14 +127,17 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
             unit = _get_unit_by_id(game_state, unit_id)
             if unit:
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight build_pools: Unit {unit_id} (player {unit['player']}) ADDED to charging_pool"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
 
     # Sub-Phase 2: Alternating activation (units NOT in units_charged, adjacent to enemies)
     active_alternating = []
     non_active_alternating = []
 
-    game_state["console_logs"].append(f"FIGHT POOL BUILD: Building alternating pools")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, f"FIGHT POOL BUILD: Building alternating pools")
     for unit in game_state["units"]:
         if unit["HP_CUR"] > 0:
             if unit["id"] not in game_state["units_charged"] and unit["id"] not in game_state["units_fought"]:
@@ -143,14 +145,17 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
                 if is_adjacent:
                     if unit["player"] == current_player:
                         active_alternating.append(unit["id"])
-                        game_state["console_logs"].append(f"ADDED TO ACTIVE ALTERNATING: Unit {unit['id']} (player {unit['player']})")
+                        from engine.game_utils import add_console_log
+                        add_console_log(game_state, f"ADDED TO ACTIVE ALTERNATING: Unit {unit['id']} (player {unit['player']})")
                     else:
                         non_active_alternating.append(unit["id"])
-                        game_state["console_logs"].append(f"ADDED TO NON-ACTIVE ALTERNATING: Unit {unit['id']} (player {unit['player']})")
+                        from engine.game_utils import add_console_log
+                        add_console_log(game_state, f"ADDED TO NON-ACTIVE ALTERNATING: Unit {unit['id']} (player {unit['player']})")
 
     game_state["active_alternating_activation_pool"] = active_alternating
     game_state["non_active_alternating_activation_pool"] = non_active_alternating
-    game_state["console_logs"].append(f"ALTERNATING POOLS: active={len(active_alternating)}, non_active={len(non_active_alternating)}")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, f"ALTERNATING POOLS: active={len(active_alternating)}, non_active={len(non_active_alternating)}")
 
 
 def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str) -> None:
@@ -189,12 +194,15 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             distance = _calculate_hex_distance(unit_col, unit_row, enemy["col"], enemy["row"])
-            game_state["console_logs"].append(f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy['id']} @ ({enemy['col']},{enemy['row']}) distance={distance}")
+            from engine.game_utils import add_console_log
+            add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy['id']} @ ({enemy['col']},{enemy['row']}) distance={distance}")
             if distance <= cc_range:
-                game_state["console_logs"].append(f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy['id']} (dist {distance} <= melee_range {cc_range})")
+                from engine.game_utils import add_console_log
+                add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy['id']} (dist {distance} <= melee_range {cc_range})")
                 return True
 
-    game_state["console_logs"].append(f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within melee_range {cc_range}")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within melee_range {cc_range}")
     return False
 
 
@@ -339,6 +347,21 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if distance <= melee_range:
         return False
     
+    # W40K RULE: Cannot shoot at enemy engaged in melee with friendly units
+    # Check if target is adjacent to any friendly unit (same player as shooter)
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+    target_cc_range = get_melee_range()  # Always 1
+    
+    for friendly in game_state["units"]:
+        if friendly["player"] == shooter["player"] and friendly["HP_CUR"] > 0 and friendly["id"] != shooter["id"]:
+            # CRITICAL: Convert coordinates to int for consistent distance calculation
+            friendly_col_int, friendly_row_int = int(friendly["col"]), int(friendly["row"])
+            target_col_int, target_row_int = int(target["col"]), int(target["row"])
+            friendly_distance = _calculate_hex_distance(target_col_int, target_row_int, friendly_col_int, friendly_row_int)
+            
+            if friendly_distance <= target_cc_range:
+                return False
+    
     # PERFORMANCE: Use LoS cache if available (instant lookup)
     # Fallback to calculation if cache missing (phase not started yet)
     has_los = False
@@ -410,20 +433,49 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     if not unit:
         return []
 
-    # Create cache key from unit identity and position
-    cache_key = (unit_id, unit["col"], unit["row"])
+    # Determine context (arg2, arg3) for valid_target_pool_build
+    unit_id_str = str(unit_id)
+    has_advanced = unit_id_str in game_state.get("units_advanced", set())
+    advance_status = 1 if has_advanced else 0
+    
+    # arg3 = (unit adjacent to enemy?) ? 1 : 0
+    # After advance, arg3 is ALWAYS 0 (advance restrictions prevent adjacent destinations)
+    if has_advanced:
+        adjacent_status = 0  # arg3=0 always after advance
+    else:
+        adjacent_status = 1 if _is_adjacent_to_enemy_within_cc_range(game_state, unit) else 0
+
+    # Create cache key from unit identity, position, player, AND context (advance_status, adjacent_status)
+    # CRITICAL: Must match cache key format in shooting_handlers.py to avoid collisions
+    # CRITICAL: Include unit["player"] to ensure cache is invalidated when player changes
+    cache_key = (unit_id, unit["col"], unit["row"], advance_status, adjacent_status, unit["player"])
 
     # Check cache
     if cache_key in _target_pool_cache:
-        # Cache hit: Fast path - only filter dead targets
+        # Cache hit: Fast path - filter dead targets AND re-validate melee status
+        # Melee status can change when friendly units die, so we must re-validate
         cached_pool = _target_pool_cache[cache_key]
 
-        # Filter out units that died since cache was built
+        # Filter out units that died AND re-validate targets that might have changed melee status
+        # CRITICAL: Also check that target is not a friendly unit or self (defense in depth)
         alive_targets = []
+        current_player = unit["player"]
+        unit_id_str = str(unit["id"])
         for target_id in cached_pool:
             target = _get_unit_by_id(game_state, target_id)
             if target and target["HP_CUR"] > 0:
-                alive_targets.append(target_id)
+                # CRITICAL: First check - target must not be the shooter itself
+                if str(target["id"]) == unit_id_str:
+                    continue  # Skip self
+                # CRITICAL: Second check - target must not be friendly (fast check)
+                if target["player"] == current_player:
+                    continue  # Skip friendly units
+                
+                # Re-validate target - melee status might have changed (friendly unit died)
+                # CRITICAL: Use _is_valid_shooting_target from shooting_handlers which checks all rules
+                from .shooting_handlers import _is_valid_shooting_target as _is_valid_shooting_target_shoot
+                if _is_valid_shooting_target_shoot(game_state, unit, target):
+                    alive_targets.append(target_id)
 
         # Update unit's target pool
         unit["valid_target_pool"] = alive_targets
@@ -431,19 +483,42 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         return alive_targets
 
     # Cache miss: Build target pool from scratch (expensive)
-    valid_target_pool = []
-
-    for enemy in game_state["units"]:
-        if (enemy["player"] != unit["player"] and
-            enemy["HP_CUR"] > 0):
-
-            # Check if target is valid with detailed logging for training debug
-            is_valid = _is_valid_shooting_target(game_state, unit, enemy)
-            if not is_valid:
-                # Add specific failure reason debugging
-                distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+    # CRITICAL: Use valid_target_pool_build from shooting_handlers to ensure consistent validation
+    # This ensures all rules are checked (friendly fire, engaged enemies, etc.)
+    from .shooting_handlers import valid_target_pool_build
+    if "weapon_rule" not in game_state:
+        raise KeyError("game_state missing required 'weapon_rule' field")
+    weapon_rule = game_state["weapon_rule"]
+    
+    # Context already calculated above for cache key - reuse it
+    # Call valid_target_pool_build with context parameters
+    # CRITICAL: This function already converts IDs to string and checks all rules
+    valid_target_pool = valid_target_pool_build(
+        game_state, unit, weapon_rule, advance_status, adjacent_status
+    )
+    
+    # CRITICAL: Double-check that no friendly units or self are in the pool (safety check)
+    # This should never happen if valid_target_pool_build is correct, but adds defense in depth
+    current_player = unit["player"]
+    unit_id_str = str(unit_id)
+    filtered_pool = []
+    for target_id in valid_target_pool:
+        target = _get_unit_by_id(game_state, target_id)
+        if target:
+            # CRITICAL: Skip self
+            if str(target["id"]) == unit_id_str:
+                from engine.game_utils import add_console_log
+                add_console_log(game_state, f"[BUG] valid_target_pool_build included self {target_id} for shooter {unit_id}")
+                continue
+            # CRITICAL: Skip friendly units
+            if target["player"] != current_player:
+                filtered_pool.append(target_id)
             else:
-                valid_target_pool.append(enemy["id"])
+                # If target is friendly, it's a bug in valid_target_pool_build - log it
+                from engine.game_utils import add_console_log
+                add_console_log(game_state, f"[BUG] valid_target_pool_build included friendly unit {target_id} for shooter {unit_id}")
+    
+    valid_target_pool = filtered_pool
 
     # PERFORMANCE: Pre-calculate priorities for all targets ONCE before sorting
     # This reduces from O(n log n) priority calculations to O(n) calculations
@@ -786,9 +861,8 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["fight_subphase"] = None
 
     # Console log
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    game_state["console_logs"].append("FIGHT PHASE COMPLETE")
+    from engine.game_utils import add_console_log
+    add_console_log(game_state, "FIGHT PHASE COMPLETE")
 
     # Player progression logic
     if game_state["current_player"] == 1:
@@ -1152,7 +1226,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         }
 
     # Check for gym training mode and PvE AI mode
-    is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
+    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 1
     is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
 
     # GYM TRAINING / PvE AI: Auto-activate unit if not already active
@@ -1176,24 +1250,51 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
     elif action_type == "fight":
         # Fight action with target selection
-        # GYM TRAINING / PvE AI: Auto-select target if not provided
+        # Auto-select target if not provided (for all modes: gym training, PvE AI, bots, etc.)
         if "targetId" not in action:
-            if is_gym_training or is_pve_ai:
-                valid_targets = game_state.get("valid_fight_targets", [])
-                if valid_targets:
-                    if is_pve_ai:
-                        # Use AI target selection for PvE AI
-                        target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets)
-                        if target_id:
-                            action["targetId"] = target_id
-                        else:
-                            # Fallback to first target if AI selection failed
-                            first_target = valid_targets[0]
-                            action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+            valid_targets = game_state.get("valid_fight_targets", [])
+            if valid_targets:
+                if is_pve_ai:
+                    # Use AI target selection for PvE AI
+                    target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets)
+                    if target_id:
+                        action["targetId"] = target_id
                     else:
-                        # Gym training: select first target
+                        # Fallback to first target if AI selection failed
                         first_target = valid_targets[0]
                         action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+                else:
+                    # Auto-select first target (gym training, bots, etc.)
+                    first_target = valid_targets[0]
+                    action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+            else:
+                # CRITICAL: Rebuild valid_targets if empty - valid_fight_targets may have been cleared
+                # But only if unit has attacks remaining
+                if unit.get("ATTACK_LEFT", 0) <= 0:
+                    # No attacks left - skip this unit
+                    result = end_activation(game_state, unit, "PASS", 1, "PASS", "FIGHT", 0)
+                    game_state["active_fight_unit"] = None
+                    game_state["valid_fight_targets"] = []
+                    result["action"] = "wait"
+                    result["phase"] = "fight"
+                    result["unitId"] = unit_id
+                    if result.get("phase_complete"):
+                        phase_result = _fight_phase_complete(game_state)
+                        result.update(phase_result)
+                    else:
+                        _toggle_fight_alternation(game_state)
+                        _update_fight_subphase(game_state)
+                    return True, result
+                
+                # Unit has attacks - rebuild valid_targets if empty
+                valid_targets = _fight_build_valid_target_pool(game_state, unit)
+                if valid_targets:
+                    # Found targets - update game_state and continue with attack
+                    game_state["valid_fight_targets"] = valid_targets
+                    # Auto-select first target (gym training, bots, etc.)
+                    first_target = valid_targets[0]
+                    action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+                    # Continue to attack execution below (skip the PASS logic)
                 else:
                     # DEBUG: Check if unit is adjacent to enemy but not attacking
                     is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
@@ -1205,8 +1306,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                         if is_adjacent:
                             attack_left = unit.get("ATTACK_LEFT", 0)
                             log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight execute_action: Unit {unit_id} ADJACENT to enemy but NO TARGETS (ATTACK_LEFT={attack_left}) - skipping without attack"
-                            game_state["console_logs"].append(log_msg)
-                            print(log_msg)
+                            from engine.game_utils import add_console_log
+                            from engine.game_utils import safe_print
+                            add_console_log(game_state, log_msg)
+                            safe_print(game_state, log_msg)
                     
                     # No targets - skip this unit
                     result = end_activation(
@@ -1216,15 +1319,57 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     # CRITICAL: Clear active_fight_unit so next unit can be activated
                     game_state["active_fight_unit"] = None
                     game_state["valid_fight_targets"] = []
+                    
+                    # CRITICAL: Set action for logging (wait action since no attack was made)
+                    result["action"] = "wait"
+                    result["phase"] = "fight"
+                    result["unitId"] = unit_id
 
                     if result.get("phase_complete"):
-                        result.update(_fight_phase_complete(game_state))
+                        # CRITICAL: Preserve action before merging phase transition
+                        preserved_action = result.get("action")
+                        preserved_unit_id = result.get("unitId")
+                        
+                        phase_result = _fight_phase_complete(game_state)
+                        # Merge phase transition info into result
+                        result.update(phase_result)
+                        
+                        # CRITICAL: Restore preserved action for logging
+                        if preserved_action is not None:
+                            result["action"] = preserved_action
+                        elif "action" not in result:
+                            result["action"] = "wait"
+                        if preserved_unit_id:
+                            result["unitId"] = preserved_unit_id
                     else:
                         _toggle_fight_alternation(game_state)
                         _update_fight_subphase(game_state)
                     return True, result
+        
+        # CRITICAL: Ensure targetId is set before attack execution
+        if "targetId" not in action:
+            # This should not happen if code above is correct, but add safety check
+            valid_targets = game_state.get("valid_fight_targets", [])
+            if not valid_targets:
+                valid_targets = _fight_build_valid_target_pool(game_state, unit)
+            if valid_targets:
+                first_target = valid_targets[0]
+                action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
             else:
-                raise KeyError(f"Fight action missing required 'targetId' field: {action}")
+                # No targets available - end activation
+                result = end_activation(game_state, unit, "PASS", 1, "PASS", "FIGHT", 0)
+                game_state["active_fight_unit"] = None
+                game_state["valid_fight_targets"] = []
+                result["action"] = "wait"
+                result["phase"] = "fight"
+                result["unitId"] = unit_id
+                if result.get("phase_complete"):
+                    phase_result = _fight_phase_complete(game_state)
+                    result.update(phase_result)
+                else:
+                    _toggle_fight_alternation(game_state)
+                    _update_fight_subphase(game_state)
+                return True, result
         
         target_id = action["targetId"]
         return _handle_fight_attack(game_state, unit, target_id, config)
@@ -1267,11 +1412,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             1              # Arg5: Error logging
         )
         result["invalid_action_penalty"] = True
-        # AI_TURN.md COMPLIANCE: Direct field access
-        if "attempted_action" not in action:
-            result["attempted_action"] = "unknown"
-        else:
-            result["attempted_action"] = action["attempted_action"]
+        # CRITICAL: No default value - require explicit attempted_action
+        attempted_action = action.get("attempted_action")
+        if attempted_action is None:
+            raise ValueError(f"Action missing 'attempted_action' field: {action}")
+        result["attempted_action"] = attempted_action
 
         # Check if ALL pools are empty ->  phase complete
         if result.get("phase_complete"):
@@ -1306,8 +1451,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             if "console_logs" not in game_state:
                 game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING (ATTACK_LEFT>0) - result['action']={result.get('action')} result['unitId']={result.get('unitId')} result_keys={list(result.keys())}"
-            game_state["console_logs"].append(log_msg)
-            print(log_msg)
+            from engine.game_utils import add_console_log
+            from engine.game_utils import safe_print
+            add_console_log(game_state, log_msg)
+            safe_print(game_state, log_msg)
 
         return True, result
 
@@ -1351,8 +1498,10 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight unit_activation: Unit {unit_id} ACTIVATED with ATTACK_LEFT={unit['ATTACK_LEFT']}"
-        game_state["console_logs"].append(log_msg)
-        print(log_msg)
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
 
     # Build valid target pool (enemies adjacent within CC_RNG)
     valid_targets = _fight_build_valid_target_pool(game_state, unit)
@@ -1364,8 +1513,10 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight unit_activation: Unit {unit_id} valid_targets={valid_targets} count={len(valid_targets)}"
-        game_state["console_logs"].append(log_msg)
-        print(log_msg)
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
 
     if not valid_targets:
         # DEBUG: Check if unit is adjacent to enemy but not attacking
@@ -1377,8 +1528,10 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
                 game_state["console_logs"] = []
             if is_adjacent and unit["ATTACK_LEFT"] > 0:
                 log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight unit_activation: Unit {unit_id} ADJACENT to enemy but NO VALID TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without attack"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
         
         # No targets - end activation with PASS
         # ATTACK_LEFT = CC_NB? YES -> no attack -> end_activation (PASS, 1, PASS, FIGHT)
@@ -1436,17 +1589,24 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
             if "console_logs" not in game_state:
                 game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING (ATTACK_LEFT=0) - result['action']={result.get('action')} result['unitId']={result.get('unitId')} result_keys={list(result.keys())}"
-            game_state["console_logs"].append(log_msg)
-            print(log_msg)
+            from engine.game_utils import add_console_log
+            from engine.game_utils import safe_print
+            add_console_log(game_state, log_msg)
+            safe_print(game_state, log_msg)
 
         return True, result
 
-    # Check for PvE AI auto-execution (similar to shooting phase)
+    # Check for PvE AI or gym training auto-execution (similar to shooting phase)
     is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
+    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 1
     
-    if is_pve_ai and valid_targets:
-        # AUTO-FIGHT: PvE AI auto-selects target and executes attack
-        target_id = _ai_select_fight_target(game_state, unit_id, valid_targets)
+    if (is_pve_ai or is_gym_training) and valid_targets:
+        # AUTO-FIGHT: PvE AI or gym training auto-selects target and executes attack
+        if is_pve_ai:
+            target_id = _ai_select_fight_target(game_state, unit_id, valid_targets)
+        else:
+            # Gym training: select first target
+            target_id = valid_targets[0] if valid_targets else None
         if target_id:
             # Execute fight attack directly and return result
             return _handle_fight_attack(game_state, unit, target_id, config)
@@ -1461,7 +1621,8 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         "unitId": unit_id,
         "valid_targets": valid_targets,
         "ATTACK_LEFT": unit["ATTACK_LEFT"],
-        "waiting_for_player": True
+        "waiting_for_player": True,
+        "action": "wait"  # CRITICAL: Set action for logging (waiting for target selection)
     }
 
 
@@ -1626,11 +1787,13 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     
     if best_weapon_idx >= 0:
         unit["selectedCcWeaponIndex"] = best_weapon_idx
-        # Mettre à jour ATTACK_LEFT avec la nouvelle arme (si pas déjà initialisé ou si arme change)
+        # CRITICAL: Only initialize ATTACK_LEFT if it's 0 AND we're at the start of activation
+        # Don't reset ATTACK_LEFT during attack execution (it should already be set)
         weapon = unit["CC_WEAPONS"][best_weapon_idx]
         current_attack_left = unit.get("ATTACK_LEFT", 0)
-        # Si ATTACK_LEFT n'est pas encore initialisé, réinitialiser
-        if current_attack_left == 0:
+        # Only reset if ATTACK_LEFT is 0 and we haven't started attacking yet
+        # This prevents infinite loops where ATTACK_LEFT is reset after being decremented
+        if current_attack_left == 0 and not game_state.get("fight_attack_results"):
             unit["ATTACK_LEFT"] = weapon["NB"]
     else:
         # Pas d'armes disponibles
@@ -1657,10 +1820,13 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         damage = attack_result.get("damage", 0)
         target_died = attack_result.get("target_died", False)
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
-        game_state["console_logs"].append(log_msg)
-        print(log_msg)
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
         # DEBUG: Verify log was added
-        print(f"[DEBUG] Added attack_executed log to console_logs (count={len(game_state['console_logs'])})")
+        from engine.game_utils import conditional_debug_print
+        conditional_debug_print(game_state, f"[DEBUG] Added attack_executed log to console_logs (count={len(game_state['console_logs'])})")
     else:
         # DEBUG: Log why condition failed
         missing_keys = []
@@ -1668,7 +1834,8 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             missing_keys.append("episode_number")
         if "turn" not in game_state:
             missing_keys.append("turn")
-        print(f"[DEBUG] attack_executed log NOT added - missing keys: {missing_keys}")
+        from engine.game_utils import conditional_debug_print
+        conditional_debug_print(game_state, f"[DEBUG] attack_executed log NOT added - missing keys: {missing_keys}")
 
     # Store this attack result with metadata for step logging
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
@@ -1690,8 +1857,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             game_state["console_logs"] = []
         total_results = len(game_state.get("fight_attack_results", []))
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight attack_executed: Unit {unit_id} fight_attack_results count={total_results}"
-        game_state["console_logs"].append(log_msg)
-        print(log_msg)
+        from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
 
     # Decrement ATTACK_LEFT
     unit["ATTACK_LEFT"] -= 1
@@ -1703,11 +1872,13 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
 
         if valid_targets_after:
             # More attacks and targets available
-            # AI_TURN.md COMPLIANCE: Check if gym training mode or PvE AI - auto-continue attack loop
+            # Auto-continue attack loop for gym training, PvE AI, and bots (all non-human players)
             is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
             is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
+            # Bots (player 2) should also auto-continue attacks like gym training
+            is_bot = unit and unit["player"] == 2 and not is_pve_ai
 
-            if is_gym_training or is_pve_ai:
+            if is_gym_training or is_pve_ai or is_bot:
                 # GYM TRAINING / PvE AI: Auto-continue attack loop until ATTACK_LEFT = 0 or no targets
                 # Select next target (use AI selection logic)
                 next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets_after)
@@ -1731,6 +1902,16 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                             seen_attacks = {(ar.get("targetId"), ar.get("attack_number")) for ar in attacks_before_recursive}
                             combined_results = list(attacks_before_recursive)
                             for ar in recursive_attack_results:
+                                # CRITICAL: Validate ar has all required fields before adding
+                                required_fields = ["hit_roll", "wound_roll", "save_roll", "damage", "hit_success", "wound_success", "save_success", "hit_target", "wound_target", "save_target", "target_died", "weapon_name"]
+                                missing_fields = [field for field in required_fields if field not in ar]
+                                if missing_fields:
+                                    raise KeyError(
+                                        f"recursive_attack_results contains incomplete attack_result: missing {missing_fields}. "
+                                        f"attack_result keys: {list(ar.keys())}. "
+                                        f"unit_id={unit_id}, target_id={ar.get('targetId', 'unknown')}"
+                                    )
+                                
                                 key = (ar.get("targetId"), ar.get("attack_number"))
                                 if key not in seen_attacks:
                                     combined_results.append(ar)
@@ -1739,6 +1920,14 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                             # Update result with combined attack results
                             rec_result["all_attack_results"] = combined_results
                             
+                            # CRITICAL: Ensure action is set to "combat" when there are attack results
+                            # This ensures attacks are logged even if recursive result had different action
+                            if combined_results:
+                                rec_result["action"] = "combat"
+                                rec_result["phase"] = "fight"
+                                if "unitId" not in rec_result:
+                                    rec_result["unitId"] = unit_id
+                            
                             # DEBUG: Log the merge
                             if "episode_number" in game_state and "turn" in game_state:
                                 episode = game_state["episode_number"]
@@ -1746,16 +1935,24 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                                 if "console_logs" not in game_state:
                                     game_state["console_logs"] = []
                                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: MERGED recursive results - before={len(attacks_before_recursive)} recursive={len(recursive_attack_results)} combined={len(combined_results)}"
-                                game_state["console_logs"].append(log_msg)
-                                print(log_msg)
-                        else:
-                            # CRITICAL: If recursive call failed, preserve attacks_before_recursive
-                            # Restore fight_attack_results from attacks_before_recursive to ensure they're not lost
-                            if attacks_before_recursive:
-                                game_state["fight_attack_results"] = list(attacks_before_recursive)
-                                # Ensure result includes all_attack_results even if recursive call failed
-                                if isinstance(rec_result, dict):
-                                    rec_result["all_attack_results"] = list(attacks_before_recursive)
+                                from engine.game_utils import add_console_log
+                                from engine.game_utils import safe_print
+                                add_console_log(game_state, log_msg)
+                                safe_print(game_state, log_msg)
+                            else:
+                                # CRITICAL: If recursive call failed, preserve attacks_before_recursive
+                                # Restore fight_attack_results from attacks_before_recursive to ensure they're not lost
+                                if attacks_before_recursive:
+                                    game_state["fight_attack_results"] = list(attacks_before_recursive)
+                                    # Ensure result includes all_attack_results even if recursive call failed
+                                    if isinstance(rec_result, dict):
+                                        rec_result["all_attack_results"] = list(attacks_before_recursive)
+                                        # CRITICAL: Ensure action is set to "combat" when there are attack results
+                                        if attacks_before_recursive:
+                                            rec_result["action"] = "combat"
+                                            rec_result["phase"] = "fight"
+                                            if "unitId" not in rec_result:
+                                                rec_result["unitId"] = unit_id
                     else:
                         # CRITICAL: If recursive_result is invalid, preserve attacks_before_recursive
                         # Restore fight_attack_results to ensure they're not lost
@@ -1802,14 +1999,23 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                     if "console_logs" not in game_state:
                         game_state["console_logs"] = []
                     log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: RETURNING waiting_for_player=True with all_attack_results count={len(all_attack_results)} for Unit {unit_id}"
-                    game_state["console_logs"].append(log_msg)
-                    print(log_msg)
+                    from engine.game_utils import add_console_log
+                    from engine.game_utils import safe_print
+                    add_console_log(game_state, log_msg)
+                    safe_print(game_state, log_msg)
                     for i, ar in enumerate(all_attack_results):
-                        target_id = ar.get("targetId", "?")
-                        damage = ar.get("damage", 0)
+                        # CRITICAL: No default values - require explicit targetId and damage
+                        target_id = ar.get("targetId")
+                        if target_id is None:
+                            raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+                        damage = ar.get("damage")
+                        if damage is None:
+                            raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
                         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: waiting_for_player attack[{i}] -> Unit {target_id} damage={damage}"
-                        game_state["console_logs"].append(log_msg)
-                        print(log_msg)
+                        from engine.game_utils import add_console_log
+                        from engine.game_utils import safe_print
+                        add_console_log(game_state, log_msg)
+                        safe_print(game_state, log_msg)
                 return True, {
                     "attack_executed": True,
                     "attack_result": attack_result,
@@ -1831,8 +2037,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 game_state["console_logs"] = []
             if is_adjacent and unit["ATTACK_LEFT"] > 0:
                 log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight attack: Unit {unit_id} ADJACENT to enemy but NO MORE TARGETS (ATTACK_LEFT={unit['ATTACK_LEFT']}) - ending without completing all attacks"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+        from engine.game_utils import safe_print
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
         
         # No more targets - end activation
         # ATTACK_LEFT > 0 but no targets -> end_activation (ACTION, 1, FIGHT, FIGHT)
@@ -1872,14 +2080,23 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             if "console_logs" not in game_state:
                 game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (no_more_targets)"
-            game_state["console_logs"].append(log_msg)
-            print(log_msg)
+            from engine.game_utils import add_console_log
+            from engine.game_utils import safe_print
+            add_console_log(game_state, log_msg)
+            safe_print(game_state, log_msg)
             for i, ar in enumerate(result["all_attack_results"]):
-                target_id = ar.get("targetId", "?")
-                damage = ar.get("damage", 0)
+                # CRITICAL: No default values - require explicit targetId and damage
+                target_id = ar.get("targetId")
+                if target_id is None:
+                    raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+                damage = ar.get("damage")
+                if damage is None:
+                    raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: no_more_targets attack[{i}] -> Unit {target_id} damage={damage}"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
@@ -1899,8 +2116,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 if "console_logs" not in game_state:
                     game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
             
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
@@ -1921,8 +2140,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 if "console_logs" not in game_state:
                     game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete - result['action']={result.get('action')} result_keys={list(result.keys())}"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
@@ -1971,14 +2192,23 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             if "console_logs" not in game_state:
                 game_state["console_logs"] = []
             log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: SETTING all_attack_results count={len(result['all_attack_results'])} for Unit {unit_id} (attacks_complete)"
-            game_state["console_logs"].append(log_msg)
-            print(log_msg)
+            from engine.game_utils import add_console_log
+            from engine.game_utils import safe_print
+            add_console_log(game_state, log_msg)
+            safe_print(game_state, log_msg)
             for i, ar in enumerate(result["all_attack_results"]):
-                target_id = ar.get("targetId", "?")
-                damage = ar.get("damage", 0)
+                # CRITICAL: No default values - require explicit targetId and damage
+                target_id = ar.get("targetId")
+                if target_id is None:
+                    raise ValueError(f"attack_result[{i}] missing 'targetId' field: {ar}")
+                damage = ar.get("damage")
+                if damage is None:
+                    raise ValueError(f"attack_result[{i}] missing 'damage' field: {ar}")
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: attacks_complete attack[{i}] -> Unit {target_id} damage={damage}"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
         # Clear accumulated results for next unit
         game_state["fight_attack_results"] = []
 
@@ -1997,8 +2227,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 if "console_logs" not in game_state:
                     game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: BEFORE phase_complete (ATTACK_LEFT=0) - preserved_action={preserved_action} preserved_unit_id={preserved_unit_id} result_keys={list(result.keys())}"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
             
             phase_result = _fight_phase_complete(game_state)
             # Merge phase transition info into result
@@ -2019,8 +2251,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 if "console_logs" not in game_state:
                     game_state["console_logs"] = []
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: AFTER phase_complete (ATTACK_LEFT=0) - result['action']={result.get('action')} result_keys={list(result.keys())}"
-                game_state["console_logs"].append(log_msg)
-                print(log_msg)
+                from engine.game_utils import add_console_log
+                from engine.game_utils import safe_print
+                add_console_log(game_state, log_msg)
+                safe_print(game_state, log_msg)
         else:
             # More units to activate - toggle alternation and update subphase
             # AI_TURN.md Lines 762-764, 844-846: Toggle alternation after activation completes
@@ -2305,12 +2539,14 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         return False, {"error": "no_valid_targets", "unitId": unit_id}
     
     # Handle target selection: agent-provided or auto-select
-    if target_id and target_id in valid_targets:
+    # CRITICAL: Convert target_id to string for consistent comparison with valid_targets
+    target_id_str = str(target_id) if target_id else None
+    if target_id_str and target_id_str in valid_targets:
         # Agent provided valid target
-        selected_target_id = target_id
-    elif target_id:
+        selected_target_id = target_id_str
+    elif target_id_str:
         # Agent provided invalid target
-        return False, {"error": "target_not_valid", "targetId": target_id}
+        return False, {"error": "target_not_valid", "targetId": target_id_str, "valid_targets": valid_targets[:5]}
     else:
         # No target provided - auto-select first valid target (human player fallback)
         selected_target_id = valid_targets[0]
@@ -2318,6 +2554,17 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     target = _get_unit_by_id(game_state, selected_target_id)
     if not target:
         return False, {"error": "target_not_found", "targetId": selected_target_id}
+    
+    # CRITICAL: Final safety check - target must not be friendly (defense in depth)
+    # This should never happen if valid_targets is correct, but adds extra protection
+    if target["player"] == unit["player"]:
+        return False, {
+            "error": "cannot_shoot_friendly_unit",
+            "targetId": selected_target_id,
+            "targetPlayer": target["player"],
+            "shooterPlayer": unit["player"],
+            "valid_targets": valid_targets[:5]
+        }
     
     # Execute shooting attack
     attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
@@ -2538,19 +2785,21 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                 except Exception as focus_fire_error:
                     # Don't crash training if focus fire bonus fails
                     import traceback
-                    print(f"⚠️  Focus fire bonus calc failed: {focus_fire_error}")
-                    print(f"   Traceback: {traceback.format_exc()}")
+                    from engine.game_utils import conditional_debug_print
+                    conditional_debug_print(game_state, f"⚠️  Focus fire bonus calc failed: {focus_fire_error}")
+                    conditional_debug_print(game_state, f"   Traceback: {traceback.format_exc()}")
                     pass
 
         except Exception as e:
-            print(f"🚨 REWARD CALC FAILED for {shooter.get('id', 'unknown')} (P{shooter.get('player', '?')}): {e}")
-            print(f"   shooter_scenario_type={shooter.get('unitType', 'missing')}")
+            from engine.game_utils import conditional_debug_print
+            conditional_debug_print(game_state, f"🚨 REWARD CALC FAILED for {shooter.get('id', 'unknown')} (P{shooter.get('player', '?')}): {e}")
+            conditional_debug_print(game_state, f"   shooter_scenario_type={shooter.get('unitType', 'missing')}")
             if 'shooter_reward_key' in locals():
-                print(f"   shooter_reward_key={shooter_reward_key}")
+                conditional_debug_print(game_state, f"   shooter_reward_key={shooter_reward_key}")
             if 'controlled_agent' in locals():
-                print(f"   controlled_agent={controlled_agent}")
+                conditional_debug_print(game_state, f"   controlled_agent={controlled_agent}")
             if 'config' in locals():
-                print(f"   controlled_player={config.get('controlled_player', 'not_set')}")
+                conditional_debug_print(game_state, f"   controlled_player={config.get('controlled_player', 'not_set')}")
             raise
 
     # Update the action_log entry with calculated reward and action_name

@@ -185,6 +185,11 @@ class UnitRegistry:
             
             # Clean up the value
             prop_value = prop_value.strip().strip('"\'')
+            # Remove comments (everything after // or #)
+            if '//' in prop_value:
+                prop_value = prop_value.split('//')[0].strip()
+            if '#' in prop_value:
+                prop_value = prop_value.split('#')[0].strip()
             
             # Try to convert to appropriate type
             if prop_value.isdigit() or (prop_value.startswith('-') and prop_value[1:].isdigit()):

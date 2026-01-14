@@ -497,6 +497,7 @@ export const BoardWithAPI: React.FC = () => {
           overallProbability: apiProps.targetPreview.overallProbability ?? 0.25
         } : null}
         blinkingUnits={apiProps.blinkingUnits}
+        blinkingAttackerId={apiProps.blinkingAttackerId}
         isBlinkingActive={apiProps.isBlinkingActive}
         onSelectUnit={apiProps.onSelectUnit}
         onSkipUnit={apiProps.onSkipUnit}

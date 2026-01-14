@@ -137,6 +137,7 @@ type BoardProps = {
   attackPreview: { unitId: number; col: number; row: number } | null;
   // Blinking state for multi-unit HP bars
   blinkingUnits?: number[];
+  blinkingAttackerId?: number | null;
   isBlinkingActive?: boolean;
   blinkState?: boolean;
   onSelectUnit: (id: number | string | null) => void;
@@ -210,11 +211,10 @@ export default function Board({
   attackPreview,
   // Blinking props
   blinkingUnits,
+  blinkingAttackerId,
   isBlinkingActive,
-  blinkState: _blinkState, // eslint-disable-line @typescript-eslint/no-unused-vars
   onSelectUnit,
   onSkipUnit,
-  onStartTargetPreview: _onStartTargetPreview, // eslint-disable-line @typescript-eslint/no-unused-vars
   onStartMovePreview,
   onDirectMove,
   onStartAttackPreview,
@@ -237,7 +237,7 @@ export default function Board({
   onCancelCharge,
   onValidateCharge,
   onLogChargeRoll,
-  shootingPhaseState: _shootingPhaseState, // eslint-disable-line @typescript-eslint/no-unused-vars
+  shootingPhaseState,
   targetPreview,
   onCancelTargetPreview,
   gameState,
@@ -616,6 +616,20 @@ export default function Board({
       onActivateCharge: stableCallbacks.current.onActivateCharge,
       onActivateFight: stableCallbacks.current.onActivateFight,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
+      onChargeEnemyUnit: (chargerId: number, enemyUnitId: number) => {
+        if (!selectedUnitId) return;
+        const enemyUnit = units.find(u => u.id === enemyUnitId);
+        if (!enemyUnit) return;
+        const chargeDests = getChargeDestinations(chargerId);
+        const enemyCube = offsetToCube(enemyUnit.col, enemyUnit.row);
+        const adjacentDest = chargeDests.find(dest => {
+          const destCube = offsetToCube(dest.col, dest.row);
+          return cubeDistance(enemyCube, destCube) === 1;
+        });
+        if (adjacentDest && stableCallbacks.current.onMoveCharger) {
+          stableCallbacks.current.onMoveCharger(chargerId, adjacentDest.col, adjacentDest.row);
+        }
+      },
       onAdvanceMove: stableCallbacks.current.onAdvanceMove,
       onStartMovePreview: onStartMovePreview,
       onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
@@ -1273,7 +1287,7 @@ export default function Board({
           units, chargeTargets, fightTargets, targetPreview,
           onConfirmMove, parseColor,
           // Pass blinking state
-          blinkingUnits: stableBlinkingUnits, isBlinkingActive,
+          blinkingUnits: stableBlinkingUnits, blinkingAttackerId, isBlinkingActive,
           // Pass shooting indicators
           shootingTargetId,
           shootingUnitId,

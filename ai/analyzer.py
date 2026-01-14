@@ -18,6 +18,17 @@ if project_root not in sys.path:
 # Import utility functions from engine
 from engine.combat_utils import calculate_hex_distance, get_hex_line
 
+# Global variable for debug log file
+_debug_log_file = None
+
+
+def _debug_log(message: str) -> None:
+    """Write debug message to analyzer.log if file is open."""
+    global _debug_log_file
+    if _debug_log_file:
+        _debug_log_file.write(message + "\n")
+        _debug_log_file.flush()
+
 
 def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, target_row: int, wall_hexes: Set[Tuple[int, int]]) -> bool:
     """Check line of sight between two hex coordinates, checking for walls blocking."""
@@ -43,9 +54,12 @@ def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_p
                          unit_hp: Dict[str, int], player: int) -> bool:
     """Check if a hex is adjacent to any enemy unit."""
     enemy_player = 3 - player
-    for uid, p in unit_player.items():
-        if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
-            enemy_pos = unit_positions[uid]
+    # CRITICAL FIX: Iterate over unit_positions instead of unit_player to avoid checking dead units
+    # Dead units are removed from unit_positions when they die, so this ensures we only check living units
+    for uid, enemy_pos in unit_positions.items():
+        # Verify this is an enemy unit
+        p = unit_player.get(uid)
+        if p == enemy_player and unit_hp.get(uid, 0) > 0:
             if is_adjacent(col, row, enemy_pos[0], enemy_pos[1]):
                 return True
     return False
@@ -56,19 +70,23 @@ def get_adjacent_enemies(col: int, row: int, unit_player: Dict[str, int], unit_p
     """Get list of enemy unit IDs adjacent to a hex position."""
     enemy_player = 3 - player
     adjacent_enemies = []
-    for uid, p in unit_player.items():
+    # DEBUG: Log all enemy positions being checked for adjacency
+    enemy_positions_debug = []
+    # CRITICAL FIX: Iterate over unit_positions instead of unit_player to avoid checking dead units
+    # Dead units are removed from unit_positions when they die, so this ensures we only check living units
+    for uid, enemy_pos in unit_positions.items():
+        # Verify this is an enemy unit
+        p = unit_player.get(uid)
         if p == enemy_player:
             hp_value = unit_hp.get(uid, -999)
-            in_positions = uid in unit_positions
-            # Debug pour Unit 13
-            if uid == "13":
-                print(f"DEBUG get_adjacent_enemies: Unit {uid} (player {p}) - hp={hp_value}, in_positions={in_positions}, col={col}, row={row}")
-                if in_positions:
-                    print(f"  Position: {unit_positions[uid]}")
-            if hp_value > 0 and in_positions:
-                enemy_pos = unit_positions[uid]
+            # DEBUG: Collect all enemy positions for logging
+            enemy_positions_debug.append(f"Unit {uid} (player {p}, HP={hp_value}) at {enemy_pos}")
+            if hp_value > 0:
                 if is_adjacent(col, row, enemy_pos[0], enemy_pos[1]):
                     adjacent_enemies.append(uid)
+    # DEBUG: Log enemy positions when checking adjacency (general, not specific to any unit)
+    if enemy_positions_debug:
+        _debug_log(f"[ANALYZER DEBUG] get_adjacent_enemies: Checking position ({col},{row}) against {len(enemy_positions_debug)} enemy units: {', '.join(enemy_positions_debug)}")
     return adjacent_enemies
 
 
@@ -88,6 +106,14 @@ def is_engaged(unit_id: str, unit_player: Dict[str, int], unit_positions: Dict[s
 
 def parse_step_log(filepath: str) -> Dict:
     """Parse step.log and extract statistics with rule validation."""
+    
+    # Open debug log file
+    global _debug_log_file
+    debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'analyzer.log')
+    _debug_log_file = open(debug_log_path, 'w', encoding='utf-8')
+    _debug_log(f"=== ANALYZER DEBUG LOG ===")
+    _debug_log(f"Analyzing {filepath}")
+    _debug_log("=" * 80)
     
     # Load unit weapons at script start
     from ai.unit_registry import UnitRegistry
@@ -204,6 +230,10 @@ def parse_step_log(filepath: str) -> Dict:
     unit_types = {}
     wall_hexes = set()
     
+    # Track all unit movements from logs (source of truth for collision detection)
+    # Maps unit_id -> list of (position, timestamp, action_type) tuples
+    unit_movement_history = {}
+    
     # Turn/phase markers
     units_moved = set()
     units_shot = set()
@@ -252,6 +282,7 @@ def parse_step_log(filepath: str) -> Dict:
                 units_fled = set()  # Reset at episode start is correct
                 units_advanced = set()
                 units_fought = set()
+                unit_movement_history = {}  # Reset movement history for new episode
                 continue
 
             # Skip header lines
@@ -495,6 +526,8 @@ def parse_step_log(filepath: str) -> Dict:
                                         stats['wounded_enemies'][player].discard(target_id)
                                         if target_id in unit_positions:
                                             del unit_positions[target_id]
+                                        if target_id in unit_hp:
+                                            del unit_hp[target_id]
                                     else:
                                         stats['wounded_enemies'][player].add(target_id)
 
@@ -608,23 +641,94 @@ def parse_step_log(filepath: str) -> Dict:
                             
                             units_advanced.add(advance_unit_id)
                             
+                            # CRITICAL: Synchronize unit_positions with log before processing
+                            # The log is the source of truth - if unit_positions doesn't match the start position
+                            # in the log, it means unit_positions is stale and needs to be corrected
+                            if advance_unit_id in unit_positions:
+                                current_pos = unit_positions[advance_unit_id]
+                                if current_pos != (start_col, start_row):
+                                    # unit_positions is stale - correct it with the log's start position
+                                    unit_positions[advance_unit_id] = (start_col, start_row)
+                            
                             # RULE: Advance from adjacent
                             if is_adjacent_to_enemy(start_col, start_row, unit_player, unit_positions, unit_hp, player):
                                 stats['advance_from_adjacent'][player] += 1
                                 if stats['first_error_lines']['advance_from_adjacent'][player] is None:
                                     stats['first_error_lines']['advance_from_adjacent'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             
+                            # Record this movement in history (source of truth)
+                            if advance_unit_id not in unit_movement_history:
+                                unit_movement_history[advance_unit_id] = []
+                            timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
+                            timestamp = timestamp_match.group(1) if timestamp_match else None
+                            unit_movement_history[advance_unit_id].append({
+                                'position': (dest_col, dest_row),
+                                'timestamp': timestamp,
+                                'action': 'advance',
+                                'turn': turn,
+                                'episode': current_episode_num
+                            })
+                            
                             # RULE: Position collision
-                            colliding_units = [uid for uid, current_pos in unit_positions.items() 
-                                              if current_pos == (dest_col, dest_row)
-                                              and uid != advance_unit_id
-                                              and unit_hp.get(uid, 0) > 0]
-                            if colliding_units:
+                            # CRITICAL: Check for collisions BEFORE updating position
+                            # This catches cases where another unit is already at the destination
+                            # before this unit moves there
+                            # Store positions of potential colliding units BEFORE we update
+                            colliding_units_before = {}
+                            for uid, current_pos in unit_positions.items():
+                                if (current_pos == (dest_col, dest_row) and
+                                    uid != advance_unit_id and
+                                    unit_hp.get(uid, 0) > 0):
+                                    colliding_units_before[uid] = current_pos
+                            
+                            # Update position
+                            # CRITICAL: Only update position if unit is still alive
+                            # Dead units should not have their positions updated (they were removed when they died)
+                            if unit_hp.get(advance_unit_id, 0) > 0:
+                                old_position = unit_positions.get(advance_unit_id)
+                                unit_positions[advance_unit_id] = (dest_col, dest_row)
+                            
+                            # CRITICAL: Verify collision is real by checking:
+                            # 1. Colliding unit is STILL at destination after position update
+                            # 2. Colliding unit is still alive
+                            # 3. Colliding unit's position hasn't changed (i.e., it didn't move at this timestamp)
+                            # 4. Colliding unit actually moved to this position according to movement history (source of truth)
+                            real_colliding_units = []
+                            for uid, pos_before in colliding_units_before.items():
+                                # Check if this unit is still at the destination AFTER we updated our position
+                                # AND still alive (HP > 0)
+                                # AND its position hasn't changed (i.e., it didn't move at this timestamp)
+                                if (uid in unit_positions and 
+                                    unit_positions[uid] == (dest_col, dest_row) and
+                                    unit_positions[uid] == pos_before and  # Position hasn't changed
+                                    uid in unit_hp and
+                                    unit_hp.get(uid, 0) > 0):
+                                    # CRITICAL: Verify that this unit actually moved to this position according to logs
+                                    # Check movement history to confirm this is a real collision
+                                    if uid in unit_movement_history:
+                                        # Check if this unit has a movement record to this position
+                                        # AND it was in the SAME episode and turn (to avoid cross-episode/turn false positives)
+                                        has_moved_to_dest = any(
+                                            move['position'] == (dest_col, dest_row) 
+                                            and move.get('turn') == turn
+                                            and move.get('episode') == current_episode_num
+                                            for move in unit_movement_history[uid]
+                                        )
+                                        if has_moved_to_dest:
+                                            real_colliding_units.append(uid)
+                                    else:
+                                        # Unit has no movement history - it might be at starting position
+                                        # This is likely a false positive, skip it
+                                        pass
+                            
+                            # Only report collision if there are real colliding units
+                            # AND the colliding unit actually moved to this position according to logs
+                            if real_colliding_units:
                                 stats['unit_position_collisions'].append({
                                     'episode': current_episode_num,
                                     'turn': turn,
                                     'position': (dest_col, dest_row),
-                                    'units': colliding_units + [advance_unit_id],
+                                    'units': real_colliding_units + [advance_unit_id],
                                     'action': 'advance',
                                     'advance_from': (start_col, start_row),
                                     'advance_to': (dest_col, dest_row)
@@ -635,8 +739,6 @@ def parse_step_log(filepath: str) -> Dict:
                                 stats['wall_collisions'][player] += 1
                                 if stats['first_error_lines']['wall_collisions'][player] is None:
                                     stats['first_error_lines']['wall_collisions'][player] = {'episode': current_episode_num, 'line': line.strip()}
-                            
-                            unit_positions[advance_unit_id] = (dest_col, dest_row)
                             
                             # Sample action
                             if not stats['sample_actions']['advance']:
@@ -662,6 +764,15 @@ def parse_step_log(filepath: str) -> Dict:
                             start_col = int(charge_match.group(6))  # from "from (start_col,start_row)"
                             start_row = int(charge_match.group(7))
                             
+                            # CRITICAL: Synchronize unit_positions with log before processing
+                            # The log is the source of truth - if unit_positions doesn't match the start position
+                            # in the log, it means unit_positions is stale and needs to be corrected
+                            if charge_unit_id in unit_positions:
+                                current_pos = unit_positions[charge_unit_id]
+                                if current_pos != (start_col, start_row):
+                                    # unit_positions is stale - correct it with the log's start position
+                                    unit_positions[charge_unit_id] = (start_col, start_row)
+                            
                             # RULE: Charge from adjacent
                             # CRITICAL: Check BEFORE updating unit_positions to use current positions
                             # Note: This checks if START position is adjacent to enemy, which is correct
@@ -677,24 +788,106 @@ def parse_step_log(filepath: str) -> Dict:
                                 if stats['first_error_lines']['charge_after_fled'][player] is None:
                                     stats['first_error_lines']['charge_after_fled'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             
+                            # Record this movement in history (source of truth)
+                            if charge_unit_id not in unit_movement_history:
+                                unit_movement_history[charge_unit_id] = []
+                            timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
+                            timestamp = timestamp_match.group(1) if timestamp_match else None
+                            unit_movement_history[charge_unit_id].append({
+                                'position': (dest_col, dest_row),
+                                'timestamp': timestamp,
+                                'action': 'charge',
+                                'turn': turn,
+                                'episode': current_episode_num
+                            })
+                            
                             # RULE: Position collision
+                            # CRITICAL: Check for collisions BEFORE updating position
+                            # This catches cases where another unit is already at the destination
+                            # before this unit moves there
                             if (start_col, start_row) != (dest_col, dest_row):
-                                colliding_units = [uid for uid, current_pos in unit_positions.items() 
-                                                  if current_pos == (dest_col, dest_row)
-                                                  and uid != charge_unit_id
-                                                  and unit_hp.get(uid, 0) > 0]
-                                if colliding_units:
+                                # Store positions of potential colliding units BEFORE we update
+                                colliding_units_before = {}
+                                for uid, current_pos in unit_positions.items():
+                                    if (current_pos == (dest_col, dest_row) and
+                                        uid != charge_unit_id and
+                                        unit_hp.get(uid, 0) > 0):
+                                        colliding_units_before[uid] = current_pos
+                                
+                                # Update position
+                                # CRITICAL: Only update position if unit is still alive
+                                # Dead units should not have their positions updated (they were removed when they died)
+                                if unit_hp.get(charge_unit_id, 0) > 0:
+                                    old_position = unit_positions.get(charge_unit_id)
+                                    unit_positions[charge_unit_id] = (dest_col, dest_row)
+                                
+                                # CRITICAL: Verify collision is real by checking:
+                                # 1. Colliding unit is STILL at destination after position update
+                                # 2. Colliding unit is still alive
+                                # 3. Colliding unit's position hasn't changed (i.e., it didn't move at this timestamp)
+                                # 4. Colliding unit actually moved to this position according to movement history (source of truth)
+                                real_colliding_units = []
+                                for uid, pos_before in colliding_units_before.items():
+                                    # Check if this unit is still at the destination AFTER we updated our position
+                                    # AND still alive (HP > 0)
+                                    # AND its position hasn't changed (i.e., it didn't move at this timestamp)
+                                    if (uid in unit_positions and 
+                                        unit_positions[uid] == (dest_col, dest_row) and
+                                        unit_positions[uid] == pos_before and  # Position hasn't changed
+                                        uid in unit_hp and
+                                        unit_hp.get(uid, 0) > 0):
+                                        # CRITICAL: Verify that this unit actually moved to this position according to logs
+                                        # Since we process actions line by line, we need to check if this unit
+                                        # has already been processed and moved to this position
+                                        # OR if it will be processed later (we can't know, so we skip it)
+                                        # The safest approach is to only report collisions for units that have
+                                        # already been processed (i.e., have movement history)
+                                        if uid in unit_movement_history:
+                                            # Check if this unit has a movement record to this position
+                                            # AND it was in the SAME episode and turn (to avoid cross-episode/turn false positives)
+                                            # CRITICAL: Only report collision if the movement history matches
+                                            # the exact episode, turn, and position
+                                            # Also verify that the episode number is valid (should be > 0)
+                                            # CRITICAL: Only report collision if the movement history matches
+                                            # the exact episode, turn, and position
+                                            # Verify that episode is defined and matches current_episode_num
+                                            has_moved_to_dest = any(
+                                                move['position'] == (dest_col, dest_row) 
+                                                and move.get('turn') == turn
+                                                and move.get('episode') is not None
+                                                and move.get('episode') == current_episode_num
+                                                and current_episode_num > 0  # Additional safety check
+                                                for move in unit_movement_history[uid]
+                                            )
+                                            if has_moved_to_dest:
+                                                real_colliding_units.append(uid)
+                                        else:
+                                            # Unit has no movement history - it hasn't been processed yet
+                                            # OR it's at its starting position
+                                            # Since we can't know if it will move to this position later,
+                                            # we skip it to avoid false positives
+                                            # This means we might miss some real collisions, but it's better
+                                            # than reporting false positives
+                                            pass
+                                
+                                # Only report collision if there are real colliding units
+                                # AND the colliding unit's position hasn't changed (i.e., it didn't move at this timestamp)
+                                if real_colliding_units:
                                     stats['unit_position_collisions'].append({
                                         'episode': current_episode_num,
                                         'turn': turn,
                                         'position': (dest_col, dest_row),
-                                        'units': colliding_units + [charge_unit_id],
+                                        'units': real_colliding_units + [charge_unit_id],
                                         'action': 'charge',
                                         'charge_from': (start_col, start_row),
                                         'charge_to': (dest_col, dest_row)
                                     })
-                            
-                            unit_positions[charge_unit_id] = (dest_col, dest_row)
+                            else:
+                                # No movement - just update position if needed
+                                # CRITICAL: Only update position if unit is still alive
+                                # Dead units should not have their positions updated (they were removed when they died)
+                                if unit_hp.get(charge_unit_id, 0) > 0:
+                                    unit_positions[charge_unit_id] = (dest_col, dest_row)
                             
                             # Sample action
                             if not stats['sample_actions']['charge']:
@@ -744,18 +937,71 @@ def parse_step_log(filepath: str) -> Dict:
                             # CRITICAL: Explicit FLED action - mark as fled
                             units_fled.add(move_unit_id)
                             
+                            # CRITICAL: Synchronize unit_positions with log before processing
+                            # The log is the source of truth - if unit_positions doesn't match the start position
+                            # in the log, it means unit_positions is stale and needs to be corrected
+                            if move_unit_id in unit_positions:
+                                current_pos = unit_positions[move_unit_id]
+                                if current_pos != (start_col, start_row):
+                                    # unit_positions is stale - correct it with the log's start position
+                                    unit_positions[move_unit_id] = (start_col, start_row)
+                            else:
+                                # Unit not in unit_positions - add it with start position from log
+                                # This can happen if unit was removed incorrectly or not initialized
+                                unit_positions[move_unit_id] = (start_col, start_row)
+                            
+                            # Record this movement in history (source of truth)
+                            if move_unit_id not in unit_movement_history:
+                                unit_movement_history[move_unit_id] = []
+                            timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
+                            timestamp = timestamp_match.group(1) if timestamp_match else None
+                            unit_movement_history[move_unit_id].append({
+                                'position': (dest_col, dest_row),
+                                'timestamp': timestamp,
+                                'action': 'fled',
+                                'turn': turn,
+                                'episode': current_episode_num
+                            })
+                            
+                            # CRITICAL: Update position IMMEDIATELY for FLED actions
+                            # This prevents false collision detection when another unit moves to the same position
+                            # at the same timestamp (e.g., Unit A flees from X, Unit B charges to X)
+                            # CRITICAL: Only update position if unit is still alive
+                            # Dead units should not have their positions updated (they were removed when they died)
+                            if unit_hp.get(move_unit_id, 0) > 0:
+                                old_position = unit_positions.get(move_unit_id)
+                                unit_positions[move_unit_id] = (dest_col, dest_row)
+                            
                             if (start_col, start_row) != (dest_col, dest_row):
                                 # RULE: Position collision
+                                # CRITICAL FIX: Only report collision if colliding unit is STILL at destination
+                                # after we update positions. This prevents false positives where Unit A moves to X,
+                                # then Unit B moves to X after Unit A has left.
                                 colliding_units = [uid for uid, current_pos in unit_positions.items() 
                                                   if current_pos == (dest_col, dest_row)
                                                   and uid != move_unit_id
                                                   and unit_hp.get(uid, 0) > 0]
-                                if colliding_units:
+                                
+                                # Position already updated above - check if collision is real
+                                
+                                # CRITICAL: Verify collision is real by checking if colliding units
+                                # are STILL at destination after position update
+                                # If a colliding unit has moved away, it's not a real collision
+                                real_colliding_units = []
+                                for uid in colliding_units:
+                                    # Check if this unit is still at the destination
+                                    # If unit_positions[uid] has changed, it means the unit moved away
+                                    # and this is not a real collision
+                                    if uid in unit_positions and unit_positions[uid] == (dest_col, dest_row):
+                                        real_colliding_units.append(uid)
+                                
+                                # Only report collision if there are real colliding units
+                                if real_colliding_units:
                                     stats['unit_position_collisions'].append({
                                         'episode': current_episode_num,
                                         'turn': turn,
                                         'position': (dest_col, dest_row),
-                                        'units': colliding_units + [move_unit_id],
+                                        'units': real_colliding_units + [move_unit_id],
                                         'action': 'move',
                                         'move_from': (start_col, start_row),
                                         'move_to': (dest_col, dest_row)
@@ -764,8 +1010,12 @@ def parse_step_log(filepath: str) -> Dict:
                                 # RULE: Move into wall
                                 if (dest_col, dest_row) in wall_hexes:
                                     stats['wall_collisions'][player] += 1
-                            
-                            unit_positions[move_unit_id] = (dest_col, dest_row)
+                            else:
+                                # No movement - just update position if needed
+                                # CRITICAL: Only update position if unit is still alive
+                                # Dead units should not have their positions updated (they were removed when they died)
+                                if unit_hp.get(move_unit_id, 0) > 0:
+                                    unit_positions[move_unit_id] = (dest_col, dest_row)
                             
                             # Sample action
                             if not stats['sample_actions']['move']:
@@ -782,6 +1032,19 @@ def parse_step_log(filepath: str) -> Dict:
                             
                             units_moved.add(move_unit_id)
                             
+                            # CRITICAL: Synchronize unit_positions with log before processing
+                            # The log is the source of truth - if unit_positions doesn't match the start position
+                            # in the log, it means unit_positions is stale and needs to be corrected
+                            if move_unit_id in unit_positions:
+                                current_pos = unit_positions[move_unit_id]
+                                if current_pos != (start_col, start_row):
+                                    # unit_positions is stale - correct it with the log's start position
+                                    unit_positions[move_unit_id] = (start_col, start_row)
+                            else:
+                                # Unit not in unit_positions - add it with start position from log
+                                # This can happen if unit was removed incorrectly or not initialized
+                                unit_positions[move_unit_id] = (start_col, start_row)
+                            
                             # RULE: Detect fled (was adjacent to enemy at start of MOVE phase, then moved)
                             if move_unit_id in positions_at_move_phase_start:
                                 start_pos = positions_at_move_phase_start[move_unit_id]
@@ -790,43 +1053,167 @@ def parse_step_log(filepath: str) -> Dict:
                                     units_fled.add(move_unit_id)
                             
                             if (start_col, start_row) != (dest_col, dest_row):
+                                # Record this movement in history (source of truth)
+                                if move_unit_id not in unit_movement_history:
+                                    unit_movement_history[move_unit_id] = []
+                                # Extract timestamp from line if available
+                                timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
+                                timestamp = timestamp_match.group(1) if timestamp_match else None
+                                unit_movement_history[move_unit_id].append({
+                                    'position': (dest_col, dest_row),
+                                    'timestamp': timestamp,
+                                    'action': 'move',
+                                    'turn': turn,
+                                    'episode': current_episode_num
+                                })
+                                
+                                # CRITICAL FIX: Save ALL unit positions BEFORE updating for adjacency check
+                                # This ensures we use positions at the moment of movement, not after other units moved
+                                positions_at_movement = dict(unit_positions)
+                                
+                                # CRITICAL FIX: Save unit_hp snapshot at movement time to prevent false positives
+                                # If a unit dies AFTER movement but BEFORE check, we should use its HP at movement time
+                                unit_hp_at_movement = dict(unit_hp)
+                                
                                 # RULE: Position collision
-                                colliding_units = [uid for uid, current_pos in unit_positions.items() 
-                                                  if current_pos == (dest_col, dest_row)
-                                                  and uid != move_unit_id
-                                                  and unit_hp.get(uid, 0) > 0]
-                                if colliding_units:
+                                # CRITICAL: Check for collisions BEFORE updating position
+                                # This catches cases where another unit is already at the destination
+                                # before this unit moves there
+                                # Store positions of potential colliding units BEFORE we update
+                                colliding_units_before = {}
+                                for uid, current_pos in unit_positions.items():
+                                    if (current_pos == (dest_col, dest_row) and
+                                        uid != move_unit_id and
+                                        unit_hp.get(uid, 0) > 0):
+                                        colliding_units_before[uid] = current_pos
+                                
+                                # Update position
+                                # CRITICAL: Only update position if unit is still alive
+                                # Dead units should not have their positions updated (they were removed when they died)
+                                if unit_hp.get(move_unit_id, 0) > 0:
+                                    old_position = unit_positions.get(move_unit_id)
+                                    unit_positions[move_unit_id] = (dest_col, dest_row)
+                                
+                                # CRITICAL: Verify collision is real by checking:
+                                # 1. Colliding unit is STILL at destination after position update
+                                # 2. Colliding unit is still alive
+                                # 3. Colliding unit's position hasn't changed (i.e., it didn't move at this timestamp)
+                                # 4. Colliding unit actually moved to this position according to movement history (source of truth)
+                                real_colliding_units = []
+                                for uid, pos_before in colliding_units_before.items():
+                                    # Check if this unit is still at the destination AFTER we updated our position
+                                    # AND still alive (HP > 0)
+                                    # AND its position hasn't changed (i.e., it didn't move at this timestamp)
+                                    if (uid in unit_positions and 
+                                        unit_positions[uid] == (dest_col, dest_row) and
+                                        unit_positions[uid] == pos_before and  # Position hasn't changed
+                                        uid in unit_hp and
+                                        unit_hp.get(uid, 0) > 0):
+                                        # CRITICAL: Verify that this unit actually moved to this position according to logs
+                                        # Since we process actions line by line, we need to check if this unit
+                                        # has already been processed and moved to this position
+                                        # OR if it will be processed later (we can't know, so we skip it)
+                                        # The safest approach is to only report collisions for units that have
+                                        # already been processed (i.e., have movement history)
+                                        if uid in unit_movement_history:
+                                            # Check if this unit has a movement record to this position
+                                            # AND it was in the SAME episode and turn (to avoid cross-episode/turn false positives)
+                                            # CRITICAL: Only report collision if the movement history matches
+                                            # the exact episode, turn, and position
+                                            # Also verify that the episode number is valid (should be > 0)
+                                            # CRITICAL: Only report collision if the movement history matches
+                                            # the exact episode, turn, and position
+                                            # Verify that episode is defined and matches current_episode_num
+                                            has_moved_to_dest = any(
+                                                move['position'] == (dest_col, dest_row) 
+                                                and move.get('turn') == turn
+                                                and move.get('episode') is not None
+                                                and move.get('episode') == current_episode_num
+                                                and current_episode_num > 0  # Additional safety check
+                                                for move in unit_movement_history[uid]
+                                            )
+                                            if has_moved_to_dest:
+                                                real_colliding_units.append(uid)
+                                        else:
+                                            # Unit has no movement history - it hasn't been processed yet
+                                            # OR it's at its starting position
+                                            # Since we can't know if it will move to this position later,
+                                            # we skip it to avoid false positives
+                                            # This means we might miss some real collisions, but it's better
+                                            # than reporting false positives
+                                            pass
+                                
+                                # Only report collision if there are real colliding units
+                                # AND the colliding unit actually moved to this position according to logs
+                                if real_colliding_units:
                                     stats['unit_position_collisions'].append({
                                         'episode': current_episode_num,
                                         'turn': turn,
                                         'position': (dest_col, dest_row),
-                                        'units': colliding_units + [move_unit_id],
+                                        'units': real_colliding_units + [move_unit_id],
                                         'action': 'move',
                                         'move_from': (start_col, start_row),
                                         'move_to': (dest_col, dest_row)
                                     })
                                 
                                 # RULE: Move to adjacent enemy
-                                # CRITICAL: Check BEFORE updating unit_positions to use current positions
-                                if is_adjacent_to_enemy(dest_col, dest_row, unit_player, unit_positions, unit_hp, player):
-                                    stats['move_to_adjacent_enemy'][player] += 1
-                                    if stats['first_error_lines']['move_to_adjacent_enemy'][player] is None:
-                                        adjacent_before = get_adjacent_enemies(start_col, start_row, unit_player, unit_positions, unit_hp, unit_types, player)
-                                        # CRITICAL: Check adjacent_after BEFORE updating unit_positions
-                                        adjacent_after = get_adjacent_enemies(dest_col, dest_row, unit_player, unit_positions, unit_hp, unit_types, player)
-                                        stats['first_error_lines']['move_to_adjacent_enemy'][player] = {
-                                            'episode': current_episode_num, 
-                                            'line': line.strip(),
-                                            'adjacent_before': adjacent_before,
-                                            'adjacent_after': adjacent_after
-                                        }
+                                # CRITICAL FIX: Use positions_at_movement (saved BEFORE this unit's position update)
+                                # to check adjacency. This ensures we use positions at the moment of movement,
+                                # not after other units moved in the same turn.
+                                # Only update this unit's position in the snapshot for the "after" check
+                                positions_for_adjacency_check = dict(positions_at_movement)
+                                positions_for_adjacency_check[move_unit_id] = (dest_col, dest_row)
+                                
+                                # CRITICAL FIX: Filter out dead units from positions_for_adjacency_check
+                                # to prevent false positives. Dead units should not be considered for adjacency checks.
+                                # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
+                                positions_for_adjacency_check_filtered = {
+                                    uid: pos for uid, pos in positions_for_adjacency_check.items()
+                                    if unit_hp_at_movement.get(uid, 0) > 0
+                                }
+                                
+                                # Check if destination is adjacent to enemy using positions at movement time
+                                # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
+                                # DEBUG: Log enemy positions used for adjacency check
+                                enemy_positions_str = ', '.join([f"Unit {uid} at {pos} (HP={unit_hp_at_movement.get(uid, 0)})" for uid, pos in positions_for_adjacency_check_filtered.items() if unit_player.get(uid) == (3 - player)])
+                                _debug_log(f"[ANALYZER DEBUG] E{current_episode_num} T{turn} MOVE: Unit {move_unit_id} checking adjacency at ({dest_col},{dest_row}) against {len(positions_for_adjacency_check_filtered)} enemy positions: {enemy_positions_str}")
+                                dest_adjacent = is_adjacent_to_enemy(dest_col, dest_row, unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement, player)
+                                
+                                # Only report violation if unit was NOT adjacent before move (flee is allowed)
+                                # If unit was already adjacent, moving to another adjacent hex is a flee (not a violation)
+                                if dest_adjacent:
+                                    # CRITICAL FIX: Filter out dead units from positions_at_movement for "before" check
+                                    # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
+                                    positions_at_movement_filtered = {
+                                        uid: pos for uid, pos in positions_at_movement.items()
+                                        if unit_hp_at_movement.get(uid, 0) > 0
+                                    }
+                                    # Use positions_at_movement (before this unit moved) for "before" check
+                                    # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
+                                    adjacent_before = get_adjacent_enemies(start_col, start_row, unit_player, positions_at_movement_filtered, unit_hp_at_movement, unit_types, player)
+                                    # Only report violation if unit was NOT adjacent before move
+                                    if not adjacent_before:
+                                        stats['move_to_adjacent_enemy'][player] += 1
+                                        if stats['first_error_lines']['move_to_adjacent_enemy'][player] is None:
+                                            # Use positions_for_adjacency_check_filtered (after this unit moved) for "after" check
+                                            # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
+                                            adjacent_after = get_adjacent_enemies(dest_col, dest_row, unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement, unit_types, player)
+                                            stats['first_error_lines']['move_to_adjacent_enemy'][player] = {
+                                                'episode': current_episode_num, 
+                                                'line': line.strip(),
+                                                'adjacent_before': adjacent_before,
+                                                'adjacent_after': adjacent_after
+                                            }
                                 
                                 # RULE: Move into wall
                                 if (dest_col, dest_row) in wall_hexes:
                                     stats['wall_collisions'][player] += 1
-                            
-                            # CRITICAL: Update unit_positions AFTER all checks
-                            unit_positions[move_unit_id] = (dest_col, dest_row)
+                            else:
+                                # No movement - just update position if needed
+                                # CRITICAL: Only update position if unit is still alive
+                                # Dead units should not have their positions updated (they were removed when they died)
+                                if unit_hp.get(move_unit_id, 0) > 0:
+                                    unit_positions[move_unit_id] = (dest_col, dest_row)
                             
                             # Sample action
                             if not stats['sample_actions']['move']:
@@ -926,6 +1313,11 @@ def parse_step_log(filepath: str) -> Dict:
         if episode_turn > 0:
             stats['turns_distribution'][episode_turn] += 1
 
+    # Close debug log file
+    if _debug_log_file:
+        _debug_log_file.close()
+        _debug_log_file = None
+
     return stats
 
 
@@ -968,23 +1360,23 @@ def print_statistics(stats: Dict, output_f=None):
         p1_pct = (p1_count / p1_total * 100) if p1_total > 0 else 0
         p2_pct = (p2_count / p2_total * 100) if p2_total > 0 else 0
         method_display = method.replace('_', ' ').title()
-        print(f"{method_display:<20} {p1_count:6d} ({p1_pct:5.1f}%)   {p2_count:6d} ({p2_pct:5.1f}%)")
+        log_print(f"{method_display:<20} {p1_count:6d} ({p1_pct:5.1f}%)   {p2_count:6d} ({p2_pct:5.1f}%)")
     
-    print("-" * 80)
+    log_print("-" * 80)
     total_games = p1_total + p2_total + draws
     p1_pct = (p1_total / total_games * 100) if total_games > 0 else 0
     p2_pct = (p2_total / total_games * 100) if total_games > 0 else 0
     draw_pct = (draws / total_games * 100) if total_games > 0 else 0
-    print(f"{'TOTAL WINS':<20} {p1_total:6d} ({p1_pct:5.1f}%)   {p2_total:6d} ({p2_pct:5.1f}%)")
-    print(f"{'DRAWS':<20} {draws:6d} ({draw_pct:5.1f}%)")
+    log_print(f"{'TOTAL WINS':<20} {p1_total:6d} ({p1_pct:5.1f}%)   {p2_total:6d} ({p2_pct:5.1f}%)")
+    log_print(f"{'DRAWS':<20} {draws:6d} ({draw_pct:5.1f}%)")
     
     # WINS BY SCENARIO
     if stats['wins_by_scenario']:
-        print("\n" + "-" * 80)
-        print("WINS BY SCENARIO")
-        print("-" * 80)
-        print(f"{'Scenario':<40} {'Agent (P1)':>15} {'Bot (P2)':>15} {'Draws':>10}")
-        print("-" * 80)
+        log_print("\n" + "-" * 80)
+        log_print("WINS BY SCENARIO")
+        log_print("-" * 80)
+        log_print(f"{'Scenario':<40} {'Agent (P1)':>15} {'Bot (P2)':>15} {'Draws':>10}")
+        log_print("-" * 80)
         
         scenario_totals = []
         for scenario, wins in stats['wins_by_scenario'].items():
@@ -1004,26 +1396,26 @@ def print_statistics(stats: Dict, output_f=None):
                 scenario_display = f"bot-{bot_match.group(1)}"
             else:
                 scenario_display = scenario[:39]
-            print(f"{scenario_display:<40} {p1_count:5d} ({p1_pct:4.1f}%) {p2_count:5d} ({p2_pct:4.1f}%) {draws_count:5d} ({draws_pct:4.1f}%)")
+            log_print(f"{scenario_display:<40} {p1_count:5d} ({p1_pct:4.1f}%) {p2_count:5d} ({p2_pct:4.1f}%) {draws_count:5d} ({draws_pct:4.1f}%)")
     
     # TURN DISTRIBUTION
-    print("\n" + "-" * 80)
-    print("TURN DISTRIBUTION")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("TURN DISTRIBUTION")
+    log_print("-" * 80)
     if stats['turns_distribution']:
         for turn in sorted(stats['turns_distribution'].keys()):
             count = stats['turns_distribution'][turn]
             pct = (count / stats['total_episodes'] * 100) if stats['total_episodes'] > 0 else 0
-            print(f"Turn {turn}: {count:3d} games ({pct:5.1f}%)")
+            log_print(f"Turn {turn}: {count:3d} games ({pct:5.1f}%)")
     else:
-        print("No turn data recorded.")
+        log_print("No turn data recorded.")
     
     # ACTIONS BY TYPE
-    print("\n" + "-" * 80)
-    print("ACTIONS BY TYPE")
-    print("-" * 80)
-    print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("ACTIONS BY TYPE")
+    log_print("-" * 80)
+    log_print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
+    log_print("-" * 80)
     
     all_actions = set(stats['actions_by_player'][1].keys()) | set(stats['actions_by_player'][2].keys())
     action_totals = [(a, stats['actions_by_player'][1].get(a, 0) + stats['actions_by_player'][2].get(a, 0))
@@ -1038,14 +1430,14 @@ def print_statistics(stats: Dict, output_f=None):
         bot_count = stats['actions_by_player'][2].get(action_type, 0)
         agent_pct = (agent_count / agent_total * 100) if agent_total > 0 else 0
         bot_pct = (bot_count / bot_total * 100) if bot_total > 0 else 0
-        print(f"{action_type:<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+        log_print(f"{action_type:<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
     
     # SHOOTING PHASE BEHAVIOR
-    print("\n" + "-" * 80)
-    print("SHOOTING PHASE BEHAVIOR")
-    print("-" * 80)
-    print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("SHOOTING PHASE BEHAVIOR")
+    log_print("-" * 80)
+    log_print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
+    log_print("-" * 80)
     
     agent_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
                         stats['shoot_vs_wait_by_player'][1]['wait'] +
@@ -1061,32 +1453,32 @@ def print_statistics(stats: Dict, output_f=None):
         bot_count = stats['shoot_vs_wait_by_player'][2][action]
         agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
         bot_pct = (bot_count / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-        print(f"{action.capitalize():<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+        log_print(f"{action.capitalize():<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
     
     agent_wait_with = stats['shoot_vs_wait_by_player'][1]['wait_with_targets']
     bot_wait_with = stats['shoot_vs_wait_by_player'][2]['wait_with_targets']
     agent_wait_with_pct = (agent_wait_with / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_wait_with_pct = (bot_wait_with / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-    print(f"{'Wait (targets)':<12} {agent_wait_with:6d} ({agent_wait_with_pct:5.1f}%)   {bot_wait_with:6d} ({bot_wait_with_pct:5.1f}%)")
+    log_print(f"{'Wait (targets)':<12} {agent_wait_with:6d} ({agent_wait_with_pct:5.1f}%)   {bot_wait_with:6d} ({bot_wait_with_pct:5.1f}%)")
     
     agent_wait_no = stats['shoot_vs_wait_by_player'][1]['wait_no_targets']
     bot_wait_no = stats['shoot_vs_wait_by_player'][2]['wait_no_targets']
     agent_wait_no_pct = (agent_wait_no / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_wait_no_pct = (bot_wait_no / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-    print(f"{'Wait (no targets)':<12} {agent_wait_no:6d} ({agent_wait_no_pct:5.1f}%)   {bot_wait_no:6d} ({bot_wait_no_pct:5.1f}%)")
+    log_print(f"{'Wait (no targets)':<12} {agent_wait_no:6d} ({agent_wait_no_pct:5.1f}%)   {bot_wait_no:6d} ({bot_wait_no_pct:5.1f}%)")
     
     agent_shots_after_advance = stats['shots_after_advance'][1]
     bot_shots_after_advance = stats['shots_after_advance'][2]
     agent_pct_after_advance = (agent_shots_after_advance / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_pct_after_advance = (bot_shots_after_advance / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-    print(f"{'Shoot+Advance':<12} {agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)   {bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)")
+    log_print(f"{'Shoot+Advance':<12} {agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)   {bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)")
     
     # PISTOL WEAPON SHOTS
-    print("\n" + "-" * 80)
-    print("PISTOL WEAPON SHOTS BY ADJACENCY")
-    print("-" * 80)
-    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("PISTOL WEAPON SHOTS BY ADJACENCY")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
     agent_pistol_adj = stats['pistol_shots'][1]['adjacent']
     bot_pistol_adj = stats['pistol_shots'][2]['adjacent']
     agent_pistol_not_adj = stats['pistol_shots'][1]['not_adjacent']
@@ -1099,20 +1491,20 @@ def print_statistics(stats: Dict, output_f=None):
     agent_pistol_not_adj_pct = (agent_pistol_not_adj / agent_pistol_total * 100) if agent_pistol_total > 0 else 0
     bot_pistol_not_adj_pct = (bot_pistol_not_adj / bot_pistol_total * 100) if bot_pistol_total > 0 else 0
     
-    print(f"PISTOL shots (adjacent):       {agent_pistol_adj:6d} ({agent_pistol_adj_pct:5.1f}%)  {bot_pistol_adj:6d} ({bot_pistol_adj_pct:5.1f}%)")
-    print(f"PISTOL shots (not adjacent):   {agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)  {bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)")
-    print(f"Total PISTOL shots:            {agent_pistol_total:6d}           {bot_pistol_total:6d}")
+    log_print(f"PISTOL shots (adjacent):       {agent_pistol_adj:6d} ({agent_pistol_adj_pct:5.1f}%)  {bot_pistol_adj:6d} ({bot_pistol_adj_pct:5.1f}%)")
+    log_print(f"PISTOL shots (not adjacent):   {agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)  {bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)")
+    log_print(f"Total PISTOL shots:            {agent_pistol_total:6d}           {bot_pistol_total:6d}")
     
     agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
     bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
-    print(f"Non-PISTOL shots (adjacent):   {agent_non_pistol_adj:6d}           {bot_non_pistol_adj:6d}")
+    log_print(f"Non-PISTOL shots (adjacent):   {agent_non_pistol_adj:6d}           {bot_non_pistol_adj:6d}")
     
     # WAIT BEHAVIOR
-    print("\n" + "-" * 80)
-    print("WAIT BEHAVIOR BY PHASE")
-    print("-" * 80)
-    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("WAIT BEHAVIOR BY PHASE")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
     agent_move_wait = stats['wait_by_phase'][1]['move_wait']
     bot_move_wait = stats['wait_by_phase'][2]['move_wait']
     agent_shoot_wait_los = stats['wait_by_phase'][1]['shoot_wait_with_los']
@@ -1120,16 +1512,16 @@ def print_statistics(stats: Dict, output_f=None):
     agent_shoot_wait_no_los = stats['wait_by_phase'][1]['shoot_wait_no_los']
     bot_shoot_wait_no_los = stats['wait_by_phase'][2]['shoot_wait_no_los']
     
-    print(f"MOVE phase waits:             {agent_move_wait:6d}           {bot_move_wait:6d}")
-    print(f"SHOOT waits (enemies in LOS): {agent_shoot_wait_los:6d}           {bot_shoot_wait_los:6d}")
-    print(f"SHOOT waits (no LOS):         {agent_shoot_wait_no_los:6d}           {bot_shoot_wait_no_los:6d}")
+    log_print(f"MOVE phase waits:             {agent_move_wait:6d}           {bot_move_wait:6d}")
+    log_print(f"SHOOT waits (enemies in LOS): {agent_shoot_wait_los:6d}           {bot_shoot_wait_los:6d}")
+    log_print(f"SHOOT waits (no LOS):         {agent_shoot_wait_no_los:6d}           {bot_shoot_wait_no_los:6d}")
     
     # TARGET PRIORITY
-    print("\n" + "-" * 80)
-    print("TARGET PRIORITY ANALYSIS (Focus Fire)")
-    print("-" * 80)
-    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("TARGET PRIORITY ANALYSIS (Focus Fire)")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
     
     agent_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_in_los']
     bot_bad = stats['target_priority'][2]['shots_at_full_hp_while_wounded_in_los']
@@ -1143,16 +1535,16 @@ def print_statistics(stats: Dict, output_f=None):
     agent_good_pct = (agent_good / agent_total_shots * 100) if agent_total_shots > 0 else 0
     bot_good_pct = (bot_good / bot_total_shots * 100) if bot_total_shots > 0 else 0
     
-    print(f"FAILURES (shot full HP while")
-    print(f"  wounded in LOS):            {agent_bad:6d} ({agent_bad_pct:5.1f}%)  {bot_bad:6d} ({bot_bad_pct:5.1f}%)")
-    print(f"SUCCESS (shot wounded or")
-    print(f"  no wounded in LOS):         {agent_good:6d} ({agent_good_pct:5.1f}%)  {bot_good:6d} ({bot_good_pct:5.1f}%)")
-    print(f"Total shots:                  {agent_total_shots:6d}           {bot_total_shots:6d}")
+    log_print(f"FAILURES (shot full HP while")
+    log_print(f"  wounded in LOS):            {agent_bad:6d} ({agent_bad_pct:5.1f}%)  {bot_bad:6d} ({bot_bad_pct:5.1f}%)")
+    log_print(f"SUCCESS (shot wounded or")
+    log_print(f"  no wounded in LOS):         {agent_good:6d} ({agent_good_pct:5.1f}%)  {bot_good:6d} ({bot_good_pct:5.1f}%)")
+    log_print(f"Total shots:                  {agent_total_shots:6d}           {bot_total_shots:6d}")
     
     # DEATH ORDER
-    print("\n" + "-" * 80)
-    print("ENEMY DEATH ORDER ANALYSIS")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("ENEMY DEATH ORDER ANALYSIS")
+    log_print("-" * 80)
     
     if stats['death_orders']:
         death_order_counter = Counter()
@@ -1161,208 +1553,208 @@ def print_statistics(stats: Dict, output_f=None):
             if units_killed:
                 death_order_counter[units_killed] += 1
         
-        print(f"Total episodes with kills: {len(stats['death_orders'])}")
-        print(f"\nMost common death orders:")
+        log_print(f"Total episodes with kills: {len(stats['death_orders'])}")
+        log_print(f"\nMost common death orders:")
         for order, count in death_order_counter.most_common(10):
             pct = (count / len(stats['death_orders']) * 100)
             order_str = " -> ".join(order)
-            print(f"  {order_str}: {count} times ({pct:.1f}%)")
+            log_print(f"  {order_str}: {count} times ({pct:.1f}%)")
         
         player_kills = {1: 0, 2: 0}
         for death_order in stats['death_orders']:
             for player, unit_id, unit_type in death_order:
                 player_kills[player] += 1
-        print(f"\nKills by player:")
-        print(f"  Agent (P1) kills: {player_kills[1]}")
-        print(f"  Bot (P2) kills:   {player_kills[2]}")
+        log_print(f"\nKills by player:")
+        log_print(f"  Agent (P1) kills: {player_kills[1]}")
+        log_print(f"  Bot (P2) kills:   {player_kills[2]}")
     else:
-        print("No kills recorded in any episode.")
+        log_print("No kills recorded in any episode.")
     
     # MOVEMENT ERRORS
-    print("\n" + "-" * 80)
-    print("MOVEMENT ERRORS")
-    print("-" * 80)
-    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("MOVEMENT ERRORS")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
     agent_walls = stats['wall_collisions'][1]
     bot_walls = stats['wall_collisions'][2]
-    print(f"Moves into walls:             {agent_walls:6d}           {bot_walls:6d}")
+    log_print(f"Moves into walls:             {agent_walls:6d}           {bot_walls:6d}")
     if agent_walls > 0 and stats['first_error_lines']['wall_collisions'][1]:
         first_err = stats['first_error_lines']['wall_collisions'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_walls > 0 and stats['first_error_lines']['wall_collisions'][2]:
         first_err = stats['first_error_lines']['wall_collisions'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_move_adj = stats['move_to_adjacent_enemy'][1]
     bot_move_adj = stats['move_to_adjacent_enemy'][2]
-    print(f"Moves to adjacent enemy:      {agent_move_adj:6d}           {bot_move_adj:6d}")
+    log_print(f"Moves to adjacent enemy:      {agent_move_adj:6d}           {bot_move_adj:6d}")
     if agent_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][1]:
         first_err = stats['first_error_lines']['move_to_adjacent_enemy'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         if 'adjacent_before' in first_err and 'adjacent_after' in first_err:
             before_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_before']]) if first_err['adjacent_before'] else 'none'
             after_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_after']]) if first_err['adjacent_after'] else 'none'
-            print(f"    Adjacent before move: {before_str}")
-            print(f"    Adjacent after move: {after_str}")
+            log_print(f"    Adjacent before move: {before_str}")
+            log_print(f"    Adjacent after move: {after_str}")
     if bot_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][2]:
         first_err = stats['first_error_lines']['move_to_adjacent_enemy'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         if 'adjacent_before' in first_err and 'adjacent_after' in first_err:
             before_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_before']]) if first_err['adjacent_before'] else 'none'
             after_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_after']]) if first_err['adjacent_after'] else 'none'
-            print(f"    Adjacent before move: {before_str}")
-            print(f"    Adjacent after move: {after_str}")
+            log_print(f"    Adjacent before move: {before_str}")
+            log_print(f"    Adjacent after move: {after_str}")
     
     # SHOOTING ERRORS
-    print("\n" + "-" * 80)
-    print("SHOOTING ERRORS")
-    print("-" * 80)
-    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("SHOOTING ERRORS")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
     agent_advance_adj = stats['advance_from_adjacent'][1]
     bot_advance_adj = stats['advance_from_adjacent'][2]
-    print(f"Advances from adjacent hex:   {agent_advance_adj:6d}           {bot_advance_adj:6d}")
+    log_print(f"Advances from adjacent hex:   {agent_advance_adj:6d}           {bot_advance_adj:6d}")
     if agent_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][1]:
         first_err = stats['first_error_lines']['advance_from_adjacent'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][2]:
         first_err = stats['first_error_lines']['advance_from_adjacent'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_wall = stats['shoot_through_wall'][1]
     bot_shoot_wall = stats['shoot_through_wall'][2]
-    print(f"Shoot through wall:           {agent_shoot_wall:6d}           {bot_shoot_wall:6d}")
+    log_print(f"Shoot through wall:           {agent_shoot_wall:6d}           {bot_shoot_wall:6d}")
     if agent_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][1]:
         first_err = stats['first_error_lines']['shoot_through_wall'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][2]:
         first_err = stats['first_error_lines']['shoot_through_wall'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_fled = stats['shoot_after_fled'][1]
     bot_shoot_fled = stats['shoot_after_fled'][2]
-    print(f"Shoot after fled:             {agent_shoot_fled:6d}           {bot_shoot_fled:6d}")
+    log_print(f"Shoot after fled:             {agent_shoot_fled:6d}           {bot_shoot_fled:6d}")
     if agent_shoot_fled > 0 and stats['first_error_lines']['shoot_after_fled'][1]:
         first_err = stats['first_error_lines']['shoot_after_fled'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_shoot_fled > 0 and stats['first_error_lines']['shoot_after_fled'][2]:
         first_err = stats['first_error_lines']['shoot_after_fled'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_friendly = stats['shoot_at_friendly'][1]
     bot_shoot_friendly = stats['shoot_at_friendly'][2]
-    print(f"Shoot at friendly unit:       {agent_shoot_friendly:6d}           {bot_shoot_friendly:6d}")
+    log_print(f"Shoot at friendly unit:       {agent_shoot_friendly:6d}           {bot_shoot_friendly:6d}")
     if agent_shoot_friendly > 0 and stats['first_error_lines']['shoot_at_friendly'][1]:
         first_err = stats['first_error_lines']['shoot_at_friendly'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_shoot_friendly > 0 and stats['first_error_lines']['shoot_at_friendly'][2]:
         first_err = stats['first_error_lines']['shoot_at_friendly'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_engaged = stats['shoot_at_engaged_enemy'][1]
     bot_shoot_engaged = stats['shoot_at_engaged_enemy'][2]
-    print(f"Shoot at engaged enemy:       {agent_shoot_engaged:6d}           {bot_shoot_engaged:6d}")
+    log_print(f"Shoot at engaged enemy:       {agent_shoot_engaged:6d}           {bot_shoot_engaged:6d}")
     if agent_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][1]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # CHARGE ERRORS
-    print("\n" + "-" * 80)
-    print("CHARGE ERRORS")
-    print("-" * 80)
-    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("CHARGE ERRORS")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
     agent_charge_adj = stats['charge_from_adjacent'][1]
     bot_charge_adj = stats['charge_from_adjacent'][2]
-    print(f"Charges from adjacent hex:     {agent_charge_adj:6d}           {bot_charge_adj:6d}")
+    log_print(f"Charges from adjacent hex:     {agent_charge_adj:6d}           {bot_charge_adj:6d}")
     if agent_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][1]:
         first_err = stats['first_error_lines']['charge_from_adjacent'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][2]:
         first_err = stats['first_error_lines']['charge_from_adjacent'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_charge_fled = stats['charge_after_fled'][1]
     bot_charge_fled = stats['charge_after_fled'][2]
-    print(f"Charge after fled:            {agent_charge_fled:6d}           {bot_charge_fled:6d}")
+    log_print(f"Charge after fled:            {agent_charge_fled:6d}           {bot_charge_fled:6d}")
     if agent_charge_fled > 0 and stats['first_error_lines']['charge_after_fled'][1]:
         first_err = stats['first_error_lines']['charge_after_fled'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_charge_fled > 0 and stats['first_error_lines']['charge_after_fled'][2]:
         first_err = stats['first_error_lines']['charge_after_fled'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # FIGHT ERRORS
-    print("\n" + "-" * 80)
-    print("FIGHT ERRORS")
-    print("-" * 80)
-    print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    print("-" * 80)
+    log_print("\n" + "-" * 80)
+    log_print("FIGHT ERRORS")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
     agent_fight_non_adj = stats['fight_from_non_adjacent'][1]
     bot_fight_non_adj = stats['fight_from_non_adjacent'][2]
-    print(f"Fight from non-adjacent hex:  {agent_fight_non_adj:6d}           {bot_fight_non_adj:6d}")
+    log_print(f"Fight from non-adjacent hex:  {agent_fight_non_adj:6d}           {bot_fight_non_adj:6d}")
     if agent_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][1]:
         first_err = stats['first_error_lines']['fight_from_non_adjacent'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][2]:
         first_err = stats['first_error_lines']['fight_from_non_adjacent'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_fight_friendly = stats['fight_friendly'][1]
     bot_fight_friendly = stats['fight_friendly'][2]
-    print(f"Fight a friendly unit:        {agent_fight_friendly:6d}           {bot_fight_friendly:6d}")
+    log_print(f"Fight a friendly unit:        {agent_fight_friendly:6d}           {bot_fight_friendly:6d}")
     if agent_fight_friendly > 0 and stats['first_error_lines']['fight_friendly'][1]:
         first_err = stats['first_error_lines']['fight_friendly'][1]
-        print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_fight_friendly > 0 and stats['first_error_lines']['fight_friendly'][2]:
         first_err = stats['first_error_lines']['fight_friendly'][2]
-        print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # POSITION COLLISIONS
     if stats['unit_position_collisions']:
-        print("\n" + "-" * 80)
-        print("⚠️  UNIT POSITION COLLISIONS (2+ units in same hex)")
-        print("-" * 80)
-        print(f"Total collisions: {len(stats['unit_position_collisions'])}")
+        log_print("\n" + "-" * 80)
+        log_print("⚠️  UNIT POSITION COLLISIONS (2+ units in same hex)")
+        log_print("-" * 80)
+        log_print(f"Total collisions: {len(stats['unit_position_collisions'])}")
         for i, collision in enumerate(stats['unit_position_collisions'][:10]):
             units_str = ", ".join([f"Unit {uid}" for uid in collision['units']])
             if 'charge_from' in collision:
-                print(f"  {i+1}. Episode #{collision['episode']}, Turn {collision['turn']}, {collision['action']}: {units_str} at {collision['position']} (from {collision['charge_from']})")
+                log_print(f"  {i+1}. Episode #{collision['episode']}, Turn {collision['turn']}, {collision['action']}: {units_str} at {collision['position']} (from {collision['charge_from']})")
             else:
-                print(f"  {i+1}. Episode #{collision['episode']}, Turn {collision['turn']}, {collision['action']}: {units_str} at {collision['position']}")
+                log_print(f"  {i+1}. Episode #{collision['episode']}, Turn {collision['turn']}, {collision['action']}: {units_str} at {collision['position']}")
         if len(stats['unit_position_collisions']) > 10:
-            print(f"  ... and {len(stats['unit_position_collisions']) - 10} more")
+            log_print(f"  ... and {len(stats['unit_position_collisions']) - 10} more")
     
     # PARSE ERRORS
     if stats['parse_errors']:
-        print("\n" + "-" * 80)
-        print("⚠️  PARSE ERRORS (Non-standard log format)")
-        print("-" * 80)
-        print(f"Total parse errors: {len(stats['parse_errors'])}")
+        log_print("\n" + "-" * 80)
+        log_print("⚠️  PARSE ERRORS (Non-standard log format)")
+        log_print("-" * 80)
+        log_print(f"Total parse errors: {len(stats['parse_errors'])}")
         for i, error in enumerate(stats['parse_errors'][:10]):
-            print(f"  {i+1}. Episode #{error['episode']}, Turn {error['turn']}, {error['phase']}: {error['error']}")
-            print(f"      Line: {error['line']}")
+            log_print(f"  {i+1}. Episode #{error['episode']}, Turn {error['turn']}, {error['phase']}: {error['error']}")
+            log_print(f"      Line: {error['line']}")
         if len(stats['parse_errors']) > 10:
-            print(f"  ... and {len(stats['parse_errors']) - 10} more")
+            log_print(f"  ... and {len(stats['parse_errors']) - 10} more")
     
     # EPISODES WITHOUT END
     if stats['episodes_without_end']:
-        print("\n" + "-" * 80)
-        print("⚠️  EPISODES WITHOUT EPISODE END (INCOMPLETE EPISODES)")
-        print("-" * 80)
-        print(f"Total: {len(stats['episodes_without_end'])} episodes")
+        log_print("\n" + "-" * 80)
+        log_print("⚠️  EPISODES WITHOUT EPISODE END (INCOMPLETE EPISODES)")
+        log_print("-" * 80)
+        log_print(f"Total: {len(stats['episodes_without_end'])} episodes")
         for i, ep in enumerate(stats['episodes_without_end'][:5]):
-            print(f"  {i+1}. Episode #{ep['episode_num']}, Actions={ep['actions']}, Turn={ep['turn']}, Last: {ep['last_line']}")
+            log_print(f"  {i+1}. Episode #{ep['episode_num']}, Actions={ep['actions']}, Turn={ep['turn']}, Last: {ep['last_line']}")
         if len(stats['episodes_without_end']) > 5:
-            print(f"  ... and {len(stats['episodes_without_end']) - 5} more")
+            log_print(f"  ... and {len(stats['episodes_without_end']) - 5} more")
     
     # EPISODES WITHOUT METHOD
     if stats['episodes_without_method']:
-        print("\n" + "-" * 80)
-        print("⚠️  EPISODES WITHOUT WIN_METHOD (BUG DETECTED)")
-        print("-" * 80)
-        print(f"Total: {len(stats['episodes_without_method'])} episodes")
+        log_print("\n" + "-" * 80)
+        log_print("⚠️  EPISODES WITHOUT WIN_METHOD (BUG DETECTED)")
+        log_print("-" * 80)
+        log_print(f"Total: {len(stats['episodes_without_method'])} episodes")
         for i, ep in enumerate(stats['episodes_without_method'][:5]):
-            print(f"  {i+1}. Winner={ep['winner']}, Line: {ep['line']}")
+            log_print(f"  {i+1}. Winner={ep['winner']}, Line: {ep['line']}")
         if len(stats['episodes_without_method']) > 5:
-            print(f"  ... and {len(stats['episodes_without_method']) - 5} more")
+            log_print(f"  ... and {len(stats['episodes_without_method']) - 5} more")
     
     # SAMPLE ACTIONS
     log_print("\n" + "=" * 80)

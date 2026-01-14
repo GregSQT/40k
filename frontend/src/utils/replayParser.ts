@@ -202,7 +202,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Parse MOVE actions
-    const moveMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT)/);
+    const moveMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT|FLED)/);
     if (moveMatch) {
       const timestamp = moveMatch[1];
       const turn = moveMatch[2];
@@ -212,7 +212,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const endRow = parseInt(moveMatch[6]);
       const actionType = moveMatch[7];
 
-      if (actionType === 'MOVED') {
+      if (actionType === 'MOVED' || actionType === 'FLED') {
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         let fromCol = endCol;
         let fromRow = endRow;
@@ -252,7 +252,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Parse SHOOT actions
-    const shootMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) (SHOT at unit|WAIT|ADVANCED)/);
+    const shootMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) (SHOT at unit|WAIT|ADVANCED)/);
     if (shootMatch) {
       // Removed verbose logging
       // console.log('Matched SHOOT line:', trimmed);
@@ -362,13 +362,6 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
 
           currentEpisode.actions.push(action);
-
-          if (damage > 0 && currentEpisode.units[targetId]) {
-            currentEpisode.units[targetId].HP_CUR -= damage;
-            if (currentEpisode.units[targetId].HP_CUR < 0) {
-              currentEpisode.units[targetId].HP_CUR = 0;
-            }
-          }
         }
       } else if (actionType === 'WAIT') {
         currentEpisode.actions.push({
@@ -388,7 +381,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Or: [timestamp] T1 P0 CHARGE : Unit 1(19, 15) WAIT [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED CHARGE unit 7 from (23,6) to (a,b) [R:+0.0] [SUCCESS] [STEP: YES]
     // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED] (old format)
-    const chargeMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED unit|WAIT|FAILED CHARGE unit|FAILED charge to unit)/);
+    const chargeMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED unit|WAIT|FAILED CHARGE unit|FAILED charge to unit)/);
     if (chargeMatch) {
       const timestamp = chargeMatch[1];
       const turn = chargeMatch[2];
@@ -517,7 +510,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse FIGHT actions
     // Format: [timestamp] T1 P0 FIGHT : Unit 2(9, 6) ATTACKED unit 8 with [weapon] - Hit:3+:2(MISS) [SUCCESS]
-    const fightMatch = trimmed.match(/\[([^\]]+)\] (T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)/);
+    const fightMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)/);
     if (fightMatch) {
       const timestamp = fightMatch[1];
       const turn = fightMatch[2];
@@ -616,7 +609,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const unit = episode.units[uid];
       const startPos = episode.initial_positions[uid];
       // Use unit's actual HP_MAX (set based on unit type during parsing)
-      const unitHP = unit.HP_MAX || 2;
+      const unitHP = unit.HP_MAX;
       initialUnits.push({
         ...unit,
         col: startPos.col,
