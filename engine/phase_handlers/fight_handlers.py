@@ -10,6 +10,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from . import shooting_handlers
+from .shooting_handlers import _has_line_of_sight  # CRITICAL: Import for _is_valid_shooting_target (shooting validation in fight phase)
 
 # Import functions from shooting_handlers for cross-phase functionality
 _cache_size_limit = shooting_handlers._cache_size_limit
@@ -99,6 +100,10 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
         raise KeyError("game_state missing required 'units_charged' field - charge phase must run before fight phase")
 
     # Sub-Phase 1: Charging units (current player only, units in units_charged AND adjacent)
+    # CRITICAL: Clear pools before rebuilding (defense in depth)
+    game_state["charging_activation_pool"] = []
+    game_state["active_alternating_activation_pool"] = []
+    game_state["non_active_alternating_activation_pool"] = []
     charging_activation_pool = []
     from engine.game_utils import add_console_log
     add_console_log(game_state, f"FIGHT POOL BUILD: Building charging pool for player {current_player}")
@@ -165,17 +170,24 @@ def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str)
     This must be called as soon as a unit dies to prevent it from being activated
     in subsequent sub-phases of the same fight phase.
     """
+    unit_id_str = str(unit_id)
+    
     # Remove from charging pool
-    if "charging_activation_pool" in game_state and unit_id in game_state["charging_activation_pool"]:
-        game_state["charging_activation_pool"].remove(unit_id)
+    if "charging_activation_pool" in game_state:
+        game_state["charging_activation_pool"] = [uid for uid in game_state["charging_activation_pool"] if str(uid) != unit_id_str]
     
     # Remove from active alternating pool
-    if "active_alternating_activation_pool" in game_state and unit_id in game_state["active_alternating_activation_pool"]:
-        game_state["active_alternating_activation_pool"].remove(unit_id)
+    if "active_alternating_activation_pool" in game_state:
+        game_state["active_alternating_activation_pool"] = [uid for uid in game_state["active_alternating_activation_pool"] if str(uid) != unit_id_str]
     
     # Remove from non-active alternating pool
-    if "non_active_alternating_activation_pool" in game_state and unit_id in game_state["non_active_alternating_activation_pool"]:
-        game_state["non_active_alternating_activation_pool"].remove(unit_id)
+    if "non_active_alternating_activation_pool" in game_state:
+        game_state["non_active_alternating_activation_pool"] = [uid for uid in game_state["non_active_alternating_activation_pool"] if str(uid) != unit_id_str]
+    
+    # CRITICAL: Also remove from other phase pools (units can die in fight but be in other pools)
+    # Import from shooting_handlers to reuse the function
+    from .shooting_handlers import _remove_dead_unit_from_pools
+    _remove_dead_unit_from_pools(game_state, unit_id)
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
@@ -337,33 +349,53 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         return False
         
     # Friendly fire check
-    if target["player"] == shooter["player"]:
+    # CRITICAL: Normalize player values to int for consistent comparison
+    target_player = int(target["player"]) if target["player"] is not None else None
+    shooter_player = int(shooter["player"]) if shooter["player"] is not None else None
+    if target_player == shooter_player:
         return False
     
-    # Adjacent check - can't shoot at adjacent enemies (melee range)
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
-    from engine.utils.weapon_helpers import get_melee_range
-    melee_range = get_melee_range()  # Always 1
-    if distance <= melee_range:
-        return False
+    # CRITICAL: Check if enemy is adjacent to shooter (melee range)
+    # EXCEPTION: PISTOL weapons can shoot at adjacent enemies
+    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+    from engine.utils.weapon_helpers import get_melee_range, get_selected_ranged_weapon
+    melee_range = get_melee_range()
+    enemy_adjacent_to_shooter = (distance <= melee_range)
+    has_pistol_weapon = False
+    
+    if enemy_adjacent_to_shooter:
+        # Enemy is adjacent to shooter - check if selected weapon has PISTOL rule
+        selected_weapon = get_selected_ranged_weapon(shooter)
+        if selected_weapon and shooting_handlers._weapon_has_pistol_rule(selected_weapon):
+            has_pistol_weapon = True
+        else:
+            # Non-PISTOL weapons cannot shoot at adjacent enemies
+            return False
     
     # W40K RULE: Cannot shoot at enemy engaged in melee with friendly units
-    # Check if target is adjacent to any friendly unit (same player as shooter)
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-    target_cc_range = get_melee_range()  # Always 1
-    
-    for friendly in game_state["units"]:
-        if friendly["player"] == shooter["player"] and friendly["HP_CUR"] > 0 and friendly["id"] != shooter["id"]:
-            # CRITICAL: Convert coordinates to int for consistent distance calculation
-            friendly_col_int, friendly_row_int = int(friendly["col"]), int(friendly["row"])
-            target_col_int, target_row_int = int(target["col"]), int(target["row"])
-            friendly_distance = _calculate_hex_distance(target_col_int, target_row_int, friendly_col_int, friendly_row_int)
-            
-            if friendly_distance <= target_cc_range:
-                return False
+    # CRITICAL: This rule applies ONLY when enemy is NOT adjacent to shooter
+    # If enemy is adjacent to shooter AND we have PISTOL weapon, we can shoot regardless of engagement
+    # If enemy is NOT adjacent to shooter, normal rules apply: cannot shoot if enemy is engaged with friendly units
+    if not enemy_adjacent_to_shooter:
+        # Enemy is NOT adjacent to shooter - apply normal engaged enemy rule
+        for friendly in game_state["units"]:
+            # CRITICAL: Normalize player values to int for consistent comparison
+            friendly_player = int(friendly["player"]) if friendly["player"] is not None else None
+            shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
+            if friendly_player == shooter_player_int and friendly["HP_CUR"] > 0 and friendly["id"] != shooter["id"]:
+                # CRITICAL: Convert coordinates to int for consistent distance calculation
+                friendly_col_int, friendly_row_int = int(friendly["col"]), int(friendly["row"])
+                target_col_int, target_row_int = int(target["col"]), int(target["row"])
+                friendly_distance = _calculate_hex_distance(target_col_int, target_row_int, friendly_col_int, friendly_row_int)
+                
+                if friendly_distance <= melee_range:
+                    # Enemy is engaged with friendly unit - cannot shoot
+                    return False
     
     # PERFORMANCE: Use LoS cache if available (instant lookup)
     # Fallback to calculation if cache missing (phase not started yet)
+    # CRITICAL: _has_line_of_sight is imported from shooting_handlers at module level
+    # (units are adjacent in fight phase, so LoS check implementation is in shooting_handlers)
     has_los = False
     if "los_cache" in game_state and game_state["los_cache"]:
         cache_key = (shooter["id"], target["id"])
@@ -388,6 +420,13 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return {"error": "unit_not_found", "unitId": unit_id}
+    
+    # CRITICAL: Check if unit is dead before activation (unit may have died between pool build and activation)
+    if unit.get("HP_CUR", 0) <= 0:
+        # Unit is dead - remove from pool and skip activation
+        from .shooting_handlers import _remove_dead_unit_from_pools
+        _remove_dead_unit_from_pools(game_state, unit_id)
+        return {"error": "unit_dead", "unitId": unit_id, "skip_activation": True}
     
     # REMOVED: Line 335 was clearing action_logs between unit activations, destroying cross-phase data
     # action_logs must accumulate for entire episode, only cleared in __init__ and reset()
@@ -460,6 +499,8 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         # CRITICAL: Also check that target is not a friendly unit or self (defense in depth)
         alive_targets = []
         current_player = unit["player"]
+        # CRITICAL: Normalize player value to int for consistent comparison
+        current_player_int = int(current_player) if current_player is not None else None
         unit_id_str = str(unit["id"])
         for target_id in cached_pool:
             target = _get_unit_by_id(game_state, target_id)
@@ -468,7 +509,9 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
                 if str(target["id"]) == unit_id_str:
                     continue  # Skip self
                 # CRITICAL: Second check - target must not be friendly (fast check)
-                if target["player"] == current_player:
+                # CRITICAL: Normalize player value to int for consistent comparison
+                target_player = int(target["player"]) if target["player"] is not None else None
+                if target_player == current_player_int:
                     continue  # Skip friendly units
                 
                 # Re-validate target - melee status might have changed (friendly unit died)
@@ -707,138 +750,6 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
     return valid_target_pool
 
-def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
-    """
-    AI_TURN.md EXACT: Line of sight check with proper hex pathfinding.
-    Fixed to get wall data from multiple possible sources.
-    """
-    start_col, start_row = shooter["col"], shooter["row"]
-    end_col, end_row = target["col"], target["row"]
-    
-    # Try multiple sources for wall hexes
-    wall_hexes_data = []
-    
-    # Source 1: Direct in game_state
-    if "wall_hexes" in game_state:
-        wall_hexes_data = game_state["wall_hexes"]
-    
-    # Source 2: In board configuration within game_state
-    elif "board" in game_state and "wall_hexes" in game_state["board"]:
-        wall_hexes_data = game_state["board"]["wall_hexes"]
-    
-    # Source 3: Check if walls exist in board config
-    # AI_TURN.md COMPLIANCE: Direct field access chain
-    elif "board_config" in game_state and "wall_hexes" in game_state["board_config"]:
-        wall_hexes_data = game_state["board_config"]["wall_hexes"]
-    
-    else:
-        # CHANGE 8: NO FALLBACK - raise error if wall data not found in any source
-        raise KeyError("wall_hexes not found in game_state['wall_hexes'], game_state['board']['wall_hexes'], or game_state['board_config']['wall_hexes']")
-    
-    if not wall_hexes_data:
-        # print(f"LOS DEBUG: No wall data found - allowing shot")
-        return True
-    
-    # Convert wall_hexes to set for fast lookup
-    wall_hexes = set()
-    for wall_hex in wall_hexes_data:
-        if isinstance(wall_hex, (list, tuple)) and len(wall_hex) >= 2:
-            wall_hexes.add((wall_hex[0], wall_hex[1]))
-        # else:
-            # print(f"LOS DEBUG: Invalid wall hex format: {wall_hex}")
-    
-    try:
-        hex_path = _get_accurate_hex_line(start_col, start_row, end_col, end_row)
-        
-        # Check if any hex in path is a wall (excluding start and end)
-        blocked = False
-        blocking_hex = None
-        for i, (col, row) in enumerate(hex_path):
-            # Skip start and end hexes
-            if i == 0 or i == len(hex_path) - 1:
-                continue
-            
-            if (col, row) in wall_hexes:
-                blocked = True
-                blocking_hex = (col, row)
-                break
-        
-        return not blocked
-        
-    except Exception as e:
-        # print(f"            LoS calculation error: {e}")
-        return False
-    
-    if not game_state["wall_hexes"]:
-        return True
-    
-    hex_path = _get_accurate_hex_line(start_col, start_row, end_col, end_row)
-    
-    # Check if any hex in path is a wall (excluding start and end)
-    for col, row in hex_path[1:-1]:
-        if (col, row) in game_state["wall_hexes"]:
-            return False
-    
-    return True
-
-def _get_accurate_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:
-    """Accurate hex line using cube coordinates."""
-    start_cube = _offset_to_cube(start_col, start_row)
-    end_cube = _offset_to_cube(end_col, end_row)
-    
-    distance = max(abs(start_cube.x - end_cube.x), abs(start_cube.y - end_cube.y), abs(start_cube.z - end_cube.z))
-    path = []
-    
-    for i in range(distance + 1):
-        t = i / distance if distance > 0 else 0
-        
-        cube_x = start_cube.x + t * (end_cube.x - start_cube.x)
-        cube_y = start_cube.y + t * (end_cube.y - start_cube.y)
-        cube_z = start_cube.z + t * (end_cube.z - start_cube.z)
-        
-        rounded_cube = _cube_round(cube_x, cube_y, cube_z)
-        offset_col, offset_row = _cube_to_offset(rounded_cube)
-        path.append((offset_col, offset_row))
-    
-    return path
-
-class CubeCoordinate:
-    def __init__(self, x: int, y: int, z: int):
-        self.x = x
-        self.y = y
-        self.z = z
-
-
-def _offset_to_cube(col: int, row: int) -> CubeCoordinate:
-    x = col
-    z = row - (col - (col & 1)) // 2
-    y = -x - z
-    return CubeCoordinate(x, y, z)
-
-
-def _cube_to_offset(cube: CubeCoordinate) -> Tuple[int, int]:
-    col = cube.x
-    row = cube.z + (cube.x - (cube.x & 1)) // 2
-    return col, row
-
-
-def _cube_round(x: float, y: float, z: float) -> CubeCoordinate:
-    rx = round(x)
-    ry = round(y)
-    rz = round(z)
-    
-    x_diff = abs(rx - x)
-    y_diff = abs(ry - y)
-    z_diff = abs(rz - z)
-    
-    if x_diff > y_diff and x_diff > z_diff:
-        rx = -ry - rz
-    elif y_diff > z_diff:
-        ry = -rx - rz
-    else:
-        rz = -rx - ry
-    
-    return CubeCoordinate(rx, ry, rz)
 
 def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -963,12 +874,10 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         pool_before = game_state["shoot_activation_pool"].copy()
-        if "shoot_activation_pool" in game_state and unit["id"] in game_state["shoot_activation_pool"]:
-            game_state["shoot_activation_pool"].remove(unit["id"])
-            pool_after = game_state["shoot_activation_pool"]
-        else:
-            current_pool = game_state["shoot_activation_pool"] if "shoot_activation_pool" in game_state else []
-            # print(f"🔴 END_ACTIVATION DEBUG: Unit {unit['id']} not found in pool {current_pool}")
+        # PRINCIPLE: "Le Pool DOIT gérer les morts" - Use string comparison to handle int/string ID mismatches
+        unit_id_str = str(unit["id"])
+        game_state["shoot_activation_pool"] = [uid for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
+        pool_after = game_state["shoot_activation_pool"]
     
     # Clean up unit activation state including position tracking
     if "valid_target_pool" in unit:
@@ -2557,7 +2466,10 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     
     # CRITICAL: Final safety check - target must not be friendly (defense in depth)
     # This should never happen if valid_targets is correct, but adds extra protection
-    if target["player"] == unit["player"]:
+    # CRITICAL: Normalize player values to int for consistent comparison
+    target_player = int(target["player"]) if target["player"] is not None else None
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    if target_player == unit_player:
         return False, {
             "error": "cannot_shoot_friendly_unit",
             "targetId": selected_target_id,
@@ -2601,6 +2513,9 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             attack_result["target_died"] = True
             # PERFORMANCE: Invalidate LoS cache for dead unit (partial invalidation)
             _invalidate_los_cache_for_unit(game_state, target["id"])
+            # CRITICAL: Remove dead unit from activation pools (prevents dead units from acting)
+            from .shooting_handlers import _remove_dead_unit_from_pools
+            _remove_dead_unit_from_pools(game_state, target["id"])
 
     # Store pre-damage HP in attack_result for reward calculation
     attack_result["target_hp_before_damage"] = target_hp_before_damage

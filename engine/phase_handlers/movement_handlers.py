@@ -141,6 +141,8 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
     AI_MOVE.md: Build activation pool with eligibility checks
     """
     current_player = game_state.get("current_player", "N/A")
+    # CRITICAL: Clear pool before rebuilding (defense in depth)
+    game_state["move_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
     game_state["move_activation_pool"] = eligible_units
     
@@ -570,6 +572,12 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
         game_state["units_fled"].add(unit["id"])
         # CRITICAL: Units that fled are also marked as moved
         # (units_fled is a subset of units_moved)
+    
+    # CRITICAL: Invalidate LoS cache when unit moves
+    # When a unit moves, all LoS calculations involving that unit are now invalid
+    # This prevents "shoot through wall" bugs caused by stale cache
+    from .shooting_handlers import _invalidate_los_cache_for_moved_unit
+    _invalidate_los_cache_for_moved_unit(game_state, unit["id"])
     
     # Pools are invalidated at the START of the phase, not after each movement
     # This prevents invalidating the "moved" tracking of units that just moved
@@ -1007,26 +1015,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
             # Check if this is a valid destination (not wall, not occupied, not adjacent to enemy)
             # PERFORMANCE: Uses pre-computed set for O(1) lookup
-            # NOTE: Enemy adjacency already checked at line 1021, so this should never be adjacent
+            # NOTE: Enemy adjacency already checked at line 996, so this should never be adjacent
             if _is_valid_destination(game_state, neighbor_col_int, neighbor_row_int, unit, {}, enemy_adjacent_hexes, occupied_positions):
                 # Don't add start position as a destination
                 if neighbor_pos != start_pos:
-                    # CRITICAL BUG DETECTION: Check if hex is in enemy_adjacent_hexes (should never happen after our check above)
-                    if neighbor_pos in enemy_adjacent_hexes:
-                        # This is a BUG - hex adjacent to enemy should not be in valid_destinations
-                        if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
-                            episode = game_state["episode_number"]
-                            turn = game_state["turn"]
-                            phase = game_state.get("phase", "move")
-                            if "console_logs" not in game_state:
-                                game_state["console_logs"] = []
-                            log_message = f"[MOVE DEBUG] ⚠️ BUG DETECTED E{episode} T{turn} {phase} build_valid_destinations: hex ({neighbor_col_int},{neighbor_row_int}) is BOTH in valid_destinations AND enemy_adjacent_hexes! enemy_adjacent_hexes sample: {list(enemy_adjacent_hexes)[:5]}"
-                            from engine.game_utils import add_console_log
-                            from engine.game_utils import safe_print
-                            add_console_log(game_state, log_message)
-                            safe_print(game_state, log_message)
-                        # DO NOT ADD - this is a bug, skip this hex
-                        continue
                     valid_destinations.append(neighbor_pos)
                     # Log when a destination is added (only in training context)
                     # Note: The CRITICAL BUG DETECTION check at line 786 already logs problematic hexes
@@ -1188,6 +1180,7 @@ def movement_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """AI_MOVE.md: Clear movement preview"""
     game_state["preview_hexes"] = []
     game_state["valid_move_destinations_pool"] = []
+    game_state["active_movement_unit"] = None
     return {
         "show_preview": False,
         "clear_hexes": True
@@ -1244,30 +1237,23 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
     
-    # CRITICAL DEBUG: Check if destination is adjacent to enemy even though it's in the pool
-    # This should never happen if the pool is correctly constructed
+    # CRITICAL: Rebuild enemy_adjacent_hexes just before execution to catch positions that changed
+    # This prevents movements to destinations that became adjacent after the pool was built
     unit_player_int = int(unit["player"]) if unit["player"] is not None else None
     current_enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit_player_int)
     if (dest_col, dest_row) in current_enemy_adjacent_hexes:
-        # This is a BUG - destination is in pool but adjacent to enemy
+        # Destination is adjacent to enemy - REJECT even if it's in the pool
+        # This can happen if an enemy moved after the pool was built
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         from engine.game_utils import add_console_log, safe_print
-        log_msg = f"[MOVE BUG] E{episode} T{turn} Unit {unit_id} destination ({dest_col},{dest_row}) is IN POOL but ADJACENT TO ENEMY! Pool size={len(valid_pool)}, enemy_adjacent_hexes count={len(current_enemy_adjacent_hexes)}"
+        log_msg = f"[MOVE REJECTED] E{episode} T{turn} Unit {unit_id} destination ({dest_col},{dest_row}) is ADJACENT TO ENEMY - REJECTED (was in pool but enemy positions changed)"
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
-        # Find which enemy makes this hex adjacent
-        for enemy in game_state["units"]:
-            enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
-            if enemy_player != unit_player_int and enemy["HP_CUR"] > 0:
-                enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
-                from engine.combat_utils import calculate_hex_distance
-                distance = calculate_hex_distance(dest_col, dest_row, enemy_col, enemy_row)
-                if distance == 1:
-                    log_msg2 = f"[MOVE BUG] Adjacent to Unit {enemy['id']} at ({enemy_col},{enemy_row})"
-                    add_console_log(game_state, log_msg2)
-                    safe_print(game_state, log_msg2)
-                    break
+        import logging
+        logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
+        logging.info(log_msg)
+        return False, {"error": "destination_adjacent_to_enemy", "destination": (dest_col, dest_row)}
 
     # CRITICAL FIX: Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.

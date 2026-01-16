@@ -151,9 +151,15 @@ def has_line_of_sight(shooter: Dict[str, Any], target: Dict[str, Any], game_stat
         from_col, from_row = shooter["col"], shooter["row"]
         to_col, to_row = target["col"], target["row"]
 
+        # CRITICAL: Convert coordinates to int for consistent comparison
+        from_col_int = int(from_col)
+        from_row_int = int(from_row)
+        to_col_int = int(to_col)
+        to_row_int = int(to_row)
+
         # Check hex-coordinate cache first
         if "hex_los_cache" in game_state:
-            cache_key = ((from_col, from_row), (to_col, to_row))
+            cache_key = ((from_col_int, from_row_int), (to_col_int, to_row_int))
             if cache_key in game_state["hex_los_cache"]:
                 return game_state["hex_los_cache"][cache_key]
 
@@ -163,7 +169,7 @@ def has_line_of_sight(shooter: Dict[str, Any], target: Dict[str, Any], game_stat
         # Store in cache for future lookups
         if "hex_los_cache" not in game_state:
             game_state["hex_los_cache"] = {}
-        game_state["hex_los_cache"][((from_col, from_row), (to_col, to_row))] = has_los
+        game_state["hex_los_cache"][((from_col_int, from_row_int), (to_col_int, to_row_int))] = has_los
 
         return has_los
 
@@ -178,21 +184,27 @@ def has_line_of_sight_coords(from_col: int, from_row: int, to_col: int, to_row: 
         """
         from engine.phase_handlers import shooting_handlers
 
+        # CRITICAL: Convert coordinates to int for consistent comparison
+        from_col_int = int(from_col)
+        from_row_int = int(from_row)
+        to_col_int = int(to_col)
+        to_row_int = int(to_row)
+        
         # Check hex-coordinate cache first
         if "hex_los_cache" in game_state:
-            cache_key = ((from_col, from_row), (to_col, to_row))
+            cache_key = ((from_col_int, from_row_int), (to_col_int, to_row_int))
             if cache_key in game_state["hex_los_cache"]:
                 return game_state["hex_los_cache"][cache_key]
 
         # Cache miss: compute LoS using temp unit dicts
-        temp_shooter = {"col": from_col, "row": from_row}
-        temp_target = {"col": to_col, "row": to_row}
+        temp_shooter = {"col": from_col_int, "row": from_row_int}
+        temp_target = {"col": to_col_int, "row": to_row_int}
         has_los = shooting_handlers._has_line_of_sight(game_state, temp_shooter, temp_target)
 
         # Store in cache
         if "hex_los_cache" not in game_state:
             game_state["hex_los_cache"] = {}
-        game_state["hex_los_cache"][((from_col, from_row), (to_col, to_row))] = has_los
+        game_state["hex_los_cache"][((from_col_int, from_row_int), (to_col_int, to_row_int))] = has_los
 
         return has_los
 

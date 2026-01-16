@@ -467,6 +467,10 @@ For each weapon:
         │   ├── In Line of Sight (no walls blocking)
         │   ├── HP_CUR > 0 (alive)
         │   └── NOT adjacent to friendly unit (excluding active unit)
+        │       └── EXCEPTION: If enemy is adjacent to shooter AND weapon has PISTOL rule:
+        │           └── ✅ Can shoot at adjacent enemy (even if engaged with other friendly units)
+        │       └── If enemy is NOT adjacent to shooter:
+        │           └── ❌ Cannot shoot if enemy is adjacent to any friendly unit
         └── If NO enemy meets ALL conditions → ❌ Weapon CANNOT be selectable (skip weapon)
         └── If at least ONE enemy meets ALL conditions → ✅ Add weapon to weapon_available_pool
 ```
@@ -481,7 +485,13 @@ valid_target_pool_build(arg1, arg2, arg3):
 For each enemy unit:
 ├── unit.HP_CUR > 0? → NO → Skip enemy unit
 ├── unit.player != current_player? → NO → Skip enemy unit
-├── Unit NOT adjacent to friendly unit (excluding active unit)? → NO → Skip enemy unit
+├── Unit adjacent to shooter?
+│   ├── YES → Check if any weapon in weapon_available_pool has PISTOL rule:
+│   │   ├── Has PISTOL weapon? → ✅ Can shoot (even if enemy engaged with other friendly units)
+│   │   └── No PISTOL weapon? → ❌ Skip enemy unit (cannot shoot at adjacent enemy without PISTOL)
+│   └── NO → Unit NOT adjacent to friendly unit (excluding active unit)?
+│       ├── NO → ❌ Skip enemy unit (cannot shoot at enemy engaged with friendly units)
+│       └── YES → Continue to next check
 ├── Unit in Line of Sight? → NO → Skip enemy unit
 ├── Perform weapon_availability_check(arg1, arg2, arg3) → Build weapon_available_pool
 ├── Unit within range of AT LEAST 1 weapon from weapon_available_pool? → NO → Skip enemy unit

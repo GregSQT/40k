@@ -1,16 +1,16 @@
 ================================================================================
 VÉRIFICATION DES LOGS - Détection des actions non loguées
-Généré le: 2026-01-14 18:58:21
+Généré le: 2026-01-16 08:12:45
 ================================================================================
 
 📖 Parsing des logs...
-  - Position changes: 555
-  - Attaques (debug): 975
-  - Mouvements (step.log): 362
-  - Charges (step.log): 131
-  - Advances (step.log): 39
-  - Attaques (step.log): 1136
-  - Activations fight: 137
+  - Position changes: 6050
+  - Attaques (debug): 10508
+  - Mouvements (step.log): 3914
+  - Charges (step.log): 1422
+  - Advances (step.log): 434
+  - Attaques (step.log): 12365
+  - Activations fight: 1521
   - Avertissements manquants: 0
 
 ================================================================================
@@ -38,4 +38,4 @@ RÉSUMÉ
 ================================================================================
 ✅ Aucun problème détecté - tous les logs sont cohérents
 
-✅ Output sauvegardé dans: check/hidden_action_finder_output.txt
+✅ hidden_action_finder.py : Aucune erreur détectée   -   Output : ai/hidden_action_finder_output.txt

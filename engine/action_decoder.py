@@ -133,9 +133,13 @@ class ActionDecoder:
             return [11]  # Only wait for unknown phases
     
     def _get_eligible_units_for_current_phase(self, game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get eligible units for current phase using handler's authoritative pools."""
-        current_phase = game_state["phase"]
+        """Get eligible units for current phase using handler's authoritative pools.
         
+        CRITICAL: Filter out dead units when reading from pools.
+        Units can die between pool construction and pool usage, so we must filter here.
+        """
+        current_phase = game_state["phase"]
+
         if current_phase == "command":
             return []  # Empty pool for now, ready for future
         elif current_phase == "move":
@@ -143,19 +147,39 @@ class ActionDecoder:
             if "move_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'move_activation_pool' field")
             pool_unit_ids = game_state["move_activation_pool"]
-            return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
+            # CRITICAL: Filter out dead units (units can die between pool build and use)
+            eligible = []
+            for uid in pool_unit_ids:
+                unit = get_unit_by_id(uid, game_state)
+                if unit and unit.get("HP_CUR", 0) > 0:
+                    eligible.append(unit)
+            return eligible
         elif current_phase == "shoot":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
             if "shoot_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'shoot_activation_pool' field")
             pool_unit_ids = game_state["shoot_activation_pool"]
-            return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
+            # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool should never contain dead units
+            # If a unit dies after pool build, _remove_dead_unit_from_pools should have removed it
+            # Defense in depth: filter dead units here as safety check
+            eligible = []
+            for uid in pool_unit_ids:
+                unit = get_unit_by_id(uid, game_state)
+                if unit and unit.get("HP_CUR", 0) > 0:
+                    eligible.append(unit)
+            return eligible
         elif current_phase == "charge":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
             if "charge_activation_pool" not in game_state:
                 return []  # Phase not initialized yet
             pool_unit_ids = game_state["charge_activation_pool"]
-            return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
+            # CRITICAL: Filter out dead units (units can die between pool build and use)
+            eligible = []
+            for uid in pool_unit_ids:
+                unit = get_unit_by_id(uid, game_state)
+                if unit and unit.get("HP_CUR", 0) > 0:
+                    eligible.append(unit)
+            return eligible
         elif current_phase == "fight":
             # Fight phase has multiple sub-pools
             # Check all fight pools in priority order
@@ -173,7 +197,13 @@ class ActionDecoder:
                     game_state.get("active_alternating_activation_pool", []) +
                     game_state.get("non_active_alternating_activation_pool", [])
                 )
-            return [get_unit_by_id(uid, game_state) for uid in pool_unit_ids if get_unit_by_id(uid, game_state)]
+            # CRITICAL: Filter out dead units (units can die between pool build and use)
+            eligible = []
+            for uid in pool_unit_ids:
+                unit = get_unit_by_id(uid, game_state)
+                if unit and unit.get("HP_CUR", 0) > 0:
+                    eligible.append(unit)
+            return eligible
         else:
             return []
     

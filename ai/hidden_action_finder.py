@@ -474,7 +474,13 @@ def parse_missing_attacks_warnings(movement_log: str) -> List[Dict]:
 
 def check_unlogged_moves(position_changes: List[Dict], step_moves: List[Dict], 
                         step_charges: List[Dict], step_advances: List[Dict]) -> List[Dict]:
-    """Find position changes that are not logged in step.log"""
+    """Find position changes that are not logged in step.log
+    
+    IMPORTANT: This function groups position changes by (episode, turn, unit_id) to find
+    the complete movement (from initial position to final position), because debug.log
+    may log intermediate position changes during pathfinding, but step.log only logs
+    the final complete movement.
+    """
     unlogged = []
     
     # Group all step position changes by (episode, turn, unit_id, from, to)
@@ -489,12 +495,39 @@ def check_unlogged_moves(position_changes: List[Dict], step_moves: List[Dict],
         key = (advance['episode'], advance['turn'], advance['unit_id'], advance['from'], advance['to'])
         step_all_moves.add(key)
     
-    # Check position changes (only MOVE type, not ADVANCE or CHARGE)
+    # Group position changes by (episode, turn, unit_id) to find complete movements
+    # Position changes in debug.log may be intermediate steps of a longer movement
+    # We need to find the initial position (first 'from') and final position (last 'to')
+    position_changes_by_unit = defaultdict(list)
     for change in position_changes:
         if change['type'] == 'MOVE':
-            key = (change['episode'], change['turn'], change['unit_id'], change['from'], change['to'])
-            if key not in step_all_moves:
-                unlogged.append(change)
+            key = (change['episode'], change['turn'], change['unit_id'])
+            position_changes_by_unit[key].append(change)
+    
+    # For each unit movement sequence, find the complete movement (initial -> final)
+    for (episode, turn, unit_id), changes in position_changes_by_unit.items():
+        if not changes:
+            continue
+        
+        # Sort by order of appearance (using line number or order in list)
+        # Find the first 'from' position (initial position) and last 'to' position (final position)
+        initial_pos = changes[0]['from']  # First change starts from this position
+        final_pos = changes[-1]['to']      # Last change ends at this position
+        
+        # Check if this complete movement is logged in step.log
+        key = (episode, turn, unit_id, initial_pos, final_pos)
+        if key not in step_all_moves:
+            # This complete movement is not logged - report the first change as representative
+            unlogged.append({
+                'episode': episode,
+                'turn': turn,
+                'unit_id': unit_id,
+                'phase': changes[0]['phase'],
+                'from': initial_pos,
+                'to': final_pos,
+                'type': 'MOVE',
+                'line': changes[0]['line']  # Use first change line as reference
+            })
     
     return unlogged
 
@@ -592,28 +625,34 @@ def main():
     import os
     
     # Open output file for writing
-    output_file = 'check/hidden_action_finder_output.txt'
+    output_file = 'ai/hidden_action_finder_output.txt'
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     output_f = open(output_file, 'w', encoding='utf-8')
     
+    def file_print(*args, **kwargs):
+        """Print only to file (not to console)"""
+        print(*args, file=output_f, **kwargs)
+        output_f.flush()
+    
     def log_print(*args, **kwargs):
-        """Print to both console and file"""
+        """Print to both console and file (used only for final summary line)"""
         print(*args, **kwargs)
         print(*args, file=output_f, **kwargs)
         output_f.flush()
     
+    total_issues = 0
     try:
-        log_print("=" * 80)
-        log_print("VÉRIFICATION DES LOGS - Détection des actions non loguées")
-        log_print(f"Généré le: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        log_print("=" * 80)
+        file_print("=" * 80)
+        file_print("VÉRIFICATION DES LOGS - Détection des actions non loguées")
+        file_print(f"Généré le: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        file_print("=" * 80)
         
         # Read logs
         try:
             with open('debug.log', 'r') as f:
                 movement_log = f.read()
         except FileNotFoundError:
-            log_print("❌ ERREUR: debug.log introuvable")
+            file_print("❌ ERREUR: debug.log introuvable")
             output_f.close()
             return
         
@@ -621,12 +660,12 @@ def main():
             with open('step.log', 'r') as f:
                 step_log = f.read()
         except FileNotFoundError:
-            log_print("❌ ERREUR: step.log introuvable")
+            file_print("❌ ERREUR: step.log introuvable")
             output_f.close()
             return
         
         # Parse logs
-        log_print("\n📖 Parsing des logs...")
+        file_print("\n📖 Parsing des logs...")
         episode_map = parse_episodes_from_step(step_log)
         position_changes = parse_position_changes(movement_log)
         debug_attacks = parse_attacks_from_debug(movement_log)
@@ -637,36 +676,36 @@ def main():
         fight_activations = parse_fight_activations(movement_log)
         missing_warnings = parse_missing_attacks_warnings(movement_log)
         
-        log_print(f"  - Position changes: {len(position_changes)}")
-        log_print(f"  - Attaques (debug): {len(debug_attacks)}")
-        log_print(f"  - Mouvements (step.log): {len(step_moves)}")
-        log_print(f"  - Charges (step.log): {len(step_charges)}")
-        log_print(f"  - Advances (step.log): {len(step_advances)}")
-        log_print(f"  - Attaques (step.log): {len(step_attacks)}")
-        log_print(f"  - Activations fight: {len(fight_activations)}")
-        log_print(f"  - Avertissements manquants: {len(missing_warnings)}")
+        file_print(f"  - Position changes: {len(position_changes)}")
+        file_print(f"  - Attaques (debug): {len(debug_attacks)}")
+        file_print(f"  - Mouvements (step.log): {len(step_moves)}")
+        file_print(f"  - Charges (step.log): {len(step_charges)}")
+        file_print(f"  - Advances (step.log): {len(step_advances)}")
+        file_print(f"  - Attaques (step.log): {len(step_attacks)}")
+        file_print(f"  - Activations fight: {len(fight_activations)}")
+        file_print(f"  - Avertissements manquants: {len(missing_warnings)}")
         
         # Check 1: Unlogged moves
-        log_print("\n" + "=" * 80)
-        log_print("1. MOUVEMENTS FAITS MAIS NON LOGUÉS DANS STEP.LOG")
-        log_print("=" * 80)
+        file_print("\n" + "=" * 80)
+        file_print("1. MOUVEMENTS FAITS MAIS NON LOGUÉS DANS STEP.LOG")
+        file_print("=" * 80)
         unlogged_moves = check_unlogged_moves(position_changes, step_moves, step_charges, step_advances)
         if unlogged_moves:
-            log_print(f"⚠️  {len(unlogged_moves)} mouvement(s) non logué(s):")
+            file_print(f"⚠️  {len(unlogged_moves)} mouvement(s) non logué(s):")
             for move in unlogged_moves[:20]:  # Show first 20
-                log_print(f"  E{move['episode']} T{move['turn']} {move['phase']}: Unit {move['unit_id']} {move['from']}→{move['to']} ({move['type']})")
+                file_print(f"  E{move['episode']} T{move['turn']} {move['phase']}: Unit {move['unit_id']} {move['from']}→{move['to']} ({move['type']})")
             if len(unlogged_moves) > 20:
-                log_print(f"  ... et {len(unlogged_moves) - 20} autres")
+                file_print(f"  ... et {len(unlogged_moves) - 20} autres")
         else:
-            log_print("✅ Tous les mouvements sont logués")
+            file_print("✅ Tous les mouvements sont logués")
         
         # Check 2: Unlogged attacks
-        log_print("\n" + "=" * 80)
-        log_print("2. ATTAQUES FAITES MAIS NON LOGUÉES DANS STEP.LOG")
-        log_print("=" * 80)
+        file_print("\n" + "=" * 80)
+        file_print("2. ATTAQUES FAITES MAIS NON LOGUÉES DANS STEP.LOG")
+        file_print("=" * 80)
         unlogged_attacks = check_unlogged_attacks(debug_attacks, step_attacks)
         if unlogged_attacks:
-            log_print(f"⚠️  {len(unlogged_attacks)} attaque(s) non loguée(s):")
+            file_print(f"⚠️  {len(unlogged_attacks)} attaque(s) non loguée(s):")
             
             # Group by (episode, turn, phase, attacker, target) for better analysis
             from collections import defaultdict
@@ -675,68 +714,71 @@ def main():
                 key = (attack['episode'], attack['turn'], attack['phase'], attack['attacker'], attack['target'])
                 grouped[key].append(attack)
             
-            log_print(f"\n  Groupées par (episode, turn, phase, attacker, target): {len(grouped)} groupe(s)")
+            file_print(f"\n  Groupées par (episode, turn, phase, attacker, target): {len(grouped)} groupe(s)")
             for i, (key, attacks) in enumerate(list(grouped.items())[:10]):
                 episode, turn, phase, attacker, target = key
-                log_print(f"  Groupe {i+1}: E{episode} T{turn} {phase} Unit {attacker} -> Unit {target}: {len(attacks)} attaque(s) manquante(s)")
+                file_print(f"  Groupe {i+1}: E{episode} T{turn} {phase} Unit {attacker} -> Unit {target}: {len(attacks)} attaque(s) manquante(s)")
                 # Show first attack details
                 if attacks:
                     first = attacks[0]
-                    log_print(f"    Exemple: damage={first['damage']}, died={first['target_died']}, line={first['line'][:80]}...")
+                    file_print(f"    Exemple: damage={first['damage']}, died={first['target_died']}, line={first['line'][:80]}...")
             
             if len(unlogged_attacks) > 20:
-                log_print(f"\n  ... et {len(unlogged_attacks) - 20} autres attaques individuelles")
+                file_print(f"\n  ... et {len(unlogged_attacks) - 20} autres attaques individuelles")
         else:
-            log_print("✅ Toutes les attaques sont loguées")
+            file_print("✅ Toutes les attaques sont loguées")
         
         # Check 3: Missing fight attacks
-        log_print("\n" + "=" * 80)
-        log_print("3. ATTAQUES MANQUANTES EN PHASE FIGHT (unités avec cibles valides mais AUCUNE attaque)")
-        log_print("=" * 80)
+        file_print("\n" + "=" * 80)
+        file_print("3. ATTAQUES MANQUANTES EN PHASE FIGHT (unités avec cibles valides mais AUCUNE attaque)")
+        file_print("=" * 80)
         missing_attacks = check_missing_fight_attacks(fight_activations, step_attacks, movement_log)
         if missing_attacks:
-            log_print(f"⚠️  {len(missing_attacks)} unité(s) avec cibles valides mais SANS AUCUNE attaque loguée:")
+            file_print(f"⚠️  {len(missing_attacks)} unité(s) avec cibles valides mais SANS AUCUNE attaque loguée:")
             for missing in missing_attacks[:20]:  # Show first 20
-                log_print(f"  E{missing['episode']} T{missing['turn']}: Unit {missing['unit_id']}")
-                log_print(f"    Valid targets: {missing['valid_targets']}")
-                log_print(f"    Attacked targets: {missing['attacked_targets']}")
+                file_print(f"  E{missing['episode']} T{missing['turn']}: Unit {missing['unit_id']}")
+                file_print(f"    Valid targets: {missing['valid_targets']}")
+                file_print(f"    Attacked targets: {missing['attacked_targets']}")
             if len(missing_attacks) > 20:
-                log_print(f"  ... et {len(missing_attacks) - 20} autres")
+                file_print(f"  ... et {len(missing_attacks) - 20} autres")
         else:
-            log_print("✅ Toutes les unités avec cibles valides ont attaqué au moins une cible")
+            file_print("✅ Toutes les unités avec cibles valides ont attaqué au moins une cible")
         
         # Check 4: Warnings from debug logs
-        log_print("\n" + "=" * 80)
-        log_print("4. AVERTISSEMENTS DÉTECTÉS DANS DEBUG.LOG")
-        log_print("=" * 80)
+        file_print("\n" + "=" * 80)
+        file_print("4. AVERTISSEMENTS DÉTECTÉS DANS DEBUG.LOG")
+        file_print("=" * 80)
         if missing_warnings:
-            log_print(f"⚠️  {len(missing_warnings)} avertissement(s) détecté(s):")
+            file_print(f"⚠️  {len(missing_warnings)} avertissement(s) détecté(s):")
             for warning in missing_warnings:
-                log_print(f"  E{warning['episode']} T{warning['turn']} {warning['context']}: Unit {warning['unit_id']}")
-                log_print(f"    {warning['reason']}")
+                file_print(f"  E{warning['episode']} T{warning['turn']} {warning['context']}: Unit {warning['unit_id']}")
+                file_print(f"    {warning['reason']}")
         else:
-            log_print("✅ Aucun avertissement détecté")
+            file_print("✅ Aucun avertissement détecté")
         
         # Summary
-        log_print("\n" + "=" * 80)
-        log_print("RÉSUMÉ")
-        log_print("=" * 80)
+        file_print("\n" + "=" * 80)
+        file_print("RÉSUMÉ")
+        file_print("=" * 80)
         total_issues = len(unlogged_moves) + len(unlogged_attacks) + len(missing_attacks) + len(missing_warnings)
         if total_issues == 0:
-            log_print("✅ Aucun problème détecté - tous les logs sont cohérents")
+            file_print("✅ Aucun problème détecté - tous les logs sont cohérents")
         else:
-            log_print(f"⚠️  {total_issues} problème(s) détecté(s):")
-            log_print(f"  - Mouvements non logués: {len(unlogged_moves)}")
-            log_print(f"  - Attaques non loguées: {len(unlogged_attacks)}")
-            log_print(f"  - Attaques manquantes (aucune attaque): {len(missing_attacks)}")
-            log_print(f"  - Avertissements: {len(missing_warnings)}")
+            file_print(f"⚠️  {total_issues} problème(s) détecté(s):")
+            file_print(f"  - Mouvements non logués: {len(unlogged_moves)}")
+            file_print(f"  - Attaques non loguées: {len(unlogged_attacks)}")
+            file_print(f"  - Attaques manquantes (aucune attaque): {len(missing_attacks)}")
+            file_print(f"  - Avertissements: {len(missing_warnings)}")
     
     except Exception as e:
-        log_print(f"❌ ERREUR: {e}")
+        file_print(f"❌ ERREUR: {e}")
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=output_f)
     finally:
-        log_print(f"\n✅ Output sauvegardé dans: {output_file}")
+        if total_issues > 0:
+            log_print(f"\n⚠️ hidden_action_finder.py :  {total_issues} erreur(s) détectée(s)   -   Output : {output_file}")
+        else:
+            log_print(f"\n✅ hidden_action_finder.py : Aucune erreur détectée   -   Output : {output_file}")
         output_f.close()
 
 if __name__ == '__main__':

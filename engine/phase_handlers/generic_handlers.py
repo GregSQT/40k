@@ -109,9 +109,15 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             game_state["move_activation_pool"].remove(unit_id)
             response["removed_from_move_pool"] = True
     elif arg4 == "SHOOTING":
-        if "shoot_activation_pool" in game_state and unit_id in game_state["shoot_activation_pool"]:
-            game_state["shoot_activation_pool"].remove(unit_id)
-            response["removed_from_shoot_pool"] = True
+        if "shoot_activation_pool" in game_state:
+            # PRINCIPLE: "Le Pool DOIT gérer les morts" - Use string comparison to handle int/string ID mismatches
+            unit_id_str = str(unit_id)
+            # Filter instead of remove to handle type mismatches
+            pool_before = len(game_state["shoot_activation_pool"])
+            game_state["shoot_activation_pool"] = [uid for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
+            pool_after = len(game_state["shoot_activation_pool"])
+            if pool_before != pool_after:
+                response["removed_from_shoot_pool"] = True
     elif arg4 == "CHARGE":
         if "charge_activation_pool" in game_state and unit_id in game_state["charge_activation_pool"]:
             game_state["charge_activation_pool"].remove(unit_id)

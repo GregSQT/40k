@@ -1428,16 +1428,43 @@ class W40KEngine(gym.Env):
                                             f"action_type={action_type}, unit_id={unit_id}"
                                         )
                                     
+                                    # CRITICAL: Use shooterId from attack_result if available, otherwise fallback to unit_id from result
+                                    # This ensures we log the correct unit that actually performed the attack
+                                    actual_shooter_id = attack_result.get("shooterId", unit_id)
                                     target_id = attack_result.get("targetId", result.get("targetId"))
+                                    
+                                    # Validate that actual_shooter_id matches the unit_id from result
+                                    if str(actual_shooter_id) != str(unit_id):
+                                        # Log warning but continue - this indicates a potential bug
+                                        episode = self.game_state.get("episode_number", "?")
+                                        turn = self.game_state.get("turn", "?")
+                                        from engine.game_utils import add_console_log, safe_print
+                                        warning_msg = f"[CRITICAL LOGGING BUG] E{episode} T{turn} shoot logging: attack_result.shooterId={actual_shooter_id} but result.unitId={unit_id} - using shooterId from attack_result"
+                                        add_console_log(self.game_state, warning_msg)
+                                        safe_print(self.game_state, warning_msg)
+                                    
+                                    # Get actual shooter unit for coordinates
+                                    actual_shooter_unit = self._get_unit_by_id(str(actual_shooter_id)) if actual_shooter_id else updated_unit
                                     target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                                     target_coords = None
                                     if target_unit:
                                         target_coords = (target_unit["col"], target_unit["row"])
                                     
+                                    # CRITICAL FIX: Use pre_action_positions for actual shooter (not unit_id from result)
+                                    # This ensures consistent position logging and avoids using stale positions
+                                    if str(actual_shooter_id) in pre_action_positions:
+                                        unit_col, unit_row = pre_action_positions[str(actual_shooter_id)]
+                                    elif actual_shooter_unit:
+                                        # Fallback to actual_shooter_unit position
+                                        unit_col, unit_row = actual_shooter_unit['col'], actual_shooter_unit['row']
+                                    else:
+                                        # Last resort: use updated_unit position
+                                        unit_col, unit_row = updated_unit['col'], updated_unit['row']
+                                    
                                     attack_details = {
                                         "current_turn": pre_action_turn,
                                         "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
-                                        "unit_with_coords": f"{updated_unit['id']}({updated_unit['col']},{updated_unit['row']})",
+                                        "unit_with_coords": f"{actual_shooter_id}({unit_col},{unit_row})",
                                         "action": action,
                                         "target_id": target_id,
                                         "target_coords": target_coords,
@@ -1461,7 +1488,7 @@ class W40KEngine(gym.Env):
                                     step_increment = (i == 0) and success
                                     
                                     self.step_logger.log_action(
-                                        unit_id=updated_unit["id"],
+                                        unit_id=actual_shooter_id,  # CRITICAL: Use actual shooter ID from attack_result
                                         action_type=action_type,
                                         phase=pre_action_phase,
                                         player=pre_action_player,

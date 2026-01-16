@@ -53,6 +53,8 @@ def charge_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
     Build charge activation pool with eligibility checks
     """
+    # CRITICAL: Clear pool before rebuilding (defense in depth)
+    game_state["charge_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
     game_state["charge_activation_pool"] = list(eligible_units)  # Ensure it's a new list, not a reference
 
@@ -442,10 +444,20 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     melee_range = get_melee_range()  # Always 1
     
     # For each enemy, check if:
-    # 1. Enemy is within charge_max_distance (via BFS - at least one reachable hex is adjacent to enemy)
-    # 2. Enemy has at least one non-occupied adjacent hex that is reachable
+    # 1. Unit is NOT already adjacent to this enemy (CRITICAL: cannot charge from adjacent hex)
+    # 2. Enemy is within charge_max_distance (via BFS - at least one reachable hex is adjacent to enemy)
+    # 3. Enemy has at least one non-occupied adjacent hex that is reachable
+    unit_col_int, unit_row_int = int(unit["col"]), int(unit["row"])
+    
     for enemy in enemies:
         enemy_col_int, enemy_row_int = int(enemy["col"]), int(enemy["row"])
+        
+        # CRITICAL: Check if unit is already adjacent to this enemy
+        # RULE: Cannot charge from adjacent hex (must be at distance > melee_range)
+        distance_from_unit_to_enemy = _calculate_hex_distance(unit_col_int, unit_row_int, enemy_col_int, enemy_row_int)
+        if distance_from_unit_to_enemy <= melee_range:
+            # Unit is already adjacent to this enemy - cannot charge
+            continue
         
         # Check if any reachable hex is adjacent to this enemy
         has_adjacent_reachable_hex = False
@@ -625,6 +637,12 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
     unit["row"] = dest_row
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
+
+    # CRITICAL: Invalidate LoS cache when unit charges (moves)
+    # When a unit charges, all LoS calculations involving that unit are now invalid
+    # This prevents "shoot through wall" bugs caused by stale cache
+    from .shooting_handlers import _invalidate_los_cache_for_moved_unit
+    _invalidate_los_cache_for_moved_unit(game_state, unit["id"])
 
     # Mark as units_charged (NOT units_moved)
     game_state["units_charged"].add(unit["id"])

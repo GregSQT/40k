@@ -127,9 +127,7 @@ class PvEController:
             elif current_phase == "shoot":
                 if "shoot_activation_pool" not in game_state:
                     raise KeyError("game_state missing required 'shoot_activation_pool' field")
-                eligible_pool = game_state["shoot_activation_pool"]
-                if "shoot_activation_pool" not in game_state:
-                    raise KeyError("game_state missing required 'shoot_activation_pool' field")
+                # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool should never contain dead units
                 eligible_pool = game_state["shoot_activation_pool"]
             elif current_phase == "fight":
                 # Fight phase has 3 sub-phases with different pools

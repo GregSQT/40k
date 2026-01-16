@@ -185,6 +185,7 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_after_fled': {1: 0, 2: 0},
         'shoot_at_friendly': {1: 0, 2: 0},
         'shoot_at_engaged_enemy': {1: 0, 2: 0},
+        'shoot_dead_unit': {1: 0, 2: 0},
         'charge_after_fled': {1: 0, 2: 0},
         'fight_from_non_adjacent': {1: 0, 2: 0},
         'fight_friendly': {1: 0, 2: 0},
@@ -198,6 +199,7 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_after_fled': {1: None, 2: None},
             'shoot_at_friendly': {1: None, 2: None},
             'shoot_at_engaged_enemy': {1: None, 2: None},
+            'shoot_dead_unit': {1: None, 2: None},
             'charge_after_fled': {1: None, 2: None},
             'fight_from_non_adjacent': {1: None, 2: None},
             'fight_friendly': {1: None, 2: None},
@@ -230,6 +232,10 @@ def parse_step_log(filepath: str) -> Dict:
     unit_types = {}
     wall_hexes = set()
     
+    # Track unit deaths with line numbers for chronological order checking
+    unit_deaths = []  # List of (turn, phase, unit_id, line_num) tuples
+    line_number = 0  # Track line number for chronological order
+    
     # Track all unit movements from logs (source of truth for collision detection)
     # Maps unit_id -> list of (position, timestamp, action_type) tuples
     unit_movement_history = {}
@@ -242,9 +248,11 @@ def parse_step_log(filepath: str) -> Dict:
     units_fought = set()
     positions_at_turn_start = {}
     positions_at_move_phase_start = {}  # Track positions at start of MOVE phase to detect fled
+    last_player = None  # Track last player to detect phase MOVE start for each player
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
+            line_number += 1
             # Episode start
             if '=== EPISODE' in line and 'START ===' in line:
                 if current_episode:
@@ -283,6 +291,7 @@ def parse_step_log(filepath: str) -> Dict:
                 units_advanced = set()
                 units_fought = set()
                 unit_movement_history = {}  # Reset movement history for new episode
+                unit_deaths = []  # Reset deaths tracking for new episode
                 continue
 
             # Skip header lines
@@ -315,11 +324,20 @@ def parse_step_log(filepath: str) -> Dict:
                 col = int(unit_start_match.group(4))
                 row = int(unit_start_match.group(5))
                 
-                # Set HP based on unit type
-                if unit_type in ['Termagant', 'Hormagaunt', 'Genestealer']:
-                    unit_hp[unit_id] = 1
+                # CRITICAL: Get HP_MAX from registry (REAL HP, not guessed)
+                hp_max = unit_registry.units.get(unit_type, {}).get('HP_MAX', None)
+                if hp_max is None:
+                    # Fallback to type-based guess if registry doesn't have it
+                    if unit_type in ['Termagant', 'Hormagaunt', 'Genestealer']:
+                        hp_max = 1
+                    else:
+                        hp_max = 2
+                    _debug_log(f"[ANALYZER WARNING] Unit {unit_id} ({unit_type}) not found in registry, using fallback HP_MAX={hp_max}")
                 else:
-                    unit_hp[unit_id] = 2
+                    _debug_log(f"[ANALYZER] Unit {unit_id} ({unit_type}) HP_MAX={hp_max} from registry")
+                
+                # Initialize HP_CUR = HP_MAX (unit starts at full HP)
+                unit_hp[unit_id] = hp_max
                 
                 unit_player[unit_id] = player
                 unit_positions[unit_id] = (col, row)
@@ -379,22 +397,56 @@ def parse_step_log(filepath: str) -> Dict:
                 success = match.group(5) == 'SUCCESS'
                 step_inc = match.group(6) == 'YES'
 
+                # CRITICAL: Apply damage regardless of [STEP: YES/NO]
+                # STEP: NO still contains real attacks/shots and can kill units.
+                # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
+                # by treating dead units as alive.
+                if 'shot at unit' in action_desc.lower() or 'attacked unit' in action_desc.lower():
+                    target_match = re.search(r'(?:SHOT at|ATTACKED) unit (\d+)', action_desc, re.IGNORECASE)
+                    if target_match:
+                        target_id = target_match.group(1)
+                        damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
+                        if damage_match:
+                            damage = int(damage_match.group(1))
+                            if damage > 0 and target_id in unit_hp:
+                                unit_hp[target_id] -= damage
+                                if unit_hp[target_id] <= 0:
+                                    target_type = unit_types.get(target_id, "Unknown")
+                                    stats['current_episode_deaths'].append((player, target_id, target_type))
+                                    stats['wounded_enemies'][player].discard(target_id)
+                                    if target_id in unit_positions:
+                                        del unit_positions[target_id]
+                                    # Track death with line number for chronological order checking
+                                    unit_deaths.append((turn, phase, target_id, line_number))
+                                    del unit_hp[target_id]
+                                else:
+                                    stats['wounded_enemies'][player].add(target_id)
+
                 # Reset markers when turn changes
                 if turn != last_turn:
                     units_moved = set()
                     units_shot = set()
-                    # CRITICAL: Don't reset units_fled - units that fled should be tracked across turns
-                    # A unit that fled in T1 should not be able to shoot/charge in T2+
-                    # units_fled = set()  # REMOVED: Persist across turns
+                    # CRITICAL: Reset units_fled at the start of each turn
+                    # According to AI_TURN.md and command_phase_start(), units_fled is reset at the start of each turn
+                    # A unit that fled in T1 SHOULD be able to shoot/charge in T2
+                    units_fled = set()
                     units_advanced = set()
                     units_fought = set()
                     positions_at_turn_start = unit_positions.copy()
                     positions_at_move_phase_start = {}
+                    last_player = None  # Reset last player on turn change
                     last_turn = turn
 
                 # Track positions at start of MOVE phase for fled detection
-                if phase == 'MOVE' and not positions_at_move_phase_start:
-                    positions_at_move_phase_start = unit_positions.copy()
+                # CRITICAL: Must track positions at the start of EACH player's MOVE phase, not just the first MOVE of the turn
+                # When player changes OR when we see the first MOVE action of a turn, capture positions
+                # BUT: Don't fill it yet - we'll fill it with positions "from" of MOVE actions below
+                if phase == 'MOVE' and (last_player != player or not positions_at_move_phase_start):
+                    # Don't fill positions_at_move_phase_start here - it will be filled below using "from" positions from log
+                    positions_at_move_phase_start = {}
+                
+                # Update last_player after processing the action
+                last_player = player
 
                 episode_turn = max(episode_turn, turn)
 
@@ -419,6 +471,17 @@ def parse_step_log(filepath: str) -> Dict:
                             shooter_row = int(shooter_match.group(3))
                             target_id = target_match.group(1)
                             
+                            # CRITICAL: Update unit_positions if shooter position changed (e.g., due to ADVANCE)
+                            # The log shows the current position of the shooter, which is the source of truth
+                            if shooter_id in unit_positions:
+                                current_pos = unit_positions[shooter_id]
+                                if current_pos != (shooter_col, shooter_row):
+                                    # Position changed (e.g., unit advanced) - update unit_positions
+                                    unit_positions[shooter_id] = (shooter_col, shooter_row)
+                            else:
+                                # Unit not in unit_positions yet - add it
+                                unit_positions[shooter_id] = (shooter_col, shooter_row)
+                            
                             if target_match.group(2) and target_match.group(3):
                                 target_col = int(target_match.group(2))
                                 target_row = int(target_match.group(3))
@@ -428,6 +491,46 @@ def parse_step_log(filepath: str) -> Dict:
                             else:
                                 target_pos = None
 
+                            # RULE: Dead unit shooting (CRITICAL BUG)
+                            # Check if shooter is dead, but filter false positives (unit dies AFTER shooting in same phase)
+                            shooter_is_dead = shooter_id not in unit_hp or unit_hp.get(shooter_id, 0) <= 0
+                            if shooter_is_dead:
+                                # Check if this is a false positive: unit dies AFTER this shoot action in same turn/phase
+                                is_false_positive = False
+                                phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
+                                current_phase_order = phase_order.get(phase, 99)
+                                
+                                # Find when this unit died (if it did)
+                                unit_died_before_shoot = False
+                                for death_turn, death_phase, dead_unit_id, death_line_num in unit_deaths:
+                                    if dead_unit_id == shooter_id:
+                                        # Unit died - check if it's BEFORE this shoot action
+                                        if death_turn < turn:
+                                            # Unit died in previous turn - REAL BUG (died before shoot)
+                                            unit_died_before_shoot = True
+                                            break
+                                        elif death_turn == turn:
+                                            # Same turn - check phase order and line number
+                                            death_phase_order = phase_order.get(death_phase, 99)
+                                            if death_phase_order < current_phase_order:
+                                                # Unit died in earlier phase of same turn - REAL BUG
+                                                unit_died_before_shoot = True
+                                                break
+                                            elif death_phase_order == current_phase_order and death_line_num < line_number:
+                                                # Unit died in same phase but BEFORE this shoot action - REAL BUG
+                                                unit_died_before_shoot = True
+                                                break
+                                            elif death_phase_order == current_phase_order and death_line_num > line_number:
+                                                # Unit dies in same phase but AFTER this shoot action - FALSE POSITIVE
+                                                is_false_positive = True
+                                                break
+                                
+                                # Only report if it's a real bug (unit died before shooting)
+                                if unit_died_before_shoot and not is_false_positive:
+                                    stats['shoot_dead_unit'][player] += 1
+                                    if stats['first_error_lines']['shoot_dead_unit'][player] is None:
+                                        stats['first_error_lines']['shoot_dead_unit'][player] = {'episode': current_episode_num, 'line': line.strip()}
+
                             # RULE: Shoot after fled
                             if shooter_id in units_fled:
                                 stats['shoot_after_fled'][player] += 1
@@ -435,10 +538,14 @@ def parse_step_log(filepath: str) -> Dict:
                                     stats['first_error_lines']['shoot_after_fled'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # RULE: Shoot at friendly
-                            if target_id in unit_player and unit_player[target_id] == player:
-                                stats['shoot_at_friendly'][player] += 1
-                                if stats['first_error_lines']['shoot_at_friendly'][player] is None:
-                                    stats['first_error_lines']['shoot_at_friendly'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                            # CRITICAL: Use shooter's actual player, not phase player
+                            # The phase player (P1/P2) indicates whose turn it is, not which player the shooter belongs to
+                            shooter_actual_player = unit_player.get(shooter_id, None)
+                            if target_id in unit_player and shooter_actual_player is not None and unit_player[target_id] == shooter_actual_player:
+                                # Use shooter's player for stats (not phase player)
+                                stats['shoot_at_friendly'][shooter_actual_player] += 1
+                                if stats['first_error_lines']['shoot_at_friendly'][shooter_actual_player] is None:
+                                    stats['first_error_lines']['shoot_at_friendly'][shooter_actual_player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # RULE: Shoot through wall
                             if target_pos and not has_line_of_sight(shooter_col, shooter_row, target_pos[0], target_pos[1], wall_hexes):
@@ -446,7 +553,61 @@ def parse_step_log(filepath: str) -> Dict:
                                 if stats['first_error_lines']['shoot_through_wall'][player] is None:
                                     stats['first_error_lines']['shoot_through_wall'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
+                            # Check PISTOL weapon rules (needed before shoot_at_engaged_enemy check)
+                            weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
+                            is_pistol = False
+                            weapon_found = False
+                            
+                            # CRITICAL: Validate that shooter_id matches expected unit type
+                            # This detects cases where unit ID is wrong in the log
+                            shooter_unit_type = unit_types.get(shooter_id, '')
+                            shooter_player_from_types = unit_player.get(shooter_id, None)
+                            
+                            if weapon_match:
+                                weapon_display_name = weapon_match.group(1)
+                                weapon_name_lower = weapon_display_name.lower()
+                                
+                                weapons_info = unit_weapons_cache.get(shooter_unit_type, [])
+                                
+                                for weapon_info in weapons_info:
+                                    if weapon_info['name'].lower() == weapon_name_lower:
+                                        is_pistol = weapon_info['is_pistol']
+                                        weapon_found = True
+                                        break
+                                
+                                # CRITICAL: Detect unit ID/type mismatch
+                                # If weapon not found AND it's clearly from wrong faction, suspect ID error
+                                if not weapon_found and shooter_unit_type:
+                                    # Check if weapon is Tyranid but unit type suggests Space Marine or vice versa
+                                    tyranid_weapons = ['deathspitter', 'fleshborer', 'devourer', 'scything talons', 'bonesword', 'lash whip']
+                                    space_marine_weapons = ['bolt rifle', 'bolt pistol', 'chainsword', 'power sword', 'power fist', 'stalker bolt rifle']
+                                    
+                                    weapon_is_tyranid = any(tyranid_wpn in weapon_name_lower for tyranid_wpn in tyranid_weapons)
+                                    weapon_is_space_marine = any(sm_wpn in weapon_name_lower for sm_wpn in space_marine_weapons)
+                                    
+                                    unit_is_space_marine = 'intercessor' in shooter_unit_type.lower() or 'captain' in shooter_unit_type.lower() or 'spacemarine' in shooter_unit_type.lower()
+                                    unit_is_tyranid = 'tyranid' in shooter_unit_type.lower() or 'genestealer' in shooter_unit_type.lower() or 'hormagaunt' in shooter_unit_type.lower() or 'termagant' in shooter_unit_type.lower()
+                                    
+                                    # If weapon faction doesn't match unit faction, it's likely an ID mismatch bug
+                                    if (weapon_is_tyranid and unit_is_space_marine) or (weapon_is_space_marine and unit_is_tyranid):
+                                        # This suggests shooter_id in log is wrong - log as ID mismatch
+                                        if 'unit_id_mismatches' not in stats:
+                                            stats['unit_id_mismatches'] = []
+                                        stats['unit_id_mismatches'].append({
+                                            'episode': current_episode_num,
+                                            'turn': turn,
+                                            'phase': phase,
+                                            'shooter_id_logged': shooter_id,
+                                            'shooter_type_registered': shooter_unit_type,
+                                            'shooter_player_registered': shooter_player_from_types,
+                                            'weapon_logged': weapon_display_name,
+                                            'shooter_position': (shooter_col, shooter_row),
+                                            'line': line.strip()
+                                        })
+
                             # RULE: Shoot at engaged enemy
+                            # CRITICAL: According to AI_TURN.md, PISTOL weapons CAN shoot at engaged enemies
+                            # So we must exclude PISTOL weapons from this violation
                             # CRITICAL: is_engaged uses unit_positions which should be current at this point
                             # But we need to ensure target_pos is used if available (more accurate)
                             if target_pos:
@@ -458,39 +619,24 @@ def parse_step_log(filepath: str) -> Dict:
                             else:
                                 target_engaged = False
                             
-                            if target_engaged:
+                            # Only report violation if target is engaged AND weapon is NOT a PISTOL
+                            if target_engaged and not is_pistol:
                                 stats['shoot_at_engaged_enemy'][player] += 1
                                 if stats['first_error_lines']['shoot_at_engaged_enemy'][player] is None:
                                     stats['first_error_lines']['shoot_at_engaged_enemy'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
-                            # Check PISTOL weapon rules
-                            weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
-                            if weapon_match and target_pos:
-                                weapon_display_name = weapon_match.group(1)
-                                weapon_name_lower = weapon_display_name.lower()
-                                
-                                shooter_unit_type = unit_types.get(shooter_id, '')
-                                weapons_info = unit_weapons_cache.get(shooter_unit_type, [])
-                                
-                                is_pistol = False
-                                weapon_found = False
-                                for weapon_info in weapons_info:
-                                    if weapon_info['name'].lower() == weapon_name_lower:
-                                        is_pistol = weapon_info['is_pistol']
-                                        weapon_found = True
-                                        break
-                                
+                            # Track PISTOL weapon shots (for statistics)
+                            if weapon_match and target_pos and weapon_found:
                                 distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
                                 
-                                if weapon_found:
-                                    if is_pistol:
-                                        if distance == 1:
-                                            stats['pistol_shots'][player]['adjacent'] += 1
-                                        else:
-                                            stats['pistol_shots'][player]['not_adjacent'] += 1
+                                if is_pistol:
+                                    if distance == 1:
+                                        stats['pistol_shots'][player]['adjacent'] += 1
                                     else:
-                                        if distance == 1:
-                                            stats['non_pistol_adjacent_shots'][player] += 1
+                                        stats['pistol_shots'][player]['not_adjacent'] += 1
+                                else:
+                                    if distance == 1:
+                                        stats['non_pistol_adjacent_shots'][player] += 1
 
                             # Track shots after advance
                             if shooter_id in units_advanced:
@@ -513,23 +659,6 @@ def parse_step_log(filepath: str) -> Dict:
                                 stats['target_priority'][player]['shots_at_full_hp_while_wounded_in_los'] += 1
                             else:
                                 stats['target_priority'][player]['shots_at_wounded_in_los'] += 1
-
-                            # Apply damage
-                            damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
-                            if damage_match:
-                                damage = int(damage_match.group(1))
-                                if damage > 0 and target_id in unit_hp:
-                                    unit_hp[target_id] -= damage
-                                    if unit_hp[target_id] <= 0:
-                                        target_type = unit_types.get(target_id, "Unknown")
-                                        stats['current_episode_deaths'].append((player, target_id, target_type))
-                                        stats['wounded_enemies'][player].discard(target_id)
-                                        if target_id in unit_positions:
-                                            del unit_positions[target_id]
-                                        if target_id in unit_hp:
-                                            del unit_hp[target_id]
-                                    else:
-                                        stats['wounded_enemies'][player].add(target_id)
 
                         # Sample action
                         if not stats['sample_actions']['shoot']:
@@ -921,7 +1050,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     'error': f"Charge action missing expected format: {action_desc[:100]}"
                                 })
 
-                    elif 'moves' in action_desc.lower() or 'moved' in action_desc.lower():
+                    elif 'moves' in action_desc.lower() or 'moved' in action_desc.lower() or 'fled' in action_desc.lower():
                         action_type = 'move'
                         
                         # CRITICAL: Detect explicit FLED actions first
@@ -937,6 +1066,10 @@ def parse_step_log(filepath: str) -> Dict:
                             # CRITICAL: Explicit FLED action - mark as fled
                             units_fled.add(move_unit_id)
                             
+                            # DEBUG: Log FLED action processing
+                            _debug_log(f"[FLED DEBUG] E{current_episode_num} T{turn} P{player}: Unit {move_unit_id} FLED from ({start_col},{start_row}) to ({dest_col},{dest_row})")
+                            _debug_log(f"[FLED DEBUG] BEFORE sync: unit_positions[{move_unit_id}] = {unit_positions.get(move_unit_id, 'NOT SET')}")
+                            
                             # CRITICAL: Synchronize unit_positions with log before processing
                             # The log is the source of truth - if unit_positions doesn't match the start position
                             # in the log, it means unit_positions is stale and needs to be corrected
@@ -945,10 +1078,14 @@ def parse_step_log(filepath: str) -> Dict:
                                 if current_pos != (start_col, start_row):
                                     # unit_positions is stale - correct it with the log's start position
                                     unit_positions[move_unit_id] = (start_col, start_row)
+                                    _debug_log(f"[FLED DEBUG] AFTER sync (corrected): unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]}")
+                                else:
+                                    _debug_log(f"[FLED DEBUG] AFTER sync (no change): unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]}")
                             else:
                                 # Unit not in unit_positions - add it with start position from log
                                 # This can happen if unit was removed incorrectly or not initialized
                                 unit_positions[move_unit_id] = (start_col, start_row)
+                                _debug_log(f"[FLED DEBUG] AFTER sync (added): unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]}")
                             
                             # Record this movement in history (source of truth)
                             if move_unit_id not in unit_movement_history:
@@ -968,9 +1105,14 @@ def parse_step_log(filepath: str) -> Dict:
                             # at the same timestamp (e.g., Unit A flees from X, Unit B charges to X)
                             # CRITICAL: Only update position if unit is still alive
                             # Dead units should not have their positions updated (they were removed when they died)
-                            if unit_hp.get(move_unit_id, 0) > 0:
+                            unit_hp_value = unit_hp.get(move_unit_id, 0)
+                            _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")
+                            if unit_hp_value > 0:
                                 old_position = unit_positions.get(move_unit_id)
                                 unit_positions[move_unit_id] = (dest_col, dest_row)
+                                _debug_log(f"[FLED DEBUG] AFTER update: unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]} (was {old_position})")
+                            else:
+                                _debug_log(f"[FLED DEBUG] SKIPPED update: unit_hp[{move_unit_id}] = {unit_hp_value} (<= 0)")
                             
                             if (start_col, start_row) != (dest_col, dest_row):
                                 # RULE: Position collision
@@ -1032,6 +1174,18 @@ def parse_step_log(filepath: str) -> Dict:
                             
                             units_moved.add(move_unit_id)
                             
+                            # CRITICAL: Rebuild positions_at_move_phase_start using "from" positions from log
+                            # This ensures we have accurate positions at the start of MOVE phase
+                            # The "from" position in the log is the position at the start of the movement
+                            if move_unit_id not in positions_at_move_phase_start:
+                                # First MOVE action for this unit in this MOVE phase - add its "from" position
+                                positions_at_move_phase_start[move_unit_id] = (start_col, start_row)
+                                # Also add positions of other units that haven't moved yet in this MOVE phase
+                                # Use their current positions from unit_positions as they haven't moved
+                                for uid, pos in unit_positions.items():
+                                    if uid not in positions_at_move_phase_start:
+                                        positions_at_move_phase_start[uid] = pos
+                            
                             # CRITICAL: Synchronize unit_positions with log before processing
                             # The log is the source of truth - if unit_positions doesn't match the start position
                             # in the log, it means unit_positions is stale and needs to be corrected
@@ -1046,6 +1200,8 @@ def parse_step_log(filepath: str) -> Dict:
                                 unit_positions[move_unit_id] = (start_col, start_row)
                             
                             # RULE: Detect fled (was adjacent to enemy at start of MOVE phase, then moved)
+                            # CRITICAL: Use positions_at_move_phase_start which now contains accurate positions
+                            # reconstructed from "from" positions in the log
                             if move_unit_id in positions_at_move_phase_start:
                                 start_pos = positions_at_move_phase_start[move_unit_id]
                                 if is_adjacent_to_enemy(start_pos[0], start_pos[1], unit_player, 
@@ -1240,6 +1396,24 @@ def parse_step_log(filepath: str) -> Dict:
                             target_col = int(fight_match.group(5))
                             target_row = int(fight_match.group(6))
                             
+                            # CRITICAL: Track damage and deaths in fight phase (same as shoot phase)
+                            # This ensures dead units are properly removed from unit_hp and unit_positions
+                            damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
+                            if damage_match:
+                                damage = int(damage_match.group(1))
+                                if damage > 0 and target_id in unit_hp:
+                                    unit_hp[target_id] -= damage
+                                    if unit_hp[target_id] <= 0:
+                                        # Unit died - remove from tracking
+                                        target_type = unit_types.get(target_id, "Unknown")
+                                        stats['current_episode_deaths'].append((player, target_id, target_type))
+                                        stats['wounded_enemies'][player].discard(target_id)
+                                        if target_id in unit_positions:
+                                            del unit_positions[target_id]
+                                        del unit_hp[target_id]
+                                    else:
+                                        stats['wounded_enemies'][player].add(target_id)
+                            
                             # RULE: Fight from non-adjacent
                             if not is_adjacent(fighter_col, fighter_row, target_col, target_row):
                                 stats['fight_from_non_adjacent'][player] += 1
@@ -1256,29 +1430,6 @@ def parse_step_log(filepath: str) -> Dict:
                                 stats['fight_friendly'][attacker_player] += 1
                                 if stats['first_error_lines']['fight_friendly'][attacker_player] is None:
                                     stats['first_error_lines']['fight_friendly'][attacker_player] = {'episode': current_episode_num, 'line': line.strip()}
-                            
-                            # Apply damage
-                            # Debug pour Unit 13
-                            if target_id == "13":
-                                print(f"DEBUG FIGHT: Unit 13 attacked - action_desc: {action_desc}")
-                            
-                            damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
-                            if damage_match:
-                                damage = int(damage_match.group(1))
-                                if damage > 0 and target_id in unit_hp:
-                                    unit_hp[target_id] -= damage
-                                    if unit_hp[target_id] <= 0:
-                                        target_type = unit_types.get(target_id, "Unknown")
-                                        stats['current_episode_deaths'].append((player, target_id, target_type))
-                                        stats['wounded_enemies'][player].discard(target_id)
-                                        if target_id in unit_positions:
-                                            del unit_positions[target_id]
-                                        if target_id in unit_hp:
-                                            del unit_hp[target_id]
-                                    else:
-                                        stats['wounded_enemies'][player].add(target_id)
-                            elif target_id == "13":
-                                print(f"DEBUG FIGHT: Unit 13 attacked but NO damage match found in: {action_desc}")
                             
                             # Sample action
                             if not stats['sample_actions']['fight']:
@@ -1656,6 +1807,43 @@ def print_statistics(stats: Dict, output_f=None):
     if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_shoot_dead = stats['shoot_dead_unit'][1]
+    bot_shoot_dead = stats['shoot_dead_unit'][2]
+    log_print(f"Dead unit shooting:           {agent_shoot_dead:6d}           {bot_shoot_dead:6d}")
+    if agent_shoot_dead > 0 and stats['first_error_lines']['shoot_dead_unit'][1]:
+        first_err = stats['first_error_lines']['shoot_dead_unit'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_shoot_dead > 0 and stats['first_error_lines']['shoot_dead_unit'][2]:
+        first_err = stats['first_error_lines']['shoot_dead_unit'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    
+    # UNIT ID MISMATCHES
+    unit_id_mismatches = stats.get('unit_id_mismatches', [])
+    if unit_id_mismatches:
+        log_print("\n" + "-" * 80)
+        log_print("UNIT ID MISMATCHES (Critical Bug)")
+        log_print("-" * 80)
+        log_print(f"Total mismatches detected: {len(unit_id_mismatches)}")
+        for mismatch in unit_id_mismatches[:5]:  # Show first 5
+            log_print(f"  Episode {mismatch['episode']} T{mismatch['turn']} {mismatch['phase']}: Unit ID {mismatch['shooter_id_logged']} logged but type={mismatch['shooter_type_registered']} player={mismatch['shooter_player_registered']} weapon={mismatch['weapon_logged']} pos={mismatch['shooter_position']}")
+        if len(unit_id_mismatches) > 5:
+            log_print(f"  ... and {len(unit_id_mismatches) - 5} more")
+    
+    # DEAD UNIT ACTIONS (Critical Bug)
+    dead_unit_actions = stats.get('dead_unit_actions', [])
+    if dead_unit_actions:
+        log_print("\n" + "-" * 80)
+        log_print("DEAD UNIT ACTIONS (Critical Bug)")
+        log_print("-" * 80)
+        log_print(f"Total actions by dead units: {len(dead_unit_actions)}")
+        for action in dead_unit_actions[:5]:  # Show first 5
+            log_print(f"  Episode {action['episode']} T{action['turn']} {action['phase']}: Unit {action['unit_id']} (DEAD) attempted {action['action_type']}")
+            log_print(f"    {action['line']}")
+        if len(dead_unit_actions) > 5:
+            log_print(f"  ... and {len(dead_unit_actions) - 5} more")
+    if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
+        first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # CHARGE ERRORS
     log_print("\n" + "-" * 80)
@@ -1779,7 +1967,7 @@ if __name__ == "__main__":
     log_file = sys.argv[1]
     
     # Open output file for writing
-    output_file = 'ai/analyzer_output.txt'
+    output_file = 'ai/analyzer.log'
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     output_f = open(output_file, 'w', encoding='utf-8')
     
@@ -1797,7 +1985,39 @@ if __name__ == "__main__":
         stats = parse_step_log(log_file)
         print_statistics(stats, output_f)
         
-        log_print(f"\n✅ Output sauvegardé dans: {output_file}")
+        # Calculate total errors (all error counts between MOVEMENT ERRORS and SAMPLE ACTIONS)
+        total_errors = (
+            # MOVEMENT ERRORS
+            stats['wall_collisions'][1] + stats['wall_collisions'][2] +
+            stats['move_to_adjacent_enemy'][1] + stats['move_to_adjacent_enemy'][2] +
+            # SHOOTING ERRORS
+            stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
+            stats['shoot_through_wall'][1] + stats['shoot_through_wall'][2] +
+            stats['shoot_after_fled'][1] + stats['shoot_after_fled'][2] +
+            stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
+            stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
+            stats['shoot_dead_unit'][1] + stats['shoot_dead_unit'][2] +
+            # CHARGE ERRORS
+            stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
+            stats['charge_after_fled'][1] + stats['charge_after_fled'][2] +
+            # FIGHT ERRORS
+            stats['fight_from_non_adjacent'][1] + stats['fight_from_non_adjacent'][2] +
+            stats['fight_friendly'][1] + stats['fight_friendly'][2] +
+            # UNIT POSITION COLLISIONS
+            len(stats['unit_position_collisions']) +
+            # PARSE ERRORS
+            len(stats['parse_errors']) +
+            # EPISODES WITHOUT END
+            len(stats['episodes_without_end']) +
+            # EPISODES WITHOUT METHOD
+            len(stats['episodes_without_method'])
+        )
+
+        if total_errors > 0:
+            log_print(f"\n⚠️  {total_errors} erreur(s) détectée(s)   -   Output : {output_file}")
+        else:
+            log_print(f"\n✅ Aucune erreur détectée   -   Output : {output_file}")
+
     except Exception as e:
         log_print(f"Error: {e}")
         import traceback
