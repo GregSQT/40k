@@ -60,7 +60,7 @@ class EntropyScheduleCallback(BaseCallback):
                 new_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
                 self.model.ent_coef = new_ent
 
-                if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 10000:
+                if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 1000:
                     print(f"Episode {self.episode_count}/{self.total_episodes}: ent_coef = {new_ent:.3f}")
                     self.last_update_step = self.num_timesteps
         return True

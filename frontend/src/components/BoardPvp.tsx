@@ -162,6 +162,7 @@ type BoardProps = {
   phase: "command" | "move" | "shoot" | "charge" | "fight";
   onCharge?: (chargerId: number, targetId: number) => void;
   onActivateCharge?: (chargerId: number) => void;
+  onChargeEnemyUnit?: (chargerId: number, enemyUnitId: number) => void;
   onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
   onCancelCharge?: () => void;
   onValidateCharge?: (chargerId: number) => void;
@@ -228,6 +229,7 @@ export default function Board({
   onActivateFight,
   onCharge,
   onActivateCharge,
+  onChargeEnemyUnit,
   unitsCharged,
   unitsAttacked,
   unitsFled,
@@ -237,7 +239,6 @@ export default function Board({
   onCancelCharge,
   onValidateCharge,
   onLogChargeRoll,
-  shootingPhaseState,
   targetPreview,
   onCancelTargetPreview,
   gameState,
@@ -290,6 +291,7 @@ export default function Board({
     onActivateFight?: (fighterId: number) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
     onActivateCharge?: (chargerId: number) => void;
+    onChargeEnemyUnit?: (chargerId: number, enemyUnitId: number) => void;
     onMoveCharger?: (chargerId: number, destCol: number, destRow: number) => void;
     onCancelCharge?: () => void;
     onCancelAdvance?: () => void;
@@ -307,6 +309,7 @@ export default function Board({
     onFightAttack,
     onCharge,
     onActivateCharge,
+    onChargeEnemyUnit,
     onMoveCharger,
     onCancelCharge,
     onCancelAdvance,
@@ -329,6 +332,7 @@ export default function Board({
     onActivateFight,
     onCharge,
     onActivateCharge,
+    onChargeEnemyUnit,
     onMoveCharger,
     onCancelCharge,
     onCancelAdvance,
@@ -616,20 +620,7 @@ export default function Board({
       onActivateCharge: stableCallbacks.current.onActivateCharge,
       onActivateFight: stableCallbacks.current.onActivateFight,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
-      onChargeEnemyUnit: (chargerId: number, enemyUnitId: number) => {
-        if (!selectedUnitId) return;
-        const enemyUnit = units.find(u => u.id === enemyUnitId);
-        if (!enemyUnit) return;
-        const chargeDests = getChargeDestinations(chargerId);
-        const enemyCube = offsetToCube(enemyUnit.col, enemyUnit.row);
-        const adjacentDest = chargeDests.find(dest => {
-          const destCube = offsetToCube(dest.col, dest.row);
-          return cubeDistance(enemyCube, destCube) === 1;
-        });
-        if (adjacentDest && stableCallbacks.current.onMoveCharger) {
-          stableCallbacks.current.onMoveCharger(chargerId, adjacentDest.col, adjacentDest.row);
-        }
-      },
+      onChargeEnemyUnit: stableCallbacks.current.onChargeEnemyUnit || (() => {}),
       onAdvanceMove: stableCallbacks.current.onAdvanceMove,
       onStartMovePreview: onStartMovePreview,
       onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
@@ -1639,6 +1630,7 @@ export default function Board({
       isBlinkingActive,
       stableBlinkingUnits,
       blinkingUnitsSignature,
+      blinkingAttackerId,
         chargeRoll,
         chargeRollPopup,
         chargeSuccess,

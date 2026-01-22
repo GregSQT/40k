@@ -77,14 +77,18 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
     if arg3 == "MOVE":
         if "units_moved" not in game_state:
             game_state["units_moved"] = set()
-        game_state["units_moved"].add(unit_id)
+        # CRITICAL: Normalize unit ID to string for consistent storage (units_moved stores strings)
+        unit_id_str = str(unit_id)
+        game_state["units_moved"].add(unit_id_str)
     elif arg3 == "FLED":
         if "units_moved" not in game_state:
             game_state["units_moved"] = set()
         if "units_fled" not in game_state:
             game_state["units_fled"] = set()
-        game_state["units_moved"].add(unit_id)
-        game_state["units_fled"].add(unit_id)
+        # CRITICAL: Normalize unit ID to string for consistent storage (units_fled stores strings)
+        unit_id_str = str(unit_id)
+        game_state["units_moved"].add(unit_id_str)
+        game_state["units_fled"].add(unit_id_str)
     elif arg3 == "SHOOTING":
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
@@ -113,8 +117,9 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             # PRINCIPLE: "Le Pool DOIT gérer les morts" - Use string comparison to handle int/string ID mismatches
             unit_id_str = str(unit_id)
             # Filter instead of remove to handle type mismatches
+            # Normalize pool to contain only strings (consistent with pool construction in shooting_handlers.py line 641)
             pool_before = len(game_state["shoot_activation_pool"])
-            game_state["shoot_activation_pool"] = [uid for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
+            game_state["shoot_activation_pool"] = [str(uid) for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
             pool_after = len(game_state["shoot_activation_pool"])
             if pool_before != pool_after:
                 response["removed_from_shoot_pool"] = True

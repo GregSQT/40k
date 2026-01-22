@@ -214,6 +214,22 @@ export const useEngineAPI = () => {
     };
   }, []);
 
+  // Reset mode to "select" when phase changes
+  useEffect(() => {
+    if (gameState?.phase) {
+      // Reset mode when phase changes (except if we're already in the correct mode for the phase)
+      // This ensures mode is reset after fight phase ends
+      setMode("select");
+      setSelectedUnitId(null);
+      setMovePreview(null);
+      setAttackPreview(null);
+      setChargeDestinations([]);
+      setAdvanceDestinations([]);
+      setAdvancingUnitId(null);
+      setAdvanceRoll(null);
+    }
+  }, [gameState?.phase]);
+
   // Execute action via API
   const executeAction = useCallback(async (action: Record<string, unknown>) => {
     
@@ -242,6 +258,7 @@ export const useEngineAPI = () => {
       }
       
       const data = await response.json();
+
 
       // Process detailed backend action logs FIRST
       if (data.action_logs && data.action_logs.length > 0) {
@@ -516,16 +533,6 @@ export const useEngineAPI = () => {
 
           setGameState(data.game_state);
 
-        // DEBUG: Check what values we have for fight phase detection
-        if (data.game_state?.phase === "fight") {
-          console.log("🔍 FIGHT PHASE RESPONSE DEBUG:", {
-            phase: data.game_state?.phase,
-            waiting_for_player: data.result?.waiting_for_player,
-            has_valid_targets: !!data.result?.valid_targets,
-            valid_targets_length: data.result?.valid_targets?.length,
-            ATTACK_LEFT: data.result?.ATTACK_LEFT
-          });
-        }
 
         // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance activation response
         if (data.result?.advance_destinations && data.result?.advance_roll) {
@@ -552,7 +559,43 @@ export const useEngineAPI = () => {
           // Note: valid_destinations are stored in game_state.valid_move_destinations_pool
           // BoardPvp will read them from gameState to display green hexes
         }
-        // Handle charge activation response with valid destinations
+        // Handle charge activation response - can have blinking_units without valid_destinations yet
+        // After handleActivateCharge, backend returns blinking_units (targets) but not destinations yet
+        // Destinations are calculated after clicking on a target (handleChargeEnemyUnit)
+        else if (data.game_state?.phase === "charge" && data.result?.waiting_for_player && data.result?.blinking_units && data.result?.start_blinking && !data.result?.valid_destinations) {
+          // Charge activation: blinking_units present but no destinations yet - set mode to chargePreview
+          const newUnitIds = data.result.blinking_units.map((id: string) => parseInt(id));
+          const needsNewTimer = !blinkingUnits.blinkTimer || 
+            !blinkingUnits.unitIds.some(id => newUnitIds.includes(id));
+          
+          if (needsNewTimer) {
+            // Clear any existing blinking timer
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+
+            // Start blinking for all valid targets
+            const timer = window.setInterval(() => {
+              // Empty interval - blinking is handled locally in UnitRenderer
+            }, 500);
+
+            const attackerId = data.result?.unitId ? parseInt(data.result.unitId) : null;
+            
+            if (data.result?.unitId) {
+              data.game_state = {
+                ...data.game_state,
+                active_charge_unit: data.result.unitId
+              };
+              setSelectedUnitId(parseInt(data.result.unitId));
+            }
+            
+            setBlinkingUnits({unitIds: newUnitIds, blinkTimer: timer, attackerId});
+          }
+          
+          setSelectedUnitId(parseInt(data.result.unitId));
+          setMode("chargePreview");
+        }
+        // Handle charge activation response with valid destinations (after target selection)
         // MUST be after setGameState to prevent being overwritten
         else if (data.result?.valid_destinations && data.result?.waiting_for_player) {
           // STEP 1: Start blinking if blinking_units is present (for charge phase)
@@ -863,6 +906,7 @@ export const useEngineAPI = () => {
           });
           return;
         } else if (gameState.active_shooting_unit) {
+          // Clicking on target when unit is active
           await executeAction({
             action: "left_click",
             unitId: gameState.active_shooting_unit,
@@ -875,16 +919,8 @@ export const useEngineAPI = () => {
       return;
     }
     
-    // Movement phase click handling - DIAGNOSTIC LOGS
+    // Movement phase click handling
     if (gameState && gameState.phase === "move" && numericUnitId !== null) {
-      console.log("🏃 MOVEMENT SELECT DEBUG:", {
-        unitId: numericUnitId,
-        move_activation_pool: gameState.move_activation_pool,
-        isInPool: gameState.move_activation_pool?.includes(numericUnitId.toString()),
-        active_movement_unit: gameState.active_movement_unit,
-        selectedUnitId: selectedUnitId
-      });
-      
       if (!gameState.move_activation_pool) {
         console.error("❌ MOVEMENT SELECT ERROR: Missing move_activation_pool");
         throw new Error(`API ERROR: Missing required move_activation_pool during movement phase`);
@@ -892,7 +928,6 @@ export const useEngineAPI = () => {
       const moveActivationPool = gameState.move_activation_pool.map(id => parseInt(id));
       
       if (moveActivationPool.includes(numericUnitId)) {
-        console.log("✅ MOVEMENT SELECT: Unit is eligible, sending activate_unit");
         await executeAction({
           action: "activate_unit", 
           unitId: numericUnitId.toString()
@@ -954,15 +989,6 @@ export const useEngineAPI = () => {
   }, []);
 
   const handleDirectMove = useCallback(async (unitId: number | string, col: number | string, row: number | string) => {
-    console.log("🏃 DIRECT MOVE DEBUG:", {
-      unitId,
-      destCol: col,
-      destRow: row,
-      phase: gameState?.phase,
-      active_movement_unit: gameState?.active_movement_unit,
-      move_activation_pool: gameState?.move_activation_pool
-    });
-    
     const action = {
       action: "move",
       unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
@@ -971,15 +997,14 @@ export const useEngineAPI = () => {
     };
     
     try {
-      const result = await executeAction(action);
-      console.log("✅ DIRECT MOVE SUCCESS:", result);
+      await executeAction(action);
       setMovePreview(null);
       setMode("select");
     } catch (error) {
       console.error("❌ DIRECT MOVE FAILED:", error);
       console.error("Move failed:", error);
     }
-  }, [executeAction, gameState]);
+  }, [executeAction]);
 
   const handleConfirmMove = useCallback(async () => {
     if (movePreview) {
@@ -1001,7 +1026,6 @@ export const useEngineAPI = () => {
   const handleSkipShoot = useCallback(async (unitId: number | string, actionType: 'wait' | 'action' = 'action') => {
     // Check if we're still in shooting phase - if phase changed, don't send skip action
     if (gameState?.phase !== 'shoot') {
-      console.log("🔍 handleSkipShoot: Phase changed, ignoring skip action for unit", unitId);
       return;
     }
     // Convert to right_click or skip action
@@ -1202,6 +1226,24 @@ export const useEngineAPI = () => {
       action: "fight",
       unitId: numericAttackerId.toString(),
       targetId: numericTargetId.toString()
+    });
+  }, [executeAction]);
+
+  // Handle clicking on enemy unit in chargePreview mode - triggers charge roll and destination building
+  const handleChargeEnemyUnit = useCallback(async (chargerId: number | string, enemyUnitId: number | string) => {
+    const numericChargerId = typeof chargerId === 'string' ? parseInt(chargerId) : chargerId;
+    const numericEnemyId = typeof enemyUnitId === 'string' ? parseInt(enemyUnitId) : enemyUnitId;
+
+    // Send left_click action with targetId to backend
+    // Backend will:
+    // 1. Roll 2d6 for charge_range
+    // 2. Build valid_charge_destinations_pool via BFS pathfinding
+    // 3. Return destinations for violet highlighting
+    await executeAction({
+      action: "left_click",
+      unitId: numericChargerId.toString(),
+      targetId: numericEnemyId.toString(),
+      clickTarget: "enemy"
     });
   }, [executeAction]);
 
@@ -1567,6 +1609,7 @@ export const useEngineAPI = () => {
         onCharge: () => {},
         onActivateCharge: () => {},
         onMoveCharger: () => {},
+        onChargeEnemyUnit: async () => {},
         onCancelCharge: () => {},
         onValidateCharge: () => {},
         onLogChargeRoll: () => {},
@@ -1623,6 +1666,7 @@ export const useEngineAPI = () => {
     onActivateFight: handleActivateFight,
     onCharge: emptyCallback,
     onActivateCharge: handleActivateCharge,
+    onChargeEnemyUnit: handleChargeEnemyUnit,
     onMoveCharger: handleMoveCharger,
     onAdvanceMove: handleAdvanceMove,
     onCancelCharge: emptyCallback,
@@ -1680,11 +1724,13 @@ export const useEngineAPI = () => {
       let eligibleAICount = 0;
       
       if (phaseCheck === 'shoot' && gameState.shoot_activation_pool) {
-        eligibleAICount = gameState.shoot_activation_pool.filter(unitId => {
+        const shootPool = gameState.shoot_activation_pool || [];
+        eligibleAICount = shootPool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
           return unit && unit.player === 2;
         }).length;
+        console.log(`🎯 SHOOT PHASE AI CHECK: pool=${JSON.stringify(shootPool)}, eligibleAICount=${eligibleAICount}, current_player=${gameState.current_player}`);
       } else       if (phaseCheck === 'move' && gameState.move_activation_pool) {
         eligibleAICount = gameState.move_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
@@ -1722,6 +1768,7 @@ export const useEngineAPI = () => {
       }
       
       if (eligibleAICount === 0) {
+        console.log(`🤖 AI TURN SKIP: No eligible AI units in ${phaseCheck} phase (eligibleAICount=0)`);
         aiTurnInProgress = false;
         return;
       }
@@ -1732,14 +1779,18 @@ export const useEngineAPI = () => {
       
       if (currentPhase === 'move' && gameState.move_activation_pool) {
         aiEligibleUnits = gameState.move_activation_pool.filter(unitId => {
-          const unit = gameState.units.find(u => u.id === unitId);
+          // Normalize comparison: pools contain strings, unit.id might be number
+          const unit = gameState.units.find(u => String(u.id) === String(unitId));
           return unit && unit.player === 2;
         }).length;
       } else if (currentPhase === 'shoot' && gameState.shoot_activation_pool) {
-        aiEligibleUnits = gameState.shoot_activation_pool.filter(unitId => {
-          const unit = gameState.units.find(u => u.id === unitId);
+        const shootPool = gameState.shoot_activation_pool || [];
+        aiEligibleUnits = shootPool.filter(unitId => {
+          // Normalize comparison: pools contain strings, unit.id might be number
+          const unit = gameState.units.find(u => String(u.id) === String(unitId));
           return unit && unit.player === 2;
         }).length;
+        console.log(`🎯 SHOOT PHASE AI ELIGIBLE: pool=${JSON.stringify(shootPool)}, aiEligibleUnits=${aiEligibleUnits}`);
       } else if (currentPhase === 'charge' && gameState.charge_activation_pool) {
         aiEligibleUnits = gameState.charge_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
@@ -1770,6 +1821,7 @@ export const useEngineAPI = () => {
       }
       
       if (aiEligibleUnits === 0) {
+        console.log(`🤖 AI TURN SKIP: No eligible AI units in ${currentPhase} phase (aiEligibleUnits=0)`);
         aiTurnInProgress = false;
         return;
       }
@@ -1864,6 +1916,48 @@ export const useEngineAPI = () => {
           targetId: nearestTarget
         };
       };
+
+      // Helper function to make AI fight decision
+      const makeFightDecision = (validTargets: Array<{ id: string | number }> | string[], unitId: string, currentGameState: APIGameState) => {
+        if (!validTargets || validTargets.length === 0) {
+          return { action: 'skip', unitId };
+        }
+        
+        // Strategy: Attack nearest/most threatening target using fresh game state
+        const attacker = currentGameState?.units.find((u) => u.id.toString() === unitId);
+        if (!attacker) {
+          // Extract target ID from first target (could be object or string)
+          const firstTarget = validTargets[0];
+          const targetId = typeof firstTarget === 'object' ? firstTarget.id : firstTarget;
+          return {
+            action: 'fight',
+            unitId,
+            targetId: targetId.toString()
+          };
+        }
+        
+        // Find nearest target
+        const nearestTarget = validTargets.reduce((nearest, target) => {
+          const targetId = typeof target === 'object' ? target.id : target;
+          const targetUnit = currentGameState?.units.find((u) => u.id.toString() === targetId.toString());
+          const nearestTargetId = typeof nearest === 'object' ? nearest.id : nearest;
+          const nearestTargetUnit = currentGameState?.units.find((u) => u.id.toString() === nearestTargetId.toString());
+          
+          if (!targetUnit || !nearestTargetUnit) return nearest;
+          
+          const distToCurrent = cubeDistance(offsetToCube(targetUnit.col, targetUnit.row), offsetToCube(attacker.col, attacker.row));
+          const distToNearest = cubeDistance(offsetToCube(nearestTargetUnit.col, nearestTargetUnit.row), offsetToCube(attacker.col, attacker.row));
+          
+          return distToCurrent < distToNearest ? target : nearest;
+        });
+        
+        const finalTargetId = typeof nearestTarget === 'object' ? nearestTarget.id : nearestTarget;
+        return {
+          action: 'fight',
+          unitId,
+          targetId: finalTargetId.toString()
+        };
+      };
       
       try {
         let totalUnitsProcessed = 0;
@@ -1875,7 +1969,7 @@ export const useEngineAPI = () => {
         while (iteration < maxIterations) {
           iteration++;
           
-          console.log(`AI Sequential Step ${iteration}: Activating next AI unit`);
+          console.log(`🤖 AI Sequential Step ${iteration}: Activating next AI unit (phase=${gameState?.phase}, current_player=${gameState?.current_player})`);
           
           // Step 1: Call backend to activate next AI unit
           const aiResponse = await fetch(`${API_BASE}/game/ai-turn`, {
@@ -1963,12 +2057,15 @@ export const useEngineAPI = () => {
           }
           
           if (!activationData.success) {
-            console.error(`AI activation failed:`, activationData.error);
+            console.error(`❌ AI activation failed:`, activationData);
+            console.error(`AI decision failed:`, activationData);
             break;
           }
           
           // Update game state from activation
-          setGameState(activationData.game_state);
+          if (activationData.game_state) {
+            setGameState(activationData.game_state);
+          }
           
           // Step 2: Check if we got a preview response requiring decision
           if (activationData.result?.waiting_for_player) {
@@ -1982,56 +2079,56 @@ export const useEngineAPI = () => {
             
             if (activationData.result.valid_destinations) {
               if (currentPhase === 'charge') {
-                // Charge phase - pick destination and find adjacent enemy target
+                // Charge phase - we have destinations after target selection and roll
+                // Pick best destination and execute charge
                 const validDestinations = activationData.result.valid_destinations;
-                interface ChargeUnit {
-                  id: string | number;
-                  player: number;
-                  HP_CUR: number;
-                  col: number;
-                  row: number;
-                }
-                const currentUnit = activationData.game_state?.units.find((u: ChargeUnit) => String(u.id) === String(unitId));
                 
-                if (!currentUnit || !validDestinations || validDestinations.length === 0) {
+                if (!validDestinations || validDestinations.length === 0) {
                   aiDecision = { action: 'skip', unitId };
                 } else {
-                  // Find enemies
-                  const enemies = activationData.game_state?.units.filter((u: ChargeUnit) => 
-                    u.player !== currentUnit.player && u.HP_CUR > 0
-                  ) || [];
+                  interface ChargeUnit {
+                    id: string | number;
+                    player: number;
+                    HP_CUR: number;
+                    col: number;
+                    row: number;
+                  }
+                  const currentUnit = activationData.game_state?.units.find((u: ChargeUnit) => String(u.id) === String(unitId));
                   
-                  // Find nearest enemy
-                  const nearestEnemy = enemies.reduce((nearest: ChargeUnit, enemy: ChargeUnit) => {
-                    const distToCurrent = cubeDistance(offsetToCube(enemy.col, enemy.row), offsetToCube(currentUnit.col, currentUnit.row));
-                    const distToNearest = cubeDistance(offsetToCube(nearest.col, nearest.row), offsetToCube(currentUnit.col, currentUnit.row));
-                    return distToCurrent < distToNearest ? enemy : nearest;
-                  });
-                  
-                  // Pick destination closest to nearest enemy
-                  const bestDestination = validDestinations.reduce((best: number[], dest: number[]) => {
-                    const distToEnemy = cubeDistance(offsetToCube(dest[0], dest[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
-                    const bestDistToEnemy = cubeDistance(offsetToCube(best[0], best[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
-                    return distToEnemy < bestDistToEnemy ? dest : best;
-                  });
-                  
-                  // Find enemy adjacent to destination (target for charge)
-                  const targetEnemy = enemies.find((enemy: ChargeUnit) => {
-                    const dist = cubeDistance(offsetToCube(enemy.col, enemy.row), offsetToCube(bestDestination[0], bestDestination[1]));
-                    return dist === 1; // Adjacent
-                  });
-                  
-                  if (targetEnemy) {
-                    aiDecision = {
-                      action: 'charge',
-                      unitId,
-                      destCol: bestDestination[0],
-                      destRow: bestDestination[1],
-                      targetId: targetEnemy.id
-                    };
-                  } else {
-                    // No adjacent enemy found - skip
+                  if (!currentUnit) {
                     aiDecision = { action: 'skip', unitId };
+                  } else {
+                    // Find enemies
+                    const enemies = activationData.game_state?.units.filter((u: ChargeUnit) => 
+                      u.player !== currentUnit.player && u.HP_CUR > 0
+                    ) || [];
+                    
+                    if (enemies.length === 0) {
+                      aiDecision = { action: 'skip', unitId };
+                    } else {
+                      // Find nearest enemy
+                      const nearestEnemy = enemies.reduce((nearest: ChargeUnit, enemy: ChargeUnit) => {
+                        const distToCurrent = cubeDistance(offsetToCube(enemy.col, enemy.row), offsetToCube(currentUnit.col, currentUnit.row));
+                        const distToNearest = cubeDistance(offsetToCube(nearest.col, nearest.row), offsetToCube(currentUnit.col, currentUnit.row));
+                        return distToCurrent < distToNearest ? enemy : nearest;
+                      });
+                      
+                      // Pick destination closest to nearest enemy
+                      const bestDestination = validDestinations.reduce((best: number[], dest: number[]) => {
+                        const distToEnemy = cubeDistance(offsetToCube(dest[0], dest[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
+                        const bestDistToEnemy = cubeDistance(offsetToCube(best[0], best[1]), offsetToCube(nearestEnemy.col, nearestEnemy.row));
+                        return distToEnemy < bestDistToEnemy ? dest : best;
+                      });
+                      
+                      // Execute charge with destination (targetId is already stored in game_state from previous step)
+                      aiDecision = {
+                        action: 'charge',
+                        unitId,
+                        destCol: bestDestination[0],
+                        destRow: bestDestination[1]
+                        // Note: targetId is NOT needed here - it's stored in game_state from target selection step
+                      };
+                    }
                   }
                 }
               } else {
@@ -2042,13 +2139,72 @@ export const useEngineAPI = () => {
                   activationData.game_state
                 );
               }
-            } else if (activationData.result.validTargets) {
-              // Shooting phase - pick target using fresh backend state
-              aiDecision = makeShootingDecision(
-                activationData.result.validTargets, 
-                unitId,
-                activationData.game_state
-              );
+            } else if (currentPhase === 'charge' && activationData.result.blinking_units && activationData.result.start_blinking) {
+              // Charge phase - we have blinking_units (potential targets) but no destinations yet
+              // Step 1: Select target (this will trigger roll and build destinations)
+              const blinkingUnits = activationData.result.blinking_units;
+              
+              if (!blinkingUnits || blinkingUnits.length === 0) {
+                aiDecision = { action: 'skip', unitId };
+              } else {
+                interface ChargeUnit {
+                  id: string | number;
+                  player: number;
+                  HP_CUR: number;
+                  col: number;
+                  row: number;
+                }
+                const currentUnit = activationData.game_state?.units.find((u: ChargeUnit) => String(u.id) === String(unitId));
+                
+                if (!currentUnit) {
+                  aiDecision = { action: 'skip', unitId };
+                } else {
+                  // Find nearest enemy from blinking_units
+                  const enemies = activationData.game_state?.units.filter((u: ChargeUnit) => 
+                    u.player !== currentUnit.player && 
+                    u.HP_CUR > 0 &&
+                    blinkingUnits.includes(String(u.id))
+                  ) || [];
+                  
+                  if (enemies.length === 0) {
+                    aiDecision = { action: 'skip', unitId };
+                  } else {
+                    // Find nearest enemy
+                    const nearestEnemy = enemies.reduce((nearest: ChargeUnit, enemy: ChargeUnit) => {
+                      const distToCurrent = cubeDistance(offsetToCube(enemy.col, enemy.row), offsetToCube(currentUnit.col, currentUnit.row));
+                      const distToNearest = cubeDistance(offsetToCube(nearest.col, nearest.row), offsetToCube(currentUnit.col, currentUnit.row));
+                      return distToCurrent < distToNearest ? enemy : nearest;
+                    });
+                    
+                    // Step 1: Select target (this will roll 2d6 and build destinations)
+                    aiDecision = {
+                      action: 'charge',
+                      unitId,
+                      targetId: nearestEnemy.id
+                      // Note: NO destCol/destRow here - that's step 2
+                    };
+                  }
+                }
+              }
+            } else if (activationData.result.valid_targets) {
+              // Handle valid targets (uniformized to snake_case in backend)
+              const targets = activationData.result.valid_targets;
+              
+              if (currentPhase === 'fight') {
+                // Fight phase - pick target using fresh backend state
+                aiDecision = makeFightDecision(
+                  targets, 
+                  unitId,
+                  activationData.game_state
+                );
+              } else {
+                // Shooting phase - pick target using fresh backend state
+                aiDecision = makeShootingDecision(
+                  targets, 
+                  unitId,
+                  activationData.game_state
+                );
+              }
             } else {
               console.error('Unknown preview type:', activationData.result);
               break;
@@ -2140,7 +2296,7 @@ export const useEngineAPI = () => {
             }
             
           } else if (!activationData.result?.waiting_for_player && 
-                     !activationData.result?.validTargets && 
+                     !activationData.result?.valid_targets && 
                      !activationData.result?.valid_destinations) {
             // No valid action available - skip this unit
             // This can happen when unit has no valid targets in shoot phase

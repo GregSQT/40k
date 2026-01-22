@@ -54,20 +54,131 @@ class ActionDecoder:
             mask[11] = True  # Wait always valid
         elif current_phase == "shoot":
             # Shooting phase: actions 4-8 (target slots 0-4) + 11 (wait) + 12 (advance)
-            # CRITICAL FIX: Dynamically enable based on ACTUAL available targets
-            active_unit = eligible_units[0] if eligible_units else None
+            # GYM MODE: Auto-activate first eligible unit if none activated yet (so valid_target_pool exists)
+            # CRITICAL: Only auto-activate for Player 1 (learning agent), not Player 2 (bot)
+            active_shooting_unit = game_state.get("active_shooting_unit")
+            is_gym_mode = game_state.get("gym_training_mode", False)
+            current_player = game_state.get("current_player")
+            is_learning_agent_turn = current_player == 1
+            # CRITICAL: Check active_shooting_unit AGAIN after getting eligible_units to avoid race conditions
+            # eligible_units is computed by _get_eligible_units_for_current_phase which might take time
+            if eligible_units and is_gym_mode and is_learning_agent_turn and not active_shooting_unit:
+                # Double-check active_shooting_unit wasn't set by another thread/call during eligible_units computation
+                active_shooting_unit = game_state.get("active_shooting_unit")
+                if not active_shooting_unit:
+                    # CRITICAL FIX (Episode 11): Verify first unit is still in pool before auto-activation
+                    # After WAIT action, _shooting_activation_end removes unit from pool, but eligible_units
+                    # may have been computed before pool update, causing infinite WAIT loop
+                    shoot_pool = game_state.get("shoot_activation_pool", [])
+                    first_unit_id = str(eligible_units[0]["id"])
+                    if first_unit_id not in shoot_pool:
+                        # Unit not in pool - refresh eligible_units to get accurate state
+                        eligible_units = self._get_eligible_units_for_current_phase(game_state)
+                        if not eligible_units:
+                            # No eligible units - phase should end naturally, skip auto-activation
+                            episode = game_state.get("episode_number", "?")
+                            turn = game_state.get("turn", "?")
+                            from engine.game_utils import add_console_log
+                            add_console_log(game_state, f"[AUTO_ACTIVATION DEBUG] E{episode} T{turn} get_action_mask: No eligible units after refresh, skipping auto-activation. Pool={shoot_pool}")
+                            pass
+                        else:
+                            # Use first truly eligible unit
+                            first_unit_id = str(eligible_units[0]["id"])
+                    
+                    # Only auto-activate if we still have eligible units
+                    if eligible_units:
+                        # CRITICAL DEBUG (Episodes 9,31,56,57,65,94,103,106): Verify unit is still in pool before auto-activation
+                        # Use add_console_log instead of add_debug_log to ensure logs are always written
+                        shoot_pool_check = game_state.get("shoot_activation_pool", [])
+                        first_unit_id_check = str(eligible_units[0]["id"])
+                        if first_unit_id_check not in shoot_pool_check:
+                            # Unit not in pool - skip auto-activation to prevent infinite loop
+                            episode = game_state.get("episode_number", "?")
+                            turn = game_state.get("turn", "?")
+                            from engine.game_utils import add_console_log
+                            add_console_log(game_state, f"[AUTO_ACTIVATION ERROR] E{episode} T{turn} get_action_mask: Unit {first_unit_id_check} NOT in pool after refresh, skipping auto-activation. Pool={shoot_pool_check}, eligible_ids={[str(u['id']) for u in eligible_units]}")
+                            eligible_units = []  # Clear eligible_units to skip auto-activation
+                    
+                    if eligible_units:
+                        # DEBUG: Log auto-activation
+                        episode = game_state.get("episode_number", "?")
+                        turn = game_state.get("turn", "?")
+                        from engine.game_utils import add_console_log
+                        add_console_log(game_state, f"[AUTO_ACTIVATION DEBUG] E{episode} T{turn} get_action_mask: Auto-activating unit {first_unit_id}, eligible_count={len(eligible_units)}, eligible_ids={[str(u['id']) for u in eligible_units]}")
+                        from engine.phase_handlers.shooting_handlers import shooting_unit_activation_start
+                        activation_result = shooting_unit_activation_start(game_state, first_unit_id)
+                        # After activation, refresh active_shooting_unit and eligible_units to get updated state
+                        if not activation_result.get("error"):
+                            active_shooting_unit = game_state.get("active_shooting_unit")
+                            eligible_units = self._get_eligible_units_for_current_phase(game_state)
+                            from engine.game_utils import add_console_log
+                            add_console_log(game_state, f"[AUTO_ACTIVATION DEBUG] E{episode} T{turn} get_action_mask: Auto-activation successful, active_shooting_unit={active_shooting_unit}")
+                        elif activation_result.get("error"):
+                            # If activation failed, refresh anyway
+                            eligible_units = self._get_eligible_units_for_current_phase(game_state)
+                            active_shooting_unit = game_state.get("active_shooting_unit")
+                            from engine.game_utils import add_console_log
+                            add_console_log(game_state, f"[AUTO_ACTIVATION DEBUG] E{episode} T{turn} get_action_mask: Auto-activation failed: {activation_result.get('error')}, active_shooting_unit={active_shooting_unit}")
+                else:
+                    # DEBUG: Log why auto-activation is skipped
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    from engine.game_utils import add_console_log
+                    add_console_log(game_state, f"[AUTO_ACTIVATION DEBUG] E{episode} T{turn} get_action_mask: Skipping auto-activation, active_shooting_unit already set to {active_shooting_unit}")
+            
+            # Get active unit - prefer unit marked as active_shooting_unit if it exists
+            # CRITICAL FIX (Episode 21): Verify active_shooting_unit is still in pool before using it
+            # After WAIT action, _shooting_activation_end should remove unit from pool and clear active_shooting_unit,
+            # but if there's a race condition or bug, active_shooting_unit might point to an invalid unit
+            if active_shooting_unit:
+                shoot_pool = game_state.get("shoot_activation_pool", [])
+                active_unit = get_unit_by_id(active_shooting_unit, game_state)
+                # Verify active unit is still in pool - if not, it was removed and active_shooting_unit is stale
+                # CRITICAL: Normalize all IDs to string for consistent comparison (pool stores strings)
+                active_shooting_unit_str = str(active_shooting_unit)
+                pool_ids = [str(uid) for uid in shoot_pool]
+                if active_unit and active_shooting_unit_str not in pool_ids:
+                    # Unit was removed from pool but active_shooting_unit wasn't cleared - clear it now
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    from engine.game_utils import add_console_log
+                    add_console_log(game_state, f"[ACTIVE_UNIT FIX] E{episode} T{turn} get_action_mask: Clearing stale active_shooting_unit={active_shooting_unit} (not in pool)")
+                    if "active_shooting_unit" in game_state:
+                        del game_state["active_shooting_unit"]
+                    active_shooting_unit = None
+                    active_unit = None
+                if not active_unit and eligible_units:
+                    # Active unit not found, fallback to first eligible
+                    active_unit = eligible_units[0] if eligible_units else None
+            else:
+                active_unit = eligible_units[0] if eligible_units else None
+            
+            # DEBUG: Log pool state for root cause investigation (write directly to debug.log if debug_mode)
+            if game_state.get("debug_mode", False):
+                import os
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                pool_ids = [str(u["id"]) for u in eligible_units] if eligible_units else []
+                debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+                try:
+                    with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
+                        f.write(f"[GET_ACTION_MASK DEBUG] E{episode} T{turn} get_action_mask: eligible_count={len(eligible_units)}, eligible_ids={pool_ids}, active_shooting_unit={active_shooting_unit}, active_unit_id={active_unit['id'] if active_unit else None}, pool_from_game_state={[str(uid) for uid in game_state.get('shoot_activation_pool', [])]}\n")
+                        f.flush()
+                except Exception:
+                    pass
             if active_unit:
-                from engine.phase_handlers import shooting_handlers
-                valid_targets = shooting_handlers.shooting_build_valid_target_pool(
-                    game_state, active_unit["id"]
-                )
-                num_targets = len(valid_targets)
-                
-                # CRITICAL: Only enable target slots if targets exist
-                if num_targets > 0:
-                    # Enable shoot actions for available targets only (up to 5 slots)
-                    for i in range(min(5, num_targets)):
-                        mask[4 + i] = True
+                # Use cached pool from unit activation if available (after activation or advance)
+                valid_targets = active_unit.get("valid_target_pool")
+                if valid_targets is not None:
+                    # Pool exists - enable only valid target slots (up to 5)
+                    num_targets = len(valid_targets)
+                    if num_targets > 0:
+                        for i in range(min(5, num_targets)):
+                            mask[4 + i] = True
+                else:
+                    # Pool not yet built (before activation) - enable all shoot actions
+                    # Handler will validate target selection later during action conversion
+                    mask[[4, 5, 6, 7, 8]] = True
                 
                 # ADVANCE_IMPLEMENTATION: Enable advance action if unit can advance
                 # CAN_ADVANCE = alive AND not fled AND not adjacent to enemy (already checked in eligibility)
@@ -148,24 +259,33 @@ class ActionDecoder:
                 raise KeyError("game_state missing required 'move_activation_pool' field")
             pool_unit_ids = game_state["move_activation_pool"]
             # CRITICAL: Filter out dead units (units can die between pool build and use)
+            from shared.data_validation import require_key
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
-                if unit and unit.get("HP_CUR", 0) > 0:
+                if unit and require_key(unit, "HP_CUR") > 0:
                     eligible.append(unit)
             return eligible
         elif current_phase == "shoot":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
+            # STEP 2: UNIT_ACTIVABLE_CHECK - Pick one unit from shoot_activation_pool
+            # No filtering by SHOOT_LEFT or can_advance - pool is built once at phase start
+            # Units are removed ONLY via end_activation() with Arg4 = SHOOTING
             if "shoot_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'shoot_activation_pool' field")
             pool_unit_ids = game_state["shoot_activation_pool"]
             # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool should never contain dead units
             # If a unit dies after pool build, _remove_dead_unit_from_pools should have removed it
-            # Defense in depth: filter dead units here as safety check
+            # Defense in depth: filter dead units here as safety check only
+            # CRITICAL: Pool contains string IDs (normalized at creation in shooting_build_activation_pool)
             eligible = []
+            from shared.data_validation import require_key
             for uid in pool_unit_ids:
-                unit = get_unit_by_id(uid, game_state)
-                if unit and unit.get("HP_CUR", 0) > 0:
+                # CRITICAL: Normalize uid to string for get_unit_by_id (which normalizes both sides)
+                uid_str = str(uid)
+                unit = get_unit_by_id(uid_str, game_state)
+                if unit and require_key(unit, "HP_CUR") > 0:
+                    # AI_TURN.md: All units in pool are eligible - no SHOOT_LEFT filtering
                     eligible.append(unit)
             return eligible
         elif current_phase == "charge":
@@ -174,10 +294,11 @@ class ActionDecoder:
                 return []  # Phase not initialized yet
             pool_unit_ids = game_state["charge_activation_pool"]
             # CRITICAL: Filter out dead units (units can die between pool build and use)
+            from shared.data_validation import require_key
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
-                if unit and unit.get("HP_CUR", 0) > 0:
+                if unit and require_key(unit, "HP_CUR") > 0:
                     eligible.append(unit)
             return eligible
         elif current_phase == "fight":
@@ -198,10 +319,11 @@ class ActionDecoder:
                     game_state.get("non_active_alternating_activation_pool", [])
                 )
             # CRITICAL: Filter out dead units (units can die between pool build and use)
+            from shared.data_validation import require_key
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
-                if unit and unit.get("HP_CUR", 0) > 0:
+                if unit and require_key(unit, "HP_CUR") > 0:
                     eligible.append(unit)
             return eligible
         else:
@@ -292,11 +414,17 @@ class ActionDecoder:
             if action_int in [4, 5, 6, 7, 8]:  # Shoot target slots 0-4
                 target_slot = action_int - 4  # Convert to slot index (0-4)
                 
-                # Get valid targets for this unit
-                from engine.phase_handlers import shooting_handlers
-                valid_targets = shooting_handlers.shooting_build_valid_target_pool(
-                    game_state, selected_unit_id
-                )
+                # PERFORMANCE: Use cached pool from unit activation instead of recalculating
+                # Pool is built at activation and after advance, should always be available here
+                # Pool is automatically updated when targets die (dead targets are removed, shooting_handlers.py line 3183)
+                selected_unit = get_unit_by_id(selected_unit_id, game_state)
+                valid_targets = selected_unit.get("valid_target_pool") if selected_unit else None
+                if valid_targets is None:
+                    # Fallback: build pool if somehow missing (shouldn't happen)
+                    from engine.phase_handlers import shooting_handlers
+                    valid_targets = shooting_handlers.shooting_build_valid_target_pool(
+                        game_state, selected_unit_id
+                    )
                 
                 # CRITICAL: Validate target slot is within valid range
                 if target_slot < len(valid_targets):
@@ -320,6 +448,20 @@ class ActionDecoder:
                     }
                     
             elif action_int == 11:  # WAIT - agent chooses not to shoot
+                # DEBUG: Log WAIT action for root cause investigation (write directly to debug.log if debug_mode)
+                if game_state.get("debug_mode", False):
+                    import os
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    pool_before = list(game_state.get("shoot_activation_pool", []))
+                    active_before = game_state.get("active_shooting_unit", None)
+                    debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+                    try:
+                        with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
+                            f.write(f"[WAIT ACTION DEBUG] E{episode} T{turn} convert_gym_action: WAIT action for unit {selected_unit_id}, pool_before={pool_before}, active_shooting_unit={active_before}\n")
+                            f.flush()
+                    except Exception:
+                        pass
                 return {"action": "wait", "unitId": selected_unit_id}
             
             elif action_int == 12:  # ADVANCE - agent chooses to advance instead of shoot

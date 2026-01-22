@@ -101,65 +101,43 @@ export function setupBoardClickHandler(callbacks: {
       }
       return;
     } else if (phase === 'charge' && mode === 'select') {
-      console.log("  ✅ CHARGE SELECT LOGIC TRIGGERED");
       if (selectedUnitId === unitId && clickType === 'right') {
-        console.log("    - Right click on selected unit -> skip charge");
         callbacks.onSkipUnit?.(unitId);
       } else {
-        console.log("    - Activating charge unit:", unitId);
-        console.log("    - onActivateCharge callback exists?", !!callbacks.onActivateCharge);
         if (callbacks.onActivateCharge) {
-          console.log("    - Calling onActivateCharge with unitId:", unitId);
           callbacks.onActivateCharge(unitId);
-          console.log("    - onActivateCharge call completed");
-        } else {
-          console.error("    - ERROR: onActivateCharge callback is undefined!");
         }
       }
       return; // Prevent fallthrough to other handlers
     } else if (phase === 'charge' && mode === 'chargePreview' && selectedUnitId !== null) {
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
-          console.log("    - Right click on active unit -> cancel charge (skip)");
           callbacks.onSkipUnit?.(unitId);
         } else {
-          console.log("    - Left click on active unit -> postpone charge (deselect)");
           callbacks.onSelectUnit(null);
         }
       } else {
         // Click on enemy unit -> find adjacent hex and move charger
-        console.log("    - Click on enemy unit -> calling onChargeEnemyUnit");
         if (callbacks.onChargeEnemyUnit) {
           callbacks.onChargeEnemyUnit(selectedUnitId, unitId);
         }
       }
       return; // Prevent fallthrough to other handlers
     } else if (mode === 'movePreview') {
-      console.log("  ✅ MOVE PREVIEW LOGIC -> calling onConfirmMove");
       callbacks.onConfirmMove();
     } else if (phase === 'fight' && mode === 'select') {
       // Fight phase select mode - selecting a unit to activate
-      console.log("  ✅ FIGHT SELECT LOGIC -> calling onSelectUnit and onActivateFight");
       callbacks.onSelectUnit(unitId);
       if (callbacks.onActivateFight) {
-        console.log("    - Calling onActivateFight with unitId:", unitId);
         callbacks.onActivateFight(unitId);
-      } else {
-        console.error("    - ERROR: onActivateFight callback is undefined!");
       }
     } else if (phase === 'fight' && mode === 'attackPreview' && selectedUnitId != null && selectedUnitId !== unitId) {
       // Fight phase attack preview - clicking on enemy to attack
-      console.log("  ✅ FIGHT ATTACK LOGIC (different unit) -> calling onCombatAttack");
       callbacks.onCombatAttack(selectedUnitId, unitId);
     } else if (phase === 'fight' && mode === 'attackPreview' && selectedUnitId === unitId) {
       // Fight phase attack preview - clicking on self (no-op or cancel)
-      console.log("  ✅ FIGHT ATTACK LOGIC (same unit) -> calling onCombatAttack");
       callbacks.onCombatAttack(selectedUnitId, null);
     } else {
-      console.log("  ✅ DEFAULT LOGIC -> calling onSelectUnit");
-      console.log("    - No specific condition matched");
-      console.log("    - Expected for shooting: phase='shoot' && mode='select'");
-      console.log("    - Actual: phase='" + phase + "' && mode='" + mode + "'");
       callbacks.onSelectUnit(unitId);
     }
   };

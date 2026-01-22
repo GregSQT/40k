@@ -62,13 +62,19 @@ class BotControlledEnv(gym.Wrapper):
 
     def step(self, agent_action):
         # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
+        # PERFORMANCE: Only track if diagnostics are enabled (shoot stats will be collected)
+        # Skip get_action_mask() call here to avoid redundant computation - action_masks are already computed
+        # by ActionMasker wrapper and passed to model.predict() in bot_evaluation.py
         game_state = self.engine.game_state
         current_phase = game_state.get("phase", "")
-        action_mask = self.engine.get_action_mask()
-
-        if current_phase == "shoot" and 4 in [i for i in range(12) if action_mask[i]]:
-            self.ai_shoot_opportunities += 1
+        
+        # Track actions for diagnostics WITHOUT calling get_action_mask() (performance optimization)
+        # We can infer shoot opportunities from action type instead of checking mask
+        if current_phase == "shoot":
+            # Infer shoot opportunity from action type (action 4-8 are shoot actions)
+            # This avoids expensive get_action_mask() call
             if agent_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+                self.ai_shoot_opportunities += 1  # If agent shot, opportunity existed
                 self.ai_shoot_actions += 1
             elif agent_action == 11:  # Wait action
                 self.ai_wait_actions += 1

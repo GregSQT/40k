@@ -1,7 +1,7 @@
 {
     "default": {
     "type": "################################################### Default ###################################################",
-    "total_episodes": 500,
+    "total_episodes": 1000,
     "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
     "max_turns_per_episode": 5,
     "max_steps_per_turn": 200,
@@ -11,7 +11,7 @@
       "eval_deterministic": true,
       "eval_render": false,
       "n_eval_episodes": 5,
-      "bot_eval_freq": 100,
+      "bot_eval_freq": 50000,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 5,
       "bot_eval_final": 0

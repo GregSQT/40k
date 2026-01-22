@@ -453,7 +453,8 @@ class W40KEngine(gym.Env):
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
             "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
-        
+        self._episode_step_calls = 0  # Safety: reset for runaway truncation check in step()
+
         # DIAGNOSTIC: Log debug_mode status on reset (write to debug.log) - DISABLED TEMPORARILY
         # if self.debug_mode:
         #     movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
@@ -575,6 +576,9 @@ class W40KEngine(gym.Env):
         """
         Execute gym action with built-in step counting - gym.Env interface.
         """
+        # Safety: count step() calls per episode to truncate runaways (e.g. stuck in eval)
+        self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
+
         # CRITICAL: Check turn limit BEFORE processing any action
         if hasattr(self, 'training_config'):
             max_turns = self.training_config.get("max_turns_per_episode")
@@ -937,6 +941,8 @@ class W40KEngine(gym.Env):
             #         pass
             
             try:
+                # PERFORMANCE: Buffer writes and flush only periodically to reduce I/O overhead
+                # Flush immediately only in debug mode or at episode end
                 with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
                     for log_msg in self.game_state["console_logs"]:
                         # Ensure log message is a string and encode safely
@@ -945,7 +951,9 @@ class W40KEngine(gym.Env):
                         # Replace any problematic characters that might cause encoding issues
                         log_msg = log_msg.encode('utf-8', errors='replace').decode('utf-8')
                         f.write(log_msg + "\n")
-                    f.flush()  # Force flush to ensure logs are written immediately
+                    # Only flush immediately in debug mode or when game ends (for debugging)
+                    if self.game_state.get("debug_mode", False) or self.game_state.get("game_over", False):
+                        f.flush()  # Force flush only when needed for debugging
                 
                 # DIAGNOSTIC: Log after writing (write to debug.log) - DISABLED TEMPORARILY
                 # if step_logger_debug_count > 0:
@@ -963,6 +971,13 @@ class W40KEngine(gym.Env):
                 print(f"⚠️ Failed to write to debug.log: {e}")
                 import traceback
                 traceback.print_exc()
+
+        # Safety: truncate runaways (e.g. stuck in eval, phase transition bug) before bot_evaluation 1000 guard
+        _calls = getattr(self, '_episode_step_calls', 0)
+        if not terminated and _calls > 1000:
+            truncated = True
+            info["truncation_reason"] = "episode_steps_limit"
+            info["winner"] = -1  # draw so eval does not skew win rate
             
         return observation, reward, terminated, truncated, info
     
@@ -1122,8 +1137,28 @@ class W40KEngine(gym.Env):
                 if action_type is None:
                     # Check if this is a phase transition without action (system response, not an action)
                     if result.get("phase_complete") or result.get("phase_transition"):
-                        # Phase transition without action - skip logging (will be handled by cascade loop)
-                        action_type = None
+                        # CRITICAL: Check if there are attack results to log before phase transition
+                        # This handles cases where attacks were executed just before phase completion
+                        all_attack_results = result.get("all_attack_results", [])
+                        if all_attack_results:
+                            # Has attacks to log - infer action type from phase or attack results
+                            current_phase = self.game_state.get("phase", "unknown")
+                            if current_phase == "shoot":
+                                action_type = "shoot"
+                                # Need unitId for logging - try to get from first attack result
+                                if not result.get("unitId") and all_attack_results:
+                                    result["unitId"] = all_attack_results[0].get("shooterId")
+                            elif current_phase == "fight":
+                                action_type = "combat"
+                                # Need unitId for logging - try to get from first attack result
+                                if not result.get("unitId") and all_attack_results:
+                                    result["unitId"] = all_attack_results[0].get("shooterId")
+                            else:
+                                # Phase transition without action and no attacks - skip logging
+                                action_type = None
+                        else:
+                            # Phase transition without action - skip logging (will be handled by cascade loop)
+                            action_type = None
                     else:
                         # No action in result and not a phase transition - this is an error
                         raise ValueError(f"result missing 'action' field and is not a phase transition. result keys: {list(result.keys())}")
@@ -1255,7 +1290,8 @@ class W40KEngine(gym.Env):
                                 action_dest_col = action.get("destCol") if isinstance(action, dict) else None
                                 action_dest_row = action.get("destRow") if isinstance(action, dict) else None
                                 debug_msg = f"[W40K_CORE DEBUG] E{pre_action_episode} T{pre_action_turn} Unit {unit_id}: result.toCol={dest_col} result.toRow={dest_row} action.destCol={action_dest_col} action.destRow={action_dest_row} result keys={list(result.keys())}"
-                                add_console_log(self.game_state, debug_msg)
+                                from engine.game_utils import add_debug_log
+                                add_debug_log(self.game_state, debug_msg)
                                 safe_print(self.game_state, debug_msg)
                                 end_pos = (dest_col, dest_row)
                             action_details.update({
@@ -1505,13 +1541,13 @@ class W40KEngine(gym.Env):
                             if action_type == "move" and "end_pos" in action_details:
                                 end_col, end_row = action_details["end_pos"]
                                 # CRITICAL DEBUG: Log exact values being used
-                                from engine.game_utils import add_console_log, safe_print
+                                from engine.game_utils import add_debug_log, safe_print
                                 debug_msg = f"[W40K_CORE DEBUG] E{action_details.get('current_episode', '?')} T{action_details.get('current_turn', '?')} Unit {unit_id}: end_pos=({end_col},{end_row}) unit_with_coords before={action_details.get('unit_with_coords', 'N/A')}"
-                                add_console_log(self.game_state, debug_msg)
+                                add_debug_log(self.game_state, debug_msg)
                                 safe_print(self.game_state, debug_msg)
                                 action_details["unit_with_coords"] = f"{unit_id}({end_col},{end_row})"
                                 debug_msg2 = f"[W40K_CORE DEBUG] E{action_details.get('current_episode', '?')} T{action_details.get('current_turn', '?')} Unit {unit_id}: unit_with_coords after={action_details['unit_with_coords']}"
-                                add_console_log(self.game_state, debug_msg2)
+                                add_debug_log(self.game_state, debug_msg2)
                                 safe_print(self.game_state, debug_msg2)
 
                             # Calculate reward normally
@@ -1524,9 +1560,9 @@ class W40KEngine(gym.Env):
 
                             # CRITICAL DEBUG: Log exact values just before log_action
                             if action_type == "move":
-                                from engine.game_utils import add_console_log, safe_print
+                                from engine.game_utils import add_debug_log, safe_print
                                 debug_msg = f"[W40K_CORE DEBUG] E{action_details.get('current_episode', '?')} T{action_details.get('current_turn', '?')} Unit {unit_id}: BEFORE log_action - unit_with_coords={action_details.get('unit_with_coords', 'N/A')} end_pos={action_details.get('end_pos', 'N/A')} col={action_details.get('col', 'N/A')} row={action_details.get('row', 'N/A')}"
-                                add_console_log(self.game_state, debug_msg)
+                                add_debug_log(self.game_state, debug_msg)
                                 safe_print(self.game_state, debug_msg)
 
                             self.step_logger.log_action(
@@ -1658,11 +1694,9 @@ class W40KEngine(gym.Env):
             success = True
             result = handler_response if isinstance(handler_response, dict) else {"error": "invalid_handler_response"}
         
-        # Handle phase transitions signaled by handler
-        if result.get("phase_complete") or result.get("phase_transition"):
-            next_phase = result.get("next_phase")
-            if next_phase == "move":
-                self._movement_phase_init()
+        # CRITICAL: Let cascade loop handle ALL phase transitions (charge, fight, move, etc.)
+        # Do NOT handle transitions manually here - cascade loop (line 1575) handles all transitions
+        # This ensures consistent behavior across all phases
         return success, result
     
     

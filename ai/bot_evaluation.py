@@ -10,6 +10,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 
 import os
 import sys
+import numpy as np
 
 __all__ = ['evaluate_against_bots']
 
@@ -108,74 +109,79 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         for scenario_file in scenario_list:
             scenario_name = os.path.basename(scenario_file).replace(f"{base_agent_key}_scenario_", "").replace(".json", "") if base_agent_key else "default"
 
-            for episode_num in range(episodes_per_scenario):
-                completed_episodes += 1
+            # PERFORMANCE: Create environment ONCE per scenario and reuse for all episodes
+            # This avoids expensive re-initialization (loading configs, creating wrappers, etc.)
+            W40KEngine, _ = setup_imports()
 
-                # Progress bar (only if show_progress=True)
-                if show_progress:
-                    progress_pct = (completed_episodes / total_episodes) * 100
-                    bar_length = 50
-                    filled = int(bar_length * completed_episodes / total_episodes)
-                    bar = '█' * filled + '░' * (bar_length - filled)
+            # Create base environment with specified training config
+            base_env = W40KEngine(
+                rewards_config=rewards_config_name,
+                training_config_name=training_config_name,
+                controlled_agent=controlled_agent,
+                active_agents=None,
+                scenario_file=scenario_file,
+                unit_registry=unit_registry,
+                quiet=True,
+                gym_training_mode=True,
+                debug_mode=debug_mode
+            )
 
-                    elapsed = time.time() - start_time
-                    avg_time = elapsed / completed_episodes
-                    remaining = total_episodes - completed_episodes
-                    eta = avg_time * remaining
+            # Connect step_logger if provided and enabled
+            if step_logger and step_logger.enabled:
+                base_env.step_logger = step_logger
 
-                    # Calculate evaluation speed
-                    eps_speed = completed_episodes / elapsed if elapsed > 0 else 0
+            # Wrap with ActionMasker (CRITICAL for proper action masking)
+            def mask_fn(env):
+                return env.get_action_mask()
 
-                    # Format times as HH:MM:SS or MM:SS depending on duration
-                    def format_time(seconds):
-                        hours = int(seconds // 3600)
-                        minutes = int((seconds % 3600) // 60)
-                        secs = int(seconds % 60)
-                        if hours > 0:
-                            return f"{hours}:{minutes:02d}:{secs:02d}"
-                        else:
-                            return f"{minutes:02d}:{secs:02d}"
+            masked_env = ActionMasker(base_env, mask_fn)
+            bot_env = BotControlledEnv(masked_env, bot, unit_registry)
 
-                    elapsed_str = format_time(elapsed)
-                    eta_str = format_time(eta)
-                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
+            # Run all episodes for this bot/scenario using the same environment
+            try:
+                for episode_num in range(episodes_per_scenario):
+                    completed_episodes += 1
 
-                    sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]")
-                    sys.stdout.flush()
+                    # Progress bar (only if show_progress=True)
+                    if show_progress:
+                        progress_pct = (completed_episodes / total_episodes) * 100
+                        bar_length = 50
+                        filled = int(bar_length * completed_episodes / total_episodes)
+                        bar = '█' * filled + '░' * (bar_length - filled)
 
-                try:
-                    W40KEngine, _ = setup_imports()
+                        elapsed = time.time() - start_time
+                        avg_time = elapsed / completed_episodes
+                        remaining = total_episodes - completed_episodes
+                        eta = avg_time * remaining
 
-                    # Create base environment with specified training config
-                    base_env = W40KEngine(
-                        rewards_config=rewards_config_name,
-                        training_config_name=training_config_name,
-                        controlled_agent=controlled_agent,
-                        active_agents=None,
-                        scenario_file=scenario_file,
-                        unit_registry=unit_registry,
-                        quiet=True,
-                        gym_training_mode=True,
-                        debug_mode=debug_mode
-                    )
+                        # Calculate evaluation speed
+                        eps_speed = completed_episodes / elapsed if elapsed > 0 else 0
 
-                    # Connect step_logger if provided and enabled
+                        # Format times as HH:MM:SS or MM:SS depending on duration
+                        def format_time(seconds):
+                            hours = int(seconds // 3600)
+                            minutes = int((seconds % 3600) // 60)
+                            secs = int(seconds % 60)
+                            if hours > 0:
+                                return f"{hours}:{minutes:02d}:{secs:02d}"
+                            else:
+                                return f"{minutes:02d}:{secs:02d}"
+
+                        elapsed_str = format_time(elapsed)
+                        eta_str = format_time(eta)
+                        speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
+
+                        sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]")
+                        sys.stdout.flush()
+
+                    # Set bot name for episode logging (for step_logger)
                     if step_logger and step_logger.enabled:
-                        base_env.step_logger = step_logger
-                        # Set bot name for episode logging
                         step_logger.current_bot_name = bot_name
-
-                    # Wrap with ActionMasker (CRITICAL for proper action masking)
-                    def mask_fn(env):
-                        return env.get_action_mask()
-
-                    masked_env = ActionMasker(base_env, mask_fn)
-                    bot_env = BotControlledEnv(masked_env, bot, unit_registry)
 
                     obs, info = bot_env.reset()
                     done = False
                     step_count = 0
-                    max_steps = 10000  # Safety guard
+                    max_steps = 1000  # Safety guard
 
                     # Episodes terminate naturally when game conditions are met:
                     # - All enemy units eliminated, OR
@@ -183,6 +189,44 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     while not done:
                         if step_count >= max_steps:
                             print(f"ERROR: Episode exceeded {max_steps} steps! Forcing termination.", flush=True)
+                            
+                            # DEBUG: Log detailed information when limit is reached (only if debug_mode is enabled)
+                            if debug_mode:
+                                game_state = bot_env.engine.game_state
+                                episode = game_state.get("episode_number", "?")
+                                turn = game_state.get("turn", "?")
+                                phase = game_state.get("phase", "?")
+                                current_player = game_state.get("current_player", "?")
+                                
+                                # Get pool states
+                                shoot_pool = game_state.get("shoot_activation_pool", [])
+                                move_pool = game_state.get("move_activation_pool", [])
+                                active_shooting_unit = game_state.get("active_shooting_unit", None)
+                                
+                                # Get eligible units
+                                action_mask = bot_env.engine.get_action_mask()
+                                num_valid_actions = action_mask.sum() if isinstance(action_mask, np.ndarray) else 0
+                                
+                                # Log to debug.log via console_logs
+                                debug_message = (
+                                    f"[MAX_STEPS LIMIT REACHED] Episode {episode}, Step {step_count}/{max_steps}\n"
+                                    f"  Turn: {turn}, Phase: {phase}, Current Player: {current_player}\n"
+                                    f"  Shoot Pool: {[str(uid) for uid in shoot_pool]} (size: {len(shoot_pool)})\n"
+                                    f"  Move Pool: {[str(uid) for uid in move_pool]} (size: {len(move_pool)})\n"
+                                    f"  Active Shooting Unit: {active_shooting_unit}\n"
+                                    f"  Valid Actions: {num_valid_actions}\n"
+                                    f"  Action Mask: {action_mask.tolist() if isinstance(action_mask, np.ndarray) else action_mask}"
+                                )
+                                
+                                # Write to debug.log
+                                debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+                                try:
+                                    with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
+                                        f.write(debug_message + "\n")
+                                        f.flush()
+                                except Exception as e:
+                                    print(f"⚠️ Failed to write to debug.log: {e}", flush=True)
+                            
                             break
                         action_masks = bot_env.engine.get_action_mask()
                         action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
@@ -210,13 +254,14 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         results[f'{bot_name}_shoot_stats'] = []
                     results[f'{bot_name}_shoot_stats'].append(bot_stats)
 
-                    bot_env.close()
-                except Exception as e:
-                    total_failed_episodes += 1
-                    if show_progress:
-                        print(f"\n❌ Bot evaluation episode failed for {bot_name} on scenario {scenario_name}: {e}")
-                    # Do not treat this as a valid game; skip win/loss counting
-                    continue
+            except Exception as e:
+                total_failed_episodes += 1
+                if show_progress:
+                    print(f"\n❌ Bot evaluation failed for {bot_name} on scenario {scenario_name}: {e}")
+                # Do not treat this as valid games; skip win/loss counting
+            finally:
+                # Close environment after all episodes for this scenario are done
+                bot_env.close()
 
         # Calculate win rate across ALL scenarios
         total_games = episodes_per_scenario * len(scenario_list)
@@ -236,8 +281,15 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             avg_ai_shoot_rate = sum(s['ai_shoot_rate'] for s in stats_list) / len(stats_list)
 
     if show_progress:
-        print("\r" + " " * 120)  # Clear the progress bar line
-        print()  # New line after clearing
+        # Show final progress bar (100%) before moving to next line
+        progress_pct = 100.0
+        bar_length = 50
+        bar = '█' * bar_length
+        elapsed = time.time() - start_time
+        elapsed_str = format_time(elapsed)
+        speed_str = f"{total_episodes/elapsed:.2f}ep/s" if elapsed > 0 else "0.00ep/s"
+        print(f"\r{progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes} [Completed] [{elapsed_str}, {speed_str}]")
+        print()  # New line after final progress bar
 
     # AI_IMPLEMENTATION.md: No silent evaluation degradation.
     # If any episodes failed to run, surface this explicitly and avoid logging

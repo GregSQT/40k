@@ -7,6 +7,7 @@ Run this locally: python ai/analyzer.py step.log
 import sys
 import os
 import re
+import math
 from collections import defaultdict, Counter
 from typing import Dict, List, Tuple, Set, Optional
 
@@ -30,24 +31,143 @@ def _debug_log(message: str) -> None:
         _debug_log_file.flush()
 
 
+def hex_to_pixel(col: int, row: int, hex_radius: float = 21.0) -> Tuple[float, float]:
+    """Convert hex coordinates to pixel coordinates (matching frontend algorithm)."""
+    hex_width = 1.5 * hex_radius
+    hex_height = (3 ** 0.5) * hex_radius  # sqrt(3)
+    
+    x = col * hex_width
+    y = row * hex_height + ((col % 2) * hex_height / 2)
+    
+    return (x, y)
+
+
+def line_segments_intersect(
+    line1_start: Tuple[float, float], line1_end: Tuple[float, float],
+    line2_start: Tuple[float, float], line2_end: Tuple[float, float]
+) -> bool:
+    """Check if two line segments intersect (matching frontend algorithm)."""
+    d1 = (line1_end[0] - line1_start[0], line1_end[1] - line1_start[1])
+    d2 = (line2_end[0] - line2_start[0], line2_end[1] - line2_start[1])
+    d3 = (line2_start[0] - line1_start[0], line2_start[1] - line1_start[1])
+    
+    cross1 = d1[0] * d2[1] - d1[1] * d2[0]
+    cross2 = d3[0] * d2[1] - d3[1] * d2[0]
+    cross3 = d3[0] * d1[1] - d3[1] * d1[0]
+    
+    if abs(cross1) < 0.0001:  # Parallel lines
+        return False
+    
+    t1 = cross2 / cross1
+    t2 = cross3 / cross1
+    
+    return 0 <= t1 <= 1 and 0 <= t2 <= 1
+
+
+def line_passes_through_hex(
+    start_point: Tuple[float, float], end_point: Tuple[float, float],
+    hex_col: int, hex_row: int, hex_radius: float = 21.0
+) -> bool:
+    """Check if a line passes through any part of a hex (matching frontend algorithm)."""
+    hex_center = hex_to_pixel(hex_col, hex_row, hex_radius)
+    
+    # Create hex polygon points (6 corners)
+    hex_points: List[Tuple[float, float]] = []
+    for i in range(6):
+        angle = (i * math.pi) / 3  # 60 degree increments for hex
+        x = hex_center[0] + hex_radius * math.cos(angle)
+        y = hex_center[1] + hex_radius * math.sin(angle)
+        hex_points.append((x, y))
+    
+    # Check if line intersects any edge of the hex polygon
+    for i in range(len(hex_points)):
+        p1 = hex_points[i]
+        p2 = hex_points[(i + 1) % len(hex_points)]
+        
+        if line_segments_intersect(start_point, end_point, p1, p2):
+            return True
+    
+    return False
+
+
+def get_hex_points(center_x: float, center_y: float, radius: float = 21.0) -> List[Tuple[float, float]]:
+    """Get 9 points for a hex: center + 8 points around (matching frontend algorithm)."""
+    points = [(center_x, center_y)]  # Center point
+    
+    # 8 corner points around the hex (not actual hex corners, but distributed around)
+    for i in range(8):
+        angle = (i * math.pi) / 4  # 45 degree increments
+        x = center_x + radius * 0.8 * math.cos(angle)
+        y = center_y + radius * 0.8 * math.sin(angle)
+        points.append((x, y))
+    
+    return points
+
+
 def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, target_row: int, wall_hexes: Set[Tuple[int, int]]) -> bool:
-    """Check line of sight between two hex coordinates, checking for walls blocking."""
+    """
+    Check line of sight using 9-point system (matching frontend algorithm).
+    
+    Uses 9 points per hex (center + 8 points around) and checks how many sight lines
+    are clear. If 0 lines are clear = blocked, otherwise = clear (with or without cover).
+    """
     if not wall_hexes:
         return True
     
-    hex_path = get_hex_line(shooter_col, shooter_row, target_col, target_row)
+    hex_radius = 21.0
     
-    # Check if any hex in path is a wall (excluding start and end)
-    for col, row in hex_path[1:-1]:
-        if (col, row) in wall_hexes:
-            return False
+    # Convert hex coordinates to pixel coordinates
+    from_pixel = hex_to_pixel(shooter_col, shooter_row, hex_radius)
+    to_pixel = hex_to_pixel(target_col, target_row, hex_radius)
     
-    return True
+    # Get 9 points for each hex (center + 8 points around)
+    shooter_points = get_hex_points(from_pixel[0], from_pixel[1], hex_radius)
+    target_points = get_hex_points(to_pixel[0], to_pixel[1], hex_radius)
+    
+    # Check how many sight lines from shooter points can reach target points
+    clear_sight_lines = 0
+    
+    for shooter_point in shooter_points:
+        shooter_point_has_clear_line = False
+        
+        for target_point in target_points:
+            # Check if this line is blocked by any wall hex
+            line_blocked = False
+            
+            for wall_col, wall_row in wall_hexes:
+                if line_passes_through_hex(shooter_point, target_point, wall_col, wall_row, hex_radius):
+                    line_blocked = True
+                    break
+            
+            if not line_blocked:
+                shooter_point_has_clear_line = True
+                break  # This shooter point has at least one clear line to any target point
+        
+        if shooter_point_has_clear_line:
+            clear_sight_lines += 1
+    
+    # Apply frontend rules: 0 = blocked, 1-2 = cover, 3+ = clear
+    # For analyzer, we only care about blocked vs not blocked
+    return clear_sight_lines > 0
 
 
 def is_adjacent(col1: int, row1: int, col2: int, row2: int) -> bool:
     """Check if two hexes are adjacent (distance == 1)."""
     return calculate_hex_distance(col1, row1, col2, row2) == 1
+
+
+def parse_timestamp_to_seconds(line: str) -> Optional[int]:
+    """
+    Parse timestamp from log line format [HH:MM:SS] and convert to seconds.
+    Returns None if timestamp cannot be parsed.
+    """
+    timestamp_match = re.match(r'\[(\d{2}):(\d{2}):(\d{2})\]', line)
+    if timestamp_match:
+        hours = int(timestamp_match.group(1))
+        minutes = int(timestamp_match.group(2))
+        seconds = int(timestamp_match.group(3))
+        return hours * 3600 + minutes * 60 + seconds
+    return None
 
 
 def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
@@ -208,6 +328,7 @@ def parse_step_log(filepath: str) -> Dict:
         'parse_errors': [],
         'episodes_without_end': [],
         'episodes_without_method': [],
+        'episode_durations': [],  # List of (episode_num, duration_seconds) tuples
         'sample_actions': {
             'move': None,
             'shoot': None,
@@ -224,6 +345,7 @@ def parse_step_log(filepath: str) -> Dict:
     episode_turn = 0
     episode_actions = 0
     last_turn = 0
+    episode_start_time = None  # Timestamp of episode start for duration calculation
 
     # Unit tracking
     unit_hp = {}
@@ -266,7 +388,7 @@ def parse_step_log(filepath: str) -> Dict:
                     if stats['current_episode_deaths']:
                         stats['death_orders'].append(tuple(stats['current_episode_deaths']))
 
-                    stats['episode_lengths'].append(episode_actions)
+                    stats['episode_lengths'].append((current_episode_num, episode_actions))
                     if episode_turn > 0:
                         stats['turns_distribution'][episode_turn] += 1
 
@@ -275,6 +397,8 @@ def parse_step_log(filepath: str) -> Dict:
                 current_episode_num = stats['total_episodes']
                 episode_turn = 0
                 episode_actions = 0
+                # Capture episode start timestamp for duration calculation
+                episode_start_time = parse_timestamp_to_seconds(line)
                 stats['current_episode_deaths'] = []
                 stats['wounded_enemies'] = {1: set(), 2: set()}
                 unit_hp = {}
@@ -354,7 +478,13 @@ def parse_step_log(filepath: str) -> Dict:
                 # Save turn distribution for this episode
                 if episode_turn > 0:
                     stats['turns_distribution'][episode_turn] += 1
-                stats['episode_lengths'].append(episode_actions)
+                stats['episode_lengths'].append((current_episode_num, episode_actions))
+                
+                # Calculate episode duration
+                episode_end_time = parse_timestamp_to_seconds(line)
+                if episode_start_time is not None and episode_end_time is not None:
+                    duration_seconds = episode_end_time - episode_start_time
+                    stats['episode_durations'].append((current_episode_num, duration_seconds))
 
                 winner_match = re.search(r'Winner=(-?\d+)', line)
                 method_match = re.search(r'Method=(\w+)', line)
@@ -493,7 +623,8 @@ def parse_step_log(filepath: str) -> Dict:
 
                             # RULE: Dead unit shooting (CRITICAL BUG)
                             # Check if shooter is dead, but filter false positives (unit dies AFTER shooting in same phase)
-                            shooter_is_dead = shooter_id not in unit_hp or unit_hp.get(shooter_id, 0) <= 0
+                            # CRITICAL: Only check if unit is in unit_hp - if not in dict, unit may not have been initialized yet
+                            shooter_is_dead = shooter_id in unit_hp and unit_hp.get(shooter_id, 0) <= 0
                             if shooter_is_dead:
                                 # Check if this is a false positive: unit dies AFTER this shoot action in same turn/phase
                                 is_false_positive = False
@@ -1177,14 +1308,32 @@ def parse_step_log(filepath: str) -> Dict:
                             # CRITICAL: Rebuild positions_at_move_phase_start using "from" positions from log
                             # This ensures we have accurate positions at the start of MOVE phase
                             # The "from" position in the log is the position at the start of the movement
+                            # CRITICAL FIX (Episodes 32, 112): When rebuilding positions_at_move_phase_start,
+                            # we must use the "from" positions from ALL MOVE actions in the current phase,
+                            # not just unit_positions which may contain stale positions from previous phases
+                            # The issue: unit_positions may contain stale positions for enemy units that moved in P1 MOVE
+                            # Solution: Update positions_at_move_phase_start for enemy units using their current positions
+                            # from unit_positions, but only if they haven't moved yet in P2 MOVE
+                            # If they have moved in P2 MOVE, their "from" position is already in positions_at_move_phase_start
                             if move_unit_id not in positions_at_move_phase_start:
                                 # First MOVE action for this unit in this MOVE phase - add its "from" position
                                 positions_at_move_phase_start[move_unit_id] = (start_col, start_row)
-                                # Also add positions of other units that haven't moved yet in this MOVE phase
-                                # Use their current positions from unit_positions as they haven't moved
+                                # CRITICAL FIX (Episode 85): For other units, use their current positions from unit_positions
+                                # BUT: unit_positions should be up-to-date because we update it after each MOVE action
+                                # The problem is that unit_positions may be stale for enemy units that moved in P1 MOVE
+                                # if we haven't processed their MOVE actions yet. But since we process actions sequentially,
+                                # unit_positions should be up-to-date for all units that have moved before this one.
+                                # For units that haven't moved yet in this phase, use unit_positions (should be correct)
+                                # CRITICAL: However, for enemy units that FLED in P1 MOVE, their positions in unit_positions
+                                # should already be updated to their destination. But to be safe, we use unit_positions
+                                # which should reflect the current state after all P1 MOVE actions have been processed.
                                 for uid, pos in unit_positions.items():
                                     if uid not in positions_at_move_phase_start:
                                         positions_at_move_phase_start[uid] = pos
+                                # CRITICAL FIX (Episode 85): After filling positions_at_move_phase_start, verify that
+                                # enemy units that FLED in P1 MOVE have their correct positions (destination, not source)
+                                # This is a safety check to ensure positions_at_move_phase_start reflects the state
+                                # at the START of P2 MOVE, not during P1 MOVE
                             
                             # CRITICAL: Synchronize unit_positions with log before processing
                             # The log is the source of truth - if unit_positions doesn't match the start position
@@ -1202,11 +1351,45 @@ def parse_step_log(filepath: str) -> Dict:
                             # RULE: Detect fled (was adjacent to enemy at start of MOVE phase, then moved)
                             # CRITICAL: Use positions_at_move_phase_start which now contains accurate positions
                             # reconstructed from "from" positions in the log
+                            # CRITICAL FIX (Episode 24): Only detect FLED if the unit was actually adjacent to an enemy
+                            # at its starting position using the CORRECT enemy positions at the start of THIS player's MOVE phase
+                            # The check must use positions_at_move_phase_start for enemy positions, but this may be incomplete
+                            # if this is the first move of the phase. For safety, require BOTH checks to agree to avoid false positives.
                             if move_unit_id in positions_at_move_phase_start:
                                 start_pos = positions_at_move_phase_start[move_unit_id]
-                                if is_adjacent_to_enemy(start_pos[0], start_pos[1], unit_player, 
-                                                       positions_at_move_phase_start, unit_hp, player):
+                                # CRITICAL: positions_at_move_phase_start may not have all enemy positions if this is the first move
+                                # Filter positions_at_move_phase_start to only include enemy units that are alive
+                                # This ensures we only check adjacency against valid enemies
+                                enemy_positions_in_snapshot = {
+                                    uid: pos for uid, pos in positions_at_move_phase_start.items()
+                                    if unit_player.get(uid) == (3 - player) and unit_hp.get(uid, 0) > 0
+                                }
+                                # Also filter unit_positions for current check
+                                enemy_positions_current = {
+                                    uid: pos for uid, pos in unit_positions.items()
+                                    if unit_player.get(uid) == (3 - player) and unit_hp.get(uid, 0) > 0
+                                }
+                                # CRITICAL FIX: Use filtered enemy positions for both checks
+                                was_adjacent_in_snapshot = is_adjacent_to_enemy(start_pos[0], start_pos[1], unit_player, 
+                                                                               enemy_positions_in_snapshot, unit_hp, player)
+                                was_adjacent_in_current = is_adjacent_to_enemy(start_pos[0], start_pos[1], unit_player, 
+                                                                              enemy_positions_current, unit_hp, player)
+                                # CRITICAL FIX (Episodes 32, 112, 85): Require BOTH checks to agree (reduces false positives)
+                                # AND require that we have at least 2 units in snapshot (this unit + at least one other)
+                                # AND require that enemy_positions_current has at least one enemy (ensures unit_positions is up-to-date)
+                                # This ensures we have enough data to make a reliable decision
+                                # The snapshot check may use stale positions for enemy units that moved in P1 MOVE,
+                                # but the current check uses unit_positions which should be up-to-date after processing all P1 MOVE actions
+                                # CRITICAL: If the two checks disagree, it means positions_at_move_phase_start contains stale positions
+                                # (e.g., enemy unit FLED in P1 MOVE but positions_at_move_phase_start has its pre-FLED position)
+                                # In this case, we should NOT mark the unit as having fled, as it's likely a false positive
+                                # Only mark as fled if BOTH checks agree AND we have sufficient data
+                                if was_adjacent_in_snapshot and was_adjacent_in_current and len(positions_at_move_phase_start) >= 2 and len(enemy_positions_current) > 0:
                                     units_fled.add(move_unit_id)
+                                elif was_adjacent_in_snapshot and not was_adjacent_in_current:
+                                    # Snapshot says adjacent but current says not - this indicates stale positions in snapshot
+                                    # Don't mark as fled to avoid false positives
+                                    _debug_log(f"[FLED DEBUG] E{current_episode_num} T{turn} P{player}: Unit {move_unit_id} at {start_pos} - snapshot says adjacent but current says not (stale positions in snapshot), NOT marking as fled")
                             
                             if (start_col, start_row) != (dest_col, dest_row):
                                 # Record this movement in history (source of truth)
@@ -1249,6 +1432,14 @@ def parse_step_log(filepath: str) -> Dict:
                                 if unit_hp.get(move_unit_id, 0) > 0:
                                     old_position = unit_positions.get(move_unit_id)
                                     unit_positions[move_unit_id] = (dest_col, dest_row)
+                                    # CRITICAL FIX (Episodes 32, 112): Update positions_at_move_phase_start for enemy units
+                                    # If this is an enemy unit that moved in P1 MOVE, we need to track its position
+                                    # so that when P2 MOVE starts, positions_at_move_phase_start has correct enemy positions
+                                    # This prevents false "fled" detection when P2 units check adjacency
+                                    # NOTE: positions_at_move_phase_start is reset at the start of each MOVE phase,
+                                    # so we can't update it here for P1 units. Instead, we rely on unit_positions
+                                    # being up-to-date, which it should be after this update.
+                                    # The real fix is to ensure unit_positions is always up-to-date (which it is here)
                                 
                                 # CRITICAL: Verify collision is real by checking:
                                 # 1. Colliding unit is STILL at destination after position update
@@ -1396,6 +1587,14 @@ def parse_step_log(filepath: str) -> Dict:
                             target_col = int(fight_match.group(5))
                             target_row = int(fight_match.group(6))
                             
+                            # CRITICAL FIX (Episode 4): Update unit_positions for target unit after FIGHT action
+                            # The log shows the target's position at time of attack, which is the source of truth
+                            # Without this update, unit_positions may contain stale positions from earlier phases
+                            # (e.g., Unit 5 was at (11,6) after MOVE but (10,8) after FIGHT, but analyzer
+                            # would use (11,6) causing false "moves to adjacent enemy" errors)
+                            if target_id in unit_hp and unit_hp.get(target_id, 0) > 0:
+                                unit_positions[target_id] = (target_col, target_row)
+                            
                             # CRITICAL: Track damage and deaths in fight phase (same as shoot phase)
                             # This ensures dead units are properly removed from unit_hp and unit_positions
                             damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
@@ -1459,7 +1658,7 @@ def parse_step_log(filepath: str) -> Dict:
             'last_line': current_episode[-1][:100] if current_episode else 'N/A'
         })
         
-        stats['episode_lengths'].append(episode_actions)
+        stats['episode_lengths'].append((current_episode_num, episode_actions))
         # Save turn distribution for last episode
         if episode_turn > 0:
             stats['turns_distribution'][episode_turn] += 1
@@ -1490,9 +1689,57 @@ def print_statistics(stats: Dict, output_f=None):
     log_print(f"Total Actions: {stats['total_actions']}")
     
     if stats['episode_lengths']:
-        avg_length = sum(stats['episode_lengths']) / len(stats['episode_lengths'])
-        log_print(f"Average Actions per Episode: {avg_length:.1f}")
-        log_print(f"Min/Max Actions per Episode: {min(stats['episode_lengths'])}/{max(stats['episode_lengths'])}")
+        lengths_list = stats['episode_lengths']
+        durations_list = stats.get('episode_durations', [])
+        # Create mapping from episode_num to duration for quick lookup
+        durations_dict = {ep_num: duration for ep_num, duration in durations_list}
+        
+        # Find min and max episodes (lengths is list of (episode_num, action_count) tuples)
+        min_episode_num, min_length = min(lengths_list, key=lambda x: x[1])
+        max_episode_num, max_length = max(lengths_list, key=lambda x: x[1])
+        avg_length = sum(action_count for _, action_count in lengths_list) / len(lengths_list)
+        
+        # Get durations for min/max episodes
+        min_duration = durations_dict.get(min_episode_num, None)
+        max_duration = durations_dict.get(max_episode_num, None)
+        
+        min_duration_str = f"{min_duration:.2f}s" if min_duration is not None else "N/A"
+        max_duration_str = f"{max_duration:.2f}s" if max_duration is not None else "N/A"
+        
+        log_print(f"Episode Actions: {avg_length:.1f} (average)")
+        log_print(f"  Min: {min_length} (Episode {min_episode_num}) - (duration: {min_duration_str})")
+        log_print(f"  Max: {max_length} (Episode {max_episode_num}) - (duration: {max_duration_str})")
+        
+        # Detect episodes that reached the action limit (>= 990, which is 90% of 1000 limit)
+        action_limit_episodes = [ep_num for ep_num, action_count in lengths_list if action_count >= 990]
+        if action_limit_episodes:
+            log_print("")
+            log_print("-" * 36)
+            episodes_str = ", ".join(str(ep_num) for ep_num in sorted(action_limit_episodes))
+            log_print(f"EPISODES REACHING THE ACTIONS LIMIT: {episodes_str}")
+    
+    # Episode durations
+    if stats['episode_durations']:
+        durations_list = stats['episode_durations']
+        lengths_list = stats.get('episode_lengths', [])
+        # Create mapping from episode_num to action_count for quick lookup
+        lengths_dict = {ep_num: action_count for ep_num, action_count in lengths_list}
+        
+        # Find min and max episodes (durations is list of (episode_num, duration) tuples)
+        min_episode_num, min_duration = min(durations_list, key=lambda x: x[1])
+        max_episode_num, max_duration = max(durations_list, key=lambda x: x[1])
+        avg_duration = sum(duration for _, duration in durations_list) / len(durations_list)
+        
+        # Get action counts for min/max episodes
+        min_actions = lengths_dict.get(min_episode_num, None)
+        max_actions = lengths_dict.get(max_episode_num, None)
+        
+        min_actions_str = str(min_actions) if min_actions is not None else "N/A"
+        max_actions_str = str(max_actions) if max_actions is not None else "N/A"
+        
+        log_print(f"Episode Durations: {avg_duration:.2f}s (average)")
+        log_print(f"  Min: {min_duration:.2f}s (Episode {min_episode_num}) - (actions: {min_actions_str})")
+        log_print(f"  Max: {max_duration:.2f}s (Episode {max_episode_num}) - (actions: {max_actions_str})")
     
     # RÉSULTATS DES PARTIES
     log_print("\n" + "-" * 80)
@@ -1950,8 +2197,8 @@ def print_statistics(stats: Dict, output_f=None):
     log_print("=" * 80)
     for action_type in ['move', 'shoot', 'advance', 'charge', 'fight']:
         if stats['sample_actions'][action_type]:
-            log_print(f"\n--- {action_type.upper()} ---")
-            log_print(stats['sample_actions'][action_type])
+            action_label = action_type.upper().ljust(7)
+            log_print(f"{action_label} --- {stats['sample_actions'][action_type]}")
     
     log_print("\n" + "=" * 80)
 

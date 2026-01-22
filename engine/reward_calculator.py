@@ -73,9 +73,10 @@ class RewardCalculator:
         # a phase transition, NOT a pure system response. Process it as an action.
         system_response_indicators = [
             "phase_complete", "phase_transition", "while_loop_active",
-            "context", "blinking_units", "start_blinking", "validTargets",
+            "context", "blinking_units", "start_blinking", "valid_targets",
             "type", "next_phase", "current_player", "new_turn", "episode_complete",
-            "unit_activated", "valid_destinations", "preview_data", "waiting_for_player"
+            "unit_activated", "valid_destinations", "preview_data", "waiting_for_player",
+            "reason"  # System responses like "pool_empty" don't have unitId
         ]
 
         # CRITICAL FIX: Check if this is actually an action result with phase transition attached
@@ -85,7 +86,12 @@ class RewardCalculator:
         has_position_data = any(ind in result for ind in ["fromCol", "toCol", "fromRow", "toRow"])
 
         matching_indicators = [ind for ind in system_response_indicators if ind in result]
-        if matching_indicators and not (is_action_result or has_position_data):
+        # CRITICAL: Explicitly handle system responses with "reason" field (e.g., "pool_empty")
+        is_system_response = (
+            matching_indicators and not (is_action_result or has_position_data)
+        ) or result.get("reason") == "pool_empty"
+        
+        if is_system_response:
             # Pure system response - no action attached
             system_response_reward = system_penalties['system_response']
             reward_breakdown['total'] = system_response_reward
@@ -116,7 +122,8 @@ class RewardCalculator:
         # CRITICAL: Only give rewards to the controlled player (P1 during training)
         # Player 2's actions are part of the environment, not the learning agent
         controlled_player = self.config.get("controlled_player", 1)
-        if acting_unit.get("player") != controlled_player:
+        from shared.data_validation import require_key
+        if require_key(acting_unit, "player") != controlled_player:
             # No action rewards for opponent, BUT check if game ended
             # If P1's action ended the game, P0 still needs the win/lose reward!
             if game_state.get("game_over", False):
@@ -358,7 +365,8 @@ class RewardCalculator:
             
         elif action_type == "wait":
             # FIXED: Wait means agent chose not to act when action was available
-            current_phase = game_state.get("phase", "shoot")
+            from shared.data_validation import require_key
+            current_phase = require_key(game_state, "phase")
             if current_phase == "move":
                 wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
             else:
@@ -1325,7 +1333,8 @@ class RewardCalculator:
             if not hasattr(self, 'unit_registry') or not self.unit_registry:
                 return 0.5
             
-            unit_type = active_unit.get("unitType", "")
+            from shared.data_validation import require_key
+            unit_type = require_key(active_unit, "unitType")
             
             if "Swarm" in unit_type:
                 preferred = "swarm"
@@ -1352,7 +1361,9 @@ class RewardCalculator:
             
             return 1.0 if preferred == target_type else 0.3
             
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.error(f"reward_calculator._get_target_type_preference failed: {str(e)} - returning neutral reward 0.5")
             return 0.5
     
     # ============================================================================
@@ -1741,12 +1752,13 @@ class RewardCalculator:
         if not acting_unit or not game_state:
             return []
 
+        from shared.data_validation import require_key
         targets = []
-        acting_player = acting_unit.get("player")
+        acting_player = require_key(acting_unit, "player")
 
         for unit in game_state.get("units", []):
             # Enemy units that are alive
-            if unit.get("player") != acting_player and unit.get("HP_CUR", 0) > 0:
+            if require_key(unit, "player") != acting_player and require_key(unit, "HP_CUR") > 0:
                 targets.append(unit)
 
         return targets

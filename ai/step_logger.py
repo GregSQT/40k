@@ -9,6 +9,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
 import time
+import builtins
 
 __all__ = ['StepLogger']
 
@@ -27,6 +28,9 @@ class StepLogger:
         self.episode_step_count = 0
         self.episode_action_count = 0
         self.episode_number = 0  # Track episode number for logging
+        # PERFORMANCE: Buffer logs to reduce I/O overhead
+        self.log_buffer = []
+        self.buffer_size = 50  # Flush every 50 actions
         
         if self.enabled:
             # Clear existing log file
@@ -62,53 +66,65 @@ class StepLogger:
             self.episode_step_count += 1
             
         try:
-            with open(self.output_file, 'a') as f:
-                timestamp = time.strftime("%H:%M:%S", time.localtime())
-                
-                # Enhanced format: [timestamp] TX(col, row) PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
-                step_status = "STEP: YES" if step_increment else "STEP: NO"
-                success_status = "SUCCESS" if success else "FAILED"
-                phase_upper = phase.upper()
-                
-                # Format message using gameLogUtils.ts style
-                message = self._format_replay_style_message(unit_id, action_type, action_details)
-                
-                # CRITICAL DEBUG: Log message just before writing to step.log
-                if action_type == "move":
-                    try:
-                        with open("debug.log", "a") as f_debug:
-                            f_debug.write(f"[STEP_LOGGER BEFORE WRITE] ID={call_id} Unit {unit_id}: message={message} unit_with_coords={action_details.get('unit_with_coords', 'N/A') if action_details else 'N/A'}\n")
-                    except Exception:
-                        pass
-                
-                # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
-                step_status = "STEP: YES" if step_increment else "STEP: NO"
-                success_status = "SUCCESS" if success else "FAILED"
-                phase_upper = phase.upper()
-                
-                # Get turn and episode from SINGLE SOURCE OF TRUTH
-                turn_number = action_details.get('current_turn', 1) if action_details else 1
-                # Use self.episode_number which is updated in log_episode_start()
-                episode_number = self.episode_number
-                # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
-                log_line = f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n"
-                f.write(log_line)
-                
-                # CRITICAL DEBUG: Log what was actually written to step.log
-                if action_type == "move":
-                    try:
-                        with open("debug.log", "a") as f_debug:
-                            f_debug.write(f"[STEP_LOGGER AFTER WRITE] ID={call_id} Unit {unit_id}: log_line written={log_line.strip()}\n")
-                    except Exception:
-                        pass
+            timestamp = time.strftime("%H:%M:%S", time.localtime())
+            
+            # Format message using gameLogUtils.ts style
+            message = self._format_replay_style_message(unit_id, action_type, action_details)
+            
+            # CRITICAL DEBUG: Log message just before writing to step.log
+            if action_type == "move":
+                try:
+                    with open("debug.log", "a") as f_debug:
+                        f_debug.write(f"[STEP_LOGGER BEFORE WRITE] ID={call_id} Unit {unit_id}: message={message} unit_with_coords={action_details.get('unit_with_coords', 'N/A') if action_details else 'N/A'}\n")
+                except Exception:
+                    pass
+            
+            # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
+            step_status = "STEP: YES" if step_increment else "STEP: NO"
+            success_status = "SUCCESS" if success else "FAILED"
+            phase_upper = phase.upper()
+            
+            # Get turn and episode from SINGLE SOURCE OF TRUTH
+            turn_number = action_details.get('current_turn', 1) if action_details else 1
+            # Use self.episode_number which is updated in log_episode_start()
+            episode_number = self.episode_number
+            # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
+            log_line = f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n"
+            # PERFORMANCE: Buffer logs and flush periodically to reduce I/O overhead
+            self.log_buffer.append(log_line)
+            if len(self.log_buffer) >= self.buffer_size:
+                self._flush_buffer()
+            
+            # CRITICAL DEBUG: Log what was actually written to step.log
+            if action_type == "move":
+                try:
+                    with open("debug.log", "a") as f_debug:
+                        f_debug.write(f"[STEP_LOGGER AFTER WRITE] ID={call_id} Unit {unit_id}: log_line written={log_line.strip()}\n")
+                except Exception:
+                    pass
                 
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
+    
+    def _flush_buffer(self):
+        """Flush buffered logs to file"""
+        if not self.enabled or not self.log_buffer:
+            return
+        try:
+            # CRITICAL: Use builtins.open to ensure availability even if open is shadowed
+            with builtins.open(self.output_file, 'a') as f:
+                f.writelines(self.log_buffer)
+            self.log_buffer = []
+        except Exception as e:
+            print(f"⚠️ Step logging flush error: {e}")
     
     def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None):
         """Log episode start with all unit starting positions, walls, and objectives"""
         if not self.enabled:
             return
+
+        # PERFORMANCE: Flush any remaining buffered logs before episode start
+        self._flush_buffer()
 
         # Increment episode number
         self.episode_number += 1
@@ -569,6 +585,9 @@ class StepLogger:
         if not self.enabled:
             return
 
+        # PERFORMANCE: Flush any remaining buffered logs before episode end
+        self._flush_buffer()
+
         try:
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
@@ -577,5 +596,14 @@ class StepLogger:
                 f.write("=" * 80 + "\n")
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
+    
+    def __del__(self):
+        """Ensure buffer is flushed when logger is destroyed"""
+        try:
+            if hasattr(self, 'log_buffer') and self.log_buffer:
+                self._flush_buffer()
+        except (NameError, AttributeError):
+            # Ignore errors during interpreter shutdown (open may not be available)
+            pass
 
 

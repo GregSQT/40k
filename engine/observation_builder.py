@@ -82,18 +82,19 @@ class ObservationBuilder:
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate max expected damage from all weapons
         # Calculate EXPECTED ranged damage per turn (max from all ranged weapons)
+        from shared.data_validation import require_key
         ranged_expected = 0.0
         if unit.get("RNG_WEAPONS"):
             for weapon in unit["RNG_WEAPONS"]:
                 weapon_expected = self._calculate_expected_damage(
-                    num_attacks=weapon.get("NB", 0),
-                    to_hit_stat=weapon.get("ATK", 0),
-                    strength=weapon.get("STR", 0),
+                    num_attacks=require_key(weapon, "NB"),
+                    to_hit_stat=require_key(weapon, "ATK"),
+                    strength=require_key(weapon, "STR"),
                     target_toughness=target_T,
-                    ap=weapon.get("AP", 0),
+                    ap=require_key(weapon, "AP"),
                     target_save=target_save,
                     target_invul=target_invul,
-                    damage_per_wound=weapon.get("DMG", 0)
+                    damage_per_wound=require_key(weapon, "DMG")
                 )
                 ranged_expected = max(ranged_expected, weapon_expected)
         
@@ -102,14 +103,14 @@ class ObservationBuilder:
         if unit.get("CC_WEAPONS"):
             for weapon in unit["CC_WEAPONS"]:
                 weapon_expected = self._calculate_expected_damage(
-                    num_attacks=weapon.get("NB", 0),
-                    to_hit_stat=weapon.get("ATK", 0),
-                    strength=weapon.get("STR", 0),
+                    num_attacks=require_key(weapon, "NB"),
+                    to_hit_stat=require_key(weapon, "ATK"),
+                    strength=require_key(weapon, "STR"),
                     target_toughness=target_T,
-                    ap=weapon.get("AP", 0),
+                    ap=require_key(weapon, "AP"),
                     target_save=target_save,
                     target_invul=target_invul,
-                    damage_per_wound=weapon.get("DMG", 0)
+                    damage_per_wound=require_key(weapon, "DMG")
                 )
                 melee_expected = max(melee_expected, weapon_expected)
         
@@ -282,13 +283,14 @@ class ObservationBuilder:
         - 1.0 = Clear line of sight
         - 0.0 = Blocked line of sight
         """
-        # Use LoS cache if available (Phase 1 implementation)
-        if "los_cache" in game_state and game_state["los_cache"]:
-            cache_key = (shooter["id"], target["id"])
-            if cache_key in game_state["los_cache"]:
-                return 1.0 if game_state["los_cache"][cache_key] else 0.0
+        # AI_TURN_SHOOTING_UPDATE.md: Use shooter["los_cache"] (new architecture)
+        target_id = target["id"]
         
-        # Fallback: calculate LoS (happens if cache not built yet)
+        if "los_cache" in shooter and shooter["los_cache"]:
+            if target_id in shooter["los_cache"]:
+                return 1.0 if shooter["los_cache"][target_id] else 0.0
+        
+        # Fallback: calculate LoS (happens if cache not built yet or used outside shooting phase)
         from engine.phase_handlers import shooting_handlers
         has_los = shooting_handlers._has_line_of_sight(game_state, shooter, target)
         return 1.0 if has_los else 0.0
@@ -566,7 +568,9 @@ class ObservationBuilder:
             
             return 1.0 if preferred == target_type else 0.3
             
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.error(f"observation_builder._get_target_type_preference failed: {str(e)} - returning neutral value 0.5")
             return 0.5
 
     def _can_melee_units_charge_target(self, target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:

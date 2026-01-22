@@ -101,9 +101,9 @@ def _log_movement_debug(game_state: Dict[str, Any], function_name: str, unit_id:
         game_state["console_logs"] = []
     
     log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} {function_name} Unit {unit_id}: {message}"
-    from engine.game_utils import add_console_log
+    from engine.game_utils import add_debug_log
     from engine.game_utils import safe_print
-    add_console_log(game_state, log_message)
+    add_debug_log(game_state, log_message)
     safe_print(game_state, log_message)  # Also print to console for immediate visibility
 
 
@@ -113,6 +113,11 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     # Set phase
     game_state["phase"] = "move"
+    
+    # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for current player
+    # Cache will be reused throughout the phase for all units
+    current_player = game_state.get("current_player", 1)
+    _build_enemy_adjacent_hexes(game_state, current_player)
     
     # CRITICAL: Invalidate all destination pools at the START of the phase
     # This ensures pools are clean and don't contain stale data from previous phases
@@ -192,9 +197,17 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             if u["HP_CUR"] > 0 and u["id"] != unit["id"]:
                 col_int, row_int = _normalize_coordinates(u["col"], u["row"])
                 occupied_positions.add((col_int, row_int))
-        # CRITICAL: Convert player to int for consistent comparison in _build_enemy_adjacent_hexes
-        unit_player_int = int(unit["player"]) if unit["player"] is not None else None
-        enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit_player_int)
+        # PERFORMANCE: Use cached enemy_adjacent_hexes from phase start
+        # Cache is built once per phase in movement_phase_start()/shooting_phase_start()/charge_phase_start()
+        # CRITICAL: Use current_player directly (cache is built with current_player at phase start)
+        # CRITICAL: Validate cache exists (no fallback)
+        current_player = game_state.get("current_player")
+        if current_player is None:
+            raise KeyError("game_state missing required 'current_player' field")
+        cache_key = f"enemy_adjacent_hexes_player_{current_player}"
+        if cache_key not in game_state:
+            raise KeyError(f"enemy_adjacent_hexes cache missing for player {current_player} - _build_enemy_adjacent_hexes() must be called at phase start")
+        enemy_adjacent_hexes = game_state[cache_key]
         
         has_valid_adjacent_hex = False
         for neighbor_col, neighbor_row in neighbors:
@@ -567,9 +580,11 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
     
     # Apply AI_TURN.md tracking
-    game_state["units_moved"].add(unit["id"])
+    # CRITICAL: Normalize unit ID to string for consistent storage (units_fled stores strings)
+    unit_id_str = str(unit["id"])
+    game_state["units_moved"].add(unit_id_str)
     if was_adjacent:
-        game_state["units_fled"].add(unit["id"])
+        game_state["units_fled"].add(unit_id_str)
         # CRITICAL: Units that fled are also marked as moved
         # (units_fled is a subset of units_moved)
     
@@ -727,6 +742,9 @@ def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[
     Returns a set of (col, row) tuples that are adjacent to at least one enemy.
     This allows O(1) adjacency checks instead of O(n) iteration per hex.
 
+    PERFORMANCE: Calculates once per phase and stores in game_state cache.
+    Call this function at phase start, then use game_state[f"enemy_adjacent_hexes_player_{player}"] directly.
+
     Args:
         game_state: Game state with units
         player: The player checking adjacency (enemies are units with different player)
@@ -734,15 +752,16 @@ def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[
     Returns:
         Set of hex coordinates adjacent to any living enemy unit
     """
-    # DEBUG: Always log when function is called to diagnose logging issues
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
+    # PERFORMANCE: Only log in debug mode to avoid performance impact during training
     debug_mode_val = game_state.get("debug_mode", False)
-    episode = game_state.get("episode_number", "?")
-    turn = game_state.get("turn", "?")
-    phase = game_state.get("phase", "?")
-    test_log = f"[DEBUG TEST] _build_enemy_adjacent_hexes called: debug_mode={debug_mode_val}, episode={episode}, turn={turn}, phase={phase}, player={player}"
-    game_state["console_logs"].append(test_log)
+    if debug_mode_val:
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "?")
+        test_log = f"[DEBUG TEST] _build_enemy_adjacent_hexes called: debug_mode={debug_mode_val}, episode={episode}, turn={turn}, phase={phase}, player={player}"
+        game_state["console_logs"].append(test_log)
     
     enemy_adjacent_hexes = set()
     enemies_processed = []  # Track enemies for debugging
@@ -819,6 +838,10 @@ def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[
         add_console_log(game_state, log_message)
         safe_print(game_state, log_message)  # Also print to console for immediate visibility
 
+    # PERFORMANCE: Store result in game_state cache for reuse during phase
+    cache_key = f"enemy_adjacent_hexes_player_{player}"
+    game_state[cache_key] = enemy_adjacent_hexes
+    
     return enemy_adjacent_hexes
 
 
@@ -914,11 +937,19 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     start_col, start_row = _normalize_coordinates(unit["col"], unit["row"])
     start_pos = (start_col, start_row)
 
-    # PERFORMANCE: Pre-compute enemy adjacent hexes once for this BFS
+    # PERFORMANCE: Use cached enemy_adjacent_hexes from phase start
+    # Cache is built once per phase in movement_phase_start()/shooting_phase_start()/charge_phase_start()
     # This reduces O(n) per hex check to O(1) set lookup
-    # CRITICAL: Convert player to int for consistent comparison in _build_enemy_adjacent_hexes
-    unit_player_int = int(unit["player"]) if unit["player"] is not None else None
-    enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit_player_int)
+    # CRITICAL: Use current_player directly (cache is built with current_player at phase start)
+    current_player = game_state.get("current_player")
+    if current_player is None:
+        raise KeyError("game_state missing required 'current_player' field")
+    
+    # CRITICAL: Cache must exist (no fallback) - raise error if missing
+    cache_key = f"enemy_adjacent_hexes_player_{current_player}"
+    if cache_key not in game_state:
+        raise KeyError(f"enemy_adjacent_hexes cache missing for player {current_player} - _build_enemy_adjacent_hexes() must be called at phase start")
+    enemy_adjacent_hexes = game_state[cache_key]
 
     # PERFORMANCE: Pre-compute occupied positions once for this BFS
     # This reduces O(n) per-hex unit iteration to O(1) set lookup
@@ -1237,23 +1268,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
     
-    # CRITICAL: Rebuild enemy_adjacent_hexes just before execution to catch positions that changed
-    # This prevents movements to destinations that became adjacent after the pool was built
-    unit_player_int = int(unit["player"]) if unit["player"] is not None else None
-    current_enemy_adjacent_hexes = _build_enemy_adjacent_hexes(game_state, unit_player_int)
-    if (dest_col, dest_row) in current_enemy_adjacent_hexes:
-        # Destination is adjacent to enemy - REJECT even if it's in the pool
-        # This can happen if an enemy moved after the pool was built
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        from engine.game_utils import add_console_log, safe_print
-        log_msg = f"[MOVE REJECTED] E{episode} T{turn} Unit {unit_id} destination ({dest_col},{dest_row}) is ADJACENT TO ENEMY - REJECTED (was in pool but enemy positions changed)"
-        add_console_log(game_state, log_msg)
-        safe_print(game_state, log_msg)
-        import logging
-        logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
-        logging.info(log_msg)
-        return False, {"error": "destination_adjacent_to_enemy", "destination": (dest_col, dest_row)}
+    # PERFORMANCE: Destination validation is already done in movement_build_valid_destinations_pool()
+    # The destination is in valid_pool, which was built using cached enemy_adjacent_hexes from phase start
+    # No need to re-validate here - if destination is in pool, it's valid
 
     # CRITICAL FIX: Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.
@@ -1501,7 +1518,7 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "phase_complete": True,
         "next_phase": "shoot",
-        "units_processed": len([u for u in game_state["units"] if u["id"] in game_state["units_moved"]])
+        "units_processed": len([u for u in game_state["units"] if str(u["id"]) in game_state["units_moved"]])
     }
 
 

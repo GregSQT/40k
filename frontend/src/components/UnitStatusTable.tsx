@@ -406,7 +406,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   onCollapseChange
 }) => {
   // Collapse/expand state for entire table
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   
   // Expanded units state (per unit expand/collapse for weapons)
   const [expandedUnits, setExpandedUnits] = useState<Set<UnitId>>(new Set());

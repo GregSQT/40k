@@ -527,6 +527,7 @@ export const BoardWithAPI: React.FC = () => {
         fightSubPhase={apiProps.fightSubPhase}
         onCharge={apiProps.onCharge}
         onActivateCharge={apiProps.onActivateCharge}
+        onChargeEnemyUnit={apiProps.onChargeEnemyUnit}
         onMoveCharger={apiProps.onMoveCharger}
         onCancelCharge={apiProps.onCancelCharge}
         onValidateCharge={apiProps.onValidateCharge}

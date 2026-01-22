@@ -54,6 +54,22 @@ def add_console_log(game_state: Dict[str, Any], message: str) -> None:
     game_state["console_logs"].append(message)
 
 
+def add_debug_log(game_state: Dict[str, Any], message: str) -> None:
+    """
+    Add debug message to console_logs ONLY if debug_mode is enabled.
+    
+    Args:
+        game_state: Game state dictionary (must contain "debug_mode" key)
+        message: Debug message to log
+    """
+    if not game_state.get("debug_mode", False):
+        return  # Skip logging if debug_mode is not enabled
+    
+    if "console_logs" not in game_state:
+        game_state["console_logs"] = []
+    game_state["console_logs"].append(message)
+
+
 def safe_print(game_state: Dict[str, Any], *args, **kwargs) -> None:
     """
     Conditionally print based on debug mode.

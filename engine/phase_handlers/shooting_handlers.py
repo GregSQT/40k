@@ -428,6 +428,11 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
+    # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for current player
+    # Cache will be reused throughout the phase for all units
+    from engine.phase_handlers.movement_handlers import _build_enemy_adjacent_hexes
+    _build_enemy_adjacent_hexes(game_state, current_player)
+    
     _build_shooting_los_cache(game_state)
     
     # Build activation pool
@@ -512,23 +517,25 @@ def _remove_dead_unit_from_pools(game_state: Dict[str, Any], dead_unit_id: str) 
     # DEBUG: Log dead unit removal
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
-    from engine.game_utils import add_console_log
+    from engine.game_utils import add_console_log, add_debug_log
     unit = _get_unit_by_id(game_state, dead_unit_id)
     hp_cur = unit.get("HP_CUR", -1) if unit else -1
-    add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} _remove_dead_unit_from_pools: Removing dead Unit {unit_id_str} (HP_CUR={hp_cur})")
+    add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} _remove_dead_unit_from_pools: Removing dead Unit {unit_id_str} (HP_CUR={hp_cur})")
     
     # Remove from shooting activation pool
     if "shoot_activation_pool" in game_state:
         pool_before = len(game_state["shoot_activation_pool"])
         was_in_pool = unit_id_str in [str(uid) for uid in game_state["shoot_activation_pool"]]
-        game_state["shoot_activation_pool"] = [uid for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
+        # Normalize pool to contain only strings (consistent with pool construction at line 641)
+        game_state["shoot_activation_pool"] = [str(uid) for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
         pool_after = len(game_state["shoot_activation_pool"])
-        add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} _remove_dead_unit_from_pools: shoot_activation_pool before={pool_before} after={pool_after} was_in_pool={was_in_pool}")
+        add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} _remove_dead_unit_from_pools: shoot_activation_pool before={pool_before} after={pool_after} was_in_pool={was_in_pool}")
         # Verify removal worked (defense in depth)
         if pool_before == pool_after and unit_id_str in [str(uid) for uid in game_state["shoot_activation_pool"]]:
             # Unit was not removed - this is a bug, force removal
-            add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} _remove_dead_unit_from_pools: BUG - Unit {unit_id_str} still in pool after removal, forcing removal")
-            game_state["shoot_activation_pool"] = [uid for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
+            add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} _remove_dead_unit_from_pools: BUG - Unit {unit_id_str} still in pool after removal, forcing removal")
+            # Normalize pool to contain only strings (consistent with pool construction at line 641)
+            game_state["shoot_activation_pool"] = [str(uid) for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
     
     # Remove from movement activation pool
     if "move_activation_pool" in game_state:
@@ -615,8 +622,8 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     # DEBUG: Log pool building for dead unit detection
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
-    from engine.game_utils import add_console_log
-    add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: Building pool for player {current_player}")
+    from engine.game_utils import add_console_log, add_debug_log
+    add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: Building pool for player {current_player}")
     
     # CRITICAL: Clear pool before rebuilding (defense in depth)
     game_state["shoot_activation_pool"] = []
@@ -631,17 +638,18 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
             continue  # Skip units of other players
         
         # PRINCIPLE: "Le Pool DOIT gérer les morts" - Only add alive units of current player
+        # CRITICAL: Normalize unit ID to string when adding to pool to ensure consistent types
         if unit.get("HP_CUR", 0) > 0 and _has_valid_shooting_targets(game_state, unit, current_player):
-            shoot_activation_pool.append(unit["id"])
-            add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: ADDED Unit {unit_id} (player={unit_player}, HP_CUR={hp_cur})")
+            shoot_activation_pool.append(str(unit["id"]))
+            add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: ADDED Unit {unit_id} (player={unit_player}, HP_CUR={hp_cur})")
         else:
             # Log why unit was NOT added (for debugging dead units in pool)
-            add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: SKIPPED Unit {unit_id} (player={unit_player}, HP_CUR={hp_cur}, has_targets={_has_valid_shooting_targets(game_state, unit, current_player)})")
+            add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: SKIPPED Unit {unit_id} (player={unit_player}, HP_CUR={hp_cur}, has_targets={_has_valid_shooting_targets(game_state, unit, current_player)})")
     
     # Update game_state pool
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool is built correctly (only alive units of current player via _has_valid_shooting_targets)
     game_state["shoot_activation_pool"] = shoot_activation_pool
-    add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: Pool built with {len(shoot_activation_pool)} units: {shoot_activation_pool}")
+    add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: Pool built with {len(shoot_activation_pool)} units: {shoot_activation_pool}")
     
     return game_state["shoot_activation_pool"]
 
@@ -718,9 +726,10 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         
     # units_fled.includes(unit.id)?
     # Direct field access with validation
+    # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
-    if unit["id"] in game_state["units_fled"]:
+    if str(unit["id"]) in game_state["units_fled"]:
         return False
     
     # STEP 1: ELIGIBILITY CHECK
@@ -859,6 +868,21 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     if not unit:
         return {"error": "unit_not_found", "unitId": unit_id}
 
+    # CRITICAL FIX (Episodes 49, 57, 94, 95, 99): Verify unit is in pool before activation
+    # A unit that was removed from pool (e.g., after WAIT) should NEVER be reactivated
+    # This prevents infinite WAIT loops where get_action_mask reactivates a unit that was removed
+    # CRITICAL: Normalize all IDs to string for consistent comparison (pool stores strings)
+    shoot_pool = game_state.get("shoot_activation_pool", [])
+    unit_id_str = str(unit_id)
+    pool_ids = [str(uid) for uid in shoot_pool]
+    if unit_id_str not in pool_ids:
+        # Unit not in pool - cannot activate
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        from engine.game_utils import add_debug_log
+        add_debug_log(game_state, f"[ACTIVATION_START ERROR] E{episode} T{turn} shooting_unit_activation_start: Unit {unit_id_str} NOT in pool, cannot activate. Pool={shoot_pool}")
+        return {"error": "unit_not_in_pool", "unitId": unit_id, "message": "Unit was removed from pool and cannot be reactivated"}
+
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is in pool, it's alive (no need to check)
 
     # STEP 2: UNIT_ACTIVABLE_CHECK
@@ -924,7 +948,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             # NO -> unit.CAN_ADVANCE = false -> No valid actions available
             # end_activation(WAIT, 1, 0, SHOOTING, 1, 1) -> UNIT_ACTIVABLE_CHECK
             unit["valid_target_pool"] = []
-            result = _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
+            # _shooting_activation_end now returns (bool, Dict), but shooting_unit_activation_start returns Dict
+            # Extract just the result dict for compatibility
+            success, result = _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
             return result
     
     # YES -> SHOOTING ACTIONS AVAILABLE -> Go to STEP 3: ACTION_SELECTION
@@ -1026,8 +1052,8 @@ def valid_target_pool_build(
     # DEBUG: Log pool building start
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
-    from engine.game_utils import add_console_log
-    add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized}({unit['col']},{unit['row']}) building pool (advance_status={advance_status}, adjacent_status={adjacent_status})")
+    from engine.game_utils import add_console_log, add_debug_log
+    add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized}({unit['col']},{unit['row']}) building pool (advance_status={advance_status}, adjacent_status={adjacent_status})")
     
     for enemy in game_state["units"]:
         # DEBUG: Log all enemies being checked
@@ -1035,11 +1061,11 @@ def valid_target_pool_build(
         enemy_pos_check = (enemy.get("col", "?"), enemy.get("row", "?"))
         enemy_hp_check = enemy.get("HP_CUR", -1)
         enemy_player_check = enemy.get("player", "?")
-        add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Checking Enemy {enemy_id_check}({enemy_pos_check[0]},{enemy_pos_check[1]}) HP={enemy_hp_check} player={enemy_player_check}")
+        add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Checking Enemy {enemy_id_check}({enemy_pos_check[0]},{enemy_pos_check[1]}) HP={enemy_hp_check} player={enemy_player_check}")
         
         # unit.HP_CUR > 0? -> NO -> Skip enemy unit
         if enemy["HP_CUR"] <= 0:
-            add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_check} EXCLUDED - HP_CUR <= 0")
+            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_check} EXCLUDED - HP_CUR <= 0")
             continue
         
         # CRITICAL: Normalize enemy ID for consistent comparison
@@ -1053,7 +1079,7 @@ def valid_target_pool_build(
             if "episode_number" in game_state and "turn" in game_state:
                 episode = game_state.get("episode_number", "?")
                 turn = game_state.get("turn", "?")
-                from engine.game_utils import add_console_log
+                from engine.game_utils import add_console_log, add_debug_log
                 log_msg = f"[SHOOT CRITICAL BUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized} attempted to add itself (enemy_id={enemy_id_normalized}, unit['id']={unit['id']}, enemy['id']={enemy['id']}) to valid_target_pool - BLOCKED"
                 add_console_log(game_state, log_msg)
             continue
@@ -1066,7 +1092,7 @@ def valid_target_pool_build(
             if "episode_number" in game_state and "turn" in game_state:
                 episode = game_state.get("episode_number", "?")
                 turn = game_state.get("turn", "?")
-                from engine.game_utils import add_console_log
+                from engine.game_utils import add_console_log, add_debug_log
                 log_msg = f"[SHOOT CRITICAL BUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized} (player={current_player_int}) attempted to add friendly unit {enemy_id_normalized} (player={enemy_player}) to valid_target_pool - BLOCKED"
                 add_console_log(game_state, log_msg)
             continue
@@ -1093,7 +1119,7 @@ def valid_target_pool_build(
             
             # If no PISTOL weapon available, cannot shoot at adjacent enemy
             if not has_pistol_weapon:
-                add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - adjacent without PISTOL weapon")
+                add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - adjacent without PISTOL weapon")
                 continue
         
         # Unit NOT adjacent to friendly unit (excluding active unit)? -> NO -> Skip enemy unit
@@ -1117,7 +1143,7 @@ def valid_target_pool_build(
                         break
             
             if enemy_adjacent_to_friendly:
-                add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - engaged with friendly unit")
+                add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - engaged with friendly unit")
                 continue
         
         # Unit in Line of Sight? -> NO -> Skip enemy unit
@@ -1128,8 +1154,8 @@ def valid_target_pool_build(
             # DEBUG: Log why target was excluded (LoS blocked)
             episode = game_state.get("episode_number", "?")
             turn = game_state.get("turn", "?")
-            from engine.game_utils import add_console_log
-            add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized}({unit['col']},{unit['row']}) -> Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - LoS BLOCKED")
+            from engine.game_utils import add_console_log, add_debug_log
+            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized}({unit['col']},{unit['row']}) -> Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - LoS BLOCKED")
             continue
         
         # Unit within range of AT LEAST 1 weapon from weapon_available_pool? -> NO -> Skip enemy unit
@@ -1155,9 +1181,9 @@ def valid_target_pool_build(
                 add_console_log(game_state, f"[CRITICAL BUG] E{episode} T{turn} valid_target_pool_build: Attempted to ADD friendly unit {enemy_id_normalized} (player={enemy_player}) to pool for Unit {unit_id_normalized} (player={current_player_int}) - BLOCKED")
                 continue  # Skip friendly units
             valid_target_pool.append(str(enemy["id"]))
-            add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) ADDED to pool (distance={distance}, shooter_player={current_player_int}, target_player={enemy_player})")
+            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) ADDED to pool (distance={distance}, shooter_player={current_player_int}, target_player={enemy_player})")
         else:
-            add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - out of range (distance={distance}, max_range={max([w.get('RNG', 0) for w in rng_weapons] + [0])})")
+            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - out of range (distance={distance}, max_range={max([w.get('RNG', 0) for w in rng_weapons] + [0])})")
     
     return valid_target_pool
 
@@ -1204,14 +1230,14 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
 
     # Check cache
     if cache_key in _target_pool_cache:
-        # Cache hit: Fast path - filter dead targets AND re-validate melee status
-        # Melee status can change when friendly units die, so we must re-validate
-        # Context (advance_status, adjacent_status) is now part of cache key
+        # Cache hit: Fast path - filter dead targets only
+        # AI_TURN.md: During shooting activation, friendly units cannot die or move
+        # Only targets can die, which is already handled by HP_CUR > 0 filter
+        # Context (advance_status, adjacent_status) is part of cache key, so cache is reliable
         cached_pool = _target_pool_cache[cache_key]
 
-        # Filter out units that died AND re-validate targets that might have changed melee status
+        # Filter out units that died (only change possible during activation)
         # CRITICAL: Also check that target is not a friendly unit (defense in depth)
-        # CRITICAL: Also check that target player hasn't changed (cache invalidation)
         alive_targets = []
         current_player = unit["player"]
         # CRITICAL: Convert to int for consistent comparison (player can be int or string)
@@ -1225,20 +1251,13 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
                 target_player = int(target["player"]) if target["player"] is not None else None
                 if target_player == current_player_int:
                     # This is a bug - log it for debugging
-                    from engine.game_utils import add_console_log
+                    from engine.game_utils import add_console_log, add_debug_log
                     add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
                     continue  # Skip friendly units
                 
-                # Re-validate target - melee status might have changed (friendly unit died)
-                # This is necessary because cache only checks (unit_id, col, row), not surrounding units
-                if _is_valid_shooting_target(game_state, unit, target):
-                    alive_targets.append(target_id_str)  # Ensure ID is string
-                else:
-                    # Log why target was excluded by _is_valid_shooting_target
-                    episode = game_state.get("episode_number", "?")
-                    turn = game_state.get("turn", "?")
-                    from engine.game_utils import add_console_log
-                    add_console_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} Cache hit: Target {target_id_str} excluded by _is_valid_shooting_target for Unit {unit_id} (player={current_player_int}, target_player={target_player})")
+                # AI_TURN.md: No re-validation needed - cache is reliable during activation
+                # Only targets can die (filtered above), friendly units cannot move or die
+                alive_targets.append(target_id_str)  # Ensure ID is string
 
         # Update unit's target pool
         unit["valid_target_pool"] = alive_targets
@@ -1472,7 +1491,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
                 filtered_pool.append(target_id)
             else:
                 # If target is friendly, it's a bug in valid_target_pool_build - log it
-                from engine.game_utils import add_console_log
+                from engine.game_utils import add_console_log, add_debug_log
                 add_console_log(game_state, f"[BUG] valid_target_pool_build included friendly unit {target_id} for shooter {unit_id}")
     
     valid_target_pool = filtered_pool
@@ -1521,17 +1540,20 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         # CHANGE 8: NO FALLBACK - raise error if wall data not found in any source
         raise KeyError("wall_hexes not found in game_state['wall_hexes'], game_state['board']['wall_hexes'], or game_state['board_config']['wall_hexes']")
     
-    # DEBUG: Log wall data source and format
+    # DEBUG: Log wall data source and format (only in debug mode to avoid performance impact)
+    debug_mode = game_state.get("debug_mode", False)
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     shooter_id = shooter.get("id", "?")
     target_id = target.get("id", "?")
-    from engine.game_utils import add_console_log
-    add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} _has_line_of_sight: Shooter {shooter_id}({start_col},{start_row}) -> Target {target_id}({end_col},{end_row})")
-    add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Wall source: {wall_source}, Type: {type(wall_hexes_data)}, Length: {len(wall_hexes_data) if hasattr(wall_hexes_data, '__len__') else 'N/A'}")
+    from engine.game_utils import add_console_log, add_debug_log
+    if debug_mode:
+        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} _has_line_of_sight: Shooter {shooter_id}({start_col},{start_row}) -> Target {target_id}({end_col},{end_row})")
+        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Wall source: {wall_source}, Type: {type(wall_hexes_data)}, Length: {len(wall_hexes_data) if hasattr(wall_hexes_data, '__len__') else 'N/A'}")
     
     if not wall_hexes_data:
-        add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} No wall data found - allowing shot")
+        if debug_mode:
+            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} No wall data found - allowing shot")
         return True
     
     # Convert wall_hexes to set for fast lookup
@@ -1547,9 +1569,10 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         else:
             invalid_walls.append(str(wall_hex))
     
-    if invalid_walls:
-        add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Invalid wall formats: {invalid_walls[:5]}")
-    add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Converted {len(wall_hexes)} valid wall hexes")
+    if invalid_walls and debug_mode:
+        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Invalid wall formats: {invalid_walls[:5]}")
+    if debug_mode:
+        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Converted {len(wall_hexes)} valid wall hexes")
     
     try:
         # CRITICAL: Convert coordinates to int to ensure consistent comparison
@@ -1559,7 +1582,8 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         end_row_int = int(end_row)
         hex_path = _get_accurate_hex_line(start_col_int, start_row_int, end_col_int, end_row_int)
         
-        add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Hex path ({len(hex_path)} hexes): {hex_path[:3]}...{hex_path[-3:]}")
+        if debug_mode:
+            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Hex path ({len(hex_path)} hexes): {hex_path[:3]}...{hex_path[-3:]}")
         
         # Check if any hex in path is a wall (excluding start and end)
         # CRITICAL: Must check all hexes in path, not just first wall found
@@ -1578,16 +1602,19 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
                 blocking_walls.append((col_int, row_int))
         
         if blocking_walls:
-            add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS BLOCKED by walls: {blocking_walls}")
+            if debug_mode:
+                add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS BLOCKED by walls: {blocking_walls}")
             return False
         
         # No walls blocking - line of sight is clear
-        add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS CLEAR (no blocking walls)")
+        if debug_mode:
+            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS CLEAR (no blocking walls)")
         return True
         
     except Exception as e:
         # On error, deny line of sight (fail-safe)
-        add_console_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS calculation ERROR: {str(e)} - denying LoS (fail-safe)")
+        if debug_mode:
+            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS calculation ERROR: {str(e)} - denying LoS (fail-safe)")
         return False
 
 def _get_accurate_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:
@@ -1665,7 +1692,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["los_cache"] = {}
     
     # Console log
-    from engine.game_utils import add_console_log
+    from engine.game_utils import add_console_log, add_debug_log
     add_console_log(game_state, "SHOOTING PHASE COMPLETE")
     
     # Base result with all_attack_results if present
@@ -1740,7 +1767,7 @@ def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> s
         return "no_target_selected"
 
 def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any], 
-                   arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1) -> Dict[str, Any]:
+                   arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1) -> Tuple[bool, Dict[str, Any]]:
     """
     shooting_activation_end procedure with exact arguments
     end_activation(result_type, step_count, action_type, phase, remove_from_pool, increment_step)
@@ -1754,6 +1781,9 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     
     # Arg3 tracking
     unit_id_str = str(unit["id"])
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    from engine.game_utils import add_console_log, add_debug_log
     if arg3 == "SHOOTING":
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
@@ -1776,13 +1806,33 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         # Direct field access
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
-        # PRINCIPLE: "Le Pool DOIT gérer les morts" - Use string comparison to handle int/string ID mismatches
-        unit_id_str = str(unit["id"])
-        pool_before_len = len(game_state["shoot_activation_pool"])
-        game_state["shoot_activation_pool"] = [uid for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
-        pool_after_len = len(game_state["shoot_activation_pool"])
+        # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool always contains string IDs (normalized at creation)
+        # CRITICAL: Normalize all IDs to string for consistent comparison (pool stores strings)
+        pool_before = list(game_state["shoot_activation_pool"])
+        pool_before_len = len(pool_before)
+        # CRITICAL DEBUG: Log types and values before comparison
+        pool_types = [type(uid).__name__ for uid in pool_before]
+        unit_id_type = type(unit["id"]).__name__
+        unit_id_str_type = type(unit_id_str).__name__
+        add_debug_log(game_state, f"[ACTIVATION_END DEBUG] E{episode} T{turn} _shooting_activation_end: Removing unit {unit_id_str} (type={unit_id_str_type}, unit['id'] type={unit_id_type}, unit['id']={unit['id']}), pool_before={pool_before} (types={pool_types})")
+        # CRITICAL: Use list comprehension with explicit type normalization
+        # Normalize pool to contain only strings (consistent with pool construction at line 641)
+        pool_after = []
+        for uid in pool_before:
+            uid_str = str(uid)
+            if uid_str != unit_id_str:
+                pool_after.append(uid_str)  # Keep normalized string version for consistency
+            else:
+                add_debug_log(game_state, f"[ACTIVATION_END DEBUG] E{episode} T{turn} _shooting_activation_end: MATCH FOUND - removing uid={uid} (type={type(uid).__name__}, str={uid_str}) == unit_id_str={unit_id_str}")
+        game_state["shoot_activation_pool"] = pool_after
+        pool_after_len = len(pool_after)
         if pool_before_len != pool_after_len:
             removed_from_shoot_pool = True
+            add_debug_log(game_state, f"[ACTIVATION_END DEBUG] E{episode} T{turn} _shooting_activation_end: Removed unit {unit_id_str} from pool, before={pool_before_len} after={pool_after_len}, arg5={arg5}")
+        else:
+            add_debug_log(game_state, f"[ACTIVATION_END DEBUG] E{episode} T{turn} _shooting_activation_end: Unit {unit_id_str} NOT in pool (before={pool_before_len}), arg5={arg5}, pool_before={pool_before}, pool_after={pool_after}")
+    else:
+        add_debug_log(game_state, f"[ACTIVATION_END DEBUG] E{episode} T{turn} _shooting_activation_end: NOT removing unit {unit_id_str} from pool (arg5={arg5}, remove_from_pool={remove_from_pool})")
     
     # Clean up unit activation state including position tracking
     # Only clean up if actually ending activation (arg5=1)
@@ -1801,8 +1851,16 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
         unit["SHOOT_LEFT"] = 0
         
         # Clear active unit
+        # DEBUG: Log active_shooting_unit before clearing
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        from engine.game_utils import add_debug_log
+        active_unit_before = game_state.get("active_shooting_unit", None)
         if "active_shooting_unit" in game_state:
+            add_debug_log(game_state, f"[ACTIVATION_END DEBUG] E{episode} T{turn} _shooting_activation_end: Clearing active_shooting_unit={active_unit_before}, unit_id={unit_id_str}, arg5={arg5}, remove_from_pool={remove_from_pool}")
             del game_state["active_shooting_unit"]
+        else:
+            add_debug_log(game_state, f"[ACTIVATION_END DEBUG] E{episode} T{turn} _shooting_activation_end: active_shooting_unit already cleared, unit_id={unit_id_str}, arg5={arg5}, remove_from_pool={remove_from_pool}")
     
     # Check if shooting pool is now empty after removing this unit
     # Direct field access
@@ -1815,7 +1873,7 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     # If arg5=0 (NOT_REMOVED), we continue activation, so return None or empty dict
     if remove_from_pool == 0:
         # NOT_REMOVED: This is just a log call, continue activation
-        return {}
+        return True, {}
     
     response = {
         "activation_ended": True,
@@ -1835,32 +1893,17 @@ def _shooting_activation_end(game_state: Dict[str, Any], unit: Dict[str, Any],
     if shoot_attack_results:
         response["all_attack_results"] = list(shoot_attack_results)
     
-    # Signal phase completion if pool is empty - delegate to proper phase end function
-    if pool_empty:
-        # CRITICAL: Preserve action and all_attack_results before merging phase transition
-        preserved_action = response.get("action")
-        preserved_attack_results = response.get("all_attack_results")
-        preserved_unit_id = response.get("unitId")
-        
-        # Don't just set a flag - call the complete phase transition function
-        # But merge activation response info so logs are still generated
-        phase_complete_result = _shooting_phase_complete(game_state)
-        # Merge activation info into phase complete result so logs include unit activation details
-        phase_complete_result.update(response)
-        
-        # CRITICAL: Restore preserved action for logging
-        if preserved_action is not None:
-            phase_complete_result["action"] = preserved_action
-        elif "action" not in phase_complete_result:
-            phase_complete_result["action"] = "wait"
-        if preserved_attack_results:
-            phase_complete_result["all_attack_results"] = preserved_attack_results
-        if preserved_unit_id:
-            phase_complete_result["unitId"] = preserved_unit_id
-        
-        return phase_complete_result
+    # AI_TURN.md COMPLIANCE: Phase ends ONLY when pool is empty (STEP 2: UNIT_ACTIVABLE_CHECK line 794)
+    # No filtering by SHOOT_LEFT or can_advance - pool is built once at phase start
+    # Units are removed ONLY via end_activation() with Arg4 = SHOOTING
     
-    return response
+    # Signal phase completion if pool is empty
+    if pool_empty:
+        # AI_TURN.md COMPLIANCE: Return phase end directly, like movement phase
+        # No merge needed - phase transition is handled by cascade loop
+        return True, shooting_phase_end(game_state)
+    
+    return True, response
 
 def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
@@ -1956,20 +1999,18 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                     unit["available_weapons"] = available_weapons
                 except Exception as e:
                     # If weapon selection fails, end activation
-                    result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-                    return True, result
+                    return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                 
                 # Check if at least one weapon is usable (can_use: True)
                 usable_weapons = [w for w in available_weapons if w["can_use"]]
                 if not usable_weapons:
                     # No usable weapons left, end activation
-                    result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-                    return True, result
+                    return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                 
                 return True, {
 
                     "while_loop_active": True,
-                    "validTargets": valid_targets,
+                    "valid_targets": valid_targets,
                     "shootLeft": 0,
                     "weapon_selection_required": True,
                     "context": "weapon_selection_after_shots_exhausted",
@@ -1980,12 +2021,10 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                 }
             else:
                 # No more weapons of the same category or no targets, end activation
-                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-                return True, result
+                return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
         else:
             # No weapon selected, end activation
-            result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-            return True, result
+            return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
     
     # Build valid_target_pool
     # shooting_build_valid_target_pool() now correctly determines context
@@ -2038,17 +2077,16 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         unit_check = _get_unit_by_id(game_state, unit_id)
         is_pve_ai = config.get("pve_mode", False) and unit_check and unit_check["player"] == 2
         is_gym_training = config.get("gym_training_mode", False) and unit_check and unit_check["player"] == 2
+        is_bot = unit_check and unit_check["player"] == 2 and not is_pve_ai
         
-        # For AI/gym: end activation as before
-        if is_pve_ai or is_gym_training:
+        # For AI/gym/bots: end activation as before
+        if is_pve_ai or is_gym_training or is_bot:
             if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
                 # No targets at activation
-                result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
-                return True, result
+                return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
             else:
                 # Shot last target available
-                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-                return True, result
+                return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
         
         # For human players: allow advance mode instead of ending activation
         if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
@@ -2062,8 +2100,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             }
         else:
             # Shot last target available
-            result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-            return True, result
+            return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
     
     # CLEAN FLAG DETECTION: Use config parameter
     unit = _get_unit_by_id(game_state, unit_id)
@@ -2078,6 +2115,16 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # CHANGE 2: Auto-execute for BOTH PvE AI, gym training, and bots
     if (is_pve_ai or is_gym_training or is_bot) and valid_targets:
+        # CRITICAL: Rebuild target pool just before execution to ensure it's up-to-date
+        # Other units may have moved or died since the pool was first built
+        # This prevents "shoot at engaged enemy" and "shoot after fled" errors
+        valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+        unit["valid_target_pool"] = valid_targets
+        
+        if not valid_targets:
+            # No valid targets after rebuild - end activation
+            return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
+        
         # AUTO-SHOOT: PvE AI and gym training
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
         
@@ -2133,7 +2180,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     response = {
         "while_loop_active": True,
-        "validTargets": valid_targets,
+        "valid_targets": valid_targets,
         "shootLeft": unit["SHOOT_LEFT"],
         "context": "player_action_selection",
         "blinking_units": valid_targets,
@@ -2178,35 +2225,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     else:
         action_type = action["action"]
         unit_id = action["unitId"]
-    # Get action_type early to check if it's select_weapon
-    action_type_early = action.get("action") if "action" in action else None
+    # AI_TURN.md COMPLIANCE: Pool is built once at phase start (STEP 1: ELIGIBILITY CHECK)
+    # Units are removed ONLY via:
+    # 1. end_activation() with Arg4 = SHOOTING (when unit finishes activation)
+    # 2. _remove_dead_unit_from_pools() (when unit dies)
+    # No filtering or modification of pool in execute_action - this is not described in AI_TURN.md
     
-    # Remove units with no shots remaining (but keep if select_weapon action for that unit)
-    # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool is already correct (no dead units), just filter by shots
-    if current_pool:
-        updated_pool = []
-        action_unit_id = str(action.get("unitId", "")) if "unitId" in action else ""
-        for pool_unit_id in current_pool:
-            unit_check = _get_unit_by_id(game_state, pool_unit_id)
-            if not unit_check:
-                continue
-            # CRITICAL: Remove dead units from pool (defense in depth)
-            if unit_check.get("HP_CUR", 0) <= 0:
-                continue  # Skip dead units
-            if unit_check and "SHOOT_LEFT" in unit_check:
-                shots_left = unit_check["SHOOT_LEFT"]
-            else:
-                shots_left = 0
-            # Keep unit in pool if it's the target of select_weapon action (can reactivate)
-            if action_type_early == "select_weapon" and str(pool_unit_id) == action_unit_id:
-                updated_pool.append(pool_unit_id)
-            elif unit_check and shots_left > 0:
-                updated_pool.append(pool_unit_id)
-        
-        game_state["shoot_activation_pool"] = updated_pool
-        current_pool = updated_pool
-    
-    # Check if shooting phase should complete after cleanup
+    # Check if shooting phase should complete
     if not current_pool:
         game_state["_shooting_phase_initialized"] = False
         return True, _shooting_phase_complete(game_state)
@@ -2222,15 +2247,19 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return False, {"error": "unit_not_found", "unitId": unit_id}
     
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is in pool, it's alive (no need to check)
-    unit_id = unit["id"]
+    # CRITICAL: Normalize unit_id to string for consistent comparison with pool (which may contain int or string IDs)
+    unit_id = str(unit["id"])
     
     # DEBUG: Log unit activation for dead unit detection
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
-    from engine.game_utils import add_console_log
+    from engine.game_utils import add_console_log, add_debug_log
     hp_cur = unit.get("HP_CUR", -1)
-    in_pool = str(unit_id) in [str(uid) for uid in game_state.get("shoot_activation_pool", [])]
-    add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} execute_action: Unit {unit_id} (HP_CUR={hp_cur}, in_pool={in_pool})")
+    # CRITICAL: Normalize unit_id to string for consistent comparison (pool stores strings)
+    unit_id_str = str(unit_id)
+    pool_ids = [str(uid) for uid in game_state.get("shoot_activation_pool", [])]
+    in_pool = unit_id_str in pool_ids
+    add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} execute_action: Unit {unit_id} (HP_CUR={hp_cur}, in_pool={in_pool})")
     
     # Direct field access
     if "action" not in action:
@@ -2243,15 +2272,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # Handler validates unit eligibility for all actions
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is in pool, it's alive (no need to check)
+    # Pool always contains string IDs (normalized at creation), so direct comparison is safe
     if "shoot_activation_pool" not in game_state:
         raise KeyError("game_state missing required 'shoot_activation_pool' field")
     if action_type != "select_weapon" and unit_id not in game_state["shoot_activation_pool"]:
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     # select_weapon can reactivate unit after weapon exhaustion (unit must have been eligible before)
     
-        # AI_SHOOT.md action routing
-        if action_type == "activate_unit":
-            result = shooting_unit_activation_start(game_state, unit_id)
+    # AI_SHOOT.md action routing
+    if action_type == "activate_unit":
+        result = shooting_unit_activation_start(game_state, unit_id)
         if result.get("success"):
             # Check if empty_target_pool with can_advance
             if result.get("empty_target_pool") and result.get("can_advance"):
@@ -2266,7 +2296,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return execution_result
         # If no success and no error handled above, return the result (may contain other errors)
         return False, result
-        return True, result
     
     elif action_type == "shoot":
         # Handle gym-style shoot action with optional targetId
@@ -2276,6 +2305,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             target_id = action["targetId"]
         
         # Validate unit eligibility
+        # Pool always contains string IDs (normalized at creation), so direct comparison is safe
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
         if unit_id not in game_state["shoot_activation_pool"]:
@@ -2299,8 +2329,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # Debug output only in debug training mode
             if not valid_targets:
                 # No valid targets - end activation with wait
-                result = _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
-                return True, result
+                return _shooting_activation_end(game_state, unit, "PASS", 1, "PASS", "SHOOTING")
             target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
         
         # Execute shooting directly without UI loops
@@ -2337,8 +2366,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # Reactivate unit in pool after weapon selection
         # This allows subsequent shooting actions (left_click, shoot) to proceed
         # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is selecting weapon, it's alive (pool is correct)
-        if unit_id not in game_state["shoot_activation_pool"]:
-            game_state["shoot_activation_pool"].append(unit_id)
+        # CRITICAL: Normalize unit_id to string for consistent comparison (pool stores strings)
+        unit_id_str = str(unit_id)
+        pool_ids = [str(uid) for uid in game_state["shoot_activation_pool"]]
+        if unit_id_str not in pool_ids:
+            game_state["shoot_activation_pool"].append(unit_id_str)
         
         # Store autoSelectWeapon in game_state if provided
         if "autoSelectWeapon" in action:
@@ -2352,20 +2384,22 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return result
 
     elif action_type == "wait" or action_type == "skip":
-        # Handle gym wait/skip actions - unit chooses not to shoot
-        
-        # DIAGNOSTIC: Verify no cross-player contamination
-        if unit["player"] != game_state["current_player"]:
-            return False, {"error": "wrong_player_unit_wait", "unitId": unit_id, "unit_player": unit["player"], "current_player": game_state["current_player"]}
-        
-        if "shoot_activation_pool" not in game_state:
-            raise KeyError("game_state missing required 'shoot_activation_pool' field")
-        current_pool = game_state["shoot_activation_pool"]
-        if unit_id in current_pool:
-            result = _shooting_activation_end(game_state, unit, "SKIP", 1, "PASS", "SHOOTING")
-            post_pool = game_state["shoot_activation_pool"] if "shoot_activation_pool" in game_state else []
-            return result
-        return False, {"error": "unit_not_eligible", "unitId": unit_id}
+        # AI_TURN.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
+        # EXACT COMPLIANCE: Same logic as right_click action (lines 2453-2468)
+        has_shot = _unit_has_shot_with_any_weapon(unit)
+        unit_id_str = str(unit["id"])
+        if has_shot:
+            # YES -> end_activation(ACTION, 1, SHOOTING, SHOOTING, 1)
+            return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+        else:
+            # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
+            has_advanced = unit_id_str in game_state.get("units_advanced", set())
+            if has_advanced:
+                # NO -> Unit has not shot yet (only advanced) -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
+                return _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
+            else:
+                # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1)
+                return _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
     
     elif action_type == "left_click":
         target_id = action.get("targetId")
@@ -2376,16 +2410,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         has_shot = _unit_has_shot_with_any_weapon(unit)
         unit_id_str = str(unit["id"])
         if has_shot:
-            # YES -> end_activation(ACTION, 1, SHOOTING, SHOOTING, 1, 1)
+            # YES -> end_activation(ACTION, 1, SHOOTING, SHOOTING, 1)
             return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
         else:
             # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
             has_advanced = unit_id_str in game_state.get("units_advanced", set())
             if has_advanced:
-                # NO -> Unit has not shot yet (only advanced) -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1)
+                # NO -> Unit has not shot yet (only advanced) -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
                 return _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
             else:
-                # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1, 1)
+                # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1)
                 return _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
     
     elif action_type == "skip":
@@ -2520,7 +2554,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             return False, {"error": "unit_not_found"}
         
         # CRITICAL: Check units_fled just before execution (may have changed during phase)
-        if unit["id"] in game_state.get("units_fled", set()):
+        # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
+        if str(unit["id"]) in game_state.get("units_fled", set()):
             return False, {"error": "unit_has_fled", "unitId": unit_id}
         
         # ASSAULT RULE VALIDATION: Block shooting if unit advanced without ASSAULT weapon
@@ -2568,16 +2603,30 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         valid_targets = unit.get("valid_target_pool", [])
         
-        # CRITICAL: If pool is empty (e.g., invalidated after target movement), rebuild it
-        # Pool is source of truth, but must be rebuilt when invalidated
+        # AI_TURN.md: If pool is empty, go to EMPTY_TARGET_HANDLING (advance or WAIT)
+        # Pool should not be empty here if unit was properly activated, but if all targets died
+        # between activation and this call, allow agent to choose advance or WAIT
         if len(valid_targets) == 0:
-            # Pool was invalidated (e.g., after target movement) - rebuild it
-            valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
-            unit["valid_target_pool"] = valid_targets
+            # Mark unit as active for EMPTY_TARGET_HANDLING
+            game_state["active_shooting_unit"] = unit_id
+            unit["valid_target_pool"] = []
             
-            # If still empty after rebuild, no valid targets
-            if len(valid_targets) == 0:
-                return False, {"error": "no_valid_targets", "unitId": unit_id}
+            # Check if unit can advance
+            can_advance = unit.get("_can_advance", False)
+            if can_advance:
+                # Return signal to allow advance action (EMPTY_TARGET_HANDLING)
+                return True, {
+                    "success": True,
+                    "unitId": unit_id,
+                    "empty_target_pool": True,
+                    "can_advance": True,
+                    "allow_advance": True,
+                    "waiting_for_player": False,  # Agent can choose immediately
+                    "action": "empty_target_advance_available"
+                }
+            else:
+                # Cannot advance - must WAIT
+                return _shooting_activation_end(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
         
         # Handle target selection: agent-provided or auto-select
         # NOTE: Friendly fire and LoS checks are already done in valid_target_pool_build().
@@ -2713,8 +2762,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                             available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
                         except Exception as e:
                             # If weapon selection fails, end activation
-                            result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-                            return True, result
+                            return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                         
                         # Filter to only usable weapons
                         usable_weapons = [w for w in available_weapons if w["can_use"]]
@@ -2730,8 +2778,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                                 best_weapon_idx_in_filtered = select_best_ranged_weapon(temp_unit, target, game_state)
                             except (KeyError, AttributeError, IndexError) as e:
                                 # If weapon selection fails, end activation
-                                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-                                return True, result
+                                return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                             
                             if best_weapon_idx_in_filtered >= 0:
                                 # Map back to original weapon index
@@ -2745,8 +2792,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         else:
                             # No more weapons of the same category available
                             # End activation since all weapons of this category have been used
-                            result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
-                            return True, result
+                            return _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
         # === FIN NOUVEAU ===
         elif target_id:
             # Agent provided invalid target
@@ -2855,6 +2901,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if not target:
             return False, {"error": "target_not_found", "targetId": selected_target_id}
         
+        # AI_TURN.md: Pool is source of truth - no redundant validation
+        # Target is in valid_target_pool, so it's valid (pool is updated after advance and target death)
+        
         # Execute shooting attack
         attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
         
@@ -2954,13 +3003,13 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 return success, loop_result
             else:
                 # NO -> All weapons exhausted -> End activation
-                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                success, result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                 # CRITICAL: Include all_attack_results even when ending activation
                 # This ensures attacks already executed are logged to step.log
                 shoot_attack_results = game_state.get("shoot_attack_results", [])
                 if shoot_attack_results:
                     result["all_attack_results"] = list(shoot_attack_results)
-                return True, result
+                return success, result
         else:
             # NO -> Continue normally (SHOOT_LEFT > 0)
             # Handle target outcome (died/survived)
@@ -2975,13 +3024,13 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 
                 # valid_target_pool empty? -> YES -> End activation (Slaughter handling)
                 if not unit.get("valid_target_pool"):
-                    result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                    success, result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                     # CRITICAL: Include all_attack_results even when ending activation
                     # This ensures attacks already executed are logged to step.log
                     shoot_attack_results = game_state.get("shoot_attack_results", [])
                     if shoot_attack_results:
                         result["all_attack_results"] = list(shoot_attack_results)
-                    return True, result
+                    return success, result
                 # NO -> Continue to shooting action selection step
             # else: Target survives
             
@@ -2989,13 +3038,13 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             valid_targets = unit.get("valid_target_pool", [])
             if not valid_targets and unit["SHOOT_LEFT"] > 0:
                 # YES -> End activation (Slaughter handling)
-                result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
+                success, result = _shooting_activation_end(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING")
                 # CRITICAL: Include all_attack_results even when ending activation
                 # This ensures attacks already executed are logged to step.log
                 shoot_attack_results = game_state.get("shoot_attack_results", [])
                 if shoot_attack_results:
                     result["all_attack_results"] = list(shoot_attack_results)
-                return True, result
+                return success, result
             # NO -> Continue to shooting action selection step
             
             # Continue to shooting action selection step
@@ -3038,7 +3087,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         # This should never happen if _get_unit_by_id works correctly
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
-        from engine.game_utils import add_console_log, safe_print
+        from engine.game_utils import add_console_log, add_debug_log, safe_print
         log_msg = f"[CRITICAL ID BUG] E{episode} T{turn} shooting_attack_controller: unit_id={unit_id_str} but shooter.id={shooter_id_str} - ID MISMATCH!"
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
@@ -3053,9 +3102,9 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     shooter_weapons = [w.get("display_name", "unknown") for w in shooter.get("RNG_WEAPONS", [])]
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
-    from engine.game_utils import add_console_log, safe_print
+    from engine.game_utils import add_console_log, add_debug_log, safe_print
     debug_msg = f"[SHOOT DEBUG] E{episode} T{turn} shooting_attack_controller: unit_id={unit_id_str} shooter.id={shooter_id_str} type={shooter_unit_type} player={shooter_player} weapons={shooter_weapons}"
-    add_console_log(game_state, debug_msg)
+    add_debug_log(game_state, debug_msg)
     safe_print(game_state, debug_msg)
     
     # FOCUS FIRE: Store target's HP before damage for reward calculation
@@ -3089,8 +3138,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             # DEBUG: Log target death
             episode = game_state.get("episode_number", "?")
             turn = game_state.get("turn", "?")
-            from engine.game_utils import add_console_log
-            add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} target_died: Unit {target['id']} died (HP_CUR={target['HP_CUR']}), calling _remove_dead_unit_from_pools")
+            from engine.game_utils import add_console_log, add_debug_log
+            add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} target_died: Unit {target['id']} died (HP_CUR={target['HP_CUR']}), calling _remove_dead_unit_from_pools")
             # PERFORMANCE: Invalidate LoS cache for dead unit (partial invalidation)
             _invalidate_los_cache_for_unit(game_state, target["id"])
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate cache for dead unit (can't attack anymore)
@@ -3099,17 +3148,23 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             # CRITICAL: Remove dead unit from activation pools (prevents dead units from acting)
             _remove_dead_unit_from_pools(game_state, target["id"])
             
-            # CRITICAL: Rebuild target pools for all active shooting units after target death
-            # This ensures dead targets are removed from all valid_target_pool
-            # Use shooting_build_valid_target_pool for consistency (same function used everywhere)
+            # CRITICAL: Remove dead target from valid_target_pool for all active shooting units
+            # Simply remove the dead target ID from each unit's pool (no need to rebuild)
+            target_id_str = str(target["id"])
             if "shoot_activation_pool" in game_state:
                 for active_unit_id in game_state["shoot_activation_pool"]:
                     active_unit = _get_unit_by_id(game_state, active_unit_id)
                     if active_unit and active_unit.get("HP_CUR", 0) > 0:
-                        # Rebuild pool for this active unit using the same wrapper function
-                        rebuilt_pool = shooting_build_valid_target_pool(game_state, str(active_unit_id))
-                        active_unit["valid_target_pool"] = rebuilt_pool
-                        add_console_log(game_state, f"[POOL DEBUG] E{episode} T{turn} target_died: Rebuilt target pool for Unit {active_unit_id} (removed dead target {target['id']})")
+                        # Remove dead target from this unit's valid_target_pool
+                        if "valid_target_pool" in active_unit:
+                            pool_before = len(active_unit["valid_target_pool"])
+                            active_unit["valid_target_pool"] = [
+                                tid for tid in active_unit["valid_target_pool"] 
+                                if str(tid) != target_id_str
+                            ]
+                            pool_after = len(active_unit["valid_target_pool"])
+                            if pool_before != pool_after:
+                                add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} target_died: Removed dead target {target_id_str} from Unit {active_unit_id} pool (before={pool_before}, after={pool_after})")
 
     # Store pre-damage HP in attack_result for reward calculation
     attack_result["target_hp_before_damage"] = target_hp_before_damage
@@ -3141,7 +3196,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         if (weapon_is_tyranid and unit_is_space_marine) or (weapon_is_space_marine and unit_is_tyranid):
             episode = game_state.get("episode_number", "?")
             turn = game_state.get("turn", "?")
-            from engine.game_utils import add_console_log, safe_print
+            from engine.game_utils import add_console_log, add_debug_log, safe_print
             log_msg = f"[CRITICAL WEAPON BUG] E{episode} T{turn} shooting_attack_controller: Unit {unit_id} (type={shooter_unit_type}, player={shooter.get('player')}) using weapon={weapon_name} - WEAPON/TYPE MISMATCH!"
             add_console_log(game_state, log_msg)
             safe_print(game_state, log_msg)
@@ -3196,9 +3251,9 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         damage = attack_result.get("damage", 0)
         target_died = attack_result.get("target_died", False)
         log_msg = f"[SHOOT DEBUG] E{episode} T{turn} shoot attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
-        from engine.game_utils import add_console_log
+        from engine.game_utils import add_console_log, add_debug_log
         from engine.game_utils import safe_print
-        add_console_log(game_state, log_msg)
+        add_debug_log(game_state, log_msg)
         safe_print(game_state, log_msg)
 
     # Calculate reward for this action using progressive bonus system
@@ -3578,13 +3633,35 @@ def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
     return False
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Cube coordinate adjacency check
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+    """
+    Check if unit is adjacent to enemy within melee range.
+    
+    PERFORMANCE: Uses cached enemy_adjacent_hexes if available (O(1) lookup),
+    otherwise falls back to iterating enemies (O(n)).
+    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (melee range is always 1)
     """
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
+    
+    # PERFORMANCE: Use cached enemy_adjacent_hexes for O(1) lookup
+    # Cache is built at phase start and stored in game_state
+    # CRITICAL: Use current_player directly (cache is built with current_player at phase start)
+    # CRITICAL: Validate cache exists (no fallback)
+    current_player = game_state.get("current_player")
+    if current_player is None:
+        raise KeyError("game_state missing required 'current_player' field")
+    cache_key = f"enemy_adjacent_hexes_player_{current_player}"
+    if cache_key not in game_state:
+        raise KeyError(f"enemy_adjacent_hexes cache missing for player {current_player} - _build_enemy_adjacent_hexes() must be called at phase start")
+    
+    # Use cache: check if unit position is in adjacent hexes set
+    from engine.phase_handlers.movement_handlers import _normalize_coordinates
+    unit_col, unit_row = _normalize_coordinates(unit["col"], unit["row"])
+    enemy_adjacent_hexes = game_state[cache_key]
+    return (unit_col, unit_row) in enemy_adjacent_hexes
+    
+    # NOTE: Removed fallback - cache must exist (AI_TURN.md compliance: no fallbacks)
     # CRITICAL: Normalize player value to int for consistent comparison
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
     for enemy in game_state["units"]:
         # CRITICAL: Normalize player value to int for consistent comparison
         enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
@@ -3805,7 +3882,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # Unit is adjacent to enemy - cannot advance (pool is source of truth)
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
-        from engine.game_utils import add_console_log
+        from engine.game_utils import add_console_log, add_debug_log
         add_console_log(game_state, f"[ADVANCE REJECTED] E{episode} T{turn} Unit {unit_id} cannot advance - adjacent to enemy (can_advance=False from pool)")
         return False, {"error": "cannot_advance_adjacent_to_enemy", "unitId": unit_id}
     
@@ -3876,7 +3953,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 if "console_logs" not in game_state:
                     game_state["console_logs"] = []
                 log_msg = f"[ADVANCE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot advance to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_unit['id']}"
-                from engine.game_utils import add_console_log
+                from engine.game_utils import add_console_log, add_debug_log
                 from engine.game_utils import safe_print
                 add_console_log(game_state, log_msg)
                 safe_print(game_state, log_msg)
@@ -3898,7 +3975,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via ADVANCE"
-        from engine.game_utils import add_console_log
+        from engine.game_utils import add_console_log, add_debug_log
         from engine.game_utils import safe_print
         add_console_log(game_state, log_message)
         safe_print(game_state, log_message)
@@ -4015,7 +4092,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         else:
             # NO -> Unit advanced but no valid targets -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1)
             # arg3="ADVANCE", arg4="SHOOTING", arg5=1 (remove from pool)
-            result = _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
+            success, result = _shooting_activation_end(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
             result.update({
                 "action": "advance",
                 "unitId": unit_id,
@@ -4026,7 +4103,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "advance_range": advance_range,
                 "actually_moved": actually_moved
             })
-            return result
+            return success, result
     else:
         # No destination - return valid destinations for player/AI to choose
         # For AI, auto-select best destination

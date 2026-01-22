@@ -9,6 +9,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
+from engine.game_utils import add_console_log, safe_print
 
 
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,11 +31,16 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["pending_charge_targets"] = []  # Store targets for gym training target selection
     game_state["pending_charge_unit_id"] = None  # Store unit ID waiting for target selection
 
+    # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for current player
+    # Cache will be reused throughout the phase for all units (invalidated after each charge)
+    current_player = game_state.get("current_player", 1)
+    from engine.phase_handlers.movement_handlers import _build_enemy_adjacent_hexes
+    _build_enemy_adjacent_hexes(game_state, current_player)
+
     # Build activation pool
     charge_build_activation_pool(game_state)
 
     # Console log (disabled in training mode for performance)
-    from engine.game_utils import add_console_log
     add_console_log(game_state, "CHARGE POOL BUILT")
 
     # Check if phase complete immediately (no eligible units)
@@ -107,7 +113,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             continue  # Already in melee, cannot charge
 
         # "NOT in units_fled?"
-        if unit["id"] in game_state["units_fled"]:
+        # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
+        if str(unit["id"]) in game_state["units_fled"]:
             continue  # Fled units cannot charge
 
         # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
@@ -169,12 +176,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
     # Validate unit is eligible (keep for validation, remove only after successful action)
     if unit_id not in game_state["charge_activation_pool"]:
-        return False, {"error": "unit_not_eligible", "unitId": unit_id}
+        return False, {"error": "unit_not_eligible", "unitId": unit_id, "action": action_type}
 
     # Get unit object for processing
     active_unit = _get_unit_by_id(game_state, unit_id)
     if not active_unit:
-        return False, {"error": "unit_not_found", "unitId": unit_id}
+        return False, {"error": "unit_not_found", "unitId": unit_id, "action": action_type}
 
     # Flag detection for consistent behavior
     # AI_TURN.md COMPLIANCE: Direct field access with explicit validation
@@ -286,7 +293,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 raise ValueError(f"Action missing 'attempted_action' field: {action}")
             result["attempted_action"] = attempted_action
             return True, result
-        return False, {"error": "unit_not_eligible", "unitId": unit_id}
+        return False, {"error": "unit_not_eligible", "unitId": unit_id, "action": action_type}
 
     else:
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "charge"}
@@ -429,7 +436,6 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     try:
         reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, CHARGE_MAX_DISTANCE)
     except Exception as e:
-        from engine.game_utils import add_console_log
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit_id}: {str(e)}")
         return []
     
@@ -504,7 +510,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
+        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
     # Build valid targets (enemies with non-occupied adjacent hexes reachable within 12 hexes)
     valid_targets = charge_build_valid_targets(game_state, unit_id)
@@ -548,17 +554,17 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     - Path must be reachable via BFS pathfinding
     """
     # CRITICAL: Check units_fled just before execution (may have changed during phase)
-    if unit["id"] in game_state.get("units_fled", set()):
+    # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
+    if str(unit["id"]) in game_state.get("units_fled", set()):
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
-        from engine.game_utils import add_console_log, safe_print
         log_msg = f"[CHARGE ERROR] E{episode} T{turn} Unit {unit['id']} attempted to charge but has fled - REJECTED"
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
         import logging
         logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
         logging.info(log_msg)
-        return False, {"error": "unit_has_fled", "unitId": unit["id"]}
+        return False, {"error": "unit_has_fled", "unitId": unit["id"], "action": "charge"}
     
     # NOTE: Pool is already built in charge_destination_selection_handler() after roll.
     # Since system is sequential, no need to rebuild here. Only verify destination is in pool.
@@ -570,11 +576,11 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     # Check if destination is in the pool (built after roll in charge_destination_selection_handler)
     dest_tuple = (int(dest_col), int(dest_row))
     if dest_tuple not in game_state.get("valid_charge_destinations_pool", []):
-        return False, {"error": "destination_not_in_pool", "target": (dest_col, dest_row)}
+        return False, {"error": "destination_not_in_pool", "target": (dest_col, dest_row), "action": "charge"}
     
     # Validate destination per AI_TURN.md charge rules
     if not _is_valid_charge_destination(game_state, dest_col, dest_row, unit, target_id, charge_roll, config):
-        return False, {"error": "invalid_charge_destination", "target": (dest_col, dest_row)}
+        return False, {"error": "invalid_charge_destination", "target": (dest_col, dest_row), "action": "charge"}
 
     # Store original position
     orig_col, orig_row = unit["col"], unit["row"]
@@ -609,7 +615,6 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
             if "console_logs" not in game_state:
                 game_state["console_logs"] = []
             log_msg = f"[CHARGE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot charge to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_unit['id']}"
-            from engine.game_utils import add_console_log, safe_print
             add_console_log(game_state, log_msg)
             safe_print(game_state, log_msg)
             import logging
@@ -624,9 +629,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     # Execute charge - position assignment happens immediately after occupation check
     # CRITICAL: Log ALL position changes to detect unauthorized modifications
     # ALWAYS log, even if episode_number/turn/phase are missing (for debugging)
-    from engine.game_utils import add_console_log
     log_message = f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: ({orig_col},{orig_row})→({dest_col},{dest_row}) via CHARGE"
-    from engine.game_utils import safe_print
     add_console_log(game_state, log_message)
     safe_print(game_state, log_message)
     
@@ -638,14 +641,25 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     unit["row"] = dest_row
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
 
-    # CRITICAL: Invalidate LoS cache when unit charges (moves)
-    # When a unit charges, all LoS calculations involving that unit are now invalid
-    # This prevents "shoot through wall" bugs caused by stale cache
-    from .shooting_handlers import _invalidate_los_cache_for_moved_unit
-    _invalidate_los_cache_for_moved_unit(game_state, unit["id"])
+    # AI_TURN_SHOOTING_UPDATE.md: No need to invalidate los_cache here
+    # The new architecture uses unit["los_cache"] which is built at unit activation in shooting phase
+    # When a unit charges, los_cache doesn't exist yet (built at shooting activation)
+    # Old code: _invalidate_los_cache_for_moved_unit(game_state, unit["id"]) - OBSOLETE
 
     # Mark as units_charged (NOT units_moved)
     game_state["units_charged"].add(unit["id"])
+
+    # PERFORMANCE: Invalidate enemy_adjacent_hexes cache after charge movement
+    # Unit positions have changed, so adjacent hexes need recalculation
+    # Remove cache for both players (positions affect adjacency for both sides)
+    current_player = game_state.get("current_player", 1)
+    enemy_player = 3 - current_player  # Player 1 <-> Player 2
+    cache_key_current = f"enemy_adjacent_hexes_player_{current_player}"
+    cache_key_enemy = f"enemy_adjacent_hexes_player_{enemy_player}"
+    if cache_key_current in game_state:
+        del game_state[cache_key_current]
+    if cache_key_enemy in game_state:
+        del game_state[cache_key_enemy]
 
     # CRITICAL: Invalidate all destination pools after charge movement
     # Positions have changed, so all pools (move, charge, shoot) are now stale
@@ -748,7 +762,6 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
         reachable_hexes = charge_build_valid_destinations_pool(game_state, unit["id"], CHARGE_MAX_DISTANCE)
     except Exception as e:
         # If BFS fails, log error and return False (no valid targets)
-        from engine.game_utils import add_console_log
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
         return False
 
@@ -870,37 +883,6 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
         return result_id
     else:
         return None
-
-
-def _build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
-    """
-    PERFORMANCE: Pre-compute all hexes adjacent to enemy units.
-
-    Returns a set of (col, row) tuples that are adjacent to at least one enemy.
-    This allows O(1) adjacency checks instead of O(n) iteration per hex.
-
-    Args:
-        game_state: Game state with units
-        player: The player checking adjacency (enemies are units with different player)
-
-    Returns:
-        Set of hex coordinates adjacent to any living enemy unit
-    """
-    enemy_adjacent_hexes = set()
-
-    for enemy in game_state["units"]:
-        if enemy["player"] != player and enemy["HP_CUR"] > 0:
-            # Add all 6 neighbors of this enemy to the set
-            # CRITICAL: Convert coordinates to int for consistent tuple comparison
-            enemy_col_int = int(float(enemy["col"]))
-            enemy_row_int = int(float(enemy["row"]))
-            neighbors = _get_hex_neighbors(enemy_col_int, enemy_row_int)
-            for neighbor in neighbors:
-                # CRITICAL: Ensure neighbor coordinates are int for consistent set membership
-                neighbor_col_int, neighbor_row_int = int(neighbor[0]), int(neighbor[1])
-                enemy_adjacent_hexes.add((neighbor_col_int, neighbor_row_int))
-
-    return enemy_adjacent_hexes
 
 
 def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
@@ -1025,7 +1007,6 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 if "episode_number" in game_state and "turn" in game_state:
                     episode = game_state.get("episode_number", "?")
                     turn = game_state.get("turn", "?")
-                    from engine.game_utils import add_console_log, safe_print
                     # CRITICAL: Use actual values if available, otherwise indicate missing
                     unit_id_log = u.get('id') if 'id' in u else 'MISSING_ID'
                     unit_col_log = u.get('col') if 'col' in u else 'MISSING_COL'
@@ -1040,11 +1021,9 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         episode = game_state["episode_number"]
         turn = game_state["turn"]
         phase = game_state.get("phase", "charge")
-        from engine.game_utils import add_console_log
         all_units_info = [f"Unit {u['id']} at ({int(u['col'])},{int(u['row'])}) HP={u.get('HP_CUR', 0)}" for u in game_state["units"]]
         log_message = f"[CHARGE DEBUG] E{episode} T{turn} {phase} charge_build_valid_destinations Unit {unit_id}: occupied_positions={occupied_positions} all_units={all_units_info}"
         add_console_log(game_state, log_message)
-        from engine.game_utils import safe_print
         safe_print(game_state, log_message)
 
     # BFS pathfinding to find all reachable hexes within charge_range
@@ -1277,8 +1256,11 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
 
     if click_target == "destination_hex":
         return charge_destination_selection_handler(game_state, unit_id, action)
+    elif click_target == "enemy" and "targetId" in action:
+        # Click on enemy unit -> target selection (roll 2d6, build destinations)
+        return charge_target_selection_handler(game_state, unit_id, action)
     elif click_target == "friendly_unit":
-        return False, {"error": "unit_switch_not_implemented"}
+        return False, {"error": "unit_switch_not_implemented", "action": "charge"}
     elif click_target == "active_unit":
         # AI_TURN.md Line 1409: Left click on active_unit -> Charge postponed
         # Clear preview but keep unit in pool (different from skip which removes from pool)
@@ -1312,11 +1294,11 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     
     target_id = action["targetId"]
     if target_id is None:
-        return False, {"error": "missing_target"}
+        return False, {"error": "missing_target", "action": "charge"}
 
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
+        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
     # Roll 2d6 AFTER target selection
     import random
@@ -1448,7 +1430,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             return charge_destination_selection_handler(game_state, unit_id, destination_action)
         else:
             # No valid destinations (should not happen after pool check, but defensive)
-            return False, {"error": "no_valid_destinations_after_target_selection"}
+            return False, {"error": "no_valid_destinations_after_target_selection", "action": "charge"}
 
 
 def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -1467,24 +1449,24 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     dest_row = action["destRow"]
 
     if dest_col is None or dest_row is None:
-        return False, {"error": "missing_destination"}
+        return False, {"error": "missing_destination", "action": "charge"}
 
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
+        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
     # Get target_id and charge_roll from previous step
     if unit_id not in game_state.get("charge_target_selections", {}):
-        return False, {"error": "target_not_selected", "unit_id": unit_id}
+        return False, {"error": "target_not_selected", "unit_id": unit_id, "action": "charge"}
     if unit_id not in game_state.get("charge_roll_values", {}):
-        return False, {"error": "charge_roll_missing", "unit_id": unit_id}
+        return False, {"error": "charge_roll_missing", "unit_id": unit_id, "action": "charge"}
     
     target_id = game_state["charge_target_selections"][unit_id]
     charge_roll = game_state["charge_roll_values"][unit_id]
 
     # Verify pool exists and destination is in it
     if "valid_charge_destinations_pool" not in game_state:
-        return False, {"error": "destination_pool_not_built"}
+        return False, {"error": "destination_pool_not_built", "action": "charge"}
     
     valid_pool = game_state["valid_charge_destinations_pool"]
 
@@ -1579,7 +1561,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
     # Position already updated by _attempt_charge_to_destination
     if unit["col"] != dest_col or unit["row"] != dest_row:
-        return False, {"error": "position_update_failed"}
+        return False, {"error": "position_update_failed", "action": "charge"}
 
     # Generate charge log
     if "action_logs" not in game_state:
@@ -1776,7 +1758,6 @@ def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state['last_compliance_data'] = {}
     game_state['last_compliance_data']['phase_end_reason'] = 'eligibility'
 
-    from engine.game_utils import add_console_log
     add_console_log(game_state, "CHARGE PHASE COMPLETE")
 
     return {

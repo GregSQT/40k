@@ -625,8 +625,10 @@ def main():
     import os
     
     # Open output file for writing
-    output_file = 'ai/hidden_action_finder_output.txt'
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    output_file = 'hidden_action_finder_output.log'
+    output_dir = os.path.dirname(output_file)
+    if output_dir:  # Only create directory if path is not empty
+        os.makedirs(output_dir, exist_ok=True)
     output_f = open(output_file, 'w', encoding='utf-8')
     
     def file_print(*args, **kwargs):

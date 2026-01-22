@@ -126,40 +126,66 @@ export const GameController: React.FC<GameControllerProps> = ({
   const [logAvailableHeight, setLogAvailableHeight] = useState(220);
   
   React.useEffect(() => {
-    // Wait for DOM to be fully rendered before measuring
-    setTimeout(() => {
+    let resizeObserver: ResizeObserver | null = null;
+    
+    const calculateLogHeight = () => {
+      const gameBoardSection = document.querySelector('.game-board-section');
       const turnPhaseTracker = document.querySelector('.turn-phase-tracker-right');
       const allTables = document.querySelectorAll('.unit-status-table-container');
-      const gameLogHeader = document.querySelector('.game-log__header') || document.querySelector('[class*="game-log"]');
+      const gameLogHeader = document.querySelector('.game-log__header');
       
-      if (!turnPhaseTracker || allTables.length < 2 || !gameLogHeader) {
-        setLogAvailableHeight(220);
+      if (!gameBoardSection || !turnPhaseTracker || allTables.length < 2 || !gameLogHeader) {
         return;
       }
       
-      const player1Table = allTables[0];
-      const player2Table = allTables[1];
+      const player1Table = allTables[0] as HTMLElement;
+      const player2Table = allTables[1] as HTMLElement;
       
       // Get actual heights from DOM measurements
+      const boardHeight = gameBoardSection.getBoundingClientRect().height;
       const turnPhaseHeight = turnPhaseTracker.getBoundingClientRect().height;
       const player1Height = player1Table.getBoundingClientRect().height;
       const player2Height = player2Table.getBoundingClientRect().height;
       const gameLogHeaderHeight = gameLogHeader.getBoundingClientRect().height;
       
-      // Calculate available space based purely on actual measurements
-      const viewportHeight = window.innerHeight;
-      const appContainer = document.querySelector('.app-container') || document.body;
-      const appMargins = viewportHeight - appContainer.getBoundingClientRect().height;
+      // Calculate available space: board height minus elements above GameLog
       const usedSpace = turnPhaseHeight + player1Height + player2Height + gameLogHeaderHeight;
-      const availableForLogEntries = viewportHeight - usedSpace - appMargins;
+      const availableForLogEntries = boardHeight - usedSpace;
     
-    const sampleLogEntry = document.querySelector('.game-log-entry');
-      if (!sampleLogEntry) {
-        setLogAvailableHeight(220);
-        return;
+      // Ensure minimum height
+      const finalHeight = Math.max(100, Math.floor(availableForLogEntries));
+      setLogAvailableHeight(finalHeight);
+    };
+    
+    // Initial calculation
+    const timeoutId = setTimeout(calculateLogHeight, 150);
+    
+    // Set up ResizeObserver to detect height changes
+    resizeObserver = new ResizeObserver(() => {
+      calculateLogHeight();
+    });
+    
+    // Observe elements after DOM is ready
+    const setupTimeout = setTimeout(() => {
+      const gameBoardSection = document.querySelector('.game-board-section');
+      const turnPhaseTracker = document.querySelector('.turn-phase-tracker-right');
+      const allTables = document.querySelectorAll('.unit-status-table-container');
+      const gameLogHeader = document.querySelector('.game-log__header');
+      
+      if (gameBoardSection) resizeObserver!.observe(gameBoardSection);
+      if (turnPhaseTracker) resizeObserver!.observe(turnPhaseTracker);
+      if (allTables.length >= 2) {
+        resizeObserver!.observe(allTables[0] as Element);
+        resizeObserver!.observe(allTables[1] as Element);
       }
-      setLogAvailableHeight(availableForLogEntries);
-    }, 100); // Wait 100ms for DOM to render
+      if (gameLogHeader) resizeObserver!.observe(gameLogHeader);
+    }, 200);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      clearTimeout(setupTimeout);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
   }, [player1Collapsed, player2Collapsed, gameState.units, gameState.phase]);
 
   // Calculate eligible units by calling the useGameActions.isUnitEligible function (no duplicate logic)

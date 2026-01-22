@@ -27,6 +27,16 @@ from main import load_config
 
 def make_json_serializable(obj):
     """Recursively convert non-JSON-serializable types to serializable ones."""
+    # Handle ParsedWeaponRule objects
+    try:
+        from engine.weapons.rules import ParsedWeaponRule
+        if isinstance(obj, ParsedWeaponRule):
+            if obj.parameter is not None:
+                return f"{obj.rule}:{obj.parameter}"
+            return obj.rule
+    except ImportError:
+        pass
+    
     if isinstance(obj, dict):
         result = {}
         for k, v in obj.items():
@@ -514,9 +524,12 @@ def get_game_state():
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
+    # Convert game state to JSON-serializable format
+    serializable_state = make_json_serializable(dict(engine.game_state))
+    
     return jsonify({
         "success": True,
-        "game_state": engine.game_state
+        "game_state": serializable_state
     })
 
 @app.route('/api/game/reset', methods=['POST'])

@@ -218,11 +218,17 @@ def check_los_cached(shooter: Dict[str, Any], target: Dict[str, Any], game_state
         - 1.0 = Clear line of sight
         - 0.0 = Blocked line of sight
         """
-        # Use LoS cache if available (Phase 1 implementation)
-        if "los_cache" in game_state and game_state["los_cache"]:
-            cache_key = (shooter["id"], target["id"])
-            if cache_key in game_state["los_cache"]:
-                return 1.0 if game_state["los_cache"][cache_key] else 0.0
+        # AI_TURN_SHOOTING_UPDATE.md: Use shooter["los_cache"] (new architecture)
+        target_id = target["id"]
+        
+        if "los_cache" in shooter and shooter["los_cache"]:
+            if target_id in shooter["los_cache"]:
+                return 1.0 if shooter["los_cache"][target_id] else 0.0
+        
+        # Fallback: calculate LoS (happens if cache not built yet or used outside shooting phase)
+        from engine.phase_handlers import shooting_handlers
+        has_los = shooting_handlers._has_line_of_sight(game_state, shooter, target)
+        return 1.0 if has_los else 0.0
 
 # ============================================================================
 # COMBAT VALIDATION

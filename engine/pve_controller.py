@@ -107,8 +107,11 @@ class PvEController:
             if valid_actions:
                 action_int = valid_actions[0]
             else:
-                # No valid actions - should not happen, but fallback to wait
-                action_int = 11
+                # No valid actions - this indicates a phase/flow bug
+                raise RuntimeError(
+                    "PvEController encountered an empty action mask. "
+                    "Engine must advance phase/turn instead of exposing empty masks."
+                )
         else:
             action_int = predicted_action
         
@@ -222,6 +225,8 @@ class PvEController:
                 return eligible_units[0]["id"]
                 
         except Exception as e:
+            import logging
+            logging.error(f"pve_controller._select_unit_from_pool failed: {str(e)} - returning first eligible unit")
             return eligible_units[0]["id"]
     
     # ============================================================================

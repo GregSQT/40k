@@ -1186,7 +1186,7 @@ textarea:focus {
 }
 
 .game-log__events {
-  max-height: none; /* Allow dynamic height calculation from JavaScript */
+  /* max-height is set dynamically via inline style in GameLog component */
   overflow-y: auto;
   padding-right: 4px;
 }

@@ -281,9 +281,12 @@ def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
                 target_id = str(target["id"])
                 hp_cur = target.get("HP_CUR", target.get("HP_MAX", 1))
                 
-                # Calculate and cache
-                kill_prob = calculate_kill_probability(unit, weapon, target, game_state)
-                _store_kill_prob_in_cache(cache, unit_id, weapon_index, target_id, hp_cur, kill_prob)
+                # PERFORMANCE: Check cache before recalculating
+                cache_key = _get_cache_key(unit_id, weapon_index, target_id, hp_cur)
+                if cache_key not in cache:
+                    # Calculate and cache only if not already cached
+                    kill_prob = calculate_kill_probability(unit, weapon, target, game_state)
+                    _store_kill_prob_in_cache(cache, unit_id, weapon_index, target_id, hp_cur, kill_prob)
 
 
 def invalidate_cache_for_target(cache: Dict[Tuple[str, int, str, int], float], target_id: str):

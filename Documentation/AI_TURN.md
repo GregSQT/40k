@@ -369,9 +369,32 @@ Decision factors: Unit value, importance of actions this turn, long term strateg
 
 ## 📚 SECTION 1: GLOBAL VARIABLES & REFERENCE TABLES
 
-### Global Variable
+### Global Variables
 ```javascript
 weapon_rule = (weapon rules activated) ? 1 : 0
+
+// Position cache - snapshot des positions ennemies
+position_cache = {
+    target_id: {id: target_id, col: col, row: row},
+    ...
+}
+// Mise à jour: Quand une cible meurt (retirer de position_cache)
+```
+
+### Unit-Specific Cache
+```javascript
+// Cache LoS par unité active (stocké sur l'unité)
+unit["los_cache"] = {
+    target_id: has_los,  // booléen
+    ...
+}
+// Calculé à:
+// - Activation de l'unité
+// - Fin d'advance de l'unité
+// Mis à jour à:
+// - Mort de la cible: retirer unit["los_cache"][dead_target_id] (pas de recalcul)
+// Nettoyé à:
+// - Fin de l'activation (comme valid_target_pool)
 ```
 
 ### Function Argument Reference Table
@@ -475,28 +498,137 @@ For each weapon:
         └── If at least ONE enemy meets ALL conditions → ✅ Add weapon to weapon_available_pool
 ```
 
+### Function: build_position_cache()
+**Purpose**: Construire le snapshot des positions ennemies  
+**Returns**: void (met à jour position_cache dans game_state)
+
+```javascript
+build_position_cache():
+├── position_cache = {}
+├── For each unit in game_state["units"]:
+│   ├── ELIGIBILITY CHECK:
+│   │   ├── unit.HP_CUR > 0? → NO → ❌ Skip (dead unit)
+│   │   └── unit.player === current_player? → YES → ❌ Skip (friendly unit)
+│   └── ALL conditions met → ✅ Add to position_cache
+│       ├── position_cache[unit.id] = {id: unit.id, col: unit.col, row: unit.row}
+│       └── Continue
+└── Store in game_state["position_cache"]
+```
+
+**Appelé à:**
+- Début de la phase de tir (une fois)
+- **PAS** après mort de cible (juste retirer l'entrée du cache)
+
+### Function: build_unit_los_cache(unit_id)
+**Purpose**: Calculer le cache LoS pour une unité spécifique  
+**Returns**: void (met à jour unit["los_cache"])
+
+```javascript
+build_unit_los_cache(unit_id):
+├── unit = get_unit_by_id(unit_id)
+├── unit["los_cache"] = {}
+├── unit_col, unit_row = unit["col"], unit["row"]
+├── For each target in position_cache:
+│   ├── target_col, target_row = position_cache[target_id]["col"], position_cache[target_id]["row"]
+│   ├── PERFORMANCE: Use has_line_of_sight_coords() instead of _get_unit_by_id() + _has_line_of_sight()
+│   ├── has_los = has_line_of_sight_coords(unit_col, unit_row, target_col, target_row, game_state)
+│   │   └── Uses hex_los_cache internally for additional performance
+│   ├── unit["los_cache"][target_id] = has_los
+│   └── Continue
+└── Cache calculé et stocké sur l'unité
+```
+
+**Optimisation de performance :**
+- Utilise `has_line_of_sight_coords()` au lieu de `_get_unit_by_id()` + `_has_line_of_sight()`
+- Évite les recherches linéaires O(n) dans `game_state["units"]` pour chaque cible
+- Utilise le cache `hex_los_cache` pour éviter les recalculs de LoS entre les mêmes coordonnées
+- Complexité : O(m) où m = nombre de cibles dans `position_cache` (au lieu de O(m×n))
+
+**Appelé à:**
+- Activation de l'unité (STEP 2: UNIT_ACTIVABLE_CHECK)
+- Fin d'advance de l'unité (après mouvement effectif)
+- **PAS** après mort de cible (juste retirer l'entrée du cache)
+
+**Cas limites :**
+- Si `position_cache` est vide (pas d'ennemis) : `unit["los_cache"] = {}` (cache vide mais existant)
+- Si l'unité a fui : `los_cache` n'est **pas construit** (l'unité ne peut pas tirer)
+
+### Function: update_los_cache_after_target_death(dead_target_id)
+**Purpose**: Mettre à jour les caches LoS après la mort d'une cible  
+**Returns**: void (retire la cible morte des caches)
+
+```javascript
+update_los_cache_after_target_death(dead_target_id):
+├── Retirer de position_cache:
+│   └── del position_cache[dead_target_id]
+├── active_unit_id = game_state["active_shooting_unit"]  // Seule l'unité active a un los_cache
+├── If active_unit_id:
+│   ├── active_unit = get_unit_by_id(active_unit_id)
+│   ├── If active_unit AND active_unit["los_cache"] exists:
+│   │   ├── If dead_target_id in active_unit["los_cache"]:
+│   │   │   └── del active_unit["los_cache"][dead_target_id]
+│   │   └── Continue
+│   └── Continue
+└── Caches mis à jour (pas de recalcul)
+```
+
+**Note:** Seule l'unité actuellement active a un `los_cache` (calculé à l'activation). Les autres unités dans `shoot_activation_pool` n'ont pas encore de cache car elles ne sont pas encore activées. Donc on met à jour uniquement l'unité active.
+
+**Appelé à:**
+- Après la mort d'une cible dans shooting_attack_controller
+
 ### Function: valid_target_pool_build(arg1, arg2, arg3)
-**Purpose**: Build list of valid enemy targets  
-**Returns**: valid_target_pool (set of enemy units that can be targeted)  
-**Process**: Uses weapon_availability_check() to determine which weapons are available
+**Purpose**: Construire le pool de cibles valides pour une unité active  
+**Returns**: valid_target_pool (liste d'IDs de cibles)
+
+**FONCTIONNEMENT:**
+1. `build_unit_los_cache` parcourt `position_cache` et calcule LoS pour chaque cible, stockant le résultat dans `unit["los_cache"] = {target_id: has_los}`
+2. `valid_target_pool_build` filtre `los_cache` pour ne garder que les cibles avec `has_los == true` (optimisation)
+3. Pour chaque cible avec LoS, on vérifie :
+   - Distance (range d'**au moins une arme** dans `weapon_available_pool`)
+   - PISTOL rule (si adjacent)
+   - Engaged enemy rule (si pas adjacent)
+4. Les cibles qui passent tous les checks sont ajoutées au pool
+
+**IMPORTANT:** 
+- `los_cache` contient toutes les cibles de `position_cache` avec leur statut LoS (true/false)
+- On filtre d'abord pour ne garder que les cibles avec LoS (pas besoin de vérifier LoS dans la boucle)
+- Pas besoin de vérifier `target_id in position_cache` car `los_cache` est construit depuis `position_cache`
+- Si une cible meurt, elle est retirée de `position_cache` ET de `los_cache` par `update_los_cache_after_target_death`
+- **Distance check:** On vérifie si la cible est dans la portée d'**au moins une arme** du `weapon_available_pool`, pas seulement de `selected_weapon` (l'unité peut changer d'arme)
 
 ```javascript
 valid_target_pool_build(arg1, arg2, arg3):
-For each enemy unit:
-├── unit.HP_CUR > 0? → NO → Skip enemy unit
-├── unit.player != current_player? → NO → Skip enemy unit
-├── Unit adjacent to shooter?
-│   ├── YES → Check if any weapon in weapon_available_pool has PISTOL rule:
-│   │   ├── Has PISTOL weapon? → ✅ Can shoot (even if enemy engaged with other friendly units)
-│   │   └── No PISTOL weapon? → ❌ Skip enemy unit (cannot shoot at adjacent enemy without PISTOL)
-│   └── NO → Unit NOT adjacent to friendly unit (excluding active unit)?
-│       ├── NO → ❌ Skip enemy unit (cannot shoot at enemy engaged with friendly units)
-│       └── YES → Continue to next check
-├── Unit in Line of Sight? → NO → Skip enemy unit
-├── Perform weapon_availability_check(arg1, arg2, arg3) → Build weapon_available_pool
-├── Unit within range of AT LEAST 1 weapon from weapon_available_pool? → NO → Skip enemy unit
-└── ALL conditions met → ✅ Add unit to valid_target_pool
+├── valid_target_pool = []
+├── ASSERT: unit["los_cache"] exists (doit être créé par build_unit_los_cache à l'activation)
+├── weapon_available_pool = weapon_availability_check(arg1, arg2, arg3)  // Build weapon_available_pool
+├── usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+├── Filter los_cache: targets_with_los = {target_id: true for target_id, has_los in unit["los_cache"].items() if has_los == true}
+├── For each target_id in targets_with_los.keys():
+│   ├── enemy_unit = get_unit_by_id(target_id)
+│   ├── distance = calculate_distance(unit, enemy_unit)
+│   ├── Range check: distance <= RNG of AT LEAST ONE weapon in usable_weapons? → NO → Skip enemy unit
+│   ├── Adjacent check: enemy adjacent to shooter?
+│   │   ├── YES → Check PISTOL weapon rule
+│   │   └── NO → Check engaged enemy rule
+│   └── ALL conditions met → ✅ Add target_id to valid_target_pool
+└── Return valid_target_pool
 ```
+
+**OPTIMISATION:** On filtre `los_cache` pour ne garder que les cibles avec LoS avant la boucle, évitant de vérifier `has_los == false` à chaque itération.
+
+**Performance:** 
+- Utilise le cache LoS pré-calculé au lieu de recalculer à chaque fois
+- `build_unit_los_cache()` utilise `has_line_of_sight_coords()` qui exploite `hex_los_cache` pour éviter les recalculs entre mêmes coordonnées
+- Complexité : O(m) où m = nombre de cibles dans `position_cache` (au lieu de O(m×n) avec `_get_unit_by_id()`)
+
+**Cas limites :**
+- Si `unit["los_cache"]` n'existe pas ET `unit.id NOT in units_fled` : **ERREUR** (doit être créé par `build_unit_los_cache` à l'activation)
+- Si `unit["los_cache"]` n'existe pas ET `unit.id in units_fled` : NORMAL - l'unité ne peut pas tirer, mais peut avancer
+- Si `unit["los_cache"]` est vide `{}` : Aucune cible dans `position_cache` → `valid_target_pool = []`
+- Si toutes les cibles sont filtrées (pas de LoS, pas de range, etc.) : `valid_target_pool = []`
+- Si `valid_target_pool` est vide ET unité n'a pas encore tiré : → Go to STEP 6: EMPTY_TARGET_HANDLING (l'unité peut avancer si `CAN_ADVANCE == true`)
+- Si `valid_target_pool` est vide ET unité a déjà tiré : → Fin d'activation (on ne peut pas avancer après avoir tiré)
 
 ### Function: weapon_selection()
 **Purpose**: Allow player to select weapon (Human only)  
@@ -523,39 +655,39 @@ weapon_selection():
 ```
 
 ### Function: shoot_action(target)
-**Purpose**: Execute single shot sequence (unified for AI and Human)  
-**Parameters**: target (AI selects best, Human clicks)  
-**Returns**: void (updates SHOOT_LEFT, weapon.shot, valid_target_pool)
+**Purpose**: Exécuter une séquence de tir  
+**Returns**: void (met à jour SHOOT_LEFT, weapon.shot, valid_target_pool)
 
 ```javascript
 shoot_action(target):
 ├── Execute attack_sequence(RNG)
 ├── Concatenate Return to TOTAL_ACTION log
 ├── SHOOT_LEFT -= 1
+├── Target died?
+│   ├── YES → 
+│   │   ├── update_los_cache_after_target_death(target_id)
+│   │   ├── Remove from valid_target_pool
+│   │   └── valid_target_pool empty? → YES → End activation
+│   └── NO → Target survives
 └── SHOOT_LEFT == 0 ?
     ├── YES → Current weapon exhausted:
-    │   ├── Mark selected_weapon as used (remove from weapon_available_pool, set weapon.shot = 1)
+    │   ├── Mark selected_weapon as used
     │   └── weapon_available_pool NOT empty?
     │       ├── YES → Select next available weapon:
-    │       │   ├── selected_weapon = next weapon (AI/Human chooses)
+    │       │   ├── selected_weapon = next weapon
     │       │   ├── SHOOT_LEFT = selected_weapon.NB
     │       │   ├── Determine context:
     │       │   │   ├── arg1 = weapon_rule
     │       │   │   ├── arg2 = (unit.id in units_advanced) ? 1 : 0
     │       │   │   └── arg3 = (unit adjacent to enemy?) ? 1 : 0
-    │       │   ├── valid_target_pool_build(weapon_rule, arg2, arg3)
-    │       │   └── Continue to shooting action selection step (ADVANCED if arg2=1, else normal)
+    │       │   ├── valid_target_pool_build(weapon_rule, arg2, arg3)  // Utilise unit["los_cache"]
+    │       │   └── Continue to shooting action selection
     │       └── NO → All weapons exhausted → End activation
     └── NO → Continue normally (SHOOT_LEFT > 0):
-        ├── selected_target dies?
-        │   ├── YES → Remove from valid_target_pool:
-        │   │   ├── valid_target_pool empty? → YES → End activation (Slaughter handling)
-        │   │   └── NO → Continue to shooting action selection step
-        │   └── NO → Target survives
-        └── Final safety check: valid_target_pool empty AND SHOOT_LEFT > 0?
-            ├── YES → End activation (Slaughter handling)
-            └── NO → Continue to shooting action selection step
+        └── Continue to shooting action selection step
 ```
+
+Après la mort d'une cible, les caches sont mis à jour (retirer l'entrée) au lieu de recalculer.
 
 **Flow Control - "Continue normally":**
 - **When**: After executing shot with SHOOT_LEFT > 0 remaining
@@ -581,40 +713,68 @@ POSTPONE_ACTIVATION():
 
 ## 🎯 SECTION 3: PHASE FLOW (Main Decision Tree)
 
+### STEP 0: PHASE INITIALIZATION
+
+**Purpose**: Initialiser les caches globaux au début de la phase
+
+**Appelé à:** 
+- Début de la phase de tir (appelé automatiquement dans `execute_action` si `_shooting_phase_initialized` est False)
+- Une seule fois par phase de tir
+
+```javascript
+shooting_phase_start():
+├── Set phase = "shoot"
+├── Initialize weapon_rule = 1
+├── Clear target_pool_cache (cache global obsolète)
+├── Initialize weapon.shot = 0 for all units
+├── build_position_cache()  // Construire position_cache
+├── shooting_build_activation_pool()  // Build shoot_activation_pool (appelle STEP 1)
+└── Continue to STEP 2: UNIT_ACTIVABLE_CHECK
+```
+
+**Note:** `shooting_phase_start()` appelle aussi `shooting_build_activation_pool()` qui implémente le STEP 1: ELIGIBILITY CHECK.
+
 ### STEP 1: ELIGIBILITY CHECK (Pool Building Phase)
 
 **Purpose**: Determine which units can participate in shooting phase  
 **Output**: shoot_activation_pool (set of eligible units)
 
 ```javascript
-For each PLAYER unit:
-├── ELIGIBILITY CHECK:
-│   ├── unit.HP_CUR > 0? → NO → ❌ Skip (dead unit)
-│   ├── unit.player === current_player? → NO → ❌ Skip (wrong player)
-│   ├── units_fled.includes(unit.id)? → YES → ❌ Skip (fled unit)
-│   ├── Adjacent to enemy unit (melee range 1 hex)?
-│   │   ├── YES → 
-│   │   │   ├── CAN_ADVANCE = false (cannot advance when adjacent)
-│   │   │   ├── weapon_availability_check(weapon_rule, 0, 1) → Build weapon_available_pool
-│   │   │   └── weapon_available_pool NOT empty?
-│   │   │       ├── YES → CAN_SHOOT = true → Store unit.CAN_SHOOT = true
-│   │   │       └── NO → CAN_SHOOT = false → ❌ Skip (no valid actions)
-│   │   └── NO →
-│   │       ├── CAN_ADVANCE = true → Store unit.CAN_ADVANCE = true
-│   │       ├── weapon_availability_check(weapon_rule, 0, 0) → Build weapon_available_pool
-│   │       ├── weapon_available_pool NOT empty?
-│   │       │   ├── YES → CAN_SHOOT = true → Store unit.CAN_SHOOT = true
-│   │       │   └── NO → CAN_SHOOT = false → Store unit.CAN_SHOOT = false
-│   │       └── (CAN_SHOOT OR CAN_ADVANCE)?
-│   │           ├── YES → Continue (unit has at least one valid action)
-│   │           └── NO → ❌ Skip (no valid actions)
-│   └── ALL conditions met → ✅ Add to shoot_activation_pool → Highlight unit with green circle
+shooting_build_activation_pool():
+├── shoot_activation_pool = []
+├── For each unit in game_state["units"]:
+│   ├── unit.player === current_player? → NO → Skip
+│   ├── unit.HP_CUR > 0? → NO → Skip
+│   ├── unit.id in units_fled? → YES → Check CAN_ADVANCE only (cannot shoot)
+│   │   ├── Determine adjacency: Unit adjacent to enemy? → YES → CAN_ADVANCE = false, NO → CAN_ADVANCE = true
+│   │   ├── CAN_ADVANCE == true? → YES → Add unit.id to pool (can advance but not shoot)
+│   │   └── CAN_ADVANCE == false? → Skip (no valid actions)
+│   ├── unit.id NOT in units_fled? → Check CAN_SHOOT OR CAN_ADVANCE
+│   │   └── Determine adjacency: Unit adjacent to enemy?
+│   │       ├── YES → 
+│   │       │   ├── CAN_ADVANCE = false (cannot advance when adjacent)
+│   │       │   ├── weapon_availability_check(weapon_rule, 0, 1) → Build weapon_available_pool
+│   │       │   ├── CAN_SHOOT = (weapon_available_pool NOT empty)
+│   │       │   └── CAN_SHOOT == false? → YES → Skip (no valid actions)
+│   │       │   └── CAN_SHOOT == true? → YES → Add unit.id to pool
+│   │       └── NO →
+│   │           ├── CAN_ADVANCE = true
+│   │           ├── weapon_availability_check(weapon_rule, 0, 0) → Build weapon_available_pool
+│   │           ├── CAN_SHOOT = (weapon_available_pool NOT empty)
+│   │           ├── (CAN_SHOOT OR CAN_ADVANCE)? → NO → Skip (no valid actions)
+│   │           └── (CAN_SHOOT OR CAN_ADVANCE)? → YES → Add unit.id to pool
+│   └── Continue
+└── Store in game_state["shoot_activation_pool"]
 ```
+
+**Note:** 
+- La logique d'éligibilité est calculée directement dans la boucle (comme dans `AI_TURN.md` lignes 590-611).
+- **IMPORTANT:** Une unité qui a fui (`unit.id in units_fled`) peut avancer mais **ne peut pas tirer**. Elle est ajoutée au pool si `CAN_ADVANCE == true` (pas adjacent à un ennemi).
+- **NOTE:** Le code actuel utilise `_has_valid_shooting_targets()` qui existe dans `shooting_handlers.py`, mais cette fonction doit être modifiée pour gérer correctement les unités qui ont fui (actuellement elle retourne `False` pour les unités qui ont fui, alors qu'elle devrait vérifier `CAN_ADVANCE`).
 
 ### STEP 2: UNIT_ACTIVABLE_CHECK
 
-**Purpose**: Check if there are units to activate  
-**Decision Point**: Is shoot_activation_pool NOT empty?
+**Purpose**: Activer une unité et construire ses caches
 
 ```javascript
 STEP : UNIT_ACTIVABLE_CHECK
@@ -622,6 +782,7 @@ STEP : UNIT_ACTIVABLE_CHECK
 │   ├── YES → Pick one unit from shoot_activation_pool:
 │   │   ├── Clear valid_target_pool
 │   │   ├── Clear TOTAL_ATTACK log
+│   │   ├── build_unit_los_cache(unit_id)  // Calculer cache LoS
 │   │   ├── Determine adjacency:
 │   │   │   ├── Unit adjacent to enemy? → YES → unit_is_adjacent = true
 │   │   │   └── NO → unit_is_adjacent = false
@@ -632,6 +793,8 @@ STEP : UNIT_ACTIVABLE_CHECK
 │   │       └── NO → valid_target_pool is empty → Go to STEP 6: EMPTY_TARGET_HANDLING
 │   └── NO → End of shooting phase → Advance to charge phase
 ```
+
+**IMPORTANT:** Une unité qui a fui (`unit.id in units_fled`) **ne peut pas tirer**, mais **peut avancer** si elle n'est pas adjacente à un ennemi. Dans ce cas, on ne construit pas `los_cache` ni `valid_target_pool`.
 
 ### STEP 3: ACTION_SELECTION (Initial State - valid_target_pool NOT empty)
 
@@ -659,38 +822,25 @@ STEP : ACTION_SELECTION (Initial State)
 - **AI**: Programmatically chooses action from VALID_ACTIONS
 - **Human**: Clicks UI elements (advance icon, target, weapon selection icon, or unit icon)
 
-### STEP 4: ADVANCE_ACTION
+### STEP 4: ADVANCE ACTION
 
-**Purpose**: Execute advance movement  
-**⚠️ POINT OF NO RETURN** (Human: Click ADVANCE logo)
+**Purpose**: Exécuter l'action advance et mettre à jour les caches
 
 ```javascript
-STEP : ADVANCE_ACTION
-├── Roll 1D6 → advance_range (from config: advance_distance_range)
-├── Display advance_range on unit icon
-├── Build valid_advance_destinations (BFS, advance_range, no walls, no enemy-adjacent)
-├── Select destination:
-│   ├── AI: Chooses best destination
-│   └── Human: Left click on valid advance hex OR left/right click on unit icon (cancel)
-└── Unit actually moved to different hex?
-    ├── YES → Unit advanced:
-    │   ├── Mark units_advanced (add unit.id to set)
-    │   ├── Log: end_activation(ACTION, 1, ADVANCE, NOT_REMOVED, 1, 0)
-    │   ├── Do NOT remove from shoot_activation_pool
-    │   ├── Do NOT remove green circle
-    │   ├── Clear valid_target_pool
-    │   ├── Update capabilities:
-    │   │   ├── CAN_ADVANCE = false
-    │   │   ├── weapon_availability_check(weapon_rule, 1, 0) → Build weapon_available_pool (only Assault if weapon_rule=1)
-    │   │   └── CAN_SHOOT = (weapon_available_pool NOT empty)
-    │   ├── Pre-select first available weapon
-    │   ├── SHOOT_LEFT = selected_weapon.NB
-    │   ├── valid_target_pool_build(weapon_rule, arg2=1, arg3=0) → Note: arg3=0 always after advance
-    │   └── valid_target_pool NOT empty AND CAN_SHOOT = true?
-    │       ├── YES → SHOOTING ACTIONS AVAILABLE (post-advance) → Go to STEP 5: ADVANCED_SHOOTING_ACTION_SELECTION
-    │       └── NO → Unit advanced but no valid targets → end_activation(ACTION, 1, ADVANCE, SHOOTING, 1, 1) → UNIT_ACTIVABLE_CHECK
-    └── NO → Unit did not advance → Go back to STEP 3: ACTION_SELECTION
+ADVANCE ACTION:
+├── Execute advance movement
+├── Unit actually moved to different hex?
+│   ├── YES → Unit advanced:
+│   │   ├── Mark units_advanced
+│   │   ├── build_unit_los_cache(unit_id)  // Recalculer cache LoS avec nouvelle position
+│   │   ├── Invalidate valid_target_pool (vide le pool)
+│   │   ├── valid_target_pool_build(weapon_rule, arg2=1, arg3=0)  // Reconstruire pool avec nouveau cache
+│   │   └── Continue to shooting action selection
+│   └── NO → Unit didn't move → Continue normally
+└── Continue to shooting action selection
 ```
+
+Le cache LoS est recalculé après l'advance, puis le pool est reconstruit.
 
 ### STEP 5: SHOOTING_ACTION_SELECTION
 
@@ -792,6 +942,29 @@ STEP : WAIT_ACTION
 ├── Human: Player chooses wait
 └── end_activation(WAIT, 1, 0, SHOOTING, 1, 1) → UNIT_ACTIVABLE_CHECK
 ```
+
+### STEP 7: END_ACTIVATION
+
+**Purpose**: Nettoyer les données temporaires de l'unité
+
+**Appelé à:**
+- Fin de l'activation d'une unité (via `end_activation()` ou `_shooting_activation_end()`)
+
+```javascript
+end_activation(...) / _shooting_activation_end(...):
+├── Remove unit from shoot_activation_pool
+├── If "valid_target_pool" in unit:
+│   └── del unit["valid_target_pool"]  // Nettoyer pool
+├── If "los_cache" in unit:
+│   └── del unit["los_cache"]  // Nettoyer cache LoS
+├── If "active_shooting_unit" in game_state:
+│   └── del game_state["active_shooting_unit"]  // Nettoyer unité active
+├── Clear TOTAL_ATTACK_LOG
+├── Clear selected_target_id
+└── SHOOT_LEFT = 0
+```
+
+Le cache LoS est nettoyé à la fin de l'activation, comme valid_target_pool. `active_shooting_unit` est nettoyé pour permettre l'activation de la prochaine unité.
 
 ---
 
@@ -924,7 +1097,128 @@ Trade-off: Better position next turn vs losing shooting opportunity this turn
 
 ---
 
-## ✅ VALIDATION CHECKLIST
+## 🔄 FLUX D'EXÉCUTION COMPLET
+
+```
+1. shooting_phase_start()
+   └── build_position_cache()  // Construire snapshot positions ennemies
+
+2. UNIT_ACTIVABLE_CHECK
+   └── build_unit_los_cache(unit_id)  // Calculer cache LoS pour cette unité
+   └── valid_target_pool_build()  // Utilise unit["los_cache"]
+
+3. ACTION_SELECTION
+   └── Agent choisit action (ADVANCE ou SHOOT)
+   │
+   ├── Si ADVANCE choisi:
+   │   └── Unit avance
+   │   └── build_unit_los_cache(unit_id)  // Recalculer cache avec nouvelle position
+   │   └── valid_target_pool_build()  // Reconstruire pool avec nouveau cache
+   │   └── Retour à ACTION_SELECTION (peut maintenant tirer)
+   │
+   └── Si SHOOT choisi:
+       └── Agent sélectionne target
+       └── Vérifie target_id in valid_target_pool
+       └── Execute shoot_action(target)
+
+4. SHOOT ACTION
+   └── shooting_attack_controller()
+   └── Target meurt?
+       └── YES → update_los_cache_after_target_death()  // Retirer de caches
+       └── Retirer de valid_target_pool
+   └── SHOOT_LEFT > 0? → Retour à ACTION_SELECTION
+
+5. END_ACTIVATION
+   └── del unit["valid_target_pool"]
+   └── del unit["los_cache"]  // Nettoyer cache
+```
+
+## ⚠️ POINTS CRITIQUES
+
+1. **position_cache** doit être mis à jour après chaque mort de cible
+2. **unit["los_cache"]** doit être recalculé après chaque advance (pas juste invalidé)
+3. **unit["los_cache"]** doit être nettoyé à la fin de l'activation
+4. Le pool est la source de vérité, et utilise le cache LoS pour la performance
+5. Pas de recalcul après mort de cible, juste retirer l'entrée du cache
+
+---
+
+## 🔍 CAS LIMITES : POOLS ET CACHES VIDES
+
+### Cas 1 : `los_cache` vide ou inexistant
+
+**Scénarios possibles :**
+
+1. **`los_cache` n'existe pas (clé absente de `unit`) :**
+   - **Cause :** `build_unit_los_cache()` n'a pas été appelé
+   - **Situation :** 
+     - **ERREUR** si `unit.id NOT in units_fled` (doit être créé à l'activation STEP 2)
+     - **NORMAL** si `unit.id in units_fled` - on ne construit pas intentionnellement le cache (l'unité ne peut pas tirer, mais peut avancer)
+   - **Comportement :** 
+     - Si unité normale : `valid_target_pool_build()` doit ASSERT que `unit["los_cache"]` existe
+     - Si unité a fui : `valid_target_pool_build()` n'est pas appelé (l'unité ne peut pas tirer)
+   - **Action :** 
+     - Si unité normale : Corriger le code pour garantir l'appel de `build_unit_los_cache()`
+     - Si unité a fui : Aucune - comportement attendu
+
+2. **`los_cache` existe mais est vide `{}` :**
+   - **Cause :** `position_cache` est vide (pas d'ennemis sur le terrain)
+   - **Situation :** NORMAL - pas d'ennemis, donc pas de LoS à calculer
+   - **Comportement :** `valid_target_pool_build()` retourne `[]` (pool vide)
+   - **Action :** Aucune - comportement attendu
+
+### Cas 2 : `valid_target_pool` vide
+
+**Scénarios possibles :**
+
+1. **Pool vide après construction (unité n'a pas encore tiré) :**
+   - **Causes possibles :**
+     - Aucune cible avec LoS (toutes bloquées par des murs)
+     - Aucune cible à portée (toutes trop loin)
+     - Toutes les cibles sont engagées avec des unités amies (sans PISTOL)
+     - Toutes les cibles adjacentes sans arme PISTOL
+   - **Situation :** NORMAL - aucune cible valide selon les règles
+   - **Comportement :** 
+     - Si `CAN_ADVANCE == true` → Go to STEP 3: ACTION_SELECTION (peut avancer)
+     - Si `CAN_ADVANCE == false` → Go to STEP 6: EMPTY_TARGET_HANDLING (fin d'activation)
+   - **Action :** Aucune - comportement attendu
+
+2. **Pool vide après mort de toutes les cibles (unité a déjà tiré) :**
+   - **Cause :** Toutes les cibles dans le pool sont mortes après des tirs
+   - **Situation :** NORMAL - toutes les cibles ont été éliminées
+   - **Comportement :** Fin d'activation (STEP 7: END_ACTIVATION) - **on ne peut pas avancer après avoir tiré**
+   - **Action :** Aucune - comportement attendu
+
+3. **Pool vide après advance :**
+   - **Cause :** Après advance, aucune cible n'est valide (nouvelle position, nouvelles contraintes)
+   - **Situation :** NORMAL - l'advance peut avoir changé les conditions
+   - **Comportement :** 
+     - Si `CAN_ADVANCE == true` → Peut encore avancer (si pas déjà avancé)
+     - Sinon → Fin d'activation
+   - **Action :** Aucune - comportement attendu
+
+### Cas 3 : `position_cache` vide
+
+**Scénario :**
+- **Cause :** Aucun ennemi vivant sur le terrain
+- **Situation :** RARE mais possible (tous les ennemis sont morts)
+- **Comportement :**
+  - `build_unit_los_cache()` crée `unit["los_cache"] = {}` (vide)
+  - `valid_target_pool_build()` retourne `[]` (pool vide)
+  - Toutes les unités peuvent avancer mais pas tirer
+- **Action :** Aucune - comportement attendu
+
+### Gestion des erreurs
+
+**Assertions à implémenter :**ascript
+// Dans valid_target_pool_build()
+ASSERT: unit["los_cache"] exists (doit être créé par build_unit_los_cache)
+// Si assertion échoue → ERREUR, corriger le code
+
+// Dans build_unit_los_cache()
+ASSERT: game_state["position_cache"] exists (doit être créé par build_position_cache)
+// Si assertion échoue → ERREUR, corriger le code
+
 
 **All features preserved:**
 - ✅ Advance action support

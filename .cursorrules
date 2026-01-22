@@ -43,6 +43,13 @@ L'autonomie est secondaire.
 - Ne renvoyer QUE des diffs.
 - Ne jamais répéter le code inchangé.
 
+7. AUCUN FALLBACK/WORKAROUND/VALEUR PAR DÉFAUT ANTI-ERREUR
+- NE JAMAIS utiliser de fallback sauf si c'est pertinent fonctionnellement (pas pour éviter une erreur).
+- Toujours préférer un message d'erreur explicite plutôt qu'un fallback pour masquer un problème.
+- NE JAMAIS utiliser de workaround. Toujours corriger la root cause.
+- NE JAMAIS utiliser de valeur par défaut pour éviter une erreur. Préférer l'erreur explicite si la valeur n'est pas fournie.
+- Les fallbacks sont autorisés uniquement dans les cas où c'est un comportement métier valide (ex: stratégie de repli planifiée), jamais pour contourner un bug ou une erreur.
+
 === WORKFLOW OBLIGATOIRE MODE ASK ===
 
 Étape 1 : Expliquer brièvement l'hypothèse et le plan.
