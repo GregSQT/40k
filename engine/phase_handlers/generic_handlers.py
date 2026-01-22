@@ -103,26 +103,64 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         game_state["units_fought"].add(unit_id)
     
     # ├── Arg4 = ?
+    # │ ├── CASE Arg4 = NOT_REMOVED -> Do not remove the unit from an activation pool
     # │ ├── CASE Arg4 = MOVE -> Unit removed from move_activation_pool
     # │ ├── CASE Arg4 = FLED -> Unit removed from move_activation_pool
     # │ ├── CASE Arg4 = SHOOTING -> Unit removed from shoot_activation_pool
     # │ ├── CASE Arg4 = CHARGE -> Unit removed from charge_activation_pool
     # │ └── CASE Arg4 = FIGHT -> Unit removed from fight_activation_pool
-    if arg4 in ["MOVE", "FLED"]:
-        if "move_activation_pool" in game_state and unit_id in game_state["move_activation_pool"]:
-            game_state["move_activation_pool"].remove(unit_id)
-            response["removed_from_move_pool"] = True
+    if arg4 == "NOT_REMOVED":
+        # AI_TURN.md line 199: Do not remove the unit from an activation pool
+        # Unit remains in its current activation pool (no action needed)
+        response["not_removed_from_pool"] = True
+    elif arg4 in ["MOVE", "FLED"]:
+        if "move_activation_pool" in game_state:
+            # CRITICAL: Normalize unit ID to string for consistent storage (move_activation_pool stores strings)
+            unit_id_str = str(unit_id)
+            # Filter instead of remove to handle type mismatches
+            # Normalize pool to contain only strings (consistent with pool construction)
+            pool_before = list(game_state["move_activation_pool"])
+            pool_before_len = len(pool_before)
+            game_state["move_activation_pool"] = [str(uid) for uid in game_state["move_activation_pool"] if str(uid) != unit_id_str]
+            pool_after = list(game_state["move_activation_pool"])
+            pool_after_len = len(pool_after)
+            if pool_before_len != pool_after_len:
+                response["removed_from_move_pool"] = True
+                # DEBUG: Log pool removal
+                from engine.game_utils import add_debug_log
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                add_debug_log(game_state, f"[END_ACTIVATION DEBUG] E{episode} T{turn} end_activation: Unit {unit_id_str} removed from move_activation_pool. Pool before={pool_before} (len={pool_before_len}), pool after={pool_after} (len={pool_after_len}), arg1={arg1}, arg4={arg4}, arg5={arg5}")
+            else:
+                # DEBUG: Log why unit was NOT removed
+                from engine.game_utils import add_debug_log
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                add_debug_log(game_state, f"[END_ACTIVATION DEBUG] E{episode} T{turn} end_activation: Unit {unit_id_str} NOT removed from move_activation_pool. Pool={pool_before} (len={pool_before_len}), unit_id_str={unit_id_str}, unit_id={unit_id}, arg1={arg1}, arg4={arg4}, arg5={arg5}")
     elif arg4 == "SHOOTING":
         if "shoot_activation_pool" in game_state:
             # PRINCIPLE: "Le Pool DOIT gérer les morts" - Use string comparison to handle int/string ID mismatches
             unit_id_str = str(unit_id)
             # Filter instead of remove to handle type mismatches
             # Normalize pool to contain only strings (consistent with pool construction in shooting_handlers.py line 641)
-            pool_before = len(game_state["shoot_activation_pool"])
+            pool_before = list(game_state["shoot_activation_pool"])
+            pool_before_len = len(pool_before)
             game_state["shoot_activation_pool"] = [str(uid) for uid in game_state["shoot_activation_pool"] if str(uid) != unit_id_str]
-            pool_after = len(game_state["shoot_activation_pool"])
-            if pool_before != pool_after:
+            pool_after = list(game_state["shoot_activation_pool"])
+            pool_after_len = len(pool_after)
+            if pool_before_len != pool_after_len:
                 response["removed_from_shoot_pool"] = True
+                # DEBUG: Log pool removal
+                from engine.game_utils import add_debug_log
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                add_debug_log(game_state, f"[END_ACTIVATION DEBUG] E{episode} T{turn} end_activation: Unit {unit_id_str} removed from shoot_activation_pool. Pool before={pool_before} (len={pool_before_len}), pool after={pool_after} (len={pool_after_len}), arg1={arg1}, arg4={arg4}, arg5={arg5}")
+            else:
+                # DEBUG: Log why unit was NOT removed
+                from engine.game_utils import add_debug_log
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                add_debug_log(game_state, f"[END_ACTIVATION DEBUG] E{episode} T{turn} end_activation: Unit {unit_id_str} NOT removed from shoot_activation_pool. Pool={pool_before} (len={pool_before_len}), unit_id_str={unit_id_str}, unit_id={unit_id}, arg1={arg1}, arg4={arg4}, arg5={arg5}")
     elif arg4 == "CHARGE":
         if "charge_activation_pool" in game_state and unit_id in game_state["charge_activation_pool"]:
             game_state["charge_activation_pool"].remove(unit_id)
@@ -192,32 +230,28 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             unit["valid_target_pool"] = []
     
     # Check if activation pool is empty after removal
-    # AI_TURN.md COMPLIANCE: Phase completion check (defensive, not field access)
-    current_phase = game_state["phase"]
+    # CRITICAL: Use arg4 (explicit phase parameter) instead of game_state["phase"]
+    # arg4 explicitly indicates which pool to check (MOVE, SHOOTING, CHARGE, FIGHT)
+    # This is more reliable than game_state["phase"] which might not be set correctly
     pool_empty = False
 
-    if current_phase == "move":
+    if arg4 in ["MOVE", "FLED"]:
         # Defensive: pool might not exist if phase not started
         if "move_activation_pool" not in game_state:
             pool_empty = True
         else:
             pool_empty = len(game_state["move_activation_pool"]) == 0
-    elif current_phase == "shoot":
+    elif arg4 == "SHOOTING":
         if "shoot_activation_pool" not in game_state:
             pool_empty = True
         else:
             pool_empty = len(game_state["shoot_activation_pool"]) == 0
-    elif current_phase == "charge":
+    elif arg4 == "CHARGE":
         if "charge_activation_pool" not in game_state:
             pool_empty = True
         else:
             pool_empty = len(game_state["charge_activation_pool"]) == 0
-    elif current_phase == "command":
-        if "command_activation_pool" not in game_state:
-            pool_empty = True
-        else:
-            pool_empty = len(game_state["command_activation_pool"]) == 0
-    elif current_phase == "fight":
+    elif arg4 == "FIGHT":
         # DEBUG: Check if unit is ending activation without attacking when it should
         from engine.game_utils import add_console_log, safe_print
         if arg3 == "PASS" and unit.get("ATTACK_LEFT", 0) > 0:
@@ -260,6 +294,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             non_active_alt_empty = len(game_state["non_active_alternating_activation_pool"]) == 0
 
         pool_empty = charging_empty and active_alt_empty and non_active_alt_empty
+    # Note: COMMAND phase doesn't use end_activation, so no need to handle it here
     
     if pool_empty:
         response["phase_complete"] = True

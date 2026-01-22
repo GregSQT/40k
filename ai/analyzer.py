@@ -106,49 +106,54 @@ def get_hex_points(center_x: float, center_y: float, radius: float = 21.0) -> Li
 
 def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, target_row: int, wall_hexes: Set[Tuple[int, int]]) -> bool:
     """
-    Check line of sight using 9-point system (matching frontend algorithm).
+    Check line of sight using the same algorithm as the game engine.
     
-    Uses 9 points per hex (center + 8 points around) and checks how many sight lines
-    are clear. If 0 lines are clear = blocked, otherwise = clear (with or without cover).
+    CRITICAL: Uses _get_accurate_hex_line algorithm (cube coordinates) to match
+    the game engine's LoS calculation exactly. This ensures analyzer detects
+    the same LoS violations as the game engine.
+    
+    Algorithm:
+    1. Calculate hex path from shooter to target using cube coordinates
+    2. Check if any hex in path (excluding start and end) is a wall
+    3. If any wall found, LoS is blocked; otherwise, LoS is clear
     """
     if not wall_hexes:
         return True
     
-    hex_radius = 21.0
-    
-    # Convert hex coordinates to pixel coordinates
-    from_pixel = hex_to_pixel(shooter_col, shooter_row, hex_radius)
-    to_pixel = hex_to_pixel(target_col, target_row, hex_radius)
-    
-    # Get 9 points for each hex (center + 8 points around)
-    shooter_points = get_hex_points(from_pixel[0], from_pixel[1], hex_radius)
-    target_points = get_hex_points(to_pixel[0], to_pixel[1], hex_radius)
-    
-    # Check how many sight lines from shooter points can reach target points
-    clear_sight_lines = 0
-    
-    for shooter_point in shooter_points:
-        shooter_point_has_clear_line = False
+    # CRITICAL: Use the same algorithm as game engine (_get_accurate_hex_line)
+    # get_hex_line from combat_utils calls shooting_handlers._get_accurate_hex_line
+    try:
+        # CRITICAL: Normalize input coordinates to int before calculating path
+        # This ensures consistent comparison with wall_hexes set
+        shooter_col_int = int(shooter_col)
+        shooter_row_int = int(shooter_row)
+        target_col_int = int(target_col)
+        target_row_int = int(target_row)
         
-        for target_point in target_points:
-            # Check if this line is blocked by any wall hex
-            line_blocked = False
-            
-            for wall_col, wall_row in wall_hexes:
-                if line_passes_through_hex(shooter_point, target_point, wall_col, wall_row, hex_radius):
-                    line_blocked = True
-                    break
-            
-            if not line_blocked:
-                shooter_point_has_clear_line = True
-                break  # This shooter point has at least one clear line to any target point
+        # Calculate hex path from shooter to target
+        hex_path = get_hex_line(shooter_col_int, shooter_row_int, target_col_int, target_row_int)
         
-        if shooter_point_has_clear_line:
-            clear_sight_lines += 1
-    
-    # Apply frontend rules: 0 = blocked, 1-2 = cover, 3+ = clear
-    # For analyzer, we only care about blocked vs not blocked
-    return clear_sight_lines > 0
+        # Check if any hex in path (excluding start and end) is a wall
+        # CRITICAL: Convert coordinates to int for consistent comparison with wall_hexes set
+        for i, (col, row) in enumerate(hex_path):
+            # Skip start and end hexes (same as game engine)
+            if i == 0 or i == len(hex_path) - 1:
+                continue
+            
+            # CRITICAL: Convert to int for consistent comparison with wall_hexes set
+            col_int = int(col)
+            row_int = int(row)
+            
+            if (col_int, row_int) in wall_hexes:
+                # Wall found in path - LoS is blocked
+                return False
+        
+        # No walls blocking - line of sight is clear
+        return True
+        
+    except Exception as e:
+        # On error, deny line of sight (fail-safe, same as game engine)
+        return False
 
 
 def is_adjacent(col1: int, row1: int, col2: int, row2: int) -> bool:
@@ -174,12 +179,16 @@ def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_p
                          unit_hp: Dict[str, int], player: int) -> bool:
     """Check if a hex is adjacent to any enemy unit."""
     enemy_player = 3 - player
+    # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+    enemy_player_int = int(enemy_player) if enemy_player is not None else None
     # CRITICAL FIX: Iterate over unit_positions instead of unit_player to avoid checking dead units
     # Dead units are removed from unit_positions when they die, so this ensures we only check living units
     for uid, enemy_pos in unit_positions.items():
         # Verify this is an enemy unit
         p = unit_player.get(uid)
-        if p == enemy_player and unit_hp.get(uid, 0) > 0:
+        # CRITICAL: Normalize player value to int for consistent comparison (handles int/string mismatches)
+        p_int = int(p) if p is not None else None
+        if p_int == enemy_player_int and unit_hp.get(uid, 0) > 0:
             if is_adjacent(col, row, enemy_pos[0], enemy_pos[1]):
                 return True
     return False
@@ -189,6 +198,8 @@ def get_adjacent_enemies(col: int, row: int, unit_player: Dict[str, int], unit_p
                          unit_hp: Dict[str, int], unit_types: Dict[str, str], player: int) -> List[str]:
     """Get list of enemy unit IDs adjacent to a hex position."""
     enemy_player = 3 - player
+    # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+    enemy_player_int = int(enemy_player) if enemy_player is not None else None
     adjacent_enemies = []
     # DEBUG: Log all enemy positions being checked for adjacency
     enemy_positions_debug = []
@@ -197,7 +208,9 @@ def get_adjacent_enemies(col: int, row: int, unit_player: Dict[str, int], unit_p
     for uid, enemy_pos in unit_positions.items():
         # Verify this is an enemy unit
         p = unit_player.get(uid)
-        if p == enemy_player:
+        # CRITICAL: Normalize player value to int for consistent comparison (handles int/string mismatches)
+        p_int = int(p) if p is not None else None
+        if p_int == enemy_player_int:
             hp_value = unit_hp.get(uid, -999)
             # DEBUG: Collect all enemy positions for logging
             enemy_positions_debug.append(f"Unit {uid} (player {p}, HP={hp_value}) at {enemy_pos}")
@@ -484,6 +497,11 @@ def parse_step_log(filepath: str) -> Dict:
                 episode_end_time = parse_timestamp_to_seconds(line)
                 if episode_start_time is not None and episode_end_time is not None:
                     duration_seconds = episode_end_time - episode_start_time
+                    # CRITICAL FIX: Handle midnight rollover (episode ends after midnight)
+                    # If end_time < start_time, episode crossed midnight boundary
+                    if duration_seconds < 0:
+                        # Add 24 hours (86400 seconds) to correct duration
+                        duration_seconds += 86400
                     stats['episode_durations'].append((current_episode_num, duration_seconds))
 
                 winner_match = re.search(r'Winner=(-?\d+)', line)
@@ -663,7 +681,8 @@ def parse_step_log(filepath: str) -> Dict:
                                         stats['first_error_lines']['shoot_dead_unit'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # RULE: Shoot after fled
-                            if shooter_id in units_fled:
+                            # CRITICAL: Normalize shooter_id to string for consistent comparison (units_fled stores strings)
+                            if str(shooter_id) in units_fled:
                                 stats['shoot_after_fled'][player] += 1
                                 if stats['first_error_lines']['shoot_after_fled'][player] is None:
                                     stats['first_error_lines']['shoot_after_fled'][player] = {'episode': current_episode_num, 'line': line.strip()}
@@ -672,7 +691,11 @@ def parse_step_log(filepath: str) -> Dict:
                             # CRITICAL: Use shooter's actual player, not phase player
                             # The phase player (P1/P2) indicates whose turn it is, not which player the shooter belongs to
                             shooter_actual_player = unit_player.get(shooter_id, None)
-                            if target_id in unit_player and shooter_actual_player is not None and unit_player[target_id] == shooter_actual_player:
+                            # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+                            shooter_actual_player_int = int(shooter_actual_player) if shooter_actual_player is not None else None
+                            target_player = unit_player.get(target_id) if target_id in unit_player else None
+                            target_player_int = int(target_player) if target_player is not None else None
+                            if target_id in unit_player and shooter_actual_player_int is not None and target_player_int == shooter_actual_player_int:
                                 # Use shooter's player for stats (not phase player)
                                 stats['shoot_at_friendly'][shooter_actual_player] += 1
                                 if stats['first_error_lines']['shoot_at_friendly'][shooter_actual_player] is None:
@@ -812,9 +835,13 @@ def parse_step_log(filepath: str) -> Dict:
                                 ranged_weapons = [w for w in available_weapons if w.get('range', 0) > 0]
                                 
                                 enemy_player = 3 - player
+                                # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+                                enemy_player_int = int(enemy_player) if enemy_player is not None else None
                                 is_adj = False
                                 for uid, p in unit_player.items():
-                                    if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
+                                    # CRITICAL: Normalize player value to int for consistent comparison (handles int/string mismatches)
+                                    p_int = int(p) if p is not None else None
+                                    if p_int == enemy_player_int and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
                                         enemy_pos = unit_positions[uid]
                                         if is_adjacent(wait_col, wait_row, enemy_pos[0], enemy_pos[1]):
                                             is_adj = True
@@ -830,8 +857,12 @@ def parse_step_log(filepath: str) -> Dict:
                                         continue
                                 
                                 valid_targets = []
+                                # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+                                enemy_player_int = int(enemy_player) if enemy_player is not None else None
                                 for uid, p in unit_player.items():
-                                    if p == enemy_player and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
+                                    # CRITICAL: Normalize player value to int for consistent comparison (handles int/string mismatches)
+                                    p_int = int(p) if p is not None else None
+                                    if p_int == enemy_player_int and unit_hp.get(uid, 0) > 0 and uid in unit_positions:
                                         enemy_pos = unit_positions[uid]
                                         distance = calculate_hex_distance(wait_col, wait_row, enemy_pos[0], enemy_pos[1])
                                         
@@ -850,8 +881,12 @@ def parse_step_log(filepath: str) -> Dict:
                                                 continue
                                             
                                             target_in_melee = False
+                                            # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+                                            player_int = int(player) if player is not None else None
                                             for friendly_id, friendly_p in unit_player.items():
-                                                if friendly_p == player and friendly_id != wait_unit_id:
+                                                # CRITICAL: Normalize player value to int for consistent comparison (handles int/string mismatches)
+                                                friendly_p_int = int(friendly_p) if friendly_p is not None else None
+                                                if friendly_p_int == player_int and friendly_id != wait_unit_id:
                                                     if friendly_id in unit_positions:
                                                         friendly_pos = unit_positions[friendly_id]
                                                         if is_adjacent(enemy_pos[0], enemy_pos[1], friendly_pos[0], friendly_pos[1]):
@@ -1201,22 +1236,24 @@ def parse_step_log(filepath: str) -> Dict:
                             _debug_log(f"[FLED DEBUG] E{current_episode_num} T{turn} P{player}: Unit {move_unit_id} FLED from ({start_col},{start_row}) to ({dest_col},{dest_row})")
                             _debug_log(f"[FLED DEBUG] BEFORE sync: unit_positions[{move_unit_id}] = {unit_positions.get(move_unit_id, 'NOT SET')}")
                             
-                            # CRITICAL: Synchronize unit_positions with log before processing
-                            # The log is the source of truth - if unit_positions doesn't match the start position
-                            # in the log, it means unit_positions is stale and needs to be corrected
-                            if move_unit_id in unit_positions:
-                                current_pos = unit_positions[move_unit_id]
-                                if current_pos != (start_col, start_row):
-                                    # unit_positions is stale - correct it with the log's start position
-                                    unit_positions[move_unit_id] = (start_col, start_row)
-                                    _debug_log(f"[FLED DEBUG] AFTER sync (corrected): unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]}")
-                                else:
-                                    _debug_log(f"[FLED DEBUG] AFTER sync (no change): unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]}")
+                            # CRITICAL FIX: For FLED actions, don't synchronize with start position
+                            # The log already contains both start and destination positions
+                            # We should use the destination position directly, not synchronize with start
+                            # This prevents unit_positions from being set to (start_col, start_row) and then
+                            # potentially not being updated to (dest_col, dest_row) if unit_hp <= 0
+                            # Instead, we update directly to the destination position
+                            # CRITICAL: Only update position if unit is still alive
+                            # Dead units should not have their positions updated (they were removed when they died)
+                            unit_hp_value = unit_hp.get(move_unit_id, 0)
+                            _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")
+                            if unit_hp_value > 0:
+                                old_position = unit_positions.get(move_unit_id)
+                                # CRITICAL: Update directly to destination position (not start position)
+                                # This ensures unit_positions is correct even if synchronization was skipped
+                                unit_positions[move_unit_id] = (dest_col, dest_row)
+                                _debug_log(f"[FLED DEBUG] AFTER update: unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]} (was {old_position})")
                             else:
-                                # Unit not in unit_positions - add it with start position from log
-                                # This can happen if unit was removed incorrectly or not initialized
-                                unit_positions[move_unit_id] = (start_col, start_row)
-                                _debug_log(f"[FLED DEBUG] AFTER sync (added): unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]}")
+                                _debug_log(f"[FLED DEBUG] SKIPPED update: unit_hp[{move_unit_id}] = {unit_hp_value} (<= 0)")
                             
                             # Record this movement in history (source of truth)
                             if move_unit_id not in unit_movement_history:
@@ -1230,20 +1267,6 @@ def parse_step_log(filepath: str) -> Dict:
                                 'turn': turn,
                                 'episode': current_episode_num
                             })
-                            
-                            # CRITICAL: Update position IMMEDIATELY for FLED actions
-                            # This prevents false collision detection when another unit moves to the same position
-                            # at the same timestamp (e.g., Unit A flees from X, Unit B charges to X)
-                            # CRITICAL: Only update position if unit is still alive
-                            # Dead units should not have their positions updated (they were removed when they died)
-                            unit_hp_value = unit_hp.get(move_unit_id, 0)
-                            _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")
-                            if unit_hp_value > 0:
-                                old_position = unit_positions.get(move_unit_id)
-                                unit_positions[move_unit_id] = (dest_col, dest_row)
-                                _debug_log(f"[FLED DEBUG] AFTER update: unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]} (was {old_position})")
-                            else:
-                                _debug_log(f"[FLED DEBUG] SKIPPED update: unit_hp[{move_unit_id}] = {unit_hp_value} (<= 0)")
                             
                             if (start_col, start_row) != (dest_col, dest_row):
                                 # RULE: Position collision
@@ -1360,14 +1383,17 @@ def parse_step_log(filepath: str) -> Dict:
                                 # CRITICAL: positions_at_move_phase_start may not have all enemy positions if this is the first move
                                 # Filter positions_at_move_phase_start to only include enemy units that are alive
                                 # This ensures we only check adjacency against valid enemies
+                                # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+                                enemy_player = 3 - player
+                                enemy_player_int = int(enemy_player) if enemy_player is not None else None
                                 enemy_positions_in_snapshot = {
                                     uid: pos for uid, pos in positions_at_move_phase_start.items()
-                                    if unit_player.get(uid) == (3 - player) and unit_hp.get(uid, 0) > 0
+                                    if (int(unit_player.get(uid)) if unit_player.get(uid) is not None else None) == enemy_player_int and unit_hp.get(uid, 0) > 0
                                 }
                                 # Also filter unit_positions for current check
                                 enemy_positions_current = {
                                     uid: pos for uid, pos in unit_positions.items()
-                                    if unit_player.get(uid) == (3 - player) and unit_hp.get(uid, 0) > 0
+                                    if (int(unit_player.get(uid)) if unit_player.get(uid) is not None else None) == enemy_player_int and unit_hp.get(uid, 0) > 0
                                 }
                                 # CRITICAL FIX: Use filtered enemy positions for both checks
                                 was_adjacent_in_snapshot = is_adjacent_to_enemy(start_pos[0], start_pos[1], unit_player, 
@@ -1522,7 +1548,10 @@ def parse_step_log(filepath: str) -> Dict:
                                 # Check if destination is adjacent to enemy using positions at movement time
                                 # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
                                 # DEBUG: Log enemy positions used for adjacency check
-                                enemy_positions_str = ', '.join([f"Unit {uid} at {pos} (HP={unit_hp_at_movement.get(uid, 0)})" for uid, pos in positions_for_adjacency_check_filtered.items() if unit_player.get(uid) == (3 - player)])
+                                # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+                                enemy_player = 3 - player
+                                enemy_player_int = int(enemy_player) if enemy_player is not None else None
+                                enemy_positions_str = ', '.join([f"Unit {uid} at {pos} (HP={unit_hp_at_movement.get(uid, 0)})" for uid, pos in positions_for_adjacency_check_filtered.items() if (int(unit_player.get(uid)) if unit_player.get(uid) is not None else None) == enemy_player_int])
                                 _debug_log(f"[ANALYZER DEBUG] E{current_episode_num} T{turn} MOVE: Unit {move_unit_id} checking adjacency at ({dest_col},{dest_row}) against {len(positions_for_adjacency_check_filtered)} enemy positions: {enemy_positions_str}")
                                 dest_adjacent = is_adjacent_to_enemy(dest_col, dest_row, unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement, player)
                                 

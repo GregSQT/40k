@@ -941,19 +941,19 @@ class W40KEngine(gym.Env):
             #         pass
             
             try:
-                # PERFORMANCE: Buffer writes and flush only periodically to reduce I/O overhead
-                # Flush immediately only in debug mode or at episode end
-                with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
-                    for log_msg in self.game_state["console_logs"]:
-                        # Ensure log message is a string and encode safely
-                        if not isinstance(log_msg, str):
-                            log_msg = str(log_msg)
-                        # Replace any problematic characters that might cause encoding issues
-                        log_msg = log_msg.encode('utf-8', errors='replace').decode('utf-8')
-                        f.write(log_msg + "\n")
-                    # Only flush immediately in debug mode or when game ends (for debugging)
-                    if self.game_state.get("debug_mode", False) or self.game_state.get("game_over", False):
-                        f.flush()  # Force flush only when needed for debugging
+                # CRITICAL: Only write to debug.log if debug_mode is enabled (--debug flag)
+                # This prevents I/O overhead during normal training
+                should_write = self.game_state.get("debug_mode", False)
+                if should_write:
+                    with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
+                        for log_msg in self.game_state["console_logs"]:
+                            # Ensure log message is a string and encode safely
+                            if not isinstance(log_msg, str):
+                                log_msg = str(log_msg)
+                            # Replace any problematic characters that might cause encoding issues
+                            log_msg = log_msg.encode('utf-8', errors='replace').decode('utf-8')
+                            f.write(log_msg + "\n")
+                        f.flush()  # Always flush in debug mode for immediate visibility
                 
                 # DIAGNOSTIC: Log after writing (write to debug.log) - DISABLED TEMPORARILY
                 # if step_logger_debug_count > 0:
@@ -1594,7 +1594,19 @@ class W40KEngine(gym.Env):
         cascade_count = 0
         while success and result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
             next_phase = result["next_phase"]
+            current_phase = self.game_state.get("phase", "unknown")
             cascade_count += 1
+
+            # CRITICAL FIX: Only transition if next_phase is different from current phase
+            # This prevents reinitializing a phase that is already active, which would
+            # rebuild activation pools and re-add units that have already completed activation
+            if next_phase == current_phase:
+                from engine.game_utils import add_console_log, add_debug_log
+                episode = self.game_state.get("episode_number", "?")
+                turn = self.game_state.get("turn", "?")
+                add_debug_log(self.game_state, f"[CASCADE LOOP FIX] E{episode} T{turn} Skipping phase transition: already in {next_phase} phase")
+                # Break the cascade loop - we're already in the target phase
+                break
 
             from engine.game_utils import add_console_log
             add_console_log(self.game_state, f"🔄 PHASE TRANSITION: {current_phase} -> {next_phase} (cascade #{cascade_count})")
@@ -1694,9 +1706,22 @@ class W40KEngine(gym.Env):
             success = True
             result = handler_response if isinstance(handler_response, dict) else {"error": "invalid_handler_response"}
         
-        # CRITICAL: Let cascade loop handle ALL phase transitions (charge, fight, move, etc.)
-        # Do NOT handle transitions manually here - cascade loop (line 1575) handles all transitions
-        # This ensures consistent behavior across all phases
+        # Check response for phase_complete flag (aligned with MOVE phase)
+        if result.get("phase_complete"):
+            self._shooting_phase_initialized = False
+            # Call shooting_phase_end to get next_phase and all_attack_results (like MOVE calls _shooting_phase_init)
+            phase_end_result = shooting_handlers.shooting_phase_end(self.game_state)
+            # Merge phase transition data into result
+            result.update(phase_end_result)
+            result["phase_transition"] = True
+            # CRITICAL: Preserve all_attack_results if already set (for logging)
+            if "all_attack_results" in result and result["all_attack_results"]:
+                # Keep existing all_attack_results (from handler)
+                pass
+            elif "all_attack_results" in phase_end_result:
+                # Use all_attack_results from phase_end_result
+                result["all_attack_results"] = phase_end_result["all_attack_results"]
+        
         return success, result
     
     

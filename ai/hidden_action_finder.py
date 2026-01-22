@@ -649,34 +649,90 @@ def main():
         file_print(f"Généré le: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         file_print("=" * 80)
         
-        # Read logs
+        # Read logs - OPTIMIZED: Process files line by line to avoid OOM
+        # Instead of loading entire files in memory, process them incrementally
         try:
-            with open('debug.log', 'r') as f:
-                movement_log = f.read()
-        except FileNotFoundError:
-            file_print("❌ ERREUR: debug.log introuvable")
+            debug_log_path = 'debug.log'
+            if not os.path.exists(debug_log_path):
+                file_print("❌ ERREUR: debug.log introuvable")
+                output_f.close()
+                return
+        except Exception as e:
+            file_print(f"❌ ERREUR: {e}")
             output_f.close()
             return
         
         try:
-            with open('step.log', 'r') as f:
-                step_log = f.read()
-        except FileNotFoundError:
-            file_print("❌ ERREUR: step.log introuvable")
+            step_log_path = 'step.log'
+            if not os.path.exists(step_log_path):
+                file_print("❌ ERREUR: step.log introuvable")
+                output_f.close()
+                return
+        except Exception as e:
+            file_print(f"❌ ERREUR: {e}")
             output_f.close()
             return
         
-        # Parse logs
+        # Parse logs - OPTIMIZED: Process files line by line to avoid OOM
         file_print("\n📖 Parsing des logs...")
+        
+        # First, build episode map from step.log (needs full file, but we'll do it efficiently)
+        with open(step_log_path, 'r') as f:
+            step_log = f.read()
         episode_map = parse_episodes_from_step(step_log)
-        position_changes = parse_position_changes(movement_log)
-        debug_attacks = parse_attacks_from_debug(movement_log)
-        step_moves = parse_moves_from_step(step_log, episode_map)
-        step_charges = parse_charges_from_step(step_log, episode_map)
-        step_advances = parse_advances_from_step(step_log, episode_map)
-        step_attacks = parse_attacks_from_step(step_log, episode_map)
-        fight_activations = parse_fight_activations(movement_log)
-        missing_warnings = parse_missing_attacks_warnings(movement_log)
+        del step_log  # Free memory immediately
+        
+        # Process debug.log line by line
+        position_changes = []
+        debug_attacks = []
+        fight_activations = []
+        missing_warnings = []
+        
+        with open(debug_log_path, 'r') as f:
+            debug_lines = []
+            for line in f:
+                debug_lines.append(line)
+                # Process in batches to avoid memory buildup
+                if len(debug_lines) >= 100000:  # Process every 100k lines
+                    movement_log_batch = ''.join(debug_lines)
+                    position_changes.extend(parse_position_changes(movement_log_batch))
+                    debug_attacks.extend(parse_attacks_from_debug(movement_log_batch))
+                    fight_activations.extend(parse_fight_activations(movement_log_batch))
+                    missing_warnings.extend(parse_missing_attacks_warnings(movement_log_batch))
+                    debug_lines = []
+            # Process remaining lines
+            if debug_lines:
+                movement_log_batch = ''.join(debug_lines)
+                position_changes.extend(parse_position_changes(movement_log_batch))
+                debug_attacks.extend(parse_attacks_from_debug(movement_log_batch))
+                fight_activations.extend(parse_fight_activations(movement_log_batch))
+                missing_warnings.extend(parse_missing_attacks_warnings(movement_log_batch))
+        
+        # Process step.log line by line
+        step_moves = []
+        step_charges = []
+        step_advances = []
+        step_attacks = []
+        
+        with open(step_log_path, 'r') as f:
+            step_log_lines = []
+            for line in f:
+                step_log_lines.append(line)
+                # Process in batches to avoid memory buildup
+                if len(step_log_lines) >= 100000:  # Process every 100k lines
+                    step_log_batch = ''.join(step_log_lines)
+                    step_moves.extend(parse_moves_from_step(step_log_batch, episode_map))
+                    step_charges.extend(parse_charges_from_step(step_log_batch, episode_map))
+                    step_advances.extend(parse_advances_from_step(step_log_batch, episode_map))
+                    step_attacks.extend(parse_attacks_from_step(step_log_batch, episode_map))
+                    step_log_lines = []
+            # Process remaining lines
+            if step_log_lines:
+                step_log_batch = ''.join(step_log_lines)
+                step_moves.extend(parse_moves_from_step(step_log_batch, episode_map))
+                step_charges.extend(parse_charges_from_step(step_log_batch, episode_map))
+                step_advances.extend(parse_advances_from_step(step_log_batch, episode_map))
+                step_attacks.extend(parse_attacks_from_step(step_log_batch, episode_map))
         
         file_print(f"  - Position changes: {len(position_changes)}")
         file_print(f"  - Attaques (debug): {len(debug_attacks)}")

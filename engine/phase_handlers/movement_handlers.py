@@ -194,7 +194,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         # Pre-compute occupied positions and enemy adjacent hexes for this check
         occupied_positions = set()
         for u in game_state["units"]:
-            if u["HP_CUR"] > 0 and u["id"] != unit["id"]:
+            # CRITICAL: Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
+            if u["HP_CUR"] > 0 and str(u["id"]) != str(unit["id"]):
                 col_int, row_int = _normalize_coordinates(u["col"], u["row"])
                 occupied_positions.add((col_int, row_int))
         # PERFORMANCE: Use cached enemy_adjacent_hexes from phase start
@@ -467,8 +468,10 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
     
-    # Build valid destinations
-    movement_build_valid_destinations_pool(game_state, unit_id)
+    # PERFORMANCE: Reuse pool if already built (e.g., from execute_action validation)
+    # Only rebuild if pool is empty or doesn't exist
+    if not game_state.get("valid_move_destinations_pool"):
+        movement_build_valid_destinations_pool(game_state, unit_id)
     
     # Check if valid destinations exist
     if not game_state["valid_move_destinations_pool"]:
@@ -538,8 +541,9 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
         # CRITICAL: Normalize coordinates - raises clear error if invalid (no defensive try/except)
         check_col, check_row = _normalize_coordinates(check_unit["col"], check_unit["row"])
         
+        # CRITICAL: Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
         # CRITICAL: Compare as integers to avoid type mismatch
-        if (check_unit["id"] != unit["id"] and
+        if (str(check_unit["id"]) != str(unit["id"]) and
             check_unit["HP_CUR"] > 0 and
             check_col == dest_col_int and
             check_row == dest_row_int):
@@ -655,7 +659,10 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
             # Also check which enemies make this hex adjacent
             adjacent_enemies = []
             for enemy in game_state["units"]:
-                if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+                # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+                enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
+                unit_player = int(unit["player"]) if unit["player"] is not None else None
+                if enemy_player != unit_player and enemy["HP_CUR"] > 0:
                     enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
                     neighbors = _get_hex_neighbors(enemy_col, enemy_row)
                     if (col_int, row_int) in neighbors:
@@ -690,7 +697,10 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     if cc_range == 1:
         hex_neighbors = set(_get_hex_neighbors(unit_col, unit_row))
         for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+            enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
+            unit_player = int(unit["player"]) if unit["player"] is not None else None
+            if enemy_player != unit_player and enemy["HP_CUR"] > 0:
                 # CRITICAL: Normalize coordinates to int - raises error if invalid
                 enemy_col, enemy_row = _normalize_coordinates(enemy["col"], enemy["row"])
                 enemy_pos = (enemy_col, enemy_row)
@@ -700,7 +710,10 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     else:
         # For longer ranges, use proper hex distance calculation
         for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
+            enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
+            unit_player = int(unit["player"]) if unit["player"] is not None else None
+            if enemy_player != unit_player and enemy["HP_CUR"] > 0:
                 hex_dist = _calculate_hex_distance(unit_col, unit_row, int(enemy["col"]), int(enemy["row"]))
                 if hex_dist <= cc_range:
                     result = True
@@ -962,7 +975,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     units_skipped = 0
     for u in game_state["units"]:
         units_processed += 1
-        if u["HP_CUR"] > 0 and u["id"] != unit["id"]:
+        # CRITICAL: Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
+        if u["HP_CUR"] > 0 and str(u["id"]) != str(unit["id"]):
             # CRITICAL: Normalize coordinates - raises clear error if invalid (no defensive try/except)
             col_int, row_int = _normalize_coordinates(u["col"], u["row"])
             occupied_positions.add((col_int, row_int))

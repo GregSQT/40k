@@ -1450,6 +1450,14 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
     if dest_col is None or dest_row is None:
         return False, {"error": "missing_destination", "action": "charge"}
+    
+    # CRITICAL FIX: Normalize destination coordinates to int to ensure type consistency
+    # This prevents type mismatch bugs (int vs float vs string) in position comparison
+    try:
+        dest_col = int(float(dest_col))
+        dest_row = int(float(dest_row))
+    except (ValueError, TypeError):
+        return False, {"error": "invalid_destination_type", "destCol": dest_col, "destRow": dest_row, "action": "charge"}
 
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
@@ -1560,8 +1568,22 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     orig_row = charge_result.get("fromRow")
 
     # Position already updated by _attempt_charge_to_destination
-    if unit["col"] != dest_col or unit["row"] != dest_row:
-        return False, {"error": "position_update_failed", "action": "charge"}
+    # CRITICAL FIX: Normalize types before comparison to prevent false negatives
+    # unit["col"] and unit["row"] may be int/float/string, so normalize both sides
+    unit_col_int = int(float(unit["col"])) if unit["col"] is not None else None
+    unit_row_int = int(float(unit["row"])) if unit["row"] is not None else None
+    if unit_col_int != dest_col or unit_row_int != dest_row:
+        return False, {
+            "error": "position_update_failed", 
+            "action": "charge",
+            "expected": (dest_col, dest_row),
+            "actual": (unit["col"], unit["row"]),
+            "toCol": dest_col,
+            "toRow": dest_row,
+            "fromCol": orig_col,
+            "fromRow": orig_row,
+            "unitId": unit["id"]
+        }
 
     # Generate charge log
     if "action_logs" not in game_state:
