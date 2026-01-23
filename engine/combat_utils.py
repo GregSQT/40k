@@ -6,6 +6,92 @@ combat_utils.py - Pure utility functions for combat calculations
 from typing import Dict, List, Tuple, Any
 
 # ============================================================================
+# COORDINATE NORMALIZATION
+# ============================================================================
+
+def normalize_coordinate(coord: Any) -> int:
+    """
+    Normalize coordinate to int. Raises ValueError if conversion fails.
+    
+    CRITICAL: All hex coordinates must be int. This function ensures type consistency
+    and raises clear errors if coordinates are invalid.
+    
+    Args:
+        coord: Coordinate value (int, float, or numeric string)
+    
+    Returns:
+        int: Normalized coordinate as integer
+    
+    Raises:
+        ValueError: If coordinate string cannot be converted
+        TypeError: If coordinate type is not supported
+    """
+    if isinstance(coord, int):
+        return coord
+    elif isinstance(coord, float):
+        return int(coord)
+    elif isinstance(coord, str):
+        try:
+            return int(float(coord))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid coordinate string '{coord}': {e}")
+    else:
+        raise TypeError(f"Invalid coordinate type {type(coord).__name__}: {coord}. Expected int, float, or numeric string.")
+
+
+def normalize_coordinates(col: Any, row: Any) -> Tuple[int, int]:
+    """
+    Normalize both coordinates to int. Raises ValueError if conversion fails.
+    
+    Args:
+        col: Column coordinate (int, float, or numeric string)
+        row: Row coordinate (int, float, or numeric string)
+    
+    Returns:
+        Tuple[int, int]: Normalized (col, row) as integers
+    """
+    return normalize_coordinate(col), normalize_coordinate(row)
+
+
+def get_unit_coordinates(unit: Dict[str, Any]) -> Tuple[int, int]:
+    """
+    Extract and normalize unit coordinates from unit dict.
+    
+    CRITICAL: Always use this function to get unit coordinates to ensure
+    they are normalized to int for consistent comparison.
+    
+    Args:
+        unit: Unit dictionary with "col" and "row" keys
+    
+    Returns:
+        Tuple[int, int]: Normalized (col, row) coordinates
+    
+    Raises:
+        KeyError: If unit dict missing "col" or "row" keys
+    """
+    return normalize_coordinates(unit["col"], unit["row"])
+
+
+def set_unit_coordinates(unit: Dict[str, Any], col: Any, row: Any) -> None:
+    """
+    Set and normalize unit coordinates in unit dict.
+    
+    CRITICAL: Always use this function to set unit coordinates to ensure
+    they are normalized to int before storage.
+    
+    Args:
+        unit: Unit dictionary to update
+        col: Column coordinate (int, float, or numeric string)
+        row: Row coordinate (int, float, or numeric string)
+    
+    Raises:
+        ValueError: If coordinate conversion fails
+        TypeError: If coordinate type is not supported
+    """
+    unit["col"], unit["row"] = normalize_coordinates(col, row)
+
+
+# ============================================================================
 # DISTANCE CALCULATION
 # ============================================================================
 
@@ -147,15 +233,9 @@ def has_line_of_sight(shooter: Dict[str, Any], target: Dict[str, Any], game_stat
         """
         from engine.phase_handlers import shooting_handlers
 
-        # Extract coordinates
-        from_col, from_row = shooter["col"], shooter["row"]
-        to_col, to_row = target["col"], target["row"]
-
-        # CRITICAL: Convert coordinates to int for consistent comparison
-        from_col_int = int(from_col)
-        from_row_int = int(from_row)
-        to_col_int = int(to_col)
-        to_row_int = int(to_row)
+        # Extract and normalize coordinates
+        from_col_int, from_row_int = get_unit_coordinates(shooter)
+        to_col_int, to_row_int = get_unit_coordinates(target)
 
         # Check hex-coordinate cache first
         if "hex_los_cache" in game_state:
@@ -184,11 +264,9 @@ def has_line_of_sight_coords(from_col: int, from_row: int, to_col: int, to_row: 
         """
         from engine.phase_handlers import shooting_handlers
 
-        # CRITICAL: Convert coordinates to int for consistent comparison
-        from_col_int = int(from_col)
-        from_row_int = int(from_row)
-        to_col_int = int(to_col)
-        to_row_int = int(to_row)
+        # CRITICAL: Normalize coordinates to int for consistent comparison
+        from_col_int, from_row_int = normalize_coordinates(from_col, from_row)
+        to_col_int, to_row_int = normalize_coordinates(to_col, to_row)
         
         # Check hex-coordinate cache first
         if "hex_los_cache" in game_state:

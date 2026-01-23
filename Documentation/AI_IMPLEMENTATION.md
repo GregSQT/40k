@@ -357,6 +357,10 @@ engine/
 ### combat_utils.py - Combat Calculations
 
 **Pure Functions:**
+- `normalize_coordinate(coord)` - Normalize single coordinate to int (handles int/float/string)
+- `normalize_coordinates(col, row)` - Normalize both coordinates to int tuple
+- `get_unit_coordinates(unit)` - Extract and normalize unit coordinates from unit dict
+- `set_unit_coordinates(unit, col, row)` - Set and normalize unit coordinates in unit dict
 - `calculate_hex_distance(col1, row1, col2, row2)` - Cube coordinate hex distance
 - `get_hex_line(start_col, start_row, end_col, end_row)` - Hex line for LoS
 - `has_line_of_sight(shooter, target, game_state)` - LoS check via handlers
@@ -366,11 +370,18 @@ engine/
 - `is_valid_shooting_target(shooter, target, game_state)` - Validate specific target
 
 **Responsibilities:**
+- Coordinate normalization (CRITICAL: ensures all hex coordinates are int for consistent comparison)
 - Pure calculation functions for combat
 - Hex distance and line-of-sight calculations
 - W40K wound table implementation
 - Delegation to phase handlers for validation
 - LoS cache integration
+
+**Coordinate Normalization:**
+- **CRITICAL**: All hex coordinates (`col`, `row`) must be normalized to `int` for consistent comparison, distance calculations, and tuple operations
+- **Always use**: `get_unit_coordinates(unit)` to extract coordinates, `set_unit_coordinates(unit, col, row)` to assign coordinates
+- **Never access**: `unit["col"]` or `unit["row"]` directly - always use the utility functions
+- **Normalization handles**: int, float, and numeric string inputs, raising `ValueError` on invalid types
 
 ---
 

@@ -239,7 +239,8 @@ class PvEController:
         if not unit:
             raise ValueError(f"Unit not found: {unit_id}")
         
-        current_pos = (unit["col"], unit["row"])
+        from engine.combat_utils import get_unit_coordinates
+        current_pos = get_unit_coordinates(unit)
         
         # Use movement handler to get valid destinations
         from engine.phase_handlers import movement_handlers
@@ -261,8 +262,10 @@ class PvEController:
 
         if enemies:
             # Find nearest enemy using BFS pathfinding distance (respects walls)
-            nearest_enemy = min(enemies, key=lambda e: calculate_pathfinding_distance(unit["col"], unit["row"], e["col"], e["row"], game_state))
-            enemy_pos = (nearest_enemy["col"], nearest_enemy["row"])
+            from engine.combat_utils import get_unit_coordinates
+            unit_col, unit_row = get_unit_coordinates(unit)
+            nearest_enemy = min(enemies, key=lambda e: calculate_pathfinding_distance(unit_col, unit_row, *get_unit_coordinates(e), game_state))
+            enemy_pos = get_unit_coordinates(nearest_enemy)
 
             # Select move that gets closest to nearest enemy using BFS pathfinding distance
             best_move = min(actual_moves,

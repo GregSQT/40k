@@ -5,6 +5,7 @@ game_state.py - Game state initialization and management
 
 from typing import Dict, List, Any, Optional, Tuple
 import json
+from engine.combat_utils import normalize_coordinates, get_unit_coordinates
 
 class GameStateManager:
     """Manages game state."""
@@ -60,8 +61,8 @@ class GameStateManager:
             "unitType": config["unitType"],  # NO DEFAULTS - must be provided
             
             # Position
-            "col": config["col"],
-            "row": config["row"],
+            "col": normalize_coordinates(config["col"], config["row"])[0],
+            "row": normalize_coordinates(config["col"], config["row"])[1],
             
             # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
             "HP_CUR": config["HP_CUR"],
@@ -188,8 +189,8 @@ class GameStateManager:
                     "id": str(unit_data["id"]),
                     "player": unit_data["player"],
                     "unitType": unit_type,
-                    "col": unit_data["col"],
-                    "row": unit_data["row"],
+                    "col": normalize_coordinates(unit_data["col"], unit_data["row"])[0],
+                    "row": normalize_coordinates(unit_data["col"], unit_data["row"])[1],
                     "HP_CUR": full_unit_data["HP_MAX"],
                     "HP_MAX": full_unit_data["HP_MAX"],
                     "MOVE": full_unit_data["MOVE"],
@@ -294,7 +295,7 @@ class GameStateManager:
                 if unit["HP_CUR"] <= 0:
                     continue  # Dead units don't control
 
-                unit_pos = (unit["col"], unit["row"])
+                unit_pos = get_unit_coordinates(unit)
                 if unit_pos in hex_set:
                     oc = unit.get("OC", 1)  # Default OC=1 if not specified
                     if unit["player"] == 0:

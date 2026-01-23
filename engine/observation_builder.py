@@ -5,7 +5,7 @@ observation_builder.py - Builds observations from game state
 
 import numpy as np
 from typing import Dict, List, Any, Optional
-from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight
+from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight, get_unit_coordinates
 from engine.game_utils import get_unit_by_id
 from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target
 
@@ -239,16 +239,17 @@ class ObservationBuilder:
             raise KeyError(f"Active unit missing required position fields: {active_unit}")
         
         prev_col, prev_row = self.last_unit_positions[unit_id]
-        curr_col, curr_row = unit["col"], unit["row"]
+        curr_col, curr_row = get_unit_coordinates(unit)
         
         # Calculate movement toward/away from active unit
+        active_col, active_row = get_unit_coordinates(active_unit)
         prev_dist = calculate_hex_distance(
             prev_col, prev_row, 
-            active_unit["col"], active_unit["row"]
+            active_col, active_row
         )
         curr_dist = calculate_hex_distance(
             curr_col, curr_row,
-            active_unit["col"], active_unit["row"]
+            active_col, active_row
         )
         
         move_distance = calculate_hex_distance(prev_col, prev_row, curr_col, curr_row)
@@ -394,9 +395,11 @@ class ObservationBuilder:
             return self._danger_probability_cache[cache_key]
 
         # Use BFS pathfinding distance to respect walls for reachability
+        defender_col, defender_row = get_unit_coordinates(defender)
+        attacker_col, attacker_row = get_unit_coordinates(attacker)
         distance = calculate_pathfinding_distance(
-            defender["col"], defender["row"],
-            attacker["col"], attacker["row"],
+            defender_col, defender_row,
+            attacker_col, attacker_row,
             game_state
         )
 
@@ -592,9 +595,11 @@ class ObservationBuilder:
                 has_melee):  # Has melee capability
 
                 # Charge range check using BFS pathfinding to respect walls
+                unit_col, unit_row = get_unit_coordinates(unit)
+                target_col, target_row = get_unit_coordinates(target)
                 distance = calculate_pathfinding_distance(
-                    unit["col"], unit["row"],
-                    target["col"], target["row"],
+                    unit_col, unit_row,
+                    target_col, target_row,
                     game_state
                 )
                 if "MOVE" not in unit:
@@ -779,7 +784,7 @@ class ObservationBuilder:
                     if unit["HP_CUR"] <= 0:
                         continue
 
-                    unit_pos = (unit["col"], unit["row"])
+                    unit_pos = get_unit_coordinates(unit)
                     if unit_pos in hex_set:
                         oc = unit.get("OC", 1)
                         if unit["player"] == my_player:
@@ -902,9 +907,11 @@ class ObservationBuilder:
             if "col" not in other_unit or "row" not in other_unit:
                 raise KeyError(f"Unit missing required position fields: {other_unit}")
             
+            active_col, active_row = get_unit_coordinates(active_unit)
+            other_col, other_row = get_unit_coordinates(other_unit)
             distance = calculate_hex_distance(
-                active_unit["col"], active_unit["row"],
-                other_unit["col"], other_unit["row"]
+                active_col, active_row,
+                other_col, other_row
             )
             
             if distance <= perception_radius:
@@ -934,8 +941,10 @@ class ObservationBuilder:
                 distance, ally = allies[i]
                 
                 # Feature 0-1: Relative position (egocentric)
-                rel_col = (ally["col"] - active_unit["col"]) / 24.0
-                rel_row = (ally["row"] - active_unit["row"]) / 24.0
+                ally_col, ally_row = get_unit_coordinates(ally)
+                active_col, active_row = get_unit_coordinates(active_unit)
+                rel_col = (ally_col - active_col) / 24.0
+                rel_row = (ally_row - active_row) / 24.0
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
                 obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
                 
@@ -1017,9 +1026,11 @@ class ObservationBuilder:
             if "col" not in other_unit or "row" not in other_unit:
                 raise KeyError(f"Unit missing required position fields: {other_unit}")
             
+            active_col, active_row = get_unit_coordinates(active_unit)
+            other_col, other_row = get_unit_coordinates(other_unit)
             distance = calculate_hex_distance(
-                active_unit["col"], active_unit["row"],
-                other_unit["col"], other_unit["row"]
+                active_col, active_row,
+                other_col, other_row
             )
             
             if distance <= perception_radius:
@@ -1063,8 +1074,10 @@ class ObservationBuilder:
                 distance, enemy = enemies[i]
                 
                 # Feature 0-2: Position and distance
-                rel_col = (enemy["col"] - active_unit["col"]) / 24.0
-                rel_row = (enemy["row"] - active_unit["row"]) / 24.0
+                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                active_col, active_row = get_unit_coordinates(active_unit)
+                rel_col = (enemy_col - active_col) / 24.0
+                rel_row = (enemy_row - active_row) / 24.0
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
                 obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
                 obs[feature_base + 2] = distance / perception_radius
@@ -1135,9 +1148,11 @@ class ObservationBuilder:
                         ally.get("RNG_WEAPONS") and len(ally["RNG_WEAPONS"]) > 0):  # A aussi des armes range
                         
                         # Vérifier si peut charger (distance)
+                        ally_col, ally_row = get_unit_coordinates(ally)
+                        enemy_col, enemy_row = get_unit_coordinates(enemy)
                         ally_distance = calculate_pathfinding_distance(
-                            ally["col"], ally["row"],
-                            enemy["col"], enemy["row"],
+                            ally_col, ally_row,
+                            enemy_col, enemy_row,
                             game_state
                         )
                         if "MOVE" not in ally:
@@ -1230,9 +1245,11 @@ class ObservationBuilder:
             if "col" not in other_unit or "row" not in other_unit:
                 raise KeyError(f"Unit missing required position fields: {other_unit}")
             
+            active_col, active_row = get_unit_coordinates(active_unit)
+            other_col, other_row = get_unit_coordinates(other_unit)
             distance = calculate_hex_distance(
-                active_unit["col"], active_unit["row"],
-                other_unit["col"], other_unit["row"]
+                active_col, active_row,
+                other_col, other_row
             )
             
             if distance <= perception_radius:
@@ -1262,8 +1279,10 @@ class ObservationBuilder:
                     raise KeyError(f"Nearby unit missing required 'player' field: {unit}")
                 
                 # Relative position (egocentric)
-                rel_col = (unit["col"] - active_unit["col"]) / 24.0
-                rel_row = (unit["row"] - active_unit["row"]) / 24.0
+                unit_col, unit_row = get_unit_coordinates(unit)
+                active_col, active_row = get_unit_coordinates(active_unit)
+                rel_col = (unit_col - active_col) / 24.0
+                rel_row = (unit_row - active_row) / 24.0
                 dist_norm = distance / perception_radius
                 hp_ratio = unit["HP_CUR"] / unit["HP_MAX"]
                 is_enemy = 1.0 if unit["player"] != active_unit["player"] else 0.0
@@ -1378,9 +1397,11 @@ class ObservationBuilder:
                         raise KeyError(f"Enemy unit missing required position fields: {enemy}")
 
                     # Use BFS pathfinding distance for charge reachability (respects walls)
+                    active_col, active_row = get_unit_coordinates(active_unit)
+                    enemy_col, enemy_row = get_unit_coordinates(enemy)
                     distance = calculate_pathfinding_distance(
-                        active_unit["col"], active_unit["row"],
-                        enemy["col"], enemy["row"],
+                        active_col, active_row,
+                        enemy_col, enemy_row,
                         game_state
                     )
 
@@ -1405,9 +1426,11 @@ class ObservationBuilder:
 
                     # Melee range is always 1 (adjacent), so pathfinding vs hex distance
                     # is equivalent for melee. Use hex distance for performance.
+                    active_col, active_row = get_unit_coordinates(active_unit)
+                    enemy_col, enemy_row = get_unit_coordinates(enemy)
                     distance = calculate_hex_distance(
-                        active_unit["col"], active_unit["row"],
-                        enemy["col"], enemy["row"]
+                        active_col, active_row,
+                        enemy_col, enemy_row
                     )
 
                     if distance <= melee_range:
@@ -1417,9 +1440,11 @@ class ObservationBuilder:
         # This prioritizes targets that give best point return per activation spent
         # Validated: All targets already passed LoS check in shooting_build_valid_target_pool
         def target_priority(target):
+            active_col, active_row = get_unit_coordinates(active_unit)
+            target_col, target_row = get_unit_coordinates(target)
             distance = calculate_hex_distance(
-                active_unit["col"], active_unit["row"],
-                target["col"], target["row"]
+                active_col, active_row,
+                target_col, target_row
             )
 
             # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
@@ -1515,8 +1540,9 @@ class ObservationBuilder:
         enemy_index_map = {}
         enemy_list = [u for u in game_state["units"] 
                      if u["player"] != active_unit["player"] and u["HP_CUR"] > 0]
+        active_col, active_row = get_unit_coordinates(active_unit)
         enemy_list.sort(key=lambda e: calculate_hex_distance(
-            active_unit["col"], active_unit["row"], e["col"], e["row"]
+            active_col, active_row, *get_unit_coordinates(e)
         ))
         for idx, enemy in enumerate(enemy_list[:6]):
             enemy_index_map[enemy["id"]] = idx
@@ -1551,9 +1577,11 @@ class ObservationBuilder:
                 obs[feature_base + 4] = enemy_idx / 5.0
                 
                 # Feature 5: Distance (accessibility) - DÉCALÉ
+                active_col, active_row = get_unit_coordinates(active_unit)
+                target_col, target_row = get_unit_coordinates(target)
                 distance = calculate_hex_distance(
-                    active_unit["col"], active_unit["row"],
-                    target["col"], target["row"]
+                    active_col, active_row,
+                    target_col, target_row
                 )
                 obs[feature_base + 5] = distance / perception_radius
                 
@@ -1636,7 +1664,8 @@ class ObservationBuilder:
             # Search walls in direction
             for wall_col, wall_row in game_state["wall_hexes"]:
                 if self._is_in_direction(unit, wall_col, wall_row, game_state, dx, dy):
-                    dist = calculate_hex_distance(unit["col"], unit["row"], wall_col, wall_row)
+                    unit_col, unit_row = get_unit_coordinates(unit)
+                    dist = calculate_hex_distance(unit_col, unit_row, wall_col, wall_row)
                     if dist < min_distance and dist <= perception_radius:
                         min_distance = dist
         
@@ -1654,9 +1683,10 @@ class ObservationBuilder:
                 if other_unit["id"] == unit["id"]:
                     continue
                     
-                if self._is_in_direction(unit, other_unit["col"], other_unit["row"], game_state, dx, dy):
-                    dist = calculate_hex_distance(unit["col"], unit["row"], 
-                                                        other_unit["col"], other_unit["row"])
+                other_col, other_row = get_unit_coordinates(other_unit)
+                if self._is_in_direction(unit, other_col, other_row, game_state, dx, dy):
+                    unit_col, unit_row = get_unit_coordinates(unit)
+                    dist = calculate_hex_distance(unit_col, unit_row, other_col, other_row)
                     if dist < min_distance and dist <= perception_radius:
                         min_distance = dist
         
@@ -1665,8 +1695,9 @@ class ObservationBuilder:
     def _is_in_direction(self, unit: Dict[str, Any], target_col: int, target_row: int, game_state: Dict[str, Any],
                         dx: int, dy: int) -> bool:
         """Check if target is roughly in the specified direction from unit."""
-        delta_col = target_col - unit["col"]
-        delta_row = target_row - unit["row"]
+        unit_col, unit_row = get_unit_coordinates(unit)
+        delta_col = target_col - unit_col
+        delta_row = target_row - unit_row
         
         # Rough directional check (within 45-degree cone)
         if dx == 0:  # North/South
@@ -1680,15 +1711,19 @@ class ObservationBuilder:
         """Calculate distance to board edge in given direction."""
         perception_radius = self.perception_radius
         if dx > 0:  # East
-            edge_dist = game_state["board_cols"] - unit["col"] - 1
+            unit_col, unit_row = get_unit_coordinates(unit)
+            edge_dist = game_state["board_cols"] - unit_col - 1
         elif dx < 0:  # West
-            edge_dist = unit["col"]
+            unit_col, unit_row = get_unit_coordinates(unit)
+            edge_dist = unit_col
         else:
             edge_dist = perception_radius
         
         if dy > 0:  # South
-            edge_dist = min(edge_dist, game_state["board_rows"] - unit["row"] - 1)
+            unit_col, unit_row = get_unit_coordinates(unit)
+            edge_dist = min(edge_dist, game_state["board_rows"] - unit_row - 1)
         elif dy < 0:  # North
-            edge_dist = min(edge_dist, unit["row"])
+            unit_col, unit_row = get_unit_coordinates(unit)
+            edge_dist = min(edge_dist, unit_row)
         
         return float(edge_dist)

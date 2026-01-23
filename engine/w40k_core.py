@@ -14,7 +14,7 @@ import numpy as np
 from typing import Dict, List, Tuple, Set, Optional, Any
 
 # Import shared utilities
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, normalize_coordinates
 
 # Phase handlers (existing - keep these)
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers
@@ -504,8 +504,7 @@ class W40KEngine(gym.Env):
                     break
 
             if original_config:
-                unit["col"] = original_config["col"]
-                unit["row"] = original_config["row"]
+                unit["col"], unit["row"] = normalize_coordinates(original_config["col"], original_config["row"])
             else:
                 raise ValueError(f"Unit {unit['id']} not found in scenario config during reset")
         
@@ -556,7 +555,8 @@ class W40KEngine(gym.Env):
             
             # Use _scenario_wall_hexes (set during scenario loading) - convert to step_logger format
             raw_walls = self._scenario_wall_hexes if self._scenario_wall_hexes is not None else []
-            walls = [{"col": w[0], "row": w[1]} for w in raw_walls] if raw_walls else []
+            from engine.combat_utils import normalize_coordinates
+            walls = [{"col": normalize_coordinates(w[0], w[1])[0], "row": normalize_coordinates(w[0], w[1])[1]} for w in raw_walls] if raw_walls else []
             # Use _scenario_objectives (set during scenario loading)
             objectives = self._scenario_objectives if hasattr(self, '_scenario_objectives') else None
             
@@ -662,7 +662,7 @@ class W40KEngine(gym.Env):
             if unit_id:
                 pre_unit = self._get_unit_by_id(str(unit_id))
                 if pre_unit:
-                    pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
+                    pre_action_positions[str(unit_id)] = get_unit_coordinates(pre_unit)
         
         # Process semantic action with AI_TURN.md compliance
         action_result = self._process_semantic_action(semantic_action)
@@ -922,7 +922,7 @@ class W40KEngine(gym.Env):
             if "col" not in unit or "row" not in unit:
                 raise KeyError(f"Unit missing required position fields: {unit}")
             unit_id = str(unit["id"])
-            self.last_unit_positions[unit_id] = (unit["col"], unit["row"])
+            self.last_unit_positions[unit_id] = get_unit_coordinates(unit)
         
         # Write console_logs to debug.log (for hidden_action_finder.py)
         if "console_logs" in self.game_state and self.game_state["console_logs"]:
@@ -1077,7 +1077,7 @@ class W40KEngine(gym.Env):
             if unit_id:
                 pre_unit = self._get_unit_by_id(str(unit_id))
                 if pre_unit:
-                    pre_action_positions[str(unit_id)] = (pre_unit["col"], pre_unit["row"])
+                    pre_action_positions[str(unit_id)] = get_unit_coordinates(pre_unit)
 
         # Handle special "advance_phase" action when pool is empty
         if action.get("action") == "advance_phase":
@@ -1367,7 +1367,7 @@ class W40KEngine(gym.Env):
                                 target_unit = self._get_unit_by_id(str(target_id))
                                 if target_unit:
                                     # Capture target coordinates - these should be stable (targets don't move during opponent's turn)
-                                    action_details["target_coords"] = (int(target_unit["col"]), int(target_unit["row"]))
+                                    action_details["target_coords"] = get_unit_coordinates(target_unit)
 
                             # Déterminer step_increment selon le type d'action et success
                             # Pour les actions qui incrémentent episode_steps (ligne 642), step_increment = success
@@ -1484,7 +1484,7 @@ class W40KEngine(gym.Env):
                                     target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                                     target_coords = None
                                     if target_unit:
-                                        target_coords = (target_unit["col"], target_unit["row"])
+                                        target_coords = get_unit_coordinates(target_unit)
                                     
                                     # CRITICAL FIX: Use pre_action_positions for actual shooter (not unit_id from result)
                                     # This ensures consistent position logging and avoids using stale positions
@@ -1492,10 +1492,10 @@ class W40KEngine(gym.Env):
                                         unit_col, unit_row = pre_action_positions[str(actual_shooter_id)]
                                     elif actual_shooter_unit:
                                         # Fallback to actual_shooter_unit position
-                                        unit_col, unit_row = actual_shooter_unit['col'], actual_shooter_unit['row']
+                                        unit_col, unit_row = get_unit_coordinates(actual_shooter_unit)
                                     else:
                                         # Last resort: use updated_unit position
-                                        unit_col, unit_row = updated_unit['col'], updated_unit['row']
+                                        unit_col, unit_row = get_unit_coordinates(updated_unit)
                                     
                                     attack_details = {
                                         "current_turn": pre_action_turn,
@@ -1675,7 +1675,9 @@ class W40KEngine(gym.Env):
                     if "destCol" in action and "destRow" in action:
                         expected_col = action["destCol"]
                         expected_row = action["destRow"]
-                        if expected_col == unit["col"] and expected_row == unit["row"]:
+                        unit_col, unit_row = get_unit_coordinates(unit)
+                        expected_col_int, expected_row_int = normalize_coordinates(expected_col, expected_row)
+                        if expected_col_int == unit_col and expected_row_int == unit_row:
                             pass
                     # If destCol/destRow missing, skip debug check (not an error, just incomplete debug data)
         

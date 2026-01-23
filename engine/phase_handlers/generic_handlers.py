@@ -8,6 +8,7 @@ ZERO TOLERANCE for deviations from specification
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
+from engine.combat_utils import get_unit_coordinates
 
 
 def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any], 
@@ -46,14 +47,15 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "turn" not in game_state:
             raise KeyError("game_state missing required 'turn' field for wait action logging")
 
+        unit_col, unit_row = get_unit_coordinates(unit)
         game_state["action_logs"].append({
             "type": "wait",
-            "message": f"Unit {unit_id} ({unit['col']}, {unit['row']}) WAIT",
+            "message": f"Unit {unit_id} ({unit_col}, {unit_row}) WAIT",
             "turn": game_state["turn"],
             "phase": game_state["phase"],
             "unitId": unit_id,
-            "col": unit["col"],
-            "row": unit["row"],
+            "col": unit_col,
+            "row": unit_row,
             "timestamp": "server_time"
         })
         response["wait_logged"] = True
@@ -363,11 +365,12 @@ def _is_adjacent_to_enemy_for_fight(game_state: Dict[str, Any], unit: Dict[str, 
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_RNG
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
-    unit_col, unit_row = unit["col"], unit["row"]
+    unit_col, unit_row = get_unit_coordinates(unit)
 
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance_for_fight(unit_col, unit_row, enemy["col"], enemy["row"])
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = _calculate_hex_distance_for_fight(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= cc_range:
                 return True
 

@@ -12,6 +12,7 @@ from .generic_handlers import end_activation
 from . import shooting_handlers
 from .shooting_handlers import _has_line_of_sight  # CRITICAL: Import for _is_valid_shooting_target (shooting validation in fight phase)
 from engine.game_utils import add_console_log, safe_print
+from engine.combat_utils import get_unit_coordinates, normalize_coordinates
 
 # Import functions from shooting_handlers for cross-phase functionality
 _cache_size_limit = shooting_handlers._cache_size_limit
@@ -189,14 +190,15 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     """
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
-    unit_col, unit_row = unit["col"], unit["row"]
+    unit_col, unit_row = get_unit_coordinates(unit)
 
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
 
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit_col, unit_row, enemy["col"], enemy["row"])
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy['id']} @ ({enemy['col']},{enemy['row']}) distance={distance}")
             if distance <= cc_range:
                 add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy['id']} (dist {distance} <= melee_range {cc_range})")
@@ -293,7 +295,9 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     # This matches the frontend logic: hasAdjacentEnemyShoot check
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            unit_col, unit_row = get_unit_coordinates(unit)
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if "CC_RNG" not in unit:
                 raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
             
@@ -332,7 +336,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
     # Range check using proper hex distance
-    distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
+    distance = _calculate_hex_distance(*get_unit_coordinates(shooter), *get_unit_coordinates(target))
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
     if "RNG_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'RNG_RNG' field: {shooter}")
@@ -378,9 +382,9 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
             friendly_player = int(friendly["player"]) if friendly["player"] is not None else None
             shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
             if friendly_player == shooter_player_int and friendly["HP_CUR"] > 0 and friendly["id"] != shooter["id"]:
-                # CRITICAL: Convert coordinates to int for consistent distance calculation
-                friendly_col_int, friendly_row_int = int(friendly["col"]), int(friendly["row"])
-                target_col_int, target_row_int = int(target["col"]), int(target["row"])
+                # CRITICAL: Normalize coordinates for consistent distance calculation
+                friendly_col_int, friendly_row_int = get_unit_coordinates(friendly)
+                target_col_int, target_row_int = get_unit_coordinates(target)
                 friendly_distance = _calculate_hex_distance(target_col_int, target_row_int, friendly_col_int, friendly_row_int)
                 
                 if friendly_distance <= melee_range:
@@ -443,13 +447,14 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     unit["selected_target_id"] = None  # For two-click confirmation
     
     # CRITICAL: Capture unit's current location for shooting phase tracking
-    unit["activation_position"] = {"col": unit["col"], "row": unit["row"]}
+    unit_col, unit_row = get_unit_coordinates(unit)
+    unit["activation_position"] = {"col": unit_col, "row": unit_row}
     
     # Mark unit as currently active
     game_state["active_shooting_unit"] = unit_id
     
     return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"], 
-            "position": {"col": unit["col"], "row": unit["row"]}}
+            "position": {"col": unit_col, "row": unit_row}}
 
 
 def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -> List[str]:
@@ -482,7 +487,8 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     # Create cache key from unit identity, position, player, AND context (advance_status, adjacent_status)
     # CRITICAL: Must match cache key format in shooting_handlers.py to avoid collisions
     # CRITICAL: Include unit["player"] to ensure cache is invalidated when player changes
-    cache_key = (unit_id, unit["col"], unit["row"], advance_status, adjacent_status, unit["player"])
+    unit_col, unit_row = get_unit_coordinates(unit)
+    cache_key = (unit_id, unit_col, unit_row, advance_status, adjacent_status, unit["player"])
 
     # Check cache
     if cache_key in _target_pool_cache:
@@ -612,7 +618,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             target_priorities.append((target_id, (999, 0, 999)))
             continue
 
-        distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+        distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
 
         # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_* fields
@@ -1626,7 +1632,7 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
     """
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
-    unit_col, unit_row = unit["col"], unit["row"]
+    unit_col, unit_row = get_unit_coordinates(unit)
     unit_player = unit["player"]
 
     valid_targets = []
@@ -1641,7 +1647,8 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
             continue
 
         # Adjacent check (within melee range)
-        distance = _calculate_hex_distance(unit_col, unit_row, target["col"], target["row"])
+        target_col, target_row = get_unit_coordinates(target)
+        distance = _calculate_hex_distance(unit_col, unit_row, target_col, target_row)
         if distance > cc_range:
             continue
 
@@ -2508,10 +2515,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "shooterId": unit_id,
         "targetId": target_id,
         "player": shooter["player"],
-        "shooterCol": shooter["col"],
-        "shooterRow": shooter["row"],
-        "targetCol": target["col"],
-        "targetRow": target["row"],
+        "shooterCol": (shooter_coords := get_unit_coordinates(shooter))[0],
+        "shooterRow": shooter_coords[1],
+        "targetCol": (target_coords := get_unit_coordinates(target))[0],
+        "targetRow": target_coords[1],
         "damage": attack_result["damage"],
         "target_died": attack_result.get("target_died", False),
         "hitRoll": attack_result.get("hit_roll"),
@@ -2887,7 +2894,7 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(enemy))
             if distance <= rng_rng:
                 return True  # Simplified - assume clear LoS for now
     
@@ -3040,7 +3047,7 @@ def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any
             if has_melee:  # Has melee capability
                 
                 # Estimate charge range (unit move + average 2d6)
-                distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+                distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 max_charge = unit["MOVE"] + 7  # Average 2d6 = 7

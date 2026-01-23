@@ -4,7 +4,7 @@ reward_calculator.py - Reward calculation system
 """
 
 from typing import Dict, List, Any, Tuple, Optional
-from engine.combat_utils import calculate_wound_target, calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight
+from engine.combat_utils import calculate_wound_target, calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight, get_unit_coordinates, normalize_coordinates
 from engine.phase_handlers.shooting_handlers import _calculate_save_target
 from engine.game_utils import get_unit_by_id
 
@@ -1056,16 +1056,17 @@ class RewardCalculator:
             raise KeyError(f"Active unit missing required position fields: {active_unit}")
         
         prev_col, prev_row = self.last_unit_positions[unit_id]
-        curr_col, curr_row = unit["col"], unit["row"]
+        curr_col, curr_row = get_unit_coordinates(unit)
         
         # Calculate movement toward/away from active unit
+        active_col, active_row = get_unit_coordinates(active_unit)
         prev_dist = calculate_hex_distance(
             prev_col, prev_row, 
-            active_unit["col"], active_unit["row"]
+            active_col, active_row
         )
         curr_dist = calculate_hex_distance(
             curr_col, curr_row,
-            active_unit["col"], active_unit["row"]
+            active_col, active_row
         )
         
         move_distance = calculate_hex_distance(prev_col, prev_row, curr_col, curr_row)
@@ -1180,9 +1181,11 @@ class RewardCalculator:
         Returns: 0.0-1.0 probability
         """
         # Use BFS pathfinding distance to respect walls for reachability
+        defender_col, defender_row = get_unit_coordinates(defender)
+        attacker_col, attacker_row = get_unit_coordinates(attacker)
         distance = calculate_pathfinding_distance(
-            defender["col"], defender["row"],
-            attacker["col"], attacker["row"],
+            defender_col, defender_row,
+            attacker_col, attacker_row,
             game_state
         )
         
@@ -1381,8 +1384,9 @@ class RewardCalculator:
         # Count how many RANGED enemies have LoS to this position
         ranged_enemies_with_los = 0
         new_unit_state = unit.copy()
-        new_unit_state["col"] = new_pos[0]
-        new_unit_state["row"] = new_pos[1]
+        new_col, new_row = normalize_coordinates(new_pos[0], new_pos[1])
+        new_unit_state["col"] = new_col
+        new_unit_state["row"] = new_row
         
         from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
         
@@ -1396,7 +1400,8 @@ class RewardCalculator:
             is_ranged_unit = max_rng_range > melee_range
             
             if is_ranged_unit and max_rng_range > 0:
-                distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
                 
                 # Enemy in shooting range and has LoS?
                 if distance <= max_rng_range:
@@ -1412,8 +1417,8 @@ class RewardCalculator:
         if not enemies:
             return False
 
-        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], e["col"], e["row"]) for e in enemies)
-        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], e["col"], e["row"]) for e in enemies)
+        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], *get_unit_coordinates(e)) for e in enemies)
+        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], *get_unit_coordinates(e)) for e in enemies)
 
         # Include equal distance (lateral movement) - unit is still engaged
         return new_min_distance <= old_min_distance
@@ -1424,8 +1429,8 @@ class RewardCalculator:
         if not enemies:
             return False
 
-        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], e["col"], e["row"]) for e in enemies)
-        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], e["col"], e["row"]) for e in enemies)
+        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], *get_unit_coordinates(e)) for e in enemies)
+        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], *get_unit_coordinates(e)) for e in enemies)
 
         return new_min_distance > old_min_distance
     
@@ -1447,11 +1452,13 @@ class RewardCalculator:
 
         # Create temporary unit state at new position for LOS check
         temp_unit = unit.copy()
-        temp_unit["col"] = new_pos[0]
-        temp_unit["row"] = new_pos[1]
+        new_col, new_row = normalize_coordinates(new_pos[0], new_pos[1])
+        temp_unit["col"] = new_col
+        temp_unit["row"] = new_row
 
         for enemy in enemies:
-            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
             # Optimal range: can shoot but not in melee (min_range < distance <= max_range)
             if min_range < distance <= max_range:
                 # CRITICAL: Also check LOS - position is only optimal if we can actually shoot
@@ -1483,7 +1490,8 @@ class RewardCalculator:
 
         for enemy in enemies:
             # Use BFS pathfinding to respect walls for charge reachability
-            distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"], game_state)
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy_col, enemy_row, game_state)
             if distance <= max_charge_range:
                 return True
 
@@ -1501,7 +1509,8 @@ class RewardCalculator:
         
         for enemy in enemies:
             # Check if moved out of enemy threat range
-            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
             max_rng_range = get_max_ranged_range(enemy)
             melee_range = get_melee_range()  # Always 1
@@ -1532,7 +1541,8 @@ class RewardCalculator:
                 if "col" not in enemy or "row" not in enemy:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 
-                distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
                 if distance <= max_range:
                     enemies_in_range.append(enemy)
         
@@ -1548,14 +1558,16 @@ class RewardCalculator:
         
         # Check LoS at old position
         old_unit_state = unit.copy()
-        old_unit_state["col"] = old_pos[0]
-        old_unit_state["row"] = old_pos[1]
+        old_col, old_row = normalize_coordinates(old_pos[0], old_pos[1])
+        old_unit_state["col"] = old_col
+        old_unit_state["row"] = old_row
         had_los_before = has_line_of_sight(old_unit_state, priority_target, game_state)
         
         # Check LoS at new position
         new_unit_state = unit.copy()
-        new_unit_state["col"] = new_pos[0]
-        new_unit_state["row"] = new_pos[1]
+        new_col, new_row = normalize_coordinates(new_pos[0], new_pos[1])
+        new_unit_state["col"] = new_col
+        new_unit_state["row"] = new_row
         has_los_now = has_line_of_sight(new_unit_state, priority_target, game_state)
         
         # Gained LoS if didn't have before but have now
@@ -1590,7 +1602,8 @@ class RewardCalculator:
 
             if is_melee_unit and has_melee_damage:
                 # Use BFS pathfinding to respect walls for charge reachability
-                distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"], game_state)
+                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy_col, enemy_row, game_state)
 
                 # Max charge distance = MOVE + 9 (2d6 average charge roll)
                 max_charge_distance = enemy["MOVE"] + 9
@@ -1622,7 +1635,8 @@ class RewardCalculator:
             
             if is_ranged_unit and max_rng_range > 0:
                 total_ranged_enemies += 1
-                distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy["col"], enemy["row"])
+                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
                 
                 # Safe if beyond their shooting range
                 if distance > max_rng_range:
@@ -1810,8 +1824,9 @@ class RewardCalculator:
 
         # Create temporary unit state at the new position for LOS checks
         temp_unit = unit.copy()
-        temp_unit["col"] = col
-        temp_unit["row"] = row
+        col_int, row_int = normalize_coordinates(col, row)
+        temp_unit["col"] = col_int
+        temp_unit["row"] = row_int
 
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
         from engine.utils.weapon_helpers import get_max_ranged_range, get_selected_ranged_weapon
@@ -1826,7 +1841,8 @@ class RewardCalculator:
             if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
                 if has_line_of_sight(temp_unit, enemy, game_state):
                     # Check if in range
-                    distance = calculate_hex_distance(col, row, enemy["col"], enemy["row"])
+                    enemy_col, enemy_row = get_unit_coordinates(enemy)
+                    distance = calculate_hex_distance(col_int, row_int, enemy_col, enemy_row)
                     if distance <= max_range:
                         visible_enemies.append(enemy)
 
@@ -1891,6 +1907,7 @@ class RewardCalculator:
         from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
 
         col, row = position
+        col_int, row_int = normalize_coordinates(col, row)
         my_player = unit["player"]
         if "VALUE" not in unit:
             raise KeyError(f"Unit missing required 'VALUE' field: {unit}")
@@ -1919,28 +1936,29 @@ class RewardCalculator:
 
             for reachable_pos in reachable_positions:
                 temp_enemy = enemy.copy()
-                temp_enemy["col"] = reachable_pos[0]
-                temp_enemy["row"] = reachable_pos[1]
+                reach_col, reach_row = normalize_coordinates(reachable_pos[0], reachable_pos[1])
+                temp_enemy["col"] = reach_col
+                temp_enemy["row"] = reach_row
 
                 # Check if enemy can see ME from this position
                 temp_unit = unit.copy()
-                temp_unit["col"] = col
-                temp_unit["row"] = row
+                temp_unit["col"] = col_int
+                temp_unit["row"] = row_int
 
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
                 from engine.utils.weapon_helpers import get_max_ranged_range
                 max_rng_range = get_max_ranged_range(enemy)
 
                 if has_line_of_sight(temp_enemy, temp_unit, game_state):
-                    distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1], col, row)
+                    distance = calculate_hex_distance(reach_col, reach_row, col_int, row_int)
                     if distance <= max_rng_range:
                         can_reach_me = True
 
                 # Check all friendlies this enemy could see
                 for friendly in friendlies:
                     if has_line_of_sight(temp_enemy, friendly, game_state):
-                        distance = calculate_hex_distance(reachable_pos[0], reachable_pos[1],
-                                                         friendly["col"], friendly["row"])
+                        friendly_col, friendly_row = get_unit_coordinates(friendly)
+                        distance = calculate_hex_distance(reach_col, reach_row, friendly_col, friendly_row)
                         if distance <= max_rng_range:
                             if friendly["id"] not in [f["id"] for f in reachable_friendlies]:
                                 reachable_friendlies.append(friendly)
@@ -2032,11 +2050,11 @@ class RewardCalculator:
         if "MOVE" not in enemy:
             raise KeyError(f"Enemy missing required 'MOVE' field: {enemy}")
         move_range = enemy["MOVE"]
-        start_pos = (enemy["col"], enemy["row"])
+        start_pos = get_unit_coordinates(enemy)
 
         # PERFORMANCE: Pre-compute occupied positions once for this BFS
-        # CRITICAL: Convert coordinates to int to ensure consistent tuple comparison
-        occupied_positions = {(int(u["col"]), int(u["row"])) for u in game_state["units"]
+        # CRITICAL: Normalize coordinates to int to ensure consistent tuple comparison
+        occupied_positions = {get_unit_coordinates(u) for u in game_state["units"]
                              if u["HP_CUR"] > 0 and u["id"] != enemy["id"]}
 
         # BFS to find reachable positions

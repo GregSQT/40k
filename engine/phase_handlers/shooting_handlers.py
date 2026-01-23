@@ -5,6 +5,7 @@ Only pool building functionality - foundation for complete handler autonomy
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
+from engine.combat_utils import get_unit_coordinates, normalize_coordinates
 
 # ============================================================================
 # PERFORMANCE: Target pool caching (30-40% speedup)
@@ -181,7 +182,9 @@ def weapon_availability_check(
                     unit_player = int(unit["player"]) if unit["player"] is not None else None
                     if enemy_player != unit_player and enemy["HP_CUR"] > 0:
                         # Check range
-                        distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+                        unit_col, unit_row = get_unit_coordinates(unit)
+                        enemy_col, enemy_row = get_unit_coordinates(enemy)
+                        distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
                         if distance > weapon_range:
                             continue
                         
@@ -326,7 +329,9 @@ def _get_available_weapons_for_selection(
                 enemy["HP_CUR"] > 0):
                 
                 # Check range
-                distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+                unit_col, unit_row = get_unit_coordinates(unit)
+                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
                 if distance > weapon_range:
                     continue
                 
@@ -792,7 +797,9 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     """
     # Range check using proper hex distance
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from all ranged weapons
-    distance = _calculate_hex_distance(shooter["col"], shooter["row"], target["col"], target["row"])
+    shooter_col, shooter_row = get_unit_coordinates(shooter)
+    target_col, target_row = get_unit_coordinates(target)
+    distance = _calculate_hex_distance(shooter_col, shooter_row, target_col, target_row)
     from engine.utils.weapon_helpers import get_max_ranged_range
     max_range = get_max_ranged_range(shooter)
     if distance > max_range:
@@ -837,7 +844,9 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
             friendly_player = int(friendly["player"]) if friendly["player"] is not None else None
             shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
             if friendly_player == shooter_player_int and friendly["HP_CUR"] > 0 and friendly["id"] != shooter["id"]:
-                friendly_distance = _calculate_hex_distance(target["col"], target["row"], friendly["col"], friendly["row"])
+                target_col, target_row = get_unit_coordinates(target)
+                friendly_col, friendly_row = get_unit_coordinates(friendly)
+                friendly_distance = _calculate_hex_distance(target_col, target_row, friendly_col, friendly_row)
                 
                 if friendly_distance <= melee_range:
                     # Enemy is engaged with friendly unit - cannot shoot
@@ -989,7 +998,8 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     unit["selected_target_id"] = None  # For two-click confirmation
 
     # Capture unit's current location for shooting phase tracking
-    unit["activation_position"] = {"col": unit["col"], "row": unit["row"]}
+    unit_col, unit_row = get_unit_coordinates(unit)
+    unit["activation_position"] = {"col": unit_col, "row": unit_row}
 
     # Mark unit as currently active
     game_state["active_shooting_unit"] = unit_id
@@ -997,8 +1007,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # Serialize available weapons for frontend (weapon_available_pool already contains serialized weapons)
     available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in weapon_available_pool]
 
+    unit_col, unit_row = get_unit_coordinates(unit)
     return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"],
-            "position": {"col": unit["col"], "row": unit["row"]},
+            "position": {"col": unit_col, "row": unit_row},
             "selectedRngWeaponIndex": unit.get("selectedRngWeaponIndex", 0),
             "available_weapons": available_weapons}
 
@@ -1101,7 +1112,9 @@ def valid_target_pool_build(
         # This check must be done BEFORE checking if enemy is engaged with other friendly units
         from engine.utils.weapon_helpers import get_melee_range
         melee_range = get_melee_range()
-        distance_to_enemy = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+        unit_col, unit_row = get_unit_coordinates(unit)
+        enemy_col, enemy_row = get_unit_coordinates(enemy)
+        distance_to_enemy = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
         
         # Check if enemy is adjacent to shooter
         enemy_adjacent_to_shooter = (distance_to_enemy <= melee_range)
@@ -1134,8 +1147,10 @@ def valid_target_pool_build(
                 if (friendly_player == current_player_int and 
                     friendly["HP_CUR"] > 0 and 
                     friendly["id"] != unit["id"]):
+                    enemy_col, enemy_row = get_unit_coordinates(enemy)
+                    friendly_col, friendly_row = get_unit_coordinates(friendly)
                     friendly_distance = _calculate_hex_distance(
-                        enemy["col"], enemy["row"], friendly["col"], friendly["row"]
+                        enemy_col, enemy_row, friendly_col, friendly_row
                     )
                     if friendly_distance <= melee_range:
                         enemy_adjacent_to_friendly = True
@@ -1225,7 +1240,8 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     # Create cache key from unit identity, position, player, AND context (advance_status, adjacent_status)
     # Cache must include context to avoid wrong results after advance
     # CRITICAL: Include unit["player"] to ensure cache is invalidated when player changes
-    cache_key = (unit_id, unit["col"], unit["row"], advance_status, adjacent_status, unit["player"])
+    unit_col, unit_row = get_unit_coordinates(unit)
+    cache_key = (unit_id, unit_col, unit_row, advance_status, adjacent_status, unit["player"])
 
     # Check cache
     if cache_key in _target_pool_cache:
@@ -1349,7 +1365,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             target_priorities.append((target_id, (999, 0, 999)))
             continue
 
-        distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+        distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
 
         # Direct UPPERCASE field access - no defaults
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_* fields
@@ -1512,8 +1528,8 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     Line of sight check with proper hex pathfinding.
     Fixed to get wall data from multiple possible sources.
     """
-    start_col, start_row = shooter["col"], shooter["row"]
-    end_col, end_row = target["col"], target["row"]
+    start_col, start_row = get_unit_coordinates(shooter)
+    end_col, end_row = get_unit_coordinates(target)
 
     # Try multiple sources for wall hexes
     wall_hexes_data = []
@@ -2363,7 +2379,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # CRITICAL FIX: Invalidate target pool cache after weapon change
         # Cache key doesn't include selectedRngWeaponIndex, so we must clear it
         global _target_pool_cache
-        cache_key = (unit_id, unit["col"], unit["row"])
+        unit_col, unit_row = get_unit_coordinates(unit)
+        cache_key = (unit_id, unit_col, unit_row)
         if cache_key in _target_pool_cache:
             del _target_pool_cache[cache_key]
 
@@ -3261,10 +3278,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "targetId": target_id,
         "weaponName": weapon_name if weapon_name else None,
         "player": shooter["player"],
-        "shooterCol": shooter["col"],
-        "shooterRow": shooter["row"],
-        "targetCol": target["col"],
-        "targetRow": target["row"],
+        "shooterCol": get_unit_coordinates(shooter)[0],
+        "shooterRow": get_unit_coordinates(shooter)[1],
+        "targetCol": get_unit_coordinates(target)[0],
+        "targetRow": get_unit_coordinates(target)[1],
         "damage": attack_result["damage"],
         "target_died": attack_result.get("target_died", False),
         "hitRoll": attack_result.get("hit_roll"),
@@ -3693,8 +3710,7 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
         raise KeyError(f"enemy_adjacent_hexes cache missing for player {current_player} - _build_enemy_adjacent_hexes() must be called at phase start")
     
     # Use cache: check if unit position is in adjacent hexes set
-    from engine.phase_handlers.movement_handlers import _normalize_coordinates
-    unit_col, unit_row = _normalize_coordinates(unit["col"], unit["row"])
+    unit_col, unit_row = get_unit_coordinates(unit)
     enemy_adjacent_hexes = game_state[cache_key]
     return (unit_col, unit_row) in enemy_adjacent_hexes
     
@@ -3704,7 +3720,9 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
         # CRITICAL: Normalize player value to int for consistent comparison
         enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
         if enemy_player != unit_player and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            unit_col, unit_row = get_unit_coordinates(unit)
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= cc_range:
                 return True
     return False
@@ -3724,7 +3742,9 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
         # CRITICAL: Normalize player value to int for consistent comparison
         enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
         if enemy_player != unit_player and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(unit["col"], unit["row"], enemy["col"], enemy["row"])
+            unit_col, unit_row = get_unit_coordinates(unit)
+            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= max_range:
                 return True  # Simplified - assume clear LoS for now
 
@@ -3877,7 +3897,7 @@ def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any
             if has_melee:  # Has melee capability
                 
                 # Estimate charge range (unit move + average 2d6)
-                distance = _calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+                distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 max_charge = unit["MOVE"] + 7  # Average 2d6 = 7
@@ -3910,7 +3930,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     )
     
     unit_id = unit["id"]
-    orig_col, orig_row = unit["col"], unit["row"]
+    orig_col, orig_row = get_unit_coordinates(unit)
     
     # CRITICAL: Cannot advance if unit is adjacent to enemy
     # Pool is source of truth: if can_advance is False, unit cannot advance
@@ -3971,12 +3991,11 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         
         # Check all units for occupation - CRITICAL: Use explicit int conversion for all comparisons
         for check_unit in game_state["units"]:
-            # CRITICAL: Force int conversion for both check_unit position and destination
+            # CRITICAL: Normalize coordinates for consistent comparison
             # This prevents type mismatch bugs (int vs float vs string)
             try:
-                check_col = int(float(check_unit["col"]))  # Handle float->int conversion
-                check_row = int(float(check_unit["row"]))  # Handle float->int conversion
-            except (ValueError, TypeError):
+                check_col, check_row = get_unit_coordinates(check_unit)
+            except (ValueError, TypeError, KeyError):
                 # Skip units with invalid positions (should not happen, but defensive)
                 continue
             
@@ -4020,10 +4039,11 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         
         # CRITICAL: Log BEFORE each assignment to catch any modification
         from engine.game_utils import conditional_debug_print
-        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col} row={dest_row}")
-        unit["col"] = dest_col
+        dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
+        conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col_int} row={dest_row_int}")
+        from engine.combat_utils import set_unit_coordinates
+        set_unit_coordinates(unit, dest_col_int, dest_row_int)
         conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
-        unit["row"] = dest_row
         conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
         
         # Check if unit actually moved (for cache invalidation and logging)
@@ -4156,8 +4176,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
             
             if enemies:
-                nearest_enemy = min(enemies, key=lambda e: _calculate_hex_distance(unit["col"], unit["row"], e["col"], e["row"]))
-                best_dest = min(valid_destinations, key=lambda d: _calculate_hex_distance(d[0], d[1], nearest_enemy["col"], nearest_enemy["row"]))
+                unit_col, unit_row = get_unit_coordinates(unit)
+                nearest_enemy = min(enemies, key=lambda e: _calculate_hex_distance(unit_col, unit_row, *get_unit_coordinates(e)))
+                nearest_enemy_col, nearest_enemy_row = get_unit_coordinates(nearest_enemy)
+                best_dest = min(valid_destinations, key=lambda d: _calculate_hex_distance(d[0], d[1], nearest_enemy_col, nearest_enemy_row))
             else:
                 best_dest = valid_destinations[0] if valid_destinations else (orig_col, orig_row)
             
@@ -4190,6 +4212,6 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             "action": "advance_select_destination",
             "unitId": unit_id,
             "advance_roll": advance_range,
-            "advance_destinations": [{"col": d[0], "row": d[1]} for d in valid_destinations],
+            "advance_destinations": [{"col": (norm_coords := normalize_coordinates(d[0], d[1]))[0], "row": norm_coords[1]} for d in valid_destinations],
             "highlight_color": "orange"
         }

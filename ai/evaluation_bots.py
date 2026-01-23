@@ -13,7 +13,7 @@ All bots implement all 4 phases: MOVE, SHOOT, CHARGE, FIGHT
 
 import random
 from typing import Dict, List, Tuple, Any, Optional
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 
 
 class RandomBot:
@@ -28,7 +28,7 @@ class RandomBot:
         return random.choice(valid_actions) if valid_actions else 7
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
-        return random.choice(valid_destinations) if valid_destinations else (unit["col"], unit["row"])
+        return random.choice(valid_destinations) if valid_destinations else get_unit_coordinates(unit)
 
     def select_shooting_target(self, valid_targets: List[str]) -> str:
         return random.choice(valid_targets) if valid_targets else ""
@@ -62,7 +62,7 @@ class GreedyBot:
     
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
         if not valid_destinations:
-            return (unit["col"], unit["row"])
+            return get_unit_coordinates(unit)
 
         # Add randomness to movement
         if self.randomness > 0 and random.random() < self.randomness:
@@ -137,7 +137,7 @@ class DefensiveBot:
     
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
         if not valid_destinations:
-            return (unit["col"], unit["row"])
+            return get_unit_coordinates(unit)
 
         # Add randomness to movement
         if self.randomness > 0 and random.random() < self.randomness:
@@ -309,7 +309,7 @@ class TacticalBot:
         - If wounded: move away from melee threats
         """
         if not valid_destinations:
-            return (unit["col"], unit["row"])
+            return get_unit_coordinates(unit)
 
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)

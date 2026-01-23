@@ -7,7 +7,7 @@ Used by PvE AI to select targets using tactical heuristics, not rewards.
 """
 
 from typing import Dict, List, Any
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 
 
 class TargetSelector:
@@ -175,7 +175,9 @@ class TargetSelector:
                 raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
 
             # Distance check
-            distance = calculate_hex_distance(friendly["col"], friendly["row"], target["col"], target["row"])
+            friendly_col, friendly_row = get_unit_coordinates(friendly)
+            target_col, target_row = get_unit_coordinates(target)
+            distance = calculate_hex_distance(friendly_col, friendly_row, target_col, target_row)
 
             # Threat only if in range
             if distance <= max_rng_range:

@@ -30,6 +30,7 @@ from shared.gameLogUtils import (
     format_turn_start_message,
     format_phase_change_message
 )
+from engine.combat_utils import get_unit_coordinates
 
 
 class GameReplayLogger:
@@ -166,7 +167,10 @@ class GameReplayLogger:
         if charge_roll is not None and die1 is not None and die2 is not None:
             # Use proper hex distance calculation for charge validation
             from engine.combat_utils import calculate_hex_distance
-            distance_needed = calculate_hex_distance(charger["col"], charger["row"], target["col"], target["row"])
+            from engine.combat_utils import get_unit_coordinates
+            charger_col, charger_row = get_unit_coordinates(charger)
+            target_col, target_row = get_unit_coordinates(target)
+            distance_needed = calculate_hex_distance(charger_col, charger_row, target_col, target_row)
             charge_details.append({
                 "rollType": "charge",
                 "die1": die1,
@@ -183,7 +187,10 @@ class GameReplayLogger:
             die1 = random.randint(1, 6)
             die2 = random.randint(1, 6)
             charge_roll = die1 + die2
-            distance_needed = calculate_hex_distance(charger["col"], charger["row"], target["col"], target["row"])
+            from engine.combat_utils import get_unit_coordinates
+            charger_col, charger_row = get_unit_coordinates(charger)
+            target_col, target_row = get_unit_coordinates(target)
+            distance_needed = calculate_hex_distance(charger_col, charger_row, target_col, target_row)
             # Use config value instead of hardcoded 12
             from config_loader import get_config_loader
             config = get_config_loader()
@@ -411,8 +418,8 @@ class GameReplayLogger:
                         "id": unit["id"],
                         "unit_type": unit["unit_type"],
                         "player": unit["player"],
-                        "col": unit["col"],
-                        "row": unit["row"],
+                        "col": get_unit_coordinates(unit)[0],
+                        "row": get_unit_coordinates(unit)[1],
                         "CUR_HP": unit["CUR_HP"],
                         "HP_MAX": unit["HP_MAX"],
                         "MOVE": unit["MOVE"],
@@ -443,8 +450,8 @@ class GameReplayLogger:
                         "id": unit["id"],
                         "unit_type": unit["unit_type"],
                         "player": unit["player"],
-                        "col": unit["col"],
-                        "row": unit["row"],
+                        "col": get_unit_coordinates(unit)[0],
+                        "row": get_unit_coordinates(unit)[1],
                         "CUR_HP": unit["CUR_HP"],
                         "HP_MAX": unit["HP_MAX"],
                         "MOVE": unit["MOVE"],
@@ -498,8 +505,8 @@ class GameReplayLogger:
                     "id": unit["id"],
                     "unit_type": unit["unit_type"],
                     "player": unit["player"],
-                    "col": unit["col"],
-                    "row": unit["row"],
+                    "col": get_unit_coordinates(unit)[0],
+                    "row": get_unit_coordinates(unit)[1],
                     "CUR_HP": unit["CUR_HP"],
                     "HP_MAX": unit["HP_MAX"],
                     "MOVE": unit["MOVE"],
@@ -526,8 +533,8 @@ class GameReplayLogger:
                         "id": unit["id"],
                         "unit_type": unit["unit_type"],
                         "player": unit["player"],
-                        "col": unit["col"],
-                        "row": unit["row"],
+                        "col": get_unit_coordinates(unit)[0],
+                        "row": get_unit_coordinates(unit)[1],
                         "CUR_HP": unit["CUR_HP"],
                         "HP_MAX": unit["HP_MAX"],
                         "MOVE": unit["MOVE"],
@@ -573,8 +580,8 @@ class GameReplayLogger:
                         "id": unit["id"],
                         "unit_type": unit_type,
                         "player": unit["player"],
-                        "col": unit["col"],
-                        "row": unit["row"],
+                        "col": get_unit_coordinates(unit)[0],
+                        "row": get_unit_coordinates(unit)[1],
                         "HP_MAX": unit_stats["HP_MAX"],
                         "MOVE": unit_stats["MOVE"],
                         "RNG_RNG": unit_stats["RNG_RNG"],
@@ -618,8 +625,8 @@ class GameReplayLogger:
                     "id": unit.get("id"),
                     "unit_type": unit.get("unit_type"),
                     "player": unit.get("player"),
-                    "col": unit.get("col"),
-                    "row": unit.get("row"),
+                    "col": get_unit_coordinates(unit)[0] if "col" in unit else None,
+                    "row": get_unit_coordinates(unit)[1] if "row" in unit else None,
                     "HP_MAX": unit.get("HP_MAX"),
                     "alive": unit.get("alive", True)
                 } for unit in current_units]
@@ -662,8 +669,8 @@ class GameReplayLogger:
                 "id": unit["id"],
                 "unit_type": unit["unit_type"],
                 "player": unit["player"],
-                "col": unit["col"],
-                "row": unit["row"],
+                "col": get_unit_coordinates(unit)[0],
+                "row": get_unit_coordinates(unit)[1],
                 "CUR_HP": unit["CUR_HP"],
                 "HP_MAX": unit["HP_MAX"],
                 "alive": unit["alive"]
@@ -792,8 +799,8 @@ class GameReplayLogger:
             current_turn = self.env.controller.game_state["current_turn"]
             self.log_move(
                 acting_unit, 
-                acting_unit["col"], acting_unit["row"],
-                acting_unit_post["col"], acting_unit_post["row"],
+                *get_unit_coordinates(acting_unit),
+                *get_unit_coordinates(acting_unit_post),
                 current_turn, reward, action
             )
                 
@@ -820,8 +827,8 @@ class GameReplayLogger:
                     current_turn = self.env.controller.game_state["current_turn"]
                     self.log_charge(
                         acting_unit, target_unit,
-                        acting_unit["col"], acting_unit["row"],
-                        acting_unit_post["col"], acting_unit_post["row"],
+                        *get_unit_coordinates(acting_unit),
+                        *get_unit_coordinates(acting_unit_post),
                         current_turn, reward, action
                     )
                     

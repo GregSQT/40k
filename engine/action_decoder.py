@@ -6,7 +6,7 @@ action_decoder.py - Decodes actions and computes masks
 import numpy as np
 from typing import Dict, List, Any
 from engine.game_utils import get_unit_by_id
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["command", "move", "shoot", "charge", "fight"]
@@ -448,7 +448,7 @@ class ActionDecoder:
                  any(w.get("DMG", 0) > 0 for w in unit["CC_WEAPONS"]))):  # Has melee capability
                 
                 # Simple charge range check (2d6 movement + unit MOVE)
-                distance = calculate_hex_distance(unit["col"], unit["row"], target["col"], target["row"])
+                distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
                 max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
