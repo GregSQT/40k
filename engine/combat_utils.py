@@ -3,7 +3,100 @@
 combat_utils.py - Pure utility functions for combat calculations
 """
 
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional, Set
+
+# ============================================================================
+# UNIT UTILITIES
+# ============================================================================
+
+def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get unit by ID from game state.
+    
+    Handles int/string ID mismatches by comparing both sides as strings.
+    
+    Args:
+        game_state: Game state dictionary with "units" list
+        unit_id: Unit ID to find (int or string)
+    
+    Returns:
+        Unit dictionary if found, None otherwise
+    """
+    for unit in game_state["units"]:
+        if str(unit["id"]) == str(unit_id):
+            return unit
+    return None
+
+
+def is_hex_adjacent_to_enemy(col: int, row: int, player: int,
+                              enemy_adjacent_hexes: Set[Tuple[int, int]]) -> bool:
+    """
+    Check if hex position is adjacent to any enemy unit.
+    
+    Uses pre-computed enemy_adjacent_hexes set for O(1) lookup.
+    
+    Args:
+        col: Column coordinate
+        row: Row coordinate
+        player: Player ID checking adjacency
+        enemy_adjacent_hexes: Pre-computed set of hexes adjacent to enemies
+    
+    Returns:
+        True if hex is adjacent to an enemy, False otherwise
+    
+    Raises:
+        ValueError: If enemy_adjacent_hexes is None
+    """
+    if enemy_adjacent_hexes is None:
+        raise ValueError("enemy_adjacent_hexes must be provided - use build_enemy_adjacent_hexes() first")
+    
+    # Normalize coordinates to int
+    col_int, row_int = normalize_coordinates(col, row)
+    return (col_int, row_int) in enemy_adjacent_hexes
+
+
+def get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
+    """
+    Get all 6 hexagonal neighbors for offset coordinates.
+    
+    Hex neighbor offsets depend on whether column is even or odd.
+    Even columns: NE/SE are (+1, -1) and (+1, 0)
+    Odd columns: NE/SE are (+1, 0) and (+1, +1)
+    
+    Args:
+        col: Column coordinate (will be normalized to int)
+        row: Row coordinate (will be normalized to int)
+    
+    Returns:
+        List of 6 neighbor (col, row) tuples, all normalized to int
+    """
+    # Normalize coordinates to int
+    col_int, row_int = normalize_coordinates(col, row)
+    
+    # Determine if column is even or odd
+    parity = col_int & 1  # 0 for even, 1 for odd
+    
+    if parity == 0:  # Even column
+        neighbors = [
+            (int(col_int), int(row_int - 1)),      # N
+            (int(col_int + 1), int(row_int - 1)),  # NE
+            (int(col_int + 1), int(row_int)),      # SE
+            (int(col_int), int(row_int + 1)),      # S
+            (int(col_int - 1), int(row_int)),      # SW
+            (int(col_int - 1), int(row_int - 1))   # NW
+        ]
+    else:  # Odd column
+        neighbors = [
+            (int(col_int), int(row_int - 1)),      # N
+            (int(col_int + 1), int(row_int)),      # NE
+            (int(col_int + 1), int(row_int + 1)),  # SE
+            (int(col_int), int(row_int + 1)),      # S
+            (int(col_int - 1), int(row_int + 1)),  # SW
+            (int(col_int - 1), int(row_int))       # NW
+        ]
+    
+    return neighbors
+
 
 # ============================================================================
 # COORDINATE NORMALIZATION
@@ -146,9 +239,6 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
         if cache_key in game_state["pathfinding_distance_cache"]:
             return game_state["pathfinding_distance_cache"][cache_key]
 
-    # Import here to avoid circular imports
-    from engine.phase_handlers.movement_handlers import _get_hex_neighbors
-
     # Get wall set for O(1) lookup
     wall_set = set()
     if "wall_hexes" in game_state:
@@ -177,7 +267,7 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
             continue
 
         # Explore neighbors
-        neighbors = _get_hex_neighbors(current_pos[0], current_pos[1])
+        neighbors = get_hex_neighbors(current_pos[0], current_pos[1])
 
         for neighbor_col, neighbor_row in neighbors:
             neighbor_pos = (neighbor_col, neighbor_row)

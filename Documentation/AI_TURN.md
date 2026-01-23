@@ -261,11 +261,11 @@ attack_sequence(Arg)
 ```javascript
 START OF THE PHASE
 For each unit
-├── ❌ Remove Mark units_moved
-├── ❌ Remove Mark units_fled
-├── ❌ Remove Mark units_shot
-├── ❌ Remove Mark units_charged
-├── ❌ Remove Mark units_fought
+├── ❌ Remove Mark units_moved (done in command_phase_start)
+├── ❌ Remove Mark units_fled (done in command_phase_start)
+├── ❌ Remove Mark units_shot (done in command_phase_start)
+├── ❌ Remove Mark units_charged (done in command_phase_start)
+├── ❌ Remove Mark units_fought (done in command_phase_start)
 │
 ├── ELIGIBILITY CHECK (move_activation_pool Building Phase)
 │   ├── unit.HP_CUR > 0?

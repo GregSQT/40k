@@ -11,6 +11,34 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import get_unit_coordinates
 
 
+def _log_with_context(game_state: Dict[str, Any], prefix: str, message: str) -> None:
+    """
+    Log message with episode/turn/phase context if available.
+    
+    Only logs if episode_number, turn, and phase exist in game_state (training mode).
+    Silently skips logging if not in training context.
+    
+    Args:
+        game_state: Game state dictionary
+        prefix: Log prefix (e.g., "MOVE DEBUG", "POOL DEBUG")
+        message: Log message content
+    """
+    if "episode_number" not in game_state or "turn" not in game_state or "phase" not in game_state:
+        return
+    
+    episode = game_state["episode_number"]
+    turn = game_state["turn"]
+    phase = game_state.get("phase", "?")
+    
+    if "console_logs" not in game_state:
+        game_state["console_logs"] = []
+    
+    log_message = f"[{prefix}] E{episode} T{turn} {phase} {message}"
+    from engine.game_utils import add_console_log, safe_print
+    add_console_log(game_state, log_message)
+    safe_print(game_state, log_message)
+
+
 def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any], 
                   arg1: str, arg2: int, arg3: str, arg4: str, arg5: int) -> Dict[str, Any]:
     """

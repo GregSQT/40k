@@ -6,6 +6,7 @@ Only pool building functionality - foundation for complete handler autonomy
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import get_unit_coordinates, normalize_coordinates
+from .shared_utils import calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge
 
 # ============================================================================
 # PERFORMANCE: Target pool caching (30-40% speedup)
@@ -435,9 +436,14 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for current player
     # Cache will be reused throughout the phase for all units
-    from engine.phase_handlers.movement_handlers import _build_enemy_adjacent_hexes
-    _build_enemy_adjacent_hexes(game_state, current_player)
+    from .shared_utils import build_enemy_adjacent_hexes
+    build_enemy_adjacent_hexes(game_state, current_player)
     
+    # AI_TURN.md STEP 0: Build position_cache at phase start
+    build_position_cache(game_state)
+    
+    # DEPRECATED: _build_shooting_los_cache() kept for backward compatibility
+    # New code should use build_unit_los_cache() per unit (unit-local cache)
     _build_shooting_los_cache(game_state)
     
     # Build activation pool
@@ -458,8 +464,87 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def build_position_cache(game_state: Dict[str, Any]) -> None:
+    """
+    AI_TURN.md: Build snapshot of enemy positions at shooting phase start.
+    Creates position_cache with enemy unit positions for efficient LoS calculations.
+    
+    Returns: void (updates game_state["position_cache"])
+    """
+    current_player = game_state.get("current_player")
+    position_cache = {}
+    
+    for unit in game_state["units"]:
+        # ELIGIBILITY CHECK: Skip dead units
+        if unit["HP_CUR"] <= 0:
+            continue
+        
+        # ELIGIBILITY CHECK: Skip friendly units
+        unit_player = int(unit["player"]) if unit["player"] is not None else None
+        current_player_int = int(current_player) if current_player is not None else None
+        if unit_player == current_player_int:
+            continue
+        
+        # Add to position_cache
+        unit_id = str(unit["id"])
+        unit_col, unit_row = get_unit_coordinates(unit)
+        position_cache[unit_id] = {
+            "id": unit_id,
+            "col": unit_col,
+            "row": unit_row
+        }
+    
+    game_state["position_cache"] = position_cache
+
+
+def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
+    """
+    AI_TURN.md: Calculate LoS cache for a specific unit.
+    Uses position_cache and has_line_of_sight_coords() for performance.
+    
+    Returns: void (updates unit["los_cache"])
+    """
+    unit = _get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return
+    
+    # Initialize cache
+    unit["los_cache"] = {}
+    
+    # Get unit coordinates
+    unit_col, unit_row = get_unit_coordinates(unit)
+    
+    # Get position_cache (must exist, built at phase start)
+    if "position_cache" not in game_state:
+        raise KeyError("position_cache must be built at phase start (call build_position_cache())")
+    
+    position_cache = game_state["position_cache"]
+    
+    # If position_cache is empty, los_cache remains empty (no enemies)
+    if not position_cache:
+        return
+    
+    # Import has_line_of_sight_coords for performance
+    from engine.combat_utils import has_line_of_sight_coords
+    
+    # Calculate LoS for each target in position_cache
+    for target_id, target_data in position_cache.items():
+        target_col = target_data["col"]
+        target_row = target_data["row"]
+        
+        # PERFORMANCE: Use has_line_of_sight_coords() instead of _get_unit_by_id() + _has_line_of_sight()
+        # Uses hex_los_cache internally for additional performance
+        has_los = has_line_of_sight_coords(unit_col, unit_row, target_col, target_row, game_state)
+        
+        # Store in unit's los_cache
+        unit["los_cache"][target_id] = has_los
+
+
 def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
     """
+    DEPRECATED: This function is kept for backward compatibility but should not be used.
+    Use build_unit_los_cache() instead for unit-local cache (AI_TURN.md compliance).
+    
     Build LoS cache for all unit pairs at shooting phase start.
     Pure function, stores in game_state, no copying.
     
@@ -482,7 +567,8 @@ def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
             
             # Calculate LoS using existing function (expensive but only once)
             # CRITICAL: Always recalculate, don't rely on potentially stale cache
-            cache_key = (shooter["id"], target["id"])
+            # CRITICAL: Normalize IDs to string for consistent cache key comparison
+            cache_key = (str(shooter["id"]), str(target["id"]))
             los_cache[cache_key] = _has_line_of_sight(game_state, shooter, target)
     
     # Store cache in game_state (single source of truth)
@@ -490,6 +576,29 @@ def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
     
     # Debug log cache size (optional, remove in production)
     # print(f"LoS CACHE: Built {len(los_cache)} entries for {len(alive_units)} units")
+
+def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_id: str) -> None:
+    """
+    AI_TURN.md: Update LoS cache after target death.
+    Removes dead target from position_cache and active unit's los_cache.
+    
+    Returns: void (updates position_cache and unit["los_cache"])
+    """
+    # Remove from position_cache
+    if "position_cache" in game_state:
+        dead_target_id_str = str(dead_target_id)
+        if dead_target_id_str in game_state["position_cache"]:
+            del game_state["position_cache"][dead_target_id_str]
+    
+    # Update active unit's los_cache (only active unit has los_cache)
+    active_unit_id = game_state.get("active_shooting_unit")
+    if active_unit_id:
+        active_unit = _get_unit_by_id(game_state, active_unit_id)
+        if active_unit and "los_cache" in active_unit:
+            dead_target_id_str = str(dead_target_id)
+            if dead_target_id_str in active_unit["los_cache"]:
+                del active_unit["los_cache"][dead_target_id_str]
+
 
 def _invalidate_los_cache_for_unit(game_state: Dict[str, Any], dead_unit_id: str) -> None:
     """
@@ -502,9 +611,11 @@ def _invalidate_los_cache_for_unit(game_state: Dict[str, Any], dead_unit_id: str
         return
     
     # Remove all cache entries involving dead unit
+    # CRITICAL: Normalize dead_unit_id to string for consistent comparison
+    dead_unit_id_str = str(dead_unit_id)
     keys_to_remove = [
         key for key in game_state["los_cache"].keys()
-        if dead_unit_id in key
+        if str(key[0]) == dead_unit_id_str or str(key[1]) == dead_unit_id_str
     ]
     
     for key in keys_to_remove:
@@ -576,12 +687,14 @@ def _rebuild_los_cache_for_unit(game_state: Dict[str, Any], unit_id: str) -> Non
             continue  # Skip self
         
         # Calculate LoS using current positions
-        cache_key = (unit_id, target["id"])
+        # CRITICAL: Normalize IDs to string for consistent cache key comparison
+        cache_key = (str(unit_id), str(target["id"]))
         has_los = _has_line_of_sight(game_state, unit, target)
         game_state["los_cache"][cache_key] = has_los
         
         # Also update reverse direction (target -> unit)
-        reverse_key = (target["id"], unit_id)
+        # CRITICAL: Normalize IDs to string for consistent cache key comparison
+        reverse_key = (str(target["id"]), str(unit_id))
         game_state["los_cache"][reverse_key] = has_los
 
 
@@ -602,10 +715,12 @@ def _invalidate_los_cache_for_moved_unit(game_state: Dict[str, Any], moved_unit_
       (easier to clear all than to track which hexes involved the moved unit)
     """
     # Invalidate los_cache (unit ID-based cache)
+    # CRITICAL: Normalize moved_unit_id to string for consistent comparison
     if "los_cache" in game_state:
+        moved_unit_id_str = str(moved_unit_id)
         keys_to_remove = [
             key for key in game_state["los_cache"].keys()
-            if moved_unit_id in key
+            if str(key[0]) == moved_unit_id_str or str(key[1]) == moved_unit_id_str
         ]
         for key in keys_to_remove:
             del game_state["los_cache"][key]
@@ -856,7 +971,8 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     # Fallback to calculation if cache missing (edge cases: cache invalidated, tests, or other contexts)
     has_los = False
     if "los_cache" in game_state and game_state["los_cache"]:
-        cache_key = (shooter["id"], target["id"])
+        # CRITICAL: Normalize IDs to string for consistent cache key comparison
+        cache_key = (str(shooter["id"]), str(target["id"]))
         if cache_key in game_state["los_cache"]:
             # Cache hit: instant lookup (0.001ms)
             has_los = game_state["los_cache"][cache_key]
@@ -905,6 +1021,16 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # CRITICAL: Clear shoot_attack_results at the start of each new unit activation
     # This ensures attacks from different units are not mixed together
     game_state["shoot_attack_results"] = []
+    
+    # AI_TURN.md STEP 2: Build unit's los_cache at activation
+    # CRITICAL: Only build los_cache if unit has not fled (units that fled cannot shoot)
+    unit_id_str = str(unit_id)
+    if unit_id_str not in game_state.get("units_fled", set()):
+        build_unit_los_cache(game_state, unit_id)
+    else:
+        # Unit has fled - cannot shoot, so no los_cache needed
+        # Unit can still advance if not adjacent to enemy
+        unit["los_cache"] = {}
     
     # Determine adjacency
     unit_is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
@@ -1065,7 +1191,33 @@ def valid_target_pool_build(
     from engine.game_utils import add_console_log, add_debug_log
     add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized}({unit['col']},{unit['row']}) building pool (advance_status={advance_status}, adjacent_status={adjacent_status})")
     
-    for enemy in game_state["units"]:
+    # AI_TURN.md: ASSERT unit["los_cache"] exists (must be created by build_unit_los_cache at activation)
+    if "los_cache" not in unit:
+        # Check if unit has fled (units that fled don't have los_cache but can advance)
+        unit_id_str = str(unit["id"])
+        if unit_id_str not in game_state.get("units_fled", set()):
+            raise KeyError(f"Unit {unit_id_normalized} missing required 'los_cache' field. Must call build_unit_los_cache() at activation.")
+        else:
+            # Unit has fled - cannot shoot, return empty pool
+            return []
+    
+    # AI_TURN.md: Filter los_cache to get only targets with LoS (optimization)
+    # Filter los_cache: targets_with_los = {target_id: true for target_id, has_los in unit["los_cache"].items() if has_los == true}
+    targets_with_los = {
+        target_id: True 
+        for target_id, has_los in unit["los_cache"].items() 
+        if has_los == True
+    }
+    
+    add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Found {len(targets_with_los)} targets with LoS out of {len(unit['los_cache'])} total targets")
+    
+    # For each target_id in targets_with_los.keys():
+    for target_id_str in targets_with_los.keys():
+        # Get enemy unit by ID
+        enemy = _get_unit_by_id(game_state, target_id_str)
+        if not enemy:
+            # Target not found (may have died) - skip
+            continue
         # DEBUG: Log all enemies being checked
         enemy_id_check = str(enemy.get("id", "?"))
         enemy_pos_check = (enemy.get("col", "?"), enemy.get("row", "?"))
@@ -1160,17 +1312,9 @@ def valid_target_pool_build(
                 add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - engaged with friendly unit")
                 continue
         
-        # Unit in Line of Sight? -> NO -> Skip enemy unit
-        # CRITICAL: Use current positions from unit and enemy objects (may have changed after ADVANCE)
-        # _has_line_of_sight reads positions directly from unit/enemy dicts, so it will use latest positions
-        has_los = _has_line_of_sight(game_state, unit, enemy)
-        if not has_los:
-            # DEBUG: Log why target was excluded (LoS blocked)
-            episode = game_state.get("episode_number", "?")
-            turn = game_state.get("turn", "?")
-            from engine.game_utils import add_console_log, add_debug_log
-            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized}({unit['col']},{unit['row']}) -> Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - LoS BLOCKED")
-            continue
+        # AI_TURN.md: LoS check already done in build_unit_los_cache()
+        # We filtered los_cache above to only include targets with has_los == True
+        # So we can skip LoS check here (performance optimization)
         
         # Unit within range of AT LEAST 1 weapon from weapon_available_pool? -> NO -> Skip enemy unit
         # CRITICAL: Reuse distance already calculated above (distance_to_enemy)
@@ -1286,6 +1430,25 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     if "weapon_rule" not in game_state:
         raise KeyError("game_state missing required 'weapon_rule' field")
     weapon_rule = game_state["weapon_rule"]
+    
+    # CRITICAL: Ensure los_cache exists and is up-to-date before calling valid_target_pool_build
+    # This can happen if shooting_build_valid_target_pool is called before shooting_unit_activation_start
+    # OR if unit has advanced since los_cache was built
+    unit_id_str = str(unit_id)
+    has_advanced = unit_id_str in game_state.get("units_advanced", set())
+    
+    # Check if los_cache needs to be rebuilt (missing or unit has advanced)
+    if "los_cache" not in unit or has_advanced:
+        # Build position_cache if missing
+        if "position_cache" not in game_state:
+            build_position_cache(game_state)
+        
+        # Build los_cache for unit (rebuild if unit has advanced)
+        if unit_id_str not in game_state.get("units_fled", set()):
+            build_unit_los_cache(game_state, unit_id)
+        else:
+            # Unit has fled - cannot shoot, so no los_cache needed
+            unit["los_cache"] = {}
     
     # Call valid_target_pool_build with context parameters
     # Use advance_status and adjacent_status already calculated above (lines 885, 890-892)
@@ -1797,6 +1960,9 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
     # Clear unit activation state
     if "valid_target_pool" in unit:
         del unit["valid_target_pool"]
+    # AI_TURN.md: Clean up los_cache at end of activation
+    if "los_cache" in unit:
+        del unit["los_cache"]
     if "TOTAL_ATTACK_LOG" in unit:
         del unit["TOTAL_ATTACK_LOG"]
     if "selected_target_id" in unit:
@@ -2613,9 +2779,6 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     """
     AI_SHOOT.md: Handle target selection and shooting execution.
     Supports both agent-selected targetId and auto-selection fallback for humans.
-    
-    CRITICAL: Rebuild target pool just before execution to ensure it's up-to-date.
-    Other units may have moved since the pool was first built.
     """    
     try:
         unit = _get_unit_by_id(game_state, unit_id)
@@ -3194,9 +3357,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             episode = game_state.get("episode_number", "?")
             turn = game_state.get("turn", "?")
             from engine.game_utils import add_console_log, add_debug_log
-            add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} target_died: Unit {target['id']} died (HP_CUR={target['HP_CUR']}), calling _remove_dead_unit_from_pools")
+            add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} target_died: Unit {target['id']} died (HP_CUR={target['HP_CUR']}), calling update_los_cache_after_target_death")
+            
+            # AI_TURN.md: Update los_cache after target death (remove entry, no recalculation)
+            update_los_cache_after_target_death(game_state, target["id"])
+            
             # PERFORMANCE: Invalidate LoS cache for dead unit (partial invalidation)
+            # DEPRECATED: Keep for backward compatibility with global cache
             _invalidate_los_cache_for_unit(game_state, target["id"])
+            
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate cache for dead unit (can't attack anymore)
             from engine.ai.weapon_selector import invalidate_cache_for_unit
             invalidate_cache_for_unit(cache, str(target["id"]))
@@ -3698,29 +3867,16 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
     
-    # PERFORMANCE: Use cached enemy_adjacent_hexes for O(1) lookup
-    # Cache is built at phase start and stored in game_state
-    # CRITICAL: Use current_player directly (cache is built with current_player at phase start)
-    # CRITICAL: Validate cache exists (no fallback)
-    current_player = game_state.get("current_player")
-    if current_player is None:
-        raise KeyError("game_state missing required 'current_player' field")
-    cache_key = f"enemy_adjacent_hexes_player_{current_player}"
-    if cache_key not in game_state:
-        raise KeyError(f"enemy_adjacent_hexes cache missing for player {current_player} - _build_enemy_adjacent_hexes() must be called at phase start")
-    
-    # Use cache: check if unit position is in adjacent hexes set
+    # CRITICAL FIX: Check adjacency using current positions from game_state["units"]
+    # The cache built at phase start may be stale if unit positions changed after movement.
+    # Always use current positions for accurate adjacency checks.
     unit_col, unit_row = get_unit_coordinates(unit)
-    enemy_adjacent_hexes = game_state[cache_key]
-    return (unit_col, unit_row) in enemy_adjacent_hexes
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
     
-    # NOTE: Removed fallback - cache must exist (AI_TURN.md compliance: no fallbacks)
-    # CRITICAL: Normalize player value to int for consistent comparison
+    # Check if unit is adjacent to any enemy using current positions
     for enemy in game_state["units"]:
-        # CRITICAL: Normalize player value to int for consistent comparison
         enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
         if enemy_player != unit_player and enemy["HP_CUR"] > 0:
-            unit_col, unit_row = get_unit_coordinates(unit)
             enemy_col, enemy_row = get_unit_coordinates(enemy)
             distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= cc_range:
@@ -3783,130 +3939,6 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     pool = shooting_build_activation_pool(game_state)
     return pool
 
-def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
-    """Calculate target priority score using AI_GAME_OVERVIEW.md logic.
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_DMG/CC_DMG
-    """
-    
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max DMG from all weapons
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
-    
-    # Calculate max threat from target's weapons
-    target_rng_weapon = get_selected_ranged_weapon(target)
-    target_cc_weapon = get_selected_melee_weapon(target)
-    target_rng_dmg = target_rng_weapon.get("DMG", 0) if target_rng_weapon else 0
-    target_cc_dmg = target_cc_weapon.get("DMG", 0) if target_cc_weapon else 0
-    # Also check all weapons for max threat
-    if target.get("RNG_WEAPONS"):
-        target_rng_dmg = max(target_rng_dmg, max(w.get("DMG", 0) for w in target["RNG_WEAPONS"]))
-    if target.get("CC_WEAPONS"):
-        target_cc_dmg = max(target_cc_dmg, max(w.get("DMG", 0) for w in target["CC_WEAPONS"]))
-    
-    threat_level = max(target_rng_dmg, target_cc_dmg)
-    
-    # Calculate if unit can kill target in 1 phase (use selected weapon or first weapon)
-    unit_rng_weapon = get_selected_ranged_weapon(unit)
-    if not unit_rng_weapon and unit.get("RNG_WEAPONS"):
-        unit_rng_weapon = unit["RNG_WEAPONS"][0]
-    unit_rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
-    can_kill_1_phase = target["HP_CUR"] <= unit_rng_dmg
-    
-    # Priority 1: High threat that melee can charge but won't kill (score: 1000)
-    if threat_level >= 3:  # High threat threshold
-        melee_can_charge = _check_if_melee_can_charge(target, game_state)
-        if melee_can_charge and target["HP_CUR"] > 2:  # Won't die to melee in 1 phase
-            return 1000 + threat_level
-    
-    # Priority 2: High threat that can be killed in 1 shooting phase (score: 800) 
-    if can_kill_1_phase and threat_level >= 3:
-        return 800 + threat_level
-    
-    # Priority 3: High threat, lowest HP that can be killed (score: 600)
-    if can_kill_1_phase and threat_level >= 2:
-        return 600 + threat_level + (10 - target["HP_CUR"])  # Prefer lower HP
-    
-    # Default: threat level only
-    return threat_level
-
-def _enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """Enrich unit data for reward mapper compatibility (matches engine format)."""
-    if not unit:
-        return {}
-    
-    # Direct field access with validation
-    if "agent_mapping" not in game_state:
-        agent_mapping = {}
-    else:
-        agent_mapping = game_state["agent_mapping"]
-    
-    unit_id_key = str(unit["id"])
-    if unit_id_key in agent_mapping:
-        controlled_agent = agent_mapping[unit_id_key]
-    elif "unitType" in unit:
-        controlled_agent = unit["unitType"]
-    elif "unit_type" in unit:
-        controlled_agent = unit["unit_type"]
-    else:
-        controlled_agent = "default"
-    
-    enriched = unit.copy()
-    
-    # All required fields must be present
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_DMG/RNG_DMG
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
-    
-    if "HP_CUR" not in unit:
-        raise KeyError(f"Unit missing required 'HP_CUR' field: {unit}")
-    
-    # Get max DMG from weapons
-    unit_rng_weapon = get_selected_ranged_weapon(unit)
-    unit_cc_weapon = get_selected_melee_weapon(unit)
-    rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
-    cc_dmg = unit_cc_weapon.get("DMG", 0) if unit_cc_weapon else 0
-    # Also check all weapons for max DMG
-    if unit.get("RNG_WEAPONS"):
-        rng_dmg = max(rng_dmg, max(w.get("DMG", 0) for w in unit["RNG_WEAPONS"]))
-    if unit.get("CC_WEAPONS"):
-        cc_dmg = max(cc_dmg, max(w.get("DMG", 0) for w in unit["CC_WEAPONS"]))
-    
-    enriched.update({
-        "controlled_agent": controlled_agent,
-        "unitType": controlled_agent,  # Use controlled_agent as unitType
-        "name": unit["name"] if "name" in unit else f"Unit_{unit['id']}",
-        "cc_dmg": cc_dmg,
-        "rng_dmg": rng_dmg,
-        "CUR_HP": unit["HP_CUR"]
-    })
-    
-    return enriched
-
-def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-    """Check if any friendly melee unit can charge this target."""
-    current_player = game_state["current_player"]
-    
-    for unit in game_state["units"]:
-        if (unit["player"] == current_player and 
-            unit["HP_CUR"] > 0):
-            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
-            from engine.utils.weapon_helpers import get_selected_melee_weapon
-            has_melee = False
-            if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
-                melee_weapon = get_selected_melee_weapon(unit)
-                if melee_weapon and melee_weapon.get("DMG", 0) > 0:
-                    has_melee = True
-            if has_melee:  # Has melee capability
-                
-                # Estimate charge range (unit move + average 2d6)
-                distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
-                if "MOVE" not in unit:
-                    raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                max_charge = unit["MOVE"] + 7  # Average 2d6 = 7
-            
-            if distance <= max_charge:
-                return True
-    
-    return False
-
 
 # ============================================================================
 # ADVANCE_IMPLEMENTATION: Advance action handler
@@ -3921,16 +3953,24 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     Unit is only marked as "advanced" if it actually moved to a different hex.
     """
     import random
+    from engine.combat_utils import get_hex_neighbors, is_hex_adjacent_to_enemy
     from engine.phase_handlers.movement_handlers import (
         movement_build_valid_destinations_pool,
-        _get_hex_neighbors,
-        _is_traversable_hex,
-        _is_hex_adjacent_to_enemy,
-        _build_enemy_adjacent_hexes
+        _is_traversable_hex
     )
+    from .shared_utils import build_enemy_adjacent_hexes
     
     unit_id = unit["id"]
     orig_col, orig_row = get_unit_coordinates(unit)
+    
+    # CRITICAL: Cannot advance if unit has already shot
+    has_shot = _unit_has_shot_with_any_weapon(unit)
+    if has_shot:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        from engine.game_utils import add_console_log, add_debug_log
+        add_console_log(game_state, f"[ADVANCE REJECTED] E{episode} T{turn} Unit {unit_id} cannot advance - unit has already shot")
+        return False, {"error": "cannot_advance_after_shooting", "unitId": unit_id}
     
     # CRITICAL: Cannot advance if unit is adjacent to enemy
     # Pool is source of truth: if can_advance is False, unit cannot advance
@@ -4055,9 +4095,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             # CRITICAL: Invalidate LoS cache when unit advances (moves)
             _invalidate_los_cache_for_moved_unit(game_state, unit["id"])
             
-            # CRITICAL: Rebuild LoS cache for this unit with new position
-            # This ensures cache is up-to-date for subsequent pool building
-            _rebuild_los_cache_for_unit(game_state, unit["id"])
+            # AI_TURN.md STEP 4: Rebuild unit's los_cache with new position after advance
+            # CRITICAL: Rebuild unit-local cache (not global cache) with new position
+            build_unit_los_cache(game_state, unit["id"])
             
             # CRITICAL: Invalidate all destination pools after advance movement
             # Positions have changed, so all pools (move, charge, shoot) are now stale
@@ -4150,8 +4190,17 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             # YES -> SHOOTING ACTIONS AVAILABLE (post-advance) -> Go to STEP 5: ADVANCED_SHOOTING_ACTION_SELECTION
             # Mark unit as currently active (required for frontend to show weapon icon)
             game_state["active_shooting_unit"] = unit_id
-            # Continue to shooting action selection (post-advance state)
-            return _shooting_unit_execution_loop(game_state, unit_id, config)
+            # Return advance action so it gets logged as its own step
+            return True, {
+                "action": "advance",
+                "unitId": unit_id,
+                "fromCol": orig_col,
+                "fromRow": orig_row,
+                "toCol": dest_col,
+                "toRow": dest_row,
+                "advance_range": advance_range,
+                "actually_moved": actually_moved
+            }
         else:
             # NO -> Unit advanced but no valid targets -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
             # arg3="ADVANCE", arg4="SHOOTING", arg5=1 (remove from pool)

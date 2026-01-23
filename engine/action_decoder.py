@@ -275,7 +275,7 @@ class ActionDecoder:
 
                 # Get unit to activate and build destinations
                 from engine.phase_handlers import movement_handlers
-                unit = movement_handlers._get_unit_by_id(game_state, selected_unit_id)
+                unit = get_unit_by_id(selected_unit_id, game_state)
 
                 # Build valid destinations using BFS
                 movement_handlers.movement_build_valid_destinations_pool(game_state, selected_unit_id)

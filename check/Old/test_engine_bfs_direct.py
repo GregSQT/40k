@@ -9,7 +9,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import minimal dependencies
-from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
+from engine.combat_utils import get_hex_neighbors
+from engine.phase_handlers.movement_handlers import _is_traversable_hex
 
 # Load board config manually
 import json
@@ -67,7 +68,7 @@ while queue and step < 20:
             print("  -> At max range")
         continue
 
-    neighbors = _get_hex_neighbors(current_col, current_row)
+    neighbors = get_hex_neighbors(current_col, current_row)
 
     for neighbor_col, neighbor_row in neighbors:
         neighbor_pos = (neighbor_col, neighbor_row)

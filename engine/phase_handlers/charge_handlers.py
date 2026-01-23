@@ -10,7 +10,12 @@ ZERO TOLERANCE for state storage or wrapper patterns
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from engine.game_utils import add_console_log, safe_print
-from engine.combat_utils import get_unit_coordinates, normalize_coordinates
+from engine.combat_utils import (
+    get_unit_coordinates, 
+    normalize_coordinates,
+    get_unit_by_id,
+    get_hex_neighbors
+)
 
 
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,8 +40,8 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for current player
     # Cache will be reused throughout the phase for all units (invalidated after each charge)
     current_player = game_state.get("current_player", 1)
-    from engine.phase_handlers.movement_handlers import _build_enemy_adjacent_hexes
-    _build_enemy_adjacent_hexes(game_state, current_player)
+    from .shared_utils import build_enemy_adjacent_hexes
+    build_enemy_adjacent_hexes(game_state, current_player)
 
     # Build activation pool
     charge_build_activation_pool(game_state)
@@ -180,7 +185,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return False, {"error": "unit_not_eligible", "unitId": unit_id, "action": action_type}
 
     # Get unit object for processing
-    active_unit = _get_unit_by_id(game_state, unit_id)
+    active_unit = get_unit_by_id(game_state, unit_id)
     if not active_unit:
         return False, {"error": "unit_not_found", "unitId": unit_id, "action": action_type}
 
@@ -426,7 +431,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     
     Returns list of target dicts with unit info.
     """
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
     
@@ -510,7 +515,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     NEW RULE: At activation, show all possible charge targets without rolling.
     The roll happens AFTER target selection.
     """
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
@@ -784,7 +789,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
             if distance_to_enemy == TARGET_MAX_DISTANCE:
                 # Check if there's a path of 12 hexes that can reach adjacent to this enemy
                 # This means we need to check if any hex adjacent to enemy is reachable in 12 moves
-                enemy_neighbors = _get_hex_neighbors(enemy_col, enemy_row)
+                enemy_neighbors = get_hex_neighbors(enemy_col, enemy_row)
                 for neighbor_col, neighbor_row in enemy_neighbors:
                     # Check if this neighbor is reachable in 12 moves from unit
                     neighbor_distance = _calculate_hex_distance(unit_col, unit_row, neighbor_col, neighbor_row)
@@ -811,7 +816,7 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     unit_col, unit_row = get_unit_coordinates(unit)
 
     # CRITICAL FIX: Use hex distance calculation directly
-    # This is more reliable than _get_hex_neighbors() which may have bugs
+    # This is more reliable than get_hex_neighbors() which may have bugs
     # Distance <= cc_range = adjacent (cc_range is always 1 for melee)
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
@@ -841,7 +846,7 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
         return (col, row) in enemy_adjacent_hexes
 
     # Fallback: compute dynamically (original behavior)
-    hex_neighbors = set(_get_hex_neighbors(col, row))
+    hex_neighbors = set(get_hex_neighbors(col, row))
 
     for enemy in game_state["units"]:
         if enemy["player"] != player and enemy["HP_CUR"] > 0:
@@ -871,7 +876,7 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
                 return None
     
     # Then check neighbors (adjacent enemies, distance == 1)
-    hex_neighbors = set(_get_hex_neighbors(col, row))
+        hex_neighbors = set(get_hex_neighbors(col, row))
     adjacent_enemies = []
     for enemy in game_state["units"]:
         if enemy["player"] != player and enemy["HP_CUR"] > 0:
@@ -884,39 +889,6 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
         return result_id
     else:
         return None
-
-
-def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
-    """
-    Get all 6 hexagonal neighbors for offset coordinates.
-    
-    Hex neighbor offsets depend on whether column is even or odd.
-    Even columns: NE/SE are (+1, -1) and (+1, 0)
-    Odd columns: NE/SE are (+1, 0) and (+1, +1)
-    """
-    # Determine if column is even or odd
-    parity = col & 1  # 0 for even, 1 for odd
-    
-    if parity == 0:  # Even column
-        neighbors = [
-            (col, row - 1),      # N
-            (col + 1, row - 1),  # NE
-            (col + 1, row),      # SE
-            (col, row + 1),      # S
-            (col - 1, row),      # SW
-            (col - 1, row - 1)   # NW
-        ]
-    else:  # Odd column
-        neighbors = [
-            (col, row - 1),      # N
-            (col + 1, row),      # NE
-            (col + 1, row + 1),  # SE
-            (col, row + 1),      # S
-            (col - 1, row + 1),  # SW
-            (col - 1, row)       # NW
-        ]
-    
-    return neighbors
 
 
 def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any],
@@ -968,7 +940,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     Args:
         target_id: Optional target unit ID. If provided, only hexes adjacent to this target are included.
     """
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
 
@@ -979,7 +951,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     # Get target enemy if specified, otherwise all enemies
     if target_id:
-        target = _get_unit_by_id(game_state, target_id)
+        target = get_unit_by_id(game_state, target_id)
         if not target or target["player"] == unit["player"] or target["HP_CUR"] <= 0:
             return []  # Invalid target
         enemies = [target]
@@ -1038,7 +1010,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             continue
 
         # Explore all 6 hex neighbors
-        neighbors = _get_hex_neighbors(current_col, current_row)
+        neighbors = get_hex_neighbors(current_col, current_row)
 
         for neighbor_col, neighbor_row in neighbors:
             # CRITICAL: Convert coordinates to int IMMEDIATELY to ensure all tuples are (int, int)
@@ -1297,7 +1269,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     if target_id is None:
         return False, {"error": "missing_target", "action": "charge"}
 
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
@@ -1459,7 +1431,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     except (ValueError, TypeError):
         return False, {"error": "invalid_destination_type", "destCol": dest_col, "destRow": dest_row, "action": "charge"}
 
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
@@ -1790,12 +1762,3 @@ def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state.
-
-    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
-    """
-    for unit in game_state["units"]:
-        if str(unit["id"]) == str(unit_id):
-            return unit
-    return None

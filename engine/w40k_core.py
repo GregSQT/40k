@@ -243,10 +243,6 @@ class W40KEngine(gym.Env):
         self.config["pve_mode"] = self.is_pve_mode
         self._ai_model = None
         
-        # CRITICAL: Ensure PvE mode is properly propagated to handlers
-        if self.is_pve_mode:
-            self.config["pve_mode"] = True
-        
         # CRITICAL: Initialize game_state FIRST before any other operations
         self.game_state = {
             # Core game state
@@ -455,16 +451,6 @@ class W40KEngine(gym.Env):
         })
         self._episode_step_calls = 0  # Safety: reset for runaway truncation check in step()
 
-        # DIAGNOSTIC: Log debug_mode status on reset (write to debug.log) - DISABLED TEMPORARILY
-        # if self.debug_mode:
-        #     movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
-        #     try:
-        #         with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
-        #             f.write(f"[DIAGNOSTIC] DEBUG MODE ENABLED: gym_training_mode={self.gym_training_mode}, debug_mode={self.debug_mode}\n")
-        #             f.flush()
-        #     except Exception:
-        #         pass
-
         # Reset unit health and positions to original scenario values
         # AI_TURN.md COMPLIANCE: Direct access - units must be provided
         if "units" not in self.config:
@@ -555,7 +541,6 @@ class W40KEngine(gym.Env):
             
             # Use _scenario_wall_hexes (set during scenario loading) - convert to step_logger format
             raw_walls = self._scenario_wall_hexes if self._scenario_wall_hexes is not None else []
-            from engine.combat_utils import normalize_coordinates
             walls = [{"col": normalize_coordinates(w[0], w[1])[0], "row": normalize_coordinates(w[0], w[1])[1]} for w in raw_walls] if raw_walls else []
             # Use _scenario_objectives (set during scenario loading)
             objectives = self._scenario_objectives if hasattr(self, '_scenario_objectives') else None
@@ -693,11 +678,6 @@ class W40KEngine(gym.Env):
 
             # Reset per-step counter
             self._units_activated_this_step = 0
-        
-        if isinstance(action_result, tuple) and len(action_result) == 2:
-            success, result = action_result
-        else:
-            success, result = True, action_result
         
         # Log action ONLY if it's a real agent action with valid unit
         # Note: pre_action_phase, pre_action_player, and pre_action_turn are already captured
@@ -928,17 +908,6 @@ class W40KEngine(gym.Env):
         if "console_logs" in self.game_state and self.game_state["console_logs"]:
             movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
             log_count = len(self.game_state["console_logs"])
-            step_logger_debug_count = sum(1 for log in self.game_state["console_logs"] if "[STEP LOGGER DEBUG]" in str(log))
-            
-            # DIAGNOSTIC: Log before writing (write to debug.log) - DISABLED TEMPORARILY
-            # if step_logger_debug_count > 0:
-            #     diagnostic_msg = f"[DIAGNOSTIC] Writing {log_count} console logs to debug.log ({step_logger_debug_count} STEP LOGGER DEBUG messages)"
-            #     try:
-            #         with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
-            #             f.write(diagnostic_msg + "\n")
-            #             f.flush()
-            #     except Exception:
-            #         pass
             
             try:
                 # CRITICAL: Only write to debug.log if debug_mode is enabled (--debug flag)
@@ -954,16 +923,6 @@ class W40KEngine(gym.Env):
                             log_msg = log_msg.encode('utf-8', errors='replace').decode('utf-8')
                             f.write(log_msg + "\n")
                         f.flush()  # Always flush in debug mode for immediate visibility
-                
-                # DIAGNOSTIC: Log after writing (write to debug.log) - DISABLED TEMPORARILY
-                # if step_logger_debug_count > 0:
-                #     diagnostic_msg = f"[DIAGNOSTIC] Successfully wrote {log_count} logs to debug.log"
-                #     try:
-                #         with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
-                #             f.write(diagnostic_msg + "\n")
-                #             f.flush()
-                #     except Exception:
-                #         pass
                 
                 # Clear console_logs after writing to avoid duplicates
                 self.game_state["console_logs"] = []
@@ -1486,13 +1445,15 @@ class W40KEngine(gym.Env):
                                     if target_unit:
                                         target_coords = get_unit_coordinates(target_unit)
                                     
-                                    # CRITICAL FIX: Use pre_action_positions for actual shooter (not unit_id from result)
-                                    # This ensures consistent position logging and avoids using stale positions
-                                    if str(actual_shooter_id) in pre_action_positions:
-                                        unit_col, unit_row = pre_action_positions[str(actual_shooter_id)]
-                                    elif actual_shooter_unit:
-                                        # Fallback to actual_shooter_unit position
+                                    # CRITICAL FIX: Use CURRENT position from game_state for combat actions
+                                    # Units do NOT move during FIGHT phase, so use current position from game_state
+                                    # This ensures accurate position logging after movements in previous phases
+                                    if actual_shooter_unit:
+                                        # Use current position from game_state (source of truth)
                                         unit_col, unit_row = get_unit_coordinates(actual_shooter_unit)
+                                    elif str(actual_shooter_id) in pre_action_positions:
+                                        # Fallback to pre_action_positions if unit not found
+                                        unit_col, unit_row = pre_action_positions[str(actual_shooter_id)]
                                     else:
                                         # Last resort: use updated_unit position
                                         unit_col, unit_row = get_unit_coordinates(updated_unit)

@@ -53,8 +53,8 @@ else:
 print("\n--- Test 2: All 6 hexagonal neighbors ---")
 unit_pos = (10, 10)
 # Use the actual _get_hex_neighbors function to get the correct neighbors
-from engine.phase_handlers.charge_handlers import _get_hex_neighbors
-real_neighbors = _get_hex_neighbors(unit_pos[0], unit_pos[1])
+from engine.combat_utils import get_hex_neighbors
+real_neighbors = get_hex_neighbors(unit_pos[0], unit_pos[1])
 direction_names = ["N (north)", "NE (north-east)", "SE (south-east)", "S (south)", "SW (south-west)", "NW (north-west)"]
 hex_neighbors = [(col, row, name) for (col, row), name in zip(real_neighbors, direction_names)]
 

@@ -3,7 +3,7 @@ def extract_episode(file_path, episode_number):
     Extrait un épisode spécifique du fichier log.
     
     Args:
-        file_path: Chemin vers le fichier step.log
+        file_path: Chemin vers le fichier log (step.log ou debug.log)
         episode_number: Numéro de l'épisode à extraire (1, 2, 3, ...)
     
     Returns:
@@ -15,23 +15,26 @@ def extract_episode(file_path, episode_number):
     captured_lines = []
     in_episode = False
     
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            # Démarrer la capture quand on trouve le marqueur de début
-            if start_marker in line:
-                in_episode = True
-                captured_lines.append(line)
-                continue
-            
-            # Arrêter la capture quand on trouve le marqueur de fin
-            if in_episode and end_marker in line:
-                break
-            
-            # Capturer les lignes de l'épisode
-            if in_episode:
-                captured_lines.append(line)
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Démarrer la capture quand on trouve le marqueur de début
+                if start_marker in line:
+                    in_episode = True
+                    captured_lines.append(line)
+                    continue
+                
+                # Arrêter la capture quand on trouve le marqueur de fin
+                if in_episode and end_marker in line:
+                    break
+                
+                # Capturer les lignes de l'épisode
+                if in_episode:
+                    captured_lines.append(line)
+    except FileNotFoundError:
+        return None
     
-    return ''.join(captured_lines)
+    return ''.join(captured_lines) if captured_lines else None
 
 
 if __name__ == "__main__":
@@ -39,8 +42,8 @@ if __name__ == "__main__":
     
     # Vérifier les arguments
     if len(sys.argv) < 2:
-        print("Usage: python check/ep1.py <episode_number> [input_file]")
-        print("Example: python check/ep1.py 4 step.log")
+        print("Usage: python check/episode.py <episode_number>")
+        print("Example: python check/episode.py 4")
         sys.exit(1)
     
     try:
@@ -49,19 +52,39 @@ if __name__ == "__main__":
         print(f"Erreur: '{sys.argv[1]}' n'est pas un numéro d'épisode valide")
         sys.exit(1)
     
-    # Fichier source (step.log par défaut, ou deuxième argument)
-    input_file = sys.argv[2] if len(sys.argv) > 2 else "step.log"
+    # Extraire l'épisode de step.log
+    step_content = extract_episode("step.log", episode_number)
+    if not step_content:
+        print(f"⚠️  Épisode {episode_number} non trouvé dans step.log")
+        step_content = ""
     
-    # Extraire l'épisode
-    content = extract_episode(input_file, episode_number)
+    # Extraire l'épisode de debug.log
+    debug_content = extract_episode("debug.log", episode_number)
+    if not debug_content:
+        print(f"⚠️  Épisode {episode_number} non trouvé dans debug.log")
+        debug_content = ""
     
-    if not content:
-        print(f"⚠️  Épisode {episode_number} non trouvé dans {input_file}")
+    # Combiner les deux contenus
+    combined_content = ""
+    if step_content:
+        combined_content += "=== STEP.LOG ===\n"
+        combined_content += step_content
+        combined_content += "\n"
+    if debug_content:
+        combined_content += "=== DEBUG.LOG ===\n"
+        combined_content += debug_content
+    
+    if not combined_content:
+        print(f"❌ Épisode {episode_number} non trouvé dans step.log ni debug.log")
         sys.exit(1)
     
     # Écrire dans episode<numéro>.log
     output_file = f"episode{episode_number}.log"
     with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(content)
+        f.write(combined_content)
     
     print(f"✅ Épisode {episode_number} extrait et écrit dans {output_file}")
+    if step_content:
+        print(f"   - step.log: {len(step_content.splitlines())} lignes")
+    if debug_content:
+        print(f"   - debug.log: {len(debug_content.splitlines())} lignes")

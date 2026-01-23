@@ -1904,7 +1904,8 @@ class RewardCalculator:
         AI_TRAINING.md: Estimate damage received, accounting for enemy movement decisions
         and targeting priorities. Uses smart targeting (enemies are intelligent).
         """
-        from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
+        from engine.combat_utils import get_hex_neighbors
+        from engine.phase_handlers.movement_handlers import _is_traversable_hex
 
         col, row = position
         col_int, row_int = normalize_coordinates(col, row)
@@ -2039,7 +2040,8 @@ class RewardCalculator:
         Cache is valid within a phase (enemies don't move during ally movement).
         Cache cleared in movement_phase_start when phase transitions.
         """
-        from engine.phase_handlers.movement_handlers import _get_hex_neighbors, _is_traversable_hex
+        from engine.combat_utils import get_hex_neighbors
+        from engine.phase_handlers.movement_handlers import _is_traversable_hex
 
         # Check cache first - enemy reachable positions are static within a phase
         if "enemy_reachable_cache" in game_state:
@@ -2068,7 +2070,7 @@ class RewardCalculator:
             if current_dist >= move_range:
                 continue
 
-            neighbors = _get_hex_neighbors(current_pos[0], current_pos[1])
+            neighbors = get_hex_neighbors(current_pos[0], current_pos[1])
 
             for neighbor_col, neighbor_row in neighbors:
                 neighbor_pos = (neighbor_col, neighbor_row)

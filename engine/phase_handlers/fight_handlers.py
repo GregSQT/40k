@@ -12,7 +12,13 @@ from .generic_handlers import end_activation
 from . import shooting_handlers
 from .shooting_handlers import _has_line_of_sight  # CRITICAL: Import for _is_valid_shooting_target (shooting validation in fight phase)
 from engine.game_utils import add_console_log, safe_print
-from engine.combat_utils import get_unit_coordinates, normalize_coordinates
+from engine.combat_utils import (
+    get_unit_coordinates, 
+    normalize_coordinates, 
+    calculate_hex_distance,
+    get_unit_by_id
+)
+from .shared_utils import calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge
 
 # Import functions from shooting_handlers for cross-phase functionality
 _cache_size_limit = shooting_handlers._cache_size_limit
@@ -127,7 +133,7 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
         for unit_id in charging_activation_pool:
-            unit = _get_unit_by_id(game_state, unit_id)
+            unit = get_unit_by_id(game_state, unit_id)
             if unit:
                 log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight build_pools: Unit {unit_id} (player {unit['player']}) ADDED to charging_pool"
                 add_console_log(game_state, log_msg)
@@ -198,7 +204,7 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             enemy_col, enemy_row = get_unit_coordinates(enemy)
-            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+            distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy['id']} @ ({enemy['col']},{enemy['row']}) distance={distance}")
             if distance <= cc_range:
                 add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy['id']} (dist {distance} <= melee_range {cc_range})")
@@ -217,7 +223,7 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
     if not valid_targets:
         return ""
 
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return valid_targets[0]
     
@@ -242,13 +248,13 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
         reward_mapper = RewardMapper(unit_reward_config)
 
         # Build target list for reward mapper
-        all_targets = [_get_unit_by_id(game_state, tid) for tid in valid_targets if _get_unit_by_id(game_state, tid)]
+        all_targets = [get_unit_by_id(game_state, tid) for tid in valid_targets if get_unit_by_id(game_state, tid)]
 
         best_target = valid_targets[0]
         best_reward = -999999
 
         for target_id in valid_targets:
-            target = _get_unit_by_id(game_state, target_id)
+            target = get_unit_by_id(game_state, target_id)
             if not target:
                 continue
 
@@ -297,7 +303,7 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
             unit_col, unit_row = get_unit_coordinates(unit)
             enemy_col, enemy_row = get_unit_coordinates(enemy)
-            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+            distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if "CC_RNG" not in unit:
                 raise KeyError(f"Unit missing required 'CC_RNG' field: {unit}")
             
@@ -336,7 +342,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
     # Range check using proper hex distance
-    distance = _calculate_hex_distance(*get_unit_coordinates(shooter), *get_unit_coordinates(target))
+    distance = calculate_hex_distance(*get_unit_coordinates(shooter), *get_unit_coordinates(target))
     # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
     if "RNG_RNG" not in shooter:
         raise KeyError(f"Shooter missing required 'RNG_RNG' field: {shooter}")
@@ -385,7 +391,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
                 # CRITICAL: Normalize coordinates for consistent distance calculation
                 friendly_col_int, friendly_row_int = get_unit_coordinates(friendly)
                 target_col_int, target_row_int = get_unit_coordinates(target)
-                friendly_distance = _calculate_hex_distance(target_col_int, target_row_int, friendly_col_int, friendly_row_int)
+                friendly_distance = calculate_hex_distance(target_col_int, target_row_int, friendly_col_int, friendly_row_int)
                 
                 if friendly_distance <= melee_range:
                     # Enemy is engaged with friendly unit - cannot shoot
@@ -415,7 +421,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     AI_TURN.md EXACT: Start unit activation from shoot_activation_pool
     Clear valid_target_pool, clear TOTAL_ACTION_LOG, SHOOT_LEFT = RNG_NB
     """
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return {"error": "unit_not_found", "unitId": unit_id, "action": "combat"}
     
@@ -442,6 +448,22 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         unit["SHOOT_LEFT"] = weapon["NB"]
     else:
         unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
+    
+    # AI_TURN.md STEP 0: Build position_cache if missing (needed for fight phase shooting)
+    if "position_cache" not in game_state:
+        from .shooting_handlers import build_position_cache
+        build_position_cache(game_state)
+    
+    # AI_TURN.md STEP 2: Build unit's los_cache at activation
+    # CRITICAL: Only build los_cache if unit has not fled (units that fled cannot shoot)
+    unit_id_str = str(unit_id)
+    if unit_id_str not in game_state.get("units_fled", set()):
+        from .shooting_handlers import build_unit_los_cache
+        build_unit_los_cache(game_state, unit_id)
+    else:
+        # Unit has fled - cannot shoot, so no los_cache needed
+        unit["los_cache"] = {}
+    
     unit["valid_target_pool"] = []
     unit["TOTAL_ATTACK_LOG"] = ""
     unit["selected_target_id"] = None  # For two-click confirmation
@@ -468,7 +490,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     """
     global _target_pool_cache
 
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
 
@@ -504,7 +526,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         current_player_int = int(current_player) if current_player is not None else None
         unit_id_str = str(unit["id"])
         for target_id in cached_pool:
-            target = _get_unit_by_id(game_state, target_id)
+            target = get_unit_by_id(game_state, target_id)
             if target and target["HP_CUR"] > 0:
                 # CRITICAL: First check - target must not be the shooter itself
                 if str(target["id"]) == unit_id_str:
@@ -527,6 +549,23 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         return alive_targets
 
     # Cache miss: Build target pool from scratch (expensive)
+    # CRITICAL: Ensure los_cache exists before calling valid_target_pool_build
+    # This can happen if shooting_build_valid_target_pool is called before shooting_unit_activation_start
+    if "los_cache" not in unit:
+        # Build position_cache if missing
+        if "position_cache" not in game_state:
+            from .shooting_handlers import build_position_cache
+            build_position_cache(game_state)
+        
+        # Build los_cache for unit
+        unit_id_str = str(unit_id)
+        if unit_id_str not in game_state.get("units_fled", set()):
+            from .shooting_handlers import build_unit_los_cache
+            build_unit_los_cache(game_state, unit_id)
+        else:
+            # Unit has fled - cannot shoot, so no los_cache needed
+            unit["los_cache"] = {}
+    
     # CRITICAL: Use valid_target_pool_build from shooting_handlers to ensure consistent validation
     # This ensures all rules are checked (friendly fire, engaged enemies, etc.)
     from .shooting_handlers import valid_target_pool_build
@@ -547,7 +586,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     unit_id_str = str(unit_id)
     filtered_pool = []
     for target_id in valid_target_pool:
-        target = _get_unit_by_id(game_state, target_id)
+        target = get_unit_by_id(game_state, target_id)
         if target:
             # CRITICAL: Skip self
             if str(target["id"]) == unit_id_str:
@@ -613,12 +652,12 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     target_priorities = []  # [(target_id, priority_tuple)]
 
     for target_id in valid_target_pool:
-        target = _get_unit_by_id(game_state, target_id)
+        target = get_unit_by_id(game_state, target_id)
         if not target:
             target_priorities.append((target_id, (999, 0, 999)))
             continue
 
-        distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
+        distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
 
         # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_* fields
@@ -930,7 +969,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     AI_TURN.md EXACT: Execute While SHOOT_LEFT > 0 loop automatically
     """
     
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "action": "combat"}
     
@@ -959,7 +998,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             return True, result
     
     # CLEAN FLAG DETECTION: Use config parameter
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
     
     # CHANGE 1: Add gym_training_mode detection
@@ -1049,8 +1088,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # Check if there are units for the non-active player (opposite of current_player)
             opposite_player = 3 - current_player
             eligible_units = [uid for uid in current_pool 
-                            if _get_unit_by_id(game_state, uid) 
-                            and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
+                            if get_unit_by_id(game_state, uid) 
+                            and get_unit_by_id(game_state, uid).get("player") == opposite_player]
             if not eligible_units and active_alternating:
                 # Non-active player has no units, but active pool has units ->  switch to active
                 current_sub_phase = "alternating_active"
@@ -1063,8 +1102,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             current_pool = active_alternating
             # CRITICAL: active pool contains units of CURRENT player
             eligible_units = [uid for uid in current_pool 
-                            if _get_unit_by_id(game_state, uid) 
-                            and _get_unit_by_id(game_state, uid).get("player") == current_player]
+                            if get_unit_by_id(game_state, uid) 
+                            and get_unit_by_id(game_state, uid).get("player") == current_player]
             if not eligible_units and non_active_alternating:
                 # Active player has no units, but non_active pool has units -> switch to non_active
                 current_sub_phase = "alternating_non_active"
@@ -1079,8 +1118,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # CRITICAL: non_active pool contains units of OPPOSITE player
             opposite_player = 3 - current_player
             eligible_units = [uid for uid in current_pool 
-                            if _get_unit_by_id(game_state, uid) 
-                            and _get_unit_by_id(game_state, uid).get("player") == opposite_player]
+                            if get_unit_by_id(game_state, uid) 
+                            and get_unit_by_id(game_state, uid).get("player") == opposite_player]
             if not eligible_units:
                 # Non-active player has no units in cleanup pool -> end phase
                 return True, fight_phase_end(game_state)
@@ -1090,8 +1129,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             current_pool = active_alternating
             # CRITICAL: active pool contains units of CURRENT player
             eligible_units = [uid for uid in current_pool 
-                            if _get_unit_by_id(game_state, uid) 
-                            and _get_unit_by_id(game_state, uid).get("player") == current_player]
+                            if get_unit_by_id(game_state, uid) 
+                            and get_unit_by_id(game_state, uid).get("player") == current_player]
             if not eligible_units:
                 # Active player has no units in cleanup pool -> end phase
                 return True, fight_phase_end(game_state)
@@ -1115,10 +1154,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if "unitId" not in action:
             # Auto-select first unit from current pool for gym training
             # CRITICAL: Filter out dead units from pool before selection
-            alive_units_in_pool = [uid for uid in current_pool if _get_unit_by_id(game_state, uid) and _get_unit_by_id(game_state, uid)["HP_CUR"] > 0]
+            alive_units_in_pool = [uid for uid in current_pool if get_unit_by_id(game_state, uid) and get_unit_by_id(game_state, uid)["HP_CUR"] > 0]
             if alive_units_in_pool:
                 unit_id = alive_units_in_pool[0]
-                unit = _get_unit_by_id(game_state, unit_id)
+                unit = get_unit_by_id(game_state, unit_id)
                 if not unit:
                     return False, {"error": "unit_not_found", "unitId": unit_id, "action": action_type}
                 # Remove dead units from pool
@@ -1128,7 +1167,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 return True, fight_phase_end(game_state)
         else:
             unit_id = str(action["unitId"])
-            unit = _get_unit_by_id(game_state, unit_id)
+            unit = get_unit_by_id(game_state, unit_id)
             if not unit:
                 return False, {"error": "unit_not_found", "unitId": unit_id, "action": action_type}
     else:
@@ -1648,7 +1687,7 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
 
         # Adjacent check (within melee range)
         target_col, target_row = get_unit_coordinates(target)
-        distance = _calculate_hex_distance(unit_col, unit_row, target_col, target_row)
+        distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
         if distance > cc_range:
             continue
 
@@ -1685,7 +1724,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         return False, {"error": "invalid_target", "targetId": target_id, "valid_targets": valid_targets, "action": "combat"}
     
     # === MULTIPLE_WEAPONS_IMPLEMENTATION.md: Sélection d'arme pour cette cible ===
-    target = _get_unit_by_id(game_state, target_id)
+    target = get_unit_by_id(game_state, target_id)
     if not target:
         return False, {"error": "target_not_found", "targetId": target_id, "action": "combat"}
     
@@ -2199,7 +2238,7 @@ def _handle_fight_unit_switch(game_state: Dict[str, Any], current_unit: Dict[str
 
     if postpone_allowed:
         # Switch to new unit
-        new_unit = _get_unit_by_id(game_state, new_unit_id)
+        new_unit = get_unit_by_id(game_state, new_unit_id)
         if not new_unit:
             return False, {"error": "unit_not_found", "unitId": new_unit_id, "action": "combat"}
 
@@ -2221,7 +2260,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     import random
     from engine.utils.weapon_helpers import get_selected_melee_weapon
 
-    target = _get_unit_by_id(game_state, target_id)
+    target = get_unit_by_id(game_state, target_id)
     if not target:
         raise ValueError(f"Target unit not found: {target_id}")
 
@@ -2400,7 +2439,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
     AI_SHOOT.md: Handle target selection and shooting execution.
     Supports both agent-selected targetId and auto-selection fallback for humans.
     """    
-    unit = _get_unit_by_id(game_state, unit_id)
+    unit = get_unit_by_id(game_state, unit_id)
     
     if not unit:
         return False, {"error": "unit_not_found", "action": "combat"}
@@ -2430,7 +2469,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         # No target provided - auto-select first valid target (human player fallback)
         selected_target_id = valid_targets[0]
     
-    target = _get_unit_by_id(game_state, selected_target_id)
+    target = get_unit_by_id(game_state, selected_target_id)
     if not target:
         return False, {"error": "target_not_found", "targetId": selected_target_id, "action": "combat"}
     
@@ -2463,8 +2502,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     """
     AI_TURN.md EXACT: attack_sequence(RNG) implementation with proper logging
     """
-    shooter = _get_unit_by_id(game_state, unit_id)
-    target = _get_unit_by_id(game_state, target_id)
+    shooter = get_unit_by_id(game_state, unit_id)
+    target = get_unit_by_id(game_state, target_id)
     
     if not shooter or not target:
         return {"error": "unit_or_target_not_found", "action": "combat"}
@@ -2653,7 +2692,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                         # Find the lowest HP among all valid targets AT THE TIME OF SHOOTING
                         lowest_hp = float('inf')
                         for target_id in valid_target_ids:
-                            candidate = _get_unit_by_id(game_state, target_id)
+                            candidate = get_unit_by_id(game_state, target_id)
                             if not candidate:
                                 continue
 
@@ -2864,12 +2903,12 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
     AI_SHOOT.md: Handle switching between units in activation pool
     """
     # End current unit activation
-    current_unit = _get_unit_by_id(game_state, current_unit_id)
+    current_unit = get_unit_by_id(game_state, current_unit_id)
     if current_unit:
         _shooting_activation_end(game_state, current_unit, "WAIT", 1, "PASS", "SHOOTING")
     
     # Start new unit activation
-    new_unit = _get_unit_by_id(game_state, new_unit_id)
+    new_unit = get_unit_by_id(game_state, new_unit_id)
     if new_unit:
         result = shooting_unit_activation_start(game_state, new_unit_id)
         if result.get("success"):
@@ -2894,37 +2933,12 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     
     for enemy in game_state["units"]:
         if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(enemy))
+            distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(enemy))
             if distance <= rng_rng:
                 return True  # Simplified - assume clear LoS for now
     
     return False
 
-def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state.
-
-    CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
-    """
-    for unit in game_state["units"]:
-        if str(unit["id"]) == str(unit_id):
-            return unit
-    return None
-
-def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
-    """Calculate hex distance using consistent cube coordinates."""
-    # Use same calculation across all handlers
-    def offset_to_cube(col: int, row: int) -> Tuple[int, int, int]:
-        x = col
-        z = row - (col - (col & 1)) // 2
-        y = -x - z
-        return (x, y, z)
-    
-    def cube_distance(a: Tuple[int, int, int], b: Tuple[int, int, int]) -> int:
-        return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
-    
-    cube1 = offset_to_cube(col1, row1)
-    cube2 = offset_to_cube(col2, row2)
-    return cube_distance(cube1, cube2)
 
 
 # Legacy compatibility
@@ -2932,127 +2946,3 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """Legacy compatibility - use shooting_build_activation_pool instead"""
     pool = shooting_build_activation_pool(game_state)
     return pool
-
-def _calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
-    """Calculate target priority score using AI_GAME_OVERVIEW.md logic.
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_DMG/CC_DMG
-    """
-    
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max DMG from all weapons
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
-    
-    # Calculate max threat from target's weapons
-    target_rng_weapon = get_selected_ranged_weapon(target)
-    target_cc_weapon = get_selected_melee_weapon(target)
-    target_rng_dmg = target_rng_weapon.get("DMG", 0) if target_rng_weapon else 0
-    target_cc_dmg = target_cc_weapon.get("DMG", 0) if target_cc_weapon else 0
-    # Also check all weapons for max threat
-    if target.get("RNG_WEAPONS"):
-        target_rng_dmg = max(target_rng_dmg, max(w.get("DMG", 0) for w in target["RNG_WEAPONS"]))
-    if target.get("CC_WEAPONS"):
-        target_cc_dmg = max(target_cc_dmg, max(w.get("DMG", 0) for w in target["CC_WEAPONS"]))
-    
-    threat_level = max(target_rng_dmg, target_cc_dmg)
-    
-    # Calculate if unit can kill target in 1 phase (use selected weapon or first weapon)
-    unit_rng_weapon = get_selected_ranged_weapon(unit)
-    if not unit_rng_weapon and unit.get("RNG_WEAPONS"):
-        unit_rng_weapon = unit["RNG_WEAPONS"][0]
-    unit_rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
-    can_kill_1_phase = target["HP_CUR"] <= unit_rng_dmg
-    
-    # Priority 1: High threat that melee can charge but won't kill (score: 1000)
-    if threat_level >= 3:  # High threat threshold
-        melee_can_charge = _check_if_melee_can_charge(target, game_state)
-        if melee_can_charge and target["HP_CUR"] > 2:  # Won't die to melee in 1 phase
-            return 1000 + threat_level
-    
-    # Priority 2: High threat that can be killed in 1 shooting phase (score: 800) 
-    if can_kill_1_phase and threat_level >= 3:
-        return 800 + threat_level
-    
-    # Priority 3: High threat, lowest HP that can be killed (score: 600)
-    if can_kill_1_phase and threat_level >= 2:
-        return 600 + threat_level + (10 - target["HP_CUR"])  # Prefer lower HP
-    
-    # Default: threat level only
-    return threat_level
-
-def _enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """Enrich unit data for reward mapper compatibility (matches engine format)."""
-    if not unit:
-        return {}
-    
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
-    if "agent_mapping" not in game_state:
-        agent_mapping = {}
-    else:
-        agent_mapping = game_state["agent_mapping"]
-    
-    unit_id_key = str(unit["id"])
-    if unit_id_key in agent_mapping:
-        controlled_agent = agent_mapping[unit_id_key]
-    elif "unitType" in unit:
-        controlled_agent = unit["unitType"]
-    elif "unit_type" in unit:
-        controlled_agent = unit["unit_type"]
-    else:
-        controlled_agent = "default"
-    
-    enriched = unit.copy()
-    
-    # AI_TURN.md COMPLIANCE: All required fields must be present
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_DMG/RNG_DMG
-    from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
-    
-    if "HP_CUR" not in unit:
-        raise KeyError(f"Unit missing required 'HP_CUR' field: {unit}")
-    
-    # Get max DMG from weapons
-    unit_rng_weapon = get_selected_ranged_weapon(unit)
-    unit_cc_weapon = get_selected_melee_weapon(unit)
-    rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
-    cc_dmg = unit_cc_weapon.get("DMG", 0) if unit_cc_weapon else 0
-    # Also check all weapons for max DMG
-    if unit.get("RNG_WEAPONS"):
-        rng_dmg = max(rng_dmg, max(w.get("DMG", 0) for w in unit["RNG_WEAPONS"]))
-    if unit.get("CC_WEAPONS"):
-        cc_dmg = max(cc_dmg, max(w.get("DMG", 0) for w in unit["CC_WEAPONS"]))
-    
-    enriched.update({
-        "controlled_agent": controlled_agent,
-        "unitType": controlled_agent,  # Use controlled_agent as unitType
-        "name": unit["name"] if "name" in unit else f"Unit_{unit['id']}",
-        "cc_dmg": cc_dmg,
-        "rng_dmg": rng_dmg,
-        "CUR_HP": unit["HP_CUR"]
-    })
-    
-    return enriched
-
-def _check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-    """Check if any friendly melee unit can charge this target."""
-    current_player = game_state["current_player"]
-    
-    for unit in game_state["units"]:
-        if (unit["player"] == current_player and 
-            unit["HP_CUR"] > 0):
-            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
-            from engine.utils.weapon_helpers import get_selected_melee_weapon
-            has_melee = False
-            if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
-                melee_weapon = get_selected_melee_weapon(unit)
-                if melee_weapon and melee_weapon.get("DMG", 0) > 0:
-                    has_melee = True
-            if has_melee:  # Has melee capability
-                
-                # Estimate charge range (unit move + average 2d6)
-                distance = _calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
-                if "MOVE" not in unit:
-                    raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                max_charge = unit["MOVE"] + 7  # Average 2d6 = 7
-            
-            if distance <= max_charge:
-                return True
-    
-    return False

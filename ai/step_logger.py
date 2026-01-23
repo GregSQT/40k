@@ -137,9 +137,12 @@ class StepLogger:
         effective_bot_name = bot_name or getattr(self, 'current_bot_name', None)
 
         try:
+            timestamp = time.strftime("%H:%M:%S", time.localtime())
+            episode_marker = f"\n[{timestamp}] === EPISODE {self.episode_number} START ===\n"
+            
+            # Write to step.log
             with open(self.output_file, 'a') as f:
-                timestamp = time.strftime("%H:%M:%S", time.localtime())
-                f.write(f"\n[{timestamp}] === EPISODE {self.episode_number} START ===\n")
+                f.write(episode_marker)
 
                 if scenario_info:
                     f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
@@ -183,6 +186,13 @@ class StepLogger:
                     f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}) {player_name}: Starting position ({unit['col']},{unit['row']})\n")
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
+            
+            # Also write episode marker to debug.log for episode extraction
+            try:
+                with open("debug.log", "a") as f_debug:
+                    f_debug.write(episode_marker)
+            except Exception:
+                pass  # Don't fail if debug.log write fails
                 
         except Exception as e:
             print(f"⚠️ Episode start logging error: {e}")
