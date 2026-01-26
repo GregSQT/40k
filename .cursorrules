@@ -1,3 +1,17 @@
+=== CONTEXTE PROJET ===
+
+PROJET : Warhammer 40K Game Engine avec IA (Reinforcement Learning)
+- Backend Python : Flask API (services/api_server.py)
+- Frontend : React + TypeScript + Vite
+- IA : Stable-Baselines3 (PPO) avec MaskablePPO
+- Structure : engine/ (moteur de jeu), ai/ (entraînement), config/ (configurations)
+
+CONVENTIONS IMPORTANTES :
+- Les modèles IA sont dans ai/models/current/model_<agent_key>.zip
+- Les configs d'agents sont dans config/agents/<agent_name>/
+- Format de code : Python type hints, docstrings, respect AI_TURN.md
+- Ne jamais utiliser de fallbacks ou de workaround ou de valeur par défaut pour masquer des erreurs
+
 # SYSTEM OVERRIDE - HIGHEST PRIORITY
 
 === MODE PAR DÉFAUT : ASK ===
@@ -40,8 +54,9 @@ L'autonomie est secondaire.
 - Ne pas refactorer hors demande explicite.
 
 6. SORTIE MINIMALE
-- Ne renvoyer QUE des diffs.
-- Ne jamais répéter le code inchangé.
+- Utiliser le format de mise à jour strict défini ci-dessous (CODE ACTUEL + CODE MIS À JOUR).
+- Ne jamais répéter le code inchangé en dehors du contexte nécessaire (3 lignes avant/après).
+- Pour les modifications très simples (typos, renommages), le format peut être simplifié avec validation préalable.
 
 7. AUCUN FALLBACK/WORKAROUND/VALEUR PAR DÉFAUT ANTI-ERREUR
 - NE JAMAIS utiliser de fallback sauf si c'est pertinent fonctionnellement (pas pour éviter une erreur).
@@ -50,11 +65,25 @@ L'autonomie est secondaire.
 - NE JAMAIS utiliser de valeur par défaut pour éviter une erreur. Préférer l'erreur explicite si la valeur n'est pas fournie.
 - Les fallbacks sont autorisés uniquement dans les cas où c'est un comportement métier valide (ex: stratégie de repli planifiée), jamais pour contourner un bug ou une erreur.
 
+8. INVESTIGATION AUTONOME (EXCEPTION CRITIQUE)
+- Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
+  → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
+  → Lire tous les fichiers nécessaires pour comprendre le problème
+  → Utiliser codebase_search, grep, read_file pour explorer le code
+  → Suivre les traces d'erreur, analyser les logs, examiner le flux d'exécution
+  → Ne s'arrêter QUE si :
+    * La root cause est identifiée avec certitude (présenter alors la solution)
+    * Des logs/exécutions sont nécessaires pour continuer (demander alors les logs)
+    * Après investigation approfondie, aucune root cause claire n'est trouvée (reconnaître honnêtement l'échec et proposer des pistes alternatives)
+- NE JAMAIS demander "voulez-vous que j'investigue ?" si l'utilisateur a déjà demandé l'investigation
+- NE JAMAIS s'arrêter à mi-chemin pour demander la permission de continuer l'investigation
+- L'investigation est une ACTION DE LECTURE/ANALYSE, pas une modification → autonomie totale autorisée
+
 === WORKFLOW OBLIGATOIRE MODE ASK ===
 
 Étape 1 : Expliquer brièvement l'hypothèse et le plan.
 Étape 2 : Attendre ma validation.
-Étape 3 : Appliquer UNE modification minimale.
+Étape 3 : Appliquer les modifications convenues.
 Étape 4 : STOP et attendre instruction.
 
 Toute violation de ces règles est une erreur.
@@ -64,8 +93,9 @@ Toute violation de ces règles est une erreur.
 TEMPLATE STRICT pour TOUTE modification de code :
 
 **Fichier :** `<chemin_complet>` 
-[Lien clickable](<chemin_absolu_complet>)
-- Le lien doit être cliquable et ouvrir le fichier dans l'éditeur
+[Lien clickable](file://<chemin_absolu_complet>)
+- Le lien doit utiliser le format `file://` pour être cliquable dans l'éditeur
+- Exemple : `[helper.ts](file:///home/greg/40k/src/utils/helper.ts)`
 
 **CODE ACTUEL**
 ```langage
