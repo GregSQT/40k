@@ -740,12 +740,20 @@ class ObservationBuilder:
         # === SECTION 5: Enemy Units (132 floats) ===
         # Allied Units: [70:142] = 72 floats
         # base_idx = 70 + 72 = 142
-        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142)
-
         # === SECTION 6: Valid Targets (40 floats) ===
+        # Shared 6 reference enemies so every valid target has enemy_index; avoid "Required key 'X' missing".
+        # Sort before building 6 so encoded targets (first 5) are always in the 6.
+        valid_targets = self._get_valid_targets(active_unit, game_state)
+        self._sort_valid_targets(valid_targets, active_unit, game_state)
+        six_enemies = self._get_six_reference_enemies(active_unit, game_state, valid_targets)
+        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies)
+
         # Enemy Units: [142:274] = 132 floats (6 × 22 features)
         # base_idx = 142 + 132 = 274
-        self._encode_valid_targets(obs, active_unit, game_state, base_idx=274)
+        self._encode_valid_targets(
+            obs, active_unit, game_state, base_idx=274,
+            valid_targets=valid_targets, six_enemies=six_enemies
+        )
         
         return obs
     
@@ -985,7 +993,14 @@ class ObservationBuilder:
                 for j in range(12):
                     obs[feature_base + j] = 0.0
     
-    def _encode_enemy_units(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
+    def _encode_enemy_units(
+        self,
+        obs: np.ndarray,
+        active_unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+        base_idx: int,
+        six_enemies: Optional[List[tuple]] = None,
+    ):
         """
         Encode up to 6 enemy units within perception radius.
         132 floats = 6 units × 22 features per unit. - MULTIPLE_WEAPONS_IMPLEMENTATION.md
@@ -1012,68 +1027,53 @@ class ObservationBuilder:
         20. favorite_target (enemy's preferred target type) - DÉCALÉ
         
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
+        When six_enemies is provided (from build_observation), uses that list so obs[141:273]
+        matches enemy_index_map in _encode_valid_targets (avoids "Required key 'X' missing").
         """
         perception_radius = self.perception_radius
-        # Get all enemy units within perception radius
-        enemies = []
-        for other_unit in game_state["units"]:
-            if "HP_CUR" not in other_unit:
-                raise KeyError(f"Unit missing required 'HP_CUR' field: {other_unit}")
-            
-            if other_unit["HP_CUR"] <= 0:
-                continue
-            if "player" not in other_unit:
-                raise KeyError(f"Unit missing required 'player' field: {other_unit}")
-            if other_unit["player"] == active_unit["player"]:
-                continue  # Skip allies
-            
-            if "col" not in other_unit or "row" not in other_unit:
-                raise KeyError(f"Unit missing required position fields: {other_unit}")
-            
-            active_col, active_row = get_unit_coordinates(active_unit)
-            other_col, other_row = get_unit_coordinates(other_unit)
-            distance = calculate_hex_distance(
-                active_col, active_row,
-                other_col, other_row
-            )
-            
-            if distance <= perception_radius:
-                enemies.append((distance, other_unit))
-        
-        # Sort by priority: wounded > can_attack_me > closer
-        # Wounded enemies are tactical priorities for focus fire
-        def enemy_priority(item):
-            distance, unit = item
-            hp_ratio = unit["HP_CUR"] / max(1, unit["HP_MAX"])
-
-            # Check if enemy can attack me
-            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
+        if six_enemies is not None:
+            enemies = six_enemies
+        else:
+            enemies = []
+            for other_unit in game_state["units"]:
+                if "HP_CUR" not in other_unit:
+                    raise KeyError(f"Unit missing required 'HP_CUR' field: {other_unit}")
+                if other_unit["HP_CUR"] <= 0:
+                    continue
+                if "player" not in other_unit:
+                    raise KeyError(f"Unit missing required 'player' field: {other_unit}")
+                if other_unit["player"] == active_unit["player"]:
+                    continue
+                if "col" not in other_unit or "row" not in other_unit:
+                    raise KeyError(f"Unit missing required position fields: {other_unit}")
+                active_col, active_row = get_unit_coordinates(active_unit)
+                other_col, other_row = get_unit_coordinates(other_unit)
+                d = calculate_hex_distance(active_col, active_row, other_col, other_row)
+                if d <= perception_radius:
+                    enemies.append((d, other_unit))
             from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
-            can_attack = 0.0
-            max_range = get_max_ranged_range(unit)
-            if max_range > 0 and distance <= max_range:
-                can_attack = 1.0
-            else:
-                melee_range = get_melee_range()  # Always 1
-                if distance <= melee_range:
-                    can_attack = 1.0
 
-            # Priority: wounded (highest), can attack (high), closer (low)
-            # More wounded = HIGHER priority for focus fire learning
-            return (
-                1000,  # Enemy weight
-                -((1.0 - hp_ratio) * 200),  # More wounded = much higher priority
-                can_attack * 100,  # Can attack me = high priority
-                -distance * 10,  # Closer = higher priority
-            )
+            def _enemy_priority(item):
+                distance, unit = item
+                hp_ratio = unit["HP_CUR"] / max(1, unit["HP_MAX"])
+                can_attack = 0.0
+                max_range = get_max_ranged_range(unit)
+                if max_range > 0 and distance <= max_range:
+                    can_attack = 1.0
+                elif distance <= get_melee_range():
+                    can_attack = 1.0
+                return (
+                    1000,
+                    -((1.0 - hp_ratio) * 200),
+                    can_attack * 100,
+                    -distance * 10,
+                )
+
+            enemies.sort(key=_enemy_priority, reverse=True)
         
-        enemies.sort(key=enemy_priority, reverse=True)
-        
-        # Encode up to 6 enemies
         max_encoded = 6
         for i in range(max_encoded):
-            feature_base = base_idx + i * 22  # Changed from 23 to 22 (removed 2 features)
-            
+            feature_base = base_idx + i * 22
             if i < len(enemies):
                 distance, enemy = enemies[i]
                 
@@ -1338,7 +1338,197 @@ class ObservationBuilder:
                 for j in range(10):
                     obs[feature_base + j] = 0.0
     
-    def _encode_valid_targets(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
+    def _get_valid_targets(self, active_unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Build raw list of valid targets for current phase (shoot / charge / fight).
+        Unsorted. Used by _get_six_reference_enemies and _encode_valid_targets.
+        """
+        valid_targets: List[Dict[str, Any]] = []
+        current_phase = require_key(game_state, "phase")
+        if current_phase == "shoot":
+            from engine.phase_handlers import shooting_handlers
+            target_ids = shooting_handlers.shooting_build_valid_target_pool(
+                game_state, active_unit["id"]
+            )
+            for tid in target_ids:
+                unit = get_unit_by_id(str(tid), game_state)
+                if unit:
+                    valid_targets.append(unit)
+        elif current_phase == "charge":
+            if "MOVE" not in active_unit:
+                raise KeyError(f"Active unit missing required 'MOVE' field: {active_unit}")
+            for enemy in game_state["units"]:
+                if "player" not in enemy or "HP_CUR" not in enemy:
+                    raise KeyError(f"Enemy unit missing required fields: {enemy}")
+                if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
+                    if "col" not in enemy or "row" not in enemy:
+                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
+                    active_col, active_row = get_unit_coordinates(active_unit)
+                    enemy_col, enemy_row = get_unit_coordinates(enemy)
+                    distance = calculate_pathfinding_distance(
+                        active_col, active_row, enemy_col, enemy_row, game_state
+                    )
+                    if distance <= active_unit["MOVE"] + 12:
+                        valid_targets.append(enemy)
+        elif current_phase == "fight":
+            from engine.utils.weapon_helpers import get_melee_range
+            melee_range = get_melee_range()
+            for enemy in game_state["units"]:
+                if "player" not in enemy or "HP_CUR" not in enemy:
+                    raise KeyError(f"Enemy unit missing required fields: {enemy}")
+                if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
+                    if "col" not in enemy or "row" not in enemy:
+                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
+                    active_col, active_row = get_unit_coordinates(active_unit)
+                    enemy_col, enemy_row = get_unit_coordinates(enemy)
+                    if calculate_hex_distance(
+                        active_col, active_row, enemy_col, enemy_row
+                    ) <= melee_range:
+                        valid_targets.append(enemy)
+        return valid_targets
+    
+    def _get_six_reference_enemies(
+        self, active_unit: Dict[str, Any], game_state: Dict[str, Any],
+        valid_targets: List[Dict[str, Any]]
+    ) -> List[tuple]:
+        """
+        Build the 6 reference enemies for obs[141:273] and enemy_index_map.
+        Ensures every valid target is in the 6 so require_key(enemy_index_map, id) never fails.
+        Returns list of (distance, unit) ordered: valid_targets first (up to 6), then fill by distance.
+        """
+        perception_radius = self.perception_radius
+        active_col, active_row = get_unit_coordinates(active_unit)
+        all_enemies: List[tuple] = []
+        for other in game_state["units"]:
+            if other["player"] == active_unit["player"] or other["HP_CUR"] <= 0:
+                continue
+            if "col" not in other or "row" not in other:
+                raise KeyError(f"Unit missing required position fields: {other}")
+            oc, or_ = get_unit_coordinates(other)
+            d = calculate_hex_distance(active_col, active_row, oc, or_)
+            all_enemies.append((d, other))
+        all_enemies.sort(key=lambda x: x[0])
+        six: List[tuple] = []
+        seen: set = set()
+        for u in valid_targets:
+            if len(six) >= 6:
+                break
+            kid = str(u["id"])
+            if kid in seen:
+                continue
+            seen.add(kid)
+            dc = calculate_hex_distance(active_col, active_row, *get_unit_coordinates(u))
+            six.append((dc, u))
+        for d, u in all_enemies:
+            if len(six) >= 6:
+                break
+            kid = str(u["id"])
+            if kid in seen:
+                continue
+            if d <= perception_radius:
+                six.append((d, u))
+                seen.add(kid)
+        for d, u in all_enemies:
+            if len(six) >= 6:
+                break
+            if str(u["id"]) in seen:
+                continue
+            six.append((d, u))
+            seen.add(str(u["id"]))
+        return six[:6]
+    
+    def _target_priority_score(
+        self,
+        target: Dict[str, Any],
+        active_unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+    ):
+        """
+        Sort key for valid targets: (lower = higher priority).
+        Returns (-strategic_efficiency, distance) so best targets sort first.
+        """
+        active_col, active_row = get_unit_coordinates(active_unit)
+        target_col, target_row = get_unit_coordinates(target)
+        distance = calculate_hex_distance(
+            active_col, active_row, target_col, target_row
+        )
+        if "VALUE" not in target:
+            raise KeyError(f"Target missing required 'VALUE' field: {target}")
+        target_value = target["VALUE"]
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        from engine.ai.weapon_selector import get_best_weapon_for_target
+        best_weapon_idx, _ = get_best_weapon_for_target(
+            active_unit, target, game_state, is_ranged=True
+        )
+        if best_weapon_idx >= 0 and active_unit.get("RNG_WEAPONS"):
+            weapon = active_unit["RNG_WEAPONS"][best_weapon_idx]
+        else:
+            selected_weapon = get_selected_ranged_weapon(active_unit)
+            if selected_weapon:
+                weapon = selected_weapon
+            elif active_unit.get("RNG_WEAPONS"):
+                weapon = active_unit["RNG_WEAPONS"][0]
+            else:
+                return (0.0, distance)
+        unit_attacks = weapon["NB"]
+        unit_bs = weapon["ATK"]
+        unit_s = weapon["STR"]
+        unit_ap = weapon["AP"]
+        unit_dmg = weapon["DMG"]
+        if "T" not in target or "ARMOR_SAVE" not in target or "HP_CUR" not in target:
+            raise KeyError(f"Target missing required T/ARMOR_SAVE/HP_CUR: {target}")
+        target_t = target["T"]
+        target_save = target["ARMOR_SAVE"]
+        target_hp = target["HP_CUR"]
+        our_hit_prob = (7 - unit_bs) / 6.0
+        if unit_s >= target_t * 2:
+            our_wound_prob = 5 / 6
+        elif unit_s > target_t:
+            our_wound_prob = 4 / 6
+        elif unit_s == target_t:
+            our_wound_prob = 3 / 6
+        elif unit_s * 2 <= target_t:
+            our_wound_prob = 1 / 6
+        else:
+            our_wound_prob = 2 / 6
+        target_modified_save = target_save - unit_ap
+        target_failed_save = (
+            1.0 if target_modified_save > 6 else (target_modified_save - 1) / 6.0
+        )
+        damage_per_attack = (
+            our_hit_prob * our_wound_prob * target_failed_save * unit_dmg
+        )
+        if damage_per_attack > 0:
+            activations_to_kill = target_hp / damage_per_attack
+        else:
+            activations_to_kill = 100
+        if activations_to_kill > 0:
+            strategic_efficiency = target_value / activations_to_kill
+        else:
+            strategic_efficiency = target_value * 100
+        return (-strategic_efficiency, distance)
+    
+    def _sort_valid_targets(
+        self,
+        valid_targets: List[Dict[str, Any]],
+        active_unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Sort valid targets by strategic efficiency (best first). In-place then return."""
+        valid_targets.sort(
+            key=lambda t: self._target_priority_score(t, active_unit, game_state)
+        )
+        return valid_targets
+    
+    def _encode_valid_targets(
+        self,
+        obs: np.ndarray,
+        active_unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+        base_idx: int,
+        valid_targets: Optional[List[Dict[str, Any]]] = None,
+        six_enemies: Optional[List[tuple]] = None,
+    ):
         """
         Encode valid targets with EXPLICIT action-target correspondence and W40K probabilities.
         40 floats = 5 actions × 8 features per action - MULTIPLE_WEAPONS_IMPLEMENTATION.md
@@ -1362,195 +1552,17 @@ class ObservationBuilder:
         7. coordination_bonus (1.0 if friendly melee can charge after I shoot) - DÉCALÉ
         """
         perception_radius = self.perception_radius
-        
-        # Get valid targets based on current phase
-        valid_targets = []
-        current_phase = game_state["phase"]
-        
-        if current_phase == "shoot":
-            # Get valid shooting targets using shooting handler
-            from engine.phase_handlers import shooting_handlers
-            
-            # Build target pool using handler's validation
-            target_ids = shooting_handlers.shooting_build_valid_target_pool(
-                game_state, active_unit["id"]
+        if valid_targets is None:
+            valid_targets = self._get_valid_targets(active_unit, game_state)
+            self._sort_valid_targets(valid_targets, active_unit, game_state)
+        if six_enemies is None:
+            six_enemies = self._get_six_reference_enemies(
+                active_unit, game_state, valid_targets
             )
-            
-            # PERFORMANCE: Call get_unit_by_id once per target, not twice
-            valid_targets = []
-            for tid in target_ids:
-                unit = get_unit_by_id(str(tid), game_state)
-                if unit:
-                    valid_targets.append(unit)
-            
-        elif current_phase == "charge":
-            # Get valid charge targets (enemies within charge range)
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-            if "MOVE" not in active_unit:
-                raise KeyError(f"Active unit missing required 'MOVE' field: {active_unit}")
-
-            for enemy in game_state["units"]:
-                # AI_TURN.md COMPLIANCE: Direct field access with validation
-                if "player" not in enemy:
-                    raise KeyError(f"Enemy unit missing required 'player' field: {enemy}")
-                if "HP_CUR" not in enemy:
-                    raise KeyError(f"Enemy unit missing required 'HP_CUR' field: {enemy}")
-
-                if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
-                    if "col" not in enemy or "row" not in enemy:
-                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-
-                    # Use BFS pathfinding distance for charge reachability (respects walls)
-                    active_col, active_row = get_unit_coordinates(active_unit)
-                    enemy_col, enemy_row = get_unit_coordinates(enemy)
-                    distance = calculate_pathfinding_distance(
-                        active_col, active_row,
-                        enemy_col, enemy_row,
-                        game_state
-                    )
-
-                    # Max charge = MOVE + 12 (maximum 2d6 roll)
-                    max_charge = active_unit["MOVE"] + 12
-                    if distance <= max_charge:
-                        valid_targets.append(enemy)
-        
-        elif current_phase == "fight":
-            # Get valid melee targets (enemies within melee range)
-            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
-            from engine.utils.weapon_helpers import get_melee_range
-            melee_range = get_melee_range()  # Always 1
-
-            for enemy in game_state["units"]:
-                if "player" not in enemy or "HP_CUR" not in enemy:
-                    raise KeyError(f"Enemy unit missing required fields: {enemy}")
-
-                if enemy["player"] != active_unit["player"] and enemy["HP_CUR"] > 0:
-                    if "col" not in enemy or "row" not in enemy:
-                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-
-                    # Melee range is always 1 (adjacent), so pathfinding vs hex distance
-                    # is equivalent for melee. Use hex distance for performance.
-                    active_col, active_row = get_unit_coordinates(active_unit)
-                    enemy_col, enemy_row = get_unit_coordinates(enemy)
-                    distance = calculate_hex_distance(
-                        active_col, active_row,
-                        enemy_col, enemy_row
-                    )
-
-                    if distance <= melee_range:
-                        valid_targets.append(enemy)
-        
-        # Sort by priority: VALUE / turns_to_kill (strategic efficiency)
-        # This prioritizes targets that give best point return per activation spent
-        # Validated: All targets already passed LoS check in shooting_build_valid_target_pool
-        def target_priority(target):
-            active_col, active_row = get_unit_coordinates(active_unit)
-            target_col, target_row = get_unit_coordinates(target)
-            distance = calculate_hex_distance(
-                active_col, active_row,
-                target_col, target_row
-            )
-
-            # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
-            if "VALUE" not in target:
-                raise KeyError(f"Target missing required 'VALUE' field: {target}")
-            target_value = target["VALUE"]
-
-            # Calculate activations needed to kill this target
-            # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon for target
-            from engine.utils.weapon_helpers import get_selected_ranged_weapon
-            from engine.ai.weapon_selector import get_best_weapon_for_target
-            
-            # Get best weapon for this target (for priority calculation)
-            best_weapon_idx, _ = get_best_weapon_for_target(active_unit, target, game_state, is_ranged=True)
-            if best_weapon_idx >= 0 and active_unit.get("RNG_WEAPONS"):
-                weapon = active_unit["RNG_WEAPONS"][best_weapon_idx]
-            else:
-                # Fallback to selected weapon or first weapon
-                selected_weapon = get_selected_ranged_weapon(active_unit)
-                if selected_weapon:
-                    weapon = selected_weapon
-                elif active_unit.get("RNG_WEAPONS"):
-                    weapon = active_unit["RNG_WEAPONS"][0]
-                else:
-                    # No ranged weapons - can't calculate priority
-                    return 0.0
-            
-            unit_attacks = weapon["NB"]
-            unit_bs = weapon["ATK"]
-            unit_s = weapon["STR"]
-            unit_ap = weapon["AP"]
-            unit_dmg = weapon["DMG"]
-
-            if "T" not in target:
-                raise KeyError(f"Target missing required 'T' field: {target}")
-            if "ARMOR_SAVE" not in target:
-                raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
-            if "HP_CUR" not in target:
-                raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
-
-            target_t = target["T"]
-            target_save = target["ARMOR_SAVE"]
-            target_hp = target["HP_CUR"]
-
-            # Our hit probability
-            our_hit_prob = (7 - unit_bs) / 6.0
-
-            # Our wound probability (S vs T)
-            if unit_s >= target_t * 2:
-                our_wound_prob = 5/6
-            elif unit_s > target_t:
-                our_wound_prob = 4/6
-            elif unit_s == target_t:
-                our_wound_prob = 3/6
-            elif unit_s * 2 <= target_t:
-                our_wound_prob = 1/6
-            else:
-                our_wound_prob = 2/6
-
-            # Target's failed save probability (AP is negative, subtract to worsen save)
-            target_modified_save = target_save - unit_ap
-            if target_modified_save > 6:
-                target_failed_save = 1.0
-            else:
-                target_failed_save = (target_modified_save - 1) / 6.0
-
-            # Expected damage per activation
-            damage_per_attack = our_hit_prob * our_wound_prob * target_failed_save * unit_dmg
-            expected_damage_per_activation = unit_attacks * damage_per_attack
-
-            # Expected activations to kill
-            if expected_damage_per_activation > 0:
-                activations_to_kill = target_hp / expected_damage_per_activation
-            else:
-                activations_to_kill = 100  # Can't kill = very low priority
-
-            # Strategic efficiency = VALUE / turns_to_kill
-            # Higher = better target (more points per activation spent)
-            if activations_to_kill > 0:
-                strategic_efficiency = target_value / activations_to_kill
-            else:
-                strategic_efficiency = target_value * 100  # Instant kill = very high priority
-
-            # Priority scoring (lower = higher priority)
-            return (
-                -strategic_efficiency,       # Higher efficiency = lower score = first
-                distance                     # Closer = lower score (tiebreaker)
-            )
-
-        valid_targets.sort(key=target_priority)
-        
-        # Build enemy index map for reference
-        enemy_index_map = {}
-        enemy_list = [u for u in game_state["units"] 
-                     if u["player"] != active_unit["player"] and u["HP_CUR"] > 0]
-        active_col, active_row = get_unit_coordinates(active_unit)
-        enemy_list.sort(key=lambda e: calculate_hex_distance(
-            active_col, active_row, *get_unit_coordinates(e)
-        ))
-        for idx, enemy in enumerate(enemy_list[:6]):
-            enemy_index_map[enemy["id"]] = idx
-        
+        enemy_index_map: Dict[str, int] = {}
+        for idx, (_d, u) in enumerate(six_enemies):
+            enemy_index_map[str(u["id"])] = idx
+        # valid_targets already sorted (by caller or above)
         # Encode up to max_valid_targets (5 targets × 8 features = 40 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md
         max_encoded = 5
         for i in range(max_encoded):

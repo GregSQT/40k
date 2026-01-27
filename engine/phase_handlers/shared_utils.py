@@ -5,6 +5,8 @@ Functions used across multiple phase handlers to avoid duplication.
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
+
+from shared.data_validation import require_key
 from engine.combat_utils import get_unit_coordinates, calculate_hex_distance, get_hex_neighbors
 
 # end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
@@ -34,7 +36,7 @@ def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]
             has_melee = False
             if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
                 melee_weapon = get_selected_melee_weapon(unit)
-                if melee_weapon and melee_weapon.get("DMG", 0) > 0:
+                if melee_weapon and require_key(melee_weapon, "DMG") > 0:
                     has_melee = True
             if has_melee:  # Has melee capability
                 
@@ -61,13 +63,13 @@ def calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any]
     # Calculate max threat from target's weapons
     target_rng_weapon = get_selected_ranged_weapon(target)
     target_cc_weapon = get_selected_melee_weapon(target)
-    target_rng_dmg = target_rng_weapon.get("DMG", 0) if target_rng_weapon else 0
-    target_cc_dmg = target_cc_weapon.get("DMG", 0) if target_cc_weapon else 0
+    target_rng_dmg = require_key(target_rng_weapon, "DMG") if target_rng_weapon else 0
+    target_cc_dmg = require_key(target_cc_weapon, "DMG") if target_cc_weapon else 0
     # Also check all weapons for max threat
     if target.get("RNG_WEAPONS"):
-        target_rng_dmg = max(target_rng_dmg, max(w.get("DMG", 0) for w in target["RNG_WEAPONS"]))
+        target_rng_dmg = max(target_rng_dmg, max(require_key(w, "DMG") for w in target["RNG_WEAPONS"]))
     if target.get("CC_WEAPONS"):
-        target_cc_dmg = max(target_cc_dmg, max(w.get("DMG", 0) for w in target["CC_WEAPONS"]))
+        target_cc_dmg = max(target_cc_dmg, max(require_key(w, "DMG") for w in target["CC_WEAPONS"]))
     
     threat_level = max(target_rng_dmg, target_cc_dmg)
     
@@ -75,7 +77,7 @@ def calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any]
     unit_rng_weapon = get_selected_ranged_weapon(unit)
     if not unit_rng_weapon and unit.get("RNG_WEAPONS"):
         unit_rng_weapon = unit["RNG_WEAPONS"][0]
-    unit_rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
+    unit_rng_dmg = require_key(unit_rng_weapon, "DMG") if unit_rng_weapon else 0
     can_kill_1_phase = target["HP_CUR"] <= unit_rng_dmg
     
     # Priority 1: High threat that melee can charge but won't kill (score: 1000)
@@ -129,13 +131,13 @@ def enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, An
     # Get max DMG from weapons
     unit_rng_weapon = get_selected_ranged_weapon(unit)
     unit_cc_weapon = get_selected_melee_weapon(unit)
-    rng_dmg = unit_rng_weapon.get("DMG", 0) if unit_rng_weapon else 0
-    cc_dmg = unit_cc_weapon.get("DMG", 0) if unit_cc_weapon else 0
+    rng_dmg = require_key(unit_rng_weapon, "DMG") if unit_rng_weapon else 0
+    cc_dmg = require_key(unit_cc_weapon, "DMG") if unit_cc_weapon else 0
     # Also check all weapons for max DMG
     if unit.get("RNG_WEAPONS"):
-        rng_dmg = max(rng_dmg, max(w.get("DMG", 0) for w in unit["RNG_WEAPONS"]))
+        rng_dmg = max(rng_dmg, max(require_key(w, "DMG") for w in unit["RNG_WEAPONS"]))
     if unit.get("CC_WEAPONS"):
-        cc_dmg = max(cc_dmg, max(w.get("DMG", 0) for w in unit["CC_WEAPONS"]))
+        cc_dmg = max(cc_dmg, max(require_key(w, "DMG") for w in unit["CC_WEAPONS"]))
     
     enriched.update({
         "controlled_agent": controlled_agent,
@@ -184,7 +186,7 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
     enemies_detailed = []  # Track detailed enemy info for debugging
     for enemy in game_state["units"]:
         # Log all units for debugging
-        unit_info = f"Unit {enemy['id']} player={enemy['player']} HP={enemy.get('HP_CUR', 0)} at ({int(enemy['col'])},{int(enemy['row'])})"
+        unit_info = f"Unit {enemy['id']} player={enemy['player']} HP={require_key(enemy, 'HP_CUR')} at ({int(enemy['col'])},{int(enemy['row'])})"
         all_units_info.append(unit_info)
         
         # Convert player to int for consistent comparison
@@ -192,12 +194,11 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
         player_int = int(player) if player is not None else None
         
         # Build detailed enemy info for debugging
-        hp_cur_raw = enemy.get("HP_CUR", 0)
-        # Ensure hp_cur is always an int (handle None and string cases)
+        hp_cur_raw = require_key(enemy, "HP_CUR")
         try:
-            hp_cur = int(float(hp_cur_raw)) if hp_cur_raw is not None else 0
+            hp_cur = int(float(hp_cur_raw))
         except (ValueError, TypeError):
-            hp_cur = 0
+            raise ValueError(f"Unit {enemy.get('id')} has invalid HP_CUR: {hp_cur_raw!r}") from None
         hp_max = enemy.get("HP_MAX", "?")
         # Normalize coordinates to int - raises error if invalid
         enemy_col, enemy_row = get_unit_coordinates(enemy)
