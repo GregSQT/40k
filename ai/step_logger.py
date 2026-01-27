@@ -70,7 +70,7 @@ class StepLogger:
             
         try:
             timestamp = time.strftime("%H:%M:%S", time.localtime())
-            
+
             # Format message using gameLogUtils.ts style
             message = self._format_replay_style_message(unit_id, action_type, action_details)
             
@@ -128,6 +128,8 @@ class StepLogger:
 
         # PERFORMANCE: Flush any remaining buffered logs before episode start
         self._flush_buffer()
+
+        self._episode_start_wall = time.time()
 
         # Increment episode number
         self.episode_number += 1
@@ -608,10 +610,11 @@ class StepLogger:
         self._flush_buffer()
 
         try:
+            duration_s = time.time() - getattr(self, '_episode_start_wall', time.time())
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
                 method_str = f", Method={win_method}" if win_method else ""
-                f.write(f"[{timestamp}] EPISODE END: Winner={winner}{method_str}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}\n")
+                f.write(f"[{timestamp}] EPISODE END: Winner={winner}{method_str}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}, Duration={duration_s:.3f}s\n")
                 f.write("=" * 80 + "\n")
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")

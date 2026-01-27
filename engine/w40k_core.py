@@ -644,7 +644,7 @@ class W40KEngine(gym.Env):
         semantic_action = self.action_decoder.convert_gym_action(
             action, self.game_state, action_mask=action_mask, eligible_units=eligible_units
         )
-        
+
         # CRITICAL: Capture pre-action state for replay_logger BEFORE action execution
         # These are needed for replay logging (independent of step_logger)
         pre_action_phase = self.game_state.get("phase", "unknown")

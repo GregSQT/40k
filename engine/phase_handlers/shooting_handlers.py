@@ -519,7 +519,7 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return
-    
+
     # Initialize cache
     unit["los_cache"] = {}
     
@@ -1453,7 +1453,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     if "weapon_rule" not in game_state:
         raise KeyError("game_state missing required 'weapon_rule' field")
     weapon_rule = game_state["weapon_rule"]
-    
+
     # CRITICAL: Ensure los_cache exists and is up-to-date before calling valid_target_pool_build
     # This can happen if shooting_build_valid_target_pool is called before shooting_unit_activation_start
     # OR if unit has advanced since los_cache was built
@@ -1472,7 +1472,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         else:
             # Unit has fled - cannot shoot, so no los_cache needed
             unit["los_cache"] = {}
-    
+
     # Call valid_target_pool_build with context parameters
     # Use advance_status and adjacent_status already calculated above (lines 885, 890-892)
     valid_target_pool = valid_target_pool_build(

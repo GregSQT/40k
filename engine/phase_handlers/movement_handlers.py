@@ -465,13 +465,13 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     """
     # Normalize coordinates to int - raises error if invalid
     dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
-    
+
     # Adjacency check is done in build_valid_destinations_pool via enemy_adjacent_hexes.
     # The pool should already exclude all hexes adjacent to enemies, so no redundant check here.
-    
+
     # Store original position
     orig_col, orig_row = get_unit_coordinates(unit)
-    
+
     # Flee detection: was adjacent to enemy before move
     was_adjacent = _is_adjacent_to_enemy(game_state, unit)
 
@@ -524,7 +524,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     # Assign normalized int coordinates using set_unit_coordinates
     set_unit_coordinates(unit, dest_col_int, dest_row_int)
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
-    
+
     # Apply AI_TURN.md tracking
     # Normalize unit ID to string for consistent storage (units_fled stores strings)
     unit_id_str = str(unit["id"])
@@ -532,20 +532,20 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     if was_adjacent:
         game_state["units_fled"].add(unit_id_str)
         # Units that fled are also marked as moved (units_fled is a subset of units_moved)
-    
+
     # Invalidate LoS cache when unit moves
     # When a unit moves, all LoS calculations involving that unit are now invalid
     # This prevents "shoot through wall" bugs caused by stale cache
     from .shooting_handlers import _invalidate_los_cache_for_moved_unit
     _invalidate_los_cache_for_moved_unit(game_state, unit["id"])
-    
+
     # Pools are invalidated at the START of the phase, not after each movement
     # This prevents invalidating the "moved" tracking of units that just moved
-    
+
     # Log successful movement
     action_type = "FLEE" if was_adjacent else "MOVE"
     _log_movement_debug(game_state, "attempt_movement", str(unit["id"]), f"({orig_col},{orig_row})→({dest_col_int},{dest_row_int}) SUCCESS {action_type}")
-    
+
     # Use normalized coordinates (dest_col_int, dest_row_int) in result
     # NOT dest_col/dest_row which might not be normalized
     return True, {
@@ -1007,26 +1007,26 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     if dest_col is None or dest_row is None:
         return False, {"error": "missing_destination"}
-    
+
     # Normalize coordinates to int - raises error if invalid
     dest_col, dest_row = normalize_coordinates(dest_col, dest_row)
-    
+
     # Pool is already built during activation - no need to rebuild here
     # System is sequential, so pool is still valid
     if "valid_move_destinations_pool" not in game_state:
         raise KeyError("game_state missing required 'valid_move_destinations_pool' field")
     valid_pool = game_state["valid_move_destinations_pool"]
-    
+
     # Validate destination in valid pool
     if (dest_col, dest_row) not in valid_pool:
         # Destination not reachable via BFS pathfinding
         _log_movement_debug(game_state, "destination_selection", str(unit_id), f"destination ({dest_col},{dest_row}) NOT_IN_POOL pool_size={len(valid_pool)}")
         return False, {"error": "invalid_destination", "destination": (dest_col, dest_row)}
-    
+
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
-    
+
     # Destination validation is already done in movement_build_valid_destinations_pool()
     # The destination is in valid_pool, which was built using cached enemy_adjacent_hexes from phase start
     # No need to re-validate here - if destination is in pool, it's valid
@@ -1086,7 +1086,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Invalidate all destination pools after movement
     # Positions have changed, so all pools (move, charge, shoot) are now stale
     _invalidate_all_destination_pools_after_movement(game_state)
-    
+
     # Generate movement log per requested format
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
@@ -1170,19 +1170,19 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     # Clear preview
     movement_clear_preview(game_state)
-    
+
     # End activation with position data for reward calculation
     # AI_TURN.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
     action_type = "FLED" if was_adjacent else "MOVE"
     result = end_activation(
         game_state, unit,
         "ACTION",      # Arg1: Log the action (movement already logged)
-        1,             # Arg2: +1 step increment  
+        1,             # Arg2: +1 step increment
         action_type,   # Arg3: MOVE or FLED tracking
         "MOVE",        # Arg4: Remove from move_activation_pool
         1              # Arg5: No error logging
     )
-    
+
     # Add position data for reward calculation
     # Detect same-position moves (unit didn't actually move)
     actually_moved = (orig_col != dest_col) or (orig_row != dest_row)

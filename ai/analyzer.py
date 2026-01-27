@@ -501,15 +501,10 @@ def parse_step_log(filepath: str) -> Dict:
                     stats['turns_distribution'][episode_turn] += 1
                 stats['episode_lengths'].append((current_episode_num, episode_actions))
                 
-                # Calculate episode duration
-                episode_end_time = parse_timestamp_to_seconds(line)
-                if episode_start_time is not None and episode_end_time is not None:
-                    duration_seconds = episode_end_time - episode_start_time
-                    # CRITICAL FIX: Handle midnight rollover (episode ends after midnight)
-                    # If end_time < start_time, episode crossed midnight boundary
-                    if duration_seconds < 0:
-                        # Add 24 hours (86400 seconds) to correct duration
-                        duration_seconds += 86400
+                # Calculate episode duration from Duration= field (wall-clock from step_logger)
+                duration_match = re.search(r'Duration=(\d+(?:\.\d+)?)\s*s?\b', line)
+                if duration_match:
+                    duration_seconds = float(duration_match.group(1))
                     stats['episode_durations'].append((current_episode_num, duration_seconds))
 
                 winner_match = re.search(r'Winner=(-?\d+)', line)
@@ -1848,7 +1843,27 @@ def parse_step_log(filepath: str) -> Dict:
     return stats
 
 
-def print_statistics(stats: Dict, output_f=None):
+def parse_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    Parse STEP_TIMING lines from debug.log.
+    Returns list of (episode, step_index, duration_s) or None if file missing/unreadable.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tuple[int, int, float]]] = None):
     """Print formatted statistics."""
     def log_print(*args, **kwargs):
         """Print to both console and file if output_f provided"""
@@ -1917,6 +1932,28 @@ def print_statistics(stats: Dict, output_f=None):
         log_print(f"Episode Durations: {avg_duration:.2f}s (average)")
         log_print(f"  Min: {min_duration:.2f}s (Episode {min_episode_num}) - (actions: {min_actions_str})")
         log_print(f"  Max: {max_duration:.2f}s (Episode {max_episode_num}) - (actions: {max_actions_str})")
+    
+    # Step durations (by step index, from debug.log STEP_TIMING)
+    if step_timings:
+        log_print("")
+        by_index: Dict[int, List[float]] = defaultdict(list)
+        for _ep, idx, dur in step_timings:
+            by_index[idx].append(dur)
+        all_durations = [d for _e, _i, d in step_timings]
+        n_steps = len(all_durations)
+        avg_all = sum(all_durations) / n_steps if n_steps else 0.0
+        min_all = min(all_durations) if all_durations else 0.0
+        max_all = max(all_durations) if all_durations else 0.0
+        # Which (episode, step_index) has min/max duration (global over all steps)
+        min_ep, min_idx, min_val = min(step_timings, key=lambda t: t[2])
+        max_ep, max_idx, max_val = max(step_timings, key=lambda t: t[2])
+        log_print(f"Step Durations (from debug.log): {avg_all:.3f}s (average), Min: {min_all:.3f}s, Max: {max_all:.3f}s (n={n_steps} steps)")
+        log_print(f"  Min: {min_val:.3f}s (Episode {min_ep}, step index {min_idx})")
+        log_print(f"  Max: {max_val:.3f}s (Episode {max_ep}, step index {max_idx})")
+    elif step_timings is not None and len(step_timings) == 0:
+        log_print("")
+        log_print("Step Durations (from debug.log): no STEP_TIMING data")
+    # If step_timings is None, debug.log was missing → skip silently to match "same stats" only when data exists
     
     # RÉSULTATS DES PARTIES
     log_print("\n" + "-" * 80)
@@ -2442,7 +2479,9 @@ if __name__ == "__main__":
         log_print("=" * 80)
         
         stats = parse_step_log(log_file)
-        print_statistics(stats, output_f)
+        debug_log_path = os.path.join(os.path.dirname(os.path.abspath(log_file)) or ".", "debug.log")
+        step_timings = parse_step_timings_from_debug(debug_log_path)
+        print_statistics(stats, output_f, step_timings=step_timings)
         
         # Calculate total errors (all error counts between MOVEMENT ERRORS and SAMPLE ACTIONS)
         total_errors = (
