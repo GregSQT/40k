@@ -91,9 +91,14 @@ def generate_steplog_and_replay(config, args):
     print("=" * 50)
     
     try:
+        if not args.agent:
+            raise ValueError("--agent required to read step_log_buffer_size from agent training config")
+        from shared.data_validation import require_key
+        tc = config.load_agent_training_config(args.agent, args.training_config or "default")
+        step_log_buffer_size = require_key(tc, "step_log_buffer_size")
         # Step 1: Enable step logging temporarily
         temp_steplog = "temp_steplog_for_replay.log"
-        temp_step_logger = StepLogger(temp_steplog, enabled=True)
+        temp_step_logger = StepLogger(temp_steplog, enabled=True, buffer_size=step_log_buffer_size)
         original_step_logger = globals().get('step_logger')
         globals()['step_logger'] = temp_step_logger
         

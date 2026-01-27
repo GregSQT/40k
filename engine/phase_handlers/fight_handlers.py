@@ -1244,11 +1244,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 # CRITICAL: Rebuild valid_targets if empty - valid_fight_targets may have been cleared
                 # But only if unit has attacks remaining
                 if require_key(unit, "ATTACK_LEFT") <= 0:
-                    # No attacks left - skip this unit
+                    # No attacks left - skip this unit (engine-determined, not agent choice)
                     result = end_activation(game_state, unit, PASS, 1, PASS, FIGHT, 0)
                     game_state["active_fight_unit"] = None
                     game_state["valid_fight_targets"] = []
-                    result["action"] = "wait"
+                    result["action"] = "skip"
+                    result["skip_reason"] = "no_valid_actions"
                     result["phase"] = "fight"
                     result["unitId"] = unit_id
                     if result.get("phase_complete"):
@@ -1282,7 +1283,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                             add_console_log(game_state, log_msg)
                             safe_print(game_state, log_msg)
                     
-                    # No targets - skip this unit
+                    # No targets - skip this unit (e.g. target died before activation)
                     result = end_activation(
                         game_state, unit,
                         PASS, 1, PASS, FIGHT, 0
@@ -1291,8 +1292,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     game_state["active_fight_unit"] = None
                     game_state["valid_fight_targets"] = []
                     
-                    # CRITICAL: Set action for logging (wait action since no attack was made)
-                    result["action"] = "wait"
+                    result["action"] = "skip"
+                    result["skip_reason"] = "no_valid_actions"
                     result["phase"] = "fight"
                     result["unitId"] = unit_id
 
@@ -1327,11 +1328,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 first_target = valid_targets[0]
                 action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
             else:
-                # No targets available - end activation
+                # No targets available - skip (e.g. target died before activation)
                 result = end_activation(game_state, unit, PASS, 1, PASS, FIGHT, 0)
                 game_state["active_fight_unit"] = None
                 game_state["valid_fight_targets"] = []
-                result["action"] = "wait"
+                result["action"] = "skip"
+                result["skip_reason"] = "no_valid_actions"
                 result["phase"] = "fight"
                 result["unitId"] = unit_id
                 if result.get("phase_complete"):

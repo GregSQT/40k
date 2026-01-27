@@ -1106,6 +1106,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             _success, result = _handle_shooting_end_activation(
                 game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
             )
+            result["skip_reason"] = "no_valid_actions"
             return result
     
     # YES -> SHOOTING ACTIONS AVAILABLE -> Go to STEP 3: ACTION_SELECTION
@@ -2679,8 +2680,9 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return success, result
     
     elif action_type == "skip":
-        # AI_TURN.md: Skip action - same as wait
+        # AI_TURN.md: Skip = unit has no valid actions (e.g. target died before activation). Engine-determined, not agent choice.
         success, result = _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip")
+        result["skip_reason"] = "no_valid_actions"
         
         # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
@@ -4000,17 +4002,17 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     unit_id = unit["id"]
     orig_col, orig_row = get_unit_coordinates(unit)
     
-    # CRITICAL: Cannot advance if unit has already shot -> SKIP (agent cannot act)
+    # CRITICAL: Cannot advance if unit has already shot -> SKIP (unit cannot act)
     has_shot = _unit_has_shot_with_any_weapon(unit)
     if has_shot:
         success, result = _handle_shooting_end_activation(
             game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
         )
         result["advance_rejected"] = True
-        result["error"] = "cannot_advance_after_shooting"
+        result["skip_reason"] = "cannot_advance_after_shooting"
         return success, result
 
-    # CRITICAL: Cannot advance if unit is adjacent to enemy -> SKIP (agent cannot act)
+    # CRITICAL: Cannot advance if unit is adjacent to enemy -> SKIP (unit cannot act)
     # Pool is source of truth: if can_advance is False, unit cannot advance
     can_advance = unit["_can_advance"] if "_can_advance" in unit else None
     if can_advance is False:
@@ -4018,7 +4020,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
         )
         result["advance_rejected"] = True
-        result["error"] = "cannot_advance_adjacent_to_enemy"
+        result["skip_reason"] = "cannot_advance_adjacent_to_enemy"
         return success, result
     
     # Use existing advance_range if already rolled (to keep same roll for destination selection)
@@ -4282,7 +4284,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
             )
             result["advance_rejected"] = True
-            result["error"] = "no_valid_advance_destinations"
+            result["skip_reason"] = "no_valid_advance_destinations"
             return success, result
         
         # Human player - return destinations for UI

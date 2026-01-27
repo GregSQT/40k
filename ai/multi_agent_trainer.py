@@ -739,7 +739,9 @@ class MultiAgentTrainer:
                     if train_module and hasattr(train_module, 'step_logger') and train_module.step_logger and train_module.step_logger.enabled:
                         agent_log_file = f"train_step_{agent_key}.log"
                         from ai.step_logger import StepLogger
-                        agent_step_logger = StepLogger(agent_log_file, enabled=True)
+                        from shared.data_validation import require_key
+                        step_log_buffer_size = require_key(training_config, "step_log_buffer_size")
+                        agent_step_logger = StepLogger(agent_log_file, enabled=True, buffer_size=step_log_buffer_size)
                         base_env.controller.connect_step_logger(agent_step_logger)
                         print(f"✅ StepLogger connected for agent {agent_key}: {agent_log_file}")
                 except Exception as log_error:

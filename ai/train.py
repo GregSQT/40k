@@ -92,6 +92,8 @@ from ai.training_utils import (
     ensure_scenario
 )
 
+from shared.data_validation import require_key
+
 # Replay converter (extracted to ai/replay_converter.py)
 from ai.replay_converter import (
     extract_scenario_name_for_replay,
@@ -1433,9 +1435,17 @@ def main():
         from engine.w40k_core import reset_debug_log_flag
         reset_debug_log_flag()
         
+        # Setup environment and configuration (before step_logger to read step_log_buffer_size)
+        config = get_config_loader()
+        if args.step and not args.agent:
+            raise ValueError("--step requires --agent to read step_log_buffer_size from agent training config")
+        step_log_buffer_size = None
+        if args.agent:
+            tc = config.load_agent_training_config(args.agent, args.training_config)
+            step_log_buffer_size = require_key(tc, "step_log_buffer_size")
         # Initialize global step logger based on --step argument
         global step_logger
-        step_logger = StepLogger("step.log", enabled=args.step)
+        step_logger = StepLogger("step.log", enabled=args.step, buffer_size=step_log_buffer_size)
         
         # Sync configs to frontend automatically
         try:
@@ -1443,9 +1453,6 @@ def main():
                          cwd=project_root, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Config sync failed: {e}")
-        
-        # Setup environment and configuration
-        config = get_config_loader()
         
         # Ensure scenario exists ONLY for generic training (no agent specified)
         if not args.agent:

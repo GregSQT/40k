@@ -310,7 +310,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         return movement_destination_selection_handler(game_state, unit_id, action)
     
     elif action_type == "skip":
-        return _handle_skip_action(game_state, active_unit)
+        # Engine determined unit has no valid actions (e.g. no valid destinations)
+        return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
     
     elif action_type == "left_click":
         return movement_click_handler(game_state, unit_id, action)
@@ -405,6 +406,7 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     # Check if valid destinations exist
     if not game_state["valid_move_destinations_pool"]:
         # No valid moves - AI_TURN.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1)
+        # Skip = engine-determined "no valid actions", skip_reason for step logger
         movement_clear_preview(game_state)
         result = end_activation(
             game_state, unit,
@@ -415,7 +417,8 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
             1             # Arg5: Error logging enabled
         )
         result.update({
-            "action": "no_destination",
+            "action": "skip",
+            "skip_reason": "no_valid_move_destinations",
             "unitId": unit["id"],
             "activation_complete": True
         })
@@ -1051,7 +1054,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
                 # If pool is now empty, force skip this unit to prevent infinite loop
                 if not game_state["valid_move_destinations_pool"]:
                     _log_movement_debug(game_state, "destination_selection", str(unit_id), "ALL destinations invalid - forcing skip to prevent infinite loop")
-                    return _handle_skip_action(game_state, unit)
+                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
         
         return False, move_result
     
@@ -1220,29 +1223,48 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     return True, result
 
 
-def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """AI_MOVE.md: Handle skip action"""
+def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_valid_destinations: bool = True) -> Tuple[bool, Dict[str, Any]]:
+    """AI_MOVE.md: Handle skip (no valid dests) or wait (agent chooses to pass).
+
+    had_valid_destinations: True = agent chose to pass (wait). False = no valid destinations (skip).
+    """
     # REMOVED: Duplicate logging - AI_TURN.md end_activation handles ALL logging
     # AI_TURN.md PRINCIPLE: end_activation is SINGLE SOURCE for action logging
-    
+
     movement_clear_preview(game_state)
-    
-    # AI_TURN.md EXACT: end_activation(WAIT, 1, PASS, MOVE, 1, 1)
-    result = end_activation(
-        game_state, unit,
-        "WAIT",        # Arg1: Log wait action (SINGLE SOURCE)
-        1,             # Arg2: +1 step increment
-        "PASS",        # Arg3: PASS tracking (not MOVE)
-        "MOVE",        # Arg4: Remove from move_activation_pool
-        1              # Arg5: Error logging enabled
-    )
-    
-    result.update({
-        "action": "wait",  # Return 'wait' not 'skip' for StepLogger whitelist
-        "unitId": unit["id"],
-        "activation_complete": True
-    })
-    
+
+    if had_valid_destinations:
+        # AI_TURN.md EXACT: end_activation(WAIT, 1, PASS, MOVE, 1, 1)
+        result = end_activation(
+            game_state, unit,
+            "WAIT",        # Arg1: Log wait action (SINGLE SOURCE)
+            1,             # Arg2: +1 step increment
+            "PASS",        # Arg3: PASS tracking (not MOVE)
+            "MOVE",        # Arg4: Remove from move_activation_pool
+            1              # Arg5: Error logging enabled
+        )
+        result.update({
+            "action": "wait",  # Agent chose to pass
+            "unitId": unit["id"],
+            "activation_complete": True
+        })
+    else:
+        # AI_TURN.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1) - no step (unit could not act)
+        result = end_activation(
+            game_state, unit,
+            "NO",         # Arg1: NO (no action taken)
+            0,            # Arg2: No step increment
+            "PASS",       # Arg3: PASS tracking
+            "MOVE",       # Arg4: Remove from move_activation_pool
+            1             # Arg5: Error logging enabled
+        )
+        result.update({
+            "action": "skip",
+            "skip_reason": "no_valid_move_destinations",
+            "unitId": unit["id"],
+            "activation_complete": True
+        })
+
     return True, result
 
 

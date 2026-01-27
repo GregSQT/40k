@@ -20,6 +20,8 @@ import torch
 from typing import Dict, Optional
 from stable_baselines3.common.callbacks import BaseCallback
 
+from shared.data_validation import require_key
+
 # Import evaluation bots for testing - flag used by print_final_training_summary
 try:
     from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
@@ -177,13 +179,13 @@ class EpisodeTerminationCallback(BaseCallback):
 
                     self.last_episode_time = current_time
 
-                    # Calculate ETA using EMA (or fallback to overall average for first few episodes)
+                    # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
                     remaining_episodes = self.total_episodes - global_episode_count
                     if self.ema_episode_time is not None:
                         eta = self.ema_episode_time * remaining_episodes
                         eps_speed = 1.0 / self.ema_episode_time if self.ema_episode_time > 0 else 0
                     else:
-                        # Fallback for early episodes
+                        # Use overall average when EMA not yet available (early episodes)
                         avg_episode_time = elapsed / global_episode_count
                         eta = avg_episode_time * remaining_episodes
                         eps_speed = global_episode_count / elapsed if elapsed > 0 else 0
@@ -351,7 +353,7 @@ class EpisodeBasedEvalCallback(BaseCallback):
             episode_lengths.append(episode_length)
 
             # Track wins - CRITICAL FIX: Learning agent is Player 0, not Player 1!
-            if final_info and final_info.get('winner') == 0:
+            if final_info and 'winner' in final_info and final_info['winner'] == 0:
                 wins += 1
         
         # Calculate statistics
@@ -376,7 +378,7 @@ class EpisodeBasedEvalCallback(BaseCallback):
             self.model.logger.record("eval/episode", self.episode_count)
             self.model.logger.dump(step=self.model.num_timesteps)
         else:
-            # Fallback to callback logger
+            # Use callback logger when model has no logger
             self.logger.record("eval/mean_reward", mean_reward)
             self.logger.record("eval/mean_ep_length", mean_ep_length)
             self.logger.record("eval/win_rate", win_rate)
@@ -588,8 +590,8 @@ class MetricsCollectionCallback(BaseCallback):
 
                         self.episode_tactical_data['total_actions'] += 1
 
-                    # Track wait actions (action type in info)
-                    if info.get('action') == 'wait' or info.get('action') == 'skip':
+                    # Track wait actions (action type in info; optional per step)
+                    if info.get('action') == 'wait' or info.get('action') == 'skip':  # get allowed
                         self.episode_tactical_data['wait_actions'] += 1
 
                     # Track damage from combat results
@@ -597,9 +599,9 @@ class MetricsCollectionCallback(BaseCallback):
                         damage_dealt = info['totalDamage']
                         self.episode_tactical_data['damage_dealt'] += damage_dealt
 
-                    # COMBAT KILL TRACKING: Log kills to metrics tracker
-                    if info.get('target_died', False):
-                        phase = info.get('phase', 'unknown')
+                    # COMBAT KILL TRACKING: Log kills to metrics tracker (optional per step)
+                    if info.get('target_died', False):  # get allowed
+                        phase = info.get('phase', 'unknown')  # get allowed
                         if phase == 'shoot':
                             self.metrics_tracker.log_combat_kill('shoot')
                         elif phase == 'fight':
@@ -608,8 +610,8 @@ class MetricsCollectionCallback(BaseCallback):
                             # Charge phase kills (rare but possible)
                             self.metrics_tracker.log_combat_kill('melee')
 
-                    # CHARGE SUCCESS TRACKING: Log successful charges
-                    if info.get('charge_succeeded', False):
+                    # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
+                    if info.get('charge_succeeded', False):  # get allowed
                         self.metrics_tracker.log_combat_kill('charge')
 
                     # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
@@ -637,11 +639,11 @@ class MetricsCollectionCallback(BaseCallback):
                             'penalties': 0.0
                         }
                     
-                    self.episode_reward_components['base_actions'] += reward_breakdown.get('base_actions', 0.0)
-                    self.episode_reward_components['result_bonuses'] += reward_breakdown.get('result_bonuses', 0.0)
-                    self.episode_reward_components['tactical_bonuses'] += reward_breakdown.get('tactical_bonuses', 0.0)
-                    self.episode_reward_components['situational'] += reward_breakdown.get('situational', 0.0)
-                    self.episode_reward_components['penalties'] += reward_breakdown.get('penalties', 0.0)
+                    self.episode_reward_components['base_actions'] += require_key(reward_breakdown, 'base_actions')
+                    self.episode_reward_components['result_bonuses'] += require_key(reward_breakdown, 'result_bonuses')
+                    self.episode_reward_components['tactical_bonuses'] += require_key(reward_breakdown, 'tactical_bonuses')
+                    self.episode_reward_components['situational'] += require_key(reward_breakdown, 'situational')
+                    self.episode_reward_components['penalties'] += require_key(reward_breakdown, 'penalties')
 
                     # Log position_score if available (Phase 2+ movement metric)
                     if 'position_score' in reward_breakdown and self.metrics_tracker:
@@ -712,10 +714,11 @@ class MetricsCollectionCallback(BaseCallback):
         # This ensures 0_critical/ metrics use timesteps (not episodes) as x-axis
         self.metrics_tracker.step_count = self.model.num_timesteps
 
-        # Extract episode data
+        # Extract episode data (we are only called when 'episode' in info; engine sets info["episode"] = {"r","l","t"})
+        ep = info['episode']
         episode_data = {
-            'total_reward': info.get('episode_reward', self.episode_reward),
-            'episode_length': info.get('episode_length', self.episode_length),
+            'total_reward': float(ep['r']),
+            'episode_length': int(ep['l']),
             'winner': info['winner'] if 'winner' in info else None,
         }
 
@@ -751,8 +754,8 @@ class MetricsCollectionCallback(BaseCallback):
 
             # Log controlled objectives ONLY if game completed turn 5 (turn limit reached)
             # Early termination (elimination) should not log objectives
-            # The 'turn_limit_reached' flag is set by fight_handlers when game ends due to turn limit
-            turn_limit_reached = info.get('turn_limit_reached', False)
+            # The 'turn_limit_reached' flag is set by fight_handlers when game ends due to turn limit (optional in info)
+            turn_limit_reached = info.get('turn_limit_reached', False)  # get allowed
             if turn_limit_reached:
                 controlled_objectives = info['tactical_data']['controlled_objectives'] if 'controlled_objectives' in info['tactical_data'] else 0
                 self.metrics_tracker.log_controlled_objectives(controlled_objectives)
@@ -788,16 +791,17 @@ class MetricsCollectionCallback(BaseCallback):
                     rolling_win_rate = np.mean(self.win_rate_window)
                     self.model.logger.record('game_critical/win_rate_100ep', rolling_win_rate)
             
-            # Tactical metrics (engine always sets these; get allowed for logging)
-            units_killed = self.episode_tactical_data.get('units_killed', 0)  # get allowed
-            units_lost = max(self.episode_tactical_data.get('units_lost', 0), 1)  # get allowed; avoid div by zero
-            kill_loss_ratio = units_killed / units_lost
-            self.model.logger.record('game_critical/units_killed_vs_lost_ratio', kill_loss_ratio)
+            # Tactical metrics (after update from info['tactical_data'], engine guarantees these keys)
+            units_killed = self.episode_tactical_data['units_killed']
+            units_lost = self.episode_tactical_data['units_lost']
+            if units_lost > 0:
+                kill_loss_ratio = units_killed / units_lost
+                self.model.logger.record('game_critical/units_killed_vs_lost_ratio', kill_loss_ratio)
 
             # Invalid action rate
-            total_actions = self.episode_tactical_data.get('total_actions', 0)  # get allowed
+            total_actions = self.episode_tactical_data['total_actions']
             if total_actions > 0:
-                invalid_rate = self.episode_tactical_data.get('invalid_actions', 0) / total_actions  # get allowed
+                invalid_rate = self.episode_tactical_data['invalid_actions'] / total_actions
                 self.model.logger.record('game_critical/invalid_action_rate', invalid_rate)
             
             # Dump metrics to TensorBoard
@@ -856,7 +860,7 @@ class MetricsCollectionCallback(BaseCallback):
                 gs = env.unwrapped.game_state
                 action_logs = gs['action_logs']  # engine always sets it
                 for log in action_logs:
-                    action_type = log.get('type', '')
+                    action_type = log['type']  # engine always sets "type" when appending to action_logs
                     if action_type in ['shoot', 'combat']:
                         immediate_actions += 1
                     elif action_type in ['move', 'wait']:
@@ -922,21 +926,19 @@ class BotEvaluationCallback(BaseCallback):
         if should_evaluate:
             results = self._evaluate_against_bots()
 
-            # Calculate combined performance (weighted average)
-            # IMPROVED weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
-            # Increased RandomBot weight to prevent overfitting to predictable patterns
+            # Calculate combined performance (evaluate_against_bots returns dict with 'random','greedy','defensive','combined')
             combined_win_rate = (
-                results.get('random', 0) * 0.35 +  # get allowed
-                results.get('greedy', 0) * 0.30 +  # get allowed
-                results.get('defensive', 0) * 0.35  # get allowed
+                results['random'] * 0.35 +
+                results['greedy'] * 0.30 +
+                results['defensive'] * 0.35
             )
 
             # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)
             if self.metrics_tracker:
                 bot_results = {
-                    'random': results.get('random'),
-                    'greedy': results.get('greedy'),
-                    'defensive': results.get('defensive'),
+                    'random': results['random'],
+                    'greedy': results['greedy'],
+                    'defensive': results['defensive'],
                     'combined': combined_win_rate
                 }
                 self.metrics_tracker.log_bot_evaluations(bot_results)
@@ -969,7 +971,8 @@ class BotEvaluationCallback(BaseCallback):
                 if hasattr(train_env, 'unwrapped'):
                     train_env = train_env.unwrapped
                 if hasattr(train_env, 'config'):
-                    controlled_agent = train_env.config.get('controlled_agent')
+                    # controlled_agent is optional (None = player 0)
+                    controlled_agent = train_env.config.get('controlled_agent')  # get allowed
                     # Extract training_config_name from config
                     if 'training_config_name' not in train_env.config:
                         raise KeyError("Training environment config missing required 'training_config_name' field")
@@ -977,7 +980,11 @@ class BotEvaluationCallback(BaseCallback):
                     # Extract rewards_config_name from config (might be stored as rewards_config)
                     if 'rewards_config' not in train_env.config and 'rewards_config_name' not in train_env.config:
                         raise KeyError("Training environment config missing required 'rewards_config' or 'rewards_config_name' field")
-                    rewards_config_name = train_env.config.get('rewards_config_name') or train_env.config.get('rewards_config')
+                    rewards_config_name = (
+                        train_env.config['rewards_config_name']
+                        if 'rewards_config_name' in train_env.config
+                        else train_env.config['rewards_config']
+                    )
 
         # Raise error if extraction failed
         if not training_config_name:

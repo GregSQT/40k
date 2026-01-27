@@ -1175,7 +1175,7 @@ class W40KEngine(gym.Env):
                         if not action_type:
                             raise ValueError(f"action_type is None or empty - cannot log action. result keys: {list(result.keys())}")
 
-                        valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee"]
+                        valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee", "skip"]
                         if action_type not in valid_action_types:
                             raise ValueError(f"Invalid action_type '{action_type}'. Valid types: {valid_action_types}")
 
@@ -1532,6 +1532,12 @@ class W40KEngine(gym.Env):
                                     raise ValueError(f"Wait action in movement phase missing position data: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}")
                                 
                                 action_details["unit_with_coords"] = f"{unit_id}({wait_col},{wait_row})"
+
+                            elif action_type == "skip":
+                                # Skip = engine-determined "no valid actions" (e.g. target died). Log reason from result.
+                                skip_col, skip_row = get_unit_coordinates(updated_unit)
+                                action_details["unit_with_coords"] = f"{unit_id}({skip_col},{skip_row})"
+                                action_details["skip_reason"] = result.get("skip_reason")
 
                             # Calculate reward normally
                             step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)

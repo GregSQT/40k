@@ -19,7 +19,7 @@ class StepLogger:
     Captures ALL actions that generate step increments per AI_TURN.md.
     """
     
-    def __init__(self, output_file="step.log", enabled=False):
+    def __init__(self, output_file: str = "step.log", enabled: bool = False, buffer_size: int = None):
         self.output_file = output_file
         self.enabled = enabled
         self.step_count = 0
@@ -28,9 +28,12 @@ class StepLogger:
         self.episode_step_count = 0
         self.episode_action_count = 0
         self.episode_number = 0  # Track episode number for logging
-        # PERFORMANCE: Buffer logs to reduce I/O overhead
+        # PERFORMANCE: Buffer logs to reduce I/O (buffer_size from training_config step_log_buffer_size)
+        # Obligatoire si enabled ; si disabled, buffer_size peut être None (non utilisé).
+        if enabled and buffer_size is None:
+            raise ValueError("buffer_size is required when step logging is enabled (from training_config step_log_buffer_size)")
         self.log_buffer = []
-        self.buffer_size = 50  # Flush every 50 actions
+        self.buffer_size = buffer_size if buffer_size is not None else 0
         
         if self.enabled:
             # Clear existing log file
@@ -504,6 +507,12 @@ class StepLogger:
 
         elif action_type == "wait":
             return f"Unit {unit_id}{unit_coords} WAIT"
+
+        elif action_type == "skip":
+            reason = (details.get("skip_reason") or "").strip()
+            if reason:
+                return f"Unit {unit_id}{unit_coords} SKIP ({reason})"
+            return f"Unit {unit_id}{unit_coords} SKIP"
             
         elif action_type == "combat_individual":
             # Individual attack within multi-attack sequence
