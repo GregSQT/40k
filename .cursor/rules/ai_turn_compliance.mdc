@@ -1,0 +1,318 @@
+---
+description: Vérification stricte de conformité avec AI_TURN.md - Contrat de codage et règles critiques
+globs: engine/**/*.py,ai/**/*.py
+alwaysApply: true
+---
+
+# AI_TURN.md Compliance - Règles Générales
+
+**RÉFÉRENCE OBLIGATOIRE** : Avant toute modification du code, lire et vérifier la conformité avec :
+- `Documentation/AI_TURN.md` (règles de tour et phases)
+- `Documentation/AI_IMPLEMENTATION.md` (architecture)
+
+**RÈGLES SPÉCIALISÉES** : Cette règle générale est complétée par des règles spécialisées par phase :
+- `shooting_compliance.mdc` : Phase de tir
+- `movement_compliance.mdc` : Phase de mouvement
+- `charge_compliance.mdc` : Phase de charge
+- `fight_compliance.mdc` : Phase de combat
+- `coding_practices.mdc` : Bonnes pratiques générales (coordonnées, workaround, etc.)
+
+## 🚨 CONTRAT DE CODAGE AI (NON NÉGOCIABLE)
+
+### Règle 1 : Ne jamais assumer de valeurs
+```python
+# ❌ INTERDIT
+if not config.get('learning_rate'):
+    learning_rate = 0.001  # Valeur inventée
+
+# ✅ OBLIGATOIRE
+learning_rate = require_key(config, 'learning_rate')  # Lève une erreur si absent
+```
+
+### Règle 2 : Toujours lever une erreur explicite
+```python
+# ❌ INTERDIT
+value = data.get('key', None)  # Silent substitution
+if not value:
+    return  # Skip silencieux
+
+# ✅ OBLIGATOIRE
+value = require_key(data, 'key')  # Lève KeyError si absent
+if not value:
+    raise ValueError("key is required and cannot be None")
+```
+
+### Règle 3 : Pas de constantes inline
+```python
+# ❌ INTERDIT
+if distance > 5:  # Magic number
+    reward = 10.0  # Magic number
+
+# ✅ OBLIGATOIRE
+max_range = config.get('max_shooting_range')  # Depuis config
+base_reward = config.get('base_reward')  # Depuis config
+```
+
+### Règle 4 : Design simple et conforme
+- Préférer la plus petite implémentation qui respecte AI_TURN.md
+- Éviter les abstractions inutiles
+- Refuser les changements qui violent AI_TURN.md
+
+## 📋 CONVENTIONS DE NOMMAGE (CRITIQUE)
+
+### Champs UPPERCASE obligatoires
+Tous les champs de statistiques d'unité DOIVENT être en UPPERCASE :
+
+```python
+# ❌ INTERDIT
+unit['hp_cur'] = 10
+unit['move'] = 6
+unit['rng_atk'] = 3
+
+# ✅ OBLIGATOIRE
+unit['HP_CUR'] = 10
+unit['MOVE'] = 6
+unit['RNG_WEAPONS'] = [...]  # Tableau d'armes
+unit['selectedRngWeaponIndex'] = 0  # Index (camelCase OK)
+```
+
+**Champs critiques à vérifier** :
+- Movement : `MOVE`, `col`, `row`
+- Shooting : `RNG_WEAPONS[]`, `selectedRngWeaponIndex`, `SHOOT_LEFT`
+- Fight : `CC_WEAPONS[]`, `selectedCcWeaponIndex`, `ATTACK_LEFT`
+- Defense : `HP_CUR`, `HP_MAX`, `T`, `ARMOR_SAVE`, `INVUL_SAVE`
+
+**⚠️ CRITICAL** : Utiliser `engine.utils.weapon_helpers` pour accéder aux armes (tableaux, pas champs uniques).
+
+## 🔄 GESTION D'ÉTAT (SINGLE SOURCE OF TRUTH)
+
+### Principe : Un seul game_state
+```python
+# ❌ INTERDIT
+def process_action(game_state):
+    local_state = game_state.copy()  # Copie interdite
+    local_state['step'] += 1
+
+# ✅ OBLIGATOIRE
+def process_action(game_state):
+    game_state['step'] += 1  # Modification directe
+```
+
+### Tracking Sets (OBLIGATOIRE)
+Les sets de tracking DOIVENT être mis à jour via `end_activation()` :
+
+```python
+# Tracking sets critiques :
+# - units_moved
+# - units_shot
+# - units_advanced
+# - units_charged
+# - units_fought
+# - units_fled
+
+# ❌ INTERDIT
+unit['has_moved'] = True  # Tracking manuel
+
+# ✅ OBLIGATOIRE
+end_activation(ACTION, 1, MOVE, MOVE, 0, 0)  # Marque automatiquement
+```
+
+## 🎯 PHASES ET SÉQUENCES
+
+### Activation séquentielle (UN SEUL À LA FOIS)
+```python
+# ❌ INTERDIT
+for unit in eligible_units:
+    unit.act()  # Actions simultanées
+
+# ✅ OBLIGATOIRE
+if move_activation_pool:
+    unit = move_activation_pool[0]
+    process_unit_activation(unit)  # Un seul à la fois
+```
+
+### Fin de phase par éligibilité
+```python
+# ❌ INTERDIT
+if step_count >= max_steps:
+    end_phase()  # Fin arbitraire
+
+# ✅ OBLIGATOIRE
+if not move_activation_pool:  # Pool vide = plus d'unités éligibles
+    advance_to_next_phase()
+```
+
+## 🔍 POINTS CRITIQUES (VÉRIFICATION OBLIGATOIRE)
+
+### 1. Caches et Pools
+```python
+# ❌ INTERDIT
+def build_target_pool(unit):
+    targets = []  # Pas de vérification de cache
+    for enemy in enemies:
+        targets.append(enemy)
+
+# ✅ OBLIGATOIRE
+def build_target_pool(unit):
+    assert 'los_cache' in unit, "los_cache must exist (call build_unit_los_cache first)"
+    assert 'position_cache' in game_state, "position_cache must exist"
+    # Utiliser los_cache pour performance
+```
+
+**Règles de cache** :
+- `position_cache` : Mis à jour après chaque mort de cible
+- `los_cache` : Recalculé après chaque advance (pas juste invalidé)
+- `los_cache` : Nettoyé à la fin de l'activation
+- Pool = source de vérité, cache = optimisation
+
+### 2. Fonction end_activation() - Arguments stricts
+```python
+# Signature : end_activation(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6)
+# Arg1 : ACTION | WAIT | NO (logging)
+# Arg2 : 1 = +step | 0 = pas de step
+# Arg3 : 0 | MOVE | FLED | SHOOTING | ADVANCE | CHARGE | FIGHT (tracking)
+# Arg4 : NOT_REMOVED | MOVE | FLED | SHOOTING | CHARGE | FIGHT (pool removal)
+# Arg5 : 1 = log error | 0 = pas de log
+# Arg6 : 1 = remove green circle | 0 = keep circle
+
+# ❌ INTERDIT
+end_activation(ACTION, 1, "move", "move", 0, 0)  # Strings au lieu de constantes
+
+# ✅ OBLIGATOIRE
+end_activation(ACTION, 1, MOVE, MOVE, 0, 0)  # Constantes définies
+```
+
+### 3. Restrictions de mouvement
+```python
+# ❌ INTERDIT
+if can_move_to(hex):
+    move_unit(hex)  # Pas de vérification d'adjacence ennemie
+
+# ✅ OBLIGATOIRE
+if not is_adjacent_to_enemy(hex) and can_move_to(hex):
+    move_unit(hex)  # Interdit de bouger VERS hex adjacent à ennemi
+```
+
+### 4. Restrictions de tir
+```python
+# Unités adjacentes à ennemis = EN FIGHT = NE PEUVENT PAS TIRER
+# Sauf si arme PISTOL
+
+# ❌ INTERDIT
+if has_weapon():
+    shoot()  # Pas de vérification d'adjacence
+
+# ✅ OBLIGATOIRE
+if is_adjacent_to_enemy():
+    if not has_pistol_weapon():
+        return  # Ne peut pas tirer
+    # Sinon, peut tirer avec PISTOL uniquement
+```
+
+### 5. Advance Action (Post-advance restrictions)
+```python
+# Après advance :
+# - Seules les armes ASSAULT sont disponibles
+# - valid_target_pool doit être reconstruit
+# - CAN_ADVANCE = false (ne peut plus avancer)
+
+# ❌ INTERDIT
+unit['CAN_ADVANCE'] = True  # Après avoir avancé
+shoot_with_any_weapon()  # Pas de filtrage ASSAULT
+
+# ✅ OBLIGATOIRE
+unit['CAN_ADVANCE'] = False  # Après advance
+weapon_availability_check(weapon_rule, 1, 0)  # Filtre ASSAULT uniquement
+valid_target_pool_build(weapon_rule, 1, 0)  # Reconstruit pool
+```
+
+## ⚠️ VIOLATIONS COMMUNES À DÉTECTER
+
+### Violation 1 : Double action dans même phase
+```python
+# ❌ DÉTECTER
+unit.shoot()
+unit.shoot()  # Même unité tire deux fois
+
+# ✅ CORRECTION
+# units_shot tracking empêche cela
+assert unit_id not in game_state['units_shot']
+```
+
+### Violation 2 : Mouvement vers hex adjacent ennemi
+```python
+# ❌ DÉTECTER
+move_to(hex_adjacent_to_enemy)
+
+# ✅ CORRECTION
+# Restrictions de mouvement empêchent cela
+assert not is_adjacent_to_enemy(destination)
+```
+
+### Violation 3 : Tir après avoir fui
+```python
+# ❌ DÉTECTER
+unit.flee()
+unit.shoot()  # Dans le même tour
+
+# ✅ CORRECTION
+# units_fled empêche le tir
+if unit_id in game_state['units_fled']:
+    return  # Ne peut pas tirer
+```
+
+### Violation 4 : Charge depuis position adjacente
+```python
+# ❌ DÉTECTER
+if is_adjacent_to_enemy():
+    charge()  # Déjà adjacent
+
+# ✅ CORRECTION
+# Pas de charge si déjà adjacent
+assert not is_adjacent_to_enemy()
+```
+
+## ✅ CHECKLIST DE VALIDATION
+
+Avant de valider un changement, vérifier :
+
+- [ ] Aucune valeur assumée (toutes depuis config ou erreur explicite)
+- [ ] Aucun fallback silencieux (erreurs explicites uniquement)
+- [ ] Aucune constante inline (toutes depuis config)
+- [ ] Champs UPPERCASE respectés (HP_CUR, MOVE, etc.)
+- [ ] Single source of truth (pas de copie de game_state)
+- [ ] Tracking sets mis à jour via end_activation()
+- [ ] Activation séquentielle (un seul à la fois)
+- [ ] Fin de phase par éligibilité (pools vides)
+- [ ] Caches vérifiés (los_cache, position_cache)
+- [ ] Restrictions de mouvement respectées
+- [ ] Restrictions de tir respectées (adjacence = fight)
+- [ ] Advance restrictions respectées (ASSAULT uniquement après)
+- [ ] Fonction end_activation() appelée avec bonnes constantes
+
+## 🔗 RÉFÉRENCES
+
+- **AI_TURN.md** : Règles complètes de tour, phases, séquences
+- **AI_IMPLEMENTATION.md** : Architecture et patterns d'implémentation
+- **Validation** : `shared/validation.py` pour require_key, require_present
+- **Script de vérification** : `scripts/check_ai_rules.py` pour détection automatique
+
+## 📚 RÈGLES SPÉCIALISÉES PAR DOMAINE
+
+Pour des règles détaillées par phase, consulter :
+- **shooting_compliance.mdc** : Règles spécifiques phase de tir (caches, advance, etc.)
+- **movement_compliance.mdc** : Règles spécifiques phase de mouvement (flee, restrictions, etc.)
+- **charge_compliance.mdc** : Règles spécifiques phase de charge (roll 2D6, advanced units, etc.)
+- **fight_compliance.mdc** : Règles spécifiques phase de combat (alternance, charging priority, etc.)
+- **coding_practices.mdc** : Bonnes pratiques générales (coordonnées, workaround, fallback, etc.)
+
+## 🎯 PRINCIPE FINAL
+
+**Si une règle dans AI_TURN.md n'est pas claire ou semble en conflit avec une demande :**
+1. **ARRÊTER** l'implémentation
+2. **SIGNALER** le conflit explicitement
+3. **DEMANDER** clarification avant de continuer
+
+**Ne jamais implémenter une violation "temporaire" ou "workaround".**
+
+**Utiliser les règles spécialisées** pour des vérifications détaillées par phase.

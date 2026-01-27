@@ -1,0 +1,241 @@
+---
+description: Bonnes pratiques de codage strictes - Uniformité, pas de workaround, pas de fallback, erreurs explicites
+globs: engine/**/*.py,ai/**/*.py
+alwaysApply: true
+---
+
+# Bonnes Pratiques de Codage - Règles Strictes
+
+**OBJECTIF** : Garantir un code propre, cohérent et sans contournements.
+
+## 🚨 RÈGLES NON NÉGOCIABLES
+
+### 1. Uniformité des Coordonnées (CRITIQUE)
+
+**Problème** : Les coordonnées peuvent être `int`, `float`, `str`, ou tuples inconsistants, causant des bugs subtils.
+
+**Règle** : TOUJOURS normaliser les coordonnées avant utilisation.
+
+```python
+# ❌ INTERDIT
+def check_adjacency(unit, enemy):
+    if unit["col"] == enemy["col"]:  # Comparaison directe non normalisée
+        return True
+
+# ✅ OBLIGATOIRE
+from engine.combat_utils import normalize_coordinates, get_unit_coordinates
+
+def check_adjacency(unit, enemy):
+    unit_col, unit_row = get_unit_coordinates(unit)  # Normalise automatiquement
+    enemy_col, enemy_row = get_unit_coordinates(enemy)
+    # OU
+    unit_col, unit_row = normalize_coordinates(unit["col"], unit["row"])
+    enemy_col, enemy_row = normalize_coordinates(enemy["col"], enemy["row"])
+    # Puis comparaison
+```
+
+**Fonctions à utiliser** :
+- `get_unit_coordinates(unit)` : Retourne `(int, int)` normalisé
+- `normalize_coordinates(col, row)` : Normalise n'importe quel format vers `(int, int)`
+
+**Vérifications obligatoires** :
+- Avant toute comparaison de coordonnées
+- Avant stockage dans des sets/tuples (clés de cache)
+- Avant calcul de distance hexagonale
+- Avant recherche dans `enemy_adjacent_hexes` (set de tuples)
+
+### 2. Pas de Workaround
+
+**Définition** : Solution temporaire qui contourne un problème au lieu de le résoudre.
+
+```python
+# ❌ INTERDIT
+# Workaround: Skip validation if data is None
+if data is None:
+    return default_value  # Contourne le problème
+
+# Workaround: Try-except pour masquer l'erreur
+try:
+    result = process(data)
+except:
+    result = None  # Masque l'erreur
+
+# ✅ OBLIGATOIRE
+# Corriger la root cause
+if data is None:
+    raise ValueError("data is required and cannot be None")
+
+# Gérer l'erreur explicitement
+try:
+    result = process(data)
+except SpecificError as e:
+    logger.error(f"Processing failed: {e}")
+    raise  # Propager l'erreur, ne pas la masquer
+```
+
+**Détection** : Si le code contient des commentaires comme "workaround", "hack", "temporary fix", "TODO fix properly", c'est une violation.
+
+### 3. Pas de Fallback Anti-Erreur
+
+**Définition** : Valeur par défaut utilisée uniquement pour éviter une erreur, sans justification métier.
+
+```python
+# ❌ INTERDIT
+value = config.get('key', None)  # Fallback silencieux
+if not value:
+    value = 0  # Fallback pour éviter erreur
+
+# Fallback dans calcul
+distance = data.get('distance', 0)  # 0 n'a pas de sens métier
+
+# ✅ OBLIGATOIRE
+# Utiliser require_key ou require_present
+from shared.validation import require_key, require_present
+
+value = require_key(config, 'key')  # Lève KeyError si absent
+value = require_present(raw_value, 'value')  # Lève ValueError si None
+
+# OU erreur explicite
+if 'key' not in config:
+    raise KeyError(f"Required config key 'key' is missing")
+```
+
+**Exception** : Les fallbacks sont autorisés UNIQUEMENT si c'est un comportement métier valide (ex: stratégie de repli planifiée), JAMAIS pour contourner un bug.
+
+### 4. Pas de Valeur par Défaut Anti-Erreur
+
+**Définition** : Valeur par défaut dont le seul objectif est d'éviter une erreur si la variable n'existe pas.
+
+```python
+# ❌ INTERDIT
+def process_unit(unit):
+    hp = unit.get('HP_CUR', 0)  # 0 pour éviter KeyError, pas pour logique métier
+    if hp > 0:  # Mais 0 n'est pas une valeur valide pour une unité vivante
+        ...
+
+# Cache avec fallback
+cache = game_state.get('position_cache', {})  # {} pour éviter KeyError
+
+# ✅ OBLIGATOIRE
+# Erreur explicite si valeur manquante
+def process_unit(unit):
+    if 'HP_CUR' not in unit:
+        raise KeyError(f"Unit {unit.get('id')} missing required field HP_CUR")
+    hp = unit['HP_CUR']
+    if hp <= 0:
+        raise ValueError(f"Unit {unit.get('id')} has invalid HP_CUR: {hp}")
+
+# OU utiliser require_key
+from shared.validation import require_key
+hp = require_key(unit, 'HP_CUR')
+```
+
+**Règle** : Si la valeur par défaut n'a pas de sens métier, préférer une erreur explicite.
+
+### 5. Gestion d'Erreurs Explicite
+
+**Règle** : Toutes les erreurs doivent être explicites et informatives.
+
+```python
+# ❌ INTERDIT
+try:
+    result = process(data)
+except:
+    pass  # Erreur silencieuse
+
+except Exception:
+    return None  # Erreur masquée
+
+# ✅ OBLIGATOIRE
+try:
+    result = process(data)
+except SpecificError as e:
+    logger.error(f"Processing failed for {data}: {e}")
+    raise ValueError(f"Cannot process data: {e}") from e
+```
+
+**Bonnes pratiques** :
+- Capturer des exceptions spécifiques, pas `Exception` générique
+- Logger l'erreur avec contexte
+- Propager ou transformer en erreur explicite
+- Utiliser `from e` pour chaîner les exceptions
+
+### 6. Pas de Magic Numbers
+
+**Règle** : Toutes les valeurs numériques doivent provenir de configuration ou être des constantes nommées.
+
+```python
+# ❌ INTERDIT
+if distance > 5:  # Magic number
+    reward = 10.0  # Magic number
+
+# ✅ OBLIGATOIRE
+max_range = config.get('max_shooting_range')  # Depuis config
+base_reward = config.get('base_reward')  # Depuis config
+
+# OU constantes nommées
+MELEE_RANGE = 1  # Constante explicite
+MAX_CHARGE_DISTANCE = 12  # Constante explicite
+```
+
+### 7. Type Hints Obligatoires
+
+**Règle** : Toutes les fonctions publiques doivent avoir des type hints.
+
+```python
+# ❌ INTERDIT
+def process_unit(unit):
+    return unit["id"]
+
+# ✅ OBLIGATOIRE
+from typing import Dict, Any, Optional, Tuple
+
+def process_unit(unit: Dict[str, Any]) -> Optional[str]:
+    return str(unit.get("id"))
+```
+
+### 8. Docstrings pour Fonctions Publiques
+
+**Règle** : Toutes les fonctions publiques doivent avoir des docstrings.
+
+```python
+# ❌ INTERDIT
+def check_adjacency(unit, enemy):
+    return unit["col"] == enemy["col"]
+
+# ✅ OBLIGATOIRE
+def check_adjacency(unit: Dict[str, Any], enemy: Dict[str, Any]) -> bool:
+    """
+    Check if unit is adjacent to enemy unit.
+    
+    Args:
+        unit: Unit dictionary with col/row coordinates
+        enemy: Enemy unit dictionary with col/row coordinates
+    
+    Returns:
+        True if units are adjacent (hex distance <= 1), False otherwise
+    """
+    unit_col, unit_row = get_unit_coordinates(unit)
+    enemy_col, enemy_row = get_unit_coordinates(enemy)
+    distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+    return distance <= 1
+```
+
+## ✅ CHECKLIST DE VALIDATION
+
+Avant de valider un changement, vérifier :
+
+- [ ] Coordonnées normalisées avant toute utilisation
+- [ ] Aucun workaround (pas de commentaires "workaround", "hack", "temporary")
+- [ ] Aucun fallback anti-erreur (utiliser require_key/require_present)
+- [ ] Aucune valeur par défaut anti-erreur (erreur explicite si valeur manquante)
+- [ ] Gestion d'erreurs explicite (pas de `except: pass`)
+- [ ] Aucun magic number (toutes depuis config ou constantes nommées)
+- [ ] Type hints sur toutes les fonctions publiques
+- [ ] Docstrings sur toutes les fonctions publiques
+
+## 🔗 RÉFÉRENCES
+
+- **combat_utils.py** : Fonctions de normalisation de coordonnées
+- **shared/validation.py** : `require_key`, `require_present` pour validation stricte
+- **AI_TURN.md** : Règles de conformité du jeu

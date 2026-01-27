@@ -7,6 +7,20 @@ Functions used across multiple phase handlers to avoid duplication.
 from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import get_unit_coordinates, calculate_hex_distance, get_hex_neighbors
 
+# end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
+ACTION = "ACTION"
+WAIT = "WAIT"
+NO = "NO"
+PASS = "PASS"
+ERROR = "ERROR"
+MOVE = "MOVE"
+SHOOTING = "SHOOTING"
+CHARGE = "CHARGE"
+FIGHT = "FIGHT"
+FLED = "FLED"
+ADVANCE = "ADVANCE"
+NOT_REMOVED = "NOT_REMOVED"
+
 
 def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Check if any friendly melee unit can charge this target."""

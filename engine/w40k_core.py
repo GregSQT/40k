@@ -1510,6 +1510,21 @@ class W40KEngine(gym.Env):
                                 debug_msg2 = f"[W40K_CORE DEBUG] E{action_details.get('current_episode', '?')} T{action_details.get('current_turn', '?')} Unit {unit_id}: unit_with_coords after={action_details['unit_with_coords']}"
                                 add_debug_log(self.game_state, debug_msg2)
                                 safe_print(self.game_state, debug_msg2)
+                            
+                            # CRITICAL FIX: For wait actions in movement phase, ensure unit_with_coords is defined with current unit position
+                            elif action_type == "wait" and pre_action_phase == "move":
+                                # For wait actions, unit didn't move, so use current position from result or updated_unit
+                                if isinstance(result, dict) and result.get("fromCol") is not None and result.get("fromRow") is not None:
+                                    # Use fromCol/fromRow from result (unit position before/after wait - same position)
+                                    wait_col = result.get("fromCol")
+                                    wait_row = result.get("fromRow")
+                                elif updated_unit:
+                                    # Fallback to current unit position (get_unit_coordinates importé en tête de module ligne 17)
+                                    wait_col, wait_row = get_unit_coordinates(updated_unit)
+                                else:
+                                    raise ValueError(f"Wait action in movement phase missing position data: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}")
+                                
+                                action_details["unit_with_coords"] = f"{unit_id}({wait_col},{wait_row})"
 
                             # Calculate reward normally
                             step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)

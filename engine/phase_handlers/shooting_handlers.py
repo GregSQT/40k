@@ -6,7 +6,10 @@ Only pool building functionality - foundation for complete handler autonomy
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import get_unit_coordinates, normalize_coordinates
-from .shared_utils import calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge
+from .shared_utils import (
+    calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
+    ACTION, WAIT, PASS, SHOOTING, ADVANCE, NOT_REMOVED,
+)
 
 # ============================================================================
 # PERFORMANCE: Target pool caching (30-40% speedup)
@@ -1084,7 +1087,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             }
         else:
             # NO -> unit.CAN_ADVANCE = false -> No valid actions available
-            success, result = _handle_shooting_end_activation(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
+            success, result = _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
             return result
     
     # YES -> SHOOTING ACTIONS AVAILABLE -> Go to STEP 3: ACTION_SELECTION
@@ -1439,9 +1442,9 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     
     # Check if los_cache needs to be rebuilt (missing or unit has advanced)
     if "los_cache" not in unit or has_advanced:
-        # Build position_cache if missing
+        # position_cache must be built at phase start, not here.
         if "position_cache" not in game_state:
-            build_position_cache(game_state)
+            raise KeyError("position_cache must exist before valid target pool (build at shooting_phase_start)")
         
         # Build los_cache for unit (rebuild if unit has advanced)
         if unit_id_str not in game_state.get("units_fled", set()):
@@ -2163,13 +2166,13 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                     unit["available_weapons"] = available_weapons
                 except Exception as e:
                     # If weapon selection fails, end activation
-                    return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+                    return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
                 
                 # Check if at least one weapon is usable (can_use: True)
                 usable_weapons = [w for w in available_weapons if w["can_use"]]
                 if not usable_weapons:
                     # No usable weapons left, end activation
-                    return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+                    return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
                 
                 return True, {
 
@@ -2185,10 +2188,10 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                 }
             else:
                 # No more weapons of the same category or no targets, end activation
-                return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+                return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         else:
             # No weapon selected, end activation
-            return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+            return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
     
     # Build valid_target_pool
     # shooting_build_valid_target_pool() now correctly determines context
@@ -2247,10 +2250,10 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         if is_pve_ai or is_gym_training or is_bot:
             if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
                 # No targets at activation
-                return _handle_shooting_end_activation(game_state, unit, "PASS", 1, "PASS", "SHOOTING", 1)
+                return _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1)
             else:
                 # Shot last target available
-                return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+                return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         
         # For human players: allow advance mode instead of ending activation
         if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
@@ -2264,7 +2267,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             }
         else:
             # Shot last target available
-            return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+            return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
     
     # CLEAN FLAG DETECTION: Use config parameter
     unit = _get_unit_by_id(game_state, unit_id)
@@ -2287,7 +2290,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         
         if not valid_targets:
             # No valid targets after rebuild - end activation
-            return _handle_shooting_end_activation(game_state, unit, "PASS", 1, "PASS", "SHOOTING", 1)
+            return _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1)
         
         # AUTO-SHOOT: PvE AI and gym training
         target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
@@ -2520,7 +2523,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # Debug output only in debug training mode
             if not valid_targets:
                 # No valid targets - end activation with wait
-                return _handle_shooting_end_activation(game_state, unit, "PASS", 1, "PASS", "SHOOTING", 1)
+                return _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1)
             target_id = _ai_select_shooting_target(game_state, unit_id, valid_targets)
         
         # Execute shooting directly without UI loops
@@ -2586,16 +2589,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         unit_id_str = str(unit["id"])
         if has_shot:
             # YES -> end_activation(ACTION, 1, SHOOTING, SHOOTING, 1)
-            success, result = _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+            success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         else:
             # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
             has_advanced = unit_id_str in game_state.get("units_advanced", set())
             if has_advanced:
                 # NO -> Unit has not shot yet (only advanced) -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
-                success, result = _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
+                success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, ADVANCE, SHOOTING, 1)
             else:
                 # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1)
-                success, result = _handle_shooting_end_activation(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
+                success, result = _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
         
         # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
@@ -2620,16 +2623,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         unit_id_str = str(unit["id"])
         if has_shot:
             # YES -> end_activation(ACTION, 1, SHOOTING, SHOOTING, 1)
-            success, result = _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+            success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         else:
             # Check if unit has advanced (ADVANCED_SHOOTING_ACTION_SELECTION)
             has_advanced = unit_id_str in game_state.get("units_advanced", set())
             if has_advanced:
                 # NO -> Unit has not shot yet (only advanced) -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
-                success, result = _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1)
+                success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, ADVANCE, SHOOTING, 1)
             else:
                 # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1)
-                success, result = _handle_shooting_end_activation(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
+                success, result = _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
         
         # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
@@ -2646,7 +2649,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     elif action_type == "skip":
         # AI_TURN.md: Skip action - same as wait
-        success, result = _handle_shooting_end_activation(game_state, unit, "PASS", 1, "PASS", "SHOOTING", 1, action_type="skip")
+        success, result = _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip")
         
         # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
@@ -2859,7 +2862,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 }
             else:
                 # Cannot advance - must WAIT
-                return _handle_shooting_end_activation(game_state, unit, "WAIT", 1, "PASS", "SHOOTING", 1)
+                return _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
         
         # Handle target selection: agent-provided or auto-select
         # NOTE: Friendly fire and LoS checks are already done in valid_target_pool_build().
@@ -2995,7 +2998,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                             available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
                         except Exception as e:
                             # If weapon selection fails, end activation
-                            return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+                            return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
                         
                         # Filter to only usable weapons
                         usable_weapons = [w for w in available_weapons if w["can_use"]]
@@ -3011,7 +3014,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                                 best_weapon_idx_in_filtered = select_best_ranged_weapon(temp_unit, target, game_state)
                             except (KeyError, AttributeError, IndexError) as e:
                                 # If weapon selection fails, end activation
-                                return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+                                return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
                             
                             if best_weapon_idx_in_filtered >= 0:
                                 # Map back to original weapon index
@@ -3025,7 +3028,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         else:
                             # No more weapons of the same category available
                             # End activation since all weapons of this category have been used
-                            return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1)
+                            return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         # === FIN NOUVEAU ===
         elif target_id:
             # Agent provided invalid target
@@ -3237,7 +3240,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             else:
                 # NO -> All weapons exhausted -> End activation
                 # CRITICAL: include_attack_results=True ensures all_attack_results is included
-                return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1, include_attack_results=True)
+                return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, include_attack_results=True)
         else:
             # NO -> Continue normally (SHOOT_LEFT > 0)
             # Handle target outcome (died/survived)
@@ -3253,7 +3256,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 # valid_target_pool empty? -> YES -> End activation (Slaughter handling)
                 if not unit.get("valid_target_pool"):
                     # CRITICAL: include_attack_results=True ensures all_attack_results is included
-                    return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1, include_attack_results=True)
+                    return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, include_attack_results=True)
                 # NO -> Continue to shooting action selection step
             # else: Target survives
             
@@ -3262,7 +3265,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             if not valid_targets and unit["SHOOT_LEFT"] > 0:
                 # YES -> End activation (Slaughter handling)
                 # CRITICAL: include_attack_results=True ensures all_attack_results is included
-                return _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "SHOOTING", "SHOOTING", 1, include_attack_results=True)
+                return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, include_attack_results=True)
             # NO -> Continue to shooting action selection step
             
             # Continue to shooting action selection step
@@ -4115,7 +4118,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # 2. We don't want to trigger phase_complete check
         # 3. This is just a tracking/logging call, not an actual activation end
         from engine.phase_handlers.generic_handlers import end_activation
-        end_activation(game_state, unit, "ACTION", 1, "ADVANCE", "NOT_REMOVED", 0)
+        end_activation(game_state, unit, ACTION, 1, ADVANCE, NOT_REMOVED, 0)
         
         # Log the advance action
         if "action_logs" not in game_state:
@@ -4204,7 +4207,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         else:
             # NO -> Unit advanced but no valid targets -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)
             # arg3="ADVANCE", arg4="SHOOTING", arg5=1 (remove from pool)
-            success, result = _handle_shooting_end_activation(game_state, unit, "ACTION", 1, "ADVANCE", "SHOOTING", 1, action_type="advance")
+            success, result = _handle_shooting_end_activation(game_state, unit, ACTION, 1, ADVANCE, SHOOTING, 1, action_type="advance")
             result.update({
                 "fromCol": orig_col,
                 "fromRow": orig_row,
@@ -4245,9 +4248,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 game_state, unit,
                 "SKIP",        # Arg1: Skip logging (no advance happened)
                 1,             # Arg2: +1 step increment
-                "PASS",        # Arg3: No tracking
-                "SHOOTING",    # Arg4: Remove from shoot_activation_pool (FIX: was "SHOOT")
-                0              # Arg5: No error logging
+                PASS,         # Arg3: No tracking
+                SHOOTING,     # Arg4: Remove from shoot_activation_pool (FIX: was "SHOOT")
+                0             # Arg5: No error logging
             )
             result["action"] = "wait"  # Mark as wait action for step logger
             result["unitId"] = unit_id

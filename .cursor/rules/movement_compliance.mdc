@@ -1,0 +1,275 @@
+---
+description: Conformité stricte phase de mouvement - AI_TURN.md Movement Phase rules
+globs: **/movement_handlers.py,**/movement*.py
+alwaysApply: false
+---
+
+# Movement Phase Compliance - AI_TURN.md
+
+**RÉFÉRENCE OBLIGATOIRE** : `Documentation/AI_TURN.md` Section "MOVEMENT PHASE Decision Tree"
+
+## 🚨 INVARIANTS CRITIQUES DE PHASE
+
+### Invariant 1 : Current Player Ne Change Pas Pendant la Phase
+
+**Règle ABSOLUE** : Pendant la phase de mouvement d'un joueur, `current_player` ne change JAMAIS.
+
+**Implications** :
+- Les positions ennemies ne changent PAS (l'adversaire ne bouge pas)
+- Les hex adjacents aux ennemis ne changent PAS
+- Les caches (`enemy_adjacent_hexes`) ne deviennent PAS obsolètes à cause de mouvements ennemis
+
+```python
+# ❌ VIOLATION CRITIQUE
+def build_valid_destinations(unit, game_state):
+    # Recalculer "par sécurité" car ennemis pourraient avoir bougé
+    enemy_adjacent_hexes = build_enemy_adjacent_hexes(game_state, unit["player"])
+    # ERREUR : Les ennemis ne bougent PAS pendant la phase de mouvement du joueur actuel
+
+# ✅ CORRECT
+def build_valid_destinations(unit, game_state):
+    # Utiliser le cache construit au début de phase
+    cache_key = f"enemy_adjacent_hexes_player_{game_state['current_player']}"
+    if cache_key not in game_state:
+        # Construire UNE FOIS au début de phase
+        game_state[cache_key] = build_enemy_adjacent_hexes(game_state, game_state['current_player'])
+    enemy_adjacent_hexes = game_state[cache_key]
+    # Le cache reste valide pendant TOUTE la phase
+```
+
+### Invariant 2 : Sequential Activation (Un Seul à la Fois)
+
+**Règle** : Une seule unité active à la fois. Les autres unités attendent.
+
+```python
+# ❌ INTERDIT
+for unit in eligible_units:
+    process_movement(unit)  # Actions simultanées
+
+# ✅ OBLIGATOIRE
+if move_activation_pool:
+    unit = move_activation_pool[0]
+    process_movement(unit)  # Un seul à la fois
+```
+
+## 📋 RÈGLES DE PHASE SPÉCIFIQUES
+
+### Règle 1 : Eligibility Check (Pool Building)
+
+**Conditions OBLIGATOIRES** (toutes doivent être vraies) :
+- `unit.HP_CUR > 0` (unité vivante)
+- `unit.player === current_player` (bon joueur)
+- Au moins un hex de destination valide disponible
+
+**Destinations VALIDES** :
+- Non occupé
+- Non adjacent à ennemi
+- Non mur
+- Atteignable via BFS pathfinding dans `MOVE` distance
+
+```python
+# ❌ INTERDIT
+if unit["HP_CUR"] > 0:
+    add_to_pool(unit)  # Manque vérifications
+
+# ✅ OBLIGATOIRE
+def get_eligible_units(game_state):
+    eligible = []
+    current_player = game_state["current_player"]
+    for unit in game_state["units"]:
+        if unit["HP_CUR"] <= 0:
+            continue
+        if unit["player"] != current_player:
+            continue
+        # Vérifier destinations valides
+        valid_destinations = build_valid_destinations_pool(unit, game_state)
+        if valid_destinations:
+            eligible.append(unit["id"])
+    return eligible
+```
+
+### Règle 2 : Restrictions de Mouvement (CRITIQUE)
+
+**Destinations INTERDITES** :
+- Hex occupé (autre unité)
+- Hex adjacent à ennemi (entrer en fight)
+- Hex mur (terrain bloque)
+
+**Pourquoi** :
+- Spatial logic : objets physiques ne peuvent pas se chevaucher
+- Engagement rules : adjacent = fight = phase différente
+- Terrain realism : murs bloquent les chemins
+
+```python
+# ❌ INTERDIT
+def is_valid_destination(col, row, game_state):
+    if is_wall(col, row):
+        return False
+    # Manque vérification adjacent à ennemi
+
+# ✅ OBLIGATOIRE
+def is_valid_destination(col, row, unit, game_state):
+    # Vérifier occupation
+    if is_occupied(col, row, game_state):
+        return False
+    # Vérifier adjacent à ennemi (CRITIQUE)
+    if is_hex_adjacent_to_enemy(col, row, unit["player"], game_state):
+        return False
+    # Vérifier mur
+    if (col, row) in game_state["wall_hexes"]:
+        return False
+    return True
+```
+
+### Règle 3 : Flee Mechanics
+
+**Déclencheur** : Action de mouvement commencée depuis hex adjacent à unité ennemie.
+
+**Implémentation** : Vérifier position de départ, pas destination (restrictions empêchent destinations adjacentes).
+
+```python
+# ❌ INTERDIT
+def process_move(unit, destination, game_state):
+    move_unit(unit, destination)
+    # Vérifier adjacence à destination (toujours False)
+    if is_adjacent_to_enemy_at(destination, game_state):
+        mark_fled(unit)
+
+# ✅ OBLIGATOIRE
+def process_move(unit, destination, game_state):
+    # Vérifier adjacence à position de DÉPART
+    was_adjacent = is_adjacent_to_enemy(unit, game_state)
+    move_unit(unit, destination)
+    if was_adjacent:
+        # Marquer comme FLED
+        end_activation(ACTION, 1, FLED, MOVE, 1, 1)
+    else:
+        end_activation(ACTION, 1, MOVE, MOVE, 1, 1)
+```
+
+**Conséquences de FLED** :
+- Shooting phase : Ne peut pas tirer (désorganisé)
+- Charge phase : Ne peut pas charger (mauvaise position/morale)
+- Fight phase : Peut combattre normalement
+- Durée : Jusqu'à la fin du tour actuel uniquement
+
+### Règle 4 : BFS Pathfinding
+
+**Règle** : Utiliser BFS pour trouver chemins valides dans `MOVE` distance.
+
+**Contraintes BFS** :
+- Pas à travers murs
+- Pas à travers hex adjacents à ennemis
+- Pas à travers hex occupés
+- Distance <= `unit.MOVE`
+
+```python
+# ❌ INTERDIT
+def get_reachable_hexes(unit, game_state):
+    # Distance euclidienne simple (incorrect pour hex)
+    max_distance = unit["MOVE"]
+    return all_hexes_within_distance(unit, max_distance)
+
+# ✅ OBLIGATOIRE
+def get_reachable_hexes(unit, game_state):
+    from engine.pathfinding import bfs_pathfinding
+    start_col, start_row = get_unit_coordinates(unit)
+    max_distance = unit["MOVE"]
+    # BFS avec contraintes
+    reachable = bfs_pathfinding(
+        start=(start_col, start_row),
+        max_distance=max_distance,
+        game_state=game_state,
+        avoid_walls=True,
+        avoid_enemy_adjacent=True,
+        avoid_occupied=True
+    )
+    return reachable
+```
+
+### Règle 5 : End Activation Parameters
+
+**Signature** : `end_activation(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6)`
+
+Pour mouvement normal :
+- `Arg1` : `ACTION`
+- `Arg2` : `1` (+step)
+- `Arg3` : `MOVE` (tracking)
+- `Arg4` : `MOVE` (pool removal)
+- `Arg5` : `1` (log)
+- `Arg6` : `1` (remove green circle)
+
+Pour FLED :
+- `Arg1` : `ACTION`
+- `Arg2` : `1` (+step)
+- `Arg3` : `FLED` (tracking : units_moved ET units_fled)
+- `Arg4` : `MOVE` (pool removal)
+- `Arg5` : `1` (log)
+- `Arg6` : `1` (remove green circle)
+
+```python
+# ❌ INTERDIT
+end_activation("action", 1, "move", "move", 0, 0)  # Strings au lieu de constantes
+
+# ✅ OBLIGATOIRE
+from engine.phase_handlers.shared_utils import ACTION, MOVE, FLED
+if was_adjacent_to_enemy:
+    end_activation(ACTION, 1, FLED, MOVE, 1, 1)
+else:
+    end_activation(ACTION, 1, MOVE, MOVE, 1, 1)
+```
+
+## ⚠️ VIOLATIONS COMMUNES
+
+### Violation 1 : Mouvement Vers Hex Adjacent Ennemi
+
+```python
+# ❌ DÉTECTER
+move_to(hex_adjacent_to_enemy)
+
+# ✅ CORRECTION
+# Restrictions de mouvement empêchent cela
+assert not is_hex_adjacent_to_enemy(destination_col, destination_row, player, game_state)
+```
+
+### Violation 2 : Recalcul Inutile de Caches
+
+```python
+# ❌ DÉTECTER
+def build_valid_destinations(unit, game_state):
+    # Recalculer "par sécurité"
+    enemy_adjacent_hexes = build_enemy_adjacent_hexes(game_state, unit["player"])
+    # ERREUR : current_player n'a pas changé
+```
+
+### Violation 3 : Flee Détecté à Destination
+
+```python
+# ❌ DÉTECTER
+def process_move(unit, destination, game_state):
+    move_unit(unit, destination)
+    if is_adjacent_to_enemy_at(destination, game_state):
+        mark_fled(unit)  # Impossible, restrictions empêchent destinations adjacentes
+
+# ✅ CORRECTION
+# Vérifier position de DÉPART, pas destination
+was_adjacent = is_adjacent_to_enemy(unit, game_state)  # Avant mouvement
+```
+
+## ✅ CHECKLIST DE VALIDATION
+
+Avant de valider un changement dans movement phase :
+
+- [ ] `current_player` ne change pas pendant la phase (pas de recalcul de caches)
+- [ ] Activation séquentielle (un seul à la fois)
+- [ ] Restrictions de mouvement respectées (pas adjacent, pas occupé, pas mur)
+- [ ] BFS pathfinding avec contraintes correctes
+- [ ] Flee détecté à position de départ, pas destination
+- [ ] End activation avec bonnes constantes (MOVE ou FLED)
+- [ ] Coordonnées normalisées avant utilisation
+
+## 🔗 RÉFÉRENCES
+
+- **AI_TURN.md** : Section "MOVEMENT PHASE Decision Tree" (lignes 257-363)
+- **movement_handlers.py** : Implémentation de référence
+- **shared_utils.py** : Constantes pour end_activation

@@ -1,0 +1,314 @@
+---
+description: Conformité stricte phase de combat - AI_TURN.md Fight Phase rules
+globs: **/fight_handlers.py,**/fight*.py
+alwaysApply: false
+---
+
+# Fight Phase Compliance - AI_TURN.md
+
+**RÉFÉRENCE OBLIGATOIRE** : `Documentation/AI_TURN.md` Section "FIGHT PHASE LOGIC"
+
+## 🚨 INVARIANTS CRITIQUES DE PHASE
+
+### Invariant 1 : Deux Joueurs Peuvent Agir (Unique à Fight)
+
+**Règle** : Fight phase est la SEULE phase où les deux joueurs peuvent agir.
+
+**Structure** :
+1. **Sub-phase 1** : Charging units (joueur actuel) attaquent en premier
+2. **Sub-phase 2** : Alternating fight (les deux joueurs alternent)
+
+```python
+# ❌ INTERDIT
+def process_fight_phase(game_state):
+    # Traiter uniquement current_player
+    for unit in get_current_player_units(game_state):
+        process_fight(unit)
+
+# ✅ OBLIGATOIRE
+def process_fight_phase(game_state):
+    # Sub-phase 1: Charging units (current_player)
+    process_charging_units(game_state)
+    # Sub-phase 2: Alternating fight (both players)
+    process_alternating_fight(game_state)
+```
+
+### Invariant 2 : Sequential Resolution
+
+**Règle** : Une unité complète toutes ses attaques avant que la suivante ne commence.
+
+```python
+# ❌ INTERDIT
+for unit in eligible_units:
+    for attack in range(unit["ATTACK_LEFT"]):
+        process_attack(unit)  # Toutes les unités attaquent simultanément
+
+# ✅ OBLIGATOIRE
+while fight_activation_pool:
+    unit = fight_activation_pool[0]
+    while unit["ATTACK_LEFT"] > 0:
+        process_attack(unit)
+        unit["ATTACK_LEFT"] -= 1
+    # Unité complète avant de passer à la suivante
+```
+
+## 📋 RÈGLES DE PHASE SPÉCIFIQUES
+
+### Règle 1 : Sub-Phase 1 - Charging Units Priority
+
+**Règle** : Unités qui ont chargé (`units_charged`) attaquent EN PREMIER.
+
+**Eligibility** :
+- `unit.HP_CUR > 0`
+- `unit.player === current_player`
+- `unit.id in units_charged`
+- Adjacent à ennemi
+
+```python
+# ❌ INTERDIT
+def get_charging_units(game_state):
+    # Inclure toutes les unités
+    return [u for u in game_state["units"] if u["HP_CUR"] > 0]
+
+# ✅ OBLIGATOIRE
+def get_charging_units(game_state):
+    current_player = game_state["current_player"]
+    charging_units = []
+    for unit in game_state["units"]:
+        if unit["HP_CUR"] <= 0:
+            continue
+        if unit["player"] != current_player:
+            continue
+        if unit["id"] not in game_state["units_charged"]:
+            continue  # CRITICAL: Only charging units
+        if not is_adjacent_to_enemy(unit, game_state):
+            continue
+        charging_units.append(unit["id"])
+    return charging_units
+```
+
+### Règle 2 : Sub-Phase 2 - Alternating Fight
+
+**Règle** : Après sub-phase 1, les unités restantes alternent entre joueurs.
+
+**Alternance** :
+- Commence par `current_player`
+- Puis adversaire
+- Puis `current_player` à nouveau
+- Continue jusqu'à ce qu'aucune unité ne soit éligible
+
+```python
+# ❌ INTERDIT
+def process_alternating_fight(game_state):
+    # Traiter uniquement current_player
+    for unit in get_current_player_units(game_state):
+        process_fight(unit)
+
+# ✅ OBLIGATOIRE
+def process_alternating_fight(game_state):
+    current_player = game_state["current_player"]
+    opponent = 1 - current_player
+    
+    # Alterner entre joueurs
+    while True:
+        # Current player
+        eligible = get_eligible_fight_units(game_state, current_player)
+        if not eligible:
+            break
+        process_fight_unit(eligible[0], game_state)
+        
+        # Opponent
+        eligible = get_eligible_fight_units(game_state, opponent)
+        if not eligible:
+            break
+        process_fight_unit(eligible[0], game_state)
+```
+
+### Règle 3 : ATTACK_LEFT Management
+
+**Règle** : `ATTACK_LEFT` est initialisé à `CC_NB` et décrémenté après chaque attaque.
+
+**Validation** : Vérifier cibles valides avant chaque attaque (unités peuvent mourir).
+
+```python
+# ❌ INTERDIT
+def process_fight(unit, game_state):
+    # Attaquer toutes les fois sans vérifier cibles
+    for _ in range(unit["ATTACK_LEFT"]):
+        attack_random_target(unit)
+
+# ✅ OBLIGATOIRE
+def process_fight(unit, game_state):
+    unit["ATTACK_LEFT"] = unit["CC_NB"]  # Initialiser
+    while unit["ATTACK_LEFT"] > 0:
+        # Vérifier cibles valides (peuvent avoir changé)
+        valid_targets = build_valid_target_pool(unit, game_state)
+        if not valid_targets:
+            break  # Plus de cibles
+        # Sélectionner et attaquer
+        target = select_target(valid_targets)
+        attack_sequence(unit, target, game_state)
+        unit["ATTACK_LEFT"] -= 1
+```
+
+### Règle 4 : Valid Target Pool Building
+
+**Règle** : Cibles valides = ennemis adjacents avec `HP_CUR > 0`.
+
+**Recalcul** : Pool doit être reconstruit avant chaque attaque (cibles peuvent mourir).
+
+```python
+# ❌ INTERDIT
+def process_fight(unit, game_state):
+    targets = build_valid_target_pool(unit, game_state)
+    # Utiliser même pool pour toutes les attaques
+    for target in targets:
+        attack(unit, target)
+
+# ✅ OBLIGATOIRE
+def process_fight(unit, game_state):
+    while unit["ATTACK_LEFT"] > 0:
+        # Reconstruire pool avant CHAQUE attaque
+        valid_targets = build_valid_target_pool(unit, game_state)
+        if not valid_targets:
+            break
+        target = select_target(valid_targets)
+        attack_sequence(unit, target, game_state)
+        unit["ATTACK_LEFT"] -= 1
+```
+
+### Règle 5 : Attack Sequence (CC)
+
+**Signature** : `attack_sequence(CC)`
+
+**Processus** :
+1. Sélectionner arme CC : `unit.CC_WEAPONS[selectedCcWeaponIndex]`
+2. Hit roll : `hit_roll >= selected_weapon.ATK`
+3. Wound roll : `wound_roll >= calculate_wound_target()`
+4. Save roll : `save_roll >= calculate_save_target()`
+5. Damage : `target.HP_CUR -= selected_weapon.DMG` (mise à jour IMMÉDIATE)
+6. Death check : Si `target.HP_CUR <= 0`, `target.alive = False`
+
+```python
+# ❌ INTERDIT
+def attack_sequence(unit, target, game_state):
+    # Appliquer dégâts à la fin
+    total_damage = 0
+    for hit in hits:
+        total_damage += weapon.DMG
+    target["HP_CUR"] -= total_damage  # Appliqué à la fin
+
+# ✅ OBLIGATOIRE
+def attack_sequence(unit, target, game_state):
+    weapon = unit["CC_WEAPONS"][unit["selectedCcWeaponIndex"]]
+    hits = 0
+    wounds = 0
+    failed_saves = 0
+    
+    # Hit roll
+    for _ in range(weapon.NB):
+        hit_roll = roll_d6()
+        if hit_roll >= weapon.ATK:
+            hits += 1
+    
+    # Wound roll
+    for _ in range(hits):
+        wound_roll = roll_d6()
+        if wound_roll >= calculate_wound_target(unit, target):
+            wounds += 1
+    
+    # Save roll
+    for _ in range(wounds):
+        save_roll = roll_d6()
+        if save_roll < calculate_save_target(target):
+            failed_saves += 1
+            # ⚡ IMMEDIATE UPDATE
+            target["HP_CUR"] -= weapon.DMG
+            if target["HP_CUR"] <= 0:
+                target["alive"] = False
+```
+
+### Règle 6 : End Activation Parameters
+
+**Signature** : `end_activation(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6)`
+
+Pour fight :
+- `Arg1` : `ACTION` (si attaqué) | `NO` (si pas de cibles)
+- `Arg2` : `1` (+step)
+- `Arg3` : `FIGHT` (tracking)
+- `Arg4` : `FIGHT` (pool removal)
+- `Arg5` : `1` (log)
+- `Arg6` : `1` (remove green circle)
+
+```python
+# ❌ INTERDIT
+end_activation("action", 1, "fight", "fight", 0, 0)  # Strings au lieu de constantes
+
+# ✅ OBLIGATOIRE
+from engine.phase_handlers.shared_utils import ACTION, FIGHT, NO
+if attacked:
+    end_activation(ACTION, 1, FIGHT, FIGHT, 1, 1)
+else:
+    end_activation(NO, 1, PASS, FIGHT, 1, 1)
+```
+
+## ⚠️ VIOLATIONS COMMUNES
+
+### Violation 1 : Pas d'Alternance
+
+```python
+# ❌ DÉTECTER
+def process_fight_phase(game_state):
+    # Traiter uniquement current_player
+    for unit in get_current_player_units(game_state):
+        process_fight(unit)
+
+# ✅ CORRECTION
+# Implémenter alternance entre joueurs
+```
+
+### Violation 2 : Pool Non Reconstruit
+
+```python
+# ❌ DÉTECTER
+def process_fight(unit, game_state):
+    targets = build_valid_target_pool(unit, game_state)
+    # Utiliser même pool pour toutes les attaques
+    for target in targets:
+        attack(unit, target)
+
+# ✅ CORRECTION
+# Reconstruire pool avant chaque attaque
+```
+
+### Violation 3 : Damage Non Immédiat
+
+```python
+# ❌ DÉTECTER
+def attack_sequence(unit, target, game_state):
+    total_damage = calculate_total_damage()
+    # Appliquer à la fin
+    target["HP_CUR"] -= total_damage
+
+# ✅ CORRECTION
+# Appliquer dégâts IMMÉDIATEMENT après chaque failed save
+```
+
+## ✅ CHECKLIST DE VALIDATION
+
+Avant de valider un changement dans fight phase :
+
+- [ ] Sub-phase 1: Charging units en premier
+- [ ] Sub-phase 2: Alternance entre joueurs
+- [ ] Activation séquentielle (une unité complète avant la suivante)
+- [ ] ATTACK_LEFT initialisé à CC_NB
+- [ ] Pool de cibles reconstruit avant chaque attaque
+- [ ] Damage appliqué immédiatement (pas à la fin)
+- [ ] End activation avec bonnes constantes
+- [ ] Coordonnées normalisées avant utilisation
+
+## 🔗 RÉFÉRENCES
+
+- **AI_TURN.md** : Section "FIGHT PHASE LOGIC" (lignes 1795-2750)
+- **fight_handlers.py** : Implémentation de référence
+- **shared_utils.py** : Constantes pour end_activation

@@ -24,7 +24,7 @@ _debug_log_file = None
 
 
 def _debug_log(message: str) -> None:
-    """Write debug message to analyzer.log if file is open."""
+    """Write debug message to analyzer_debug.log if file is open."""
     global _debug_log_file
     if _debug_log_file:
         _debug_log_file.write(message + "\n")
@@ -242,7 +242,7 @@ def parse_step_log(filepath: str) -> Dict:
     
     # Open debug log file
     global _debug_log_file
-    debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'analyzer.log')
+    debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'analyzer_debug.log')
     _debug_log_file = open(debug_log_path, 'w', encoding='utf-8')
     _debug_log(f"=== ANALYZER DEBUG LOG ===")
     _debug_log(f"Analyzing {filepath}")
@@ -2427,8 +2427,7 @@ if __name__ == "__main__":
     log_file = sys.argv[1]
     
     # Open output file for writing
-    output_file = 'ai/analyzer.log'
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    output_file = 'analyzer.log'
     output_f = open(output_file, 'w', encoding='utf-8')
     
     def log_print(*args, **kwargs):

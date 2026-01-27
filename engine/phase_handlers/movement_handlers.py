@@ -562,7 +562,7 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
     Validates movement destination per AI_TURN.md restrictions.
 
     Uses pre-computed enemy_adjacent_hexes set for O(1) lookup.
-    enemy_adjacent_hexes must be provided (use build_enemy_adjacent_hexes()).
+    enemy_adjacent_hexes must be provided by caller (built at movement_phase_start).
     """
     # Normalize coordinates to int - raises error if invalid
     col_int, row_int = normalize_coordinates(col, row)

@@ -18,7 +18,10 @@ from engine.combat_utils import (
     calculate_hex_distance,
     get_unit_by_id
 )
-from .shared_utils import calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge
+from .shared_utils import (
+    calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
+    ACTION, PASS, ERROR, FIGHT,
+)
 
 # Import functions from shooting_handlers for cross-phase functionality
 _cache_size_limit = shooting_handlers._cache_size_limit
@@ -449,10 +452,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     else:
         unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
     
-    # AI_TURN.md STEP 0: Build position_cache if missing (needed for fight phase shooting)
+    # AI_TURN.md: position_cache must be built at phase start, not during unit activation.
     if "position_cache" not in game_state:
-        from .shooting_handlers import build_position_cache
-        build_position_cache(game_state)
+        raise KeyError("position_cache must exist before unit activation (build at shooting_phase_start or fight_phase_start)")
     
     # AI_TURN.md STEP 2: Build unit's los_cache at activation
     # CRITICAL: Only build los_cache if unit has not fled (units that fled cannot shoot)
@@ -552,10 +554,9 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     # CRITICAL: Ensure los_cache exists before calling valid_target_pool_build
     # This can happen if shooting_build_valid_target_pool is called before shooting_unit_activation_start
     if "los_cache" not in unit:
-        # Build position_cache if missing
+        # position_cache must be built at phase start, not here.
         if "position_cache" not in game_state:
-            from .shooting_handlers import build_position_cache
-            build_position_cache(game_state)
+            raise KeyError("position_cache must exist before valid target pool (build at shooting_phase_start or fight_phase_start)")
         
         # Build los_cache for unit
         unit_id_str = str(unit_id)
@@ -1229,7 +1230,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 # But only if unit has attacks remaining
                 if unit.get("ATTACK_LEFT", 0) <= 0:
                     # No attacks left - skip this unit
-                    result = end_activation(game_state, unit, "PASS", 1, "PASS", "FIGHT", 0)
+                    result = end_activation(game_state, unit, PASS, 1, PASS, FIGHT, 0)
                     game_state["active_fight_unit"] = None
                     game_state["valid_fight_targets"] = []
                     result["action"] = "wait"
@@ -1269,7 +1270,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     # No targets - skip this unit
                     result = end_activation(
                         game_state, unit,
-                        "PASS", 1, "PASS", "FIGHT", 0
+                        PASS, 1, PASS, FIGHT, 0
                     )
                     # CRITICAL: Clear active_fight_unit so next unit can be activated
                     game_state["active_fight_unit"] = None
@@ -1312,7 +1313,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
             else:
                 # No targets available - end activation
-                result = end_activation(game_state, unit, "PASS", 1, "PASS", "FIGHT", 0)
+                result = end_activation(game_state, unit, PASS, 1, PASS, FIGHT, 0)
                 game_state["active_fight_unit"] = None
                 game_state["valid_fight_targets"] = []
                 result["action"] = "wait"
@@ -1360,10 +1361,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # is skipped for this case to prevent the unit from being re-added to the pool.
         result = end_activation(
             game_state, unit,
-            "ERROR",       # Arg1: ERROR logging (per AI_TURN.md line 667)
+            ERROR,         # Arg1: ERROR logging (per AI_TURN.md line 667)
             0,             # Arg2: NO step increment (per AI_TURN.md line 667)
-            "PASS",        # Arg3: PASS tracking (per AI_TURN.md line 667)
-            "FIGHT",       # Arg4: Remove from fight pool
+            PASS,          # Arg3: PASS tracking (per AI_TURN.md line 667)
+            FIGHT,         # Arg4: Remove from fight pool
             1              # Arg5: Error logging
         )
         result["invalid_action_penalty"] = True
@@ -1484,10 +1485,10 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         # ATTACK_LEFT = CC_NB? YES -> no attack -> end_activation (PASS, 1, PASS, FIGHT)
         result = end_activation(
             game_state, unit,
-            "PASS",        # Arg1: Pass logging
+            PASS,          # Arg1: Pass logging
             1,             # Arg2: +1 step increment
-            "PASS",        # Arg3: No tracking (no attack made)
-            "FIGHT",       # Arg4: Remove from fight pool
+            PASS,          # Arg3: No tracking (no attack made)
+            FIGHT,         # Arg4: Remove from fight pool
             0              # Arg5: No error logging
         )
         # CRITICAL: Clear active_fight_unit so next unit can be activated
@@ -1980,10 +1981,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         # ATTACK_LEFT > 0 but no targets -> end_activation (ACTION, 1, FIGHT, FIGHT)
         result = end_activation(
             game_state, unit,
-            "ACTION",      # Arg1: Log action
+            ACTION,        # Arg1: Log action
             1,             # Arg2: +1 step
-            "FIGHT",       # Arg3: FIGHT tracking
-            "FIGHT",       # Arg4: Remove from fight pool
+            FIGHT,         # Arg3: FIGHT tracking
+            FIGHT,         # Arg4: Remove from fight pool
             0              # Arg5: No error logging
         )
         # CRITICAL: Clear active_fight_unit so next unit can be activated
@@ -2083,10 +2084,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         # end_activation (ACTION, 1, FIGHT, FIGHT)
         result = end_activation(
             game_state, unit,
-            "ACTION",      # Arg1: Log action
+            ACTION,        # Arg1: Log action
             1,             # Arg2: +1 step
-            "FIGHT",       # Arg3: FIGHT tracking
-            "FIGHT",       # Arg4: Remove from fight pool
+            FIGHT,         # Arg3: FIGHT tracking
+            FIGHT,         # Arg4: Remove from fight pool
             0              # Arg5: No error logging
         )
         # CRITICAL: Clear active_fight_unit so next unit can be activated

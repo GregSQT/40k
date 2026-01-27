@@ -1,0 +1,241 @@
+---
+description: Conformité stricte phase de charge - AI_TURN.md Charge Phase rules
+globs: **/charge_handlers.py,**/charge*.py
+alwaysApply: false
+---
+
+# Charge Phase Compliance - AI_TURN.md
+
+**RÉFÉRENCE OBLIGATOIRE** : `Documentation/AI_TURN.md` Section "CHARGE PHASE Decision Tree"
+
+## 🚨 INVARIANTS CRITIQUES DE PHASE
+
+### Invariant 1 : Current Player Ne Change Pas Pendant la Phase
+
+**Règle ABSOLUE** : Pendant la phase de charge d'un joueur, `current_player` ne change JAMAIS.
+
+**Implications** :
+- Les positions ennemies ne changent PAS (l'adversaire ne bouge pas)
+- Les hex adjacents aux ennemis ne changent PAS
+- Les caches ne deviennent PAS obsolètes à cause de mouvements ennemis
+
+### Invariant 2 : Sequential Activation (Un Seul à la Fois)
+
+**Règle** : Une seule unité active à la fois. Les autres unités attendent.
+
+## 📋 RÈGLES DE PHASE SPÉCIFIQUES
+
+### Règle 1 : Eligibility Check (Pool Building)
+
+**Conditions OBLIGATOIRES** (toutes doivent être vraies) :
+- `unit.HP_CUR > 0` (unité vivante)
+- `unit.player === current_player` (bon joueur)
+- `unit.id NOT in units_fled` (pas fui)
+- `unit.id NOT in units_advanced` (pas avancé - ne peut pas charger après advance)
+- `NOT adjacent to enemy` (pas déjà en fight)
+- Ennemis existent dans `charge_max_distance` ET ont hex adjacents non occupés à ≤12 hexes
+
+```python
+# ❌ INTERDIT
+if unit["HP_CUR"] > 0:
+    add_to_pool(unit)  # Manque vérifications
+
+# ✅ OBLIGATOIRE
+def get_eligible_units(game_state):
+    eligible = []
+    current_player = game_state["current_player"]
+    for unit in game_state["units"]:
+        if unit["HP_CUR"] <= 0:
+            continue
+        if unit["player"] != current_player:
+            continue
+        if unit["id"] in game_state["units_fled"]:
+            continue
+        if unit["id"] in game_state["units_advanced"]:
+            continue  # CRITICAL: Advanced units cannot charge
+        if is_adjacent_to_enemy(unit, game_state):
+            continue  # Already in fight
+        # Vérifier cibles de charge valides
+        if has_valid_charge_targets(unit, game_state):
+            eligible.append(unit["id"])
+    return eligible
+```
+
+### Règle 2 : Advanced Units Cannot Charge (CRITIQUE)
+
+**Règle** : Unités qui ont avancé (`units_advanced`) NE PEUVENT PAS charger.
+
+```python
+# ❌ INTERDIT
+if unit["id"] in game_state["units_advanced"]:
+    # Permettre charge quand même
+    process_charge(unit)
+
+# ✅ OBLIGATOIRE
+if unit["id"] in game_state["units_advanced"]:
+    continue  # Skip, cannot charge after advance
+```
+
+### Règle 3 : Charge Distance Logic (2D6 Roll)
+
+**Quand rouler** : Immédiatement quand l'unité est sélectionnée par son joueur (pas quand action choisie).
+
+**Durée du roll** : La valeur du roll est **discardée** à la fin de l'activation de l'unité.
+
+**Mécanique** :
+- Roll 2D6 → `charge_range`
+- Distance à vérifier : distance au hex adjacent le plus proche à la cible (via pathfinding)
+- Roll doit être ≥ distance pour réussir
+
+```python
+# ❌ INTERDIT
+def process_charge(unit, target, game_state):
+    # Roll après sélection de destination
+    charge_range = roll_2d6()
+    if charge_range >= distance:
+        move_to_destination()
+
+# ✅ OBLIGATOIRE
+def select_unit_for_charge(unit, game_state):
+    # Roll IMMÉDIATEMENT à la sélection
+    charge_range = roll_2d6()
+    game_state["charge_rolls"][unit["id"]] = charge_range
+    # Puis sélection de cible et destination
+    # Roll est discardé à la fin de l'activation
+```
+
+### Règle 4 : Valid Charge Destinations
+
+**Conditions OBLIGATOIRES** :
+- Adjacent à la cible sélectionnée
+- Distance ≤ `charge_range` (via BFS pathfinding)
+- Non occupé
+
+```python
+# ❌ INTERDIT
+def build_charge_destinations(unit, target, charge_range, game_state):
+    # Distance euclidienne (incorrect)
+    all_adjacent = get_adjacent_hexes(target)
+    return [h for h in all_adjacent if euclidean_distance(unit, h) <= charge_range]
+
+# ✅ OBLIGATOIRE
+def build_charge_destinations(unit, target, charge_range, game_state):
+    from engine.pathfinding import bfs_pathfinding
+    target_adjacent_hexes = get_hex_neighbors(target["col"], target["row"])
+    unit_col, unit_row = get_unit_coordinates(unit)
+    valid_destinations = []
+    for dest_col, dest_row in target_adjacent_hexes:
+        # Vérifier occupation
+        if is_occupied(dest_col, dest_row, game_state):
+            continue
+        # Vérifier distance via BFS
+        distance = bfs_pathfinding_distance(
+            start=(unit_col, unit_row),
+            end=(dest_col, dest_row),
+            game_state=game_state
+        )
+        if distance <= charge_range:
+            valid_destinations.append((dest_col, dest_row))
+    return valid_destinations
+```
+
+### Règle 5 : Charge Roll Discard
+
+**Règle** : Le roll de charge est **discardé** à la fin de l'activation, qu'il ait été utilisé ou non.
+
+```python
+# ❌ INTERDIT
+def end_charge_activation(unit, game_state):
+    # Garder le roll pour la prochaine activation
+    # game_state["charge_rolls"][unit["id"]] reste
+
+# ✅ OBLIGATOIRE
+def end_charge_activation(unit, game_state):
+    # Discarder le roll
+    if unit["id"] in game_state.get("charge_rolls", {}):
+        del game_state["charge_rolls"][unit["id"]]
+    end_activation(ACTION, 1, CHARGE, CHARGE, 1, 1)
+```
+
+### Règle 6 : End Activation Parameters
+
+**Signature** : `end_activation(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6)`
+
+Pour charge réussie :
+- `Arg1` : `ACTION`
+- `Arg2` : `1` (+step)
+- `Arg3` : `CHARGE` (tracking)
+- `Arg4` : `CHARGE` (pool removal)
+- `Arg5` : `1` (log)
+- `Arg6` : `1` (remove green circle)
+
+```python
+# ❌ INTERDIT
+end_activation("action", 1, "charge", "charge", 0, 0)  # Strings au lieu de constantes
+
+# ✅ OBLIGATOIRE
+from engine.phase_handlers.shared_utils import ACTION, CHARGE
+end_activation(ACTION, 1, CHARGE, CHARGE, 1, 1)
+```
+
+## ⚠️ VIOLATIONS COMMUNES
+
+### Violation 1 : Charge Après Advance
+
+```python
+# ❌ DÉTECTER
+unit.advance()
+unit.charge()  # Impossible après advance
+
+# ✅ CORRECTION
+# units_advanced empêche cela
+assert unit_id not in game_state["units_advanced"]
+```
+
+### Violation 2 : Charge Depuis Position Adjacente
+
+```python
+# ❌ DÉTECTER
+if is_adjacent_to_enemy(unit, game_state):
+    charge()  # Déjà adjacent
+
+# ✅ CORRECTION
+# Pas de charge si déjà adjacent
+assert not is_adjacent_to_enemy(unit, game_state)
+```
+
+### Violation 3 : Roll Après Sélection Destination
+
+```python
+# ❌ DÉTECTER
+def process_charge(unit, destination, game_state):
+    charge_range = roll_2d6()  # Roll trop tard
+    if can_reach(destination, charge_range):
+        move_to(destination)
+
+# ✅ CORRECTION
+# Roll à la sélection d'unité, pas à la destination
+charge_range = roll_2d6()  # À la sélection
+# Puis sélection cible et destination
+```
+
+## ✅ CHECKLIST DE VALIDATION
+
+Avant de valider un changement dans charge phase :
+
+- [ ] `current_player` ne change pas pendant la phase
+- [ ] Activation séquentielle (un seul à la fois)
+- [ ] Advanced units ne peuvent pas charger
+- [ ] Pas adjacent à ennemi (pas déjà en fight)
+- [ ] Roll 2D6 à la sélection d'unité, pas à la destination
+- [ ] Roll discardé à la fin de l'activation
+- [ ] Destinations valides (adjacent à cible, distance ≤ roll, non occupé)
+- [ ] BFS pathfinding pour distance
+- [ ] End activation avec bonnes constantes
+- [ ] Coordonnées normalisées avant utilisation
+
+## 🔗 RÉFÉRENCES
+
+- **AI_TURN.md** : Section "CHARGE PHASE Decision Tree" (lignes 1660-1793)
+- **charge_handlers.py** : Implémentation de référence
+- **shared_utils.py** : Constantes pour end_activation

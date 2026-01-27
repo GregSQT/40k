@@ -1,0 +1,241 @@
+---
+description: Conformité stricte phase de tir - AI_TURN.md Shooting Phase rules
+globs: **/shooting_handlers.py,**/shooting*.py
+alwaysApply: false
+---
+
+# Shooting Phase Compliance - AI_TURN.md
+
+**RÉFÉRENCE OBLIGATOIRE** : `Documentation/AI_TURN.md` Section "SHOOTING PHASE Decision Tree"
+
+## 🚨 INVARIANTS CRITIQUES DE PHASE
+
+### Invariant 1 : Current Player Ne Change Pas Pendant la Phase
+
+**Règle ABSOLUE** : Pendant la phase de tir d'un joueur, `current_player` ne change JAMAIS.
+
+**Implications** :
+- Les positions ennemies ne changent PAS (l'adversaire ne bouge pas)
+- Les hex adjacents aux ennemis ne changent PAS
+- Les caches (`enemy_adjacent_hexes`, `position_cache`) ne deviennent PAS obsolètes à cause de mouvements ennemis
+
+```python
+# ❌ VIOLATION CRITIQUE
+def build_target_pool(unit, game_state):
+    # Recalculer "par sécurité" car ennemis pourraient avoir bougé
+    enemy_adjacent_hexes = build_enemy_adjacent_hexes(game_state, unit["player"])
+    # ERREUR : Les ennemis ne bougent PAS pendant la phase de tir du joueur actuel
+
+# ✅ CORRECT
+def build_target_pool(unit, game_state):
+    # Utiliser le cache construit au début de phase
+    cache_key = f"enemy_adjacent_hexes_player_{game_state['current_player']}"
+    if cache_key not in game_state:
+        # Construire UNE FOIS au début de phase
+        game_state[cache_key] = build_enemy_adjacent_hexes(game_state, game_state['current_player'])
+    enemy_adjacent_hexes = game_state[cache_key]
+    # Le cache reste valide pendant TOUTE la phase
+```
+
+**Vérification** : Si le code recalcule `enemy_adjacent_hexes` ou `position_cache` sans changement de `current_player` ou de phase → **VIOLATION**.
+
+### Invariant 2 : Sequential Activation (Un Seul à la Fois)
+
+**Règle** : Une seule unité active à la fois. Les autres unités attendent.
+
+```python
+# ❌ INTERDIT
+for unit in eligible_units:
+    process_shooting(unit)  # Actions simultanées
+
+# ✅ OBLIGATOIRE
+if shoot_activation_pool:
+    unit = shoot_activation_pool[0]
+    process_shooting(unit)  # Un seul à la fois
+```
+
+### Invariant 3 : Caches Valides Pendant Toute l'Activation
+
+**Règle** : `los_cache` et `position_cache` restent valides pendant toute l'activation d'une unité, sauf :
+- Mort d'une cible → retirer de `position_cache` et `los_cache` (pas de recalcul)
+- Advance de l'unité → recalculer `los_cache` (nouvelle position)
+
+```python
+# ❌ INTERDIT
+def update_after_target_death(dead_target_id, unit):
+    # Recalculer tout le cache
+    unit["los_cache"] = build_unit_los_cache(unit)  # Inutile, coûteux
+
+# ✅ OBLIGATOIRE
+def update_after_target_death(dead_target_id, unit, game_state):
+    # Retirer uniquement la cible morte
+    if dead_target_id in unit.get("los_cache", {}):
+        del unit["los_cache"][dead_target_id]
+    if dead_target_id in game_state.get("position_cache", {}):
+        del game_state["position_cache"][dead_target_id]
+    # Pas de recalcul, juste retrait
+```
+
+## 📋 RÈGLES DE PHASE SPÉCIFIQUES
+
+### Règle 1 : Eligibility Check (Pool Building)
+
+**Conditions OBLIGATOIRES** (toutes doivent être vraies) :
+- `unit.HP_CUR > 0` (unité vivante)
+- `unit.player === current_player` (bon joueur)
+- `unit.id NOT in units_shot` (pas déjà tiré)
+- Au moins une cible valide disponible
+
+```python
+# ❌ INTERDIT
+if unit["HP_CUR"] > 0:
+    add_to_pool(unit)  # Manque vérifications
+
+# ✅ OBLIGATOIRE
+def get_eligible_units(game_state):
+    eligible = []
+    current_player = game_state["current_player"]
+    for unit in game_state["units"]:
+        if unit["HP_CUR"] <= 0:
+            continue
+        if unit["player"] != current_player:
+            continue
+        if unit["id"] in game_state["units_shot"]:
+            continue
+        # Vérifier cibles valides...
+        if has_valid_targets(unit, game_state):
+            eligible.append(unit["id"])
+    return eligible
+```
+
+### Règle 2 : Adjacent = In Fight = Cannot Shoot
+
+**Règle** : Unités adjacentes à ennemis = EN FIGHT = NE PEUVENT PAS TIRER (sauf PISTOL).
+
+```python
+# ❌ INTERDIT
+if has_weapon(unit):
+    shoot()  # Pas de vérification d'adjacence
+
+# ✅ OBLIGATOIRE
+if is_adjacent_to_enemy(unit, game_state):
+    if not has_pistol_weapon(unit):
+        return  # Ne peut pas tirer
+    # Sinon, peut tirer avec PISTOL uniquement
+```
+
+### Règle 3 : Advance Action Restrictions
+
+**Après advance** :
+- Seules les armes ASSAULT sont disponibles
+- `CAN_ADVANCE = false` (ne peut plus avancer)
+- `valid_target_pool` doit être reconstruit avec `arg2=1, arg3=0`
+
+```python
+# ❌ INTERDIT
+def after_advance(unit, game_state):
+    unit["CAN_ADVANCE"] = True  # Faux, a déjà avancé
+    # Utiliser toutes les armes
+    weapons = unit["RNG_WEAPONS"]
+
+# ✅ OBLIGATOIRE
+def after_advance(unit, game_state):
+    unit["CAN_ADVANCE"] = False  # Ne peut plus avancer
+    # Filtrer uniquement ASSAULT
+    weapon_available_pool = weapon_availability_check(weapon_rule=1, advance_status=1, adjacent_status=0)
+    # Reconstruire pool avec restrictions advance
+    valid_target_pool = valid_target_pool_build(weapon_rule=1, arg2=1, arg3=0)
+```
+
+### Règle 4 : Function Arguments Stricts
+
+**`valid_target_pool_build(arg1, arg2, arg3)`** :
+- `arg1` : `weapon_rule` (0 ou 1)
+- `arg2` : `advance_status` (0=no advance, 1=advanced)
+- `arg3` : `adjacent_status` (0=not adjacent, 1=adjacent)
+
+**CRITICAL** : Si `arg2=1` (advanced), alors `arg3` est TOUJOURS 0 (advance restrictions prevent adjacent destinations).
+
+```python
+# ❌ INTERDIT
+valid_target_pool_build(1, 1, 1)  # arg3=1 après advance = impossible
+
+# ✅ OBLIGATOIRE
+if unit_has_advanced:
+    valid_target_pool_build(weapon_rule=1, advance_status=1, adjacent_status=0)
+```
+
+### Règle 5 : End Activation Parameters
+
+**Signature** : `end_activation(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6)`
+
+- `Arg1` : `ACTION` | `WAIT` | `NO` | `ERROR`
+- `Arg2` : `1` = +step | `0` = pas de step
+- `Arg3` : `0` | `SHOOTING` | `ADVANCE` (tracking)
+- `Arg4` : `NOT_REMOVED` | `SHOOTING` (pool removal)
+- `Arg5` : `1` = log error | `0` = pas de log
+- `Arg6` : `1` = remove green circle | `0` = keep circle
+
+```python
+# ❌ INTERDIT
+end_activation("action", 1, "shooting", "shooting", 0, 0)  # Strings au lieu de constantes
+
+# ✅ OBLIGATOIRE
+from engine.phase_handlers.shared_utils import ACTION, SHOOTING, NOT_REMOVED
+end_activation(ACTION, 1, SHOOTING, SHOOTING, 0, 0)
+```
+
+## ⚠️ VIOLATIONS COMMUNES
+
+### Violation 1 : Recalcul Inutile de Caches
+
+```python
+# ❌ DÉTECTER
+def process_shooting(unit, game_state):
+    # Recalculer "par sécurité"
+    game_state["position_cache"] = build_position_cache(game_state)
+    # ERREUR : current_player n'a pas changé, cache toujours valide
+```
+
+### Violation 2 : Double Action dans Même Phase
+
+```python
+# ❌ DÉTECTER
+unit.shoot()
+unit.shoot()  # Même unité tire deux fois
+
+# ✅ CORRECTION
+# units_shot tracking empêche cela
+assert unit_id not in game_state["units_shot"]
+```
+
+### Violation 3 : Tir Après Advance avec Arme Non-ASSAULT
+
+```python
+# ❌ DÉTECTER
+unit.advance()
+shoot_with_any_weapon(unit)  # Pas de filtrage ASSAULT
+
+# ✅ CORRECTION
+weapon_available_pool = weapon_availability_check(weapon_rule=1, advance_status=1, adjacent_status=0)
+# Filtre automatiquement ASSAULT uniquement
+```
+
+## ✅ CHECKLIST DE VALIDATION
+
+Avant de valider un changement dans shooting phase :
+
+- [ ] `current_player` ne change pas pendant la phase (pas de recalcul de caches)
+- [ ] Activation séquentielle (un seul à la fois)
+- [ ] Caches valides (pas de recalcul inutile)
+- [ ] Adjacent = in fight = cannot shoot (sauf PISTOL)
+- [ ] Advance restrictions respectées (ASSAULT uniquement après)
+- [ ] Arguments de fonctions stricts (arg3=0 si arg2=1)
+- [ ] End activation avec bonnes constantes
+- [ ] Pas de double action (units_shot tracking)
+
+## 🔗 RÉFÉRENCES
+
+- **AI_TURN.md** : Section "SHOOTING PHASE Decision Tree" (lignes 364-1256)
+- **shooting_handlers.py** : Implémentation de référence
+- **shared_utils.py** : Constantes pour end_activation
