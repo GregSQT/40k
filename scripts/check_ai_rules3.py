@@ -4,7 +4,6 @@ AI rules checker for AI_TURN.md and coding_practices.mdc compliance.
 
 Purpose:
 - Detect cache recalculation violations (build_enemy_adjacent_hexes, build_position_cache)
-- Detect activation pool rebuild outside phase_start (*_build_activation_pool*); for dead units use _remove_dead_unit_from_pools or in-place removal
 - Verify coordinate normalization (no direct col/row comparisons; supports "col"/'col')
 - Detect anti-error fallbacks (.get with None, 0, [], {}); standalone or followed by if)
   For voluntary .get on optional keys (config, feature flags), add "# get allowed" or "# fallback allowed" on the same line to avoid false positives.
@@ -14,7 +13,7 @@ Purpose:
 Lines containing \"\"\" are ignored for col/row checks (to avoid flagging example code in docstrings); violations inside docstrings/strings are false negatives (accepted trade-off).
 
 Usage:
-    python scripts/check_ai_rules.py [--path PATH]
+    python scripts/check_ai_rules3.py [--path PATH]
 
 Exit codes:
 - 0: no violations detected
@@ -158,66 +157,6 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
                 line,
                 "cache_recalculation"
             ))
-            break
-
-    return violations
-
-
-def check_pool_rebuild(path: Path, text: str) -> List[RuleViolation]:
-    """
-    Detect activation pool built outside phase_start.
-
-    Violations:
-    - shooting_build_activation_pool(), movement_build_activation_pool(),
-      charge_build_activation_pool(), fight_build_activation_pools() called outside *_phase_start
-    - Rule: pool built only at phase start; for dead units use _remove_dead_unit_from_pools
-      or in-place removal, do not rebuild the pool.
-    """
-    violations: List[RuleViolation] = []
-
-    pool_functions = [
-        ("shooting_build_activation_pool", "Activation pool must be built only at phase start. For dead units use _remove_dead_unit_from_pools or in-place removal; do not rebuild the pool."),
-        ("movement_build_activation_pool", "Activation pool must be built only at phase start. For dead units use _remove_dead_unit_from_pools or in-place removal; do not rebuild the pool."),
-        ("charge_build_activation_pool", "Activation pool must be built only at phase start. For dead units use _remove_dead_unit_from_pools or in-place removal; do not rebuild the pool."),
-        ("fight_build_activation_pools", "Activation pool must be built only at phase start. For dead units use _remove_dead_unit_from_pools or in-place removal; do not rebuild the pool."),
-    ]
-
-    lines = text.splitlines()
-    phase_start_pattern = re.compile(r"def\s+(\w+_phase_start|phase_start)\s*\(")
-
-    in_phase_start = False
-    for idx, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not line.startswith(" ") and not line.startswith("\t") and phase_start_pattern.search(line):
-            in_phase_start = True
-            continue
-        if in_phase_start and stripped.startswith("def ") and not line.startswith(" ") and not line.startswith("\t"):
-            in_phase_start = False
-        if in_phase_start:
-            continue
-
-        for func_name, message in pool_functions:
-            if re.search(rf"def\s+{func_name}\s*\(", line):
-                continue
-            if re.search(rf"from\s+.*\s+import.*{re.escape(func_name)}|import.*{re.escape(func_name)}", line):
-                continue
-            if "#" in line:
-                comment_pos = line.find("#")
-                func_pos = line.find(func_name)
-                if func_pos > comment_pos:
-                    continue
-            if '"""' in line or "'''" in line:
-                continue
-            call_pattern = re.compile(rf"\b{re.escape(func_name)}\s*\(")
-            if not call_pattern.search(line):
-                continue
-            if re.search(rf"(raise|ValueError|KeyError|Exception).*{re.escape(func_name)}", line, re.IGNORECASE):
-                continue
-            if re.search(rf"(use|call|must|should).*{re.escape(func_name)}", line, re.IGNORECASE):
-                code_part = line.split("#")[0].replace('"""', "").replace("'''", "")
-                if not call_pattern.search(code_part):
-                    continue
-            violations.append(RuleViolation(path, idx, f"{message} Found in non-phase_start function.", line, "pool_rebuild"))
             break
 
     return violations
@@ -396,12 +335,10 @@ def main(argv: List[str]) -> int:
             return 0
 
     all_violations: List[RuleViolation] = []
-    log_path = root / "check_ai_rules.log"
-    log_lines: List[str] = []
 
-    log_lines.append("AI Rules Checker (check_ai_rules)")
-    log_lines.append("=" * 70)
-    log_lines.append("")
+    print("AI Rules Checker (check_ai_rules3)")
+    print("=" * 70)
+    print()
 
     for file_path in iter_source_files(root, scan_path):
         try:
@@ -413,7 +350,6 @@ def main(argv: List[str]) -> int:
             continue
 
         all_violations.extend(check_cache_recalculations(file_path, text))
-        all_violations.extend(check_pool_rebuild(file_path, text))
         all_violations.extend(check_coordinate_normalization(file_path, text))
         all_violations.extend(check_fallback_anti_error(file_path, text))
         all_violations.extend(check_forbidden_terms(file_path, text))
@@ -426,29 +362,20 @@ def main(argv: List[str]) -> int:
         violations_by_type[v.rule_type].append(v)
 
     if not all_violations:
-        log_lines.append("✅ No violations detected.")
-        log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
-        print("✅ check_ai_rules.py : Aucune erreur détectée   -   Output : check_ai_rules.log")
+        print("✅ No violations detected.")
         return 0
 
-    log_lines.append(f"❌ {len(all_violations)} violation(s) detected:\n")
+    print(f"❌ {len(all_violations)} violation(s) detected:\n")
     for rule_type, vlist in sorted(violations_by_type.items()):
-        log_lines.append(f"\n[{rule_type.upper()}] {len(vlist)} violation(s):")
-        log_lines.append("-" * 70)
+        print(f"\n[{rule_type.upper()}] {len(vlist)} violation(s):")
+        print("-" * 70)
         for v in vlist:
-            log_lines.append(v.format())
+            print(v.format())
 
-    log_lines.append("\n" + "=" * 70)
-    log_lines.append("Failing per repository AI coding rules.")
-    log_lines.append("Please address the messages above before committing or merging.")
-    log_lines.append("=" * 70)
-
-    log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
-
-    for rule_type, vlist in sorted(violations_by_type.items()):
-        print(f"[{rule_type.upper()}] {len(vlist)} violation(s)")
-    n = len(all_violations)
-    print(f"⚠️  check_ai_rules.py : {n} erreur(s) détectée(s)   -   Output : check_ai_rules.log")
+    print("\n" + "=" * 70)
+    print("Failing per repository AI coding rules.")
+    print("Please address the messages above before committing or merging.")
+    print("=" * 70)
     return 1
 
 

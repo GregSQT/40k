@@ -14,6 +14,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 
 import os
 import time
+from collections import deque
 import numpy as np
 import torch
 from typing import Dict, Optional
@@ -593,7 +594,7 @@ class MetricsCollectionCallback(BaseCallback):
 
                     # Track damage from combat results
                     if 'totalDamage' in info:
-                        damage_dealt = info.get('totalDamage', 0)
+                        damage_dealt = info['totalDamage']
                         self.episode_tactical_data['damage_dealt'] += damage_dealt
 
                     # COMBAT KILL TRACKING: Log kills to metrics tracker
@@ -715,7 +716,7 @@ class MetricsCollectionCallback(BaseCallback):
         episode_data = {
             'total_reward': info.get('episode_reward', self.episode_reward),
             'episode_length': info.get('episode_length', self.episode_length),
-            'winner': info.get('winner', None)
+            'winner': info['winner'] if 'winner' in info else None,
         }
 
         # GAMMA MONITORING: Track discount factor effects
@@ -753,7 +754,7 @@ class MetricsCollectionCallback(BaseCallback):
             # The 'turn_limit_reached' flag is set by fight_handlers when game ends due to turn limit
             turn_limit_reached = info.get('turn_limit_reached', False)
             if turn_limit_reached:
-                controlled_objectives = info['tactical_data'].get('controlled_objectives', 0)
+                controlled_objectives = info['tactical_data']['controlled_objectives'] if 'controlled_objectives' in info['tactical_data'] else 0
                 self.metrics_tracker.log_controlled_objectives(controlled_objectives)
             else:
                 # Game ended early (elimination) - skip objective logging
@@ -766,9 +767,9 @@ class MetricsCollectionCallback(BaseCallback):
         # CRITICAL FIX: Write game_critical metrics directly to model.logger
         # This ensures metrics appear in same TensorBoard directory as train/ metrics
         if hasattr(self.model, 'logger') and self.model.logger:
-            total_reward = episode_data.get('total_reward', 0)
-            episode_length = episode_data.get('episode_length', 0)
-            winner = episode_data.get('winner', None)
+            total_reward = episode_data['total_reward']
+            episode_length = episode_data['episode_length']
+            winner = episode_data['winner']
             
             # Game critical metrics
             self.model.logger.record('game_critical/episode_reward', total_reward)
@@ -776,29 +777,27 @@ class MetricsCollectionCallback(BaseCallback):
             
             # Win rate calculation (need rolling window)
             if not hasattr(self, 'win_rate_window'):
-                from collections import deque
                 self.win_rate_window = deque(maxlen=100)
-            
+
             if winner is not None:
                 # CRITICAL FIX: Learning agent is Player 0, not Player 1!
                 agent_won = 1.0 if winner == 0 else 0.0
                 self.win_rate_window.append(agent_won)
 
                 if len(self.win_rate_window) >= 10:
-                    import numpy as np
                     rolling_win_rate = np.mean(self.win_rate_window)
                     self.model.logger.record('game_critical/win_rate_100ep', rolling_win_rate)
             
-            # Tactical metrics
-            units_killed = self.episode_tactical_data.get('units_killed', 0)
-            units_lost = max(self.episode_tactical_data.get('units_lost', 0), 1)  # Avoid division by zero
+            # Tactical metrics (engine always sets these; get allowed for logging)
+            units_killed = self.episode_tactical_data.get('units_killed', 0)  # get allowed
+            units_lost = max(self.episode_tactical_data.get('units_lost', 0), 1)  # get allowed; avoid div by zero
             kill_loss_ratio = units_killed / units_lost
             self.model.logger.record('game_critical/units_killed_vs_lost_ratio', kill_loss_ratio)
-            
+
             # Invalid action rate
-            total_actions = self.episode_tactical_data.get('total_actions', 0)
+            total_actions = self.episode_tactical_data.get('total_actions', 0)  # get allowed
             if total_actions > 0:
-                invalid_rate = self.episode_tactical_data.get('invalid_actions', 0) / total_actions
+                invalid_rate = self.episode_tactical_data.get('invalid_actions', 0) / total_actions  # get allowed
                 self.model.logger.record('game_critical/invalid_action_rate', invalid_rate)
             
             # Dump metrics to TensorBoard
@@ -854,8 +853,8 @@ class MetricsCollectionCallback(BaseCallback):
         if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
             env = self.training_env.envs[0]
             if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
-                action_logs = env.unwrapped.game_state.get('action_logs', [])
-                
+                gs = env.unwrapped.game_state
+                action_logs = gs['action_logs']  # engine always sets it
                 for log in action_logs:
                     action_type = log.get('type', '')
                     if action_type in ['shoot', 'combat']:
@@ -927,9 +926,9 @@ class BotEvaluationCallback(BaseCallback):
             # IMPROVED weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
             # Increased RandomBot weight to prevent overfitting to predictable patterns
             combined_win_rate = (
-                results.get('random', 0) * 0.35 +
-                results.get('greedy', 0) * 0.30 +
-                results.get('defensive', 0) * 0.35
+                results.get('random', 0) * 0.35 +  # get allowed
+                results.get('greedy', 0) * 0.30 +  # get allowed
+                results.get('defensive', 0) * 0.35  # get allowed
             )
 
             # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)

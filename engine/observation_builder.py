@@ -933,7 +933,7 @@ class ObservationBuilder:
         def ally_priority(item):
             distance, unit = item
             hp_ratio = unit["HP_CUR"] / max(1, unit["HP_MAX"])
-            has_acted = 1.0 if unit["id"] in game_state.get("units_moved", set()) else 0.0
+            has_acted = 1.0 if unit["id"] in game_state["units_moved"] else 0.0
             
             # Priority: closer units (higher), wounded (higher), not acted (higher)
             return (
@@ -965,7 +965,7 @@ class ObservationBuilder:
                 obs[feature_base + 3] = ally["HP_MAX"] / 10.0
                 
                 # Feature 4: Has moved
-                obs[feature_base + 4] = 1.0 if ally["id"] in game_state.get("units_moved", set()) else 0.0
+                obs[feature_base + 4] = 1.0 if ally["id"] in game_state["units_moved"] else 0.0
                 
                 # Feature 5: Movement direction (temporal behavior)
                 obs[feature_base + 5] = self._calculate_movement_direction(ally, active_unit)
@@ -1091,13 +1091,13 @@ class ObservationBuilder:
                 obs[feature_base + 4] = enemy["HP_MAX"] / 10.0
                 
                 # Feature 5-6: Movement tracking
-                obs[feature_base + 5] = 1.0 if enemy["id"] in game_state.get("units_moved", set()) else 0.0
+                obs[feature_base + 5] = 1.0 if enemy["id"] in game_state["units_moved"] else 0.0
                 obs[feature_base + 6] = self._calculate_movement_direction(enemy, active_unit)
                 
                 # Feature 7-9: Action tracking
-                obs[feature_base + 7] = 1.0 if enemy["id"] in game_state.get("units_shot", set()) else 0.0
-                obs[feature_base + 8] = 1.0 if enemy["id"] in game_state.get("units_charged", set()) else 0.0
-                obs[feature_base + 9] = 1.0 if enemy["id"] in game_state.get("units_attacked", set()) else 0.0
+                obs[feature_base + 7] = 1.0 if enemy["id"] in game_state["units_shot"] else 0.0
+                obs[feature_base + 8] = 1.0 if enemy["id"] in game_state["units_charged"] else 0.0
+                obs[feature_base + 9] = 1.0 if enemy["id"] in game_state["units_attacked"] else 0.0
                 
                 # Feature 10: Is valid target (basic check)
                 current_phase = game_state["phase"]

@@ -96,19 +96,19 @@ def select_best_ranged_weapon(unit: Dict[str, Any], target: Dict[str, Any],
     if "RNG_WEAPONS" not in unit:
         raise KeyError(f"Unit missing RNG_WEAPONS: {unit}")
     
-    rng_weapons = unit.get("RNG_WEAPONS", [])
+    rng_weapons = unit["RNG_WEAPONS"]
     if not rng_weapons:
         return -1
     
-    # Get cache if available
-    cache = game_state.get("kill_probability_cache", {})
+    # Get cache if available (optional; built on demand)
+    cache = game_state.get("kill_probability_cache", {})  # get allowed
     
     best_index = -1
     best_kill_prob = -1.0
     
     unit_id = str(unit["id"])
     target_id = str(target["id"])
-    hp_cur = target.get("HP_CUR", target.get("HP_MAX", 1))
+    hp_cur = require_key(target, "HP_CUR")
     
     for weapon_index, weapon in enumerate(rng_weapons):
         # Check cache first
@@ -149,19 +149,19 @@ def select_best_melee_weapon(unit: Dict[str, Any], target: Dict[str, Any],
     if "CC_WEAPONS" not in unit:
         raise KeyError(f"Unit missing CC_WEAPONS: {unit}")
     
-    cc_weapons = unit.get("CC_WEAPONS", [])
+    cc_weapons = unit["CC_WEAPONS"]
     if not cc_weapons:
         return -1
     
-    # Get cache if available
-    cache = game_state.get("kill_probability_cache", {})
+    # Get cache if available (optional; built on demand)
+    cache = game_state.get("kill_probability_cache", {})  # get allowed
     
     best_index = -1
     best_kill_prob = -1.0
     
     unit_id = str(unit["id"])
     target_id = str(target["id"])
-    hp_cur = target.get("HP_CUR", target.get("HP_MAX", 1))
+    hp_cur = require_key(target, "HP_CUR")
     
     for weapon_index, weapon in enumerate(cc_weapons):
         # Check cache first
@@ -208,15 +208,15 @@ def get_best_weapon_for_target(unit: Dict[str, Any], target: Dict[str, Any],
         return (-1, 0.0)
     
     # Get kill probability from cache or calculate
-    cache = game_state.get("kill_probability_cache", {})
+    cache = game_state.get("kill_probability_cache", {})  # get allowed
     unit_id = str(unit["id"])
     target_id = str(target["id"])
-    hp_cur = target.get("HP_CUR", target.get("HP_MAX", 1))
+    hp_cur = require_key(target, "HP_CUR")
     
     if is_ranged:
-        weapons = unit.get("RNG_WEAPONS", [])
+        weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
     else:
-        weapons = unit.get("CC_WEAPONS", [])
+        weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
     
     if weapon_index >= len(weapons):
         return (-1, 0.0)
@@ -254,22 +254,22 @@ def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
         game_state["kill_probability_cache"] = {}
     
     cache = game_state["kill_probability_cache"]
-    current_player = game_state.get("current_player", 1)
+    current_player = require_key(game_state, "current_player")
     
     # Get active units (current player's units)
-    active_units = [u for u in game_state["units"] if u.get("player") == current_player and u.get("HP_CUR", 0) > 0]
+    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and require_key(u, "HP_CUR") > 0]
     
     # Get all enemy units as targets
-    enemy_units = [u for u in game_state["units"] if u.get("player") != current_player and u.get("HP_CUR", 0) > 0]
+    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and require_key(u, "HP_CUR") > 0]
     
     for unit in active_units:
         unit_id = str(unit["id"])
         
         # Get weapons based on phase
         if phase == "shoot":
-            weapons = unit.get("RNG_WEAPONS", [])
+            weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
         elif phase == "fight":
-            weapons = unit.get("CC_WEAPONS", [])
+            weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
         else:
             continue
         
@@ -279,7 +279,7 @@ def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
         for weapon_index, weapon in enumerate(weapons):
             for target in enemy_units:
                 target_id = str(target["id"])
-                hp_cur = target.get("HP_CUR", target.get("HP_MAX", 1))
+                hp_cur = require_key(target, "HP_CUR")
                 
                 # PERFORMANCE: Check cache before recalculating
                 cache_key = _get_cache_key(unit_id, weapon_index, target_id, hp_cur)
@@ -331,16 +331,16 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
     if "units" not in game_state:
         return
     
-    perception_radius = game_state.get("perception_radius", 25)
-    current_player = game_state.get("current_player", 1)
+    perception_radius = game_state.get("perception_radius", 25)  # get allowed (config; may be absent)
+    current_player = require_key(game_state, "current_player")
     
     # Get active units
-    active_units = [u for u in game_state["units"] if u.get("player") == current_player and u.get("HP_CUR", 0) > 0]
+    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and require_key(u, "HP_CUR") > 0]
     
     # Get all enemy units
-    enemy_units = [u for u in game_state["units"] if u.get("player") != current_player and u.get("HP_CUR", 0) > 0]
+    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and require_key(u, "HP_CUR") > 0]
     
-    cache = game_state.get("kill_probability_cache", {})
+    cache = game_state.get("kill_probability_cache", {})  # get allowed
     
     for unit in active_units:
         unit_id = str(unit["id"])
@@ -350,10 +350,10 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
         from engine.combat_utils import get_unit_coordinates
         unit_col, unit_row = get_unit_coordinates(unit)
         
-        rng_weapons = unit.get("RNG_WEAPONS", [])
+        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
         
         for weapon_index, weapon in enumerate(rng_weapons):
-            weapon_range = weapon.get("RNG", 0)
+            weapon_range = require_key(weapon, "RNG")
             
             for target in enemy_units:
                 target_id = str(target["id"])
@@ -367,7 +367,7 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
                 distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
                 
                 if distance <= perception_radius and distance <= weapon_range:
-                    hp_cur = target.get("HP_CUR", target.get("HP_MAX", 1))
+                    hp_cur = require_key(target, "HP_CUR")
                     
                     # Check if already cached
                     if _get_kill_prob_from_cache(cache, unit_id, weapon_index, target_id, hp_cur) is None:

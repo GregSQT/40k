@@ -7,6 +7,7 @@ from typing import Dict, List, Any, Tuple, Optional
 from engine.combat_utils import calculate_wound_target, calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight, get_unit_coordinates, normalize_coordinates
 from engine.phase_handlers.shooting_handlers import _calculate_save_target
 from engine.game_utils import get_unit_by_id
+from shared.data_validation import require_key
 
 class RewardCalculator:
     """Calculates rewards for actions."""
@@ -160,7 +161,7 @@ class RewardCalculator:
             # CRITICAL: Check if this is a waiting_for_player action without attacks executed
             # In this case, no logs are added yet, so return 0.0 reward
             waiting_for_player = result.get("waiting_for_player", False)
-            all_attack_results = result.get("all_attack_results", [])
+            all_attack_results = result["all_attack_results"] if "all_attack_results" in result else []
             if waiting_for_player and not all_attack_results:
                 # No attacks executed yet, return 0.0 reward
                 reward_breakdown['total'] = 0.0
@@ -168,7 +169,7 @@ class RewardCalculator:
                 return 0.0
             
             # Sum all shoot rewards from current activation (handles RNG_NB > 1)
-            action_logs = game_state.get("action_logs", [])
+            action_logs = require_key(game_state, "action_logs")
             
             # Validate action_logs exists and is not empty
             if not action_logs or len(action_logs) == 0:
@@ -179,7 +180,7 @@ class RewardCalculator:
             
             # Find all shoot logs from the most recent activation
             # Work backwards until we hit a different action type or different shooter
-            current_turn = game_state.get("turn", 0)
+            current_turn = require_key(game_state, "turn")
             shooter_id = acting_unit.get("id")
             # CRITICAL: Normalize shooter_id to string for comparison (logs use string unit_id)
             shooter_id_str = str(shooter_id) if shooter_id is not None else None
@@ -669,9 +670,10 @@ class RewardCalculator:
             
             # Diagnostic logging (only if not quiet)
             if not self.quiet and objective_reward > 0:
-                current_turn = game_state.get("turn", 0)
+                current_turn = require_key(game_state, "turn")
                 obj_counts = self.state_manager.count_controlled_objectives(game_state) if self.state_manager else {}
-                print(f"🎯 OBJECTIVE REWARD: Turn={current_turn}, P0 objectives={obj_counts.get(0, 0)}, Reward={objective_reward:.1f}")
+                p0_count = obj_counts[0] if 0 in obj_counts else 0
+                print(f"🎯 OBJECTIVE REWARD: Turn={current_turn}, P0 objectives={p0_count}, Reward={objective_reward:.1f}")
             
             return base_reward + objective_reward
         except (KeyError, ValueError) as e:
@@ -692,7 +694,7 @@ class RewardCalculator:
             Reward value (reward_per_objective * number of objectives controlled by P0)
         """
         # Only apply at end of turn 5 (not elimination)
-        current_turn = game_state.get("turn", 0)
+        current_turn = require_key(game_state, "turn")
         turn_limit_reached = game_state.get("turn_limit_reached", False)
         
         # Check if game ended at turn 5
@@ -724,7 +726,7 @@ class RewardCalculator:
             return 0.0
         
         obj_counts = self.state_manager.count_controlled_objectives(game_state)
-        p0_objectives = obj_counts.get(0, 0)
+        p0_objectives = obj_counts[0] if 0 in obj_counts else 0
         
         # Get reward per objective from config (REQUIRED - raise error if missing)
         if "objective_rewards" not in unit_rewards:
@@ -910,7 +912,7 @@ class RewardCalculator:
         
         # Calculate max EXPECTED ranged damage from all ranged weapons
         ranged_expected_list = []
-        rng_weapons = unit.get("RNG_WEAPONS", [])
+        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
         for weapon in rng_weapons:
             expected = self._calculate_expected_damage(
                 num_attacks=require_key(weapon, "NB"),
@@ -928,7 +930,7 @@ class RewardCalculator:
         
         # Calculate max EXPECTED melee damage from all melee weapons
         melee_expected_list = []
-        cc_weapons = unit.get("CC_WEAPONS", [])
+        cc_weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
         for weapon in cc_weapons:
             expected = self._calculate_expected_damage(
                 num_attacks=require_key(weapon, "NB"),
@@ -1473,7 +1475,7 @@ class RewardCalculator:
         Uses BFS pathfinding distance to respect walls for charge reachability.
         """
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
-        cc_weapons = unit.get("CC_WEAPONS", [])
+        cc_weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
         if not cc_weapons:
             return False
         
@@ -1590,7 +1592,7 @@ class RewardCalculator:
             
             max_rng_range = get_max_ranged_range(enemy)
             melee_range = get_melee_range()  # Always 1
-            cc_weapons = enemy.get("CC_WEAPONS", [])
+            cc_weapons = enemy["CC_WEAPONS"] if "CC_WEAPONS" in enemy else []
             
             # CRITICAL: Use same logic as observation encoding
             # Melee unit = has melee weapons and max ranged range <= melee range
@@ -1732,9 +1734,8 @@ class RewardCalculator:
             raise KeyError(f"Unit missing required 'unitType' field: {unit}")
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get max damage from all weapons
-        from shared.data_validation import require_key
-        rng_weapons = unit.get("RNG_WEAPONS", [])
-        cc_weapons = unit.get("CC_WEAPONS", [])
+        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
+        cc_weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
         
         rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
         cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
@@ -1766,11 +1767,11 @@ class RewardCalculator:
         if not acting_unit or not game_state:
             return []
 
-        from shared.data_validation import require_key
         targets = []
         acting_player = require_key(acting_unit, "player")
+        units = require_key(game_state, "units")
 
-        for unit in game_state.get("units", []):
+        for unit in units:
             # Enemy units that are alive
             if require_key(unit, "player") != acting_player and require_key(unit, "HP_CUR") > 0:
                 targets.append(unit)

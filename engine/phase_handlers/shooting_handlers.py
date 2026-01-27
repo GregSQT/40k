@@ -6,6 +6,7 @@ Only pool building functionality - foundation for complete handler autonomy
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import get_unit_coordinates, normalize_coordinates
+from shared.data_validation import require_key
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
     ACTION, WAIT, PASS, SHOOTING, ADVANCE, NOT_REMOVED,
@@ -61,7 +62,7 @@ def _weapon_has_assault_rule(weapon: Dict[str, Any]) -> bool:
     """Check if weapon has ASSAULT rule allowing shooting after advance."""
     if not weapon:
         return False
-    rules = weapon.get("WEAPON_RULES", [])
+    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
     # Handle both ParsedWeaponRule objects and strings
     for rule in rules:
         if hasattr(rule, 'rule'):  # ParsedWeaponRule object
@@ -76,7 +77,7 @@ def _weapon_has_pistol_rule(weapon: Dict[str, Any]) -> bool:
     """Check if weapon has PISTOL rule."""
     if not weapon:
         return False
-    rules = weapon.get("WEAPON_RULES", [])
+    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
     # Handle both ParsedWeaponRule objects and strings
     for rule in rules:
         if hasattr(rule, 'rule'):  # ParsedWeaponRule object
@@ -109,7 +110,7 @@ def weapon_availability_check(
         Each item has: index, weapon, can_use, reason
     """
     available_weapons = []
-    rng_weapons = unit.get("RNG_WEAPONS", [])
+    rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
     
     for idx, weapon in enumerate(rng_weapons):
         can_use = True
@@ -148,7 +149,7 @@ def weapon_availability_check(
         
         # Check weapon.shot flag
         if can_use:
-            weapon_shot = weapon.get("shot", 0)
+            weapon_shot = require_key(weapon, "shot")
             if weapon_shot == 1:
                 # ❌ Weapon CANNOT be selectable (skip weapon)
                 can_use = False
@@ -172,7 +173,7 @@ def weapon_availability_check(
         
         # Check weapon.RNG and target availability
         if can_use:
-            weapon_range = weapon.get("RNG", 0)
+            weapon_range = require_key(weapon, "RNG")
             if weapon_range <= 0:
                 can_use = False
                 reason = "Weapon has no range"
@@ -240,7 +241,7 @@ def _get_available_weapons_for_selection(
         List of dicts with keys: index, weapon, can_use, reason
     """
     available_weapons = []
-    rng_weapons = unit.get("RNG_WEAPONS", [])
+    rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
     
     # Build valid targets for range/LoS checking
     # We'll check each weapon individually
@@ -252,7 +253,7 @@ def _get_available_weapons_for_selection(
         
         # Check weapon.shot flag
         if exclude_used:
-            weapon_shot = weapon.get("shot", 0)
+            weapon_shot = require_key(weapon, "shot")
             if weapon_shot == 1:
                 can_use = False
                 reason = "Weapon already used (weapon.shot = 1)"
@@ -280,7 +281,7 @@ def _get_available_weapons_for_selection(
         # Check PISTOL rule category
         # Only apply PISTOL filter if unit has already fired (current_weapon_is_pistol is not None)
         # If None, unit hasn't fired yet, so all weapons should be selectable
-        weapon_rules = weapon.get("WEAPON_RULES", [])
+        weapon_rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
         is_pistol = "PISTOL" in weapon_rules
         
         if current_weapon_is_pistol is not None:
@@ -311,7 +312,7 @@ def _get_available_weapons_for_selection(
         
         # Check if weapon has at least one valid target (range + LoS)
         weapon_has_valid_target = False
-        weapon_range = weapon.get("RNG", 0)
+        weapon_range = require_key(weapon, "RNG")
         
         # Skip if weapon has no range
         if weapon_range <= 0:
@@ -393,7 +394,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     current_player = game_state["current_player"]
     for unit in game_state["units"]:
         if unit["player"] == current_player and unit["HP_CUR"] > 0:
-            rng_weapons = unit.get("RNG_WEAPONS", [])
+            rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
             for weapon in rng_weapons:
                 weapon["shot"] = 0
             
@@ -415,7 +416,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 if usable_weapons:
                     # If adjacent, prioritize PISTOL weapons
                     if is_adjacent:
-                        pistol_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w.get("weapon", {}))]
+                        pistol_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(require_key(w, "weapon"))]
                         if pistol_weapons:
                             first_weapon = pistol_weapons[0]
                         else:
@@ -429,7 +430,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                     unit["SHOOT_LEFT"] = weapon["NB"]
                 else:
                     # No usable weapons, default to first weapon (will be validated later)
-                    selected_idx = unit.get("selectedRngWeaponIndex", 0)
+                    selected_idx = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
                     if selected_idx < 0 or selected_idx >= len(rng_weapons):
                         selected_idx = 0
                     weapon = rng_weapons[selected_idx]
@@ -770,7 +771,7 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
         
         # PRINCIPLE: "Le Pool DOIT gérer les morts" - Only add alive units of current player
         # CRITICAL: Normalize unit ID to string when adding to pool to ensure consistent types
-        if unit.get("HP_CUR", 0) > 0 and _has_valid_shooting_targets(game_state, unit, current_player):
+        if require_key(unit, "HP_CUR") > 0 and _has_valid_shooting_targets(game_state, unit, current_player):
             shoot_activation_pool.append(str(unit["id"]))
             add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: ADDED Unit {unit_id} (player={unit_player}, HP_CUR={hp_cur})")
         else:
@@ -796,7 +797,10 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
     try:
         from ai.reward_mapper import RewardMapper
         
-        reward_configs = game_state.get("reward_configs", {})
+        if "reward_configs" in game_state:
+            reward_configs = game_state["reward_configs"]
+        else:
+            reward_configs = None
         if not reward_configs:
             return valid_targets[0]
         
@@ -813,9 +817,13 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
         
         reward_mapper = RewardMapper(unit_reward_config)
         
-        # Build target list for reward mapper
-        all_targets = [_get_unit_by_id(game_state, tid) for tid in valid_targets if _get_unit_by_id(game_state, tid)]
-        
+        # Build target list for reward mapper (single lookup per tid)
+        all_targets = []
+        for tid in valid_targets:
+            t = _get_unit_by_id(game_state, tid)
+            if t:
+                all_targets.append(t)
+
         best_target = valid_targets[0]
         best_reward = -999999
         
@@ -1011,7 +1019,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # A unit that was removed from pool (e.g., after WAIT) should NEVER be reactivated
     # This prevents infinite WAIT loops where get_action_mask reactivates a unit that was removed
     # CRITICAL: Normalize all IDs to string for consistent comparison (pool stores strings)
-    shoot_pool = game_state.get("shoot_activation_pool", [])
+    shoot_pool = require_key(game_state, "shoot_activation_pool")
     unit_id_str = str(unit_id)
     pool_ids = [str(uid) for uid in shoot_pool]
     if unit_id_str not in pool_ids:
@@ -1053,7 +1061,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     
     # Reset weapon.shot flags for this unit at activation start
     # Each unit should be able to use all its weapons at the start of its activation
-    rng_weapons = unit.get("RNG_WEAPONS", [])
+    rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
     for weapon in rng_weapons:
         weapon["shot"] = 0
     
@@ -1112,7 +1120,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             pistol_weapons = []
             non_pistol_weapons = []
             for w in usable_weapons:
-                weapon = w.get("weapon", {})
+                weapon = require_key(w, "weapon")
                 if _weapon_has_pistol_rule(weapon):
                     pistol_weapons.append(w)
                 else:
@@ -1149,7 +1157,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     unit_col, unit_row = get_unit_coordinates(unit)
     return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"],
             "position": {"col": unit_col, "row": unit_row},
-            "selectedRngWeaponIndex": unit.get("selectedRngWeaponIndex", 0),
+            "selectedRngWeaponIndex": unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0,
             "available_weapons": available_weapons}
 
 
@@ -1188,7 +1196,7 @@ def valid_target_pool_build(
     
     # Extract usable weapon indices and ranges
     usable_weapon_indices = [w["index"] for w in usable_weapons]
-    rng_weapons = unit.get("RNG_WEAPONS", [])
+    rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
     
     # For each enemy unit
     valid_target_pool = []
@@ -1337,7 +1345,7 @@ def valid_target_pool_build(
         for weapon_idx in usable_weapon_indices:
             if weapon_idx < len(rng_weapons):
                 weapon = rng_weapons[weapon_idx]
-                weapon_range = weapon.get("RNG", 0)
+                weapon_range = require_key(weapon, "RNG")
                 if distance <= weapon_range:
                     unit_within_range = True
                     break
@@ -1354,7 +1362,8 @@ def valid_target_pool_build(
             valid_target_pool.append(str(enemy["id"]))
             add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) ADDED to pool (distance={distance}, shooter_player={current_player_int}, target_player={enemy_player})")
         else:
-            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - out of range (distance={distance}, max_range={max([w.get('RNG', 0) for w in rng_weapons] + [0])})")
+            max_rng = max((require_key(w, "RNG") for w in rng_weapons), default=0)
+            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy['col']},{enemy['row']}) EXCLUDED - out of range (distance={distance}, max_range={max_rng})")
     
     return valid_target_pool
 
@@ -1873,7 +1882,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     # CRITICAL: Include all_attack_results if attacks were executed before phase completion
     # This ensures attacks already executed are logged to step.log
-    shoot_attack_results = game_state.get("shoot_attack_results", [])
+    shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
     
     # Final cleanup
     game_state["shoot_activation_pool"] = []
@@ -1911,7 +1920,9 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         }
     elif game_state["current_player"] == 2:
         # Player 2 complete -> Check if incrementing turn would exceed limit
-        max_turns = game_state.get("config", {}).get("training_config", {}).get("max_turns_per_episode")
+        cfg = game_state["config"] if "config" in game_state else None
+        tc = cfg["training_config"] if cfg and "training_config" in cfg else None
+        max_turns = tc["max_turns_per_episode"] if tc and "max_turns_per_episode" in tc else None
         if max_turns and (game_state["turn"] + 1) > max_turns:
             # Incrementing would exceed turn limit - end game without incrementing
             game_state["game_over"] = True
@@ -2030,7 +2041,7 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     
     # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
     # Must hold after every end_activation (shoot/advance/wait/execution_loop), not only wait/skip.
-    pool = game_state.get("shoot_activation_pool", [])
+    pool = require_key(game_state, "shoot_activation_pool")
     if pool:
         game_state["active_shooting_unit"] = pool[0]
     
@@ -2064,7 +2075,7 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     # Include attack results if needed (for cases where attacks were executed before ending)
     # CRITICAL: This must be done BEFORE phase transition to ensure logging
     if include_attack_results:
-        shoot_attack_results = game_state.get("shoot_attack_results", [])
+        shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
         if shoot_attack_results:
             result["all_attack_results"] = list(shoot_attack_results)
     
@@ -2103,17 +2114,17 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
         if selected_weapon:
-            weapon_rules = selected_weapon.get("WEAPON_RULES", [])
+            weapon_rules = selected_weapon["WEAPON_RULES"] if "WEAPON_RULES" in selected_weapon else []
             current_weapon_is_pistol = "PISTOL" in weapon_rules
-            current_weapon_index = unit.get("selectedRngWeaponIndex", 0)
+            current_weapon_index = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
             
             # Find available weapons of the same category (PISTOL or non-PISTOL)
-            rng_weapons = unit.get("RNG_WEAPONS", [])
+            rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
             available_weapons_same_category = []
             for idx, weapon in enumerate(rng_weapons):
                 if idx == current_weapon_index:
                     continue  # Skip current weapon
-                weapon_rules = weapon.get("WEAPON_RULES", [])
+                weapon_rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
                 is_pistol = "PISTOL" in weapon_rules
                 if current_weapon_is_pistol and is_pistol:
                     # Current is PISTOL, looking for other PISTOL weapons
@@ -2130,7 +2141,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             
             if available_weapons_same_category:
                 # Store original weapon index to restore later
-                original_weapon_index = unit.get("selectedRngWeaponIndex", 0)
+                original_weapon_index = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
                 
                 # Check each available weapon for valid targets
                 for weapon_idx in available_weapons_same_category:
@@ -2329,9 +2340,9 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         # Fallback: Check if unit has fired by comparing SHOOT_LEFT
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
-        if selected_weapon and unit.get("SHOOT_LEFT", 0) < selected_weapon.get("NB", 0):
+        if selected_weapon and require_key(unit, "SHOOT_LEFT") < require_key(selected_weapon, "NB"):
             # Unit has already fired (SHOOT_LEFT decreased), determine category from current weapon
-            weapon_rules = selected_weapon.get("WEAPON_RULES", [])
+            weapon_rules = selected_weapon["WEAPON_RULES"] if "WEAPON_RULES" in selected_weapon else []
             current_weapon_is_pistol = "PISTOL" in weapon_rules
         
     # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
@@ -2359,7 +2370,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # CRITICAL: Include all_attack_results if attacks were executed before (in a loop)
     # This ensures attacks already executed are logged to step.log
-    shoot_attack_results = game_state.get("shoot_attack_results", [])
+    shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
     
     response = {
         "while_loop_active": True,
@@ -2410,7 +2421,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # Check if shooting phase should complete - read directly from game_state (not cached)
     # CRITICAL: Read pool directly to get current state (pool may have been modified by previous actions)
-    current_pool = game_state.get("shoot_activation_pool", [])
+    current_pool = require_key(game_state, "shoot_activation_pool")
     if not current_pool:
         game_state["_shooting_phase_initialized"] = False
         return True, _shooting_phase_complete(game_state)
@@ -2436,7 +2447,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     hp_cur = unit.get("HP_CUR", -1)
     # CRITICAL: Normalize unit_id to string for consistent comparison (pool stores strings)
     unit_id_str = str(unit_id)
-    pool_ids = [str(uid) for uid in game_state.get("shoot_activation_pool", [])]
+    pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
     in_pool = unit_id_str in pool_ids
     add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} execute_action: Unit {unit_id} (HP_CUR={hp_cur}, in_pool={in_pool})")
     
@@ -2460,7 +2471,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if not active_shooting_unit and action_type in ["shoot", "advance"] and is_gym_training and is_learning_agent_turn:
         # Verify unit is still in pool before activation (defense in depth)
         unit_id_str = str(unit_id)
-        pool_ids = [str(uid) for uid in game_state.get("shoot_activation_pool", [])]
+        pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
         if unit_id_str in pool_ids:
             from engine.game_utils import add_debug_log
             episode = game_state.get("episode_number", "?")
@@ -2555,7 +2566,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if weapon_index is None:
             return False, {"error": "missing_weapon_index"}
         
-        rng_weapons = unit.get("RNG_WEAPONS", [])
+        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
         if weapon_index < 0 or weapon_index >= len(rng_weapons):
             return False, {"error": "invalid_weapon_index", "weaponIndex": weapon_index}
 
@@ -2578,7 +2589,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # If unit is not in pool, it was removed via end_activation and cannot be reactivated
         # CRITICAL: Normalize unit_id to string for consistent comparison (pool stores strings)
         unit_id_str = str(unit_id)
-        pool_ids = [str(uid) for uid in game_state.get("shoot_activation_pool", [])]
+        pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
         if unit_id_str not in pool_ids:
             # Unit not in pool - cannot select weapon (unit was removed via end_activation)
             episode = game_state.get("episode_number", "?")
@@ -2620,7 +2631,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
         # AI_TURN.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
         # CRITICAL: According to AI_TURN.md, pool should never contain dead units, so checking pool emptiness is correct
-        pool_after_removal = game_state.get("shoot_activation_pool", [])
+        pool_after_removal = require_key(game_state, "shoot_activation_pool")
         if not pool_after_removal:
             # Pool is empty - phase is complete (AI_TURN.md LINE 794: "NO → End of shooting phase")
             game_state["_shooting_phase_initialized"] = False
@@ -2656,7 +2667,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
         # AI_TURN.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
         # CRITICAL: According to AI_TURN.md, pool should never contain dead units, so checking pool emptiness is correct
-        pool_after_removal = game_state.get("shoot_activation_pool", [])
+        pool_after_removal = require_key(game_state, "shoot_activation_pool")
         if not pool_after_removal:
             # Pool is empty - phase is complete (AI_TURN.md LINE 794: "NO → End of shooting phase")
             game_state["_shooting_phase_initialized"] = False
@@ -2675,7 +2686,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
         # AI_TURN.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
         # CRITICAL: According to AI_TURN.md, pool should never contain dead units, so checking pool emptiness is correct
-        pool_after_removal = game_state.get("shoot_activation_pool", [])
+        pool_after_removal = require_key(game_state, "shoot_activation_pool")
         if not pool_after_removal:
             # Pool is empty - phase is complete (AI_TURN.md LINE 794: "NO → End of shooting phase")
             game_state["_shooting_phase_initialized"] = False
@@ -2768,7 +2779,7 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
             # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
-            pool = game_state.get("shoot_activation_pool", [])
+            pool = require_key(game_state, "shoot_activation_pool")
             if pool:
                 game_state["active_shooting_unit"] = pool[0]
             return True, {
@@ -2793,7 +2804,7 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
             # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
-            pool = game_state.get("shoot_activation_pool", [])
+            pool = require_key(game_state, "shoot_activation_pool")
             if pool:
                 game_state["active_shooting_unit"] = pool[0]
             # Return to UNIT_ACTIVABLE_CHECK step (by returning activation_ended=False)
@@ -2867,7 +2878,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if not unit:
             return False, {"error": "unit_not_found"}
         
-        valid_targets = unit.get("valid_target_pool", [])
+        valid_targets = unit["valid_target_pool"] if "valid_target_pool" in unit else []
         
         # AI_TURN.md: If pool is empty, go to EMPTY_TARGET_HANDLING (advance or WAIT)
         # Pool should not be empty here if unit was properly activated, but if all targets died
@@ -2909,12 +2920,13 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 return False, {"error": "target_not_found", "targetId": selected_target_id}
             
             # Only auto-select weapon if autoSelectWeapon is enabled
-            config = game_state.get("config", {})
-            auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
+            cfg = game_state["config"] if "config" in game_state else None
+            gs = cfg["game_settings"] if cfg and "game_settings" in cfg else None
+            auto_select = gs["autoSelectWeapon"] if gs and "autoSelectWeapon" in gs else True
             
             # If SHOOT_LEFT > 0, weapon is already selected and has remaining shots
             # Don't re-select weapon, just use the already selected one
-            current_shoot_left = unit.get("SHOOT_LEFT", 0)
+            current_shoot_left = require_key(unit, "SHOOT_LEFT")
             if current_shoot_left > 0:
                 # Weapon already selected, just verify it's still valid
                 selected_weapon = get_selected_ranged_weapon(unit)
@@ -2989,8 +3001,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 from engine.utils.weapon_helpers import get_selected_ranged_weapon
                 selected_weapon = get_selected_ranged_weapon(unit)
                 if selected_weapon:
-                    current_shoot_left = unit.get("SHOOT_LEFT", 0)
-                    active_shooting_unit = game_state.get("active_shooting_unit")
+                    current_shoot_left = require_key(unit, "SHOOT_LEFT")
+                    active_shooting_unit = game_state["active_shooting_unit"] if "active_shooting_unit" in game_state else None
                     # Only initialize SHOOT_LEFT if it hasn't been initialized yet
                     # If SHOOT_LEFT == 0 after shooting, it means all shots from this weapon have been used
                     # Check if unit has started shooting (has active_shooting_unit set)
@@ -3001,7 +3013,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         # Unit has already shot and SHOOT_LEFT is 0
                         # Need to select another weapon of the same category (PISTOL or non-PISTOL)
                         # Even in manual mode, auto-select the best weapon of same category to continue
-                        weapon_rules = selected_weapon.get("WEAPON_RULES", [])
+                        weapon_rules = selected_weapon["WEAPON_RULES"] if "WEAPON_RULES" in selected_weapon else []
                         current_weapon_is_pistol = "PISTOL" in weapon_rules
                         
                         # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
@@ -3072,8 +3084,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             if not target:
                 return False, {"error": "target_not_found", "targetId": selected_target_id}
                 # Only auto-select weapon if autoSelectWeapon is enabled
-                config = game_state.get("config", {})
-                auto_select = config.get("game_settings", {}).get("autoSelectWeapon", True)
+                cfg = game_state["config"] if "config" in game_state else None
+                gs = cfg["game_settings"] if cfg and "game_settings" in cfg else None
+                auto_select = gs["autoSelectWeapon"] if gs and "autoSelectWeapon" in gs else True
                 
                 if auto_select:
                     # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
@@ -3127,7 +3140,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         best_weapon_idx = filtered_indices[best_weapon_idx_in_filtered]
                         unit["selectedRngWeaponIndex"] = best_weapon_idx
                         weapon = unit["RNG_WEAPONS"][best_weapon_idx]
-                        current_shoot_left = unit.get("SHOOT_LEFT", 0)
+                        current_shoot_left = require_key(unit, "SHOOT_LEFT")
                         if current_shoot_left == 0:
                             unit["SHOOT_LEFT"] = weapon["NB"]
                     else:
@@ -3138,9 +3151,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     from engine.utils.weapon_helpers import get_selected_ranged_weapon
                     selected_weapon = get_selected_ranged_weapon(unit)
                     if selected_weapon:
-                        current_shoot_left = unit.get("SHOOT_LEFT", 0)
+                        current_shoot_left = require_key(unit, "SHOOT_LEFT")
                         # Only initialize SHOOT_LEFT if it hasn't been initialized yet
-                        active_shooting_unit = game_state.get("active_shooting_unit")
+                        active_shooting_unit = game_state["active_shooting_unit"] if "active_shooting_unit" in game_state else None
                         if current_shoot_left == 0 and active_shooting_unit != unit_id:
                             # Unit hasn't started shooting yet, initialize SHOOT_LEFT
                             unit["SHOOT_LEFT"] = selected_weapon["NB"]
@@ -3195,7 +3208,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             actual_attack_result["shooterId"] = unit_id
         # CRITICAL: Ensure target_died is always present (it's added in shooting_attack_controller but may be missing)
         if "target_died" not in actual_attack_result:
-            actual_attack_result["target_died"] = attack_result.get("target_died", False)
+            actual_attack_result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
         game_state["shoot_attack_results"].append(actual_attack_result)
 
         # Update SHOOT_LEFT and continue loop per AI_TURN.md
@@ -3203,11 +3216,11 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         # PISTOL rule: Update _shooting_with_pistol after each shot to track weapon category
         # This ensures the filter persists even if unit switches weapons
-        current_weapon_index = unit.get("selectedRngWeaponIndex", 0)
-        rng_weapons = unit.get("RNG_WEAPONS", [])
+        current_weapon_index = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
+        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
         if current_weapon_index < len(rng_weapons):
             weapon = rng_weapons[current_weapon_index]
-            weapon_rules = weapon.get("WEAPON_RULES", [])
+            weapon_rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
             weapon_name = weapon.get("display_name", f"weapon_{current_weapon_index}")
             is_pistol = "PISTOL" in weapon_rules
             if is_pistol:
@@ -3242,7 +3255,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 # For now, auto-select first usable weapon
                 next_weapon = usable_weapons[0]
                 unit["selectedRngWeaponIndex"] = next_weapon["index"]
-                unit["SHOOT_LEFT"] = next_weapon["weapon"].get("NB", 0)
+                unit["SHOOT_LEFT"] = require_key(require_key(next_weapon, "weapon"), "NB")
                 
                 # CRITICAL: Rebuild target pool using shooting_build_valid_target_pool for consistency
                 # This wrapper automatically determines context (advance_status, adjacent_status)
@@ -3253,9 +3266,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 # This is handled by _shooting_unit_execution_loop
                 success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
                 loop_result["phase"] = "shoot"
-                loop_result["target_died"] = attack_result.get("target_died", False)
-                loop_result["damage"] = attack_result.get("damage", 0)
-                loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
+                loop_result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
+                loop_result["damage"] = attack_result["damage"] if "damage" in attack_result else 0
+                loop_result["target_hp_remaining"] = attack_result["target_hp_remaining"] if "target_hp_remaining" in attack_result else 0
                 # CRITICAL: Ensure action and unitId are set for logging
                 if "action" not in loop_result:
                     loop_result["action"] = "shoot"
@@ -3263,7 +3276,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     loop_result["unitId"] = unit_id
                 # CRITICAL: Include all_attack_results even when waiting_for_player
                 # This ensures attacks already executed are logged to step.log
-                shoot_attack_results = game_state.get("shoot_attack_results", [])
+                shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
                 if shoot_attack_results:
                     loop_result["all_attack_results"] = list(shoot_attack_results)
                 return success, loop_result
@@ -3278,20 +3291,20 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             
             if target_died:
                 # Remove from valid_target_pool
-                valid_target_pool = unit.get("valid_target_pool", [])
+                valid_target_pool = unit["valid_target_pool"] if "valid_target_pool" in unit else []
                 if selected_target_id in valid_target_pool:
                     valid_target_pool.remove(selected_target_id)
                     unit["valid_target_pool"] = valid_target_pool
                 
                 # valid_target_pool empty? -> YES -> End activation (Slaughter handling)
-                if not unit.get("valid_target_pool"):
+                if not unit["valid_target_pool"]:
                     # CRITICAL: include_attack_results=True ensures all_attack_results is included
                     return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, include_attack_results=True)
                 # NO -> Continue to shooting action selection step
             # else: Target survives
             
             # Final safety check: valid_target_pool empty AND SHOOT_LEFT > 0?
-            valid_targets = unit.get("valid_target_pool", [])
+            valid_targets = unit["valid_target_pool"] if "valid_target_pool" in unit else []
             if not valid_targets and unit["SHOOT_LEFT"] > 0:
                 # YES -> End activation (Slaughter handling)
                 # CRITICAL: include_attack_results=True ensures all_attack_results is included
@@ -3301,9 +3314,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             # Continue to shooting action selection step
             success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
             loop_result["phase"] = "shoot"
-            loop_result["target_died"] = attack_result.get("target_died", False)
-            loop_result["damage"] = attack_result.get("damage", 0)
-            loop_result["target_hp_remaining"] = attack_result.get("target_hp_remaining", 0)
+            loop_result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
+            loop_result["damage"] = attack_result["damage"] if "damage" in attack_result else 0
+            loop_result["target_hp_remaining"] = attack_result["target_hp_remaining"] if "target_hp_remaining" in attack_result else 0
             # CRITICAL: Ensure action and unitId are set for logging
             if "action" not in loop_result:
                 loop_result["action"] = "shoot"
@@ -3311,7 +3324,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 loop_result["unitId"] = unit_id
             # CRITICAL: Include all_attack_results even when waiting_for_player
             # This ensures attacks already executed are logged to step.log
-            shoot_attack_results = game_state.get("shoot_attack_results", [])
+            shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
             if shoot_attack_results:
                 loop_result["all_attack_results"] = list(shoot_attack_results)
             return success, loop_result
@@ -3350,7 +3363,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # This helps identify if the wrong unit is being retrieved
     shooter_unit_type = shooter.get("unitType", "Unknown")
     shooter_player = shooter.get("player", "?")
-    shooter_weapons = [w.get("display_name", "unknown") for w in shooter.get("RNG_WEAPONS", [])]
+    shooter_weapons = [w.get("display_name", "unknown") for w in (shooter["RNG_WEAPONS"] if "RNG_WEAPONS" in shooter else [])]
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     from engine.game_utils import add_console_log, add_debug_log, safe_print
@@ -3380,7 +3393,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate kill probability cache for target
         from engine.ai.weapon_selector import invalidate_cache_for_target
-        cache = game_state.get("kill_probability_cache", {})
+        cache = game_state["kill_probability_cache"] if "kill_probability_cache" in game_state else {}
         invalidate_cache_for_target(cache, str(target["id"]))
         
         # Check if target died
@@ -3411,7 +3424,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             if "shoot_activation_pool" in game_state:
                 for active_unit_id in game_state["shoot_activation_pool"]:
                     active_unit = _get_unit_by_id(game_state, active_unit_id)
-                    if active_unit and active_unit.get("HP_CUR", 0) > 0:
+                    if active_unit and require_key(active_unit, "HP_CUR") > 0:
                         # Remove dead target from this unit's valid_target_pool
                         if "valid_target_pool" in active_unit:
                             pool_before = len(active_unit["valid_target_pool"])
@@ -3505,8 +3518,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         turn = game_state["turn"]
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
-        damage = attack_result.get("damage", 0)
-        target_died = attack_result.get("target_died", False)
+        damage = attack_result["damage"] if "damage" in attack_result else 0
+        target_died = attack_result["target_died"] if "target_died" in attack_result else False
         log_msg = f"[SHOOT DEBUG] E{episode} T{turn} shoot attack_executed: Unit {unit_id} -> Unit {target_id} damage={damage} target_died={target_died}"
         from engine.game_utils import add_console_log, add_debug_log
         from engine.game_utils import safe_print
@@ -3516,8 +3529,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Calculate reward for this action using progressive bonus system
     # OPTIMIZATION: Only calculate rewards for controlled player's units
     # Bot units don't need rewards since they don't learn
-    config = game_state.get("config", {})
-    controlled_player = config.get("controlled_player", 1)
+    cfg = game_state["config"] if "config" in game_state else None
+    controlled_player = cfg["controlled_player"] if cfg and "controlled_player" in cfg else 1
 
     # Skip reward calculation for bot units (not the controlled player)
     if shooter["player"] != controlled_player:
@@ -3532,8 +3545,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                 raise ValueError(f"rewards_configs is missing from game_state for shooter {shooter.get('id', 'unknown')}")
 
         # CRITICAL FIX: Use controlled_agent for reward config lookup (includes phase suffix)
-            config = game_state.get("config", {})
-            controlled_agent = config.get("controlled_agent")
+            cfg2 = game_state["config"] if "config" in game_state else None
+            controlled_agent = cfg2["controlled_agent"] if cfg2 and "controlled_agent" in cfg2 else None
 
             if not controlled_agent:
                 # Fallback: use unit_registry mapping if no controlled_agent
@@ -3582,8 +3595,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
        
         # Get unit rewards config
             unit_rewards = reward_mapper._get_unit_rewards(enriched_shooter)
-            base_actions = unit_rewards.get("base_actions", {})
-            result_bonuses = unit_rewards.get("result_bonuses", {})
+            base_actions = require_key(unit_rewards, "base_actions")
+            result_bonuses = require_key(unit_rewards, "result_bonuses")
        
             if "ranged_attack" not in base_actions:
                 raise KeyError(f"Missing 'ranged_attack' in base_actions for unit {shooter['id']} (enriched_unitType={enriched_shooter.get('unitType')}): base_actions={base_actions}")
@@ -3604,18 +3617,19 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                     action_reward += result_bonuses["wound_target"]
                     action_name = "wound_target"
        
-            if attack_result.get("damage", 0) > 0:
+            if (attack_result["damage"] if "damage" in attack_result else 0) > 0:
                 if "damage_target" in result_bonuses:
                     action_reward += result_bonuses["damage_target"]
                     action_name = "damage_target"
        
-            if attack_result.get("target_died", False):
+            if attack_result["target_died"] if "target_died" in attack_result else False:
                 if "kill_target" in result_bonuses:
                     action_reward += result_bonuses["kill_target"]
                     action_name = "kill_target"
 
             # No overkill bonus (exact kill)
-                if target["HP_CUR"] == attack_result.get("damage", 0):
+                dmg = attack_result["damage"] if "damage" in attack_result else 0
+                if target["HP_CUR"] == dmg:
                     if "no_overkill" in result_bonuses:
                         action_reward += result_bonuses["no_overkill"]
 
@@ -3644,7 +3658,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                             if candidate["id"] == target["id"]:
                                 candidate_hp = target_hp_before
                             else:
-                                candidate_hp = candidate.get("HP_CUR", 0)
+                                candidate_hp = require_key(candidate, "HP_CUR")
 
                             # Only consider alive targets
                             if candidate_hp > 0:
@@ -3883,9 +3897,9 @@ def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
     Check if unit has shot with ANY weapon (any weapon.shot = 1)
     Returns True if at least one weapon has shot flag set to 1
     """
-    rng_weapons = unit.get("RNG_WEAPONS", [])
+    rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
     for weapon in rng_weapons:
-        if weapon.get("shot", 0) == 1:
+        if require_key(weapon, "shot") == 1:
             return True
     return False
 
@@ -3940,10 +3954,7 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     return False
 
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state.
-
-    Compare both sides as strings to handle int/string ID mismatches.
-    """
+    """Get unit by ID from game state. Compare both sides as strings for int/str ID mismatch."""
     for unit in game_state["units"]:
         if str(unit["id"]) == str(unit_id):
             return unit
@@ -3964,13 +3975,6 @@ def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
     cube1 = offset_to_cube(col1, row1)
     cube2 = offset_to_cube(col2, row2)
     return cube_distance(cube1, cube2)
-
-
-# Legacy compatibility
-def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
-    """Legacy compatibility - use shooting_build_activation_pool instead"""
-    pool = shooting_build_activation_pool(game_state)
-    return pool
 
 
 # ============================================================================
@@ -4008,7 +4012,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
 
     # CRITICAL: Cannot advance if unit is adjacent to enemy -> SKIP (agent cannot act)
     # Pool is source of truth: if can_advance is False, unit cannot advance
-    can_advance = unit.get("_can_advance", None)
+    can_advance = unit["_can_advance"] if "_can_advance" in unit else None
     if can_advance is False:
         success, result = _handle_shooting_end_activation(
             game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
@@ -4022,7 +4026,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     if "advance_range" in unit and unit["advance_range"] is not None:
         advance_range = unit["advance_range"]
     else:
-        advance_dice_max = config.get("game_rules", {}).get("advance_distance_range", 6)
+        gr = config["game_rules"] if "game_rules" in config else None
+        advance_dice_max = gr["advance_distance_range"] if gr and "advance_distance_range" in gr else 6
         advance_range = random.randint(1, advance_dice_max)
         # Store advance range on unit for frontend display
         unit["advance_range"] = advance_range
@@ -4194,7 +4199,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         
         # CRITICAL: Call weapon_availability_check FIRST to get usable weapons
         # Then rebuild valid_target_pool using those usable weapons
-        weapon_rule = game_state.get("weapon_rule", 0)
+        weapon_rule = game_state["weapon_rule"] if "weapon_rule" in game_state else 0
         weapon_available_pool = weapon_availability_check(
             game_state, unit, weapon_rule, advance_status=1, adjacent_status=0
         )
@@ -4213,8 +4218,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if usable_weapons:
             first_weapon = usable_weapons[0]
             unit["selectedRngWeaponIndex"] = first_weapon["index"]
-            selected_weapon = first_weapon["weapon"]
-            unit["SHOOT_LEFT"] = selected_weapon.get("NB", 0)
+            selected_weapon = require_key(first_weapon, "weapon")
+            unit["SHOOT_LEFT"] = require_key(selected_weapon, "NB")
         else:
             unit["SHOOT_LEFT"] = 0
         

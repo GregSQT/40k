@@ -135,9 +135,10 @@ class W40KEngine(gym.Env):
             else:
                 # Fallback to board config
                 if "default" in board_config:
-                    scenario_wall_hexes = board_config["default"].get("wall_hexes", [])
+                    d = board_config["default"]
+                    scenario_wall_hexes = d["wall_hexes"] if "wall_hexes" in d else []
                 else:
-                    scenario_wall_hexes = board_config.get("wall_hexes", [])
+                    scenario_wall_hexes = board_config["wall_hexes"] if "wall_hexes" in board_config else []
 
             # Determine objectives: use scenario if provided, otherwise fallback to board config
             # New format: grouped objectives with id, name, hexes
@@ -146,9 +147,10 @@ class W40KEngine(gym.Env):
             else:
                 # Fallback to board config (legacy flat list or new grouped format)
                 if "default" in board_config:
-                    scenario_objectives = board_config["default"].get("objectives", board_config["default"].get("objective_hexes", []))
+                    d = board_config["default"]
+                    scenario_objectives = d["objectives"] if "objectives" in d else (d["objective_hexes"] if "objective_hexes" in d else [])
                 else:
-                    scenario_objectives = board_config.get("objectives", board_config.get("objective_hexes", []))
+                    scenario_objectives = board_config["objectives"] if "objectives" in board_config else (board_config["objective_hexes"] if "objective_hexes" in board_config else [])
 
             # Store scenario terrain for game_state initialization
             self._scenario_wall_hexes = scenario_wall_hexes
@@ -190,17 +192,18 @@ class W40KEngine(gym.Env):
                 self.config["controlled_player"] = 1  # FIXED: Agent controls player 1 (matches scenario setup)
 
             # CRITICAL: Extract rewards_config from config dict for module initialization
-            self.rewards_config = config.get("rewards_config", {})
+            self.rewards_config = config["rewards_config"] if "rewards_config" in config else {}
             
             # CRITICAL: Extract training_config from config dict for observation_params access
             # API server provides training_configs dict with agent keys, or training_config_name to select phase
             if "training_configs" in config and training_config_name:
                 # Multi-agent config: extract specific agent's training config
-                first_agent = list(config.get("agent_keys", []))[0] if config.get("agent_keys") else None
+                agent_keys = config["agent_keys"] if "agent_keys" in config else []
+                first_agent = list(agent_keys)[0] if agent_keys else None
                 if first_agent and first_agent in config["training_configs"]:
                     full_training_config = config["training_configs"][first_agent]
                     # Extract the specific phase (e.g., "default")
-                    self.training_config = full_training_config.get(training_config_name, {})
+                    self.training_config = full_training_config[training_config_name] if training_config_name in full_training_config else {}
                     self.training_config_name = training_config_name
                 else:
                     self.training_config = None
@@ -298,9 +301,9 @@ class W40KEngine(gym.Env):
             "board_cols": self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"],
             "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
             # Use scenario terrain if loaded, otherwise fallback to board config
-            "wall_hexes": set(map(tuple, self._scenario_wall_hexes)) if self._scenario_wall_hexes is not None else set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else self.config["board"].get("wall_hexes", []))),
+            "wall_hexes": set(map(tuple, self._scenario_wall_hexes)) if self._scenario_wall_hexes is not None else set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else (self.config["board"]["wall_hexes"] if "wall_hexes" in self.config["board"] else []))),
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
-            "objectives": self._scenario_objectives if self._scenario_objectives is not None else (self.config["board"]["default"].get("objectives", []) if "default" in self.config["board"] else self.config["board"].get("objectives", []))
+            "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else []))
         }
 
         # CRITICAL: Instantiate all module managers BEFORE using them
@@ -308,13 +311,14 @@ class W40KEngine(gym.Env):
         self.obs_builder = ObservationBuilder(self.config)
         self.action_decoder = ActionDecoder(self.config)
         # Use rewards_config from config dict if not already loaded
-        rewards_cfg = getattr(self, 'rewards_config', self.config.get("rewards_config", {}))
+        _rc = self.config["rewards_config"] if "rewards_config" in self.config else {}
+        rewards_cfg = getattr(self, 'rewards_config', _rc)
         self.reward_calculator = RewardCalculator(self.config, self.rewards_config, self.unit_registry, self.state_manager)
         self.pve_controller = PvEController(self.config)
         
         # Initialize units from config AFTER game_state exists
         self._initialize_units()
-        
+
         # CRITICAL: Initialize Gym spaces BEFORE any other operations
         # Gym interface properties - dynamic action space based on phase
         self.action_space = gym.spaces.Discrete(13)  # Expanded: 4 move + 5 shoot + charge + fight + wait + advance
@@ -327,7 +331,7 @@ class W40KEngine(gym.Env):
         
         # Load perception parameters from training config if available
         if hasattr(self, 'training_config') and self.training_config:
-            obs_params = self.training_config.get("observation_params", {})
+            obs_params = self.training_config["observation_params"] if "observation_params" in self.training_config else {}
             
             # Validation stricte: obs_size DOIT être présent
             if "obs_size" not in obs_params:
@@ -596,7 +600,8 @@ class W40KEngine(gym.Env):
 
         # CRITICAL FIX: Auto-advance phase when no valid actions exist
         # This handles the case where fight phase pools are empty
-        action_mask = self.get_action_mask()
+        # PERF: compute mask+eligible_units once, reuse for convert_gym_action
+        action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
         if not np.any(action_mask):
             # No valid actions - trigger phase transition
             current_phase = self.game_state["phase"]
@@ -635,8 +640,10 @@ class W40KEngine(gym.Env):
             
             return observation, 0.0, terminated, False, info
         
-        # Convert gym integer action to semantic action
-        semantic_action = self.action_decoder.convert_gym_action(action, self.game_state)
+        # Convert gym integer action to semantic action (reuse precomputed mask+eligible_units)
+        semantic_action = self.action_decoder.convert_gym_action(
+            action, self.game_state, action_mask=action_mask, eligible_units=eligible_units
+        )
         
         # CRITICAL: Capture pre-action state for replay_logger BEFORE action execution
         # These are needed for replay logging (independent of step_logger)
@@ -733,26 +740,26 @@ class W40KEngine(gym.Env):
                             raise ValueError(f"Replay logger shoot missing targetId: result keys: {list(result.keys())}")
                         target_unit = self._get_unit_by_id(str(target_id))
                         if target_unit:
-                            # Build shoot_details from last_attack_result
-                            attack_result = self.game_state.get("last_attack_result", {})
+                            # Build shoot_details from last_attack_result (optional display fields; # get allowed)
+                            ar = self.game_state.get("last_attack_result", {})  # get allowed
                             shoot_details = {
                                 "summary": {
                                     "totalShots": 1,
-                                    "hits": 1 if attack_result.get("hit_success") else 0,
-                                    "wounds": 1 if attack_result.get("wound_success") else 0,
-                                    "failedSaves": 1 if attack_result.get("damage", 0) > 0 else 0
+                                    "hits": 1 if ar.get("hit_success") else 0,
+                                    "wounds": 1 if ar.get("wound_success") else 0,
+                                    "failedSaves": 1 if ar.get("damage", 0) > 0 else 0  # get allowed
                                 },
                                 "shots": [{
-                                    "hit_roll": attack_result.get("hit_roll", 0),
-                                    "wound_roll": attack_result.get("wound_roll", 0),
-                                    "save_roll": attack_result.get("save_roll", 0),
-                                    "damage": attack_result.get("damage", 0),
-                                    "hit": attack_result.get("hit_success", False),
-                                    "wound": attack_result.get("wound_success", False),
-                                    "save_success": attack_result.get("save_success", False),
-                                    "hit_target": attack_result.get("hit_target", 4),
-                                    "wound_target": attack_result.get("wound_target", 4),
-                                    "save_target": attack_result.get("save_target", 4)
+                                    "hit_roll": ar.get("hit_roll", 0),   # get allowed
+                                    "wound_roll": ar.get("wound_roll", 0),  # get allowed
+                                    "save_roll": ar.get("save_roll", 0),   # get allowed
+                                    "damage": ar.get("damage", 0),         # get allowed
+                                    "hit": ar.get("hit_success", False),   # get allowed
+                                    "wound": ar.get("wound_success", False),  # get allowed
+                                    "save_success": ar.get("save_success", False),  # get allowed
+                                    "hit_target": ar.get("hit_target", 4),   # get allowed
+                                    "wound_target": ar.get("wound_target", 4),  # get allowed
+                                    "save_target": ar.get("save_target", 4)   # get allowed
                                 }]
                             }
                             self.replay_logger.log_shoot(
@@ -789,14 +796,14 @@ class W40KEngine(gym.Env):
                         target_id = result.get("targetId")
                         target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                         if target_unit:
-                            # Build combat_details from last_attack_result
-                            attack_result = self.game_state.get("last_attack_result", {})
+                            # Build combat_details from last_attack_result (optional display fields; # get allowed)
+                            ar = self.game_state.get("last_attack_result", {})  # get allowed
                             combat_details = {
                                 "summary": {
                                     "totalAttacks": 1,
-                                    "hits": 1 if attack_result.get("hit_success") else 0,
-                                    "wounds": 1 if attack_result.get("wound_success") else 0,
-                                    "failedSaves": 1 if attack_result.get("damage_dealt", 0) > 0 else 0
+                                    "hits": 1 if ar.get("hit_success") else 0,
+                                    "wounds": 1 if ar.get("wound_success") else 0,
+                                    "failedSaves": 1 if ar.get("damage_dealt", 0) > 0 else 0  # get allowed
                                 }
                             }
                             self.replay_logger.log_combat(
@@ -880,7 +887,7 @@ class W40KEngine(gym.Env):
 
             # Count controlled objectives for Player 0 (learning agent)
             obj_counts = self.state_manager.count_controlled_objectives(self.game_state)
-            self.episode_tactical_data['controlled_objectives'] = obj_counts.get(0, 0)
+            self.episode_tactical_data['controlled_objectives'] = obj_counts[0] if 0 in obj_counts else 0
 
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()
@@ -892,8 +899,8 @@ class W40KEngine(gym.Env):
             info["winner"] = None
         
         # CRITICAL: Add action_logs to info dict so metrics can access it
-        # This must happen BEFORE reset clears action_logs
-        info["action_logs"] = self.game_state.get("action_logs", []).copy()
+        # This must happen BEFORE reset clears action_logs. action_logs is always present (init + reset).
+        info["action_logs"] = self.game_state["action_logs"].copy()
         
         # Update position cache for movement_direction feature
         for unit in self.game_state["units"]:
@@ -978,11 +985,11 @@ class W40KEngine(gym.Env):
             pool_to_check = []
             
             if fight_subphase == "charging" and self.game_state.get("charging_activation_pool"):
-                pool_to_check = self.game_state.get("charging_activation_pool", [])
+                pool_to_check = self.game_state["charging_activation_pool"]
             elif fight_subphase in ["alternating_non_active", "cleanup_non_active"] and self.game_state.get("non_active_alternating_activation_pool"):
-                pool_to_check = list(self.game_state.get("non_active_alternating_activation_pool", []))  # Make a copy to avoid reference issues
+                pool_to_check = list(self.game_state["non_active_alternating_activation_pool"])  # Make a copy to avoid reference issues
             elif fight_subphase in ["alternating_active", "cleanup_active"] and self.game_state.get("active_alternating_activation_pool"):
-                pool_to_check = self.game_state.get("active_alternating_activation_pool", [])
+                pool_to_check = self.game_state["active_alternating_activation_pool"]
             
             # Check if any unit in the pool is an AI unit (player 2)
             for unit_id in pool_to_check:
@@ -1098,7 +1105,7 @@ class W40KEngine(gym.Env):
                     if result.get("phase_complete") or result.get("phase_transition"):
                         # CRITICAL: Check if there are attack results to log before phase transition
                         # This handles cases where attacks were executed just before phase completion
-                        all_attack_results = result.get("all_attack_results", [])
+                        all_attack_results = result.get("all_attack_results", [])  # get allowed
                         if all_attack_results:
                             # Has attacks to log - infer action type from phase or attack results
                             current_phase = self.game_state.get("phase", "unknown")
@@ -1152,7 +1159,7 @@ class W40KEngine(gym.Env):
                     
                     # Special case: combat or shoot with waiting_for_player but all_attack_results present
                     # These attacks were already executed and must be logged
-                    all_attack_results = result.get("all_attack_results", [])
+                    all_attack_results = result.get("all_attack_results", [])  # get allowed
                     is_action_with_attacks = (
                         action_type in ["combat", "shoot"] and 
                         waiting_for_player and 
@@ -1393,7 +1400,7 @@ class W40KEngine(gym.Env):
 
                         elif action_type in ["combat", "shoot"]:
                             # Log combat or shoot action - handlers MUST return all_attack_results complete
-                            all_attack_results = result.get("all_attack_results", [])
+                            all_attack_results = result.get("all_attack_results", [])  # get allowed
                             
                             if not all_attack_results:
                                 # No attack results - check if waiting for player input
@@ -1953,18 +1960,20 @@ class W40KEngine(gym.Env):
             self._scenario_wall_hexes = scenario_result["wall_hexes"]
         else:
             if "default" in board_config:
-                self._scenario_wall_hexes = board_config["default"].get("wall_hexes", [])
+                d = board_config["default"]
+                self._scenario_wall_hexes = d["wall_hexes"] if "wall_hexes" in d else []
             else:
-                self._scenario_wall_hexes = board_config.get("wall_hexes", [])
+                self._scenario_wall_hexes = board_config["wall_hexes"] if "wall_hexes" in board_config else []
 
         # Determine objectives: use scenario if provided, otherwise fallback to board config
         if scenario_result.get("objectives") is not None:
             self._scenario_objectives = scenario_result["objectives"]
         else:
             if "default" in board_config:
-                self._scenario_objectives = board_config["default"].get("objectives", board_config["default"].get("objective_hexes", []))
+                d = board_config["default"]
+                self._scenario_objectives = d["objectives"] if "objectives" in d else (d["objective_hexes"] if "objective_hexes" in d else [])
             else:
-                self._scenario_objectives = board_config.get("objectives", board_config.get("objective_hexes", []))
+                self._scenario_objectives = board_config["objectives"] if "objectives" in board_config else (board_config["objective_hexes"] if "objective_hexes" in board_config else [])
 
         # Extract scenario name from file path for logging
         scenario_name = scenario_file

@@ -1,12 +1,10 @@
-# Script de Vérification AI_TURN.md et coding_practices.mdc — check_ai_rules3.py
+# Script de Vérification AI_TURN.md et coding_practices.mdc — check_ai_rules.py
 
-**Fichier** : `scripts/check_ai_rules3.py`
-
-Script de référence (versions 1 et 2 existent en historique ; la v3 est la plus complète et la moins bruyante).
+**Fichier** : `scripts/check_ai_rules.py`
 
 ## Objectif
 
-Vérifier la conformité du code à AI_TURN.md et coding_practices.mdc : recalculs de caches, normalisation des coordonnées, fallbacks anti-erreur, patterns end_activation, termes interdits.
+Vérifier la conformité du code à AI_TURN.md et coding_practices.mdc : recalculs de caches, pools d'activation, normalisation des coordonnées, fallbacks anti-erreur, patterns end_activation, termes interdits.
 
 ## Détections
 
@@ -15,34 +13,42 @@ Vérifier la conformité du code à AI_TURN.md et coding_practices.mdc : recalcu
    - `build_position_cache()` appelé hors `*_phase_start`
    - Violation de l’invariant : `current_player` ne change pas pendant la phase (non détectée automatiquement)
 
-2. **Coordonnées non normalisées**
+2. **Pool d'activation : construit seulement au début de la phase**
+   - `shooting_build_activation_pool()`, `movement_build_activation_pool()`, `charge_build_activation_pool()`, `fight_build_activation_pools()` appelés hors `*_phase_start` → violation.
+   - Pour les unités mortes : utiliser `_remove_dead_unit_from_pools` ou retrait in-place (liste en compréhension), ne pas reconstruire le pool.
+
+3. **Coordonnées non normalisées**
    - Comparaisons directes `unit["col"] == other["col"]` ou `unit['col'] == other['col']` (double et simple quotes)
    - À remplacer par `get_unit_coordinates()` ou `normalize_coordinates()`
 
-3. **Fallbacks anti-erreur**
+4. **Fallbacks anti-erreur**
    - `.get(key, None)`, `.get(key, 0)`, `.get(key, [])`, `.get(key, {})` (signalés même sans `if` sur la ligne suivante)
    - Exceptions : lignes contenant `require_key(`, `require_present(`, ou commentaires `# get allowed`, `# fallback allowed`, `# TODO fix`, `# exception.*get`
    - À remplacer par `require_key()` ou erreur explicite
 
-4. **Patterns end_activation**
+5. **Patterns end_activation**
    - `end_activation()` avec des strings au lieu de constantes
    - Importer les constantes depuis `shared_utils`
 
-5. **Termes interdits**
+6. **Termes interdits**
    - Workaround, fallback, magic number
    - Les commentaires qui documentent l'interdiction (ex. « no fallback », « interdit », « do not use workaround ») sont ignorés.
+
+## Règle documentée (sans détection automatique)
+
+**Pas de vérification redondante** : Une fois un pool ou un cache construit (ex. `enemy_adjacent_hexes`, `valid_*_destinations_pool`), ne pas re-vérifier la même condition (adjacence, atteignabilité, etc.) ; le pool est la source de vérité. Exemple interdit : utiliser `enemy_adjacent_hexes` puis appeler `is_adjacent_to_enemy(...)` dans le même flux. Voir `coding_practices.mdc` section « Pas de vérification redondante ».
 
 ## Usage
 
 ```bash
 # Vérifier tout le périmètre (engine/ + ai/)
-python3 scripts/check_ai_rules3.py
+python3 scripts/check_ai_rules.py
 
 # Vérifier un fichier spécifique
-python3 scripts/check_ai_rules3.py --path engine/phase_handlers/shooting_handlers.py
+python3 scripts/check_ai_rules.py --path engine/phase_handlers/shooting_handlers.py
 
 # Vérifier un répertoire
-python3 scripts/check_ai_rules3.py --path engine/phase_handlers/
+python3 scripts/check_ai_rules.py --path engine/phase_handlers/
 ```
 
 `--path` exige un argument : sans chemin, le script affiche `Error: --path requires a path argument.` et quitte avec le code 1.
@@ -61,14 +67,14 @@ python3 scripts/check_ai_rules3.py --path engine/phase_handlers/
 
 ```bash
 #!/bin/bash
-python3 scripts/check_ai_rules3.py || exit 1
+python3 scripts/check_ai_rules.py || exit 1
 ```
 
 ### GitHub Actions / CI
 
 ```yaml
 - name: Check AI Rules
-  run: python3 scripts/check_ai_rules3.py
+  run: python3 scripts/check_ai_rules.py
 ```
 
 ## Résultats typiques (indicatif)
@@ -117,6 +123,7 @@ Les lignes contenant `"""` sont ignorées pour les comparaisons col/row (pour ne
 ## Améliorations futures
 
 - [ ] Détection de violations de séquencement
-- [ ] Vérification de conformité des pools
-- [ ] Détection de violations d’invariants de phase
+- [x] Vérification de conformité des pools (construit seulement en phase_start ; retrait des morts sans reconstruction) — implémentée
+- [ ] Détection de violations d'invariants de phase
 - [ ] Whitelist pour exceptions légitimes
+- [ ] Warning ciblé « pas de vérification redondante » (ex. adjacency après usage de enemy_adjacent_hexes) — règle documentée, pas de check pour l'instant

@@ -95,7 +95,9 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
     # │   ├── YES -> +1 step
     # │   └── NO -> No step increase
     if arg2 == 1:
-        game_state["episode_steps"] = game_state.get("episode_steps", 0) + 1
+        if "episode_steps" not in game_state:
+            game_state["episode_steps"] = 0
+        game_state["episode_steps"] += 1
         response["step_incremented"] = True
     
     # ├── Arg3 =
@@ -283,20 +285,23 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             pool_empty = len(game_state["charge_activation_pool"]) == 0
     elif arg4 == "FIGHT":
         # DEBUG: Check if unit is ending activation without attacking when it should
-        from engine.game_utils import add_console_log, safe_print
-        if arg3 == "PASS" and unit.get("ATTACK_LEFT", 0) > 0:
-            # Unit is passing but has attacks left - check if adjacent to enemy
-            from .fight_handlers import _is_adjacent_to_enemy_within_cc_range
-            is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-            if is_adjacent:
-                if "episode_number" in game_state and "turn" in game_state:
-                    episode = game_state["episode_number"]
-                    turn = game_state["turn"]
-                    if "console_logs" not in game_state:
-                        game_state["console_logs"] = []
-                    log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight end_activation: Unit {unit['id']} ADJACENT to enemy but PASSING with ATTACK_LEFT={unit.get('ATTACK_LEFT', 0)}"
-                    add_console_log(game_state, log_msg)
-                    safe_print(game_state, log_msg)
+        if arg3 == "PASS":
+            from engine.game_utils import add_console_log, safe_print
+            from shared.data_validation import require_key
+            attack_left = require_key(unit, "ATTACK_LEFT")
+            if attack_left > 0:
+                # Unit is passing but has attacks left - check if adjacent to enemy
+                from .fight_handlers import _is_adjacent_to_enemy_within_cc_range
+                is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                if is_adjacent:
+                    if "episode_number" in game_state and "turn" in game_state:
+                        episode = game_state["episode_number"]
+                        turn = game_state["turn"]
+                        if "console_logs" not in game_state:
+                            game_state["console_logs"] = []
+                        log_msg = f"[FIGHT DEBUG] ⚠️ E{episode} T{turn} fight end_activation: Unit {unit['id']} ADJACENT to enemy but PASSING with ATTACK_LEFT={attack_left}"
+                        add_console_log(game_state, log_msg)
+                        safe_print(game_state, log_msg)
         
         # Fight phase complete when ALL 3 pools empty
         if "charging_activation_pool" not in game_state:

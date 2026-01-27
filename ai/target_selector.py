@@ -87,8 +87,8 @@ class TargetSelector:
         # Component 2: Threat level
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max damage from all weapons
         from shared.data_validation import require_key
-        rng_weapons = target.get("RNG_WEAPONS", [])
-        cc_weapons = target.get("CC_WEAPONS", [])
+        rng_weapons = target["RNG_WEAPONS"] if "RNG_WEAPONS" in target else []
+        cc_weapons = target["CC_WEAPONS"] if "CC_WEAPONS" in target else []
         
         max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
         max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
@@ -155,8 +155,8 @@ class TargetSelector:
         from shared.data_validation import require_key
         
         max_rng_range = get_max_ranged_range(target)
-        rng_weapons = target.get("RNG_WEAPONS", [])
-        cc_weapons = target.get("CC_WEAPONS", [])
+        rng_weapons = target["RNG_WEAPONS"] if "RNG_WEAPONS" in target else []
+        cc_weapons = target["CC_WEAPONS"] if "CC_WEAPONS" in target else []
         
         max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
         max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)

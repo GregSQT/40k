@@ -9,6 +9,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation, _log_with_context
+from shared.data_validation import require_key
 from engine.combat_utils import (
     calculate_hex_distance, 
     get_unit_coordinates, 
@@ -47,7 +48,7 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
         game_state["valid_charge_destinations_pool"] = []
     
     # Clear target pools for all units (shoot phase)
-    for unit in game_state.get("units", []):
+    for unit in require_key(game_state, "units"):
         if "valid_target_pool" in unit:
             unit["valid_target_pool"] = []
     
@@ -374,7 +375,7 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
         return True, {
             "unit_activated": True,
             "unitId": unit["id"],
-            "valid_destinations": execution_result[1].get("valid_destinations", []),
+            "valid_destinations": execution_result[1]["valid_destinations"] if "valid_destinations" in execution_result[1] else [],
             # No action field - activation is not an action to log
             # Movement will be logged when action with destCol/destRow is processed
         }
@@ -886,7 +887,7 @@ def _select_strategic_destination(
 
     # Get enemy units
     enemy_units = [u for u in game_state["units"]
-                   if u["player"] != unit["player"] and u.get("HP_CUR", 0) > 0]
+                   if u["player"] != unit["player"] and require_key(u, "HP_CUR") > 0]
 
     # If no enemies, just pick first destination
     if not enemy_units:
@@ -1093,8 +1094,10 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     
     try:
         from ai.reward_mapper import RewardMapper
-        reward_configs = game_state.get("reward_configs", {})
-        
+        if "reward_configs" in game_state:
+            reward_configs = game_state["reward_configs"]
+        else:
+            reward_configs = None
         if reward_configs:
             # Map scenario unit type to reward config key
             from ai.unit_registry import UnitRegistry

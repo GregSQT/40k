@@ -4,7 +4,7 @@ action_decoder.py - Decodes actions and computes masks
 """
 
 import numpy as np
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
@@ -22,12 +22,12 @@ class ActionDecoder:
     # ACTION MASKING
     # ============================================================================
     
-    def get_action_mask(self, game_state: Dict[str, Any]) -> np.ndarray:
-        """Return action mask with dynamic target slot masking - True = valid action."""
+    def get_action_mask_and_eligible_units(self, game_state: Dict[str, Any]) -> tuple:
+        """Return (mask, eligible_units). PERF: avoids recomputing eligible_units when both are needed."""
         mask = np.zeros(13, dtype=bool)  # ADVANCE_IMPLEMENTATION: 13 actions (0-12)
         current_phase = game_state["phase"]
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
-        
+
         if not eligible_units:
             # No units can act - phase should auto-advance
             # CRITICAL: Fight phase has no wait action - return all False mask
@@ -35,15 +35,15 @@ class ActionDecoder:
             if current_phase == "fight":
                 # Fight phase with empty pools - return all False mask
                 # This triggers auto-advance in step() function
-                return mask  # All False
+                return mask, eligible_units  # All False
             # For other phases, enable WAIT action to allow phase processing
             mask[11] = True  # WAIT triggers phase transition when pool is empty
-            return mask
-        
+            return mask, eligible_units
+
         if current_phase == "command":
             # Command phase: auto-advances, but enable WAIT for consistency
             mask[11] = True  # WAIT action
-            return mask
+            return mask, eligible_units
         elif current_phase == "move":
             # Movement phase: actions 0-3 (movement strategies) + 11 (wait)
             # Actions 0-3 now map to strategic heuristics:
@@ -81,7 +81,7 @@ class ActionDecoder:
                     units_advanced = game_state.get("units_advanced", set())
                     if active_unit["id"] not in units_advanced:
                         mask[12] = True  # Advance action
-            
+
             mask[11] = True  # Wait always valid (can choose not to shoot)
         elif current_phase == "charge":
             # Charge phase: Check if unit is activated and has targets waiting
@@ -120,7 +120,12 @@ class ActionDecoder:
             if eligible_units:
                 mask[10] = True
             # If no eligible units, action mask will be all False - handler will end phase
-        
+
+        return mask, eligible_units
+
+    def get_action_mask(self, game_state: Dict[str, Any]) -> np.ndarray:
+        """Return action mask with dynamic target slot masking - True = valid action."""
+        mask, _ = self.get_action_mask_and_eligible_units(game_state)
         return mask
     
     def _get_valid_actions_for_phase(self, phase: str) -> List[int]:
@@ -222,8 +227,15 @@ class ActionDecoder:
     # ACTION CONVERSION
     # ============================================================================
     
-    def convert_gym_action(self, action: int, game_state: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert gym integer action to semantic action with target selection support."""
+    def convert_gym_action(
+        self,
+        action: int,
+        game_state: Dict[str, Any],
+        action_mask: Optional[np.ndarray] = None,
+        eligible_units: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Convert gym integer action to semantic action with target selection support.
+        PERF: When action_mask and eligible_units are provided (e.g. from step), avoids recomputing them."""
         # CRITICAL: Convert numpy types to Python int FIRST
         if hasattr(action, 'item'):
             action_int = int(action.item())
@@ -231,14 +243,16 @@ class ActionDecoder:
             action_int = int(action.flatten()[0])
         else:
             action_int = int(action)
-        
+
         current_phase = game_state["phase"]
-        
+
+        # Use provided mask/units or compute (e.g. PvE, other callers)
+        if action_mask is None or eligible_units is None:
+            action_mask, eligible_units = self.get_action_mask_and_eligible_units(game_state)
+
         # Validate action against mask - convert invalid actions to SKIP
-        action_mask = self.get_action_mask(game_state)        
         if not action_mask[action_int]:
             # Return invalid action for training penalty and proper pool management
-            eligible_units = self._get_eligible_units_for_current_phase(game_state)
             if eligible_units:
                 selected_unit_id = eligible_units[0]["id"]
                 return {
@@ -250,10 +264,7 @@ class ActionDecoder:
                 }
             else:
                 return {"action": "advance_phase", "from": current_phase, "reason": "no_eligible_units"}
-        
-        # Get eligible units for current phase - AI_TURN.md sequential activation
-        eligible_units = self._get_eligible_units_for_current_phase(game_state)
-        
+
         if not eligible_units:
             # No eligible units - signal phase advance needed
             current_phase = game_state["phase"]

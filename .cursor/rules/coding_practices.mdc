@@ -194,7 +194,23 @@ def process_unit(unit: Dict[str, Any]) -> Optional[str]:
     return str(unit.get("id"))
 ```
 
-### 8. Docstrings pour Fonctions Publiques
+### 8. Pas de Vérification Redondante
+
+**Principe** : Une fois un pool ou un cache construit (ex. `enemy_adjacent_hexes`, `valid_*_destinations_pool`), ne pas re-vérifier la même condition (adjacence, atteignabilité, etc.) ; le pool est la source de vérité.
+
+```python
+# ❌ INTERDIT
+enemy_adjacent_hexes = game_state[cache_key]  # Construit au début de phase
+if is_adjacent_to_enemy(col, row):  # Re-vérification redondante
+
+# ✅ OBLIGATOIRE
+enemy_adjacent_hexes = game_state[cache_key]
+if (col, row) in enemy_adjacent_hexes:  # S'appuyer sur le pool
+```
+
+**Exemples** : Ne pas appeler `is_adjacent_to_enemy(...)` après avoir utilisé `enemy_adjacent_hexes`. Ne pas re-valider atteignabilité/adjacence si la destination provient d'un `valid_*_destinations_pool` déjà construit. Aucun check automatique pour l'instant ; règle de revue de code et documentation.
+
+### 9. Docstrings pour Fonctions Publiques
 
 **Règle** : Toutes les fonctions publiques doivent avoir des docstrings.
 
@@ -233,6 +249,7 @@ Avant de valider un changement, vérifier :
 - [ ] Aucun magic number (toutes depuis config ou constantes nommées)
 - [ ] Type hints sur toutes les fonctions publiques
 - [ ] Docstrings sur toutes les fonctions publiques
+- [ ] Pas de vérification redondante (s'appuyer sur les pools/caches construits, ne pas re-vérifier)
 
 ## 🔗 RÉFÉRENCES
 

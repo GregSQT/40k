@@ -9,6 +9,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
+from shared.data_validation import require_key
 from engine.game_utils import add_console_log, safe_print
 from engine.combat_utils import (
     get_unit_coordinates, 
@@ -259,7 +260,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     # Unit is now activated, proceed with skip
                     # Check if unit has valid destinations to determine skip type
                     execution_result = activation_result[1]
-                    has_valid_dests = execution_result.get("valid_destinations", [])
+                    has_valid_dests = execution_result["valid_destinations"] if "valid_destinations" in execution_result else []
                     had_valid_destinations = len(has_valid_dests) > 0 if has_valid_dests else False
                     return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
                 else:
@@ -388,14 +389,14 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
         if t.get("CC_WEAPONS"):
             # Calculate max threat from all melee weapons
             for weapon in t["CC_WEAPONS"]:
-                threat = weapon.get("STR", 0) * weapon.get("NB", 0)
+                threat = require_key(weapon, "STR") * require_key(weapon, "NB")
                 melee_threat = max(melee_threat, threat)
         
         ranged_threat = 0.0
         if t.get("RNG_WEAPONS"):
             # Calculate max threat from all ranged weapons
             for weapon in t["RNG_WEAPONS"]:
-                threat = weapon.get("STR", 0) * weapon.get("NB", 0)
+                threat = require_key(weapon, "STR") * require_key(weapon, "NB")
                 ranged_threat = max(ranged_threat, threat)
         
         threat = max(melee_threat, ranged_threat)
@@ -582,7 +583,8 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     
     # Check if destination is in the pool (built after roll in charge_destination_selection_handler)
     dest_tuple = (int(dest_col), int(dest_row))
-    if dest_tuple not in game_state.get("valid_charge_destinations_pool", []):
+    pool = require_key(game_state, "valid_charge_destinations_pool")
+    if dest_tuple not in pool:
         return False, {"error": "destination_not_in_pool", "target": (dest_col, dest_row), "action": "charge"}
     
     # Validate destination per AI_TURN.md charge rules
@@ -671,9 +673,9 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     _invalidate_all_destination_pools_after_movement(game_state)
 
     # Clear charge roll, target selection, and pending targets after use
-    if unit_id in game_state.get("charge_roll_values", {}):
+    if "charge_roll_values" in game_state and unit_id in game_state["charge_roll_values"]:
         del game_state["charge_roll_values"][unit_id]
-    if unit_id in game_state.get("charge_target_selections", {}):
+    if "charge_target_selections" in game_state and unit_id in game_state["charge_target_selections"]:
         del game_state["charge_target_selections"][unit_id]
     if "pending_charge_targets" in game_state:
         del game_state["pending_charge_targets"]
@@ -991,7 +993,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         episode = game_state["episode_number"]
         turn = game_state["turn"]
         phase = game_state.get("phase", "charge")
-        all_units_info = [f"Unit {u['id']} at ({int(u['col'])},{int(u['row'])}) HP={u.get('HP_CUR', 0)}" for u in game_state["units"]]
+        all_units_info = [f"Unit {u['id']} at ({int(u['col'])},{int(u['row'])}) HP={require_key(u, 'HP_CUR')}" for u in game_state["units"]]
         log_message = f"[CHARGE DEBUG] E{episode} T{turn} {phase} charge_build_valid_destinations Unit {unit_id}: occupied_positions={occupied_positions} all_units={all_units_info}"
         add_console_log(game_state, log_message)
         safe_print(game_state, log_message)
@@ -1239,9 +1241,9 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
         # Clear preview but keep unit in pool (different from skip which removes from pool)
         charge_clear_preview(game_state)
         # Clear charge roll and target selection if exists (postpone discards the roll)
-        if unit_id in game_state.get("charge_roll_values", {}):
+        if "charge_roll_values" in game_state and unit_id in game_state["charge_roll_values"]:
             del game_state["charge_roll_values"][unit_id]
-        if unit_id in game_state.get("charge_target_selections", {}):
+        if "charge_target_selections" in game_state and unit_id in game_state["charge_target_selections"]:
             del game_state["charge_target_selections"][unit_id]
         return True, {
             "action": "postpone",
@@ -1322,7 +1324,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         # Clear charge roll after use
         if unit_id in game_state["charge_roll_values"]:
             del game_state["charge_roll_values"][unit_id]
-        if unit_id in game_state.get("charge_target_selections", {}):
+        if "charge_target_selections" in game_state and unit_id in game_state["charge_target_selections"]:
             del game_state["charge_target_selections"][unit_id]
         
         # Clear preview
@@ -1341,6 +1343,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         # CRITICAL: Add start_pos and end_pos for proper logging (unit didn't move, so both are current position)
         # For failed charges with roll too low, there's no destination, so end_pos equals start_pos
         current_pos = get_unit_coordinates(unit)
+        action_logs = game_state["action_logs"] if "action_logs" in game_state else []
         result.update({
             "action": "charge_fail",
             "unitId": unit["id"],
@@ -1351,7 +1354,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             "start_pos": current_pos,  # Position actuelle (from) - unit didn't move
             "end_pos": current_pos,  # No destination (roll too low), so equals start_pos
             "activation_complete": True,
-            "action_logs": game_state.get("action_logs", [])
+            "action_logs": action_logs
         })
         
         # Check if pool is now empty after removing this unit
@@ -1436,9 +1439,9 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
 
     # Get target_id and charge_roll from previous step
-    if unit_id not in game_state.get("charge_target_selections", {}):
+    if "charge_target_selections" not in game_state or unit_id not in game_state["charge_target_selections"]:
         return False, {"error": "target_not_selected", "unit_id": unit_id, "action": "charge"}
-    if unit_id not in game_state.get("charge_roll_values", {}):
+    if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
         return False, {"error": "charge_roll_missing", "unit_id": unit_id, "action": "charge"}
     
     target_id = game_state["charge_target_selections"][unit_id]
@@ -1496,6 +1499,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             0              # Arg5: No error logging
         )
         
+        action_logs_val = game_state["action_logs"] if "action_logs" in game_state else []
         result.update({
             "action": "charge_fail",
             "unitId": unit["id"],
@@ -1507,7 +1511,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "end_pos": (dest_col, dest_row),  # Destination prévue (to)
             "activation_complete": True,
             # CRITICAL: Include action_logs in result so they're sent to frontend
-            "action_logs": game_state.get("action_logs", [])
+            "action_logs": action_logs_val
         })
         
         # Check if pool is now empty after removing this unit
@@ -1693,9 +1697,9 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
     - Line 518/536: No valid destinations OR cancel -> end_activation (PASS, 0, PASS, CHARGE)
     """
     # Clear charge roll, target selection, and pending targets if unit skips
-    if unit["id"] in game_state.get("charge_roll_values", {}):
+    if "charge_roll_values" in game_state and unit["id"] in game_state["charge_roll_values"]:
         del game_state["charge_roll_values"][unit["id"]]
-    if unit["id"] in game_state.get("charge_target_selections", {}):
+    if "charge_target_selections" in game_state and unit["id"] in game_state["charge_target_selections"]:
         del game_state["charge_target_selections"][unit["id"]]
     if "pending_charge_targets" in game_state:
         del game_state["pending_charge_targets"]

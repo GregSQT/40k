@@ -12,13 +12,13 @@ from typing import Dict, List, Tuple, Any, Optional, Set
 def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
     """
     Get unit by ID from game state.
-    
+
     Handles int/string ID mismatches by comparing both sides as strings.
-    
+
     Args:
         game_state: Game state dictionary with "units" list
         unit_id: Unit ID to find (int or string)
-    
+
     Returns:
         Unit dictionary if found, None otherwise
     """
