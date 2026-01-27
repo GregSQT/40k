@@ -5,6 +5,7 @@ observation_builder.py - Builds observations from game state
 
 import numpy as np
 from typing import Dict, List, Any, Optional
+from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight, get_unit_coordinates
 from engine.game_utils import get_unit_by_id
 from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target
@@ -587,8 +588,8 @@ class ObservationBuilder:
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
             has_melee = False
             if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
-                # Check if any melee weapon has DMG > 0
-                has_melee = any(w.get("DMG", 0) > 0 for w in unit["CC_WEAPONS"])
+                # Check if any melee weapon has DMG > 0 (DMG required per unit definitions)
+                has_melee = any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"])
             
             if (unit["player"] == current_player and
                 unit["HP_CUR"] > 0 and
@@ -674,56 +675,56 @@ class ObservationBuilder:
         self._encode_objective_control(obs, active_unit, game_state, base_idx=11)
 
         # === SECTION 2: Active Unit Capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md ===
-        obs[16] = active_unit.get("MOVE", 0) / 12.0
+        obs[16] = require_key(active_unit, "MOVE") / 12.0
 
         # RNG_WEAPONS[0] (3 floats: RNG, DMG, NB)
-        rng_weapons = active_unit.get("RNG_WEAPONS", [])
+        rng_weapons = require_key(active_unit, "RNG_WEAPONS")
         if len(rng_weapons) > 0:
-            obs[17] = rng_weapons[0].get("RNG", 0) / 24.0
-            obs[18] = rng_weapons[0].get("DMG", 0) / 5.0
-            obs[19] = rng_weapons[0].get("NB", 0) / 10.0
+            obs[17] = require_key(rng_weapons[0], "RNG") / 24.0
+            obs[18] = require_key(rng_weapons[0], "DMG") / 5.0
+            obs[19] = require_key(rng_weapons[0], "NB") / 10.0
         else:
             obs[17] = obs[18] = obs[19] = 0.0
 
         # RNG_WEAPONS[1] (3 floats)
         if len(rng_weapons) > 1:
-            obs[20] = rng_weapons[1].get("RNG", 0) / 24.0
-            obs[21] = rng_weapons[1].get("DMG", 0) / 5.0
-            obs[22] = rng_weapons[1].get("NB", 0) / 10.0
+            obs[20] = require_key(rng_weapons[1], "RNG") / 24.0
+            obs[21] = require_key(rng_weapons[1], "DMG") / 5.0
+            obs[22] = require_key(rng_weapons[1], "NB") / 10.0
         else:
             obs[20] = obs[21] = obs[22] = 0.0
 
         # RNG_WEAPONS[2] (3 floats)
         if len(rng_weapons) > 2:
-            obs[23] = rng_weapons[2].get("RNG", 0) / 24.0
-            obs[24] = rng_weapons[2].get("DMG", 0) / 5.0
-            obs[25] = rng_weapons[2].get("NB", 0) / 10.0
+            obs[23] = require_key(rng_weapons[2], "RNG") / 24.0
+            obs[24] = require_key(rng_weapons[2], "DMG") / 5.0
+            obs[25] = require_key(rng_weapons[2], "NB") / 10.0
         else:
             obs[23] = obs[24] = obs[25] = 0.0
 
         # CC_WEAPONS[0] (5 floats: NB, ATK, STR, AP, DMG)
-        cc_weapons = active_unit.get("CC_WEAPONS", [])
+        cc_weapons = require_key(active_unit, "CC_WEAPONS")
         if len(cc_weapons) > 0:
-            obs[26] = cc_weapons[0].get("NB", 0) / 10.0
-            obs[27] = cc_weapons[0].get("ATK", 0) / 6.0
-            obs[28] = cc_weapons[0].get("STR", 0) / 10.0
-            obs[29] = cc_weapons[0].get("AP", 0) / 6.0
-            obs[30] = cc_weapons[0].get("DMG", 0) / 5.0
+            obs[26] = require_key(cc_weapons[0], "NB") / 10.0
+            obs[27] = require_key(cc_weapons[0], "ATK") / 6.0
+            obs[28] = require_key(cc_weapons[0], "STR") / 10.0
+            obs[29] = require_key(cc_weapons[0], "AP") / 6.0
+            obs[30] = require_key(cc_weapons[0], "DMG") / 5.0
         else:
             obs[26] = obs[27] = obs[28] = obs[29] = obs[30] = 0.0
 
         # CC_WEAPONS[1] (5 floats)
         if len(cc_weapons) > 1:
-            obs[31] = cc_weapons[1].get("NB", 0) / 10.0
-            obs[32] = cc_weapons[1].get("ATK", 0) / 6.0
-            obs[33] = cc_weapons[1].get("STR", 0) / 10.0
-            obs[34] = cc_weapons[1].get("AP", 0) / 6.0
-            obs[35] = cc_weapons[1].get("DMG", 0) / 5.0
+            obs[31] = require_key(cc_weapons[1], "NB") / 10.0
+            obs[32] = require_key(cc_weapons[1], "ATK") / 6.0
+            obs[33] = require_key(cc_weapons[1], "STR") / 10.0
+            obs[34] = require_key(cc_weapons[1], "AP") / 6.0
+            obs[35] = require_key(cc_weapons[1], "DMG") / 5.0
         else:
             obs[31] = obs[32] = obs[33] = obs[34] = obs[35] = 0.0
 
-        obs[36] = active_unit.get("T", 0) / 10.0
-        obs[37] = active_unit.get("ARMOR_SAVE", 0) / 6.0
+        obs[36] = require_key(active_unit, "T") / 10.0
+        obs[37] = require_key(active_unit, "ARMOR_SAVE") / 6.0
 
         # === SECTION 3: Directional Terrain Awareness (32 floats) ===
         # Global Context: [0:16] = 16 floats (ADVANCE_IMPLEMENTATION: +1 for has_advanced)
@@ -765,13 +766,13 @@ class ObservationBuilder:
 
         This lets the agent know the current objective state for strategic planning.
         """
-        objectives = game_state.get("objectives", [])
+        objectives = require_key(game_state, "objectives")
         my_player = active_unit["player"]
 
         for i in range(5):  # Max 5 objectives
             if i < len(objectives):
                 objective = objectives[i]
-                obj_hexes = objective.get("hexes", [])
+                obj_hexes = require_key(objective, "hexes")
 
                 # Convert hex list to set of tuples for fast lookup
                 hex_set = set(tuple(h) for h in obj_hexes)
@@ -786,7 +787,7 @@ class ObservationBuilder:
 
                     unit_pos = get_unit_coordinates(unit)
                     if unit_pos in hex_set:
-                        oc = unit.get("OC", 1)
+                        oc = require_key(unit, "OC")
                         if unit["player"] == my_player:
                             my_oc += oc
                         else:
@@ -812,15 +813,18 @@ class ObservationBuilder:
         
         # Get first eligible unit from current phase pool
         if current_phase == "move":
-            pool = game_state.get("move_activation_pool", [])
+            pool = require_key(game_state, "move_activation_pool")
         elif current_phase == "shoot":
-            pool = game_state.get("shoot_activation_pool", [])
+            pool = require_key(game_state, "shoot_activation_pool")
         elif current_phase == "charge":
-            pool = game_state.get("charge_activation_pool", [])
+            pool = require_key(game_state, "charge_activation_pool")
         elif current_phase == "fight":
-            pool = game_state.get("charging_activation_pool", [])
+            pool = require_key(game_state, "charging_activation_pool")
+        elif current_phase == "command":
+            # Command phase has no "active unit" for observation; return None so build_observation returns zeros
+            return None
         else:
-            pool = []
+            raise KeyError(f"game_state phase must be move/shoot/charge/fight/command, got: {current_phase}")
         
         # Get first unit from pool that belongs to current player
         for unit_id in pool:
@@ -1290,8 +1294,8 @@ class ObservationBuilder:
                 # Threat calculation (potential damage to active unit)
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max damage from all weapons
                 from shared.data_validation import require_key
-                rng_weapons = unit.get("RNG_WEAPONS", [])
-                cc_weapons = unit.get("CC_WEAPONS", [])
+                rng_weapons = require_key(unit, "RNG_WEAPONS")
+                cc_weapons = require_key(unit, "CC_WEAPONS")
                 
                 max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
                 max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
@@ -1573,7 +1577,7 @@ class ObservationBuilder:
                 obs[feature_base + 3] = danger_prob
                 
                 # Feature 4: Enemy index (reference to obs[141:273]) - DÉCALÉ
-                enemy_idx = enemy_index_map.get(target["id"], 0)
+                enemy_idx = require_key(enemy_index_map, str(target["id"]))
                 obs[feature_base + 4] = enemy_idx / 5.0
                 
                 # Feature 5: Distance (accessibility) - DÉCALÉ

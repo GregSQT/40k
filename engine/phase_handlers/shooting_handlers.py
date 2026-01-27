@@ -452,6 +452,14 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
     
+    # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+    # Required for convert_gym_action, get_action_mask, and any reader (e.g. debug log).
+    if eligible_units:
+        game_state["active_shooting_unit"] = eligible_units[0]
+    else:
+        if "active_shooting_unit" in game_state:
+            del game_state["active_shooting_unit"]
+    
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Pre-compute kill probability cache
     from engine.ai.weapon_selector import precompute_kill_probability_cache
     precompute_kill_probability_cache(game_state, "shoot")
@@ -1086,8 +1094,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 "available_weapons": []  # Explicitly return empty array to prevent frontend from using stale weapons
             }
         else:
-            # NO -> unit.CAN_ADVANCE = false -> No valid actions available
-            success, result = _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
+            # NO -> unit.CAN_ADVANCE = false -> No valid actions (SKIP: cannot act)
+            _success, result = _handle_shooting_end_activation(
+                game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+            )
             return result
     
     # YES -> SHOOTING ACTIONS AVAILABLE -> Go to STEP 3: ACTION_SELECTION
@@ -2018,6 +2028,12 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     # Call end_activation (exactly like MOVE phase)
     result = end_activation(game_state, unit, arg1, arg2, arg3, arg4, arg5)
     
+    # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+    # Must hold after every end_activation (shoot/advance/wait/execution_loop), not only wait/skip.
+    pool = game_state.get("shoot_activation_pool", [])
+    if pool:
+        game_state["active_shooting_unit"] = pool[0]
+    
     # CRITICAL: Pool empty detection is handled in execute_action (like MOVE phase)
     # This prevents double call to _shooting_phase_complete (once here, once in _process_shooting_phase)
     # execute_action checks pool empty BEFORE processing action, so phase_complete is handled there
@@ -2610,6 +2626,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             game_state["_shooting_phase_initialized"] = False
             phase_complete_result = _shooting_phase_complete(game_state)
             result.update(phase_complete_result)
+            if "active_shooting_unit" in game_state:
+                del game_state["active_shooting_unit"]
         
         return success, result
     
@@ -2644,6 +2662,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             game_state["_shooting_phase_initialized"] = False
             phase_complete_result = _shooting_phase_complete(game_state)
             result.update(phase_complete_result)
+            if "active_shooting_unit" in game_state:
+                del game_state["active_shooting_unit"]
         
         return success, result
     
@@ -2661,6 +2681,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             game_state["_shooting_phase_initialized"] = False
             phase_complete_result = _shooting_phase_complete(game_state)
             result.update(phase_complete_result)
+            if "active_shooting_unit" in game_state:
+                del game_state["active_shooting_unit"]
         
         return success, result
     
@@ -2745,6 +2767,10 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             # Unit has not shot yet - postpone (deselect, return to pool)
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
+            # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+            pool = game_state.get("shoot_activation_pool", [])
+            if pool:
+                game_state["active_shooting_unit"] = pool[0]
             return True, {
                 "action": "postpone",
                 "unitId": unit_id,
@@ -2766,6 +2792,10 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             # Clear active unit
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
+            # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+            pool = game_state.get("shoot_activation_pool", [])
+            if pool:
+                game_state["active_shooting_unit"] = pool[0]
             # Return to UNIT_ACTIVABLE_CHECK step (by returning activation_ended=False)
             return True, {
                 "action": "postpone",
@@ -3966,26 +3996,26 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     unit_id = unit["id"]
     orig_col, orig_row = get_unit_coordinates(unit)
     
-    # CRITICAL: Cannot advance if unit has already shot
+    # CRITICAL: Cannot advance if unit has already shot -> SKIP (agent cannot act)
     has_shot = _unit_has_shot_with_any_weapon(unit)
     if has_shot:
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        from engine.game_utils import add_console_log, add_debug_log
-        add_console_log(game_state, f"[ADVANCE REJECTED] E{episode} T{turn} Unit {unit_id} cannot advance - unit has already shot")
-        return False, {"error": "cannot_advance_after_shooting", "unitId": unit_id}
-    
-    # CRITICAL: Cannot advance if unit is adjacent to enemy
+        success, result = _handle_shooting_end_activation(
+            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+        )
+        result["advance_rejected"] = True
+        result["error"] = "cannot_advance_after_shooting"
+        return success, result
+
+    # CRITICAL: Cannot advance if unit is adjacent to enemy -> SKIP (agent cannot act)
     # Pool is source of truth: if can_advance is False, unit cannot advance
-    # Check can_advance flag set during pool building (ligne 703-704)
     can_advance = unit.get("_can_advance", None)
     if can_advance is False:
-        # Unit is adjacent to enemy - cannot advance (pool is source of truth)
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        from engine.game_utils import add_console_log, add_debug_log
-        add_console_log(game_state, f"[ADVANCE REJECTED] E{episode} T{turn} Unit {unit_id} cannot advance - adjacent to enemy (can_advance=False from pool)")
-        return False, {"error": "cannot_advance_adjacent_to_enemy", "unitId": unit_id}
+        success, result = _handle_shooting_end_activation(
+            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+        )
+        result["advance_rejected"] = True
+        result["error"] = "cannot_advance_adjacent_to_enemy"
+        return success, result
     
     # Use existing advance_range if already rolled (to keep same roll for destination selection)
     # Otherwise roll new 1D6 for advance range (from config)
@@ -4242,19 +4272,13 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         
         # CRITICAL FIX: If no valid destinations in gym training, end activation to prevent infinite loop
         if (is_gym_training or is_pve_ai) and not valid_destinations:
-            # No valid destinations - end activation (skip advance)
-            from engine.phase_handlers.generic_handlers import end_activation
-            result = end_activation(
-                game_state, unit,
-                "SKIP",        # Arg1: Skip logging (no advance happened)
-                1,             # Arg2: +1 step increment
-                PASS,         # Arg3: No tracking
-                SHOOTING,     # Arg4: Remove from shoot_activation_pool (FIX: was "SHOOT")
-                0             # Arg5: No error logging
+            # No valid destinations - SKIP (cannot advance)
+            success, result = _handle_shooting_end_activation(
+                game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
             )
-            result["action"] = "wait"  # Mark as wait action for step logger
-            result["unitId"] = unit_id
-            return True, result
+            result["advance_rejected"] = True
+            result["error"] = "no_valid_advance_destinations"
+            return success, result
         
         # Human player - return destinations for UI
         # ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Use advance_destinations and advance_roll names

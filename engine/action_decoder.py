@@ -5,6 +5,7 @@ action_decoder.py - Decodes actions and computes masks
 
 import numpy as np
 from typing import Dict, List, Any
+from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 
@@ -100,7 +101,7 @@ class ActionDecoder:
                     elif "valid_charge_destinations_pool" in game_state and game_state.get("valid_charge_destinations_pool"):
                         # After target selection and roll, destinations are available
                         # Enable destination slots (actions 4-8) for available destinations
-                        valid_destinations = game_state.get("valid_charge_destinations_pool", [])
+                        valid_destinations = require_key(game_state, "valid_charge_destinations_pool")
                         num_destinations = len(valid_destinations)
                         if num_destinations > 0:
                             # Enable destination actions for available destinations (up to 5 slots)
@@ -151,7 +152,6 @@ class ActionDecoder:
                 raise KeyError("game_state missing required 'move_activation_pool' field")
             pool_unit_ids = game_state["move_activation_pool"]
             # CRITICAL: Filter out dead units (units can die between pool build and use)
-            from shared.data_validation import require_key
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
@@ -171,7 +171,6 @@ class ActionDecoder:
             # Defense in depth: filter dead units here as safety check only
             # CRITICAL: Pool contains string IDs (normalized at creation in shooting_build_activation_pool)
             eligible = []
-            from shared.data_validation import require_key
             for uid in pool_unit_ids:
                 # CRITICAL: Normalize uid to string for get_unit_by_id (which normalizes both sides)
                 uid_str = str(uid)
@@ -186,7 +185,6 @@ class ActionDecoder:
                 return []  # Phase not initialized yet
             pool_unit_ids = game_state["charge_activation_pool"]
             # CRITICAL: Filter out dead units (units can die between pool build and use)
-            from shared.data_validation import require_key
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
@@ -198,20 +196,19 @@ class ActionDecoder:
             # Check all fight pools in priority order
             subphase = game_state.get("fight_subphase")
             if subphase == "charging":
-                pool_unit_ids = game_state.get("charging_activation_pool", [])
+                pool_unit_ids = require_key(game_state, "charging_activation_pool")
             elif subphase == "alternating_active":
-                pool_unit_ids = game_state.get("active_alternating_activation_pool", [])
+                pool_unit_ids = require_key(game_state, "active_alternating_activation_pool")
             elif subphase in ("alternating_non_active", "alternating"):
-                pool_unit_ids = game_state.get("non_active_alternating_activation_pool", [])
+                pool_unit_ids = require_key(game_state, "non_active_alternating_activation_pool")
             else:
-                # Fallback: check all pools
+                # Check all pools (all keys required)
                 pool_unit_ids = (
-                    game_state.get("charging_activation_pool", []) +
-                    game_state.get("active_alternating_activation_pool", []) +
-                    game_state.get("non_active_alternating_activation_pool", [])
+                    require_key(game_state, "charging_activation_pool") +
+                    require_key(game_state, "active_alternating_activation_pool") +
+                    require_key(game_state, "non_active_alternating_activation_pool")
                 )
             # CRITICAL: Filter out dead units (units can die between pool build and use)
-            from shared.data_validation import require_key
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
@@ -279,7 +276,7 @@ class ActionDecoder:
 
                 # Build valid destinations using BFS
                 movement_handlers.movement_build_valid_destinations_pool(game_state, selected_unit_id)
-                valid_destinations = game_state.get("valid_move_destinations_pool", [])
+                valid_destinations = require_key(game_state, "valid_move_destinations_pool")
 
                 if not valid_destinations:
                     # No valid moves - skip
@@ -345,8 +342,8 @@ class ActionDecoder:
                     import os
                     episode = game_state.get("episode_number", "?")
                     turn = game_state.get("turn", "?")
-                    pool_before = list(game_state.get("shoot_activation_pool", []))
-                    active_before = game_state.get("active_shooting_unit", None)
+                    pool_before = list(require_key(game_state, "shoot_activation_pool"))
+                    active_before = require_key(game_state, "active_shooting_unit")
                     debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
                     try:
                         with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
@@ -389,7 +386,7 @@ class ActionDecoder:
             
             # Check if unit is activated and waiting for destination selection (after target and roll)
             if active_charge_unit == selected_unit_id and "valid_charge_destinations_pool" in game_state:
-                valid_destinations = game_state.get("valid_charge_destinations_pool", [])
+                valid_destinations = require_key(game_state, "valid_charge_destinations_pool")
                 if valid_destinations and action_int in [4, 5, 6, 7, 8]:
                     # Destination selection (gym mode auto-selects, but allow manual for consistency)
                     dest_slot = action_int - 4
@@ -445,7 +442,7 @@ class ActionDecoder:
                 unit["HP_CUR"] > 0 and
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
                 (unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0 and
-                 any(w.get("DMG", 0) > 0 for w in unit["CC_WEAPONS"]))):  # Has melee capability
+                 any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"]))):  # Has melee capability
                 
                 # Simple charge range check (2d6 movement + unit MOVE)
                 distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))

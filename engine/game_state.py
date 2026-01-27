@@ -5,6 +5,7 @@ game_state.py - Game state initialization and management
 
 from typing import Dict, List, Any, Optional, Tuple
 import json
+from shared.data_validation import require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates
 
 class GameStateManager:
@@ -33,8 +34,8 @@ class GameStateManager:
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Create unit with AI_TURN.md compliant fields."""
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
-        rng_weapons = config.get("RNG_WEAPONS", [])
-        cc_weapons = config.get("CC_WEAPONS", [])
+        rng_weapons = require_key(config, "RNG_WEAPONS")
+        cc_weapons = require_key(config, "CC_WEAPONS")
         
         if not rng_weapons and not cc_weapons:
             raise ValueError(f"Unit {config.get('id', 'unknown')} must have at least RNG_WEAPONS or CC_WEAPONS")
@@ -47,12 +48,12 @@ class GameStateManager:
         shoot_left = 0
         if rng_weapons and selected_rng_weapon_index is not None:
             selected_weapon = rng_weapons[selected_rng_weapon_index]
-            shoot_left = selected_weapon.get("NB", 0)
+            shoot_left = require_key(selected_weapon, "NB")
         
         attack_left = 0
         if cc_weapons and selected_cc_weapon_index is not None:
             selected_weapon = cc_weapons[selected_cc_weapon_index]
-            attack_left = selected_weapon.get("NB", 0)
+            attack_left = require_key(selected_weapon, "NB")
         
         return {
             # Identity
@@ -105,8 +106,8 @@ class GameStateManager:
                 raise ValueError(f"Unit {unit['id']} missing required UPPERCASE field: {field}")
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
-        rng_weapons = unit.get("RNG_WEAPONS", [])
-        cc_weapons = unit.get("CC_WEAPONS", [])
+        rng_weapons = require_key(unit, "RNG_WEAPONS")
+        cc_weapons = require_key(unit, "CC_WEAPONS")
         if not rng_weapons and not cc_weapons:
             raise ValueError(f"Unit {unit['id']} must have at least RNG_WEAPONS or CC_WEAPONS")
     
@@ -157,8 +158,8 @@ class GameStateManager:
                         raise KeyError(f"Unit missing required field '{field}': {unit_data}")
                 
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract RNG_WEAPONS and CC_WEAPONS
-                rng_weapons = full_unit_data.get("RNG_WEAPONS", [])
-                cc_weapons = full_unit_data.get("CC_WEAPONS", [])
+                rng_weapons = require_key(full_unit_data, "RNG_WEAPONS")
+                cc_weapons = require_key(full_unit_data, "CC_WEAPONS")
                 
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
                 if not rng_weapons and not cc_weapons:
@@ -173,7 +174,7 @@ class GameStateManager:
                 if rng_weapons and selected_rng_weapon_index is not None:
                     selected_weapon = rng_weapons[selected_rng_weapon_index]
                     if isinstance(selected_weapon, dict):
-                        shoot_left = selected_weapon.get("NB", 0)
+                        shoot_left = require_key(selected_weapon, "NB")
                     else:
                         raise TypeError(f"Unit {unit_type}: RNG_WEAPONS[{selected_rng_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
                 
@@ -181,7 +182,7 @@ class GameStateManager:
                 if cc_weapons and selected_cc_weapon_index is not None:
                     selected_weapon = cc_weapons[selected_cc_weapon_index]
                     if isinstance(selected_weapon, dict):
-                        attack_left = selected_weapon.get("NB", 0)
+                        attack_left = require_key(selected_weapon, "NB")
                     else:
                         raise TypeError(f"Unit {unit_type}: CC_WEAPONS[{selected_cc_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
                 
@@ -270,7 +271,7 @@ class GameStateManager:
                 'controller': int|None  # 0, 1, or None (contested/uncontrolled)
             }]
         """
-        objectives = game_state.get("objectives", [])
+        objectives = require_key(game_state, "objectives")
         if not objectives:
             return {}
 
@@ -297,14 +298,16 @@ class GameStateManager:
 
                 unit_pos = get_unit_coordinates(unit)
                 if unit_pos in hex_set:
-                    oc = unit.get("OC", 1)  # Default OC=1 if not specified
+                    oc = require_key(unit, "OC")
                     if unit["player"] == 0:
                         player_0_oc += oc
                     else:
                         player_1_oc += oc
 
-            # Get current controller from persistent state
-            current_controller = game_state["objective_controllers"].get(obj_id, None)
+            # Get current controller from persistent state; explicit init when first seeing this objective
+            if str(obj_id) not in game_state["objective_controllers"]:
+                game_state["objective_controllers"][str(obj_id)] = None
+            current_controller = game_state["objective_controllers"][str(obj_id)]
 
             # Determine new controller with PERSISTENT control rules
             new_controller = current_controller  # Default: keep current control

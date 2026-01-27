@@ -254,6 +254,12 @@ class UnitRegistry:
             
             properties["CC_WEAPONS"] = get_weapons(faction, codes)
         
+        # Normalize output: every unit must have both keys ([] if not defined in TS)
+        if "RNG_WEAPONS" not in properties:
+            properties["RNG_WEAPONS"] = []
+        if "CC_WEAPONS" not in properties:
+            properties["CC_WEAPONS"] = []
+        
         # Initialiser selectedWeaponIndex
         if properties.get("RNG_WEAPONS"):
             properties["selectedRngWeaponIndex"] = 0
