@@ -99,17 +99,19 @@ def select_best_ranged_weapon(unit: Dict[str, Any], target: Dict[str, Any],
     rng_weapons = unit["RNG_WEAPONS"]
     if not rng_weapons:
         return -1
-    
-    # Get cache if available (optional; built on demand)
-    cache = game_state.get("kill_probability_cache", {})  # get allowed
-    
+
+    # Get or create cache (lazy init so phase_start stays fast; avoids ~2.9s step spike)
+    if "kill_probability_cache" not in game_state:
+        game_state["kill_probability_cache"] = {}
+    cache = game_state["kill_probability_cache"]
+
     best_index = -1
     best_kill_prob = -1.0
-    
+
     unit_id = str(unit["id"])
     target_id = str(target["id"])
     hp_cur = require_key(target, "HP_CUR")
-    
+
     for weapon_index, weapon in enumerate(rng_weapons):
         # Check cache first
         cached_prob = _get_kill_prob_from_cache(cache, unit_id, weapon_index, target_id, hp_cur)
@@ -152,13 +154,15 @@ def select_best_melee_weapon(unit: Dict[str, Any], target: Dict[str, Any],
     cc_weapons = unit["CC_WEAPONS"]
     if not cc_weapons:
         return -1
-    
-    # Get cache if available (optional; built on demand)
-    cache = game_state.get("kill_probability_cache", {})  # get allowed
-    
+
+    # Get or create cache (lazy init)
+    if "kill_probability_cache" not in game_state:
+        game_state["kill_probability_cache"] = {}
+    cache = game_state["kill_probability_cache"]
+
     best_index = -1
     best_kill_prob = -1.0
-    
+
     unit_id = str(unit["id"])
     target_id = str(target["id"])
     hp_cur = require_key(target, "HP_CUR")
@@ -206,9 +210,11 @@ def get_best_weapon_for_target(unit: Dict[str, Any], target: Dict[str, Any],
     
     if weapon_index < 0:
         return (-1, 0.0)
-    
-    # Get kill probability from cache or calculate
-    cache = game_state.get("kill_probability_cache", {})  # get allowed
+
+    # Get or create cache (lazy init)
+    if "kill_probability_cache" not in game_state:
+        game_state["kill_probability_cache"] = {}
+    cache = game_state["kill_probability_cache"]
     unit_id = str(unit["id"])
     target_id = str(target["id"])
     hp_cur = require_key(target, "HP_CUR")
@@ -340,8 +346,10 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
     # Get all enemy units
     enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and require_key(u, "HP_CUR") > 0]
     
-    cache = game_state.get("kill_probability_cache", {})  # get allowed
-    
+    if "kill_probability_cache" not in game_state:
+        game_state["kill_probability_cache"] = {}
+    cache = game_state["kill_probability_cache"]
+
     for unit in active_units:
         unit_id = str(unit["id"])
         # CRITICAL: No default values - require explicit coordinates

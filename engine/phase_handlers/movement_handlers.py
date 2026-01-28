@@ -56,7 +56,7 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
     from .shooting_handlers import _target_pool_cache
     _target_pool_cache.clear()
     
-    # Log invalidation (only in training context)
+    # LOG TEMPORAIRE: Log invalidation (only if --debug)
     if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
         episode = game_state["episode_number"]
         turn = game_state["turn"]
@@ -71,8 +71,9 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
 
 
 def _log_movement_debug(game_state: Dict[str, Any], function_name: str, unit_id: str, message: str) -> None:
-    """Helper function to log movement debug information with episode/turn/phase context."""
-    # Only log if episode_number exists (training mode), otherwise skip silently
+    """LOG TEMPORAIRE: Helper to log movement debug with episode/turn/phase (only if --debug)."""
+    if not game_state.get("debug_mode", False):
+        return
     if "episode_number" not in game_state or "turn" not in game_state or "phase" not in game_state:
         return  # Skip logging if not in training context
     
@@ -774,6 +775,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     visited = {start_pos: 0}  # {(col, row): distance_from_start}
     queue = [(start_pos, 0)]  # [(position, distance)]
     valid_destinations = []
+    # Count hexes skipped due to enemy adjacency (one summary log instead of per-hex to avoid I/O perf)
+    blocked_enemy_adjacent_count = 0
 
     while queue:
         current_pos, current_dist = queue.pop(0)
@@ -805,18 +808,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             # Check enemy adjacency BEFORE marking as visited
             # Uses pre-computed set for O(1) lookup
             if neighbor_pos in enemy_adjacent_hexes:
-                # Log why this hex is blocked (only in training context)
-                if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
-                    episode = game_state["episode_number"]
-                    turn = game_state["turn"]
-                    phase = game_state.get("phase", "move")
-                    if "console_logs" not in game_state:
-                        game_state["console_logs"] = []
-                    log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_valid_destinations: hex {neighbor_pos} BLOCKED - in enemy_adjacent_hexes"
-                    from engine.game_utils import add_console_log
-                    from engine.game_utils import safe_print
-                    add_console_log(game_state, log_message)
-                    safe_print(game_state, log_message)
+                blocked_enemy_adjacent_count += 1
                 continue  # Cannot move through this hex - don't add to queue or destinations
 
             # Mark as visited AFTER all blocking checks pass
@@ -836,18 +828,17 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     game_state["valid_move_destinations_pool"] = valid_destinations
 
-    # DEBUG: Log occupied_positions and valid_destinations for collision debugging
+    # LOG TEMPORAIRE: One summary line for build_valid_destinations (only if --debug)
     if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         phase = game_state.get("phase", "move")
         from engine.game_utils import add_console_log, safe_print
-        log_msg = f"[POOL DEBUG] E{episode} T{turn} {phase} Unit {unit_id}: occupied_positions={sorted(occupied_positions)[:10]}... (total={len(occupied_positions)}), valid_destinations={len(valid_destinations)}"
+        log_msg = f"[POOL DEBUG] E{episode} T{turn} {phase} Unit {unit_id}: blocked_enemy_adjacent={blocked_enemy_adjacent_count}, occupied={len(occupied_positions)}, valid_destinations={len(valid_destinations)}"
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
 
-    # Log valid destinations result
-    _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations={valid_destinations} count={len(valid_destinations)}")
+    _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)}")
 
     return valid_destinations
 

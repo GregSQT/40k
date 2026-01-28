@@ -5,6 +5,7 @@ Delegates to specialized modules, orchestrates game flow.
 """
 
 import os
+import time
 import copy
 import torch
 import json
@@ -364,11 +365,9 @@ class W40KEngine(gym.Env):
         self.episode_length_accumulator = 0
         self.episode_number = 0  # Track episode number for debug logging
         
-        # Clear debug.log ONCE at the start of training (before first episode)
-        # This ensures each training session starts with a clean log file
-        # Use global flag to prevent clearing if multiple engine instances are created
+        # Clear debug.log ONCE at the start of training, only when --debug (avoid I/O when not debugging)
         global _debug_log_cleared
-        if not _debug_log_cleared:
+        if debug_mode and not _debug_log_cleared:
             movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
             try:
                 with open(movement_debug_path, 'w', encoding='utf-8', errors='replace') as f:
@@ -454,6 +453,7 @@ class W40KEngine(gym.Env):
             "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
         self._episode_step_calls = 0  # Safety: reset for runaway truncation check in step()
+        self._step_calls_since_increment = 0  # LOG TEMPORAIRE: count step() between step_increment (--debug)
 
         # Reset unit health and positions to original scenario values
         # AI_TURN.md COMPLIANCE: Direct access - units must be provided
@@ -565,6 +565,9 @@ class W40KEngine(gym.Env):
         """
         Execute gym action with built-in step counting - gym.Env interface.
         """
+        # LOG TEMPORAIRE: time from step() entry to _step_t0 (to see if pic is before get_action_mask, --debug)
+        _step_t_entry = time.perf_counter() if self.game_state.get("debug_mode", False) else None
+
         # Safety: count step() calls per episode to truncate runaways (e.g. stuck in eval)
         self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
 
@@ -598,18 +601,40 @@ class W40KEngine(gym.Env):
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
 
+        # LOG TEMPORAIRE: count step() calls between two step_increment (only when --debug)
+        if self.game_state.get("debug_mode", False):
+            self._step_calls_since_increment = getattr(self, '_step_calls_since_increment', 0) + 1
+
+        # LOG TEMPORAIRE: write PRE_STEP_TIMING (step entry to _step_t0 = game_over + counter, --debug)
+        if _step_t_entry is not None:
+            pre_s = time.perf_counter() - _step_t_entry
+            _ep_pre = int(self.game_state.get("episode_number", 0))
+            _idx_pre = int(self.game_state.get("episode_steps", 0))
+            try:
+                _debug_pre = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(_debug_pre, "a", encoding="utf-8", errors="replace") as _f:
+                    _f.write(f"PRE_STEP_TIMING episode={_ep_pre} step_index={_idx_pre} duration_s={pre_s:.6f}\n")
+            except (OSError, IOError):
+                pass
+
+        # LOG TEMPORAIRE: step breakdown timings (only if --debug)
+        _step_t0 = time.perf_counter() if self.game_state.get("debug_mode", False) else None
+
         # CRITICAL FIX: Auto-advance phase when no valid actions exist
         # This handles the case where fight phase pools are empty
         # PERF: compute mask+eligible_units once, reuse for convert_gym_action
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        _step_t1 = time.perf_counter() if _step_t0 is not None else None
         if not np.any(action_mask):
             # No valid actions - trigger phase transition
             current_phase = self.game_state["phase"]
             if current_phase == "fight":
                 from engine.phase_handlers import fight_handlers
                 result = fight_handlers.fight_phase_end(self.game_state)
+            _step_t2_early = time.perf_counter() if _step_t0 is not None else None
             # After phase transition, get new observation
             observation = self.obs_builder.build_observation(self.game_state)
+            _step_t3_early = time.perf_counter() if _step_t0 is not None else None
             # Check if game ended after phase transition
             self.game_state["game_over"] = self._check_game_over()
             
@@ -638,12 +663,31 @@ class W40KEngine(gym.Env):
                 if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
                     self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method)
             
+            # LOG TEMPORAIRE: STEP_BREAKDOWN for early-return path (no valid actions) so slow steps are visible
+            if _step_t0 is not None and _step_t1 is not None:
+                ep = int(self.game_state.get("episode_number", 0))
+                step_idx = int(self.game_state.get("episode_steps", 0))
+                get_mask_s = _step_t1 - _step_t0
+                phase_end_s = (_step_t2_early - _step_t1) if _step_t2_early is not None else 0.0
+                build_obs_s = (_step_t3_early - _step_t2_early) if _step_t3_early is not None and _step_t2_early is not None else 0.0
+                total_early = (_step_t3_early - _step_t0) if _step_t3_early is not None else 0.0
+                try:
+                    _debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(_debug_path, "a", encoding="utf-8", errors="replace") as _f:
+                        _f.write(
+                            f"STEP_BREAKDOWN episode={ep} step_index={step_idx} get_mask_s={get_mask_s:.6f} convert_s=0.000000 "
+                            f"process_s={phase_end_s:.6f} replay_s=0.000000 build_obs_s={build_obs_s:.6f} reward_s=0.000000 total_s={total_early:.6f} [EARLY_NO_ACTIONS]\n"
+                        )
+                except (OSError, IOError):
+                    pass
+            
             return observation, 0.0, terminated, False, info
         
         # Convert gym integer action to semantic action (reuse precomputed mask+eligible_units)
         semantic_action = self.action_decoder.convert_gym_action(
             action, self.game_state, action_mask=action_mask, eligible_units=eligible_units
         )
+        _step_t2 = time.perf_counter() if _step_t0 is not None else None
 
         # CRITICAL: Capture pre-action state for replay_logger BEFORE action execution
         # These are needed for replay logging (independent of step_logger)
@@ -658,11 +702,12 @@ class W40KEngine(gym.Env):
         
         # Process semantic action with AI_TURN.md compliance
         action_result = self._process_semantic_action(semantic_action)
+        _step_t3 = time.perf_counter() if _step_t0 is not None else None
         if isinstance(action_result, tuple) and len(action_result) == 2:
             success, result = action_result
         else:
             success, result = True, action_result
-        
+
         # BUILT-IN STEP COUNTING - AFTER validation, only for successful actions
         if success:
             self.game_state["episode_steps"] += 1
@@ -817,10 +862,14 @@ class W40KEngine(gym.Env):
                             step_reward, 6
                         )
 
+        # LOG TEMPORAIRE: time replay block separately (only if --debug)
+        _step_t3_5 = time.perf_counter() if _step_t0 is not None else None
         # Convert to gym format
         observation = self.obs_builder.build_observation(self.game_state)
+        _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
         reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+        _step_t5 = time.perf_counter() if _step_t0 is not None else None
         terminated = self.game_state["game_over"]
         truncated = False
         info = result.copy() if isinstance(result, dict) else {}
@@ -902,6 +951,19 @@ class W40KEngine(gym.Env):
         # This must happen BEFORE reset clears action_logs. action_logs is always present (init + reset).
         info["action_logs"] = self.game_state["action_logs"].copy()
         
+        # LOG TEMPORAIRE: time from step_increment (log_action) to return (last_unit_positions + STEP_BREAKDOWN + console_logs)
+        if self.game_state.get("debug_mode") and "_step_increment_time" in self.game_state:
+            t0 = self.game_state.pop("_step_increment_time")
+            after_s = time.perf_counter() - t0
+            ep = int(self.game_state.get("episode_number", 0))
+            step_idx = int(self.game_state.get("episode_steps", 0)) - 1 if success else int(self.game_state.get("episode_steps", 0))
+            try:
+                _debug_path_after = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(_debug_path_after, "a", encoding="utf-8", errors="replace") as _f:
+                    _f.write(f"AFTER_STEP_INCREMENT_TIMING episode={ep} step_index={step_idx} duration_s={after_s:.6f}\n")
+            except (OSError, IOError):
+                pass
+
         # Update position cache for movement_direction feature
         for unit in self.game_state["units"]:
             if "id" not in unit:
@@ -911,16 +973,39 @@ class W40KEngine(gym.Env):
             unit_id = str(unit["id"])
             self.last_unit_positions[unit_id] = get_unit_coordinates(unit)
         
-        # Write console_logs to debug.log (for hidden_action_finder.py)
+        # LOG TEMPORAIRE: write STEP_BREAKDOWN to debug.log (only if --debug, main path)
+        if _step_t0 is not None and _step_t5 is not None:
+            ep = int(self.game_state.get("episode_number", 0))
+            step_idx = int(self.game_state.get("episode_steps", 0)) - 1 if success else int(self.game_state.get("episode_steps", 0))
+            get_mask_s = _step_t1 - _step_t0 if _step_t1 is not None else 0.0
+            convert_s = _step_t2 - _step_t1 if _step_t2 is not None else 0.0
+            process_s = _step_t3 - _step_t2 if _step_t3 is not None else 0.0
+            replay_s = _step_t3_5 - _step_t3 if _step_t3_5 is not None and _step_t3 is not None else 0.0
+            build_obs_s = _step_t4 - _step_t3_5 if _step_t4 is not None and _step_t3_5 is not None else (_step_t4 - _step_t3 if _step_t4 is not None else 0.0)
+            reward_s = _step_t5 - _step_t4 if _step_t5 is not None else 0.0
+            total_s = _step_t5 - _step_t0
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(
+                        f"STEP_BREAKDOWN episode={ep} step_index={step_idx} get_mask_s={get_mask_s:.6f} convert_s={convert_s:.6f} "
+                        f"process_s={process_s:.6f} replay_s={replay_s:.6f} build_obs_s={build_obs_s:.6f} reward_s={reward_s:.6f} total_s={total_s:.6f}\n"
+                    )
+            except (OSError, IOError):
+                pass
+
+        # LOG TEMPORAIRE: Write console_logs to debug.log (for hidden_action_finder.py; only if --debug)
         if "console_logs" in self.game_state and self.game_state["console_logs"]:
             movement_debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
             log_count = len(self.game_state["console_logs"])
-            
+            ep_w = int(self.game_state.get("episode_number", 0))
+            step_idx_w = int(self.game_state.get("episode_steps", 0)) - 1 if success else int(self.game_state.get("episode_steps", 0))
+
             try:
-                # CRITICAL: Only write to debug.log if debug_mode is enabled (--debug flag)
-                # This prevents I/O overhead during normal training
                 should_write = self.game_state.get("debug_mode", False)
                 if should_write:
+                    # LOG TEMPORAIRE: time the console_logs write to see if it causes ~3s steps
+                    t_console0 = time.perf_counter()
                     with open(movement_debug_path, 'a', encoding='utf-8', errors='replace') as f:
                         for log_msg in self.game_state["console_logs"]:
                             # Ensure log message is a string and encode safely
@@ -930,13 +1015,32 @@ class W40KEngine(gym.Env):
                             log_msg = log_msg.encode('utf-8', errors='replace').decode('utf-8')
                             f.write(log_msg + "\n")
                         f.flush()  # Always flush in debug mode for immediate visibility
-                
+                    console_write_s = time.perf_counter() - t_console0
+                    try:
+                        with open(movement_debug_path, "a", encoding="utf-8", errors="replace") as f:
+                            f.write(f"CONSOLE_LOG_WRITE_TIMING episode={ep_w} step_index={step_idx_w} duration_s={console_write_s:.6f} lines={log_count}\n")
+                    except (OSError, IOError):
+                        pass
+
                 # Clear console_logs after writing to avoid duplicates
                 self.game_state["console_logs"] = []
             except Exception as e:
                 print(f"⚠️ Failed to write to debug.log: {e}")
                 import traceback
                 traceback.print_exc()
+
+        # LOG TEMPORAIRE: time from _step_t5 to return (last_unit_positions + STEP_BREAKDOWN + console_logs) to see if pic is there
+        if _step_t0 is not None and _step_t5 is not None:
+            _step_t6 = time.perf_counter()
+            post_s = _step_t6 - _step_t5
+            _ep_post = int(self.game_state.get("episode_number", 0))
+            _idx_post = int(self.game_state.get("episode_steps", 0)) - 1 if success else int(self.game_state.get("episode_steps", 0))
+            try:
+                _debug_path_post = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(_debug_path_post, "a", encoding="utf-8", errors="replace") as _f:
+                    _f.write(f"POST_STEP_TIMING episode={_ep_post} step_index={_idx_post} duration_s={post_s:.6f}\n")
+            except (OSError, IOError):
+                pass
 
         # Safety: truncate runaways (e.g. stuck in eval, phase transition bug) before bot_evaluation 1000 guard
         _calls = getattr(self, '_episode_step_calls', 0)
@@ -1338,7 +1442,7 @@ class W40KEngine(gym.Env):
                             # Déterminer step_increment selon le type d'action et success
                             # Pour les actions qui incrémentent episode_steps (ligne 642), step_increment = success
                             step_increment = success
-                            
+                            step_calls = self._step_calls_since_increment if step_increment else None
                             self.step_logger.log_action(
                                 unit_id=updated_unit["id"],
                                 action_type=action_type,
@@ -1346,8 +1450,13 @@ class W40KEngine(gym.Env):
                                 player=pre_action_player,
                                 success=success,
                                 step_increment=step_increment,
-                                action_details=action_details
+                                action_details=action_details,
+                                step_calls_since_last=step_calls
                             )
+                            if step_increment:
+                                self._step_calls_since_increment = 0
+                                # LOG TEMPORAIRE: mark time right after step_increment (log_action) to measure until return
+                                self.game_state["_step_increment_time"] = time.perf_counter()
 
                         elif action_type == "charge_fail":
                             # Add charge_fail-specific data for step logger
@@ -1387,7 +1496,7 @@ class W40KEngine(gym.Env):
                             # Pour charge_fail, step_increment = success (False car action échouée)
                             # Mais selon AI_TURN.md, les actions échouées n'incrémentent pas episode_steps (ligne 642)
                             step_increment = success
-                            
+                            step_calls = self._step_calls_since_increment if step_increment else None
                             self.step_logger.log_action(
                                 unit_id=updated_unit["id"],
                                 action_type=action_type,
@@ -1395,8 +1504,13 @@ class W40KEngine(gym.Env):
                                 player=pre_action_player,
                                 success=success,
                                 step_increment=step_increment,
-                                action_details=action_details
+                                action_details=action_details,
+                                step_calls_since_last=step_calls
                             )
+                            if step_increment:
+                                self._step_calls_since_increment = 0
+                                # LOG TEMPORAIRE: mark time right after step_increment (log_action) to measure until return
+                                self.game_state["_step_increment_time"] = time.perf_counter()
 
                         elif action_type in ["combat", "shoot"]:
                             # Log combat or shoot action - handlers MUST return all_attack_results complete
@@ -1490,7 +1604,7 @@ class W40KEngine(gym.Env):
                                     # Déterminer step_increment selon le type d'action et success
                                     # Pour combat/shoot, step_increment seulement pour la première attaque ET si success
                                     step_increment = (i == 0) and success
-                                    
+                                    step_calls = self._step_calls_since_increment if step_increment else None
                                     self.step_logger.log_action(
                                         unit_id=actual_shooter_id,  # CRITICAL: Use actual shooter ID from attack_result
                                         action_type=action_type,
@@ -1498,8 +1612,13 @@ class W40KEngine(gym.Env):
                                         player=pre_action_player,
                                         success=success,
                                         step_increment=step_increment,
-                                        action_details=attack_details
+                                        action_details=attack_details,
+                                        step_calls_since_last=step_calls
                                     )
+                                    if step_increment:
+                                        self._step_calls_since_increment = 0
+                                        # LOG TEMPORAIRE: mark time right after step_increment (log_action) to measure until return
+                                        self.game_state["_step_increment_time"] = time.perf_counter()
                         else:
                             # Non-specialized actions (move, wait)
                             # charge, combat, and shoot have their own logging above with specialized multi-attack handling
@@ -1546,6 +1665,7 @@ class W40KEngine(gym.Env):
                             # Déterminer step_increment selon le type d'action et success
                             # Pour les autres actions, step_increment = success (cohérent avec ligne 642)
                             step_increment = success
+                            step_calls = self._step_calls_since_increment if step_increment else None
 
                             # CRITICAL DEBUG: Log exact values just before log_action
                             if action_type == "move":
@@ -1561,8 +1681,13 @@ class W40KEngine(gym.Env):
                                 player=pre_action_player,
                                 success=success,
                                 step_increment=step_increment,
-                                action_details=action_details
+                                action_details=action_details,
+                                step_calls_since_last=step_calls
                             )
+                            if step_increment:
+                                self._step_calls_since_increment = 0
+                                # LOG TEMPORAIRE: mark time right after step_increment (log_action) to measure until return
+                                self.game_state["_step_increment_time"] = time.perf_counter()
             except Exception as e:
                 # CRITICAL: Logging errors must NOT interrupt action execution
                 # Log the error but continue with action processing
@@ -1600,6 +1725,8 @@ class W40KEngine(gym.Env):
             from engine.game_utils import add_console_log
             add_console_log(self.game_state, f"🔄 PHASE TRANSITION: {current_phase} -> {next_phase} (cascade #{cascade_count})")
 
+            # LOG TEMPORAIRE: time each phase_*_start() to find which cascade step causes ~3s spike
+            _cascade_t0 = time.perf_counter() if self.game_state.get("debug_mode", False) else None
             # Initialize next phase using phase handlers
             phase_init_result = None
             if next_phase == "command":
@@ -1612,6 +1739,16 @@ class W40KEngine(gym.Env):
                 phase_init_result = fight_handlers.fight_phase_start(self.game_state)
             elif next_phase == "move":
                 phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+
+            if _cascade_t0 is not None:
+                _cascade_dur = time.perf_counter() - _cascade_t0
+                _ep_c = int(self.game_state.get("episode_number", 0))
+                try:
+                    _debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(_debug_path, "a", encoding="utf-8", errors="replace") as _f:
+                        _f.write(f"CASCADE_TIMING episode={_ep_c} cascade_num={cascade_count} from_phase={current_phase} to_phase={next_phase} duration_s={_cascade_dur:.6f}\n")
+                except (OSError, IOError):
+                    pass
 
             add_console_log(self.game_state, f"🔄 PHASE NOW: {self.game_state.get('phase', 'UNKNOWN')}")
 

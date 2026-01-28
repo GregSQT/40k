@@ -221,6 +221,10 @@ for each weapon in unit's weapons:
 select weapon with highest kill_probability
 ```
 
+### Kill Probability Cache
+
+Le cache `game_state["kill_probability_cache"]` est rempli **à la demande** (lazy) : à la première utilisation de `select_best_ranged_weapon()` ou `select_best_melee_weapon()` pour une paire (unité, arme, cible), la probabilité est calculée et stockée ; les appels suivants lisent le cache. Il n'est plus pré-rempli en début de phase shoot/fight.
+
 ### Kill Probability Calculation
 
 **Formula**:

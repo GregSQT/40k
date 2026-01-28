@@ -348,7 +348,7 @@ class ActionDecoder:
                     }
                     
             elif action_int == 11:  # WAIT - agent chooses not to shoot
-                # DEBUG: Log WAIT action for root cause investigation (write directly to debug.log if debug_mode)
+                # LOG TEMPORAIRE: Log WAIT action to debug.log (only if --debug)
                 if game_state.get("debug_mode", False):
                     import os
                     episode = game_state.get("episode_number", "?")

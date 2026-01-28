@@ -12,6 +12,8 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import gymnasium as gym
 from typing import Optional, Any
 import random
+import os
+import time
 
 __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
 
@@ -42,9 +44,23 @@ class BotControlledEnv(gym.Wrapper):
         self.ai_shoot_opportunities = 0
         self.ai_shoot_actions = 0
         self.ai_wait_actions = 0
+        # LOG TEMPORAIRE: time between step() return and next step() call (--debug)
+        self._last_step_return_time = None
 
     def reset(self, seed=None, options=None):
+        # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
+        debug_mode = self.engine.game_state.get("debug_mode", False)
+        t0 = time.perf_counter() if debug_mode else None
         obs, info = self.env.reset(seed=seed, options=options)
+        if debug_mode and t0 is not None:
+            reset_s = time.perf_counter() - t0
+            ep = int(self.engine.game_state.get("episode_number", 0))
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"RESET_TIMING episode={ep} duration_s={reset_s:.6f}\n")
+            except (OSError, IOError):
+                pass
         self.episode_reward = 0.0
         self.episode_length = 0
 
@@ -57,10 +73,22 @@ class BotControlledEnv(gym.Wrapper):
         self.ai_shoot_opportunities = 0
         self.ai_shoot_actions = 0
         self.ai_wait_actions = 0
-
+        self._last_step_return_time = None
         return obs, info
 
     def step(self, agent_action):
+        # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)
+        debug_mode = self.engine.game_state.get("debug_mode", False)
+        if debug_mode and self._last_step_return_time is not None:
+            between_s = time.perf_counter() - self._last_step_return_time
+            ep = int(self.engine.game_state.get("episode_number", 0))
+            step_idx = int(self.engine.game_state.get("episode_steps", 0))
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"BETWEEN_STEP_TIMING episode={ep} step_index={step_idx} duration_s={between_s:.6f}\n")
+            except (OSError, IOError):
+                pass
         # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
         # PERFORMANCE: Only track if diagnostics are enabled (shoot stats will be collected)
         # Skip get_action_mask() call here to avoid redundant computation - action_masks are already computed
@@ -80,7 +108,19 @@ class BotControlledEnv(gym.Wrapper):
                 self.ai_wait_actions += 1
 
         # Execute agent action
+        # LOG TEMPORAIRE: time full env.step() call (--debug) to compare with STEP_TIMING
+        t0_agent = time.perf_counter() if debug_mode else None
         obs, reward, terminated, truncated, info = self.env.step(agent_action)
+        if debug_mode and t0_agent is not None:
+            ep = int(self.engine.game_state.get("episode_number", 0))
+            step_idx = int(self.engine.game_state.get("episode_steps", 0))
+            duration_s = time.perf_counter() - t0_agent
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+            except (OSError, IOError):
+                pass
         self.episode_reward += reward
         self.episode_length += 1
 
@@ -94,9 +134,23 @@ class BotControlledEnv(gym.Wrapper):
                 raise RuntimeError(f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={self.engine.game_state.get('phase', '?')}")
             debug_bot = self.episode_length < 10
             bot_action = self._get_bot_action(debug=debug_bot)
+            # LOG TEMPORAIRE: time full env.step(bot_action) (--debug)
+            t0_bot = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(bot_action)
+            if debug_mode and t0_bot is not None:
+                ep = int(self.engine.game_state.get("episode_number", 0))
+                step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                duration_s = time.perf_counter() - t0_bot
+                try:
+                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+                except (OSError, IOError):
+                    pass
             self.episode_length += 1
 
+        if debug_mode:
+            self._last_step_return_time = time.perf_counter()
         return obs, reward, terminated, truncated, info
 
     def _get_bot_action(self, debug=False) -> int:
@@ -199,12 +253,27 @@ class SelfPlayWrapper(gym.Wrapper):
         self.player1_wins = 0
         self.player2_wins = 0
         self.draws = 0
+        # LOG TEMPORAIRE: time between step() return and next step() call (--debug)
+        self._last_step_return_time = None
 
     def reset(self, seed=None, options=None):
         """Reset environment for new episode."""
+        # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
+        debug_mode = self.engine.game_state.get("debug_mode", False)
+        t0 = time.perf_counter() if debug_mode else None
         obs, info = self.env.reset(seed=seed, options=options)
+        if debug_mode and t0 is not None:
+            reset_s = time.perf_counter() - t0
+            ep = int(self.engine.game_state.get("episode_number", 0))
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"RESET_TIMING episode={ep} duration_s={reset_s:.6f}\n")
+            except (OSError, IOError):
+                pass
         self.episode_reward = 0.0
         self.episode_length = 0
+        self._last_step_return_time = None
         return obs, info
 
     def step(self, agent_action):
@@ -214,6 +283,18 @@ class SelfPlayWrapper(gym.Wrapper):
         If it's Player 1's turn: Execute the provided action
         If it's Player 2's turn: Use frozen model action instead
         """
+        # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)
+        debug_mode = self.engine.game_state.get("debug_mode", False)
+        if debug_mode and self._last_step_return_time is not None:
+            between_s = time.perf_counter() - self._last_step_return_time
+            ep = int(self.engine.game_state.get("episode_number", 0))
+            step_idx = int(self.engine.game_state.get("episode_steps", 0))
+            try:
+                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"BETWEEN_STEP_TIMING episode={ep} step_index={step_idx} duration_s={between_s:.6f}\n")
+            except (OSError, IOError):
+                pass
         # CRITICAL: First handle any pending Player 2 turns before Player 1's action
         # This shouldn't happen normally, but safety check
         obs = None
@@ -232,7 +313,19 @@ class SelfPlayWrapper(gym.Wrapper):
                 print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 before loop! Count: {p1_actions_before}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
                 raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 before): {p1_actions_before} iterations, phase={self.engine.game_state.get('phase', '?')}")
             player1_action = self._get_frozen_model_action()
+            # LOG TEMPORAIRE: time full env.step() (--debug)
+            t0_p1 = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(player1_action)
+            if debug_mode and t0_p1 is not None:
+                ep = int(self.engine.game_state.get("episode_number", 0))
+                step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                duration_s = time.perf_counter() - t0_p1
+                try:
+                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+                except (OSError, IOError):
+                    pass
             self.episode_length += 1
 
             # If P1's action ended the game before P0 could act, capture the reward
@@ -242,7 +335,19 @@ class SelfPlayWrapper(gym.Wrapper):
         # Now execute Player 0's action (if game not over)
         p0_reward = p1_terminal_reward  # Start with any terminal reward from P1's pre-emptive kill
         if not (terminated or truncated):
+            # LOG TEMPORAIRE: time full env.step() (--debug)
+            t0_p0 = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            if debug_mode and t0_p0 is not None:
+                ep = int(self.engine.game_state.get("episode_number", 0))
+                step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                duration_s = time.perf_counter() - t0_p0
+                try:
+                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+                except (OSError, IOError):
+                    pass
             p0_reward = reward  # CRITICAL: Save P0's reward before P1 overwrites it
             self.episode_reward += reward
             self.episode_length += 1
@@ -262,7 +367,19 @@ class SelfPlayWrapper(gym.Wrapper):
                 player1_action = self._get_frozen_model_action()
                 # CRITICAL FIX: Capture reward when P1's action ends game!
                 # When P1 kills last P0 unit, reward contains P0's LOSE penalty
+                # LOG TEMPORAIRE: time full env.step() (--debug)
+                t0_p1_after = time.perf_counter() if debug_mode else None
                 obs, p1_step_reward, terminated, truncated, info = self.env.step(player1_action)
+                if debug_mode and t0_p1_after is not None:
+                    ep = int(self.engine.game_state.get("episode_number", 0))
+                    step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                    duration_s = time.perf_counter() - t0_p1_after
+                    try:
+                        debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                        with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                            f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+                    except (OSError, IOError):
+                        pass
                 self.episode_length += 1
                 p1_actions_after += 1
 
@@ -293,6 +410,8 @@ class SelfPlayWrapper(gym.Wrapper):
             else:
                 self.draws += 1
 
+        if debug_mode:
+            self._last_step_return_time = time.perf_counter()
         return obs, reward, terminated, truncated, info
 
     def _get_frozen_model_action(self) -> int:

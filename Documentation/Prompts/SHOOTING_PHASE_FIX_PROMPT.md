@@ -81,7 +81,7 @@ elif current_phase == "shoot":
 
 ### CAUSE RACINE
 Dans `engine/phase_handlers/shooting_handlers.py`, la fonction `_shooting_activation_end()` déclenchait une transition de phase (`_shooting_phase_complete()`) même en cas d'erreur (`arg1 == "ERROR"`). Cela causait :
-1. Des recalculs coûteux du cache de probabilité de kill (`precompute_kill_probability_cache()`) même en cas d'erreur
+1. ~~Des recalculs coûteux du cache de probabilité de kill (`precompute_kill_probability_cache()`) même en cas d'erreur~~ — **Obsolète :** le cache kill probability est maintenant rempli à la demande (lazy) dans `engine/ai/weapon_selector.py`, il n'est plus appelé en phase_start.
 2. Des transitions de phase prématurées qui pouvaient corrompre l'état du jeu
 3. Des logs manquants car les données d'activation étaient perdues lors de la transition
 
@@ -105,7 +105,7 @@ return response
 ```python
 # Signal phase completion if pool is empty - delegate to proper phase end function
 # PERFORMANCE: Don't trigger phase transition on ERROR - let normal flow handle it
-# ERROR cases should not trigger expensive phase transitions (precompute_kill_probability_cache)
+# ERROR cases should not trigger expensive phase transitions (precompute removed; cache is now lazy)
 if pool_empty and arg1 != "ERROR":
     # CRITICAL: Preserve action and all_attack_results before merging phase transition
     preserved_action = response.get("action")

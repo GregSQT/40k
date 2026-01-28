@@ -237,6 +237,26 @@ def is_engaged(unit_id: str, unit_player: Dict[str, int], unit_positions: Dict[s
     return is_adjacent_to_enemy(unit_pos[0], unit_pos[1], unit_player, unit_positions, unit_hp, player)
 
 
+def _position_cache_set(
+    cache: Dict[str, Tuple[int, int]], unit_id: str, col: int, row: int
+) -> None:
+    """
+    Set unit position in the position cache (single source of truth).
+    Call on every event that establishes or changes a unit's position:
+    UNIT (init), MOVE, FLED, ADVANCE, CHARGE, SHOT (shooter + target when coords in log), FIGHT (target).
+    """
+    cache[unit_id] = (int(col), int(row))
+
+
+def _position_cache_remove(cache: Dict[str, Tuple[int, int]], unit_id: str) -> None:
+    """
+    Remove unit from the position cache (e.g. on death).
+    Call on every unit death so the cache never holds obsolete positions.
+    """
+    if unit_id in cache:
+        del cache[unit_id]
+
+
 def parse_step_log(filepath: str) -> Dict:
     """Parse step.log and extract statistics with rule validation."""
     
@@ -319,6 +339,7 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_at_friendly': {1: 0, 2: 0},
         'shoot_at_engaged_enemy': {1: 0, 2: 0},
         'shoot_dead_unit': {1: 0, 2: 0},
+        'shoot_at_dead_unit': {1: 0, 2: 0},
         'charge_after_fled': {1: 0, 2: 0},
         'charge_dead_unit': {1: 0, 2: 0},
         'fight_from_non_adjacent': {1: 0, 2: 0},
@@ -337,6 +358,7 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_at_friendly': {1: None, 2: None},
             'shoot_at_engaged_enemy': {1: None, 2: None},
             'shoot_dead_unit': {1: None, 2: None},
+            'shoot_at_dead_unit': {1: None, 2: None},
             'charge_after_fled': {1: None, 2: None},
             'charge_dead_unit': {1: None, 2: None},
             'fight_from_non_adjacent': {1: None, 2: None},
@@ -371,6 +393,9 @@ def parse_step_log(filepath: str) -> Dict:
     # Unit tracking
     unit_hp = {}
     unit_player = {}
+    # Position cache: unit_id -> (col, row). Single source of truth for positions in the analyzer.
+    # Updated on every: UNIT (init), MOVE, FLED, ADVANCE, CHARGE, SHOT (shooter + target when coords in log),
+    # FIGHT (target). Removed on unit death. Use _position_cache_set / _position_cache_remove for all updates.
     unit_positions = {}
     unit_types = {}
     wall_hexes = set()
@@ -485,7 +510,7 @@ def parse_step_log(filepath: str) -> Dict:
                 unit_hp[unit_id] = hp_max
                 
                 unit_player[unit_id] = player
-                unit_positions[unit_id] = (col, row)
+                _position_cache_set(unit_positions, unit_id, col, row)
                 unit_types[unit_id] = unit_type
                 stats['unit_types'][unit_id] = unit_type
                 positions_at_turn_start[unit_id] = (col, row)
@@ -559,14 +584,20 @@ def parse_step_log(filepath: str) -> Dict:
                         damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
                         if damage_match:
                             damage = int(damage_match.group(1))
+                            # RULE: Shoot at dead unit (target already dead when shot)
+                            if 'shot at unit' in action_desc.lower() and damage > 0:
+                                target_already_dead = target_id not in unit_hp or unit_hp.get(target_id, 0) <= 0
+                                if target_already_dead:
+                                    stats['shoot_at_dead_unit'][player] += 1
+                                    if stats['first_error_lines']['shoot_at_dead_unit'][player] is None:
+                                        stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             if damage > 0 and target_id in unit_hp:
                                 unit_hp[target_id] -= damage
                                 if unit_hp[target_id] <= 0:
                                     target_type = unit_types.get(target_id, "Unknown")
                                     stats['current_episode_deaths'].append((player, target_id, target_type))
                                     stats['wounded_enemies'][player].discard(target_id)
-                                    if target_id in unit_positions:
-                                        del unit_positions[target_id]
+                                    _position_cache_remove(unit_positions, target_id)
                                     # Track death with line number for chronological order checking
                                     unit_deaths.append((turn, phase, target_id, line_number))
                                     del unit_hp[target_id]
@@ -622,27 +653,16 @@ def parse_step_log(filepath: str) -> Dict:
                             shooter_row = int(shooter_match.group(3))
                             target_id = target_match.group(1)
                             
-                            # CRITICAL: Update unit_positions if shooter position changed (e.g., due to ADVANCE)
-                            # The log shows the current position of the shooter, which is the source of truth
-                            if shooter_id in unit_positions:
-                                current_pos = unit_positions[shooter_id]
-                                if current_pos != (shooter_col, shooter_row):
-                                    # Position changed (e.g., unit advanced) - update unit_positions
-                                    unit_positions[shooter_id] = (shooter_col, shooter_row)
-                            else:
-                                # Unit not in unit_positions yet - add it
-                                unit_positions[shooter_id] = (shooter_col, shooter_row)
+                            # CRITICAL: Update position cache with shooter position from log (source of truth)
+                            _position_cache_set(unit_positions, shooter_id, shooter_col, shooter_row)
                             
                             if target_match.group(2) and target_match.group(3):
                                 target_col = int(target_match.group(2))
                                 target_row = int(target_match.group(3))
                                 target_pos = (target_col, target_row)
-                                # CRITICAL FIX: Update target unit position from log (source of truth)
-                                # This ensures unit_positions is synchronized with actual positions shown in logs
-                                # Without this, unit_positions may contain stale positions for enemy units
-                                # that moved in previous phases, causing false "moves to adjacent enemy" errors
+                                # CRITICAL: Update target position in cache from log (avoids stale positions)
                                 if target_id in unit_hp and unit_hp.get(target_id, 0) > 0:
-                                    unit_positions[target_id] = (target_col, target_row)
+                                    _position_cache_set(unit_positions, target_id, target_col, target_row)
                             elif target_id in unit_positions:
                                 target_pos = unit_positions[target_id]
                             else:
@@ -953,14 +973,9 @@ def parse_step_log(filepath: str) -> Dict:
                                 if stats['first_error_lines']['advance_after_shoot'][player] is None:
                                     stats['first_error_lines']['advance_after_shoot'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             
-                            # CRITICAL: Synchronize unit_positions with log before processing
-                            # The log is the source of truth - if unit_positions doesn't match the start position
-                            # in the log, it means unit_positions is stale and needs to be corrected
-                            if advance_unit_id in unit_positions:
-                                current_pos = unit_positions[advance_unit_id]
-                                if current_pos != (start_col, start_row):
-                                    # unit_positions is stale - correct it with the log's start position
-                                    unit_positions[advance_unit_id] = (start_col, start_row)
+                            # CRITICAL: Sync position cache with log start position before processing
+                            if advance_unit_id in unit_positions and unit_positions[advance_unit_id] != (start_col, start_row):
+                                _position_cache_set(unit_positions, advance_unit_id, start_col, start_row)
                             
                             # RULE: Advance from adjacent
                             if is_adjacent_to_enemy(start_col, start_row, unit_player, unit_positions, unit_hp, player):
@@ -993,12 +1008,10 @@ def parse_step_log(filepath: str) -> Dict:
                                     unit_hp.get(uid, 0) > 0):
                                     colliding_units_before[uid] = current_pos
                             
-                            # Update position
-                            # CRITICAL: Only update position if unit is still alive
-                            # Dead units should not have their positions updated (they were removed when they died)
+                            # Update position cache (only if unit still alive)
                             if unit_hp.get(advance_unit_id, 0) > 0:
                                 old_position = unit_positions.get(advance_unit_id)
-                                unit_positions[advance_unit_id] = (dest_col, dest_row)
+                                _position_cache_set(unit_positions, advance_unit_id, dest_col, dest_row)
                             
                             # CRITICAL: Verify collision is real by checking:
                             # 1. Colliding unit is STILL at destination after position update
@@ -1077,14 +1090,9 @@ def parse_step_log(filepath: str) -> Dict:
                             start_col = int(charge_match.group(7))  # from "from (start_col,start_row)"
                             start_row = int(charge_match.group(8))
                             
-                            # CRITICAL: Synchronize unit_positions with log before processing
-                            # The log is the source of truth - if unit_positions doesn't match the start position
-                            # in the log, it means unit_positions is stale and needs to be corrected
-                            if charge_unit_id in unit_positions:
-                                current_pos = unit_positions[charge_unit_id]
-                                if current_pos != (start_col, start_row):
-                                    # unit_positions is stale - correct it with the log's start position
-                                    unit_positions[charge_unit_id] = (start_col, start_row)
+                            # CRITICAL: Sync position cache with log start position before processing
+                            if charge_unit_id in unit_positions and unit_positions[charge_unit_id] != (start_col, start_row):
+                                _position_cache_set(unit_positions, charge_unit_id, start_col, start_row)
                             
                             # RULE: Charge from adjacent
                             # CRITICAL: Use the log's "from" position (start_col, start_row) which is the actual position
@@ -1171,12 +1179,10 @@ def parse_step_log(filepath: str) -> Dict:
                                         unit_hp.get(uid, 0) > 0):
                                         colliding_units_before[uid] = current_pos
                                 
-                                # Update position
-                                # CRITICAL: Only update position if unit is still alive
-                                # Dead units should not have their positions updated (they were removed when they died)
+                                # Update position cache (only if unit still alive)
                                 if unit_hp.get(charge_unit_id, 0) > 0:
                                     old_position = unit_positions.get(charge_unit_id)
-                                    unit_positions[charge_unit_id] = (dest_col, dest_row)
+                                    _position_cache_set(unit_positions, charge_unit_id, dest_col, dest_row)
                                 
                                 # CRITICAL: Verify collision is real by checking:
                                 # 1. Colliding unit is STILL at destination after position update
@@ -1240,11 +1246,9 @@ def parse_step_log(filepath: str) -> Dict:
                                         'charge_to': (dest_col, dest_row)
                                     })
                             else:
-                                # No movement - just update position if needed
-                                # CRITICAL: Only update position if unit is still alive
-                                # Dead units should not have their positions updated (they were removed when they died)
+                                # No movement - just update position cache if unit still alive
                                 if unit_hp.get(charge_unit_id, 0) > 0:
-                                    unit_positions[charge_unit_id] = (dest_col, dest_row)
+                                    _position_cache_set(unit_positions, charge_unit_id, dest_col, dest_row)
                             
                             # Sample action
                             if not stats['sample_actions']['charge']:
@@ -1310,9 +1314,7 @@ def parse_step_log(filepath: str) -> Dict:
                             _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")
                             if unit_hp_value > 0:
                                 old_position = unit_positions.get(move_unit_id)
-                                # CRITICAL: Update directly to destination position (not start position)
-                                # This ensures unit_positions is correct even if synchronization was skipped
-                                unit_positions[move_unit_id] = (dest_col, dest_row)
+                                _position_cache_set(unit_positions, move_unit_id, dest_col, dest_row)
                                 _debug_log(f"[FLED DEBUG] AFTER update: unit_positions[{move_unit_id}] = {unit_positions[move_unit_id]} (was {old_position})")
                             else:
                                 _debug_log(f"[FLED DEBUG] SKIPPED update: unit_hp[{move_unit_id}] = {unit_hp_value} (<= 0)")
@@ -1369,11 +1371,9 @@ def parse_step_log(filepath: str) -> Dict:
                                 if (dest_col, dest_row) in wall_hexes:
                                     stats['wall_collisions'][player] += 1
                             else:
-                                # No movement - just update position if needed
-                                # CRITICAL: Only update position if unit is still alive
-                                # Dead units should not have their positions updated (they were removed when they died)
+                                # No movement - just update position cache if unit still alive
                                 if unit_hp.get(move_unit_id, 0) > 0:
-                                    unit_positions[move_unit_id] = (dest_col, dest_row)
+                                    _position_cache_set(unit_positions, move_unit_id, dest_col, dest_row)
                             
                             # Sample action
                             if not stats['sample_actions']['move']:
@@ -1400,16 +1400,9 @@ def parse_step_log(filepath: str) -> Dict:
                             # Solution: Update positions_at_move_phase_start for enemy units using their current positions
                             # from unit_positions, but only if they haven't moved yet in P2 MOVE
                             # If they have moved in P2 MOVE, their "from" position is already in positions_at_move_phase_start
-                            # CRITICAL: Synchronize unit_positions with log BEFORE filling snapshot
-                            # The log is the source of truth - synchronize unit_positions first to ensure accuracy
-                            if move_unit_id in unit_positions:
-                                current_pos = unit_positions[move_unit_id]
-                                if current_pos != (start_col, start_row):
-                                    # unit_positions is stale - correct it with the log's start position
-                                    unit_positions[move_unit_id] = (start_col, start_row)
-                            else:
-                                # Unit not in unit_positions - add it with start position from log
-                                unit_positions[move_unit_id] = (start_col, start_row)
+                            # CRITICAL: Sync position cache with log start position before filling snapshot
+                            if move_unit_id not in unit_positions or unit_positions[move_unit_id] != (start_col, start_row):
+                                _position_cache_set(unit_positions, move_unit_id, start_col, start_row)
                             
                             if move_unit_id not in positions_at_move_phase_start:
                                 # First MOVE action for this unit in this MOVE phase - add its "from" position
@@ -1529,12 +1522,10 @@ def parse_step_log(filepath: str) -> Dict:
                                         unit_hp.get(uid, 0) > 0):
                                         colliding_units_before[uid] = current_pos
                                 
-                                # Update position
-                                # CRITICAL: Only update position if unit is still alive
-                                # Dead units should not have their positions updated (they were removed when they died)
+                                # Update position cache (only if unit still alive)
                                 if unit_hp.get(move_unit_id, 0) > 0:
                                     old_position = unit_positions.get(move_unit_id)
-                                    unit_positions[move_unit_id] = (dest_col, dest_row)
+                                    _position_cache_set(unit_positions, move_unit_id, dest_col, dest_row)
                                     # CRITICAL FIX (Episodes 32, 112): Update positions_at_move_phase_start for enemy units
                                     # If this is an enemy unit that moved in P1 MOVE, we need to track its position
                                     # so that when P2 MOVE starts, positions_at_move_phase_start has correct enemy positions
@@ -1666,7 +1657,7 @@ def parse_step_log(filepath: str) -> Dict:
                                 # CRITICAL: Only update position if unit is still alive
                                 # Dead units should not have their positions updated (they were removed when they died)
                                 if unit_hp.get(move_unit_id, 0) > 0:
-                                    unit_positions[move_unit_id] = (dest_col, dest_row)
+                                    _position_cache_set(unit_positions, move_unit_id, dest_col, dest_row)
                             
                             # Sample action
                             if not stats['sample_actions']['move']:
@@ -1693,13 +1684,9 @@ def parse_step_log(filepath: str) -> Dict:
                             target_col = int(fight_match.group(5))
                             target_row = int(fight_match.group(6))
                             
-                            # CRITICAL FIX (Episode 4): Update unit_positions for target unit after FIGHT action
-                            # The log shows the target's position at time of attack, which is the source of truth
-                            # Without this update, unit_positions may contain stale positions from earlier phases
-                            # (e.g., Unit 5 was at (11,6) after MOVE but (10,8) after FIGHT, but analyzer
-                            # would use (11,6) causing false "moves to adjacent enemy" errors)
+                            # CRITICAL: Update position cache for target from log (source of truth at fight time)
                             if target_id in unit_hp and unit_hp.get(target_id, 0) > 0:
-                                unit_positions[target_id] = (target_col, target_row)
+                                _position_cache_set(unit_positions, target_id, target_col, target_row)
                             
                             # CRITICAL: Track damage and deaths in fight phase (same as shoot phase)
                             # This ensures dead units are properly removed from unit_hp and unit_positions
@@ -1713,8 +1700,7 @@ def parse_step_log(filepath: str) -> Dict:
                                         target_type = unit_types.get(target_id, "Unknown")
                                         stats['current_episode_deaths'].append((player, target_id, target_type))
                                         stats['wounded_enemies'][player].discard(target_id)
-                                        if target_id in unit_positions:
-                                            del unit_positions[target_id]
+                                        _position_cache_remove(unit_positions, target_id)
                                         del unit_hp[target_id]
                                     else:
                                         stats['wounded_enemies'][player].add(target_id)
@@ -1843,15 +1829,38 @@ def parse_step_log(filepath: str) -> Dict:
     return stats
 
 
-def parse_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+def parse_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float, Optional[int]]]]:
     """
-    Parse STEP_TIMING lines from debug.log.
+    LOG TEMPORAIRE: Parse STEP_TIMING lines from debug.log (only written when --debug).
+    Returns list of (episode, step_index, duration_s, step_calls or None) or None if file missing.
+    step_calls = number of step() calls between this step_increment and the previous.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float, Optional[int]]] = []
+    # With optional step_calls= (LOG TEMPORAIRE)
+    pattern = re.compile(r'STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)(?: step_calls=(\d+))?')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    step_calls = int(m.group(4)) if m.group(4) else None
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3)), step_calls))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_predict_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse PREDICT_TIMING lines from debug.log (model.predict(), written by bot_evaluation when --debug).
     Returns list of (episode, step_index, duration_s) or None if file missing/unreadable.
     """
     if not os.path.isfile(debug_log_path):
         return None
     result: List[Tuple[int, int, float]] = []
-    pattern = re.compile(r'STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    pattern = re.compile(r'PREDICT_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
     try:
         with open(debug_log_path, 'r', encoding='utf-8') as f:
             for line in f:
@@ -1863,7 +1872,228 @@ def parse_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[in
     return result if result else None
 
 
-def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tuple[int, int, float]]] = None):
+def parse_cascade_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, str, str, float]]]:
+    """
+    LOG TEMPORAIRE: Parse CASCADE_TIMING lines from debug.log (cascade loop phase_*_start, only when --debug).
+    Returns list of (episode, cascade_num, from_phase, to_phase, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, str, str, float]] = []
+    pattern = re.compile(r'CASCADE_TIMING episode=(\d+) cascade_num=(\d+) from_phase=(\w+) to_phase=(\w+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), m.group(3), m.group(4), float(m.group(5))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_between_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse BETWEEN_STEP_TIMING lines from debug.log (time between step() return and next step() call = SB3 loop / predict, only when --debug).
+    Returns list of (episode, step_index, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'BETWEEN_STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_pre_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse PRE_STEP_TIMING lines from debug.log (time from step() entry to _step_t0, only when --debug).
+    Returns list of (episode, step_index, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'PRE_STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_post_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse POST_STEP_TIMING lines from debug.log (time from _step_t5 to return, only when --debug).
+    Returns list of (episode, step_index, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'POST_STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_reset_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse RESET_TIMING lines from debug.log (reset() duration per episode, only when --debug).
+    Returns list of (episode, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, float]] = []
+    pattern = re.compile(r'RESET_TIMING episode=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), float(m.group(2))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_wrapper_step_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse WRAPPER_STEP_TIMING lines from debug.log (duration of full env.step() call in wrapper, only when --debug).
+    Returns list of (episode, step_index, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'WRAPPER_STEP_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_after_step_increment_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse AFTER_STEP_INCREMENT_TIMING lines from debug.log (time from log_action to return, only when --debug).
+    Returns list of (episode, step_index, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'AFTER_STEP_INCREMENT_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_console_log_write_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float, int]]]:
+    """
+    LOG TEMPORAIRE: Parse CONSOLE_LOG_WRITE_TIMING lines from debug.log (only when --debug).
+    Returns list of (episode, step_index, duration_s, lines) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float, int]] = []
+    pattern = re.compile(r'CONSOLE_LOG_WRITE_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+) lines=(\d+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3)), int(m.group(4))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_get_mask_timings_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float]]]:
+    """
+    LOG TEMPORAIRE: Parse GET_MASK_TIMING lines from debug.log (get_action_mask in bot loop, only when --debug).
+    Returns list of (episode, step_index, duration_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float]] = []
+    pattern = re.compile(r'GET_MASK_TIMING episode=(\d+) step_index=(\d+) duration_s=([\d.]+)')
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append((int(m.group(1)), int(m.group(2)), float(m.group(3))))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def parse_step_breakdowns_from_debug(debug_log_path: str) -> Optional[List[Tuple[int, int, float, float, float, float, float, float, float]]]:
+    """
+    LOG TEMPORAIRE: Parse STEP_BREAKDOWN lines from debug.log (only written when --debug).
+    Returns list of (episode, step_index, get_mask_s, convert_s, process_s, replay_s, build_obs_s, reward_s, total_s) or None.
+    """
+    if not os.path.isfile(debug_log_path):
+        return None
+    result: List[Tuple[int, int, float, float, float, float, float, float, float]] = []
+    # New format with replay_s
+    pattern_new = re.compile(
+        r'STEP_BREAKDOWN episode=(\d+) step_index=(\d+) get_mask_s=([\d.]+) convert_s=([\d.]+) '
+        r'process_s=([\d.]+) replay_s=([\d.]+) build_obs_s=([\d.]+) reward_s=([\d.]+) total_s=([\d.]+)'
+    )
+    pattern_old = re.compile(
+        r'STEP_BREAKDOWN episode=(\d+) step_index=(\d+) get_mask_s=([\d.]+) convert_s=([\d.]+) '
+        r'process_s=([\d.]+) build_obs_s=([\d.]+) reward_s=([\d.]+) total_s=([\d.]+)'
+    )
+    try:
+        with open(debug_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern_new.search(line)
+                if m:
+                    result.append((
+                        int(m.group(1)), int(m.group(2)),
+                        float(m.group(3)), float(m.group(4)), float(m.group(5)),
+                        float(m.group(6)), float(m.group(7)), float(m.group(8)), float(m.group(9))
+                    ))
+                    continue
+                m = pattern_old.search(line)
+                if m:
+                    # replay_s=0 for old format
+                    result.append((
+                        int(m.group(1)), int(m.group(2)),
+                        float(m.group(3)), float(m.group(4)), float(m.group(5)),
+                        0.0, float(m.group(6)), float(m.group(7)), float(m.group(8))
+                    ))
+    except (OSError, ValueError):
+        return None
+    return result if result else None
+
+
+def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tuple[int, int, float, Optional[int]]]] = None, predict_timings: Optional[List[Tuple[int, int, float]]] = None, get_mask_timings: Optional[List[Tuple[int, int, float]]] = None, console_log_write_timings: Optional[List[Tuple[int, int, float, int]]] = None, cascade_timings: Optional[List[Tuple[int, int, str, str, float]]] = None, step_breakdowns: Optional[List[Tuple[int, int, float, float, float, float, float, float, float]]] = None, between_step_timings: Optional[List[Tuple[int, int, float]]] = None, reset_timings: Optional[List[Tuple[int, float]]] = None, post_step_timings: Optional[List[Tuple[int, int, float]]] = None, pre_step_timings: Optional[List[Tuple[int, int, float]]] = None, wrapper_step_timings: Optional[List[Tuple[int, int, float]]] = None, after_step_increment_timings: Optional[List[Tuple[int, int, float]]] = None):
     """Print formatted statistics."""
     def log_print(*args, **kwargs):
         """Print to both console and file if output_f provided"""
@@ -1933,28 +2163,250 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  Min: {min_duration:.2f}s (Episode {min_episode_num}) - (actions: {min_actions_str})")
         log_print(f"  Max: {max_duration:.2f}s (Episode {max_episode_num}) - (actions: {max_actions_str})")
     
-    # Step durations (by step index, from debug.log STEP_TIMING)
+    # LOG TEMPORAIRE: Reset timing (reset() duration per episode, from debug.log when --debug)
+    if reset_timings:
+        log_print("")
+        all_reset = [r[1] for r in reset_timings]
+        n_reset = len(all_reset)
+        avg_reset = sum(all_reset) / n_reset if n_reset else 0.0
+        max_reset = max(all_reset) if all_reset else 0.0
+        max_reset_ep = max(reset_timings, key=lambda x: x[1])
+        log_print(f"Reset timing (from debug.log, --debug): avg={avg_reset:.3f}s, max={max_reset:.3f}s (n={n_reset})")
+        log_print(f"  Max: {max_reset:.3f}s (Episode {max_reset_ep[0]})")
+    
+    # LOG TEMPORAIRE: Step durations (by step index, from debug.log STEP_TIMING when --debug)
     if step_timings:
         log_print("")
+        # step_timings: (episode, step_index, duration_s, step_calls or None)
         by_index: Dict[int, List[float]] = defaultdict(list)
-        for _ep, idx, dur in step_timings:
+        for _ep, idx, dur, _sc in step_timings:
             by_index[idx].append(dur)
-        all_durations = [d for _e, _i, d in step_timings]
+        all_durations = [d for _e, _i, d, _sc in step_timings]
         n_steps = len(all_durations)
         avg_all = sum(all_durations) / n_steps if n_steps else 0.0
         min_all = min(all_durations) if all_durations else 0.0
         max_all = max(all_durations) if all_durations else 0.0
         # Which (episode, step_index) has min/max duration (global over all steps)
-        min_ep, min_idx, min_val = min(step_timings, key=lambda t: t[2])
-        max_ep, max_idx, max_val = max(step_timings, key=lambda t: t[2])
+        min_ep, min_idx, min_val, _ = min(step_timings, key=lambda t: t[2])
+        max_ep, max_idx, max_val, max_sc = max(step_timings, key=lambda t: t[2])
         log_print(f"Step Durations (from debug.log): {avg_all:.3f}s (average), Min: {min_all:.3f}s, Max: {max_all:.3f}s (n={n_steps} steps)")
         log_print(f"  Min: {min_val:.3f}s (Episode {min_ep}, step index {min_idx})")
-        log_print(f"  Max: {max_val:.3f}s (Episode {max_ep}, step index {max_idx})")
+        max_line = f"  Max: {max_val:.3f}s (Episode {max_ep}, step index {max_idx})"
+        if max_sc is not None:
+            max_line += f", {max_sc} step() calls"
+        log_print(max_line)
+        # LOG TEMPORAIRE: step_calls stats when present (--debug)
+        step_calls_list = [sc for _e, _i, _d, sc in step_timings if sc is not None]
+        if step_calls_list:
+            n_sc = len(step_calls_list)
+            avg_sc = sum(step_calls_list) / n_sc
+            max_step_calls = max(step_calls_list)
+            log_print(f"  Step calls between step_increment: avg={avg_sc:.1f}, max={max_step_calls} (n={n_sc} with data)")
+        # LOG TEMPORAIRE: show STEP_BREAKDOWN for the slowest step (same episode/step_index or step_index-1 for early-return)
+        if step_breakdowns:
+            # step_breakdowns: (episode, step_index, get_mask_s, convert_s, process_s, replay_s, build_obs_s, reward_s, total_s)
+            matching = [b for b in step_breakdowns if b[0] == max_ep and (b[1] == max_idx or b[1] == max_idx - 1)]
+            if matching:
+                # Prefer the one with total_s closest to max_val (the actual slow step)
+                b = max(matching, key=lambda x: x[8])
+                log_print(f"  Breakdown for slowest step (Ep {b[0]}, step {b[1]}): get_mask={b[2]:.3f}s convert={b[3]:.3f}s process={b[4]:.3f}s replay={b[5]:.3f}s build_obs={b[6]:.3f}s reward={b[7]:.3f}s total={b[8]:.3f}s")
+            else:
+                log_print(f"  No STEP_BREAKDOWN for slowest step (Episode {max_ep}, step index {max_idx}) — check debug.log for [EARLY_NO_ACTIONS]")
+            # LOG TEMPORAIRE: list any STEP_BREAKDOWN for same episode with total_s > 1.0s (to spot [EARLY_NO_ACTIONS] or other step_index)
+            high_total_same_ep = [b for b in step_breakdowns if b[0] == max_ep and b[8] > 1.0]
+            if high_total_same_ep:
+                high_total_same_ep.sort(key=lambda x: -x[8])
+                for b in high_total_same_ep:
+                    log_print(f"  STEP_BREAKDOWN Ep {b[0]} step {b[1]} total_s={b[8]:.3f}s (get_mask={b[2]:.3f} process={b[4]:.3f} build_obs={b[6]:.3f})")
+        # LOG TEMPORAIRE: when slowest step is step index 0, show reset() duration for that episode (explains slow first step)
+        if max_idx == 0 and reset_timings:
+            reset_for_ep = [r for r in reset_timings if r[0] == max_ep]
+            if reset_for_ep:
+                reset_dur = reset_for_ep[0][1]
+                log_print(f"  Reset of episode {max_ep} took {reset_dur:.3f}s (slowest step is first step of episode)")
+        # LOG TEMPORAIRE: PRE_STEP_TIMING for slowest step (time from step() entry to _step_t0 = game_over + counter)
+        if pre_step_timings:
+            pre_for_slowest = [p for p in pre_step_timings if p[0] == max_ep and p[1] == max_idx]
+            if pre_for_slowest:
+                pre_val = max(pre_for_slowest, key=lambda x: x[2])[2]
+                log_print(f"  Pre-step (entry to _step_t0) for slowest step: {pre_val:.3f}s")
+            all_pre = [p[2] for p in pre_step_timings]
+            n_pre = len(all_pre)
+            avg_pre = sum(all_pre) / n_pre if n_pre else 0.0
+            max_pre = max(all_pre) if all_pre else 0.0
+            log_print(f"  Pre-step timing (--debug): avg={avg_pre:.3f}s, max={max_pre:.3f}s (n={n_pre})")
+        # LOG TEMPORAIRE: POST_STEP_TIMING for slowest step (time from _step_t5 to return = last_unit_positions + STEP_BREAKDOWN + console_logs)
+        if post_step_timings:
+            post_for_slowest = [p for p in post_step_timings if p[0] == max_ep and (p[1] == max_idx or p[1] == max_idx - 1)]
+            if post_for_slowest:
+                post_val = max(post_for_slowest, key=lambda x: x[2])[2]
+                log_print(f"  Post-step (after _step_t5 to return) for slowest step: {post_val:.3f}s")
+            all_post = [p[2] for p in post_step_timings]
+            n_post = len(all_post)
+            avg_post = sum(all_post) / n_post if n_post else 0.0
+            max_post = max(all_post) if all_post else 0.0
+            log_print(f"  Post-step timing (--debug): avg={avg_post:.3f}s, max={max_post:.3f}s (n={n_post})")
+        # LOG TEMPORAIRE: BETWEEN_STEP_TIMING for slowest step (time between step() return and next step() call = SB3 loop / predict)
+        if between_step_timings:
+            between_for_slowest = [b for b in between_step_timings if b[0] == max_ep and b[1] == max_idx]
+            if between_for_slowest:
+                between_val = between_for_slowest[0][2]
+                log_print(f"  Between-step (SB3 loop / predict) for slowest step: {between_val:.3f}s")
+            all_between = [b[2] for b in between_step_timings]
+            n_bt = len(all_between)
+            avg_bt = sum(all_between) / n_bt if n_bt else 0.0
+            max_bt = max(all_between) if all_between else 0.0
+            log_print(f"  Between-step timing (--debug): avg={avg_bt:.3f}s, max={max_bt:.3f}s (n={n_bt})")
+        # LOG TEMPORAIRE: WRAPPER_STEP_TIMING for slowest step (full env.step() call in wrapper; compare with STEP_TIMING).
+        # Also check max_idx±1 because engine STEP_TIMING step_index can differ from wrapper episode_steps (off-by-one).
+        if wrapper_step_timings:
+            wrapper_for_slowest = [w for w in wrapper_step_timings if w[0] == max_ep and w[1] in (max_idx - 1, max_idx, max_idx + 1)]
+            if wrapper_for_slowest:
+                wrapper_val = max(wrapper_for_slowest, key=lambda x: x[2])[2]
+                log_print(f"  Wrapper step (env.step call) for slowest step: {wrapper_val:.3f}s")
+            all_wrapper = [w[2] for w in wrapper_step_timings]
+            n_wrap = len(all_wrapper)
+            avg_wrap = sum(all_wrapper) / n_wrap if n_wrap else 0.0
+            max_wrap = max(all_wrapper) if all_wrapper else 0.0
+            log_print(f"  Wrapper step timing (--debug): avg={avg_wrap:.3f}s, max={max_wrap:.3f}s (n={n_wrap})")
+        # LOG TEMPORAIRE: AFTER_STEP_INCREMENT_TIMING for slowest step (time from log_action to return = last_unit_positions + STEP_BREAKDOWN + console_logs)
+        if after_step_increment_timings:
+            after_for_slowest = [a for a in after_step_increment_timings if a[0] == max_ep and a[1] in (max_idx - 1, max_idx, max_idx + 1)]
+            if after_for_slowest:
+                after_val = max(after_for_slowest, key=lambda x: x[2])[2]
+                log_print(f"  After step_increment (log_action to return) for slowest step: {after_val:.3f}s")
+            all_after = [a[2] for a in after_step_increment_timings]
+            n_after = len(all_after)
+            avg_after = sum(all_after) / n_after if n_after else 0.0
+            max_after = max(all_after) if all_after else 0.0
+            log_print(f"  After step_increment timing (--debug): avg={avg_after:.3f}s, max={max_after:.3f}s (n={n_after})")
+        # LOG TEMPORAIRE: previous step (Ep max_ep, step max_idx-1) breakdown + POST_STEP + AFTER_STEP_INCREMENT (STEP_TIMING = time from prev step_increment to this one; slow part may be in prev step's tail)
+        if max_idx > 0 and step_breakdowns:
+            prev_breakdowns = [b for b in step_breakdowns if b[0] == max_ep and (b[1] == max_idx - 1 or b[1] == max_idx - 2)]
+            if prev_breakdowns:
+                b_prev = max(prev_breakdowns, key=lambda x: x[8])
+                log_print(f"  [Previous step] Ep {max_ep} step {b_prev[1]}: get_mask={b_prev[2]:.3f}s process={b_prev[4]:.3f}s build_obs={b_prev[6]:.3f}s total={b_prev[8]:.3f}s")
+        if max_idx > 0 and post_step_timings:
+            prev_post = [p for p in post_step_timings if p[0] == max_ep and (p[1] == max_idx - 1 or p[1] == max_idx - 2)]
+            if prev_post:
+                post_prev = max(prev_post, key=lambda x: x[2])[2]
+                log_print(f"  [Previous step] Ep {max_ep} step {max_idx - 1} POST_STEP (after _step_t5 to return): {post_prev:.3f}s")
+        if max_idx > 0 and after_step_increment_timings:
+            prev_after = [a for a in after_step_increment_timings if a[0] == max_ep and (a[1] == max_idx - 1 or a[1] == max_idx - 2)]
+            if prev_after:
+                after_prev = max(prev_after, key=lambda x: x[2])[2]
+                log_print(f"  [Previous step] Ep {max_ep} step {max_idx - 1} AFTER_STEP_INCREMENT (log_action to return): {after_prev:.3f}s")
     elif step_timings is not None and len(step_timings) == 0:
         log_print("")
         log_print("Step Durations (from debug.log): no STEP_TIMING data")
+    # LOG TEMPORAIRE: Wrapper step timing when we have data but no STEP_TIMING (e.g. debug.log only from wrapper)
+    if wrapper_step_timings and not step_timings:
+        log_print("")
+        all_wrap = [w[2] for w in wrapper_step_timings]
+        n_wrap = len(all_wrap)
+        avg_wrap = sum(all_wrap) / n_wrap if n_wrap else 0.0
+        max_wrap = max(all_wrap) if all_wrap else 0.0
+        log_print(f"Wrapper step timing (from debug.log, --debug): avg={avg_wrap:.3f}s, max={max_wrap:.3f}s (n={n_wrap})")
     # If step_timings is None, debug.log was missing → skip silently to match "same stats" only when data exists
-    
+
+    # Predict durations (model.predict(), from debug.log PREDICT_TIMING when --debug)
+    if predict_timings:
+        log_print("")
+        all_pred = [d for _e, _i, d in predict_timings]
+        n_pred = len(all_pred)
+        avg_pred = sum(all_pred) / n_pred if n_pred else 0.0
+        min_pred = min(all_pred) if all_pred else 0.0
+        max_pred = max(all_pred) if all_pred else 0.0
+        min_ep_p, min_idx_p, min_val_p = min(predict_timings, key=lambda t: t[2])
+        max_ep_p, max_idx_p, max_val_p = max(predict_timings, key=lambda t: t[2])
+        log_print(f"Predict Durations (from debug.log): {avg_pred:.3f}s (average), Min: {min_pred:.3f}s, Max: {max_pred:.3f}s (n={n_pred} calls)")
+        log_print(f"  Min: {min_val_p:.3f}s (Episode {min_ep_p}, step index {min_idx_p})")
+        log_print(f"  Max: {max_val_p:.3f}s (Episode {max_ep_p}, step index {max_idx_p})")
+    elif predict_timings is not None and len(predict_timings) == 0:
+        log_print("")
+        log_print("Predict Durations (from debug.log): no PREDICT_TIMING data")
+
+    # LOG TEMPORAIRE: Get-mask durations (get_action_mask in bot loop, from debug.log when --debug)
+    if get_mask_timings:
+        log_print("")
+        all_gm = [d for _e, _i, d in get_mask_timings]
+        n_gm = len(all_gm)
+        avg_gm = sum(all_gm) / n_gm if n_gm else 0.0
+        min_gm = min(all_gm) if all_gm else 0.0
+        max_gm = max(all_gm) if all_gm else 0.0
+        min_ep_gm, min_idx_gm, min_val_gm = min(get_mask_timings, key=lambda t: t[2])
+        max_ep_gm, max_idx_gm, max_val_gm = max(get_mask_timings, key=lambda t: t[2])
+        log_print(f"Get-Mask Durations (from debug.log, --debug): {avg_gm:.3f}s (average), Min: {min_gm:.3f}s, Max: {max_gm:.3f}s (n={n_gm} calls)")
+        log_print(f"  Min: {min_val_gm:.3f}s (Episode {min_ep_gm}, step index {min_idx_gm})")
+        log_print(f"  Max: {max_val_gm:.3f}s (Episode {max_ep_gm}, step index {max_idx_gm})")
+    elif get_mask_timings is not None and len(get_mask_timings) == 0:
+        log_print("")
+        log_print("Get-Mask Durations (from debug.log): no GET_MASK_TIMING data (run with --debug)")
+
+    # LOG TEMPORAIRE: Console-log write durations (write console_logs to debug.log; only when --debug)
+    if console_log_write_timings:
+        log_print("")
+        all_cl = [d for _e, _i, d, _l in console_log_write_timings]
+        n_cl = len(all_cl)
+        avg_cl = sum(all_cl) / n_cl if n_cl else 0.0
+        min_cl = min(all_cl) if all_cl else 0.0
+        max_cl = max(all_cl) if all_cl else 0.0
+        min_ep_cl, min_idx_cl, min_val_cl, _ = min(console_log_write_timings, key=lambda t: t[2])
+        max_ep_cl, max_idx_cl, max_val_cl, max_lines = max(console_log_write_timings, key=lambda t: t[2])
+        log_print(f"Console-Log Write (from debug.log, --debug): {avg_cl:.3f}s (average), Min: {min_cl:.3f}s, Max: {max_cl:.3f}s (n={n_cl} writes)")
+        log_print(f"  Min: {min_val_cl:.3f}s (Episode {min_ep_cl}, step index {min_idx_cl})")
+        log_print(f"  Max: {max_val_cl:.3f}s (Episode {max_ep_cl}, step index {max_idx_cl}, lines={max_lines})")
+    elif console_log_write_timings is not None and len(console_log_write_timings) == 0:
+        log_print("")
+        log_print("Console-Log Write (from debug.log): no CONSOLE_LOG_WRITE_TIMING data (run with --debug)")
+
+    # LOG TEMPORAIRE: Step breakdown (get_mask, convert, process, replay, build_obs, reward) from debug.log when --debug
+    if step_breakdowns:
+        log_print("")
+        n_br = len(step_breakdowns)
+        avg_get = sum(r[2] for r in step_breakdowns) / n_br
+        avg_convert = sum(r[3] for r in step_breakdowns) / n_br
+        avg_process = sum(r[4] for r in step_breakdowns) / n_br
+        avg_replay = sum(r[5] for r in step_breakdowns) / n_br
+        avg_build_obs = sum(r[6] for r in step_breakdowns) / n_br
+        avg_reward = sum(r[7] for r in step_breakdowns) / n_br
+        avg_total = sum(r[8] for r in step_breakdowns) / n_br
+        segs = [
+            ("get_mask", avg_get), ("convert", avg_convert), ("process", avg_process),
+            ("replay", avg_replay), ("build_obs", avg_build_obs), ("reward", avg_reward)
+        ]
+        max_seg = max(segs, key=lambda x: x[1])
+        log_print(f"Step Breakdown (from debug.log, --debug): avg total={avg_total:.3f}s (n={n_br})")
+        log_print(f"  Avg: get_mask={avg_get:.3f}s convert={avg_convert:.3f}s process={avg_process:.3f}s replay={avg_replay:.3f}s build_obs={avg_build_obs:.3f}s reward={avg_reward:.3f}s")
+        log_print(f"  Segment with highest avg: {max_seg[0]} ({max_seg[1]:.3f}s)")
+        slowest = max(step_breakdowns, key=lambda r: r[8])
+        log_print(f"  Slowest step: Episode {slowest[0]}, step_index {slowest[1]}: total={slowest[8]:.3f}s (get_mask={slowest[2]:.3f} convert={slowest[3]:.3f} process={slowest[4]:.3f} replay={slowest[5]:.3f} build_obs={slowest[6]:.3f} reward={slowest[7]:.3f})")
+    elif step_breakdowns is not None and len(step_breakdowns) == 0:
+        log_print("")
+        log_print("Step Breakdown (from debug.log): no STEP_BREAKDOWN data (run with --debug)")
+
+    # LOG TEMPORAIRE: Cascade timings (phase_*_start in cascade loop; only when --debug)
+    if cascade_timings:
+        log_print("")
+        n_casc = len(cascade_timings)
+        all_casc_dur = [r[4] for r in cascade_timings]
+        avg_casc = sum(all_casc_dur) / n_casc if n_casc else 0.0
+        max_casc = max(all_casc_dur) if all_casc_dur else 0.0
+        slowest_casc = max(cascade_timings, key=lambda r: r[4])
+        # Group by (from_phase, to_phase) for avg
+        by_trans: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+        for _ep, _num, fp, tp, dur in cascade_timings:
+            by_trans[(fp, tp)].append(dur)
+        trans_avg = [(k, sum(v) / len(v), len(v)) for k, v in by_trans.items()]
+        trans_avg.sort(key=lambda x: -x[1])
+        log_print(f"Cascade (from debug.log, --debug): {avg_casc:.3f}s avg per transition, max={max_casc:.3f}s (n={n_casc})")
+        log_print(f"  Slowest: Episode {slowest_casc[0]}, cascade #{slowest_casc[1]} {slowest_casc[2]}->{slowest_casc[3]}: {slowest_casc[4]:.3f}s")
+        if trans_avg:
+            log_print(f"  By transition (avg): {'; '.join(f'{k[0]}->{k[1]}={v:.3f}s (n={c})' for (k, v, c) in trans_avg[:6])}")
+    elif cascade_timings is not None and len(cascade_timings) == 0:
+        log_print("")
+        log_print("Cascade (from debug.log): no CASCADE_TIMING data (run with --debug)")
+
     # RÉSULTATS DES PARTIES
     log_print("\n" + "-" * 80)
     log_print("WIN METHODS")
@@ -2277,6 +2729,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_shoot_dead > 0 and stats['first_error_lines']['shoot_dead_unit'][2]:
         first_err = stats['first_error_lines']['shoot_dead_unit'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_shoot_at_dead = stats['shoot_at_dead_unit'][1]
+    bot_shoot_at_dead = stats['shoot_at_dead_unit'][2]
+    log_print(f"Shoot at dead unit:           {agent_shoot_at_dead:6d}           {bot_shoot_at_dead:6d}")
+    if agent_shoot_at_dead > 0 and stats['first_error_lines']['shoot_at_dead_unit'][1]:
+        first_err = stats['first_error_lines']['shoot_at_dead_unit'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_shoot_at_dead > 0 and stats['first_error_lines']['shoot_at_dead_unit'][2]:
+        first_err = stats['first_error_lines']['shoot_at_dead_unit'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_advance_after_shoot = stats['advance_after_shoot'][1]
     bot_advance_after_shoot = stats['advance_after_shoot'][2]
     log_print(f"Advance after shoot:          {agent_advance_after_shoot:6d}           {bot_advance_after_shoot:6d}")
@@ -2481,7 +2942,18 @@ if __name__ == "__main__":
         stats = parse_step_log(log_file)
         debug_log_path = os.path.join(os.path.dirname(os.path.abspath(log_file)) or ".", "debug.log")
         step_timings = parse_step_timings_from_debug(debug_log_path)
-        print_statistics(stats, output_f, step_timings=step_timings)
+        predict_timings = parse_predict_timings_from_debug(debug_log_path)
+        get_mask_timings = parse_get_mask_timings_from_debug(debug_log_path)
+        console_log_write_timings = parse_console_log_write_timings_from_debug(debug_log_path)
+        cascade_timings = parse_cascade_timings_from_debug(debug_log_path)
+        step_breakdowns = parse_step_breakdowns_from_debug(debug_log_path)
+        between_step_timings = parse_between_step_timings_from_debug(debug_log_path)
+        reset_timings = parse_reset_timings_from_debug(debug_log_path)
+        post_step_timings = parse_post_step_timings_from_debug(debug_log_path)
+        pre_step_timings = parse_pre_step_timings_from_debug(debug_log_path)
+        wrapper_step_timings = parse_wrapper_step_timings_from_debug(debug_log_path)
+        after_step_increment_timings = parse_after_step_increment_timings_from_debug(debug_log_path)
+        print_statistics(stats, output_f, step_timings=step_timings, predict_timings=predict_timings, get_mask_timings=get_mask_timings, console_log_write_timings=console_log_write_timings, cascade_timings=cascade_timings, step_breakdowns=step_breakdowns, between_step_timings=between_step_timings, reset_timings=reset_timings, post_step_timings=post_step_timings, pre_step_timings=pre_step_timings, wrapper_step_timings=wrapper_step_timings, after_step_increment_timings=after_step_increment_timings)
         
         # Calculate total errors (all error counts between MOVEMENT ERRORS and SAMPLE ACTIONS)
         total_errors = (
@@ -2495,6 +2967,7 @@ if __name__ == "__main__":
             stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
             stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
             stats['shoot_dead_unit'][1] + stats['shoot_dead_unit'][2] +
+            stats['shoot_at_dead_unit'][1] + stats['shoot_at_dead_unit'][2] +
             # CHARGE ERRORS
             stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
             stats['charge_after_fled'][1] + stats['charge_after_fled'][2] +

@@ -1445,7 +1445,7 @@ def main():
             step_log_buffer_size = require_key(tc, "step_log_buffer_size")
         # Initialize global step logger based on --step argument
         global step_logger
-        step_logger = StepLogger("step.log", enabled=args.step, buffer_size=step_log_buffer_size)
+        step_logger = StepLogger("step.log", enabled=args.step, buffer_size=step_log_buffer_size, debug_mode=args.debug)
         
         # Sync configs to frontend automatically
         try:

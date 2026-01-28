@@ -446,9 +446,11 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # AI_TURN.md STEP 0: Build position_cache at phase start
     build_position_cache(game_state)
     
-    # DEPRECATED: _build_shooting_los_cache() kept for backward compatibility
-    # New code should use build_unit_los_cache() per unit (unit-local cache)
-    _build_shooting_los_cache(game_state)
+    # PERF: No global los_cache at phase start (was 56 _has_line_of_sight calls → ~3s spike).
+    # LoS is built per unit at activation via build_unit_los_cache(); _is_valid_shooting_target
+    # uses shooter["los_cache"] when present, else _has_line_of_sight (e.g. activation pool build).
+    if "los_cache" in game_state:
+        game_state["los_cache"] = {}
     
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
@@ -457,13 +459,10 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Required for convert_gym_action, get_action_mask, and any reader (e.g. debug log).
     if eligible_units:
         game_state["active_shooting_unit"] = eligible_units[0]
+        # Kill probability cache is built lazily on first use (select_best_ranged_weapon) to avoid ~2.9s step spike.
     else:
         if "active_shooting_unit" in game_state:
             del game_state["active_shooting_unit"]
-    
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Pre-compute kill probability cache
-    from engine.ai.weapon_selector import precompute_kill_probability_cache
-    precompute_kill_probability_cache(game_state, "shoot")
     
     # Silent pool building - no console logs during normal operation
     if "console_logs" not in game_state:
@@ -986,23 +985,21 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
                     # Enemy is engaged with friendly unit - cannot shoot
                     return False
 
-    # PERFORMANCE: Use LoS cache if available (instant lookup)
-    # Fallback to calculation if cache missing (edge cases: cache invalidated, tests, or other contexts)
+    # PERFORMANCE: Prefer unit-local los_cache (built at activation), then global, then direct calc.
+    # Unit-local cache avoids 56-call spike at shooting_phase_start (AI_TURN.md per-unit cache).
+    target_id_str = str(target["id"])
     has_los = False
-    if "los_cache" in game_state and game_state["los_cache"]:
-        # CRITICAL: Normalize IDs to string for consistent cache key comparison
-        cache_key = (str(shooter["id"]), str(target["id"]))
+    if "los_cache" in shooter and shooter["los_cache"] and target_id_str in shooter["los_cache"]:
+        has_los = bool(shooter["los_cache"][target_id_str])
+    elif "los_cache" in game_state and game_state["los_cache"]:
+        cache_key = (str(shooter["id"]), target_id_str)
         if cache_key in game_state["los_cache"]:
-            # Cache hit: instant lookup (0.001ms)
             has_los = game_state["los_cache"][cache_key]
         else:
-            # Cache miss: calculate and store (first-time lookup)
             has_los = _has_line_of_sight(game_state, shooter, target)
             game_state["los_cache"][cache_key] = has_los
     else:
-        # No cache: fall back to direct calculation (pre-phase-start calls)
         has_los = _has_line_of_sight(game_state, shooter, target)
-    
     return has_los
 
 def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
@@ -1741,20 +1738,16 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         # CHANGE 8: NO FALLBACK - raise error if wall data not found in any source
         raise KeyError("wall_hexes not found in game_state['wall_hexes'], game_state['board']['wall_hexes'], or game_state['board_config']['wall_hexes']")
     
-    # DEBUG: Log wall data source and format (only in debug mode to avoid performance impact)
+    # LOG TEMPORAIRE: Log LOS wall/LoS in debug mode (only if --debug)
     debug_mode = game_state.get("debug_mode", False)
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     shooter_id = shooter.get("id", "?")
     target_id = target.get("id", "?")
-    from engine.game_utils import add_console_log, add_debug_log
-    if debug_mode:
-        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} _has_line_of_sight: Shooter {shooter_id}({start_col},{start_row}) -> Target {target_id}({end_col},{end_row})")
-        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Wall source: {wall_source}, Type: {type(wall_hexes_data)}, Length: {len(wall_hexes_data) if hasattr(wall_hexes_data, '__len__') else 'N/A'}")
-    
+    from engine.game_utils import add_debug_log
     if not wall_hexes_data:
         if debug_mode:
-            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} No wall data found - allowing shot")
+            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id}({start_col},{start_row}) -> Target {target_id}({end_col},{end_row}): CLEAR (no walls)")
         return True
     
     # Convert wall_hexes to set for fast lookup
@@ -1770,22 +1763,13 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         else:
             invalid_walls.append(str(wall_hex))
     
-    if invalid_walls and debug_mode:
-        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Invalid wall formats: {invalid_walls[:5]}")
-    if debug_mode:
-        add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Converted {len(wall_hexes)} valid wall hexes")
-    
     try:
-        # CRITICAL: Convert coordinates to int to ensure consistent comparison
         start_col_int = int(start_col)
         start_row_int = int(start_row)
         end_col_int = int(end_col)
         end_row_int = int(end_row)
         hex_path = _get_accurate_hex_line(start_col_int, start_row_int, end_col_int, end_row_int)
-        
-        if debug_mode:
-            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Hex path ({len(hex_path)} hexes): {hex_path[:3]}...{hex_path[-3:]}")
-        
+
         # Check if any hex in path is a wall (excluding start and end)
         # CRITICAL: Must check all hexes in path, not just first wall found
         # Convert coordinates to int for consistent comparison
@@ -1804,18 +1788,16 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         
         if blocking_walls:
             if debug_mode:
-                add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS BLOCKED by walls: {blocking_walls}")
+                add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id}({start_col},{start_row}) -> Target {target_id}({end_col},{end_row}): BLOCKED")
             return False
-        
-        # No walls blocking - line of sight is clear
+
         if debug_mode:
-            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS CLEAR (no blocking walls)")
+            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id}({start_col},{start_row}) -> Target {target_id}({end_col},{end_row}): CLEAR")
         return True
-        
+
     except Exception as e:
-        # On error, deny line of sight (fail-safe)
         if debug_mode:
-            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} LoS calculation ERROR: {str(e)} - denying LoS (fail-safe)")
+            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id} -> Target {target_id}: ERROR {e!r} (deny LoS)")
         return False
 
 def _get_accurate_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:

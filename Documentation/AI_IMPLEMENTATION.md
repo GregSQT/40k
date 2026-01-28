@@ -1029,6 +1029,10 @@ API Server:
 
 Line-of-sight calculations cached in `game_state["los_cache"]`. Cache built at shooting phase start, invalidated on movement. Reduces shooting phase from 40% to 8% of episode time.
 
+### Kill Probability Cache (Lazy)
+
+`game_state["kill_probability_cache"]` is filled on first use in `engine/ai/weapon_selector.py` (e.g. when `select_best_ranged_weapon()` or `select_best_melee_weapon()` is called). It is no longer precomputed at shooting_phase_start() or fight_phase_start(), avoiding a costly O(units×weapons×enemies) block at phase transition.
+
 ### Egocentric Observation (150 Floats)
 
 Observation uses relative coordinates centered on active unit. Perception radius R=25 creates fog of war. Enables transfer learning. No performance degradation despite larger observation space.

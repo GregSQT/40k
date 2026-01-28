@@ -715,7 +715,7 @@ POSTPONE_ACTIVATION():
 
 ### STEP 0: PHASE INITIALIZATION
 
-**Purpose**: Initialiser les caches globaux au début de la phase
+**Purpose**: Initialiser les caches globaux au début de la phase (position_cache, pools ; le cache kill probability n'est pas construit ici, voir note ci-dessous)
 
 **Appelé à:** 
 - Début de la phase de tir (appelé automatiquement dans `execute_action` si `_shooting_phase_initialized` est False)
@@ -733,6 +733,8 @@ shooting_phase_start():
 ```
 
 **Note:** `shooting_phase_start()` appelle aussi `shooting_build_activation_pool()` qui implémente le STEP 1: ELIGIBILITY CHECK.
+
+**Cache kill probability:** Le cache `game_state["kill_probability_cache"]` n'est plus construit en début de phase. Il est rempli à la demande (lazy) lors du premier appel à `select_best_ranged_weapon()` / `select_best_melee_weapon()` pour une paire (unité, cible). Voir `engine/ai/weapon_selector.py`.
 
 ### STEP 1: ELIGIBILITY CHECK (Pool Building Phase)
 

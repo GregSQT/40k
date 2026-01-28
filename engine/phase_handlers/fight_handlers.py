@@ -46,13 +46,6 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Build ALL fight pools (charging + alternating for both players)
     # NOTE: ATTACK_LEFT is NOT set at phase start - it's set per unit activation
     fight_build_activation_pools(game_state)
-    
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Pre-compute kill probability cache
-    from engine.ai.weapon_selector import precompute_kill_probability_cache
-    precompute_kill_probability_cache(game_state, "fight")
-
-    # Console log
-    add_console_log(game_state, "FIGHT PHASE START")
 
     # Check if phase complete immediately (no eligible units)
     # AI_TURN.md COMPLIANCE: Direct field access - pools are set by fight_build_activation_pools()
@@ -67,6 +60,12 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     active_alternating = game_state["active_alternating_activation_pool"]
     non_active_alternating = game_state["non_active_alternating_activation_pool"]
 
+    # Kill probability cache is built lazily on first use (select_best_melee_weapon) to avoid step spike.
+    has_eligible = bool(charging_pool or active_alternating or non_active_alternating)
+
+    # Console log
+    add_console_log(game_state, "FIGHT PHASE START")
+
     # AI_TURN.md COMPLIANCE: Set initial fight_subphase based on which pools have units
     if charging_pool:
         game_state["fight_subphase"] = "charging"
@@ -76,7 +75,7 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     else:
         game_state["fight_subphase"] = None
 
-    if not charging_pool and not active_alternating and not non_active_alternating:
+    if not has_eligible:
         return fight_phase_end(game_state)
 
     return {

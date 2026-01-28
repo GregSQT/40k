@@ -6,7 +6,7 @@ observation_builder.py - Builds observations from game state
 import os
 import time
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight, get_unit_coordinates
 from engine.game_utils import get_unit_by_id
@@ -298,7 +298,34 @@ class ObservationBuilder:
         from engine.phase_handlers import shooting_handlers
         has_los = shooting_handlers._has_line_of_sight(game_state, shooter, target)
         return 1.0 if has_los else 0.0
-    
+
+    def _build_los_cache_for_observation(
+        self,
+        active_unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+        six_enemies: List[Tuple[float, Dict[str, Any]]],
+    ) -> Dict[Tuple[str, str], bool]:
+        """
+        Build a LoS cache for observation: (ally_id, enemy_id) -> bool.
+        Used by _encode_enemy_units for feature 14 (visibility_to_allies) to avoid
+        repeated _has_line_of_sight calls. Reuses ally["los_cache"] when present.
+        """
+        from engine.phase_handlers import shooting_handlers
+
+        allies = [
+            u for u in game_state["units"]
+            if u["player"] == active_unit["player"] and u["HP_CUR"] > 0
+        ]
+        result: Dict[Tuple[str, str], bool] = {}
+        for ally in allies:
+            for _distance, enemy in six_enemies:
+                key = (str(ally["id"]), str(enemy["id"]))
+                if "los_cache" in ally and ally["los_cache"] and enemy["id"] in ally["los_cache"]:
+                    result[key] = bool(ally["los_cache"][enemy["id"]])
+                else:
+                    result[key] = shooting_handlers._has_line_of_sight(game_state, ally, enemy)
+        return result
+
     def _calculate_kill_probability(self, shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         """
         Calculate actual probability to kill target this turn considering W40K dice mechanics.
@@ -639,7 +666,7 @@ class ObservationBuilder:
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
         """
-        # Logs temporaires — BUILD_OBS_TIMING pour identifier la section lente dans build_observation. À supprimer une fois la root cause trouvée.
+        # LOG TEMPORAIRE: BUILD_OBS_TIMING pour identifier la section lente dans build_observation.
         debug_build_obs = game_state.get("debug_mode", False)
         t0 = time.time() if debug_build_obs else None
 
@@ -757,7 +784,8 @@ class ObservationBuilder:
         valid_targets = self._get_valid_targets(active_unit, game_state)
         self._sort_valid_targets(valid_targets, active_unit, game_state)
         six_enemies = self._get_six_reference_enemies(active_unit, game_state, valid_targets)
-        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies)
+        los_cache_obs = self._build_los_cache_for_observation(active_unit, game_state, six_enemies)
+        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies, los_cache_obs=los_cache_obs)
         t6 = time.time() if debug_build_obs else None
 
         # Enemy Units: [142:274] = 132 floats (6 × 22 features)
@@ -768,7 +796,7 @@ class ObservationBuilder:
         )
         t7 = time.time() if debug_build_obs else None
 
-        # Logs temporaires — écriture BUILD_OBS_TIMING (voir bloc t0 en début de build_observation). À supprimer une fois la root cause trouvée.
+        # LOG TEMPORAIRE: écriture BUILD_OBS_TIMING (voir bloc t0 en début de build_observation).
         if debug_build_obs and t0 is not None and t1 is not None:
             try:
                 debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
@@ -1026,13 +1054,18 @@ class ObservationBuilder:
         game_state: Dict[str, Any],
         base_idx: int,
         six_enemies: Optional[List[tuple]] = None,
+        los_cache_obs: Optional[Dict[Tuple[str, str], bool]] = None,
     ):
         """
         Encode up to 6 enemy units within perception radius.
         132 floats = 6 units × 22 features per unit. - MULTIPLE_WEAPONS_IMPLEMENTATION.md
-        
+
         Asymmetric design: MORE complete information about enemies for tactical decisions.
-        
+
+        When los_cache_obs is provided (from build_observation), feature 14 (visibility_to_allies)
+        uses this cache instead of _check_los_cached to avoid repeated _has_line_of_sight calls.
+        When los_cache_obs is None (e.g. call from test), feature 14 uses _check_los_cached (current behavior).
+
         Features per enemy (22 floats):
         0. relative_col, 1. relative_row (egocentric position)
         2. distance_normalized (distance / perception_radius)
@@ -1051,7 +1084,7 @@ class ObservationBuilder:
         18. is_adjacent (1.0 if within melee range) - INCHANGÉ
         19. combat_mix_score (enemy's ranged/melee preference) - DÉCALÉ
         20. favorite_target (enemy's preferred target type) - DÉCALÉ
-        
+
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
         When six_enemies is provided (from build_observation), uses that list so obs[141:273]
         matches enemy_index_map in _encode_valid_targets (avoids "Required key 'X' missing").
@@ -1154,8 +1187,12 @@ class ObservationBuilder:
                 combined_threat = 0.0
                 for ally in game_state["units"]:
                     if ally["player"] == active_unit["player"] and ally["HP_CUR"] > 0:
-                        if self._check_los_cached(ally, enemy, game_state) > 0.5:
-                            visibility += 1.0
+                        if los_cache_obs is not None:
+                            if los_cache_obs.get((str(ally["id"]), str(enemy["id"])), False):
+                                visibility += 1.0
+                        else:
+                            if self._check_los_cached(ally, enemy, game_state) > 0.5:
+                                visibility += 1.0
                         combined_threat += self._calculate_danger_probability(enemy, ally, game_state)
                 obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)
                 obs[feature_base + 15] = min(1.0, combined_threat / 5.0)  # combined_friendly_threat (était feature 14)

@@ -168,7 +168,7 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
     Returns:
         Set of hex coordinates adjacent to any living enemy unit
     """
-    # Only log in debug mode to avoid performance impact during training
+    # LOG TEMPORAIRE: Log build_enemy_adjacent_hexes call (only if --debug)
     debug_mode_val = game_state.get("debug_mode", False)
     if debug_mode_val:
         if "console_logs" not in game_state:
@@ -176,97 +176,53 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         phase = game_state.get("phase", "?")
-        test_log = f"[DEBUG TEST] build_enemy_adjacent_hexes called: debug_mode={debug_mode_val}, episode={episode}, turn={turn}, phase={phase}, player={player}"
+        test_log = f"[DEBUG TEST] build_enemy_adjacent_hexes called: episode={episode}, turn={turn}, phase={phase}, player={player}"
         game_state["console_logs"].append(test_log)
     
     enemy_adjacent_hexes = set()
-    enemies_processed = []  # Track enemies for debugging
-    all_units_info = []  # Track all units for debugging
+    alive_enemy_count = 0  # For debug summary only
 
-    enemies_detailed = []  # Track detailed enemy info for debugging
     for enemy in game_state["units"]:
-        # Log all units for debugging
-        unit_info = f"Unit {enemy['id']} player={enemy['player']} HP={require_key(enemy, 'HP_CUR')} at ({int(enemy['col'])},{int(enemy['row'])})"
-        all_units_info.append(unit_info)
-        
         # Convert player to int for consistent comparison
         enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
         player_int = int(player) if player is not None else None
         
-        # Build detailed enemy info for debugging
+        if enemy_player == player_int:
+            continue  # Skip friendly units
         hp_cur_raw = require_key(enemy, "HP_CUR")
         try:
             hp_cur = int(float(hp_cur_raw))
         except (ValueError, TypeError):
             raise ValueError(f"Unit {enemy.get('id')} has invalid HP_CUR: {hp_cur_raw!r}") from None
-        hp_max = enemy.get("HP_MAX", "?")
-        # Normalize coordinates to int - raises error if invalid
-        enemy_col, enemy_row = get_unit_coordinates(enemy)
-        is_dead = hp_cur <= 0
-        is_friendly = enemy_player == player_int
-        
-        if is_friendly:
-            status = "FRIENDLY"
-        elif is_dead:
-            status = "DEAD"
-        else:
-            status = "ALIVE_ENEMY"
-        
-        enemy_detail = f"Unit {enemy['id']} player={enemy_player} HP_CUR={hp_cur} HP_MAX={hp_max} at ({enemy_col},{enemy_row}) status={status}"
-        enemies_detailed.append(enemy_detail)
-        
-        # Debug: Log why units are skipped
-        if enemy_player == player_int:
-            continue  # Skip friendly units
         if hp_cur <= 0:
             continue  # Skip dead units
         
-        # Convert coordinates to int before calculating neighbors
+        alive_enemy_count += 1
         # Normalize coordinates to int - raises error if invalid
         enemy_col, enemy_row = get_unit_coordinates(enemy)
         
-        # Debug: Log Unit 5 position specifically (only in debug mode)
-        if game_state.get("debug_mode", False) and str(enemy["id"]) == "5":
-            episode = game_state.get("episode_number", "?")
-            turn = game_state.get("turn", "?")
-            phase = game_state.get("phase", "?")
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
-            log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes: Unit 5 position check - get_unit_coordinates() returned ({enemy_col},{enemy_row}), unit['col']={enemy.get('col')}, unit['row']={enemy.get('row')}"
-            from engine.game_utils import add_console_log, safe_print
-            add_console_log(game_state, log_message)
-            safe_print(game_state, log_message)
-        
-        enemies_processed.append(f"Unit {enemy['id']} at ({enemy_col},{enemy_row})")
         # Add all 6 neighbors of this enemy to the set
         # CRITICAL: Only add neighbors that are within board bounds
-        # Neighbors outside bounds are not valid destinations anyway
         neighbors = get_hex_neighbors(enemy_col, enemy_row)
         for neighbor_col, neighbor_row in neighbors:
-            # Filter out neighbors outside board bounds
             if (neighbor_col >= 0 and neighbor_row >= 0 and
                 neighbor_col < game_state.get("board_cols", 999999) and
                 neighbor_row < game_state.get("board_rows", 999999)):
                 enemy_adjacent_hexes.add((neighbor_col, neighbor_row))
 
-    # Log enemy adjacent hexes result (only in debug mode to avoid performance impact)
-    # Always log for P1 to debug the (4,8) issue
-    should_log = game_state.get("debug_mode", False)  # Only log in debug mode
+    # LOG TEMPORAIRE: One-line summary for build_enemy_adjacent_hexes (only if --debug)
+    should_log = game_state.get("debug_mode", False)
     if should_log:
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         phase = game_state.get("phase", "?")
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
-        # Convert set to sorted list for readable output
-        sorted_hexes = sorted(enemy_adjacent_hexes)
-        # Log the complete list of hexes in enemy_adjacent_hexes
-        hexes_list_str = str(sorted_hexes) if len(sorted_hexes) <= 100 else str(sorted_hexes[:100]) + f"... (total {len(sorted_hexes)})"
-        log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes player={player}: enemy_adjacent_hexes count={len(enemy_adjacent_hexes)} enemies={enemies_processed} enemies_detailed={enemies_detailed} all_units={all_units_info} hexes={hexes_list_str}"
+        log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes player={player}: hexes={len(enemy_adjacent_hexes)}, alive_enemies={alive_enemy_count}"
         from engine.game_utils import add_console_log
         from engine.game_utils import safe_print
         add_console_log(game_state, log_message)
-        safe_print(game_state, log_message)  # Also print to console for immediate visibility
+        safe_print(game_state, log_message)
 
     # Store result in game_state cache for reuse during phase
     cache_key = f"enemy_adjacent_hexes_player_{player}"

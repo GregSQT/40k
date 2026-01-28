@@ -449,9 +449,9 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     if not reachable_hexes:
         return []  # No reachable hexes
     
-    # Get all enemies
+    # Get all enemies - CRITICAL: require_key so dead/missing HP_CUR never enter pool
     enemies = [u for u in game_state["units"]
-               if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+               if u["player"] != unit["player"] and require_key(u, "HP_CUR") > 0]
     
     from engine.utils.weapon_helpers import get_melee_range
     melee_range = get_melee_range()  # Always 1
@@ -486,7 +486,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
                 is_occupied = False
                 for check_unit in game_state["units"]:
                     if (check_unit["id"] != unit["id"] and
-                        check_unit["HP_CUR"] > 0):
+                        require_key(check_unit, "HP_CUR") > 0):
                         check_col, check_row = get_unit_coordinates(check_unit)
                         if check_col == dest_col and check_row == dest_row:
                             is_occupied = True
@@ -954,13 +954,13 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # Get target enemy if specified, otherwise all enemies
     if target_id:
         target = get_unit_by_id(game_state, target_id)
-        if not target or target["player"] == unit["player"] or target["HP_CUR"] <= 0:
+        if not target or target["player"] == unit["player"] or require_key(target, "HP_CUR") <= 0:
             return []  # Invalid target
         enemies = [target]
     else:
         # Get all enemy positions for adjacency checks (used during activation preview)
         enemies = [u for u in game_state["units"]
-                   if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+                   if u["player"] != unit["player"] and require_key(u, "HP_CUR") > 0]
         if not enemies:
             return []  # No enemies to charge
 
@@ -1678,7 +1678,7 @@ def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any
     Hexagonal grids require hex distance calculation for accurate adjacency.
     """
     for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+        if enemy["player"] != unit["player"] and require_key(enemy, "HP_CUR") > 0:
             # AI_TURN.md COMPLIANCE: Use proper hex distance calculation
             unit_col, unit_row = get_unit_coordinates(unit)
             enemy_col, enemy_row = get_unit_coordinates(enemy)

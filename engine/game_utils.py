@@ -42,13 +42,15 @@ def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[st
 
 def add_console_log(game_state: Dict[str, Any], message: str) -> None:
     """
-    Add message to console_logs.
-    ALL logs are ALWAYS logged, even in training mode.
+    Add message to console_logs. Only when debug_mode is True (--debug).
+    When debug_mode is False, does nothing to avoid building a large list and slowing training.
     
     Args:
-        game_state: Game state dictionary
+        game_state: Game state dictionary (must contain "debug_mode" key when used in engine)
         message: Message to log
     """
+    if not game_state.get("debug_mode", False):
+        return
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
     game_state["console_logs"].append(message)

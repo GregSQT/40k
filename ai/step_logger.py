@@ -19,15 +19,17 @@ class StepLogger:
     Captures ALL actions that generate step increments per AI_TURN.md.
     """
     
-    def __init__(self, output_file: str = "step.log", enabled: bool = False, buffer_size: int = None):
+    def __init__(self, output_file: str = "step.log", enabled: bool = False, buffer_size: int = None, debug_mode: bool = False):
         self.output_file = output_file
         self.enabled = enabled
+        self.debug_mode = debug_mode  # LOG TEMPORAIRE: timings/logs to debug.log only when --debug
         self.step_count = 0
         self.action_count = 0
         # Per-episode counters
         self.episode_step_count = 0
         self.episode_action_count = 0
         self.episode_number = 0  # Track episode number for logging
+        self._last_step_wall = None  # Wall-clock of last step end (for STEP_TIMING → analyzer "Step Durations")
         # PERFORMANCE: Buffer logs to reduce I/O (buffer_size from training_config step_log_buffer_size)
         # Obligatoire si enabled ; si disabled, buffer_size peut être None (non utilisé).
         if enabled and buffer_size is None:
@@ -46,13 +48,14 @@ class StepLogger:
                 f.write("=" * 80 + "\n\n")
             print(f"📝 Step logging enabled: {self.output_file}")
     
-    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
-        """Log action with step increment information using clear format"""
-        # CRITICAL DEBUG: Log when log_action is called for move actions (BEFORE enabled check)
-        # Add unique call ID to track multiple calls
+    def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None, step_calls_since_last=None):
+        """Log action with step increment information using clear format.
+        step_calls_since_last: LOG TEMPORAIRE -- number of step() calls since last step_increment (--debug).
+        """
+        # LOG TEMPORAIRE: Log when log_action is called for move actions (only if --debug)
         import time
         call_id = f"{time.time():.6f}_{id(self)}_{self.action_count}"
-        if action_type == "move" and action_details:
+        if self.debug_mode and action_type == "move" and action_details:
             try:
                 with open("debug.log", "a") as f:
                     f.write(f"[STEP_LOGGER log_action CALLED] ID={call_id} Unit {unit_id}: enabled={self.enabled} unit_with_coords={action_details.get('unit_with_coords', 'N/A')} end_pos={action_details.get('end_pos', 'N/A')} col={action_details.get('col', 'N/A')} row={action_details.get('row', 'N/A')}\n")
@@ -67,15 +70,28 @@ class StepLogger:
         if step_increment:
             self.step_count += 1
             self.episode_step_count += 1
-            
+            # LOG TEMPORAIRE: STEP_TIMING → debug.log for analyzer "Step Durations" (only if --debug).
+            # step_index = episode_step_count so it matches WRAPPER_STEP_TIMING (wrapper reads episode_steps after return).
+            now = time.time()
+            duration_s = (now - self._last_step_wall) if self._last_step_wall is not None else 0.0
+            step_index = self.episode_step_count
+            if self.debug_mode:
+                try:
+                    with open("debug.log", "a") as f_db:
+                        suffix = f" step_calls={step_calls_since_last}" if step_calls_since_last is not None else ""
+                        f_db.write(f"STEP_TIMING episode={self.episode_number} step_index={step_index} duration_s={duration_s:.6f}{suffix}\n")
+                except Exception:
+                    pass
+            self._last_step_wall = now
+
         try:
             timestamp = time.strftime("%H:%M:%S", time.localtime())
 
             # Format message using gameLogUtils.ts style
             message = self._format_replay_style_message(unit_id, action_type, action_details)
             
-            # CRITICAL DEBUG: Log message just before writing to step.log
-            if action_type == "move":
+            # LOG TEMPORAIRE: Log message just before writing to step.log (only if --debug)
+            if self.debug_mode and action_type == "move":
                 try:
                     with open("debug.log", "a") as f_debug:
                         f_debug.write(f"[STEP_LOGGER BEFORE WRITE] ID={call_id} Unit {unit_id}: message={message} unit_with_coords={action_details.get('unit_with_coords', 'N/A') if action_details else 'N/A'}\n")
@@ -98,8 +114,8 @@ class StepLogger:
             if len(self.log_buffer) >= self.buffer_size:
                 self._flush_buffer()
             
-            # CRITICAL DEBUG: Log what was actually written to step.log
-            if action_type == "move":
+            # LOG TEMPORAIRE: Log what was actually written to step.log (only if --debug)
+            if self.debug_mode and action_type == "move":
                 try:
                     with open("debug.log", "a") as f_debug:
                         f_debug.write(f"[STEP_LOGGER AFTER WRITE] ID={call_id} Unit {unit_id}: log_line written={log_line.strip()}\n")
@@ -130,6 +146,7 @@ class StepLogger:
         self._flush_buffer()
 
         self._episode_start_wall = time.time()
+        self._last_step_wall = time.time()  # First step duration = time since episode start
 
         # Increment episode number
         self.episode_number += 1
@@ -192,12 +209,13 @@ class StepLogger:
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
             
-            # Also write episode marker to debug.log for episode extraction
-            try:
-                with open("debug.log", "a") as f_debug:
-                    f_debug.write(episode_marker)
-            except Exception:
-                pass  # Don't fail if debug.log write fails
+            # LOG TEMPORAIRE: Write episode marker to debug.log for episode extraction (only if --debug)
+            if self.debug_mode:
+                try:
+                    with open("debug.log", "a") as f_debug:
+                        f_debug.write(episode_marker)
+                except Exception:
+                    pass  # Don't fail if debug.log write fails
                 
         except Exception as e:
             print(f"⚠️ Episode start logging error: {e}")
@@ -222,12 +240,13 @@ class StepLogger:
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                # CRITICAL DEBUG: Log exact values in _format_replay_style_message to debug.log
-                try:
-                    with open("debug.log", "a") as f:
-                        f.write(f"[STEP_LOGGER DEBUG] Unit {unit_id}: unit_coords={unit_coords} start_pos=({start_col},{start_row}) end_pos=({end_col},{end_row}) unit_with_coords={details.get('unit_with_coords', 'N/A')} col={details.get('col', 'N/A')} row={details.get('row', 'N/A')}\n")
-                except Exception:
-                    pass  # Don't fail if logging fails
+                # LOG TEMPORAIRE: Log exact values in _format_replay_style_message to debug.log (only if --debug)
+                if self.debug_mode:
+                    try:
+                        with open("debug.log", "a") as f:
+                            f.write(f"[STEP_LOGGER DEBUG] Unit {unit_id}: unit_coords={unit_coords} start_pos=({start_col},{start_row}) end_pos=({end_col},{end_row}) unit_with_coords={details.get('unit_with_coords', 'N/A')} col={details.get('col', 'N/A')} row={details.get('row', 'N/A')}\n")
+                    except Exception:
+                        pass  # Don't fail if logging fails
                 base_msg = f"Unit {unit_id}{unit_coords} MOVED from ({start_col},{start_row}) to ({end_col},{end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates from mirror_action

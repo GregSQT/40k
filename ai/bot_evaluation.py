@@ -190,7 +190,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         if step_count >= max_steps:
                             print(f"ERROR: Episode exceeded {max_steps} steps! Forcing termination.", flush=True)
                             
-                            # DEBUG: Log detailed information when limit is reached (only if debug_mode is enabled)
+                            # LOG TEMPORAIRE: Log when step limit is reached (only if --debug)
                             if debug_mode:
                                 game_state = bot_env.engine.game_state
                                 episode = game_state.get("episode_number", "?")
@@ -207,7 +207,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                                 action_mask = bot_env.engine.get_action_mask()
                                 num_valid_actions = action_mask.sum() if isinstance(action_mask, np.ndarray) else 0
                                 
-                                # Log to debug.log via console_logs
                                 debug_message = (
                                     f"[MAX_STEPS LIMIT REACHED] Episode {episode}, Step {step_count}/{max_steps}\n"
                                     f"  Turn: {turn}, Phase: {phase}, Current Player: {current_player}\n"
@@ -218,7 +217,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                                     f"  Action Mask: {action_mask.tolist() if isinstance(action_mask, np.ndarray) else action_mask}"
                                 )
                                 
-                                # Write to debug.log
                                 debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
                                 try:
                                     with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
@@ -228,8 +226,35 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                                     print(f"⚠️ Failed to write to debug.log: {e}", flush=True)
                             
                             break
+                        # LOG TEMPORAIRE: GET_MASK_TIMING (get_action_mask in bot loop; only if --debug)
+                        ep_num = 0
+                        try:
+                            ep_num = bot_env.engine.game_state.get("episode_number", 0)
+                            if not isinstance(ep_num, (int, float)):
+                                ep_num = 0
+                        except (AttributeError, TypeError):
+                            ep_num = 0
+                        t_get_mask0 = time.perf_counter() if debug_mode else None
                         action_masks = bot_env.engine.get_action_mask()
+                        if debug_mode and t_get_mask0 is not None and ep_num >= 0:
+                            get_mask_duration = time.perf_counter() - t_get_mask0
+                            try:
+                                debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+                                with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
+                                    f.write(f"GET_MASK_TIMING episode={int(ep_num)} step_index={step_count} duration_s={get_mask_duration:.6f}\n")
+                            except (OSError, IOError):
+                                pass
+                        # LOG TEMPORAIRE: PREDICT_TIMING → debug.log for analyzer (only if --debug)
+                        t0 = time.perf_counter()
                         action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
+                        predict_duration = time.perf_counter() - t0
+                        if debug_mode and ep_num >= 0:
+                            debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
+                            try:
+                                with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
+                                    f.write(f"PREDICT_TIMING episode={int(ep_num)} step_index={step_count} duration_s={predict_duration:.6f}\n")
+                            except (OSError, IOError):
+                                pass
 
                         obs, reward, terminated, truncated, info = bot_env.step(action)
                         done = terminated or truncated
