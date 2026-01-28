@@ -18,7 +18,7 @@
 - ✅ Migration procedures
 
 **Version History:**
-- **v2.1 (January 2025)**: 295-float asymmetric observation (current) ⭐
+- **v2.1 (January 2025)**: 313-float asymmetric observation (current) ⭐
 - v2.0 (December 2024): 165-float pure RL (archived)
 - v1.0 (October 2024): 150-float egocentric (never deployed)
 
@@ -32,16 +32,16 @@
 
 ## 🎯 EXECUTIVE SUMMARY
 
-The **295-Float Asymmetric Observation System** provides agents with rich tactical information, with more complete intelligence about enemies than allies. This design philosophy ("Give more complete information about enemies than allies") enables superior threat assessment and target prioritization.
+The **313-Float Asymmetric Observation System** provides agents with rich tactical information, with more complete intelligence about enemies than allies. This design philosophy ("Give more complete information about enemies than allies") enables superior threat assessment and target prioritization.
 
 ### Key Metrics
 
-| Metric | v2.1 (295-float) | v2.0 (165-float) |
+| Metric | v2.1 (313-float) | v2.0 (165-float) |
 |--------|------------------|------------------|
-| **Observation Size** | 295 floats | 165 floats |
+| **Observation Size** | 313 floats | 165 floats |
 | **Allied Features** | 12 per unit | N/A (mixed) |
-| **Enemy Features** | 23 per unit | N/A (mixed) |
-| **Valid Target Features** | 7 per slot | 9 per slot |
+| **Enemy Features** | 22 per unit | N/A (mixed) |
+| **Valid Target Features** | 8 per slot | 9 per slot |
 | **Perception Radius** | R=25 hexes | R=25 hexes |
 | **Training Speed** | ~311 it/s (CPU) | 311 it/s (CPU) |
 | **Network Architecture** | 320×320 MlpPolicy | 256×256 MlpPolicy |
@@ -50,7 +50,7 @@ The **295-Float Asymmetric Observation System** provides agents with rich tactic
 ### Design Philosophy v2.1
 
 **Asymmetric Intelligence:**
-- ✅ **More enemy info** - 23 features per enemy vs 12 for allies
+- ✅ **More enemy info** - 22 features per enemy vs 12 for allies
 - ✅ **Temporal tracking** - movement_direction feature (brilliant encoding)
 - ✅ **Expected damage** - combat_mix_score uses W40K dice mechanics
 - ✅ **Target preferences** - Parsed from unitType (no redundancy)
@@ -61,52 +61,53 @@ The **295-Float Asymmetric Observation System** provides agents with rich tactic
 
 ## 📊 OBSERVATION ARCHITECTURE v2.1
 
-### Structure Overview (295 Floats)
+### Structure Overview (313 Floats)
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  OBSERVATION VECTOR (295 floats)                         │
+│  OBSERVATION VECTOR (313 floats)                         │
 ├──────────────────────────────────────────────────────────┤
-│  [0:10]    Global context         (10 floats)   SAME    │
-│  [10:18]   Active unit            (8 floats)    SAME    │
-│  [18:50]   Directional terrain    (32 floats)   SAME    │
-│  [50:122]  Allied units           (72 floats)   NEW! 🆕 │
-│  [122:260] Enemy units            (138 floats)  NEW! 🆕 │
-│  [260:295] Valid targets          (35 floats)   UPDATED │
+│  [0:15]    Global context         (15 floats)   +objectives │
+│  [15:37]   Active unit            (22 floats)   MULTIPLE_WEAPONS │
+│  [37:69]   Directional terrain    (32 floats)   SAME    │
+│  [69:141]  Allied units           (72 floats)   NEW! 🆕 │
+│  [141:273] Enemy units            (132 floats)  NEW! 🆕 │
+│  [273:313] Valid targets          (40 floats)   UPDATED │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ### Section Breakdown
 
-#### 1. Global Context [0:10] - 10 floats ✅ UNCHANGED
+#### 1. Global Context [0:15] - 15 floats ✅ includes objective control
 
 ```python
 obs[0] = current_player              # 0.0 or 1.0
 obs[1] = phase_encoding              # move=0.25, shoot=0.5, charge=0.75, fight=1.0
-obs[2] = turn_number / 10.0          # Normalized turn
+obs[2] = turn_number / 5.0            # Normalized turn (max 5)
 obs[3] = episode_steps / 100.0       # Step counter
-obs[4] = active_unit_hp_ratio        # HP_CUR / HP_MAX
+obs[4] = active_unit_hp_ratio         # HP_CUR / HP_MAX
 obs[5] = has_moved                   # 1.0 if unit moved
 obs[6] = has_shot                    # 1.0 if unit shot
 obs[7] = has_attacked                # 1.0 if unit attacked
-obs[8] = alive_friendlies / 10       # Normalized count
-obs[9] = alive_enemies / 10          # Normalized count
+obs[8] = has_advanced               # 1.0 if unit advanced this turn
+obs[9] = alive_friendlies / max_nearby   # Normalized count
+obs[10] = alive_enemies / max_nearby     # Normalized count
+obs[11:16] = objective_control      # 5 floats: -1/0/1 per objective
 ```
 
-#### 2. Active Unit Capabilities [10:18] - 8 floats ✅ UNCHANGED
+#### 2. Active Unit Capabilities [15:37] - 22 floats ✅ MULTIPLE_WEAPONS
 
 ```python
-obs[10] = MOVE / 12.0                # Movement capability
-obs[11] = RNG_RNG / 24.0             # Shooting range
-obs[12] = RNG_DMG / 5.0              # Shooting damage
-obs[13] = RNG_NB / 10.0              # Number of shots
-obs[14] = CC_RNG / 6.0               # Melee range
-obs[15] = CC_DMG / 5.0               # Melee damage
-obs[16] = T / 10.0                   # Toughness
-obs[17] = ARMOR_SAVE / 6.0           # Armor save
+obs[16] = MOVE / 12.0                # Movement capability
+# RNG_WEAPONS[0..2]: RNG, DMG, NB per slot (3×3 = 9 floats)
+obs[17:26] = first 3 ranged weapons  # RNG/24, DMG/5, NB/10 each
+# CC_WEAPONS[0..1]: NB, ATK, STR, AP, DMG per slot (2×5 = 10 floats)
+obs[26:36] = first 2 melee weapons    # NB/10, ATK/6, STR/10, AP/6, DMG/5 each
+obs[36] = T / 10.0                   # Toughness
+obs[37] = ARMOR_SAVE / 6.0           # Armor save
 ```
 
-#### 3. Directional Terrain [18:50] - 32 floats ✅ UNCHANGED
+#### 3. Directional Terrain [37:69] - 32 floats ✅ UNCHANGED
 
 8 directions × 4 features = 32 floats
 
@@ -120,7 +121,7 @@ obs[17] = ARMOR_SAVE / 6.0           # Armor save
 [direction_base + 3] = edge_distance / 25      # Board edge
 ```
 
-#### 4. Allied Units [50:122] - 72 floats 🆕 NEW
+#### 4. Allied Units [69:141] - 72 floats 🆕 NEW
 
 6 units × 12 features = 72 floats
 
@@ -145,9 +146,9 @@ obs[17] = ARMOR_SAVE / 6.0           # Armor save
 [ally_base + 11] = danger_level                     # 0.0-1.0: threat to me
 ```
 
-#### 5. Enemy Units [122:260] - 138 floats 🆕 NEW
+#### 5. Enemy Units [141:273] - 132 floats 🆕 NEW
 
-6 units × 23 features = 138 floats
+6 units × 22 features = 132 floats
 
 **Asymmetric Design:** MORE complete information about enemies for tactical superiority.
 
@@ -157,7 +158,7 @@ obs[17] = ARMOR_SAVE / 6.0           # Armor save
 3. Can attack me (100x weight - immediate threats)
 4. Wounded enemies (5x weight - finish-off opportunities)
 
-**Features per enemy (23 floats):**
+**Features per enemy (22 floats):**
 ```python
 [enemy_base + 0]  = relative_col / 24.0             # Egocentric X
 [enemy_base + 1]  = relative_row / 24.0             # Egocentric Y
@@ -170,40 +171,40 @@ obs[17] = ARMOR_SAVE / 6.0           # Armor save
 [enemy_base + 8]  = has_charged                     # 1.0 if charged
 [enemy_base + 9]  = has_attacked                    # 1.0 if attacked
 [enemy_base + 10] = is_valid_target                 # 1.0 if can be shot/attacked
-[enemy_base + 11] = kill_probability                # 0.0-1.0: can I kill them
-[enemy_base + 12] = danger_to_me                    # 0.0-1.0: can they kill ME
-[enemy_base + 13] = visibility_to_allies            # How many allies see them
-[enemy_base + 14] = combined_friendly_threat        # Total threat from allies
-[enemy_base + 15] = can_be_charged_by_melee         # 1.0 if melee can reach
-[enemy_base + 16] = target_type_match               # 0.0-1.0: matchup quality
-[enemy_base + 17] = can_be_meleed                   # 1.0 if I can melee now
+[enemy_base + 11] = best_weapon_index              # 0-2 normalized / 2.0
+[enemy_base + 12] = best_kill_probability           # 0.0-1.0: can I kill them
+[enemy_base + 13] = danger_to_me                    # 0.0-1.0: can they kill ME
+[enemy_base + 14] = visibility_to_allies            # How many allies see them
+[enemy_base + 15] = combined_friendly_threat        # Total threat from allies
+[enemy_base + 16] = melee_charge_preference         # 0.0-1.0: TTK melee vs range
+[enemy_base + 17] = target_efficiency               # 0.0-1.0: TTK with best weapon
 [enemy_base + 18] = is_adjacent                     # 1.0 if within melee range
-[enemy_base + 19] = is_in_range                     # 1.0 if in my weapon range
-[enemy_base + 20] = combat_mix_score                # Enemy's preference ⭐
-[enemy_base + 21] = ranged_favorite_target          # Enemy's target type ⭐
-[enemy_base + 22] = melee_favorite_target           # Enemy's target type ⭐
+[enemy_base + 19] = combat_mix_score                # Enemy's preference ⭐
+[enemy_base + 20] = favorite_target                 # Enemy's target type ⭐
+[enemy_base + 21] = reserved                        # Padding / future use
 ```
 
-#### 6. Valid Targets [260:295] - 35 floats ✅ UPDATED
+#### 6. Valid Targets [273:313] - 40 floats ✅ UPDATED
 
-5 targets × 7 features = 35 floats
+5 targets × 8 features = 40 floats
 
 **CRITICAL:** Direct action-observation correspondence preserved for fast learning.
-- Action 4 → obs[260:267] (target slot 0)
-- Action 5 → obs[267:274] (target slot 1)
-- Action 6 → obs[274:281] (target slot 2)
-- Action 7 → obs[281:288] (target slot 3)
-- Action 8 → obs[288:295] (target slot 4)
+- Action 4 → obs[273:281] (target slot 0)
+- Action 5 → obs[281:289] (target slot 1)
+- Action 6 → obs[289:297] (target slot 2)
+- Action 7 → obs[297:305] (target slot 3)
+- Action 8 → obs[305:313] (target slot 4)
 
-**Features per target (7 floats) - SIMPLIFIED from 9:**
+**Features per target (8 floats):**
 ```python
 [target_base + 0] = is_valid                        # 1.0 = target exists
-[target_base + 1] = kill_probability                # W40K dice calculation
-[target_base + 2] = danger_to_me                    # Threat assessment
-[target_base + 3] = enemy_index / 5.0               # Reference to obs[122:260]
-[target_base + 4] = distance_normalized             # Distance / 25
-[target_base + 5] = is_priority_target              # Approaching + dangerous
-[target_base + 6] = coordination_bonus              # Can melee charge after
+[target_base + 1] = best_weapon_index               # 0-2 normalized / 2.0
+[target_base + 2] = best_kill_probability           # W40K dice calculation
+[target_base + 3] = danger_to_me                    # Threat assessment
+[target_base + 4] = enemy_index / 5.0               # Reference to obs[141:273]
+[target_base + 5] = distance_normalized             # Distance / 25
+[target_base + 6] = is_priority_target              # Approaching + dangerous
+[target_base + 7] = coordination_bonus             # Can melee charge after
 ```
 
 **Removed from v2.0:** hp_ratio, is_lowest_hp, army_weighted_threat, target_type_match (now in enemy section)
@@ -311,22 +312,22 @@ def _calculate_favorite_target(unit):
 
 ### Observation Size
 
-| Component | v2.1 (295) | v2.0 (165) | Change |
+| Component | v2.1 (313) | v2.0 (165) | Change |
 |-----------|------------|------------|--------|
-| Global context | 10 | 10 | ✅ Same |
-| Active unit | 8 | 8 | ✅ Same |
+| Global context | 15 | 10 | ✅ +objectives |
+| Active unit | 22 | 8 | ✅ MULTIPLE_WEAPONS |
 | Directional terrain | 32 | 32 | ✅ Same |
 | Allied units | 72 | - | 🆕 New |
-| Enemy units | 138 | - | 🆕 New |
+| Enemy units | 132 | - | 🆕 New |
 | Nearby units | - | 70 | ❌ Removed |
-| Valid targets | 35 | 45 | ✅ Simplified |
-| **TOTAL** | **295** | **165** | **+130** |
+| Valid targets | 40 | 45 | ✅ Simplified |
+| **TOTAL** | **313** | **165** | **+148** |
 
 ### Key Improvements
 
 **1. Asymmetric Intelligence:**
 - v2.0: 10 features per nearby unit (mixed allies/enemies)
-- v2.1: 12 features for allies, 23 features for enemies
+- v2.1: 12 features for allies, 22 features for enemies
 - **Result:** Agent has superior enemy intelligence for threat assessment
 
 **2. Temporal Tracking:**
@@ -341,7 +342,7 @@ def _calculate_favorite_target(unit):
 
 **4. Target Selection:**
 - v2.0: 9 features per target slot (some redundant)
-- v2.1: 7 features per target slot + enemy_index reference
+- v2.1: 8 features per target slot + enemy_index reference
 - **Result:** Cleaner design, faster learning, no redundancy
 
 ---
@@ -374,10 +375,10 @@ model = MaskablePPO(
 )
 ```
 
-**Network Size:** 295 inputs → 320 → 320 → 12 outputs
+**Network Size:** 313 inputs → 320 → 320 → 12 outputs
 
 **Why 320×320?**
-- Input: 295 floats → 320 allows feature expansion
+- Input: 313 floats → 320 allows feature expansion
 - Compression ratio: 1.08x (efficient for learning)
 - Total params: ~100K (fast training, CPU optimal)
 - Proven effective for tactical games
@@ -409,10 +410,10 @@ model = MaskablePPO(
 
 ### Breaking Changes
 
-**Observation size:** 165 → 295 floats
+**Observation size:** 165 → 313 floats
 
 **Changes required:**
-1. ✅ Update `training_config.json` obs_size to 295 (all configs)
+1. ✅ Update `training_config.json` obs_size to 313 (all configs)
 2. ✅ Archive or delete old 165-float models
 3. ✅ Retrain all agents with `--new` flag
 4. ✅ Update network architecture to 320×320
@@ -421,7 +422,7 @@ model = MaskablePPO(
 ### Migration Checklist
 
 ```bash
-# 1. Verify 295-float observation system
+# 1. Verify 313-float observation system
 python -c "
 from engine.w40k_engine import W40KEngine
 from config_loader import get_config_loader
@@ -441,8 +442,8 @@ engine = W40KEngine(
 )
 
 obs, info = engine.reset()
-assert obs.shape == (295,), f'Shape mismatch: {obs.shape}'
-print('✅ 295-float asymmetric observation verified!')
+assert obs.shape == (313,), f'Shape mismatch: {obs.shape}'
+print('✅ 313-float asymmetric observation verified!')
 print(f'   Observation shape: {obs.shape}')
 print(f'   Non-zero features: {(obs != 0).sum()}')
 "
@@ -478,7 +479,7 @@ tensorboard --logdir ./tensorboard/
 2. **Tactical Decision Focus:**
    - Agents make decisions about engaging ENEMIES
    - Allied coordination is secondary concern
-   - 23 enemy features vs 12 ally features reflects this
+   - 22 enemy features vs 12 ally features reflects this
 
 3. **Information Asymmetry = Tactical Advantage:**
    - Real combat: Know more about threats than friendlies
@@ -489,12 +490,12 @@ tensorboard --logdir ./tensorboard/
 
 **Alternative Considered:** Remove valid targets, let network figure out which enemy maps to which action.
 
-**Decision:** Keep valid targets with 7 simplified features.
+**Decision:** Keep valid targets with 8 simplified features.
 
 **Reasoning:**
 1. **Fast Learning:**
    - Direct action-observation correspondence proven effective
-   - Agent learns "obs[261]=1.0 → action 4 = good" immediately
+   - Agent learns "obs[273]=1.0 → action 4 = good" immediately
    - Removing this adds ~500-1000 episodes to convergence
 
 2. **No Redundancy:**
@@ -503,7 +504,7 @@ tensorboard --logdir ./tensorboard/
    - Enemy section provides full context
 
 3. **Best of Both Worlds:**
-   - Rich enemy intelligence (138 floats)
+   - Rich enemy intelligence (132 floats)
    - Fast action selection (direct mapping)
    - Clean architecture (no duplication)
 
@@ -555,9 +556,9 @@ if "Swarm" in attack_pref:
 
 **Test Results:**
 ```
-✅ 295-float asymmetric observation verified!
-   Observation shape: (295,)
-   Non-zero features: 81
+✅ 313-float asymmetric observation verified!
+   Observation shape: (313,)
+   Non-zero features: (varies)
 ```
 
 **Verification Script:**
@@ -581,7 +582,7 @@ engine = W40KEngine(
 )
 
 obs, info = engine.reset()
-assert obs.shape == (295,), f'Shape mismatch: {obs.shape}'
+assert obs.shape == (313,), f'Shape mismatch: {obs.shape}'
 print('✅ v2.1 implementation verified!')
 "
 ```
@@ -592,7 +593,7 @@ print('✅ v2.1 implementation verified!')
 
 **v2.1 Asymmetric Observation System** represents a significant evolution:
 
-- ✅ **Richer intelligence** - 295 floats vs 165
+- ✅ **Richer intelligence** - 313 floats vs 165
 - ✅ **Temporal awareness** - movement_direction feature
 - ✅ **Combat accuracy** - W40K dice mechanics
 - ✅ **Asymmetric design** - More enemy intel than ally
@@ -613,19 +614,42 @@ print('✅ v2.1 implementation verified!')
 
 ---
 
+## 🔍 ARCHITECTURE ASSESSMENT (Is it optimal?)
+
+**Short answer:** The design is **strong and well-suited** to the game and to PPO; it is not "perfect" in an absolute sense, but it is a good trade-off between information, learning speed, and cost.
+
+**Strengths:**
+- **Asymmetric enemy focus** — Aligns with the decision problem (engage / target selection) and avoids overloading the network with ally detail. 22 enemy vs 12 ally features is a defensible choice.
+- **Temporal in one float** — `movement_direction` replaces frame stacking and keeps the observation Markovian while still encoding recent behavior. Very efficient.
+- **Valid targets as action scaffolding** — Direct action–observation mapping (action 4 → slot 0) speeds up learning; removing it would likely cost hundreds of episodes.
+- **W40K semantics** — `combat_mix_score` and `favorite_target` encode domain knowledge (dice, unit types) instead of raw stats; the network gets actionable signals.
+- **Fixed layout** — 313 floats, fixed slots for allies/enemies/targets: simple for the policy, no variable-length handling.
+
+**Trade-offs and limits:**
+- **Cost of rich enemy features** — Features 14–16 (visibility_to_allies, combined_friendly_threat, melee_charge_preference) are expensive (LoS, danger, pathfinding). The Observation_fix1.md pre-compute LoS plan addresses the main bottleneck; feature 16 can be capped or cached if needed.
+- **Cap at 6 enemies / 6 allies** — Fine for typical squad sizes; in very large battles, some units are unseen. Acceptable unless you explicitly target 10+ unit battles.
+- **No explicit opponent model** — The observation does not encode "what the other player tends to do"; the network infers it from outcomes. For symmetric PPO vs bots, this is normal.
+- **Redundancy** — Some info appears both in enemy section and valid targets (e.g. kill_prob, danger). That redundancy helps learning (direct mapping) at the cost of a few dozen floats; reasonable.
+
+**Verdict:** The architecture is **appropriate and close to optimal** for the current game and training setup. The main improvement to pursue is **performance** (LoS/pre-compute and possibly feature 16), not a redesign of the observation layout. If you later add more unit types or phases, extending the same pattern (more slots or a few extra global/active features) is enough.
+
+---
+
 ## 📝 CHANGELOG v2.1
 
 **Added:**
 - Allied units section (72 floats, 6 units × 12 features)
-- Enemy units section (138 floats, 6 units × 23 features)
+- Enemy units section (132 floats, 6 units × 22 features)
 - movement_direction feature (temporal behavior encoding)
 - combat_mix_score feature (W40K expected damage)
-- ranged/melee_favorite_target features (parsed from unitType)
+- favorite_target feature (parsed from unitType; single float for enemy)
 - enemy_index reference in valid targets
+- Global: objective control (5 floats), has_advanced
+- Active unit: MULTIPLE_WEAPONS (RNG_WEAPONS[0..2], CC_WEAPONS[0..1])
 
 **Changed:**
-- Observation size: 165 → 295 floats
-- Valid targets: 9 features → 7 features (simplified)
+- Observation size: 165 → 313 floats
+- Valid targets: 9 features → 8 features (simplified)
 - Network architecture: 256×256 → 320×320
 - Nearby units split into asymmetric ally/enemy sections
 
