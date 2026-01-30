@@ -28,7 +28,7 @@ alwaysApply: false
 ### Règle 1 : Eligibility Check (Pool Building)
 
 **Conditions OBLIGATOIRES** (toutes doivent être vraies) :
-- `unit.HP_CUR > 0` (unité vivante)
+- Unité vivante : `is_unit_alive(str(unit["id"]), game_state)` (source : `units_cache`)
 - `unit.player === current_player` (bon joueur)
 - `unit.id NOT in units_fled` (pas fui)
 - `unit.id NOT in units_advanced` (pas avancé - ne peut pas charger après advance)
@@ -38,14 +38,15 @@ alwaysApply: false
 ```python
 # ❌ INTERDIT
 if unit["HP_CUR"] > 0:
-    add_to_pool(unit)  # Manque vérifications
+    add_to_pool(unit)  # Utiliser is_unit_alive
 
 # ✅ OBLIGATOIRE
+from engine.phase_handlers.shared_utils import is_unit_alive
 def get_eligible_units(game_state):
     eligible = []
     current_player = game_state["current_player"]
     for unit in game_state["units"]:
-        if unit["HP_CUR"] <= 0:
+        if not is_unit_alive(str(unit["id"]), game_state):
             continue
         if unit["player"] != current_player:
             continue

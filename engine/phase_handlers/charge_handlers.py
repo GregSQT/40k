@@ -12,10 +12,13 @@ from .generic_handlers import end_activation
 from shared.data_validation import require_key
 from engine.game_utils import add_console_log, safe_print
 from engine.combat_utils import (
-    get_unit_coordinates, 
     normalize_coordinates,
     get_unit_by_id,
     get_hex_neighbors
+)
+from .shared_utils import (
+    update_units_cache_position, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
+    get_unit_position, require_unit_position,
 )
 
 
@@ -76,7 +79,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     AI_TURN.md charge eligibility decision tree implementation.
 
     Charge Eligibility Requirements:
-    - HP_CUR > 0
+    - Alive (in units_cache)
     - player === current_player
     - NOT in units_charged
     - NOT adjacent to enemy (distance > melee_range to all enemies)
@@ -91,26 +94,22 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
 
     for unit in game_state["units"]:
         unit_id_str = str(unit["id"])
-        # "unit.HP_CUR > 0?"
-        if unit["HP_CUR"] <= 0:
+        # unit alive? (units_cache is source of truth)
+        if not is_unit_alive(str(unit["id"]), game_state):
             continue  # Dead unit
 
         # "unit.player === current_player?"
         if unit["player"] != current_player:
             continue  # Wrong player
 
-        # "unit.id not in units_charged?"
-        if unit["id"] in game_state["units_charged"]:
-            continue  # Already charged
-
         # "NOT adjacent to enemy?"
         # CRITICAL FIX: Use direct hex distance calculation for reliable adjacency detection
         # Normalize coordinates to int to ensure consistent calculation
-        unit_col_int, unit_row_int = get_unit_coordinates(unit)
+        unit_col_int, unit_row_int = require_unit_position(unit, game_state)
         adjacent_found = False
         for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-                enemy_col_int, enemy_row_int = get_unit_coordinates(enemy)
+            if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
+                enemy_col_int, enemy_row_int = require_unit_position(enemy, game_state)
                 hex_dist = _calculate_hex_distance(unit_col_int, unit_row_int, enemy_col_int, enemy_row_int)
                 if hex_dist <= 1:  # Distance 1 = adjacent (melee range is always 1)
                     adjacent_found = True
@@ -380,8 +379,9 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate threat from all weapons
     # Calculate priority score for each target
     def priority_score(t):
-        # Priority 1: Lowest HP (higher priority = lower HP)
-        hp_priority = -t["HP_CUR"]  # Negative so lower HP = higher score
+        # Priority 1: Lowest HP (higher priority = lower HP) (Phase 2: HP from cache)
+        hp_cur = require_hp_from_cache(str(t["id"]), game_state)
+        hp_priority = -hp_cur  # Negative so lower HP = higher score
 
         # Priority 2: Highest threat
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate threat from all weapons
@@ -449,9 +449,9 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     if not reachable_hexes:
         return []  # No reachable hexes
     
-    # Get all enemies - CRITICAL: require_key so dead/missing HP_CUR never enter pool
+    # Get all enemies - CRITICAL: is_unit_alive so dead units never enter pool
     enemies = [u for u in game_state["units"]
-               if u["player"] != unit["player"] and require_key(u, "HP_CUR") > 0]
+               if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
     
     from engine.utils.weapon_helpers import get_melee_range
     melee_range = get_melee_range()  # Always 1
@@ -460,10 +460,10 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     # 1. Unit is NOT already adjacent to this enemy (CRITICAL: cannot charge from adjacent hex)
     # 2. Enemy is within charge_max_distance (via BFS - at least one reachable hex is adjacent to enemy)
     # 3. Enemy has at least one non-occupied adjacent hex that is reachable
-    unit_col_int, unit_row_int = get_unit_coordinates(unit)
+    unit_col_int, unit_row_int = require_unit_position(unit, game_state)
     
     for enemy in enemies:
-        enemy_col_int, enemy_row_int = get_unit_coordinates(enemy)
+        enemy_col_int, enemy_row_int = require_unit_position(enemy, game_state)
         
         # CRITICAL: Check if unit is already adjacent to this enemy
         # RULE: Cannot charge from adjacent hex (must be at distance > melee_range)
@@ -486,8 +486,11 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
                 is_occupied = False
                 for check_unit in game_state["units"]:
                     if (check_unit["id"] != unit["id"] and
-                        require_key(check_unit, "HP_CUR") > 0):
-                        check_col, check_row = get_unit_coordinates(check_unit)
+                        is_unit_alive(str(check_unit["id"]), game_state)):
+                        check_pos = get_unit_position(check_unit, game_state)
+                        if check_pos is None:
+                            continue
+                        check_col, check_row = check_pos
                         if check_col == dest_col and check_row == dest_row:
                             is_occupied = True
                             break
@@ -497,12 +500,12 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
         
         # Target is valid if it has at least one non-occupied adjacent hex reachable
         if has_adjacent_reachable_hex and non_occupied_adjacent_hexes:
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             valid_targets.append({
                 "id": enemy["id"],
                 "col": enemy_col,
                 "row": enemy_row,
-                "HP_CUR": enemy["HP_CUR"],
+                "HP_CUR": require_hp_from_cache(str(enemy["id"]), game_state),
                 "player": enemy["player"]
             })
     
@@ -592,7 +595,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
         return False, {"error": "invalid_charge_destination", "target": (dest_col, dest_row), "action": "charge"}
 
     # Store original position
-    orig_col, orig_row = get_unit_coordinates(unit)
+    orig_col, orig_row = require_unit_position(unit, game_state)
 
     # CRITICAL: Final occupation check IMMEDIATELY before position assignment
     # This prevents race conditions where multiple units select the same destination
@@ -607,14 +610,17 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     for check_unit in game_state["units"]:
         # CRITICAL: Normalize coordinates for consistent comparison
         try:
-            check_col, check_row = get_unit_coordinates(check_unit)
+            check_pos = get_unit_position(check_unit, game_state)
+            if check_pos is None:
+                continue
+            check_col, check_row = check_pos
         except (ValueError, TypeError, KeyError):
             # Skip units with invalid positions (should not happen, but defensive)
             continue
         
         # CRITICAL: Compare as normalized integers to avoid type mismatch
         if (check_unit["id"] != unit["id"] and
-            check_unit["HP_CUR"] > 0 and
+            is_unit_alive(str(check_unit["id"]), game_state) and
             check_col == dest_col_int and
             check_row == dest_row_int):
             # Another unit already occupies this destination - prevent collision
@@ -646,6 +652,9 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: Setting col={dest_col_int} row={dest_row_int}")
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
+
+    # Update units_cache after position change
+    update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
 
     # AI_TURN_SHOOTING_UPDATE.md: No need to invalidate los_cache here
     # The new architecture uses unit["los_cache"] which is built at unit activation in shooting phase
@@ -724,8 +733,8 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     # Unit occupation check (defensive - pool already filters occupied hexes)
     for other_unit in game_state["units"]:
         if (other_unit["id"] != unit["id"] and
-            other_unit["HP_CUR"] > 0):
-            other_col, other_row = get_unit_coordinates(other_unit)
+            is_unit_alive(str(other_unit["id"]), game_state)):
+            other_col, other_row = require_unit_position(other_unit, game_state)
             if other_col == col_int and other_row == row_int:
                 return False
 
@@ -775,9 +784,9 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
     cc_range = get_melee_range()  # Always 1
 
     for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+        if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
             # Check if enemy is within CC_RNG of any reachable hex
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             for dest_col, dest_row in reachable_hexes:
                 distance_to_enemy = _calculate_hex_distance(dest_col, dest_row, enemy_col, enemy_row)
                 if 0 < distance_to_enemy <= cc_range:
@@ -786,7 +795,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
             
             # NEW: Also check if enemy is at distance 13 (charge of 12 can reach adjacent to target at 13)
             # Calculate distance from unit to enemy
-            unit_col, unit_row = get_unit_coordinates(unit)
+            unit_col, unit_row = require_unit_position(unit, game_state)
             distance_to_enemy = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance_to_enemy == TARGET_MAX_DISTANCE:
                 # Check if there's a path of 12 hexes that can reach adjacent to this enemy
@@ -815,15 +824,15 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
     # CRITICAL: Normalize coordinates BEFORE any calculations to ensure proper tuple comparison
-    unit_col, unit_row = get_unit_coordinates(unit)
+    unit_col, unit_row = require_unit_position(unit, game_state)
 
     # CRITICAL FIX: Use hex distance calculation directly
     # This is more reliable than get_hex_neighbors() which may have bugs
     # Distance <= cc_range = adjacent (cc_range is always 1 for melee)
     for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+        if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
             # CRITICAL: Normalize enemy coordinates before distance calculation
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             hex_dist = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if hex_dist <= cc_range:
                 return True
@@ -851,8 +860,8 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
     hex_neighbors = set(get_hex_neighbors(col, row))
 
     for enemy in game_state["units"]:
-        if enemy["player"] != player and enemy["HP_CUR"] > 0:
-            enemy_pos = get_unit_coordinates(enemy)
+        if enemy["player"] != player and is_unit_alive(str(enemy["id"]), game_state):
+            enemy_pos = require_unit_position(enemy, game_state)
             # Check if enemy is in our 6 neighbors (true hex adjacency)
             if enemy_pos in hex_neighbors:
                 return True
@@ -871,18 +880,18 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
     """
     # First check if destination itself is occupied by an enemy (distance == 0)
     for enemy in game_state["units"]:
-        if enemy["player"] != player and enemy["HP_CUR"] > 0:
-            enemy_pos = get_unit_coordinates(enemy)
+        if enemy["player"] != player and is_unit_alive(str(enemy["id"]), game_state):
+            enemy_pos = require_unit_position(enemy, game_state)
             if enemy_pos == (col, row):
                 # Enemy is ON the destination - this is invalid for charge
                 return None
     
     # Then check neighbors (adjacent enemies, distance == 1)
-        hex_neighbors = set(get_hex_neighbors(col, row))
+    hex_neighbors = set(get_hex_neighbors(col, row))
     adjacent_enemies = []
     for enemy in game_state["units"]:
-        if enemy["player"] != player and enemy["HP_CUR"] > 0:
-            enemy_pos = get_unit_coordinates(enemy)
+        if enemy["player"] != player and is_unit_alive(str(enemy["id"]), game_state):
+            enemy_pos = require_unit_position(enemy, game_state)
             if enemy_pos in hex_neighbors:
                 adjacent_enemies.append(enemy["id"])
     
@@ -948,19 +957,19 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     charge_range = charge_roll  # 2d6 result
     # CRITICAL: Normalize coordinates to int for consistent tuple comparison
-    start_col, start_row = get_unit_coordinates(unit)
+    start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
 
     # Get target enemy if specified, otherwise all enemies
     if target_id:
         target = get_unit_by_id(game_state, target_id)
-        if not target or target["player"] == unit["player"] or require_key(target, "HP_CUR") <= 0:
+        if not target or target["player"] == unit["player"] or not is_unit_alive(str(target["id"]), game_state):
             return []  # Invalid target
         enemies = [target]
     else:
         # Get all enemy positions for adjacency checks (used during activation preview)
         enemies = [u for u in game_state["units"]
-                   if u["player"] != unit["player"] and require_key(u, "HP_CUR") > 0]
+                   if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
         if not enemies:
             return []  # No enemies to charge
 
@@ -969,9 +978,9 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # CRITICAL: Use try-except to handle invalid coordinates gracefully
     occupied_positions = set()
     for u in game_state["units"]:
-        if u["HP_CUR"] > 0 and u["id"] != unit["id"]:
+        if is_unit_alive(str(u["id"]), game_state) and u["id"] != unit["id"]:
             try:
-                col_int, row_int = get_unit_coordinates(u)
+                col_int, row_int = require_unit_position(u, game_state)
                 occupied_positions.add((col_int, row_int))
             except (ValueError, TypeError, KeyError) as e:
                 # Skip units with invalid positions (should not happen, but defensive)
@@ -993,7 +1002,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         episode = game_state["episode_number"]
         turn = game_state["turn"]
         phase = game_state.get("phase", "charge")
-        all_units_info = [f"Unit {u['id']} at ({int(u['col'])},{int(u['row'])}) HP={require_key(u, 'HP_CUR')}" for u in game_state["units"]]
+        def _hp_display(uid, gs):
+            h = get_hp_from_cache(str(uid), gs)
+            return h if h is not None else "dead"
+        all_units_info = [f"Unit {u['id']} at ({int(u['col'])},{int(u['row'])}) HP={_hp_display(u['id'], game_state)}" for u in game_state["units"]]
         log_message = f"[CHARGE DEBUG] E{episode} T{turn} {phase} charge_build_valid_destinations Unit {unit_id}: occupied_positions={occupied_positions} all_units={all_units_info}"
         add_console_log(game_state, log_message)
         safe_print(game_state, log_message)
@@ -1040,7 +1052,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             melee_range = get_melee_range()  # Always 1
             for enemy in enemies:
                 # CRITICAL: Normalize enemy coordinates for consistent distance calculation
-                enemy_col_int, enemy_row_int = get_unit_coordinates(enemy)
+                enemy_col_int, enemy_row_int = require_unit_position(enemy, game_state)
                 distance_to_enemy = _calculate_hex_distance(neighbor_col_int, neighbor_row_int, enemy_col_int, enemy_row_int)
                 if distance_to_enemy == 0:
                     # Enemy is ON this hex - mark as occupied and skip
@@ -1120,16 +1132,15 @@ def _select_strategic_destination(
 
     # If no destinations, return current position
     if not valid_destinations:
-        return get_unit_coordinates(unit)
+        return require_unit_position(unit, game_state)
 
     # Get enemy units
     # AI_TURN.md COMPLIANCE: Direct field access with validation
     enemy_units = []
     for u in game_state["units"]:
         if u["player"] != unit["player"]:
-            if "HP_CUR" not in u:
-                raise KeyError(f"Unit missing required 'HP_CUR' field: {u}")
-            if u["HP_CUR"] > 0:
+            # Phase 2: aliveness from is_unit_alive (HP in cache only)
+            if is_unit_alive(str(u["id"]), game_state):
                 enemy_units.append(u)
 
     # If no enemies, just pick first destination
@@ -1144,7 +1155,7 @@ def _select_strategic_destination(
         for dest in valid_destinations:
             # Find distance to nearest enemy from this destination
             for enemy in enemy_units:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 dist = _calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_enemy:
                     min_dist_to_enemy = dist
@@ -1163,7 +1174,7 @@ def _select_strategic_destination(
         for dest in valid_destinations:
             targets_in_range = 0
             for enemy in enemy_units:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 dist = _calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist <= weapon_range:
                     # Check LoS (simplified - assumes LoS if in range for now)
@@ -1184,7 +1195,7 @@ def _select_strategic_destination(
             # Find distance to nearest enemy (we want to maximize this)
             min_dist_to_any_enemy = float('inf')
             for enemy in enemy_units:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 dist = _calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_any_enemy:
                     min_dist_to_any_enemy = dist
@@ -1342,7 +1353,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         
         # CRITICAL: Add start_pos and end_pos for proper logging (unit didn't move, so both are current position)
         # For failed charges with roll too low, there's no destination, so end_pos equals start_pos
-        current_pos = get_unit_coordinates(unit)
+        current_pos = require_unit_position(unit, game_state)
         action_logs = game_state["action_logs"] if "action_logs" in game_state else []
         result.update({
             "action": "charge_fail",
@@ -1457,7 +1468,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     if (dest_col, dest_row) not in valid_pool:
         # Charge roll too low - charge failed
         # Calculate distance for logging
-        unit_col, unit_row = get_unit_coordinates(unit)
+        unit_col, unit_row = require_unit_position(unit, game_state)
         distance_to_dest = _calculate_hex_distance(unit_col, unit_row, dest_col, dest_row)
         
         # Log failure in action_logs
@@ -1507,7 +1518,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "charge_roll": charge_roll,
             "charge_failed": True,
             "charge_failed_reason": "roll_too_low",
-            "start_pos": get_unit_coordinates(unit),  # Position actuelle (from)
+            "start_pos": require_unit_position(unit, game_state),  # Position actuelle (from)
             "end_pos": (dest_col, dest_row),  # Destination prévue (to)
             "activation_complete": True,
             # CRITICAL: Include action_logs in result so they're sent to frontend
@@ -1535,7 +1546,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         charge_result.setdefault("charge_failed_reason", charge_result.get("error", "unknown_error"))
         # CRITICAL: Add start_pos and end_pos for proper logging
         if "start_pos" not in charge_result:
-            charge_result["start_pos"] = get_unit_coordinates(unit)  # Position actuelle (from) - unit didn't move
+            charge_result["start_pos"] = require_unit_position(unit, game_state)  # Position actuelle (from) - unit didn't move
         if "end_pos" not in charge_result:
             charge_result["end_pos"] = (dest_col, dest_row)  # Destination prévue (to) - even though charge failed
         return False, charge_result
@@ -1546,13 +1557,13 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
     # Position already updated by _attempt_charge_to_destination
     # CRITICAL FIX: Normalize types before comparison to prevent false negatives
-    unit_col_int, unit_row_int = get_unit_coordinates(unit)
+    unit_col_int, unit_row_int = require_unit_position(unit, game_state)
     if unit_col_int != dest_col or unit_row_int != dest_row:
         return False, {
             "error": "position_update_failed", 
             "action": "charge",
             "expected": (dest_col, dest_row),
-            "actual": get_unit_coordinates(unit),
+            "actual": require_unit_position(unit, game_state),
             "toCol": dest_col,
             "toRow": dest_row,
             "fromCol": orig_col,
@@ -1678,10 +1689,10 @@ def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any
     Hexagonal grids require hex distance calculation for accurate adjacency.
     """
     for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and require_key(enemy, "HP_CUR") > 0:
+        if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
             # AI_TURN.md COMPLIANCE: Use proper hex distance calculation
-            unit_col, unit_row = get_unit_coordinates(unit)
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            unit_col, unit_row = require_unit_position(unit, game_state)
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= 1:
                 return True

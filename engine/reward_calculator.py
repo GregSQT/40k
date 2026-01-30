@@ -4,8 +4,12 @@ reward_calculator.py - Reward calculation system
 """
 
 from typing import Dict, List, Any, Tuple, Optional
-from engine.combat_utils import calculate_wound_target, calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight, get_unit_coordinates, normalize_coordinates
+from engine.combat_utils import calculate_wound_target, calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight, normalize_coordinates
 from engine.phase_handlers.shooting_handlers import _calculate_save_target
+from engine.phase_handlers.shared_utils import (
+    is_unit_alive, get_hp_from_cache, require_hp_from_cache,
+    get_unit_position, require_unit_position,
+)
 from engine.game_utils import get_unit_by_id
 from shared.data_validation import require_key
 
@@ -329,9 +333,12 @@ class RewardCalculator:
             
         elif action_type == "charge" and "targetId" in result:
             target = get_unit_by_id(str(result["targetId"]), game_state)
+            if not target:
+                raise ValueError(f"Charge target not found: {result['targetId']}")
+            # No target can die in charge phase
             enriched_target = self._enrich_unit_for_reward_mapper(target)
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets)
+            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state)
             reward_breakdown['base_actions'] = charge_reward
             reward_breakdown['total'] = charge_reward
             
@@ -348,9 +355,12 @@ class RewardCalculator:
         elif action_type in ("fight", "combat") and "targetId" in result:
             # "combat" is the step_logger action type, "fight" is the legacy name
             target = get_unit_by_id(str(result["targetId"]), game_state)
-            enriched_target = self._enrich_unit_for_reward_mapper(target)
+            if not target:
+                raise ValueError(f"Fight target not found: {result['targetId']}")
+            # units_cache = living only; target may be dead (removed). Reward_mapper uses get_hp_from_cache → 0 if not in cache.
+            enriched_target = self._enrich_unit_for_reward_mapper(target) if is_unit_alive(str(target["id"]), game_state) else target
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets)
+            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state)
             reward_breakdown['base_actions'] = fight_reward
             reward_breakdown['total'] = fight_reward
 
@@ -710,7 +720,7 @@ class RewardCalculator:
         # (objectives only matter when game ends at turn 5)
         living_units_by_player = {}
         for unit in game_state["units"]:
-            if unit["HP_CUR"] > 0:
+            if is_unit_alive(str(unit["id"]), game_state):
                 player = unit["player"]
                 if player not in living_units_by_player:
                     living_units_by_player[player] = 0
@@ -1027,7 +1037,8 @@ class RewardCalculator:
             return 0.5  # Default neutral
     
     def _calculate_movement_direction(self, unit: Dict[str, Any], 
-                                     active_unit: Dict[str, Any]) -> float:
+                                     active_unit: Dict[str, Any],
+                                     game_state: Dict[str, Any]) -> float:
         """
         Encode temporal behavior in single float - replaces frame stacking.
         
@@ -1038,17 +1049,18 @@ class RewardCalculator:
         - 0.75-1.00: Charged at me (>50% MOVE toward)
         
         Critical for detecting threats before they strike!
-        AI_TURN.md COMPLIANCE: Direct field access
+        Uses units_cache_prev for previous positions (snapshot at step start).
         """
-        # Get last known position from cache
-        if not hasattr(self, 'last_unit_positions') or not self.last_unit_positions:
+        # Get last known position from units_cache_prev
+        units_cache_prev = game_state.get("units_cache_prev")
+        if not units_cache_prev:
             return 0.5  # Unknown/first turn
         
         if "id" not in unit:
             raise KeyError(f"Unit missing required 'id' field: {unit}")
         
         unit_id = str(unit["id"])
-        if unit_id not in self.last_unit_positions:
+        if unit_id not in units_cache_prev:
             return 0.5  # No previous position data
         
         # Validate required position fields
@@ -1057,11 +1069,12 @@ class RewardCalculator:
         if "col" not in active_unit or "row" not in active_unit:
             raise KeyError(f"Active unit missing required position fields: {active_unit}")
         
-        prev_col, prev_row = self.last_unit_positions[unit_id]
-        curr_col, curr_row = get_unit_coordinates(unit)
+        prev_entry = units_cache_prev[unit_id]
+        prev_col, prev_row = prev_entry["col"], prev_entry["row"]
+        curr_col, curr_row = require_unit_position(unit, game_state)
         
         # Calculate movement toward/away from active unit
-        active_col, active_row = get_unit_coordinates(active_unit)
+        active_col, active_row = require_unit_position(active_unit, game_state)
         prev_dist = calculate_hex_distance(
             prev_col, prev_row, 
             active_col, active_row
@@ -1164,10 +1177,11 @@ class RewardCalculator:
         p_damage_per_attack = p_hit * p_wound * p_fail_save
         expected_damage = num_attacks * p_damage_per_attack * damage
         
-        if expected_damage >= target["HP_CUR"]:
+        target_hp = require_hp_from_cache(str(target["id"]), game_state)
+        if expected_damage >= target_hp:
             return 1.0
         else:
-            return min(1.0, expected_damage / target["HP_CUR"])
+            return min(1.0, expected_damage / target_hp)
     
     def _calculate_danger_probability(self, defender: Dict[str, Any], attacker: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         """
@@ -1183,8 +1197,8 @@ class RewardCalculator:
         Returns: 0.0-1.0 probability
         """
         # Use BFS pathfinding distance to respect walls for reachability
-        defender_col, defender_row = get_unit_coordinates(defender)
-        attacker_col, attacker_row = get_unit_coordinates(attacker)
+        defender_col, defender_row = require_unit_position(defender, game_state)
+        attacker_col, attacker_row = require_unit_position(attacker, game_state)
         distance = calculate_pathfinding_distance(
             defender_col, defender_row,
             attacker_col, attacker_row,
@@ -1268,10 +1282,11 @@ class RewardCalculator:
         p_damage_per_attack = p_hit * p_wound * p_fail_save
         expected_damage = num_attacks * p_damage_per_attack * damage
         
-        if expected_damage >= defender["HP_CUR"]:
+        defender_hp = require_hp_from_cache(str(defender["id"]), game_state)
+        if expected_damage >= defender_hp:
             return 1.0
         else:
-            return min(1.0, expected_damage / defender["HP_CUR"])
+            return min(1.0, expected_damage / defender_hp)
     
     def _calculate_army_weighted_threat(self, target: Dict[str, Any], valid_targets: List[Dict[str, Any]], game_state: Dict[str, Any]) -> float:
         """
@@ -1293,7 +1308,7 @@ class RewardCalculator:
         my_player = game_state["current_player"]
         friendly_units = [
             u for u in game_state["units"]
-            if u["player"] == my_player and u["HP_CUR"] > 0
+            if u["player"] == my_player and is_unit_alive(str(u["id"]), game_state)
         ]
         
         if not friendly_units:
@@ -1378,7 +1393,7 @@ class RewardCalculator:
     def _moved_to_cover_from_enemies(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit is hidden from enemy RANGED units (melee LoS irrelevant)."""
         enemies = [u for u in game_state["units"] 
-                  if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+                  if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
         
         if not enemies:
             return False
@@ -1402,7 +1417,7 @@ class RewardCalculator:
             is_ranged_unit = max_rng_range > melee_range
             
             if is_ranged_unit and max_rng_range > 0:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
                 
                 # Enemy in shooting range and has LoS?
@@ -1415,24 +1430,24 @@ class RewardCalculator:
     
     def _moved_closer_to_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved closer to enemies (or maintained same distance = lateral move)."""
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
         if not enemies:
             return False
 
-        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], *get_unit_coordinates(e)) for e in enemies)
-        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], *get_unit_coordinates(e)) for e in enemies)
+        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], *require_unit_position(e, game_state)) for e in enemies)
+        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], *require_unit_position(e, game_state)) for e in enemies)
 
         # Include equal distance (lateral movement) - unit is still engaged
         return new_min_distance <= old_min_distance
     
     def _moved_away_from_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved away from enemies."""
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
         if not enemies:
             return False
 
-        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], *get_unit_coordinates(e)) for e in enemies)
-        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], *get_unit_coordinates(e)) for e in enemies)
+        old_min_distance = min(calculate_hex_distance(old_pos[0], old_pos[1], *require_unit_position(e, game_state)) for e in enemies)
+        new_min_distance = min(calculate_hex_distance(new_pos[0], new_pos[1], *require_unit_position(e, game_state)) for e in enemies)
 
         return new_min_distance > old_min_distance
     
@@ -1450,7 +1465,7 @@ class RewardCalculator:
             return False
         
         min_range = get_melee_range()  # Minimum engagement distance (always 1)
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
 
         # Create temporary unit state at new position for LOS check
         temp_unit = unit.copy()
@@ -1459,7 +1474,7 @@ class RewardCalculator:
         temp_unit["row"] = new_row
 
         for enemy in enemies:
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
             # Optimal range: can shoot but not in melee (min_range < distance <= max_range)
             if min_range < distance <= max_range:
@@ -1485,14 +1500,14 @@ class RewardCalculator:
         if not has_melee_damage:
             return False
 
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
         if "MOVE" not in unit:
             raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
         max_charge_range = unit["MOVE"] + 12  # Average 2d6 charge distance
 
         for enemy in enemies:
             # Use BFS pathfinding to respect walls for charge reachability
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy_col, enemy_row, game_state)
             if distance <= max_charge_range:
                 return True
@@ -1501,7 +1516,7 @@ class RewardCalculator:
     
     def _moved_to_safety(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved to safety from enemy threats."""
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
 
         # No enemies should mean game is over - don't mask this with return True
         if not enemies:
@@ -1511,7 +1526,7 @@ class RewardCalculator:
         
         for enemy in enemies:
             # Check if moved out of enemy threat range
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
             max_rng_range = get_max_ranged_range(enemy)
@@ -1536,14 +1551,13 @@ class RewardCalculator:
         # Get all enemies in shooting range
         enemies_in_range = []
         for enemy in game_state["units"]:
-            if "player" not in enemy or "HP_CUR" not in enemy:
-                raise KeyError(f"Enemy unit missing required fields: {enemy}")
-            
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            if "player" not in enemy:
+                raise KeyError(f"Enemy unit missing required 'player' field: {enemy}")
+            if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
                 if "col" not in enemy or "row" not in enemy:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
                 if distance <= max_range:
                     enemies_in_range.append(enemy)
@@ -1551,12 +1565,8 @@ class RewardCalculator:
         if not enemies_in_range:
             return False
         
-        # Find priority target (lowest HP for RangedSwarm units)
-        # AI_TURN.md COMPLIANCE: All units must have HP_CUR
-        for e in enemies_in_range:
-            if "HP_CUR" not in e:
-                raise KeyError(f"Enemy missing required 'HP_CUR' field: {e}")
-        priority_target = min(enemies_in_range, key=lambda e: e["HP_CUR"])
+        # Find priority target (lowest HP for RangedSwarm units) (Phase 2: HP from cache)
+        priority_target = min(enemies_in_range, key=lambda e: require_hp_from_cache(str(e["id"]), game_state))
         
         # Check LoS at old position
         old_unit_state = unit.copy()
@@ -1581,7 +1591,7 @@ class RewardCalculator:
         Uses BFS pathfinding distance to respect walls for charge reachability.
         """
         enemies = [u for u in game_state["units"]
-                  if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+                  if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
 
         from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
         
@@ -1604,7 +1614,7 @@ class RewardCalculator:
 
             if is_melee_unit and has_melee_damage:
                 # Use BFS pathfinding to respect walls for charge reachability
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 distance = calculate_pathfinding_distance(new_pos[0], new_pos[1], enemy_col, enemy_row, game_state)
 
                 # Max charge distance = MOVE + 9 (2d6 average charge roll)
@@ -1620,7 +1630,7 @@ class RewardCalculator:
     def _safe_from_enemy_ranged(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit is beyond range of enemy RANGED units."""
         enemies = [u for u in game_state["units"] 
-                  if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+                  if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
         
         safe_distance_count = 0
         total_ranged_enemies = 0
@@ -1637,7 +1647,7 @@ class RewardCalculator:
             
             if is_ranged_unit and max_rng_range > 0:
                 total_ranged_enemies += 1
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 distance = calculate_hex_distance(new_pos[0], new_pos[1], enemy_col, enemy_row)
                 
                 # Safe if beyond their shooting range
@@ -1675,7 +1685,7 @@ class RewardCalculator:
         # This is the old logic that ignores objectives
         living_units_by_player = {}
         for unit in game_state["units"]:
-            if unit["HP_CUR"] > 0:
+            if is_unit_alive(str(unit["id"]), game_state):
                 player = unit["player"]
                 if player not in living_units_by_player:
                     living_units_by_player[player] = 0
@@ -1773,7 +1783,7 @@ class RewardCalculator:
 
         for unit in units:
             # Enemy units that are alive
-            if require_key(unit, "player") != acting_player and require_key(unit, "HP_CUR") > 0:
+            if require_key(unit, "player") != acting_player and is_unit_alive(str(unit["id"]), game_state):
                 targets.append(unit)
 
         return targets
@@ -1839,10 +1849,10 @@ class RewardCalculator:
         # Get all visible enemies
         visible_enemies = []
         for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
                 if has_line_of_sight(temp_unit, enemy, game_state):
                     # Check if in range
-                    enemy_col, enemy_row = get_unit_coordinates(enemy)
+                    enemy_col, enemy_row = require_unit_position(enemy, game_state)
                     distance = calculate_hex_distance(col_int, row_int, enemy_col, enemy_row)
                     if distance <= max_range:
                         visible_enemies.append(enemy)
@@ -1917,11 +1927,11 @@ class RewardCalculator:
 
         # Get all living friendly units
         friendlies = [u for u in game_state["units"]
-                     if u["player"] == my_player and u["HP_CUR"] > 0]
+                     if u["player"] == my_player and is_unit_alive(str(u["id"]), game_state)]
 
         # Get all living enemy units
         enemies = [u for u in game_state["units"]
-                  if u["player"] != my_player and u["HP_CUR"] > 0]
+                  if u["player"] != my_player and is_unit_alive(str(u["id"]), game_state)]
 
         if not enemies:
             return 0.0
@@ -1959,7 +1969,7 @@ class RewardCalculator:
                 # Check all friendlies this enemy could see
                 for friendly in friendlies:
                     if has_line_of_sight(temp_enemy, friendly, game_state):
-                        friendly_col, friendly_row = get_unit_coordinates(friendly)
+                        friendly_col, friendly_row = require_unit_position(friendly, game_state)
                         distance = calculate_hex_distance(reach_col, reach_row, friendly_col, friendly_row)
                         if distance <= max_rng_range:
                             if friendly["id"] not in [f["id"] for f in reachable_friendlies]:
@@ -2053,12 +2063,12 @@ class RewardCalculator:
         if "MOVE" not in enemy:
             raise KeyError(f"Enemy missing required 'MOVE' field: {enemy}")
         move_range = enemy["MOVE"]
-        start_pos = get_unit_coordinates(enemy)
+        start_pos = require_unit_position(enemy, game_state)
 
         # PERFORMANCE: Pre-compute occupied positions once for this BFS
         # CRITICAL: Normalize coordinates to int to ensure consistent tuple comparison
-        occupied_positions = {get_unit_coordinates(u) for u in game_state["units"]
-                             if u["HP_CUR"] > 0 and u["id"] != enemy["id"]}
+        occupied_positions = {require_unit_position(u, game_state) for u in game_state["units"]
+                             if is_unit_alive(str(u["id"]), game_state) and u["id"] != enemy["id"]}
 
         # BFS to find reachable positions
         visited = {start_pos: 0}
@@ -2102,7 +2112,8 @@ class RewardCalculator:
         if expected_damage <= 0:
             return 100.0  # Can't kill
 
-        return target["HP_CUR"] / expected_damage
+        target_hp = require_hp_from_cache(str(target["id"]), game_state)
+        return target_hp / expected_damage
 
     def _calculate_turns_to_kill_by_attacker(self, attacker: Dict[str, Any], defender: Dict[str, Any],
                                               game_state: Dict[str, Any]) -> float:

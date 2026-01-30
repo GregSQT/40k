@@ -5,6 +5,10 @@ combat_utils.py - Pure utility functions for combat calculations
 
 from typing import Dict, List, Tuple, Any, Optional, Set
 
+# NOTE: Do not import is_unit_alive at top level — causes circular import
+# (combat_utils → shared_utils → phase_handlers → generic_handlers → combat_utils).
+# Use lazy import inside functions that need it.
+
 # ============================================================================
 # UNIT UTILITIES
 # ============================================================================
@@ -419,9 +423,10 @@ def calculate_wound_target(strength: int, toughness: int) -> int:
 def has_valid_shooting_targets(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
         """Check if unit has valid shooting targets per AI_TURN.md restrictions."""
         from engine.phase_handlers import shooting_handlers
+        from engine.phase_handlers.shared_utils import is_unit_alive
         for enemy in game_state["units"]:
             if (enemy["player"] != unit["player"] and 
-                enemy["HP_CUR"] > 0 and
+                is_unit_alive(str(enemy["id"]), game_state) and
                 shooting_handlers._is_valid_shooting_target(game_state, unit, enemy)):
                 return True
         return False

@@ -155,15 +155,17 @@ def build_target_pool(unit):
 # ✅ OBLIGATOIRE
 def build_target_pool(unit):
     assert 'los_cache' in unit, "los_cache must exist (call build_unit_los_cache first)"
-    assert 'position_cache' in game_state, "position_cache must exist"
+    assert 'units_cache' in game_state, "units_cache must exist (build_units_cache at reset)"
     # Utiliser los_cache pour performance
 ```
 
 **Règles de cache** :
-- `position_cache` : Mis à jour après chaque mort de cible
+- `units_cache` : Source de vérité pour position et HP_CUR des unités **vivantes** (mortes = absentes du cache). Construit au reset uniquement ; mis à jour incrémentalement (position, HP). Mort → `update_units_cache_hp(..., 0)` (l’entrée appelle remove_from_units_cache, unité retirée du cache).
 - `los_cache` : Recalculé après chaque advance (pas juste invalidé)
 - `los_cache` : Nettoyé à la fin de l'activation
 - Pool = source de vérité, cache = optimisation
+- **HP_CUR** : Seul `update_units_cache_hp` écrit HP_CUR en jeu (uniquement dans `units_cache`). Pour **lire** les HP : `get_hp_from_cache(unit_id, game_state)` (`None` si mort/absent du cache). Pas d'assignation directe à `unit["HP_CUR"]`.
+- **Vivant** : Utiliser `is_unit_alive(unit_id, game_state)` (présent dans le cache **et** HP_CUR > 0). Mort = absent du cache.
 
 ### 2. Fonction end_activation() - Arguments stricts
 ```python
@@ -284,7 +286,7 @@ Avant de valider un changement, vérifier :
 - [ ] Tracking sets mis à jour via end_activation()
 - [ ] Activation séquentielle (un seul à la fois)
 - [ ] Fin de phase par éligibilité (pools vides)
-- [ ] Caches vérifiés (los_cache, position_cache)
+- [ ] Caches vérifiés (los_cache, units_cache)
 - [ ] Restrictions de mouvement respectées
 - [ ] Restrictions de tir respectées (adjacence = fight)
 - [ ] Advance restrictions respectées (ASSAULT uniquement après)

@@ -8,6 +8,7 @@ import numpy as np
 import os
 from typing import Dict, Any, Tuple, List
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance
+from engine.phase_handlers.shared_utils import is_unit_alive
 
 class PvEController:
     """Controls AI opponent in PvE mode."""
@@ -239,8 +240,8 @@ class PvEController:
         if not unit:
             raise ValueError(f"Unit not found: {unit_id}")
         
-        from engine.combat_utils import get_unit_coordinates
-        current_pos = get_unit_coordinates(unit)
+        from engine.phase_handlers.shared_utils import require_unit_position
+        current_pos = require_unit_position(unit, game_state)
         
         # Use movement handler to get valid destinations
         from engine.phase_handlers import movement_handlers
@@ -258,14 +259,14 @@ class PvEController:
         
         # Strategy: Move toward nearest enemy for aggressive positioning
         # Uses BFS pathfinding to respect walls when calculating distance
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and u["HP_CUR"] > 0]
+        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
 
         if enemies:
             # Find nearest enemy using BFS pathfinding distance (respects walls)
-            from engine.combat_utils import get_unit_coordinates
-            unit_col, unit_row = get_unit_coordinates(unit)
-            nearest_enemy = min(enemies, key=lambda e: calculate_pathfinding_distance(unit_col, unit_row, *get_unit_coordinates(e), game_state))
-            enemy_pos = get_unit_coordinates(nearest_enemy)
+            from engine.phase_handlers.shared_utils import require_unit_position
+            unit_col, unit_row = require_unit_position(unit, game_state)
+            nearest_enemy = min(enemies, key=lambda e: calculate_pathfinding_distance(unit_col, unit_row, *require_unit_position(e, game_state), game_state))
+            enemy_pos = require_unit_position(nearest_enemy, game_state)
 
             # Select move that gets closest to nearest enemy using BFS pathfinding distance
             best_move = min(actual_moves,

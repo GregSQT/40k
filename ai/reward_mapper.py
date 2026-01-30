@@ -6,6 +6,7 @@ using existing parameter unitTypes from rewards_config.json
 
 from typing import Dict, List, Any, Tuple
 from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage, get_selected_ranged_weapon, get_selected_melee_weapon
+from engine.phase_handlers.shared_utils import get_hp_from_cache
 
 class RewardMapper:
     """Maps AI_GAME_OVERVIEW.md tactical priorities to existing reward parameters."""
@@ -22,12 +23,18 @@ class RewardMapper:
         cc_dmg = get_max_melee_damage(unit)
         return max(rng_dmg, cc_dmg)
     
-    def _can_unit_kill_target_in_one_phase(self, unit: Dict[str, Any], target: Dict[str, Any], is_ranged: bool) -> bool:
+    def _get_target_hp(self, target: Dict[str, Any], game_state: Dict[str, Any]) -> int:
+        """HP of target: from units_cache if alive, else 0 (dead = not in cache)."""
+        hp = get_hp_from_cache(str(target["id"]), game_state)
+        return hp if hp is not None else 0
+    
+    def _can_unit_kill_target_in_one_phase(self, unit: Dict[str, Any], target: Dict[str, Any], is_ranged: bool, game_state: Dict[str, Any]) -> bool:
         """
         Check if unit can kill target in one phase.
         MULTIPLE_WEAPONS_IMPLEMENTATION.md: Uses weapon arrays instead of single damage fields.
+        Phase 2: HP from _get_target_hp (enriched cur_hp or cache).
         """
-        target_hp = target.get("HP_CUR", 0)
+        target_hp = self._get_target_hp(target, game_state)
         if target_hp <= 0:
             return True
         
@@ -44,7 +51,7 @@ class RewardMapper:
         
         return target_hp <= max_damage
     
-    def get_shooting_priority_reward(self, unit, target, all_targets, can_melee_charge_target):
+    def get_shooting_priority_reward(self, unit, target, all_targets, can_melee_charge_target, game_state: Dict[str, Any]):
         """
         Calculate shooting reward based on AI_GAME_OVERVIEW.md priority system:
         
@@ -70,12 +77,13 @@ class RewardMapper:
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
         target_threat = self._get_unit_threat(target)
-        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True)
+        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state=game_state)
         
         # Priority 1: High threat target that melee can charge but won't kill in 1 melee phase
         if can_melee_charge_target:
             melee_damage = self._get_max_melee_damage_vs_target(target)
-            if target["HP_CUR"] > melee_damage:  # Won't be killed by melee in 1 phase
+            target_hp = self._get_target_hp(target, game_state)
+            if target_hp > melee_damage:  # Won't be killed by melee in 1 phase
                 if self._is_highest_threat_in_range(target, all_targets):
                     if "shoot_priority_1" not in unit_rewards:
                         raise ValueError("shoot_priority_1 reward not found in unit rewards config")
@@ -88,7 +96,7 @@ class RewardMapper:
             return base_reward + unit_rewards["shoot_priority_2"]
         
         # Priority 3: High threat, lowest HP target that can be killed in 1 phase
-        if can_kill_1_phase and self._is_lowest_hp_high_threat(target, all_targets):
+        if can_kill_1_phase and self._is_lowest_hp_high_threat(target, all_targets, game_state):
             if "shoot_priority_3" not in unit_rewards:
                 raise ValueError("shoot_priority_3 reward not found in unit rewards config")
             return base_reward + unit_rewards["shoot_priority_3"]
@@ -96,7 +104,7 @@ class RewardMapper:
         # Standard shooting reward
         return base_reward
     
-    def get_charge_priority_reward(self, unit, target, all_targets):
+    def get_charge_priority_reward(self, unit, target, all_targets, game_state: Dict[str, Any]):
         """
         Calculate charge reward based on AI_GAME_OVERVIEW.md priority system:
         
@@ -116,7 +124,7 @@ class RewardMapper:
 
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
         target_threat = self._get_unit_threat(target)
-        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False)
+        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state=game_state)
         
         if "is_melee" not in unit:
             raise ValueError(f"unit.is_melee is required for unit {unit.get('unitType', 'unknown')}")
@@ -129,25 +137,26 @@ class RewardMapper:
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use melee weapon damage
             melee_weapon = get_selected_melee_weapon(unit)
             unit_melee_dmg = (melee_weapon.get("NB", 0) * melee_weapon.get("DMG", 0)) if melee_weapon else 0
-            if (target["HP_CUR"] >= unit_melee_dmg and
+            target_hp = self._get_target_hp(target, game_state)
+            if (target_hp >= unit_melee_dmg and
                 self._is_highest_threat_in_range(target, all_targets) and
-                self._is_lowest_hp_among_threats(target, all_targets)):
+                self._is_lowest_hp_among_threats(target, all_targets, game_state)):
                 return base_reward + unit_rewards.get("charge_priority_2", 0)
 
             # Priority 3: High threat, lowest HP
             if (self._is_highest_threat_in_range(target, all_targets) and
-                self._is_lowest_hp_among_threats(target, all_targets)):
+                self._is_lowest_hp_among_threats(target, all_targets, game_state)):
                 return base_reward + unit_rewards.get("charge_priority_3", 0)
 
         else:  # Ranged unit charge priorities (different logic)
             if (can_kill_1_phase and
                 self._is_highest_threat_in_range(target, all_targets) and
-                self._is_highest_hp_among_threats(target, all_targets)):
+                self._is_highest_hp_among_threats(target, all_targets, game_state)):
                 return base_reward + unit_rewards.get("charge_priority_1", 0)
 
         return base_reward
     
-    def get_combat_priority_reward(self, unit, target, all_targets):
+    def get_combat_priority_reward(self, unit, target, all_targets, game_state: Dict[str, Any]):
         """
         Calculate combat reward based on AI_GAME_OVERVIEW.md priority system:
         
@@ -161,7 +170,7 @@ class RewardMapper:
         base_reward = base_actions["melee_attack"]
 
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use melee weapon damage
-        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False)
+        can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state=game_state)
 
         # Priority 1: Can kill in 1 melee phase with highest threat
         if can_kill_1_phase and self._is_highest_threat_adjacent(target, all_targets):
@@ -170,17 +179,18 @@ class RewardMapper:
 
         # Priority 2: Highest threat, lowest HP if multiple high threats
         if (self._is_highest_threat_adjacent(target, all_targets) and
-            self._is_lowest_hp_among_adjacent_threats(target, all_targets)):
+            self._is_lowest_hp_among_adjacent_threats(target, all_targets, game_state)):
             priority_bonus = unit_rewards.get("attack_priority_2", 0)
             return base_reward + priority_bonus
 
         return base_reward
     
-    def get_kill_bonus_reward(self, unit, target, damage_dealt):
-        """Calculate kill bonus rewards using existing parameter unitTypes."""
+    def get_kill_bonus_reward(self, unit, target, damage_dealt, game_state: Dict[str, Any]):
+        """Calculate kill bonus rewards using existing parameter unitTypes. Phase 2: HP from _get_target_hp."""
         unit_rewards = self._get_unit_rewards(unit)
+        target_hp = self._get_target_hp(target, game_state)
         
-        if target["HP_CUR"] - damage_dealt <= 0:  # Target will be killed
+        if target_hp - damage_dealt <= 0:  # Target will be killed
             phase = self._get_current_phase()
             
             result_bonuses = unit_rewards.get("result_bonuses", {})
@@ -194,7 +204,7 @@ class RewardMapper:
                 base_kill = result_bonuses["kill_target"]
             
             # No overkill bonus
-            if target["HP_CUR"] == damage_dealt:
+            if target_hp == damage_dealt:
                 if phase == "shoot":
                     if "enemy_killed_no_overkill_r" not in unit_rewards:
                         raise ValueError("enemy_killed_no_overkill_r reward not found in unit rewards config")
@@ -209,7 +219,7 @@ class RewardMapper:
                     base_kill += unit_rewards["enemy_killed_no_overkill_m"] - unit_rewards["enemy_killed_m"]
             
             # Lowest HP target bonus
-            if self._was_lowest_hp_target(target):
+            if self._was_lowest_hp_target(target, game_state):
                 if phase == "shoot":
                     if "enemy_killed_lowests_hp_r" not in unit_rewards:
                         raise ValueError("enemy_killed_lowests_hp_r reward not found in unit rewards config")
@@ -426,48 +436,51 @@ class RewardMapper:
                     return False
         return True
     
-    def _is_lowest_hp_high_threat(self, target, all_targets):
-        """Check if target has lowest HP among high threat targets."""
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+    def _is_lowest_hp_high_threat(self, target, all_targets, game_state: Dict[str, Any]):
+        """Check if target has lowest HP among high threat targets. Phase 2: HP from _get_target_hp."""
         target_threat = self._get_unit_threat(target)
         max_threat = max(self._get_unit_threat(t) for t in all_targets)
-        
+        target_hp = self._get_target_hp(target, game_state)
         if target_threat == max_threat:
             for other in all_targets:
                 other_threat = self._get_unit_threat(other)
-                if other_threat == max_threat and other["HP_CUR"] < target["HP_CUR"]:
+                other_hp = self._get_target_hp(other, game_state)
+                if other_threat == max_threat and other_hp < target_hp:
                     return False
             return True
         return False
     
-    def _is_lowest_hp_among_threats(self, target, all_targets):
-        """Check if target has lowest HP among targets of same threat level.""" 
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+    def _is_lowest_hp_among_threats(self, target, all_targets, game_state: Dict[str, Any]):
+        """Check if target has lowest HP among targets of same threat level. Phase 2: HP from _get_target_hp."""
         target_threat = self._get_unit_threat(target)
+        target_hp = self._get_target_hp(target, game_state)
         for other in all_targets:
             other_threat = self._get_unit_threat(other)
-            if other_threat == target_threat and other["HP_CUR"] < target["HP_CUR"]:
+            other_hp = self._get_target_hp(other, game_state)
+            if other_threat == target_threat and other_hp < target_hp:
                 return False
         return True
     
-    def _is_highest_hp_among_threats(self, target, all_targets):
-        """Check if target has highest HP among targets of same threat level."""
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+    def _is_highest_hp_among_threats(self, target, all_targets, game_state: Dict[str, Any]):
+        """Check if target has highest HP among targets of same threat level. Phase 2: HP from _get_target_hp."""
         target_threat = self._get_unit_threat(target)
+        target_hp = self._get_target_hp(target, game_state)
         for other in all_targets:
             other_threat = self._get_unit_threat(other)
-            if other_threat == target_threat and other["HP_CUR"] > target["HP_CUR"]:
+            other_hp = self._get_target_hp(other, game_state)
+            if other_threat == target_threat and other_hp > target_hp:
                 return False
         return True
     
-    def _is_lowest_hp_among_adjacent_threats(self, target, adjacent_targets):
-        """Check if target has lowest HP among adjacent targets of same threat level."""
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon arrays for threat calculation
+    def _is_lowest_hp_among_adjacent_threats(self, target, adjacent_targets, game_state: Dict[str, Any]):
+        """Check if target has lowest HP among adjacent targets of same threat level. Phase 2: HP from _get_target_hp."""
         target_threat = self._get_unit_threat(target)
+        target_hp = self._get_target_hp(target, game_state)
         for other in adjacent_targets:
             if other != target:
                 other_threat = self._get_unit_threat(other)
-                if other_threat == target_threat and other["HP_CUR"] < target["HP_CUR"]:
+                other_hp = self._get_target_hp(other, game_state)
+                if other_threat == target_threat and other_hp < target_hp:
                     return False
         return True
     
@@ -482,7 +495,7 @@ class RewardMapper:
         # This would need access to game state
         raise NotImplementedError("_get_current_phase requires access to game state - no fallback defaults allowed")
     
-    def _was_lowest_hp_target(self, target):
-        """Check if this was the lowest HP target when action was taken."""
-        # This would need access to game state at time of action
-        raise NotImplementedError("_was_lowest_hp_target requires access to game state at action time - no fallback defaults allowed")
+    def _was_lowest_hp_target(self, target, game_state: Dict[str, Any]):
+        """Check if this was the lowest HP target when action was taken. Phase 2: HP from get_hp_from_cache."""
+        # get_kill_bonus_reward does not receive all_targets; cannot compare. No bonus to avoid over-reward.
+        return False

@@ -3,7 +3,7 @@
 AI rules checker for AI_TURN.md and coding_practices.mdc compliance.
 
 Purpose:
-- Detect cache recalculation violations (build_enemy_adjacent_hexes, build_position_cache)
+- Detect cache recalculation violations (build_enemy_adjacent_hexes, build_units_cache)
 - Detect activation pool rebuild outside phase_start (*_build_activation_pool*); for dead units use _remove_dead_unit_from_pools or in-place removal
 - Verify coordinate normalization (no direct col/row comparisons; supports "col"/'col')
 - Detect anti-error fallbacks (.get with None, 0, [], {}); standalone or followed by if)
@@ -12,6 +12,8 @@ Purpose:
 - Detect forbidden terms (workaround, fallback, magic number); skip comment lines that document the prohibition
 
 Lines containing \"\"\" are ignored for col/row checks (to avoid flagging example code in docstrings); violations inside docstrings/strings are false negatives (accepted trade-off).
+
+NOTE: build_units_cache should be called ONLY at reset(), NOT at phase_start. Phase starts verify that units_cache exists.
 
 Usage:
     python scripts/check_ai_rules.py [--path PATH]
@@ -96,14 +98,18 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
 
     Violations:
     - build_enemy_adjacent_hexes() called outside phase_start functions
-    - build_position_cache() called outside phase_start functions
+    - build_units_cache() called outside reset() function (should be built ONLY at reset, not phase start)
     """
     violations: List[RuleViolation] = []
 
     # Functions that should only be called in phase_start
     cache_functions = [
         ("build_enemy_adjacent_hexes", "enemy_adjacent_hexes cache should be built once at phase start, not recalculated"),
-        ("build_position_cache", "position_cache should be built once at phase start, not recalculated"),
+    ]
+    
+    # Functions that should only be called at reset (NOT phase_start)
+    reset_only_functions = [
+        ("build_units_cache", "units_cache should be built ONLY at reset(), not at phase_start or anywhere else"),
     ]
 
     lines = text.splitlines()
@@ -111,6 +117,10 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
     # Track whether we're inside a phase_start function (def at column 0 matching *_phase_start)
     in_phase_start = False
     phase_start_pattern = re.compile(r"def\s+(\w+_phase_start|phase_start)\s*\(")
+    
+    # Track whether we're inside a reset function
+    in_reset = False
+    reset_pattern = re.compile(r"def\s+reset\s*\(")
 
     for idx, line in enumerate(lines, start=1):
         stripped = line.strip()
@@ -118,47 +128,87 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
         # Entering phase_start: def at column 0
         if not line.startswith(" ") and not line.startswith("\t") and phase_start_pattern.search(line):
             in_phase_start = True
+            in_reset = False
+            continue
+        
+        # Entering reset: def at column 0 or indented (method)
+        if reset_pattern.search(line):
+            in_reset = True
+            in_phase_start = False
             continue
 
         # Leaving: next top-level def (column 0)
-        if in_phase_start and stripped.startswith("def ") and not line.startswith(" ") and not line.startswith("\t"):
+        if (in_phase_start or in_reset) and stripped.startswith("def ") and not line.startswith(" ") and not line.startswith("\t"):
             in_phase_start = False
+            in_reset = False
 
-        # Skip if inside phase_start
-        if in_phase_start:
-            continue
-
-        for func_name, message in cache_functions:
-            if re.search(rf"def\s+{func_name}\s*\(", line):
-                continue
-            if re.search(rf"from\s+.*\s+import.*{re.escape(func_name)}|import.*{re.escape(func_name)}", line):
-                continue
-            if "#" in line:
-                comment_pos = line.find("#")
-                func_pos = line.find(func_name)
-                if func_pos > comment_pos:
+        # Check phase_start cache functions (should only be called in phase_start)
+        if not in_phase_start:
+            for func_name, message in cache_functions:
+                if re.search(rf"def\s+{func_name}\s*\(", line):
                     continue
-            if '"""' in line or "'''" in line:
-                continue
-
-            call_pattern = re.compile(rf"\b{re.escape(func_name)}\s*\(")
-            if not call_pattern.search(line):
-                continue
-
-            if re.search(rf"(raise|ValueError|KeyError|Exception).*{re.escape(func_name)}", line, re.IGNORECASE):
-                continue
-            if re.search(rf"(use|call|must|should).*{re.escape(func_name)}", line, re.IGNORECASE):
-                code_part = line.split("#")[0].replace('"""', "").replace("'''", "")
-                if not call_pattern.search(code_part):
+                if re.search(rf"from\s+.*\s+import.*{re.escape(func_name)}|import.*{re.escape(func_name)}", line):
+                    continue
+                if "#" in line:
+                    comment_pos = line.find("#")
+                    func_pos = line.find(func_name)
+                    if func_pos > comment_pos:
+                        continue
+                if '"""' in line or "'''" in line:
                     continue
 
-            violations.append(RuleViolation(
-                path, idx,
-                f"{message}. Found in non-phase_start function.",
-                line,
-                "cache_recalculation"
-            ))
-            break
+                call_pattern = re.compile(rf"\b{re.escape(func_name)}\s*\(")
+                if not call_pattern.search(line):
+                    continue
+
+                if re.search(rf"(raise|ValueError|KeyError|Exception).*{re.escape(func_name)}", line, re.IGNORECASE):
+                    continue
+                if re.search(rf"(use|call|must|should).*{re.escape(func_name)}", line, re.IGNORECASE):
+                    code_part = line.split("#")[0].replace('"""', "").replace("'''", "")
+                    if not call_pattern.search(code_part):
+                        continue
+
+                violations.append(RuleViolation(
+                    path, idx,
+                    f"{message}. Found in non-phase_start function.",
+                    line,
+                    "cache_recalculation"
+                ))
+                break
+        
+        # Check reset-only cache functions (should ONLY be called in reset, not phase_start)
+        if not in_reset:
+            for func_name, message in reset_only_functions:
+                if re.search(rf"def\s+{func_name}\s*\(", line):
+                    continue
+                if re.search(rf"from\s+.*\s+import.*{re.escape(func_name)}|import.*{re.escape(func_name)}", line):
+                    continue
+                if "#" in line:
+                    comment_pos = line.find("#")
+                    func_pos = line.find(func_name)
+                    if func_pos > comment_pos:
+                        continue
+                if '"""' in line or "'''" in line:
+                    continue
+
+                call_pattern = re.compile(rf"\b{re.escape(func_name)}\s*\(")
+                if not call_pattern.search(line):
+                    continue
+
+                if re.search(rf"(raise|ValueError|KeyError|Exception).*{re.escape(func_name)}", line, re.IGNORECASE):
+                    continue
+                if re.search(rf"(use|call|must|should).*{re.escape(func_name)}", line, re.IGNORECASE):
+                    code_part = line.split("#")[0].replace('"""', "").replace("'''", "")
+                    if not call_pattern.search(code_part):
+                        continue
+
+                violations.append(RuleViolation(
+                    path, idx,
+                    f"{message}. Found outside reset() function.",
+                    line,
+                    "cache_recalculation"
+                ))
+                break
 
     return violations
 

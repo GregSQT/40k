@@ -17,7 +17,7 @@ alwaysApply: false
 **Implications** :
 - Les positions ennemies ne changent PAS (l'adversaire ne bouge pas)
 - Les hex adjacents aux ennemis ne changent PAS
-- Les caches (`enemy_adjacent_hexes`, `position_cache`) ne deviennent PAS obsolètes à cause de mouvements ennemis
+- Les caches (`enemy_adjacent_hexes`, `units_cache`) ne deviennent PAS obsolètes à cause de mouvements ennemis
 
 ```python
 # ❌ VIOLATION CRITIQUE
@@ -37,7 +37,7 @@ def build_target_pool(unit, game_state):
     # Le cache reste valide pendant TOUTE la phase
 ```
 
-**Vérification** : Si le code recalcule `enemy_adjacent_hexes` ou `position_cache` sans changement de `current_player` ou de phase → **VIOLATION**.
+**Vérification** : Si le code recalcule `enemy_adjacent_hexes` ou `units_cache` sans changement de `current_player` ou de phase → **VIOLATION**.
 
 ### Invariant 2 : Sequential Activation (Un Seul à la Fois)
 
@@ -56,8 +56,8 @@ if shoot_activation_pool:
 
 ### Invariant 3 : Caches Valides Pendant Toute l'Activation
 
-**Règle** : `los_cache` et `position_cache` restent valides pendant toute l'activation d'une unité, sauf :
-- Mort d'une cible → retirer de `position_cache` et `los_cache` (pas de recalcul)
+**Règle** : `los_cache` et `units_cache` restent valides pendant toute l'activation d'une unité, sauf :
+- Mort d'une cible → `update_units_cache_hp(..., 0)` appelle `remove_from_units_cache` (unité retirée de `units_cache`) ; retirer de `los_cache` (pas de recalcul). Capturer position cible **avant** dégâts pour les logs.
 - Advance de l'unité → recalculer `los_cache` (nouvelle position)
 
 ```python
@@ -68,11 +68,10 @@ def update_after_target_death(dead_target_id, unit):
 
 # ✅ OBLIGATOIRE
 def update_after_target_death(dead_target_id, unit, game_state):
-    # Retirer uniquement la cible morte
+    # Retirer uniquement la cible morte (units_cache déjà mis à jour par update_units_cache_hp)
     if dead_target_id in unit.get("los_cache", {}):
         del unit["los_cache"][dead_target_id]
-    if dead_target_id in game_state.get("position_cache", {}):
-        del game_state["position_cache"][dead_target_id]
+    # units_cache : retrait via update_units_cache_hp(..., 0) au moment des dégâts
     # Pas de recalcul, juste retrait
 ```
 
@@ -81,7 +80,7 @@ def update_after_target_death(dead_target_id, unit, game_state):
 ### Règle 1 : Eligibility Check (Pool Building)
 
 **Conditions OBLIGATOIRES** (toutes doivent être vraies) :
-- `unit.HP_CUR > 0` (unité vivante)
+- Unité vivante : `is_unit_alive(str(unit["id"]), game_state)` (source : `units_cache`)
 - `unit.player === current_player` (bon joueur)
 - `unit.id NOT in units_shot` (pas déjà tiré)
 - Au moins une cible valide disponible
@@ -89,14 +88,15 @@ def update_after_target_death(dead_target_id, unit, game_state):
 ```python
 # ❌ INTERDIT
 if unit["HP_CUR"] > 0:
-    add_to_pool(unit)  # Manque vérifications
+    add_to_pool(unit)  # Utiliser is_unit_alive, pas HP_CUR
 
 # ✅ OBLIGATOIRE
+from engine.phase_handlers.shared_utils import is_unit_alive
 def get_eligible_units(game_state):
     eligible = []
     current_player = game_state["current_player"]
     for unit in game_state["units"]:
-        if unit["HP_CUR"] <= 0:
+        if not is_unit_alive(str(unit["id"]), game_state):
             continue
         if unit["player"] != current_player:
             continue
@@ -193,7 +193,7 @@ end_activation(ACTION, 1, SHOOTING, SHOOTING, 0, 0)
 # ❌ DÉTECTER
 def process_shooting(unit, game_state):
     # Recalculer "par sécurité"
-    game_state["position_cache"] = build_position_cache(game_state)
+    build_units_cache(game_state)  # ERREUR : reset only, pas en phase start
     # ERREUR : current_player n'a pas changé, cache toujours valide
 ```
 

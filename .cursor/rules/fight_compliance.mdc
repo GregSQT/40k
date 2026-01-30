@@ -59,7 +59,7 @@ while fight_activation_pool:
 **Règle** : Unités qui ont chargé (`units_charged`) attaquent EN PREMIER.
 
 **Eligibility** :
-- `unit.HP_CUR > 0`
+- Unité vivante : `is_unit_alive(str(unit["id"]), game_state)` (source : `units_cache`)
 - `unit.player === current_player`
 - `unit.id in units_charged`
 - Adjacent à ennemi
@@ -67,15 +67,15 @@ while fight_activation_pool:
 ```python
 # ❌ INTERDIT
 def get_charging_units(game_state):
-    # Inclure toutes les unités
-    return [u for u in game_state["units"] if u["HP_CUR"] > 0]
+    return [u for u in game_state["units"] if u["HP_CUR"] > 0]  # Utiliser is_unit_alive
 
 # ✅ OBLIGATOIRE
+from engine.phase_handlers.shared_utils import is_unit_alive
 def get_charging_units(game_state):
     current_player = game_state["current_player"]
     charging_units = []
     for unit in game_state["units"]:
-        if unit["HP_CUR"] <= 0:
+        if not is_unit_alive(str(unit["id"]), game_state):
             continue
         if unit["player"] != current_player:
             continue
@@ -153,7 +153,7 @@ def process_fight(unit, game_state):
 
 ### Règle 4 : Valid Target Pool Building
 
-**Règle** : Cibles valides = ennemis adjacents avec `HP_CUR > 0`.
+**Règle** : Cibles valides = ennemis adjacents vivants (`is_unit_alive` ; source : `units_cache`).
 
 **Recalcul** : Pool doit être reconstruit avant chaque attaque (cibles peuvent mourir).
 
@@ -186,46 +186,31 @@ def process_fight(unit, game_state):
 2. Hit roll : `hit_roll >= selected_weapon.ATK`
 3. Wound roll : `wound_roll >= calculate_wound_target()`
 4. Save roll : `save_roll >= calculate_save_target()`
-5. Damage : `target.HP_CUR -= selected_weapon.DMG` (mise à jour IMMÉDIATE)
-6. Death check : Si `target.HP_CUR <= 0`, `target.alive = False`
+5. Damage : lire HP depuis le cache (`get_hp_from_cache`), calculer `new_hp`, appeler `update_units_cache_hp(game_state, target_id, new_hp)` uniquement (Phase 2 : met à jour uniquement `units_cache`).
+6. Death check : si `new_hp <= 0`, `update_units_cache_hp` appelle `remove_from_units_cache` (unité retirée de `units_cache`). Capturer position cible **avant** dégâts pour les logs.
 
 ```python
 # ❌ INTERDIT
 def attack_sequence(unit, target, game_state):
-    # Appliquer dégâts à la fin
     total_damage = 0
     for hit in hits:
         total_damage += weapon.DMG
-    target["HP_CUR"] -= total_damage  # Appliqué à la fin
+    update_units_cache_hp(game_state, str(target["id"]), max(0, target["HP_CUR"] - total_damage))  # Ne pas lire target["HP_CUR"]
 
-# ✅ OBLIGATOIRE
+# ✅ OBLIGATOIRE (Phase 2)
+from engine.phase_handlers.shared_utils import require_hp_from_cache, update_units_cache_hp
 def attack_sequence(unit, target, game_state):
     weapon = unit["CC_WEAPONS"][unit["selectedCcWeaponIndex"]]
-    hits = 0
-    wounds = 0
-    failed_saves = 0
-    
-    # Hit roll
-    for _ in range(weapon.NB):
-        hit_roll = roll_d6()
-        if hit_roll >= weapon.ATK:
-            hits += 1
-    
-    # Wound roll
-    for _ in range(hits):
-        wound_roll = roll_d6()
-        if wound_roll >= calculate_wound_target(unit, target):
-            wounds += 1
-    
+    # ...
     # Save roll
     for _ in range(wounds):
         save_roll = roll_d6()
         if save_roll < calculate_save_target(target):
             failed_saves += 1
-            # ⚡ IMMEDIATE UPDATE
-            target["HP_CUR"] -= weapon.DMG
-            if target["HP_CUR"] <= 0:
-                target["alive"] = False
+            target_hp = require_hp_from_cache(str(target["id"]), game_state)
+            new_hp = max(0, target_hp - weapon.DMG)
+            update_units_cache_hp(game_state, str(target["id"]), new_hp)
+            # Mort = remove_from_units_cache (unité retirée du cache)
 ```
 
 ### Règle 6 : End Activation Parameters
@@ -287,11 +272,13 @@ def process_fight(unit, game_state):
 # ❌ DÉTECTER
 def attack_sequence(unit, target, game_state):
     total_damage = calculate_total_damage()
-    # Appliquer à la fin
-    target["HP_CUR"] -= total_damage
+    update_units_cache_hp(game_state, str(target["id"]), max(0, target["HP_CUR"] - total_damage))  # Ne pas lire target["HP_CUR"]
 
-# ✅ CORRECTION
-# Appliquer dégâts IMMÉDIATEMENT après chaque failed save
+# ✅ CORRECTION (Phase 2)
+# Lire HP depuis require_hp_from_cache ; appliquer dégâts IMMÉDIATEMENT après chaque failed save
+target_hp = require_hp_from_cache(str(target["id"]), game_state)
+new_hp = max(0, target_hp - total_damage)
+update_units_cache_hp(game_state, str(target["id"]), new_hp)
 ```
 
 ## ✅ CHECKLIST DE VALIDATION

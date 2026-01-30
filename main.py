@@ -8,6 +8,7 @@ Test and validate the AI_TURN.md compliant W40K engine.
 import json
 import os
 from engine import W40KEngine
+from engine.phase_handlers.shared_utils import is_unit_alive
 
 
 def load_config(scenario_path=None):
@@ -289,7 +290,7 @@ def test_basic_functionality():
         
         if current_phase == 'move':
             # Try to move east for current player's first unit
-            eligible_units = [u for u in engine.game_state["units"] if u["player"] == current_player and u["HP_CUR"] > 0]
+            eligible_units = [u for u in engine.game_state["units"] if u["player"] == current_player and is_unit_alive(str(u["id"]), engine.game_state)]
             if eligible_units:
                 unit = eligible_units[0]
                 action = {"action": "move", "unitId": unit["id"], "destCol": unit["col"] + 1, "destRow": unit["row"]}

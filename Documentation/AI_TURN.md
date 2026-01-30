@@ -519,6 +519,8 @@ build_position_cache():
 - Début de la phase de tir (une fois)
 - **PAS** après mort de cible (juste retirer l'entrée du cache)
 
+**Note d’implémentation** : L’implémentation actuelle utilise **`units_cache`** à la place de `position_cache`. `units_cache` est construit **uniquement au reset** (pas en phase start). Il est la source de vérité pour position, `HP_CUR` et aliveness des unités vivantes. Les unités mortes sont retirées via `update_units_cache_hp(..., 0)` (shooting/fight). **`HP_CUR`** a une source unique : seul `update_units_cache_hp` écrit `HP_CUR` en jeu ; pour « vivant », utiliser `is_unit_alive(unit_id, game_state)`. Voir `AI_IMPLEMENTATION.md` (Units cache & HP_CUR) et `unit_cache21.md`.
+
 ### Function: build_unit_los_cache(unit_id)
 **Purpose**: Calculer le cache LoS pour une unité spécifique  
 **Returns**: void (met à jour unit["los_cache"])

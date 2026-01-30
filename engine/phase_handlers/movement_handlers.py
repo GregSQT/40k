@@ -11,15 +11,17 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation, _log_with_context
 from shared.data_validation import require_key
 from engine.combat_utils import (
-    calculate_hex_distance, 
-    get_unit_coordinates, 
-    normalize_coordinates, 
+    calculate_hex_distance,
+    normalize_coordinates,
     set_unit_coordinates,
     get_unit_by_id,
     get_hex_neighbors,
     is_hex_adjacent_to_enemy
 )
-from .shared_utils import build_enemy_adjacent_hexes
+from .shared_utils import (
+    build_enemy_adjacent_hexes, update_units_cache_position, is_unit_alive,
+    get_unit_position, require_unit_position,
+)
 
 
 def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any]) -> None:
@@ -152,8 +154,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     for unit in game_state["units"]:
         unit_id = unit["id"]
         
-        # "unit.HP_CUR > 0?"
-        if unit["HP_CUR"] <= 0:
+        # unit alive? (units_cache is source of truth)
+        if not is_unit_alive(str(unit["id"]), game_state):
             continue  # Dead unit (Skip, no log)
 
         # "unit.player === current_player?"
@@ -162,15 +164,15 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
 
         # Check if unit has at least one adjacent hex that is not occupied and not adjacent to enemy
         # This ensures the unit can actually move
-        unit_col, unit_row = get_unit_coordinates(unit)
+        unit_col, unit_row = require_unit_position(unit, game_state)
         neighbors = get_hex_neighbors(unit_col, unit_row)
         
         # Pre-compute occupied positions and enemy adjacent hexes for this check
         occupied_positions = set()
         for u in game_state["units"]:
             # Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
-            if u["HP_CUR"] > 0 and str(u["id"]) != str(unit["id"]):
-                col_int, row_int = get_unit_coordinates(u)
+            if is_unit_alive(str(u["id"]), game_state) and str(u["id"]) != str(unit["id"]):
+                col_int, row_int = require_unit_position(u, game_state)
                 occupied_positions.add((col_int, row_int))
         # Use cached enemy_adjacent_hexes from phase start
         # Cache is built once per phase in movement_phase_start()/shooting_phase_start()/charge_phase_start()
@@ -471,7 +473,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     # The pool should already exclude all hexes adjacent to enemies, so no redundant check here.
 
     # Store original position
-    orig_col, orig_row = get_unit_coordinates(unit)
+    orig_col, orig_row = require_unit_position(unit, game_state)
 
     # Flee detection: was adjacent to enemy before move
     was_adjacent = _is_adjacent_to_enemy(game_state, unit)
@@ -485,11 +487,14 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     
     # Check all units for occupation
     for check_unit in game_state["units"]:
-        check_col, check_row = get_unit_coordinates(check_unit)
+        check_pos = get_unit_position(check_unit, game_state)
+        if check_pos is None:
+            continue
+        check_col, check_row = check_pos
         
         # Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
         if (str(check_unit["id"]) != str(unit["id"]) and
-            check_unit["HP_CUR"] > 0 and
+            is_unit_alive(str(check_unit["id"]), game_state) and
             check_col == dest_col_int and
             check_row == dest_row_int):
             # Another unit already occupies this destination - prevent collision
@@ -525,6 +530,9 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     # Assign normalized int coordinates using set_unit_coordinates
     set_unit_coordinates(unit, dest_col_int, dest_row_int)
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
+
+    # Update units_cache after position change
+    update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
 
     # Apply AI_TURN.md tracking
     # Normalize unit ID to string for consistent storage (units_fled stores strings)
@@ -604,8 +612,8 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
                 # Normalize player values to int for consistent comparison (handles int/string mismatches)
                 enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
                 unit_player = int(unit["player"]) if unit["player"] is not None else None
-                if enemy_player != unit_player and enemy["HP_CUR"] > 0:
-                    enemy_col, enemy_row = get_unit_coordinates(enemy)
+                if enemy_player != unit_player and is_unit_alive(str(enemy["id"]), game_state):
+                    enemy_col, enemy_row = require_unit_position(enemy, game_state)
                     neighbors = get_hex_neighbors(enemy_col, enemy_row)
                     if (col_int, row_int) in neighbors:
                         adjacent_enemies.append(f"Unit {enemy['id']} at ({enemy_col},{enemy_row})")
@@ -632,7 +640,7 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
     # Normalize coordinates to int - raises error if invalid
-    unit_col, unit_row = get_unit_coordinates(unit)
+    unit_col, unit_row = require_unit_position(unit, game_state)
 
     # Optimization: For CC_RNG=1 (most common), check 6 neighbors directly
     result = False
@@ -642,9 +650,9 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
             # Normalize player values to int for consistent comparison (handles int/string mismatches)
             enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
             unit_player = int(unit["player"]) if unit["player"] is not None else None
-            if enemy_player != unit_player and enemy["HP_CUR"] > 0:
+            if enemy_player != unit_player and is_unit_alive(str(enemy["id"]), game_state):
                 # Normalize coordinates to int - raises error if invalid
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 enemy_pos = (enemy_col, enemy_row)
                 if enemy_pos in hex_neighbors:
                     result = True
@@ -655,8 +663,8 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
             # Normalize player values to int for consistent comparison (handles int/string mismatches)
             enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
             unit_player = int(unit["player"]) if unit["player"] is not None else None
-            if enemy_player != unit_player and enemy["HP_CUR"] > 0:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+            if enemy_player != unit_player and is_unit_alive(str(enemy["id"]), game_state):
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 hex_dist = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
                 if hex_dist <= cc_range:
                     result = True
@@ -717,7 +725,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     move_range = unit["MOVE"]
     # Normalize coordinates to int - raises error if invalid
-    start_col, start_row = get_unit_coordinates(unit)
+    start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
 
     # Use cached enemy_adjacent_hexes from phase start
@@ -743,9 +751,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     for u in game_state["units"]:
         units_processed += 1
         # Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
-        if u["HP_CUR"] > 0 and str(u["id"]) != str(unit["id"]):
+        if is_unit_alive(str(u["id"]), game_state) and str(u["id"]) != str(unit["id"]):
             # Normalize coordinates - raises clear error if invalid (no defensive try/except)
-            col_int, row_int = get_unit_coordinates(u)
+            col_int, row_int = require_unit_position(u, game_state)
             occupied_positions.add((col_int, row_int))
     
     # DEBUG: Log all units and their positions for collision debugging
@@ -753,16 +761,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         total_units = len(game_state["units"])
-        active_units = sum(1 for u in game_state["units"] if u["HP_CUR"] > 0)
+        active_units = sum(1 for u in game_state["units"] if is_unit_alive(str(u["id"]), game_state))
         occupied_count = len(occupied_positions)
-        expected_count = active_units - (1 if unit["HP_CUR"] > 0 else 0)  # Minus the active unit itself
+        expected_count = active_units - (1 if is_unit_alive(str(unit["id"]), game_state) else 0)  # Minus the active unit itself
         
         # Log all units and their positions
         units_info = []
         for u in game_state["units"]:
-            if u["HP_CUR"] > 0:
+            if is_unit_alive(str(u["id"]), game_state):
                 # Normalize coordinates - raises clear error if invalid (no defensive try/except)
-                col_int, row_int = get_unit_coordinates(u)
+                col_int, row_int = require_unit_position(u, game_state)
                 in_occupied = (col_int, row_int) in occupied_positions
                 units_info.append(f"Unit {u['id']}@({col_int},{row_int}){'✓' if in_occupied else '✗'}")
         
@@ -877,11 +885,11 @@ def _select_strategic_destination(
 
     # If no destinations, return current position
     if not valid_destinations:
-        return get_unit_coordinates(unit)
+        return require_unit_position(unit, game_state)
 
     # Get enemy units
     enemy_units = [u for u in game_state["units"]
-                   if u["player"] != unit["player"] and require_key(u, "HP_CUR") > 0]
+                   if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
 
     # If no enemies, just pick first destination
     if not enemy_units:
@@ -895,7 +903,7 @@ def _select_strategic_destination(
         for dest in valid_destinations:
             # Find distance to nearest enemy from this destination
             for enemy in enemy_units:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_enemy:
                     min_dist_to_enemy = dist
@@ -913,7 +921,7 @@ def _select_strategic_destination(
         for dest in valid_destinations:
             targets_in_range = 0
             for enemy in enemy_units:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist <= weapon_range:
                     # Check LoS (simplified - assumes LoS if in range for now)
@@ -934,7 +942,7 @@ def _select_strategic_destination(
             # Find distance to nearest enemy (we want to maximize this)
             min_dist_to_any_enemy = float('inf')
             for enemy in enemy_units:
-                enemy_col, enemy_row = get_unit_coordinates(enemy)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_any_enemy:
                     min_dist_to_any_enemy = dist
@@ -1062,7 +1070,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     # Position has already been updated by _attempt_movement_to_destination()
     # Validate it actually changed
-    unit_col, unit_row = get_unit_coordinates(unit)
+    unit_col, unit_row = require_unit_position(unit, game_state)
     if unit_col != dest_col or unit_row != dest_row:
         return False, {"error": "position_update_failed"}
     
@@ -1190,7 +1198,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # NOT move_result.get("toCol")/toRow which comes from action["destCol"]/destRow
     # NOT action["destCol"]/destRow which might be incorrect
     # The unit's position is the ONLY reliable source after movement execution
-    result_to_col, result_to_row = get_unit_coordinates(unit)
+    result_to_col, result_to_row = require_unit_position(unit, game_state)
     
     # DEBUG: Log exact values being used for result
     from engine.game_utils import add_console_log, safe_print

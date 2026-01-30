@@ -236,7 +236,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                             ep_num = 0
                         t_get_mask0 = time.perf_counter() if debug_mode else None
                         action_masks = bot_env.engine.get_action_mask()
-                        if debug_mode and t_get_mask0 is not None and ep_num >= 0:
+                        # LOG TEMPORAIRE: only every 50 steps to avoid I/O bottleneck (episode can appear stuck otherwise)
+                        if debug_mode and t_get_mask0 is not None and ep_num >= 0 and step_count % 50 == 0:
                             get_mask_duration = time.perf_counter() - t_get_mask0
                             try:
                                 debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
@@ -244,11 +245,11 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                                     f.write(f"GET_MASK_TIMING episode={int(ep_num)} step_index={step_count} duration_s={get_mask_duration:.6f}\n")
                             except (OSError, IOError):
                                 pass
-                        # LOG TEMPORAIRE: PREDICT_TIMING → debug.log for analyzer (only if --debug)
+                        # LOG TEMPORAIRE: PREDICT_TIMING → only every 50 steps to avoid I/O bottleneck
                         t0 = time.perf_counter()
                         action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
                         predict_duration = time.perf_counter() - t0
-                        if debug_mode and ep_num >= 0:
+                        if debug_mode and ep_num >= 0 and step_count % 50 == 0:
                             debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
                             try:
                                 with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
@@ -259,6 +260,11 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         obs, reward, terminated, truncated, info = bot_env.step(action)
                         done = terminated or truncated
                         step_count += 1
+
+                        # Progress hint for long episodes so user sees it's not stuck
+                        if show_progress and step_count % 100 == 0 and step_count > 0:
+                            sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] step {step_count} [{elapsed_str}<{eta_str}, {speed_str}]   ")
+                            sys.stdout.flush()
 
                     # Determine winner - track wins/losses/draws
                     # CRITICAL FIX: Learning agent is ALWAYS Player 0, regardless of controlled_agent name
@@ -311,7 +317,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         bar_length = 50
         bar = '█' * bar_length
         elapsed = time.time() - start_time
-        elapsed_str = format_time(elapsed)
+        _mins = int(elapsed // 60)
+        _secs = int(elapsed % 60)
+        elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
         speed_str = f"{total_episodes/elapsed:.2f}ep/s" if elapsed > 0 else "0.00ep/s"
         print(f"\r{progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes} [Completed] [{elapsed_str}, {speed_str}]")
         print()  # New line after final progress bar

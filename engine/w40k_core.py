@@ -15,10 +15,14 @@ import numpy as np
 from typing import Dict, List, Tuple, Set, Optional, Any
 
 # Import shared utilities
-from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, normalize_coordinates
+from shared.data_validation import require_key
+from engine.combat_utils import calculate_hex_distance, normalize_coordinates
 
 # Phase handlers (existing - keep these)
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers
+
+# units_cache helpers (single source of truth for position/HP of living units)
+from engine.phase_handlers.shared_utils import build_units_cache, is_unit_alive, require_unit_position
 
 # Import shared utilities FIRST (no circular dependencies)
 from engine.game_utils import get_unit_by_id
@@ -357,8 +361,7 @@ class W40KEngine(gym.Env):
             low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
         )
         
-        # Initialize position caching for movement_direction feature
-        self.last_unit_positions = {}  # {unit_id: (col, row)}
+        # NOTE: last_unit_positions removed - now using game_state["units_cache_prev"] for movement_direction
         
         # Episode-level metrics accumulation for MetricsCollectionCallback
         self.episode_reward_accumulator = 0.0
@@ -498,6 +501,16 @@ class W40KEngine(gym.Env):
             else:
                 raise ValueError(f"Unit {unit['id']} not found in scenario config during reset")
         
+        # Build units_cache once after all units are initialized (single source of truth)
+        build_units_cache(self.game_state)
+        
+        # Initialize units_cache_prev for first step (Phase 2: units_cache always exists after reset)
+        uc = require_key(self.game_state, "units_cache")
+        self.game_state["units_cache_prev"] = {
+            uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
+            for uid, d in uc.items()
+        }
+        
         # Initialize command phase for game start using handler delegation
         # CRITICAL: reset() is not in the cascade loop, so we need to handle initialization differently
         # Call command_phase_start() to do the resets, then call movement_phase_start() directly
@@ -549,7 +562,21 @@ class W40KEngine(gym.Env):
             # Use _scenario_objectives (set during scenario loading)
             objectives = self._scenario_objectives if hasattr(self, '_scenario_objectives') else None
             
-            self.step_logger.log_episode_start(self.game_state["units"], scenario_name, bot_name=bot_name, walls=walls, objectives=objectives)
+            # Single source of truth: episode_units from units_cache (col, row, player); unitType from units
+            uc = require_key(self.game_state, "units_cache")
+            unit_by_id = {str(u["id"]): u for u in self.game_state["units"]}
+            episode_units = []
+            for uid, entry in uc.items():
+                unit = unit_by_id.get(uid)
+                unit_type = unit.get("unitType", "Unknown") if unit else "Unknown"
+                episode_units.append({
+                    "id": uid,
+                    "col": entry["col"],
+                    "row": entry["row"],
+                    "player": entry["player"],
+                    "unitType": unit_type,
+                })
+            self.step_logger.log_episode_start(episode_units, scenario_name, bot_name=bot_name, walls=walls, objectives=objectives)
             
             # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number
             # This ensures debug.log uses the same episode number as step.log
@@ -601,6 +628,13 @@ class W40KEngine(gym.Env):
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
 
+        # Snapshot units_cache → units_cache_prev BEFORE processing the action (Phase 2: units_cache always exists)
+        uc = require_key(self.game_state, "units_cache")
+        self.game_state["units_cache_prev"] = {
+            uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
+            for uid, d in uc.items()
+        }
+
         # LOG TEMPORAIRE: count step() calls between two step_increment (only when --debug)
         if self.game_state.get("debug_mode", False):
             self._step_calls_since_increment = getattr(self, '_step_calls_since_increment', 0) + 1
@@ -628,6 +662,7 @@ class W40KEngine(gym.Env):
         if not np.any(action_mask):
             # No valid actions - trigger phase transition
             current_phase = self.game_state["phase"]
+            result = {}
             if current_phase == "fight":
                 from engine.phase_handlers import fight_handlers
                 result = fight_handlers.fight_phase_end(self.game_state)
@@ -698,7 +733,7 @@ class W40KEngine(gym.Env):
             if unit_id:
                 pre_unit = self._get_unit_by_id(str(unit_id))
                 if pre_unit:
-                    pre_action_positions[str(unit_id)] = get_unit_coordinates(pre_unit)
+                    pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
         
         # Process semantic action with AI_TURN.md compliance
         action_result = self._process_semantic_action(semantic_action)
@@ -918,9 +953,9 @@ class W40KEngine(gym.Env):
             controlled_player = 1
             
             surviving_ally_units = sum(1 for u in self.game_state["units"] 
-                                      if u["player"] == controlled_player and u["HP_CUR"] > 0)
+                                      if u["player"] == controlled_player and is_unit_alive(str(u["id"]), self.game_state))
             surviving_enemy_units = sum(1 for u in self.game_state["units"] 
-                                       if u["player"] != controlled_player and u["HP_CUR"] > 0)
+                                       if u["player"] != controlled_player and is_unit_alive(str(u["id"]), self.game_state))
             
             total_ally_units = sum(1 for u in self.game_state["units"] 
                                   if u["player"] == controlled_player)
@@ -964,17 +999,11 @@ class W40KEngine(gym.Env):
             except (OSError, IOError):
                 pass
 
-        # Update position cache for movement_direction feature
-        for unit in self.game_state["units"]:
-            if "id" not in unit:
-                raise KeyError(f"Unit missing required 'id' field: {unit}")
-            if "col" not in unit or "row" not in unit:
-                raise KeyError(f"Unit missing required position fields: {unit}")
-            unit_id = str(unit["id"])
-            self.last_unit_positions[unit_id] = get_unit_coordinates(unit)
+        # NOTE: last_unit_positions loop removed - now using units_cache_prev snapshot at step() start
         
-        # LOG TEMPORAIRE: write STEP_BREAKDOWN to debug.log (only if --debug, main path)
+        # LOG TEMPORAIRE: write STEP_BREAKDOWN to debug.log (only if --debug, main path); time the block for analyzer slowest-step analysis
         if _step_t0 is not None and _step_t5 is not None:
+            _t_breakdown_start = time.perf_counter()
             ep = int(self.game_state.get("episode_number", 0))
             step_idx = int(self.game_state.get("episode_steps", 0)) - 1 if success else int(self.game_state.get("episode_steps", 0))
             get_mask_s = _step_t1 - _step_t0 if _step_t1 is not None else 0.0
@@ -993,6 +1022,15 @@ class W40KEngine(gym.Env):
                     )
             except (OSError, IOError):
                 pass
+            # LOG TEMPORAIRE: STEP_BREAKDOWN_WRITE_TIMING for analyzer (compute + write segment)
+            if self.game_state.get("debug_mode"):
+                _breakdown_s = time.perf_counter() - _t_breakdown_start
+                try:
+                    _debug_path_bd = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(_debug_path_bd, "a", encoding="utf-8", errors="replace") as _f:
+                        _f.write(f"STEP_BREAKDOWN_WRITE_TIMING episode={ep} step_index={step_idx} duration_s={_breakdown_s:.6f}\n")
+                except (OSError, IOError):
+                    pass
 
         # LOG TEMPORAIRE: Write console_logs to debug.log (for hidden_action_finder.py; only if --debug)
         if "console_logs" in self.game_state and self.game_state["console_logs"]:
@@ -1147,7 +1185,7 @@ class W40KEngine(gym.Env):
             if unit_id:
                 pre_unit = self._get_unit_by_id(str(unit_id))
                 if pre_unit:
-                    pre_action_positions[str(unit_id)] = get_unit_coordinates(pre_unit)
+                    pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
 
         # Handle special "advance_phase" action when pool is empty
         if action.get("action") == "advance_phase":
@@ -1437,7 +1475,7 @@ class W40KEngine(gym.Env):
                                 target_unit = self._get_unit_by_id(str(target_id))
                                 if target_unit:
                                     # Capture target coordinates - these should be stable (targets don't move during opponent's turn)
-                                    action_details["target_coords"] = get_unit_coordinates(target_unit)
+                                    action_details["target_coords"] = require_unit_position(target_unit, self.game_state)
 
                             # Déterminer step_increment selon le type d'action et success
                             # Pour les actions qui incrémentent episode_steps (ligne 642), step_increment = success
@@ -1564,20 +1602,20 @@ class W40KEngine(gym.Env):
                                     target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                                     target_coords = None
                                     if target_unit:
-                                        target_coords = get_unit_coordinates(target_unit)
+                                        target_coords = require_unit_position(target_unit, self.game_state)
                                     
                                     # CRITICAL FIX: Use CURRENT position from game_state for combat actions
                                     # Units do NOT move during FIGHT phase, so use current position from game_state
                                     # This ensures accurate position logging after movements in previous phases
                                     if actual_shooter_unit:
                                         # Use current position from game_state (source of truth)
-                                        unit_col, unit_row = get_unit_coordinates(actual_shooter_unit)
+                                        unit_col, unit_row = require_unit_position(actual_shooter_unit, self.game_state)
                                     elif str(actual_shooter_id) in pre_action_positions:
                                         # Fallback to pre_action_positions if unit not found
                                         unit_col, unit_row = pre_action_positions[str(actual_shooter_id)]
                                     else:
                                         # Last resort: use updated_unit position
-                                        unit_col, unit_row = get_unit_coordinates(updated_unit)
+                                        unit_col, unit_row = require_unit_position(updated_unit, self.game_state)
                                     
                                     attack_details = {
                                         "current_turn": pre_action_turn,
@@ -1645,8 +1683,8 @@ class W40KEngine(gym.Env):
                                     wait_col = result.get("fromCol")
                                     wait_row = result.get("fromRow")
                                 elif updated_unit:
-                                    # Fallback to current unit position (get_unit_coordinates importé en tête de module ligne 17)
-                                    wait_col, wait_row = get_unit_coordinates(updated_unit)
+                                    # Fallback to current unit position (from cache)
+                                    wait_col, wait_row = require_unit_position(updated_unit, self.game_state)
                                 else:
                                     raise ValueError(f"Wait action in movement phase missing position data: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}")
                                 
@@ -1654,7 +1692,7 @@ class W40KEngine(gym.Env):
 
                             elif action_type == "skip":
                                 # Skip = engine-determined "no valid actions" (e.g. target died). Log reason from result.
-                                skip_col, skip_row = get_unit_coordinates(updated_unit)
+                                skip_col, skip_row = require_unit_position(updated_unit, self.game_state)
                                 action_details["unit_with_coords"] = f"{unit_id}({skip_col},{skip_row})"
                                 action_details["skip_reason"] = result.get("skip_reason")
 
@@ -1801,7 +1839,7 @@ class W40KEngine(gym.Env):
                     if "destCol" in action and "destRow" in action:
                         expected_col = action["destCol"]
                         expected_row = action["destRow"]
-                        unit_col, unit_row = get_unit_coordinates(unit)
+                        unit_col, unit_row = require_unit_position(unit, self.game_state)
                         expected_col_int, expected_row_int = normalize_coordinates(expected_col, expected_row)
                         if expected_col_int == unit_col and expected_row_int == unit_row:
                             pass
@@ -1991,7 +2029,7 @@ class W40KEngine(gym.Env):
             if player not in dead_units_by_player:
                 dead_units_by_player[player] = 0
             
-            if unit["HP_CUR"] > 0:
+            if is_unit_alive(str(unit["id"]), self.game_state):
                 living_units_by_player[player] += 1
             else:
                 dead_units_by_player[player] += 1
@@ -2054,8 +2092,18 @@ class W40KEngine(gym.Env):
     # ============================================================================
     
     def get_action_mask(self) -> np.ndarray:
-        """Get valid action mask - delegates to action_decoder."""
-        return self.action_decoder.get_action_mask(self.game_state)
+        """Get valid action mask. Auto-advances phase when mask is empty (e.g. fight with empty pools)."""
+        action_mask, _ = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        while not np.any(action_mask) and not self.game_state.get("game_over", False):
+            current_phase = self.game_state.get("phase")
+            if current_phase == "fight":
+                from engine.phase_handlers import fight_handlers
+                fight_handlers.fight_phase_end(self.game_state)
+            else:
+                break
+            self.game_state["game_over"] = self._check_game_over()
+            action_mask, _ = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        return action_mask
     
     
     def _build_observation(self) -> np.ndarray:

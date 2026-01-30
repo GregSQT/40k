@@ -8,7 +8,10 @@ ZERO TOLERANCE for deviations from specification
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
-from engine.combat_utils import get_unit_coordinates
+from .shared_utils import (
+    is_unit_alive, get_hp_from_cache, require_hp_from_cache,
+    get_unit_position, require_unit_position,
+)
 
 
 def _log_with_context(game_state: Dict[str, Any], prefix: str, message: str) -> None:
@@ -75,7 +78,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "turn" not in game_state:
             raise KeyError("game_state missing required 'turn' field for wait action logging")
 
-        unit_col, unit_row = get_unit_coordinates(unit)
+        unit_col, unit_row = require_unit_position(unit, game_state)
         game_state["action_logs"].append({
             "type": "wait",
             "message": f"Unit {unit_id} ({unit_col}, {unit_row}) WAIT",
@@ -363,11 +366,9 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
 
     for unit in game_state["units"]:
         unit_id = unit["id"]
-        hp = unit["HP_CUR"]
-        player = unit["player"]
-
-        if hp <= 0:
+        if not is_unit_alive(str(unit_id), game_state):
             continue
+        player = unit["player"]
 
         # Skip units that already charged (they had their turn)
         if unit_id in game_state["units_charged"]:
@@ -398,11 +399,11 @@ def _is_adjacent_to_enemy_for_fight(game_state: Dict[str, Any], unit: Dict[str, 
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_RNG
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
-    unit_col, unit_row = get_unit_coordinates(unit)
+    unit_col, unit_row = require_unit_position(unit, game_state)
 
     for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
-            enemy_col, enemy_row = get_unit_coordinates(enemy)
+        if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
+            enemy_col, enemy_row = require_unit_position(enemy, game_state)
             distance = _calculate_hex_distance_for_fight(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= cc_range:
                 return True

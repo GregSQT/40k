@@ -7,6 +7,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import json
 from shared.data_validation import require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates
+from engine.phase_handlers.shared_utils import is_unit_alive
 
 class GameStateManager:
     """Manages game state."""
@@ -293,7 +294,7 @@ class GameStateManager:
             player_1_oc = 0
 
             for unit in game_state["units"]:
-                if unit["HP_CUR"] <= 0:
+                if not is_unit_alive(str(unit["id"]), game_state):
                     continue  # Dead units don't control
 
                 unit_pos = get_unit_coordinates(unit)
@@ -379,7 +380,7 @@ class GameStateManager:
             if player not in dead_units_by_player:
                 dead_units_by_player[player] = 0
             
-            if unit["HP_CUR"] > 0:
+            if is_unit_alive(str(unit["id"]), game_state):
                 living_units_by_player[player] += 1
             else:
                 dead_units_by_player[player] += 1
@@ -410,7 +411,7 @@ class GameStateManager:
         living_units_by_player = {}
 
         for unit in game_state["units"]:
-            if unit["HP_CUR"] > 0:
+            if is_unit_alive(str(unit["id"]), game_state):
                 player = unit["player"]
                 if player not in living_units_by_player:
                     living_units_by_player[player] = 0
@@ -462,9 +463,9 @@ class GameStateManager:
             else:
                 # Tiebreaker: More cumulated VALUE of living units wins
                 p0_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 0 and u["HP_CUR"] > 0)
+                              if u["player"] == 0 and is_unit_alive(str(u["id"]), game_state))
                 p1_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 1 and u["HP_CUR"] > 0)
+                              if u["player"] == 1 and is_unit_alive(str(u["id"]), game_state))
                 if not self.quiet:
                     print(f"   Equal objectives ({obj_counts[0]}), tiebreaker by VALUE: P0={p0_value}, P1={p1_value}")
 
@@ -498,7 +499,7 @@ class GameStateManager:
         living_units_by_player = {}
 
         for unit in game_state["units"]:
-            if unit["HP_CUR"] > 0:
+            if is_unit_alive(str(unit["id"]), game_state):
                 player = unit["player"]
                 if player not in living_units_by_player:
                     living_units_by_player[player] = 0
@@ -535,9 +536,9 @@ class GameStateManager:
             else:
                 # Tiebreaker: More cumulated VALUE of living units wins
                 p0_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 0 and u["HP_CUR"] > 0)
+                              if u["player"] == 0 and is_unit_alive(str(u["id"]), game_state))
                 p1_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 1 and u["HP_CUR"] > 0)
+                              if u["player"] == 1 and is_unit_alive(str(u["id"]), game_state))
 
                 if p0_value > p1_value:
                     return 0, "value_tiebreaker"

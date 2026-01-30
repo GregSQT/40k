@@ -21,7 +21,11 @@ Document fusionné à partir de unit_cache2.md, enrichi avec les apports de unit
 **Contraintes :**
 - Pas de fallback / valeur par défaut pour masquer une erreur ; utiliser `require_key` ou lever une erreur explicite si une clé attendue est absente.
 - Conformité AI_TURN.md et règles du projet (coordonnées normalisées, pas de workaround).
-- Les unités mortes ne doivent pas figurer dans `units_cache` (retrait à la mort).
+- **Une seule source de vérité** : seules les unités **vivantes** figurent dans `units_cache`. Les mortes sont **retirées** du cache.
+
+**À la mort (shooting / fight)** : Quand une unité meurt, on appelle `update_units_cache_hp(game_state, target_id, 0)`. Celle-ci appelle `remove_from_units_cache` (l’unité est retirée du cache). Les logs doivent capturer la position de la cible **avant** d’appliquer les dégâts.
+
+**HP_CUR — source unique (Phase 2)** : En jeu, **seul** `update_units_cache_hp` écrit `HP_CUR` et **uniquement** dans `units_cache`. Pour **lire** les HP : `get_hp_from_cache(unit_id, game_state)`. Les handlers ne doivent jamais faire `unit["HP_CUR"] = ...`. Au reset, `build_units_cache` lit `unit["HP_CUR"]` une seule fois pour remplir le cache.
 
 ---
 
@@ -34,13 +38,14 @@ game_state["units_cache"]: Dict[str, Dict[str, Any]]
 # unit_id (str) → {
 #     "col": int,      # coordonnée normalisée
 #     "row": int,       # coordonnée normalisée
-#     "HP_CUR": int,    # > 0 pour toute entrée (vivant uniquement)
+#     "HP_CUR": int,    # > 0 vivant (unités mortes = absentes du cache)
 #     "player": int,    # 1 ou 2
 # }
 ```
 
-- Une entrée existe **uniquement** pour les unités vivantes (`HP_CUR > 0`).
-- À chaque changement de position ou de HP (mouvement, tir, charge, combat, fuite, mort), le cache est mis à jour ou l’entrée est supprimée (mort).
+- Une entrée existe uniquement pour les unités **vivantes**. Mort = **absent du cache** (retrait via `remove_from_units_cache`).
+- **Vivant** = `unit_id in units_cache` et `entry["HP_CUR"] > 0` (utiliser `is_unit_alive`).
+- À chaque changement de position ou de HP (mouvement, tir, charge, combat, fuite), le cache est mis à jour. À la mort, l’unité est **retirée** du cache.
 
 ### 2.2 Snapshot « étape précédente » pour obs / reward
 
@@ -75,18 +80,18 @@ Pour la feature **movement_direction** (observation) et la récompense basée su
 - **Fichier à créer ou étendre :** par exemple `engine/phase_handlers/shared_utils.py` ou un module dédié `engine/unit_cache.py`.
 - **Fonctions obligatoires :**
   - **`build_units_cache(game_state: Dict[str, Any]) -> None`**  
-    Reconstruit `game_state["units_cache"]` à partir de `game_state["units"]` : pour chaque unité avec `HP_CUR > 0`, ajouter une entrée `unit_id → { "col", "row", "HP_CUR", "player" }`. Utiliser `get_unit_coordinates` / `normalize_coordinates` pour (col, row). Ne pas y mettre les unités mortes.
+    Reconstruit `game_state["units_cache"]` à partir de `game_state["units"]` : pour **chaque** unité, ajouter une entrée `unit_id → { "col", "row", "HP_CUR", "player" }`. Utiliser `get_unit_coordinates` / `normalize_coordinates` pour (col, row).
   - **`update_units_cache_unit(game_state: Dict[str, Any], unit_id: str, col: int, row: int, hp_cur: int, player: int) -> None`**  
-    Met à jour ou insère une entrée pour `unit_id`. Si `hp_cur <= 0`, appeler plutôt `remove_from_units_cache`.
+    Met à jour ou insère une entrée pour `unit_id`. Si `hp_cur <= 0`, retirer l’entrée du cache (`remove_from_units_cache`).
   - **`remove_from_units_cache(game_state: Dict[str, Any], unit_id: str) -> None`**  
-    Supprime l’entrée `unit_id` de `game_state["units_cache"]` (unité morte).
+    Supprime l’entrée `unit_id` du cache. Appelé par `update_units_cache_hp` quand HP <= 0 (mort).
 - **Fonctions d’accès recommandées** (pour lecture cohérente et testabilité) :
-  - **`get_unit_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]`** : retourne l’entrée cache pour `unit_id` ou `None` si absent (unité morte ou inconnue).
-  - **`is_unit_alive(unit_id: str, game_state: Dict[str, Any]) -> bool`** : `unit_id in game_state.get("units_cache", {})`.
-  - **`get_unit_position_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[Tuple[int, int]]`** : `(col, row)` si vivant, sinon `None`.
-- **Fonctions de convenance optionnelles (API position / HP séparée)** : pour des call sites plus clairs après `set_unit_coordinates` ou après dégâts, sans changer le contrat principal (`update_units_cache_unit` reste la mise à jour complète) :
-  - **`update_units_cache_position(game_state, unit_id, col, row) -> None`** : met à jour uniquement col/row de l’entrée (si présente) ; peut déléguer à `update_units_cache_unit` en reprenant hp_cur et player depuis l’entrée existante.
-  - **`update_units_cache_hp(game_state, unit_id, new_hp_cur) -> None`** : met à jour HP_CUR ; si `new_hp_cur <= 0`, supprimer l’entrée du cache (équivalent à `remove_from_units_cache`). Utile après application de dégâts (tir, combat).
+  - **`get_unit_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]`** : retourne l’entrée cache pour `unit_id` ou `None` si absent (unité morte ou jamais ajoutée).
+  - **`is_unit_alive(unit_id: str, game_state: Dict[str, Any]) -> bool`** : `unit_id in units_cache` et `entry["HP_CUR"] > 0`.
+  - **`get_unit_position_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[Tuple[int, int]]`** : `(col, row)` si unité dans le cache, sinon `None`.
+- **Fonctions de convenance optionnelles (API position / HP séparée)** :
+  - **`update_units_cache_position(game_state, unit_id, col, row) -> None`** : met à jour uniquement col/row de l’entrée (si présente).
+  - **`update_units_cache_hp(game_state, unit_id, new_hp_cur) -> None`** : met à jour HP_CUR ; si `new_hp_cur <= 0`, appelle `remove_from_units_cache` (l’unité est retirée du cache).
 - **Règles :** pas de fallback ; si `game_state["units_cache"]` est absent alors qu’il doit exister, lever une erreur explicite (ou documenter les seuls moments où il est encore non initialisé, ex. avant la première construction).
 
 #### A.2 Construction initiale — Décision unique (reset only)
@@ -107,7 +112,7 @@ Pour chaque endroit qui modifie la position ou les HP d’une unité, ou qui enl
    Après toute mise à jour de `unit["col"]`, `unit["row"]` :  
    `update_units_cache_unit(game_state, unit_id, col, row, unit["HP_CUR"], unit["player"])` (ou `update_units_cache_position` si implémentée).
 2. **Tir — cible touchée / morte**  
-   Après réduction de HP ou mort de la cible : mise à jour de l’entrée si encore vivante ; si `HP_CUR <= 0` : `remove_from_units_cache(game_state, target_id)` (ou `update_units_cache_hp(game_state, target_id, 0)`) et suppression de la cible du `los_cache` / pools comme aujourd’hui.
+   Après réduction de HP ou mort de la cible : `update_units_cache_hp(game_state, target_id, new_hp)` (mort = retrait du cache via `remove_from_units_cache`). Capturer la position de la cible **avant** les dégâts pour les logs. Suppression de la cible du `los_cache` / pools comme aujourd’hui.
 3. **Combat (fight)**  
    Idem : après modification de HP ou mort, mettre à jour `units_cache` ou retirer l’unité.
 4. **Fuite (FLED)**  
@@ -120,8 +125,8 @@ Pour chaque endroit qui modifie la position ou les HP d’une unité, ou qui enl
 **Emplacements précis (référence code actuel ; numéros de lignes approximatifs, confirmer par grep si besoin) :**
 - **Position :** après tout appel à `set_unit_coordinates(unit, col, row)` — `movement_handlers.py`, `charge_handlers.py`, `shooting_handlers.py` (advance, vers **l.4106–4107** dans `_handle_advance_action`) : appeler `update_units_cache_position` ou `update_units_cache_unit`.
 - **Position (init) :** dans `w40k_core.py` après chargement des units au reset (après la boucle vers **l.463–497**) : appeler `build_units_cache(game_state)`.
-- **HP / mort (tir) :** dans le contrôleur de tir (shooting_handlers), après modification de `target["HP_CUR"]` : `update_units_cache_hp` ; si mort : `remove_from_units_cache(game_state, target_id)`.
-- **HP / mort (combat) :** dans fight_handlers, après dégâts en mêlée : idem.
+- **HP / mort (tir) :** dans le contrôleur de tir (shooting_handlers), capturer position cible avant dégâts, puis après dégâts : `update_units_cache_hp(game_state, target_id, new_hp)` (mort = retrait du cache).
+- **HP / mort (combat) :** dans fight_handlers, idem (capturer position avant dégâts pour les logs).
 - **Fin de step (w40k_core) :** supprimer la boucle qui met à jour **`self.last_unit_positions`** (actuellement vers **l.967–974**). Ne plus utiliser `self.last_unit_positions`.
 
 Fichiers concernés :
@@ -240,7 +245,7 @@ game_state["units_cache_prev"] = {
 - Vérifier que les phases (movement, shooting, charge, fight) se déroulent sans erreur et que les pools (activation, cibles, LoS) sont cohérents.
 - Vérifier que l’observation (notamment movement_direction) et les rewards basés sur le mouvement sont corrects après un ou plusieurs steps.
 - Vérifier reset → step → step et que `units_cache_prev` / `units_cache` sont cohérents entre deux steps.
-- Ordre recommandé à la mort (HP → 0) : 1) mettre à jour `unit["HP_CUR"]` dans `game_state["units"]`, 2) `update_units_cache_hp` ou `remove_from_units_cache`, 3) mise à jour des los_cache / valid_target_pool / pools d’activation comme aujourd’hui.
+- Ordre recommandé à la mort (HP → 0) : 1) capturer position cible pour les logs, 2) `update_units_cache_hp(game_state, target_id, 0)` (retrait du cache), 3) mise à jour des los_cache / valid_target_pool / pools d’activation comme aujourd’hui.
 
 #### E.3 Documentation et règles
 
@@ -355,6 +360,46 @@ Cette section recense **tous** les fichiers du projet qui utilisent les coordonn
 8. Mettre à jour les scripts de vérification et la documentation (AI_TURN.md, AI_IMPLEMENTATION.md, .cursor/rules, check_ai_rules*, CHECK_AI_RULES.md si présent).
 
 Chaque étape peut être validée par des tests ciblés (ex. un step complet, un reset, une phase shooting avec LoS et mort de cible) avant de passer à la suivante.
+
+---
+
+## 7. Phase 2 — HP_CUR uniquement dans units_cache, units_cache toujours existant
+
+La **Phase 1** (sections 1–6 et plan d'implémentation) est supposée réalisée : `units_cache` et `units_cache_prev` en place, `position_cache` et `last_unit_positions` supprimés, `update_units_cache_hp` comme seul chemin d'écriture pour les HP. En Phase 1, `HP_CUR` reste présent à la fois dans `units_cache` et dans `game_state["units"][i]`.
+
+La **Phase 2** vise une **seule** source de vérité pour `HP_CUR` et à considérer **`units_cache` comme toujours existant** en gameplay.
+
+### 7.1 Objectifs Phase 2
+
+1. **HP_CUR uniquement dans `units_cache`**
+   - En gameplay, `HP_CUR` n'est plus lu ni écrit dans `game_state["units"][i]`.
+   - Toute lecture ou écriture de `HP_CUR` passe par le cache (ou `get_unit_from_cache` / `update_units_cache_hp`).
+   - Au reset, `build_units_cache` remplit le cache à partir des unités (positions de départ, `HP_MAX` / `HP_CUR` initiaux) ; ensuite, seul le cache fait autorité pour les HP courants.
+
+2. **`units_cache` toujours existant**
+   - Le cache est créé au reset, **juste après** l'ajout des unités (quand positions de départ et `HP_MAX` / `HP_CUR` sont connus).
+   - En gameplay (après reset), `units_cache` est **toujours** présent.
+   - Si du code s'exécute alors que `units_cache` est absent (avant reset, bug, etc.) : **lever une erreur explicite** (ex. `require_key(game_state, "units_cache")`). Aucun fallback.
+
+### 7.2 Modifications techniques
+
+- **`update_units_cache_hp`** : met à jour **uniquement** `units_cache` ; si mort (HP <= 0), appelle `remove_from_units_cache` (l’unité est retirée du cache). Ne pas écrire dans `unit["HP_CUR"]`.
+- **`build_units_cache`** : lit les HP initiaux depuis `game_state["units"]` (ou définitions) une seule fois au reset et remplit le cache.
+- **Lectures de `HP_CUR`** : partout (dégâts, ratios, observation, rewards, etc.), utiliser `get_hp_from_cache(unit_id, game_state)` ou `require_hp_from_cache` (pas `unit["HP_CUR"]`).
+- **`units_cache_prev`** : snapshot au début du step ; inclure `HP_CUR` seulement si utilisé pour des features « état précédent », sinon `{col, row, player}` suffit pour movement_direction.
+- **Présence du cache** : remplacer `game_state.get("units_cache", {})` par `require_key(game_state, "units_cache")` (ou équivalent) partout où le cache doit exister.
+
+### 7.3 Ordre d'exécution Phase 2
+
+1. Mettre à jour la doc (AI_IMPLEMENTATION, AI_TURN, .cursor/rules) : `HP_CUR` uniquement dans le cache ; mort = retrait du cache (`remove_from_units_cache`) ; `units_cache` toujours existant, sinon raise.
+2. `update_units_cache_hp` met à jour uniquement le cache ; à la mort (HP <= 0), appelle `remove_from_units_cache` (l’unité est retirée du cache).
+3. Recenser toutes les lectures de `unit["HP_CUR"]` / `target["HP_CUR"]` (grep) et les remplacer par `get_hp_from_cache` / `require_hp_from_cache`.
+4. Adapter `build_units_cache` et init si besoin (pas de double stockage au reset).
+5. Remplacer les accès « optionnels » au cache par `require_key` là où il doit exister.
+6. Tests, scripts, replays : s'assurer qu'ils construisent `units_cache` lorsqu'ils utilisent `game_state` en mode gameplay, ou qu'ils n'accèdent pas au cache hors reset.
+7. Mettre à jour la liste des fichiers impactés (section 4) et l'inventaire (section 5) si de nouveaux fichiers sont concernés.
+
+Chaque étape Phase 2 peut être validée par des tests ciblés avant de passer à la suivante.
 
 ---
 

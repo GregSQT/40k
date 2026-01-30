@@ -7,6 +7,10 @@ MULTIPLE_WEAPONS_IMPLEMENTATION.md: Automatic weapon selection for AI
 from typing import Dict, List, Any, Tuple, Optional
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance
+from engine.phase_handlers.shared_utils import (
+    is_unit_alive, get_hp_from_cache, require_hp_from_cache,
+    require_unit_position,
+)
 
 
 def calculate_kill_probability(unit: Dict[str, Any], weapon: Dict[str, Any], 
@@ -50,12 +54,11 @@ def calculate_kill_probability(unit: Dict[str, Any], weapon: Dict[str, Any],
     p_damage_per_attack = p_hit * p_wound * p_fail_save
     expected_damage = num_attacks * p_damage_per_attack * damage
     
-    # Kill probability - NO DEFAULT, raise error si HP_CUR manquant
-    hp_cur = require_key(target, "HP_CUR")
+    # Kill probability - Phase 2: HP from require_hp_from_cache (target must be alive)
+    hp_cur = require_hp_from_cache(str(target["id"]), game_state)
     if expected_damage >= hp_cur:
         return 1.0
-    else:
-        return min(1.0, expected_damage / hp_cur)
+    return min(1.0, expected_damage / hp_cur)
 
 
 def _get_cache_key(unit_id: str, weapon_index: int, target_id: str, hp_cur: int) -> Tuple[str, int, str, int]:
@@ -110,7 +113,7 @@ def select_best_ranged_weapon(unit: Dict[str, Any], target: Dict[str, Any],
 
     unit_id = str(unit["id"])
     target_id = str(target["id"])
-    hp_cur = require_key(target, "HP_CUR")
+    hp_cur = require_hp_from_cache(target_id, game_state)
 
     for weapon_index, weapon in enumerate(rng_weapons):
         # Check cache first
@@ -165,7 +168,7 @@ def select_best_melee_weapon(unit: Dict[str, Any], target: Dict[str, Any],
 
     unit_id = str(unit["id"])
     target_id = str(target["id"])
-    hp_cur = require_key(target, "HP_CUR")
+    hp_cur = require_hp_from_cache(target_id, game_state)
     
     for weapon_index, weapon in enumerate(cc_weapons):
         # Check cache first
@@ -217,7 +220,7 @@ def get_best_weapon_for_target(unit: Dict[str, Any], target: Dict[str, Any],
     cache = game_state["kill_probability_cache"]
     unit_id = str(unit["id"])
     target_id = str(target["id"])
-    hp_cur = require_key(target, "HP_CUR")
+    hp_cur = require_hp_from_cache(target_id, game_state)
     
     if is_ranged:
         weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
@@ -263,10 +266,10 @@ def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
     current_player = require_key(game_state, "current_player")
     
     # Get active units (current player's units)
-    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and require_key(u, "HP_CUR") > 0]
+    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and is_unit_alive(str(u["id"]), game_state)]
     
     # Get all enemy units as targets
-    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and require_key(u, "HP_CUR") > 0]
+    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and is_unit_alive(str(u["id"]), game_state)]
     
     for unit in active_units:
         unit_id = str(unit["id"])
@@ -285,7 +288,7 @@ def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
         for weapon_index, weapon in enumerate(weapons):
             for target in enemy_units:
                 target_id = str(target["id"])
-                hp_cur = require_key(target, "HP_CUR")
+                hp_cur = require_hp_from_cache(target_id, game_state)
                 
                 # PERFORMANCE: Check cache before recalculating
                 cache_key = _get_cache_key(unit_id, weapon_index, target_id, hp_cur)
@@ -341,10 +344,10 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
     current_player = require_key(game_state, "current_player")
     
     # Get active units
-    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and require_key(u, "HP_CUR") > 0]
+    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and is_unit_alive(str(u["id"]), game_state)]
     
     # Get all enemy units
-    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and require_key(u, "HP_CUR") > 0]
+    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and is_unit_alive(str(u["id"]), game_state)]
     
     if "kill_probability_cache" not in game_state:
         game_state["kill_probability_cache"] = {}
@@ -352,11 +355,7 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
 
     for unit in active_units:
         unit_id = str(unit["id"])
-        # CRITICAL: No default values - require explicit coordinates
-        if "col" not in unit or "row" not in unit:
-            raise ValueError(f"Unit {unit_id} missing coordinates: has_col={'col' in unit}, has_row={'row' in unit}")
-        from engine.combat_utils import get_unit_coordinates
-        unit_col, unit_row = get_unit_coordinates(unit)
+        unit_col, unit_row = require_unit_position(unit, game_state)
         
         rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
         
@@ -365,17 +364,13 @@ def recompute_cache_for_new_units_in_range(game_state: Dict[str, Any]):
             
             for target in enemy_units:
                 target_id = str(target["id"])
-                # CRITICAL: No default values - require explicit coordinates
-                if "col" not in target or "row" not in target:
-                    raise ValueError(f"Target {target_id} missing coordinates: has_col={'col' in target}, has_row={'row' in target}")
-                from engine.combat_utils import get_unit_coordinates
-                target_col, target_row = get_unit_coordinates(target)
+                target_col, target_row = require_unit_position(target, game_state)
                 
                 # Check if target is in range
                 distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
                 
                 if distance <= perception_radius and distance <= weapon_range:
-                    hp_cur = require_key(target, "HP_CUR")
+                    hp_cur = require_hp_from_cache(target_id, game_state)
                     
                     # Check if already cached
                     if _get_kill_prob_from_cache(cache, unit_id, weapon_index, target_id, hp_cur) is None:
@@ -424,5 +419,5 @@ def calculate_ttk_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any],
     if expected_damage <= 0:
         return 100.0  # Can't kill
     
-    hp_cur = require_key(target, "HP_CUR")
+    hp_cur = require_hp_from_cache(str(target["id"]), game_state)
     return hp_cur / expected_damage

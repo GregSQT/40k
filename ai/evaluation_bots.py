@@ -14,6 +14,10 @@ All bots implement all 4 phases: MOVE, SHOOT, CHARGE, FIGHT
 import random
 from typing import Dict, List, Tuple, Any, Optional
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
+from engine.phase_handlers.shared_utils import (
+    is_unit_alive, get_hp_from_cache,
+    get_unit_position, require_unit_position,
+)
 
 
 class RandomBot:
@@ -27,8 +31,12 @@ class RandomBot:
         # For other phases, pick randomly
         return random.choice(valid_actions) if valid_actions else 7
 
-    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
-        return random.choice(valid_destinations) if valid_destinations else get_unit_coordinates(unit)
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
+        if valid_destinations:
+            return random.choice(valid_destinations)
+        if game_state is not None:
+            return require_unit_position(unit, game_state)
+        return get_unit_coordinates(unit)
 
     def select_shooting_target(self, valid_targets: List[str]) -> str:
         return random.choice(valid_targets) if valid_targets else ""
@@ -60,8 +68,10 @@ class GreedyBot:
         else:
             return valid_actions[0] if valid_actions else 7
     
-    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         if not valid_destinations:
+            if game_state is not None:
+                return require_unit_position(unit, game_state)
             return get_unit_coordinates(unit)
 
         # Add randomness to movement
@@ -89,12 +99,10 @@ class GreedyBot:
 
             for target_id in valid_targets:
                 target = self._get_unit_by_id(game_state, target_id)
-                if target:
-                    # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
-                    if 'HP_CUR' not in target:
-                        raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
-                    if target['HP_CUR'] < min_hp:
-                        min_hp = target['HP_CUR']
+                if target and is_unit_alive(str(target["id"]), game_state):
+                    hp = get_hp_from_cache(str(target["id"]), game_state)
+                    if hp is not None and hp < min_hp:
+                        min_hp = hp
                         best_target = target_id
 
             return best_target
@@ -135,8 +143,10 @@ class DefensiveBot:
         else:
             return valid_actions[0] if valid_actions else 7
     
-    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]]) -> Tuple[int, int]:
+    def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         if not valid_destinations:
+            if game_state is not None:
+                return require_unit_position(unit, game_state)
             return get_unit_coordinates(unit)
 
         # Add randomness to movement
@@ -166,7 +176,7 @@ class DefensiveBot:
         
         active_unit = None
         for unit in game_state.get('units', []):
-            if unit['player'] == current_player and unit['HP_CUR'] > 0:
+            if unit['player'] == current_player and is_unit_alive(str(unit["id"]), game_state):
                 active_unit = unit
                 break
         
@@ -189,7 +199,7 @@ class DefensiveBot:
         threat_range = 12
 
         for enemy in game_state.get('units', []):
-            if enemy['player'] != unit['player'] and enemy['HP_CUR'] > 0:
+            if enemy['player'] != unit['player'] and is_unit_alive(str(enemy["id"]), game_state):
                 distance = calculate_hex_distance(unit['col'], unit['row'], enemy['col'], enemy['row'])
                 if distance <= threat_range:
                     threat_count += 1
@@ -309,6 +319,8 @@ class TacticalBot:
         - If wounded: move away from melee threats
         """
         if not valid_destinations:
+            if game_state is not None:
+                return require_unit_position(unit, game_state)
             return get_unit_coordinates(unit)
 
         if self.randomness > 0 and random.random() < self.randomness:
@@ -322,10 +334,12 @@ class TacticalBot:
         if not nearest_enemy:
             return valid_destinations[0]
 
-        # If wounded (< 50% HP), move away from melee units
-        hp_cur = unit.get('HP_CUR', 1)
-        hp_max = unit.get('HP_MAX', 1)
-        if hp_cur < hp_max * 0.5:
+        # If wounded (< 50% HP), move away from melee units. Skip if unit dead (not in cache).
+        hp_cur = get_hp_from_cache(str(unit["id"]), game_state)
+        if hp_cur is None:
+            return valid_destinations[0]
+        hp_max = unit.get("HP_MAX", 1)
+        if hp_max <= 0 or hp_cur < hp_max * 0.5:
             return self._find_safest_position(unit, valid_destinations, game_state)
 
         # Otherwise, move toward optimal shooting range
@@ -359,10 +373,12 @@ class TacticalBot:
 
         for target_id in valid_targets:
             target = self._get_unit_by_id(game_state, target_id)
-            if not target:
+            if not target or not is_unit_alive(str(target["id"]), game_state):
                 continue
 
-            hp = target.get('HP_CUR', 999)
+            hp = get_hp_from_cache(str(target["id"]), game_state)
+            if hp is None:
+                continue
             threat = max(target.get('RNG_DMG', 0), target.get('CC_DMG', 0))
 
             # Scoring: killable > low HP > high threat
@@ -405,10 +421,12 @@ class TacticalBot:
 
         for target_id in valid_targets:
             target = self._get_unit_by_id(game_state, target_id)
-            if not target:
+            if not target or not is_unit_alive(str(target["id"]), game_state):
                 continue
 
-            hp = target.get('HP_CUR', 999)
+            hp = get_hp_from_cache(str(target["id"]), game_state)
+            if hp is None:
+                continue
             ranged_threat = target.get('RNG_DMG', 0)
 
             # Scoring: killable > high ranged threat
@@ -433,7 +451,7 @@ class TacticalBot:
         """Get the currently active unit."""
         current_player = game_state.get('current_player', 0)
         for unit in game_state.get('units', []):
-            if unit.get('player') == current_player and unit.get('HP_CUR', 0) > 0:
+            if unit.get('player') == current_player and is_unit_alive(str(unit.get("id")), game_state):
                 return unit
         return None
 
@@ -450,7 +468,7 @@ class TacticalBot:
         min_dist = float('inf')
 
         for enemy in game_state.get('units', []):
-            if enemy.get('player') != unit.get('player') and enemy.get('HP_CUR', 0) > 0:
+            if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
                 dist = calculate_hex_distance(
                     unit['col'], unit['row'],
                     enemy['col'], enemy['row']
@@ -470,7 +488,7 @@ class TacticalBot:
         for col, row in destinations:
             min_enemy_dist = float('inf')
             for enemy in game_state.get('units', []):
-                if enemy.get('player') != unit.get('player') and enemy.get('HP_CUR', 0) > 0:
+                if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
                     # Only consider melee threats
                     if enemy.get('CC_DMG', 0) > enemy.get('RNG_DMG', 0):
                         dist = calculate_hex_distance(col, row, enemy['col'], enemy['row'])

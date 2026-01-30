@@ -81,6 +81,21 @@ Rules:
 
 The `game_state` dictionary exists only in `W40KEngine` (in `w40k_core.py`). All other modules receive it as a parameter and never copy or cache state.
 
+### Units cache & HP_CUR (single source of truth)
+
+**`game_state["units_cache"]`** is the single source of truth for **position** (`col`, `row`) and **HP_CUR** of **living** units. **Dead = absent from `units_cache`**. **(Phase 2)** HP_CUR is stored **only** in `units_cache` during gameplay; do **not** read or write `unit["HP_CUR"]` for current HP.
+
+- **Build** : `build_units_cache(game_state)` is called **only at reset** (after units are initialised). Not at phase start.
+- **units_cache always exists** : After reset, `units_cache` is always present. Use `require_key(game_state, "units_cache")` where the cache is required; no fallback.
+- **HP_CUR single write path** : During gameplay, **only** `update_units_cache_hp(game_state, unit_id, new_hp_cur)` writes HP_CUR. It updates **only** `units_cache` (not `unit["HP_CUR"]`). Handlers must **not** assign `unit["HP_CUR"]` directly; they compute `new_hp` and call `update_units_cache_hp`.
+- **HP_CUR reads** : Use `get_hp_from_cache(unit_id, game_state)` (from `engine.phase_handlers.shared_utils`) for current HP. Returns `None` if the unit is not in cache (dead or missing).
+- **Death** : When a unit dies (shooting or fight), `update_units_cache_hp(..., 0)` is called. It removes the entry from `units_cache` (single source of truth).
+- **Aliveness** : Use `is_unit_alive(unit_id, game_state)` (present in cache **and** `HP_CUR > 0`). Absence from cache means dead.
+- **Position updates** : After any move (MOVE, ADVANCE, CHARGE, FLED), call `update_units_cache_position(game_state, unit_id, col, row)`.
+- **Snapshot** : `game_state["units_cache_prev"]` is a copy of `units_cache` at the **start** of each `step()`, used for movement-direction features (observation, reward).
+
+See `Documentation/unit_cache21.md` for the full implementation plan.
+
 ### Sequential Unit Activation
 
 One unit processes per gym step. Phase-specific activation pools (`move_activation_pool`, `shoot_activation_pool`) maintain the queue. The engine processes the first unit in the current pool.
@@ -804,7 +819,7 @@ W40KEngine._process_movement_phase():
 │      │
 │      ├─ Build shoot_activation_pool:
 │      │  └─ For each unit:
-│      │     ├─ Check HP_CUR > 0
+│      │     ├─ Check is_unit_alive(unit_id, game_state)
 │      │     ├─ Check current_player matches
 │      │     ├─ Check has RNG_NB > 0
 │      │     ├─ Check has valid targets

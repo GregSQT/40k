@@ -7,7 +7,11 @@ Used by PvE AI to select targets using tactical heuristics, not rewards.
 """
 
 from typing import Dict, List, Any
-from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
+from engine.combat_utils import calculate_hex_distance
+from engine.phase_handlers.shared_utils import (
+    is_unit_alive, get_hp_from_cache, require_hp_from_cache,
+    require_unit_position,
+)
 
 
 class TargetSelector:
@@ -81,7 +85,7 @@ class TargetSelector:
         score = 0.0
         
         # Component 1: Kill probability
-        kill_prob = self._estimate_kill_probability(shooter, target)
+        kill_prob = self._estimate_kill_probability(shooter, target, game_state)
         score += self.weights.get("kill_probability", 2.0) * kill_prob
         
         # Component 2: Threat level
@@ -95,8 +99,9 @@ class TargetSelector:
         threat = max(max_rng_dmg, max_cc_dmg) / 5.0
         score += self.weights.get("threat_level", 1.5) * threat
         
-        # Component 3: HP ratio (prefer wounded)
-        hp_ratio = target["HP_CUR"] / max(1, target["HP_MAX"])
+        # Component 3: HP ratio (prefer wounded). Phase 2: valid target must be alive.
+        target_hp = require_hp_from_cache(str(target["id"]), game_state)
+        hp_ratio = target_hp / max(1, target["HP_MAX"])
         score += self.weights.get("hp_ratio", 1.0) * (1.0 - hp_ratio)
         
         # Component 4: Army-weighted threat
@@ -106,9 +111,9 @@ class TargetSelector:
         return score
     
     def _estimate_kill_probability(self, shooter: Dict[str, Any],
-                                   target: Dict[str, Any]) -> float:
-        """Estimate probability of killing target (simplified W40K math)."""
-        # AI_TURN.md COMPLIANCE: Direct UPPERCASE field access - no defaults
+                                   target: Dict[str, Any],
+                                   game_state: Dict[str, Any]) -> float:
+        """Estimate probability of killing target (simplified W40K math). Phase 2: HP from get_hp_from_cache."""
         if "RNG_ATK" not in shooter:
             raise KeyError(f"Shooter missing required 'RNG_ATK' field: {shooter}")
         if "RNG_STR" not in shooter:
@@ -119,8 +124,10 @@ class TargetSelector:
             raise KeyError(f"Shooter missing required 'RNG_DMG' field: {shooter}")
         if "T" not in target:
             raise KeyError(f"Target missing required 'T' field: {target}")
-        if "HP_CUR" not in target:
-            raise KeyError(f"Target missing required 'HP_CUR' field: {target}")
+
+        target_hp = get_hp_from_cache(str(target["id"]), game_state)
+        if target_hp is None or target_hp <= 0:
+            return 1.0  # Dead or absent
 
         # Hit probability
         hit_target = shooter["RNG_ATK"]
@@ -142,10 +149,9 @@ class TargetSelector:
         expected_damage = num_attacks * p_hit * p_wound * damage_per_hit
 
         # Kill probability
-        if expected_damage >= target["HP_CUR"]:
+        if expected_damage >= target_hp:
             return 1.0
-        else:
-            return expected_damage / target["HP_CUR"]
+        return expected_damage / target_hp
     
     def _calculate_army_threat(self, target: Dict[str, Any],
                                game_state: Dict[str, Any]) -> float:
@@ -163,7 +169,7 @@ class TargetSelector:
 
         my_player = game_state["current_player"]
         friendly_units = [u for u in game_state["units"]
-                         if u["player"] == my_player and u["HP_CUR"] > 0]
+                         if u["player"] == my_player and is_unit_alive(str(u["id"]), game_state)]
 
         if not friendly_units:
             return 0.0
@@ -174,9 +180,9 @@ class TargetSelector:
             if "VALUE" not in friendly:
                 raise KeyError(f"Friendly unit missing required 'VALUE' field: {friendly}")
 
-            # Distance check
-            friendly_col, friendly_row = get_unit_coordinates(friendly)
-            target_col, target_row = get_unit_coordinates(target)
+            # Distance check (position from cache)
+            friendly_col, friendly_row = require_unit_position(friendly, game_state)
+            target_col, target_row = require_unit_position(target, game_state)
             distance = calculate_hex_distance(friendly_col, friendly_row, target_col, target_row)
 
             # Threat only if in range

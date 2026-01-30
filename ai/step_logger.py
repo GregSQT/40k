@@ -162,8 +162,19 @@ class StepLogger:
             timestamp = time.strftime("%H:%M:%S", time.localtime())
             episode_marker = f"\n[{timestamp}] === EPISODE {self.episode_number} START ===\n"
             
-            # Write to step.log
+            # Write to step.log: validate first (inside with open), then write so we never emit a partial header
             with open(self.output_file, 'a') as f:
+                units_list = list(units_data)
+                for unit in units_list:
+                    if "id" not in unit:
+                        raise KeyError("Unit missing required 'id' field")
+                    if "col" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'col' field")
+                    if "row" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'row' field")
+                    if "player" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'player' field")
+
                 f.write(episode_marker)
 
                 if scenario_info:
@@ -191,18 +202,8 @@ class StepLogger:
                 else:
                     f.write(f"[{timestamp}] Objectives: none\n")
 
-                # Log all unit starting positions
-                for unit in units_data:
-                    if "id" not in unit:
-                        raise KeyError("Unit missing required 'id' field")
-                    if "col" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'col' field")
-                    if "row" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'row' field")
-                    if "player" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'player' field")
-
-                    # Use unitType instead of name (name field doesn't exist)
+                # Log all unit starting positions (already validated above)
+                for unit in units_list:
                     unit_type = unit.get("unitType", "Unknown")
                     player_name = f"P{unit['player']}"
                     f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}) {player_name}: Starting position ({unit['col']},{unit['row']})\n")

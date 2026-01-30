@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
+from engine.phase_handlers.shared_utils import is_unit_alive
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["command", "move", "shoot", "charge", "fight"]
@@ -60,18 +61,14 @@ class ActionDecoder:
             active_unit = eligible_units[0] if eligible_units else None
             
             if active_unit:
-                # Use cached pool from unit activation if available (after activation or advance)
+                # Enable shoot actions only when pool already exists (built during activation)
                 valid_targets = active_unit.get("valid_target_pool")
                 if valid_targets is not None:
-                    # Pool exists - enable only valid target slots (up to 5)
+                    # Enable only valid target slots (up to 5)
                     num_targets = len(valid_targets)
                     if num_targets > 0:
                         for i in range(min(5, num_targets)):
                             mask[4 + i] = True
-                else:
-                    # Pool not yet built (before activation) - enable all shoot actions
-                    # Handler will validate target selection later during action conversion
-                    mask[[4, 5, 6, 7, 8]] = True
                 
                 # ADVANCE_IMPLEMENTATION: Enable advance action if unit can advance
                 # CAN_ADVANCE = alive AND not fled AND not adjacent to enemy (already checked in eligibility)
@@ -160,7 +157,7 @@ class ActionDecoder:
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
-                if unit and require_key(unit, "HP_CUR") > 0:
+                if unit and is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
         elif current_phase == "shoot":
@@ -180,7 +177,7 @@ class ActionDecoder:
                 # CRITICAL: Normalize uid to string for get_unit_by_id (which normalizes both sides)
                 uid_str = str(uid)
                 unit = get_unit_by_id(uid_str, game_state)
-                if unit and require_key(unit, "HP_CUR") > 0:
+                if unit and is_unit_alive(str(unit["id"]), game_state):
                     # AI_TURN.md: All units in pool are eligible - no SHOOT_LEFT filtering
                     eligible.append(unit)
             return eligible
@@ -193,7 +190,7 @@ class ActionDecoder:
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
-                if unit and require_key(unit, "HP_CUR") > 0:
+                if unit and is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
         elif current_phase == "fight":
@@ -217,7 +214,7 @@ class ActionDecoder:
             eligible = []
             for uid in pool_unit_ids:
                 unit = get_unit_by_id(uid, game_state)
-                if unit and require_key(unit, "HP_CUR") > 0:
+                if unit and is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
         else:
@@ -440,7 +437,7 @@ class ActionDecoder:
         """Get all valid targets for unit based on current phase."""
         targets = []
         for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and enemy["HP_CUR"] > 0:
+            if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
                 targets.append(enemy)
         return targets
     
@@ -450,7 +447,7 @@ class ActionDecoder:
         
         for unit in game_state["units"]:
             if (unit["player"] == current_player and 
-                unit["HP_CUR"] > 0 and
+                is_unit_alive(str(unit["id"]), game_state) and
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
                 (unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0 and
                  any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"]))):  # Has melee capability

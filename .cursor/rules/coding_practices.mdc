@@ -114,7 +114,7 @@ def process_unit(unit):
         ...
 
 # Cache avec fallback
-cache = game_state.get('position_cache', {})  # {} pour éviter KeyError
+cache = game_state.get('units_cache', {})  # {} pour éviter KeyError (INTERDIT si units_cache requis)
 
 # ✅ OBLIGATOIRE
 # Erreur explicite si valeur manquante
@@ -210,7 +210,11 @@ if (col, row) in enemy_adjacent_hexes:  # S'appuyer sur le pool
 
 **Exemples** : Ne pas appeler `is_adjacent_to_enemy(...)` après avoir utilisé `enemy_adjacent_hexes`. Ne pas re-valider atteignabilité/adjacence si la destination provient d'un `valid_*_destinations_pool` déjà construit. Aucun check automatique pour l'instant ; règle de revue de code et documentation.
 
-### 9. Docstrings pour Fonctions Publiques
+### 9. HP_CUR et units_cache (source unique — Phase 2)
+
+**Règle** : En jeu, **seul** `update_units_cache_hp(game_state, unit_id, new_hp)` écrit `HP_CUR` ; elle met à jour **uniquement** `units_cache` (pas `unit["HP_CUR"]`). Si HP <= 0, elle appelle `remove_from_units_cache` (l'unité est retirée du cache). Ne jamais faire `unit["HP_CUR"] = ...` dans les handlers. Mort = **absent du cache**. Pour **lire** les HP : `get_hp_from_cache(unit_id, game_state)` (retourne `None` si mort/absent du cache). Pour « unité vivante », utiliser `is_unit_alive(unit_id, game_state)` (présent dans le cache **et** `HP_CUR > 0`). **units_cache** est toujours présent après reset ; utiliser `require_key(game_state, "units_cache")` là où le cache est requis.
+
+### 10. Docstrings pour Fonctions Publiques
 
 **Règle** : Toutes les fonctions publiques doivent avoir des docstrings.
 
@@ -250,9 +254,11 @@ Avant de valider un changement, vérifier :
 - [ ] Type hints sur toutes les fonctions publiques
 - [ ] Docstrings sur toutes les fonctions publiques
 - [ ] Pas de vérification redondante (s'appuyer sur les pools/caches construits, ne pas re-vérifier)
+- [ ] HP_CUR : écriture uniquement via `update_units_cache_hp` (cache seul) ; lecture via `get_hp_from_cache` ; vivant via `is_unit_alive` (pas `HP_CUR > 0`)
 
 ## 🔗 RÉFÉRENCES
 
 - **combat_utils.py** : Fonctions de normalisation de coordonnées
 - **shared/validation.py** : `require_key`, `require_present` pour validation stricte
+- **engine/phase_handlers/shared_utils.py** : `update_units_cache_hp`, `is_unit_alive`, `units_cache`
 - **AI_TURN.md** : Règles de conformité du jeu
