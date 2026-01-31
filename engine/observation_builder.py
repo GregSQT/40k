@@ -31,9 +31,9 @@ class ObservationBuilder:
         
         # AI_OBSERVATION.md COMPLIANCE: No defaults - force explicit configuration
         # Cache as instance variables (read config ONCE, not 8 times)
-        self.perception_radius = obs_params["perception_radius"]  # ✓ CHANGE 3: No default fallback
-        self.max_nearby_units = obs_params.get("max_nearby_units", 10)  # ✓ CHANGE 3: Cache for line 553
-        self.max_valid_targets = obs_params.get("max_valid_targets", 5)  # ✓ CHANGE 3: Cache for future use
+        self.perception_radius = obs_params["perception_radius"]  # ✓ CHANGE 3: Explicit config required
+        self.max_nearby_units = require_key(obs_params, "max_nearby_units")  # ✓ CHANGE 3: Cache for line 553
+        self.max_valid_targets = require_key(obs_params, "max_valid_targets")  # ✓ CHANGE 3: Cache for future use
         
         # CRITIQUE: obs_size depuis config, NO DEFAULT - raise error si manquant
         if "obs_size" not in obs_params:
@@ -88,7 +88,6 @@ class ObservationBuilder:
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate max expected damage from all weapons
         # Calculate EXPECTED ranged damage per turn (max from all ranged weapons)
-        from shared.data_validation import require_key
         ranged_expected = 0.0
         if unit.get("RNG_WEAPONS"):
             for weapon in unit["RNG_WEAPONS"]:
@@ -294,7 +293,7 @@ class ObservationBuilder:
         - 0.0 = Blocked line of sight
         """
         # AI_TURN_SHOOTING_UPDATE.md: Use shooter["los_cache"] (new architecture)
-        target_id = target["id"]
+        target_id = str(target["id"])
         
         los_cache = require_key(shooter, "los_cache")
         if target_id not in los_cache:
@@ -309,28 +308,27 @@ class ObservationBuilder:
     ) -> Dict[Tuple[str, str], bool]:
         """
         Build a LoS cache for observation: (ally_id, enemy_id) -> bool.
-        Used by _encode_enemy_units for feature 14 (visibility_to_allies) to avoid
-        repeated _has_line_of_sight calls. Reuses ally["los_cache"] when present.
+        Uses ally["los_cache"] (must be built explicitly before this call).
         """
-        from engine.phase_handlers import shooting_handlers
-
         units_cache = require_key(game_state, "units_cache")
-        active_player = int(active_unit["player"]) if active_unit["player"] is not None else None
+        active_entry = require_key(units_cache, str(active_unit["id"]))
+        active_player = require_key(active_entry, "player")
         allies = []
         for ally_id, cache_entry in units_cache.items():
-            if int(cache_entry["player"]) == active_player:
+            if cache_entry["player"] == active_player:
                 ally = get_unit_by_id(ally_id, game_state)
                 if ally is None:
                     raise KeyError(f"Unit {ally_id} missing from game_state['units']")
                 allies.append(ally)
         result: Dict[Tuple[str, str], bool] = {}
         for ally in allies:
+            los_cache = require_key(ally, "los_cache")
             for _distance, enemy in six_enemies:
-                key = (str(ally["id"]), str(enemy["id"]))
-                if "los_cache" in ally and ally["los_cache"] and enemy["id"] in ally["los_cache"]:
-                    result[key] = bool(ally["los_cache"][enemy["id"]])
-                else:
-                    result[key] = shooting_handlers._has_line_of_sight(game_state, ally, enemy)
+                target_id = str(enemy["id"])
+                key = (str(ally["id"]), target_id)
+                if target_id not in los_cache:
+                    raise KeyError(f"los_cache missing target_id={target_id} for ally_id={ally.get('id')}")
+                result[key] = bool(los_cache[target_id])
         return result
 
     def _calculate_kill_probability(self, shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
@@ -672,6 +670,16 @@ class ObservationBuilder:
         if not active_unit:
             # No active unit - return zero observation
             return obs
+        
+        # Build los_cache explicitly for observation (single source of truth)
+        from engine.phase_handlers.shooting_handlers import build_unit_los_cache
+        units_cache = require_key(game_state, "units_cache")
+        active_player = int(active_unit["player"]) if active_unit["player"] is not None else None
+        if active_player is None:
+            raise ValueError(f"Active unit missing player: {active_unit}")
+        for ally_id, cache_entry in units_cache.items():
+            if int(cache_entry["player"]) == active_player:
+                build_unit_los_cache(game_state, str(ally_id))
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
         phase_encoding = {"command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
@@ -769,8 +777,7 @@ class ObservationBuilder:
         valid_targets = self._get_valid_targets(active_unit, game_state)
         self._sort_valid_targets(valid_targets, active_unit, game_state)
         six_enemies = self._get_six_reference_enemies(active_unit, game_state, valid_targets)
-        los_cache_obs = self._build_los_cache_for_observation(active_unit, game_state, six_enemies)
-        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies, los_cache_obs=los_cache_obs)
+        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies)
         # Enemy Units: [142:274] = 132 floats (6 × 22 features)
         # base_idx = 142 + 132 = 274
         self._encode_valid_targets(
@@ -839,7 +846,10 @@ class ObservationBuilder:
         AI_TURN.md COMPLIANCE: Uses activation pools (single source of truth).
         """
         current_phase = game_state["phase"]
-        current_player = game_state["current_player"]
+        current_player = int(game_state["current_player"]) if game_state["current_player"] is not None else None
+        if current_player is None:
+            raise ValueError("game_state['current_player'] must be set for observation")
+        units_cache = require_key(game_state, "units_cache")
         
         # Get first eligible unit from current phase pool
         if current_phase == "move":
@@ -849,7 +859,17 @@ class ObservationBuilder:
         elif current_phase == "charge":
             pool = require_key(game_state, "charge_activation_pool")
         elif current_phase == "fight":
-            pool = require_key(game_state, "charging_activation_pool")
+            fight_subphase = require_key(game_state, "fight_subphase")
+            if fight_subphase == "charging":
+                pool = require_key(game_state, "charging_activation_pool")
+            elif fight_subphase in ("alternating_active", "cleanup_active"):
+                pool = require_key(game_state, "active_alternating_activation_pool")
+            elif fight_subphase in ("alternating_non_active", "cleanup_non_active"):
+                pool = require_key(game_state, "non_active_alternating_activation_pool")
+            elif fight_subphase is None:
+                raise ValueError("fight_subphase is None while phase is fight")
+            else:
+                raise KeyError(f"Unknown fight_subphase: {fight_subphase}")
         elif current_phase == "command":
             # Command phase has no "active unit" for observation; return None so build_observation returns zeros
             return None
@@ -859,9 +879,26 @@ class ObservationBuilder:
         # Get first unit from pool that belongs to current player (pool contains only alive units)
         for unit_id in pool:
             unit = get_unit_by_id(str(unit_id), game_state)
-            if unit and unit["player"] == current_player:
+            if not unit:
+                continue
+            if current_phase == "fight":
+                return unit
+            if not is_unit_alive(str(unit["id"]), game_state):
+                continue
+            cache_entry = units_cache.get(str(unit_id))
+            if cache_entry is None:
+                raise KeyError(f"Unit {unit_id} missing from units_cache")
+            unit_player = require_key(cache_entry, "player")
+            try:
+                unit_player = int(unit_player)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid player value in units_cache for unit {unit_id}: {unit_player}") from exc
+            if unit_player == current_player:
                 return unit
         
+        if current_phase == "shoot":
+            # No eligible unit for current player in shoot pool; allow empty observation
+            return None
         raise ValueError(f"No active unit found in pool for player {current_player} (phase={current_phase})")
     
     def _encode_directional_terrain(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
@@ -1017,7 +1054,6 @@ class ObservationBuilder:
         game_state: Dict[str, Any],
         base_idx: int,
         six_enemies: Optional[List[tuple]] = None,
-        los_cache_obs: Optional[Dict[Tuple[str, str], bool]] = None,
     ):
         """
         Encode up to 6 enemy units within perception radius.
@@ -1025,7 +1061,7 @@ class ObservationBuilder:
 
         Asymmetric design: MORE complete information about enemies for tactical decisions.
 
-        los_cache_obs is required (built in build_observation) for visibility features.
+        Uses unit["los_cache"] for visibility features (must be built explicitly before this call).
 
         Features per enemy (22 floats):
         0. relative_col, 1. relative_row (egocentric position)
@@ -1050,8 +1086,6 @@ class ObservationBuilder:
         When six_enemies is provided (from build_observation), uses that list so obs[141:273]
         matches enemy_index_map in _encode_valid_targets (avoids "Required key 'X' missing").
         """
-        if los_cache_obs is None:
-            raise ValueError("los_cache_obs is required for enemy unit encoding")
         perception_radius = self.perception_radius
         if six_enemies is not None:
             enemies = six_enemies
@@ -1148,14 +1182,23 @@ class ObservationBuilder:
                 # Features 14-16: Allied coordination (3 floats, était 13-15) - DÉCALÉ
                 visibility = 0.0
                 combined_threat = 0.0
-                for ally in game_state["units"]:
-                    if ally["player"] == active_unit["player"] and is_unit_alive(str(ally["id"]), game_state):
-                        cache_key = (str(ally["id"]), str(enemy["id"]))
-                        if cache_key not in los_cache_obs:
-                            raise KeyError(f"los_cache_obs missing key={cache_key}")
-                        if los_cache_obs[cache_key]:
+                units_cache = require_key(game_state, "units_cache")
+                active_player = int(active_unit["player"]) if active_unit["player"] is not None else None
+                if active_player is None:
+                    raise ValueError(f"Active unit missing player: {active_unit}")
+                for ally_id, cache_entry in units_cache.items():
+                    if int(cache_entry["player"]) != active_player:
+                        continue
+                    ally = get_unit_by_id(str(ally_id), game_state)
+                    if ally is None:
+                        raise KeyError(f"Unit {ally_id} missing from game_state['units']")
+                        target_id = str(enemy["id"])
+                        los_cache = require_key(ally, "los_cache")
+                        if target_id not in los_cache:
+                            raise KeyError(f"los_cache missing target_id={target_id} for ally_id={ally.get('id')}")
+                        if los_cache[target_id]:
                             visibility += 1.0
-                        combined_threat += self._calculate_danger_probability(enemy, ally, game_state)
+                    combined_threat += self._calculate_danger_probability(enemy, ally, game_state)
                 obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)
                 obs[feature_base + 15] = min(1.0, combined_threat / 5.0)  # combined_friendly_threat (était feature 14)
                 
@@ -1314,7 +1357,6 @@ class ObservationBuilder:
                 
                 # Threat calculation (potential damage to active unit)
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max damage from all weapons
-                from shared.data_validation import require_key
                 rng_weapons = require_key(unit, "RNG_WEAPONS")
                 cc_weapons = require_key(unit, "CC_WEAPONS")
                 
@@ -1340,10 +1382,11 @@ class ObservationBuilder:
                 # LoS check using cache (only for enemies)
                 has_los = 0.0
                 if is_enemy > 0.5:
-                    cache_key = (str(active_unit["id"]), str(unit["id"]))
-                    if cache_key not in los_cache_obs:
-                        raise KeyError(f"los_cache_obs missing key={cache_key}")
-                    has_los = 1.0 if los_cache_obs[cache_key] else 0.0
+                    target_id = str(unit["id"])
+                    active_los_cache = require_key(active_unit, "los_cache")
+                    if target_id not in active_los_cache:
+                        raise KeyError(f"los_cache missing target_id={target_id} for active_unit_id={active_unit.get('id')}")
+                    has_los = 1.0 if active_los_cache[target_id] else 0.0
                 
                 # Target preference match (placeholder - will enhance with unit registry)
                 target_match = 0.5
@@ -1388,34 +1431,46 @@ class ObservationBuilder:
         elif current_phase == "charge":
             if "MOVE" not in active_unit:
                 raise KeyError(f"Active unit missing required 'MOVE' field: {active_unit}")
-            for enemy in game_state["units"]:
-                if "player" not in enemy:
-                    raise KeyError(f"Enemy unit missing required 'player' field: {enemy}")
-                if enemy["player"] != active_unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
-                    if "col" not in enemy or "row" not in enemy:
-                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-                    active_col, active_row = require_unit_position(active_unit, game_state)
-                    enemy_col, enemy_row = require_unit_position(enemy, game_state)
-                    distance = calculate_pathfinding_distance(
-                        active_col, active_row, enemy_col, enemy_row, game_state
-                    )
-                    if distance <= active_unit["MOVE"] + 12:
-                        valid_targets.append(enemy)
+            units_cache = require_key(game_state, "units_cache")
+            active_entry = require_key(units_cache, str(active_unit["id"]))
+            active_player = require_key(active_entry, "player")
+            for enemy_id, enemy_entry in units_cache.items():
+                enemy_player = require_key(enemy_entry, "player")
+                if enemy_player == active_player:
+                    continue
+                enemy = get_unit_by_id(str(enemy_id), game_state)
+                if enemy is None:
+                    raise KeyError(f"Enemy unit {enemy_id} missing from game_state['units']")
+                if "col" not in enemy or "row" not in enemy:
+                    raise KeyError(f"Enemy unit missing required position fields: {enemy}")
+                active_col, active_row = require_unit_position(active_unit, game_state)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+                distance = calculate_pathfinding_distance(
+                    active_col, active_row, enemy_col, enemy_row, game_state
+                )
+                if distance <= active_unit["MOVE"] + 12:
+                    valid_targets.append(enemy)
         elif current_phase == "fight":
             from engine.utils.weapon_helpers import get_melee_range
             melee_range = get_melee_range()
-            for enemy in game_state["units"]:
-                if "player" not in enemy:
-                    raise KeyError(f"Enemy unit missing required 'player' field: {enemy}")
-                if enemy["player"] != active_unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
-                    if "col" not in enemy or "row" not in enemy:
-                        raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-                    active_col, active_row = require_unit_position(active_unit, game_state)
-                    enemy_col, enemy_row = require_unit_position(enemy, game_state)
-                    if calculate_hex_distance(
-                        active_col, active_row, enemy_col, enemy_row
-                    ) <= melee_range:
-                        valid_targets.append(enemy)
+            units_cache = require_key(game_state, "units_cache")
+            active_entry = require_key(units_cache, str(active_unit["id"]))
+            active_player = require_key(active_entry, "player")
+            for enemy_id, enemy_entry in units_cache.items():
+                enemy_player = require_key(enemy_entry, "player")
+                if enemy_player == active_player:
+                    continue
+                enemy = get_unit_by_id(str(enemy_id), game_state)
+                if enemy is None:
+                    raise KeyError(f"Enemy unit {enemy_id} missing from game_state['units']")
+                if "col" not in enemy or "row" not in enemy:
+                    raise KeyError(f"Enemy unit missing required position fields: {enemy}")
+                active_col, active_row = require_unit_position(active_unit, game_state)
+                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+                if calculate_hex_distance(
+                    active_col, active_row, enemy_col, enemy_row
+                ) <= melee_range:
+                    valid_targets.append(enemy)
         return valid_targets
     
     def _get_six_reference_enemies(
@@ -1430,9 +1485,16 @@ class ObservationBuilder:
         perception_radius = self.perception_radius
         active_col, active_row = require_unit_position(active_unit, game_state)
         all_enemies: List[tuple] = []
-        for other in game_state["units"]:
-            if other["player"] == active_unit["player"] or not is_unit_alive(str(other["id"]), game_state):
+        units_cache = require_key(game_state, "units_cache")
+        active_entry = require_key(units_cache, str(active_unit["id"]))
+        active_player = require_key(active_entry, "player")
+        for other_id, other_entry in units_cache.items():
+            other_player = require_key(other_entry, "player")
+            if other_player == active_player:
                 continue
+            other = get_unit_by_id(str(other_id), game_state)
+            if other is None:
+                raise KeyError(f"Unit {other_id} missing from game_state['units']")
             if "col" not in other or "row" not in other:
                 raise KeyError(f"Unit missing required position fields: {other}")
             oc, or_ = require_unit_position(other, game_state)

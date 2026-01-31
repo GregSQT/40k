@@ -5,14 +5,9 @@
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
     "Info": "######################### BASE CONFIG (PvP Mode) - Copy of Phase 2 ########################################################",
     "base_actions": {
-      "move_close": 0.0,
-      "move_away": 0.0,
-      "move_to_charge": 0.0,
-      "move_to_los": 0.6,
       "ranged_attack": 3.0,
       "charge_success": 0.1,
       "melee_attack": 0.1,
-      "move_wait": 0.0,
       "shoot_wait": -10.0
     },
     "result_bonuses": {
@@ -54,14 +49,9 @@
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm #######################################################",
     "Info": "######################### PHASE 1 - SHOOTING IS GOOD: Strong rewards for ranged combat #################################",
     "base_actions": {
-      "move_close": 0.0,
-      "move_away": 0.0,
-      "move_to_charge": 0.0,
-      "move_to_los": 0.6,
       "ranged_attack": 3.0,
       "charge_success": 0.1,
       "melee_attack": 0.1,
-      "move_wait": 0.0,
       "shoot_wait": -10.0
     },
     "result_bonuses": {
@@ -97,14 +87,9 @@
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
     "Info": "######################### PHASE 2 - FIXED: Efficient Aggression #######################################################",
     "base_actions": {
-      "move_close": 0.0,
-      "move_away": 0.0,
-      "move_to_charge": 0.0,
-      "move_to_los": 0.6,
       "ranged_attack": 3.0,
       "charge_success": 0.1,
       "melee_attack": 0.1,
-      "move_wait": 0.0,
       "shoot_wait": -10.0
     },
     "result_bonuses": {
@@ -146,14 +131,9 @@
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ########################################################",
     "Info": "######################### PHASE 3                                ########################################################",
     "base_actions": {
-      "move_close": 0.4,
-      "move_away": -0.2,
-      "move_to_charge": 0.6,
-      "move_to_los": 0.8,
       "ranged_attack": 1.5,
       "charge_success": 0.8,
       "melee_attack": 0.6,
-      "move_wait": -0.3,
       "shoot_wait": -3.0
     },
     "result_bonuses": {
@@ -186,12 +166,6 @@
     "adaptive_bonuses": {
       "step_up_when_covered": 0.2,
       "step_down_when_needed": 0.2
-    },
-    "tactical_bonuses": {
-      "gained_los_on_target": 0.8,
-      "moved_to_cover": 0.6,
-      "safe_from_charges": 0.5,
-      "safe_from_ranged": 0.4
     },
     "system_penalties": {
       "forbidden_action": -1.0,

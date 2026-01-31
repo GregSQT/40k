@@ -17,7 +17,8 @@ from engine.game_utils import add_console_log, safe_print
 from engine.combat_utils import (
     normalize_coordinates,
     calculate_hex_distance,
-    get_unit_by_id
+    get_unit_by_id,
+    get_unit_coordinates
 )
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
@@ -1649,6 +1650,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     target = get_unit_by_id(game_state, target_id)
     if not target:
         raise ValueError(f"Target unit not found: {target_id}")
+    target_coords = get_unit_coordinates(target)
 
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get selected weapon
     weapon = get_selected_melee_weapon(attacker)
@@ -1784,7 +1786,8 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         "damage": damage_dealt,
         "target_died": target_died,
         "attack_log": attack_log,
-        "weapon_name": weapon_name  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
+        "weapon_name": weapon_name,  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
+        "target_coords": target_coords
     }
 
 

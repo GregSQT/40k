@@ -374,22 +374,6 @@ These metrics compare agent performance against scripted opponents.
 
 These metrics measure the agent's tactical combat performance across different phases of gameplay. They use alphabetical prefixes (a-e) to control TensorBoard sort order and are smoothed using rolling averages.
 
-#### `combat/a_position_score`
-**What it is:** Quality of unit positioning during movement phase (smoothed over 100 episodes)
-
-**Why it matters:** Measures tactical positioning skills - agent's ability to move to advantageous positions.
-
-**Interpretation:**
-- **Increasing:** Agent learning better positioning
-- **Stable high:** Good positioning habits established
-- **Decreasing or low:** Agent not learning positioning tactics
-
-**Action triggers:**
-- Not increasing → Increase positioning rewards in rewards_config.json
-- Consistently low → Check if movement rewards are balanced
-
----
-
 #### `combat/b_shoot_kills`
 **What it is:** Number of enemy units killed by ranged attacks per episode (smoothed over 20 episodes)
 
@@ -482,7 +466,6 @@ These metrics measure the agent's tactical combat performance across different p
 - High but losing → Check if agent is controlling wrong objectives or losing units
 
 **Relationship to other metrics:**
-- Should correlate with `a_position_score` (good positioning = better objective control)
 - May trade off with `b_shoot_kills` and `d_melee_kills` (aggressive play vs. defensive positioning)
 
 ---

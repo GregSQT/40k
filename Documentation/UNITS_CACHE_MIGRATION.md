@@ -300,19 +300,7 @@ doit basculer sur `units_cache` via les helpers.
 - `_get_situational_reward`
 - `_calculate_objective_reward_turn5`
 - `_calculate_army_weighted_threat`
-- `_moved_to_cover_from_enemies`
-- `_moved_closer_to_enemies`
-- `_moved_away_from_enemies`
-- `_moved_to_optimal_range`
-- `_moved_to_charge_range`
-- `_moved_to_safety`
-- `_gained_los_on_priority_target`
-- `_safe_from_enemy_charges`
-- `_safe_from_enemy_ranged`
 - `_determine_winner`
-- `_calculate_offensive_value`
-- `_calculate_defensive_threat`
-- `_get_enemy_reachable_positions`
 
 ### engine/w40k_core.py
 - `reset`

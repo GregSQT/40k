@@ -125,7 +125,7 @@ class W40KEngine(gym.Env):
             # PvE mode in API: pve_mode=True (load AI model for Player 1)
             pve_mode_value = False  # Training uses SelfPlayWrapper, not pve_mode
 
-            # Extract observation_params for module access - NO FALLBACKS
+            # Extract observation_params for module access - NO DEFAULTS
             if "observation_params" not in self.training_config:
                 raise KeyError(f"observation_params missing from {controlled_agent} training config phase {training_config_name}")
             obs_params = self.training_config["observation_params"]
@@ -134,18 +134,18 @@ class W40KEngine(gym.Env):
             scenario_result = self._load_units_from_scenario(scenario_file, unit_registry)
             scenario_units = scenario_result["units"]
 
-            # Determine wall_hexes: use scenario if provided, otherwise fallback to board config
+            # Determine wall_hexes: use scenario if provided, otherwise use board config
             if scenario_result.get("wall_hexes") is not None:
                 scenario_wall_hexes = scenario_result["wall_hexes"]
             else:
-                # Fallback to board config
+                # Use board config
                 if "default" in board_config:
                     d = board_config["default"]
                     scenario_wall_hexes = d["wall_hexes"] if "wall_hexes" in d else []
                 else:
                     scenario_wall_hexes = board_config["wall_hexes"] if "wall_hexes" in board_config else []
 
-            # Determine objectives: use scenario if provided, otherwise fallback to board config
+            # Determine objectives: use scenario if provided, otherwise use board config
             # New format: grouped objectives with id, name, hexes
             if scenario_result.get("objectives") is not None:
                 scenario_objectives = scenario_result["objectives"]
@@ -227,7 +227,7 @@ class W40KEngine(gym.Env):
                 else:
                     self.training_config = None
 
-            # No scenario loaded - use board config for terrain (set to None for fallback logic)
+            # No scenario loaded - use board config for terrain (set to None for selection logic)
             self._scenario_wall_hexes = None
             self._scenario_objectives = None
         
@@ -305,7 +305,7 @@ class W40KEngine(gym.Env):
             # Board state - handle both config formats
             "board_cols": self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"],
             "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
-            # Use scenario terrain if loaded, otherwise fallback to board config
+            # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": set(map(tuple, self._scenario_wall_hexes)) if self._scenario_wall_hexes is not None else set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else (self.config["board"]["wall_hexes"] if "wall_hexes" in self.config["board"] else []))),
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
             "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else []))
@@ -351,7 +351,7 @@ class W40KEngine(gym.Env):
             self.max_nearby_units = obs_params.get("max_nearby_units", 10)
             self.max_valid_targets = obs_params.get("max_valid_targets", 5)
         else:
-            # Pas de config = erreur (pas de fallback)
+            # Pas de config = erreur (pas de valeur par défaut)
             raise ValueError(
                 "W40KEngine requires training_config with observation_params.obs_size. "
                 "No default value allowed."
@@ -438,6 +438,7 @@ class W40KEngine(gym.Env):
             "episode_steps": 0,
             "episode_number": self.episode_number,
             "game_over": False,
+            "turn_limit_reached": False,
             "winner": None,
             "units_moved": set(),
             "units_fled": set(),
@@ -531,7 +532,7 @@ class W40KEngine(gym.Env):
         
         # Log episode start with all unit positions, walls, and objectives
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-            # Extract scenario name: prefer config "name", fallback to filename pattern
+            # Extract scenario name: prefer config "name", otherwise use filename pattern
             scenario_name = self.config.get("name")
             if not scenario_name or scenario_name == "Unknown Scenario":
                 # Extract from filename: AgentName_scenario_phase1-bot3.json -> phase1-bot3
@@ -543,7 +544,7 @@ class W40KEngine(gym.Env):
                     if match:
                         scenario_name = match.group(1)
                     else:
-                        # Fallback: use filename without extension
+                        # Use filename without extension
                         scenario_name = os.path.splitext(filename)[0]
                 else:
                     scenario_name = "Unknown Scenario"
@@ -583,7 +584,7 @@ class W40KEngine(gym.Env):
             # step_logger.episode_number was incremented in log_episode_start()
             self.game_state["episode_number"] = self.step_logger.episode_number
         
-        observation = self.obs_builder.build_observation(self.game_state)
+        observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
         
         return observation, info    
@@ -602,17 +603,14 @@ class W40KEngine(gym.Env):
                 # Turn limit exceeded - return terminated episode immediately
                 # CRITICAL: Set turn_limit_reached flag in game_state for winner determination
                 self.game_state["turn_limit_reached"] = True
-                observation = self.obs_builder.build_observation(self.game_state)
+                observation = self._build_observation()
                 winner, win_method = self._determine_winner_with_method()
                 
                 # CRITICAL: win_method should never be None when game is terminated
                 if win_method is None:
-                    import warnings
-                    warnings.warn(f"BUG: win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}")
-                    if winner == -1:
-                        win_method = "draw"
-                    else:
-                        win_method = "elimination"  # Default fallback
+                    raise ValueError(
+                        f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
+                    )
                 
                 info = {"turn_limit_exceeded": True, "winner": winner, "win_method": win_method}
                 
@@ -639,16 +637,16 @@ class W40KEngine(gym.Env):
         # PERF: compute mask+eligible_units once, reuse for convert_gym_action
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
         _step_t1 = time.perf_counter() if _step_t0 is not None else None
-        if not np.any(action_mask):
-            # No valid actions - trigger phase transition
+        if not eligible_units:
+            # No eligible units - trigger phase transition
             current_phase = self.game_state["phase"]
-            result = {}
-            if current_phase == "fight":
-                from engine.phase_handlers import fight_handlers
-                result = fight_handlers.fight_phase_end(self.game_state)
+            advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
+            advance_success, result = self._process_semantic_action(advance_action)
+            if not advance_success:
+                raise RuntimeError(f"advance_phase failed: {result}")
             _step_t2_early = time.perf_counter() if _step_t0 is not None else None
             # After phase transition, get new observation
-            observation = self.obs_builder.build_observation(self.game_state)
+            observation = self._build_observation()
             _step_t3_early = time.perf_counter() if _step_t0 is not None else None
             # Check if game ended after phase transition
             self.game_state["game_over"] = self._check_game_over()
@@ -664,12 +662,9 @@ class W40KEngine(gym.Env):
                 
                 # CRITICAL: win_method should never be None when game is terminated
                 if win_method is None:
-                    import warnings
-                    warnings.warn(f"BUG: win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}")
-                    if winner == -1:
-                        win_method = "draw"
-                    else:
-                        win_method = "elimination"  # Default fallback
+                    raise ValueError(
+                        f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
+                    )
                 
                 info["winner"] = winner
                 info["win_method"] = win_method
@@ -736,7 +731,7 @@ class W40KEngine(gym.Env):
         # Log action for replay/debugging
         if hasattr(self, 'replay_logger') and self.replay_logger and success:
             # Get action_type and unit_id using same logic as step_logger
-            # CRITICAL: No fallbacks - require explicit values in result
+            # CRITICAL: No defaults - require explicit values in result
             if not isinstance(result, dict):
                 raise TypeError(f"result must be a dict for replay logger, got {type(result).__name__}")
             
@@ -756,19 +751,18 @@ class W40KEngine(gym.Env):
                     step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
 
                     if action_type == "move":
-                        # CRITICAL: No fallbacks - require explicit coordinates
+                        # CRITICAL: No defaults - require explicit coordinates
                         if str(unit_id) not in pre_action_positions:
                             raise ValueError(f"Replay logger move missing start position in pre_action_positions: unit_id={unit_id}")
                         start_pos = pre_action_positions[str(unit_id)]
-                        # Use result destination, then action, no fallback to updated_unit
+                        # Use result destination
                         if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
                             dest_col = result.get("toCol")
                             dest_row = result.get("toRow")
-                        elif isinstance(semantic_action, dict) and semantic_action.get("destCol") is not None and semantic_action.get("destRow") is not None:
-                            dest_col = semantic_action.get("destCol")
-                            dest_row = semantic_action.get("destRow")
                         else:
-                            raise ValueError(f"Replay logger move missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={semantic_action.get('destCol') if isinstance(semantic_action, dict) else None}, action.destRow={semantic_action.get('destRow') if isinstance(semantic_action, dict) else None}")
+                            raise ValueError(
+                                f"Replay logger move missing destination in result: unit_id={unit_id}, result keys={list(result.keys())}"
+                            )
                         self.replay_logger.log_move(
                             updated_unit,
                             start_pos[0], start_pos[1],
@@ -776,7 +770,7 @@ class W40KEngine(gym.Env):
                             current_turn, step_reward, 0
                         )
                     elif action_type == "shoot":
-                        # CRITICAL: No fallbacks - require explicit targetId in result
+                        # CRITICAL: No defaults - require explicit targetId in result
                         target_id = result.get("targetId")
                         if target_id is None:
                             raise ValueError(f"Replay logger shoot missing targetId: result keys: {list(result.keys())}")
@@ -812,11 +806,11 @@ class W40KEngine(gym.Env):
                         target_id = result.get("targetId")
                         target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                         if target_unit:
-                            # CRITICAL: No fallbacks - require explicit coordinates
+                            # CRITICAL: No defaults - require explicit coordinates
                             if str(unit_id) not in pre_action_positions:
                                 raise ValueError(f"Replay logger charge missing start position in pre_action_positions: unit_id={unit_id}")
                             start_pos = pre_action_positions[str(unit_id)]
-                            # Use result destination, then action, no fallback to updated_unit
+                        # Use result destination; do not use updated_unit
                             if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
                                 dest_col = result.get("toCol")
                                 dest_row = result.get("toRow")
@@ -860,7 +854,48 @@ class W40KEngine(gym.Env):
                         )
 
         # Convert to gym format
-        observation = self.obs_builder.build_observation(self.game_state)
+        action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        if not eligible_units:
+            # Pool empty -> advance phase before building observation (no recursion)
+            current_phase = self.game_state.get("phase", "unknown")
+            advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
+            advance_success, advance_result = self._process_semantic_action(advance_action)
+            if not advance_success:
+                raise RuntimeError(f"advance_phase failed: {advance_result}")
+            
+            # Mirror cascade behavior from step(): execute phase transitions before building observation
+            if isinstance(advance_result, dict) and advance_result.get("phase_complete") and advance_result.get("next_phase"):
+                max_cascade = 10
+                cascade_count = 0
+                result = advance_result
+                while result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
+                    next_phase = result["next_phase"]
+                    current_phase = self.game_state.get("phase", "unknown")
+                    cascade_count += 1
+                    
+                    if next_phase == current_phase:
+                        break
+                    
+                    if next_phase == "command":
+                        phase_init_result = command_handlers.command_phase_start(self.game_state)
+                    elif next_phase == "shoot":
+                        phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
+                    elif next_phase == "charge":
+                        phase_init_result = charge_handlers.charge_phase_start(self.game_state)
+                    elif next_phase == "fight":
+                        phase_init_result = fight_handlers.fight_phase_start(self.game_state)
+                    elif next_phase == "move":
+                        phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+                    else:
+                        break
+                    
+                    if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
+                        result = phase_init_result
+                    else:
+                        break
+            observation = self._build_observation()
+        else:
+            observation = self._build_observation()
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
         reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
@@ -891,12 +926,9 @@ class W40KEngine(gym.Env):
             
             # CRITICAL: win_method should never be None when game is terminated
             if win_method is None:
-                import warnings
-                warnings.warn(f"BUG: win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}")
-                if winner == -1:
-                    win_method = "draw"
-                else:
-                    win_method = "elimination"  # Default fallback
+                raise ValueError(
+                    f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
+                )
             
             info["winner"] = winner
             info["win_method"] = win_method
@@ -959,9 +991,19 @@ class W40KEngine(gym.Env):
             turn = self.game_state.get("turn", "?")
             phase = self.game_state.get("phase", "?")
             current_player = require_key(self.game_state, "current_player")
+            fight_subphase = self.game_state.get("fight_subphase")
+            move_pool = len(require_key(self.game_state, "move_activation_pool"))
+            shoot_pool = len(require_key(self.game_state, "shoot_activation_pool"))
+            charge_pool = len(require_key(self.game_state, "charge_activation_pool"))
+            charging_pool = len(require_key(self.game_state, "charging_activation_pool"))
+            active_alt_pool = len(require_key(self.game_state, "active_alternating_activation_pool"))
+            non_active_alt_pool = len(require_key(self.game_state, "non_active_alternating_activation_pool"))
             error_msg = (
                 f"\n ❌ ERROR: Episode exceeded 1000 steps (episode={episode}, turn={turn}, "
-                f"phase={phase}, player={current_player}). Forcing termination."
+                f"phase={phase}, player={current_player}, fight_subphase={fight_subphase}, "
+                f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}, "
+                f"charging_pool={charging_pool}, active_alt_pool={active_alt_pool}, "
+                f"non_active_alt_pool={non_active_alt_pool}). Forcing termination."
             )
             print(error_msg, flush=True)
             from engine.game_utils import add_debug_log
@@ -1074,21 +1116,27 @@ class W40KEngine(gym.Env):
         if action.get("action") == "advance_phase":
             # Pool is empty - trigger phase transition
             from_phase = action.get("from", current_phase)
-            result = {"phase_complete": True, "reason": "pool_empty"}
-
-            # Determine next phase based on current phase
-            if from_phase == "move":
-                result["next_phase"] = "shoot"
-            elif from_phase == "shoot":
-                result["next_phase"] = "charge"
-            elif from_phase == "charge":
-                result["next_phase"] = "fight"
-            elif from_phase == "fight":
-                result["next_phase"] = "command"
-            elif from_phase == "command":
-                result["next_phase"] = "move"
+            if from_phase == "shoot":
+                result = shooting_handlers.shooting_phase_end(self.game_state)
+                self._shooting_phase_initialized = False
+                if "phase_complete" not in result:
+                    result["phase_complete"] = True
+                if "reason" not in result:
+                    result["reason"] = "pool_empty"
             else:
-                result["next_phase"] = "move"
+                result = {"phase_complete": True, "reason": "pool_empty"}
+
+                # Determine next phase based on current phase
+                if from_phase == "move":
+                    result["next_phase"] = "shoot"
+                elif from_phase == "charge":
+                    result["next_phase"] = "fight"
+                elif from_phase == "fight":
+                    result["next_phase"] = "command"
+                elif from_phase == "command":
+                    result["next_phase"] = "move"
+                else:
+                    result["next_phase"] = "move"
 
             # CRITICAL FIX: Don't return early - fall through to cascade loop
             # to actually execute the phase transition in game_state
@@ -1120,7 +1168,7 @@ class W40KEngine(gym.Env):
                 
                 # CRITICAL: No diagnostic logging - errors should be explicit, not masked
                 
-                # CRITICAL: action_type must be a string from result - no fallbacks, no workarounds
+                # CRITICAL: action_type must be a string from result - no defaults, no workarounds
                 if not isinstance(result, dict):
                     raise TypeError(f"result must be a dict, got {type(result).__name__}")
                 
@@ -1172,7 +1220,7 @@ class W40KEngine(gym.Env):
                     # System or intermediate action - skip logging
                     pass
                 elif action_type is not None:
-                    # CRITICAL: unitId must be in result - no fallbacks
+                    # CRITICAL: unitId must be in result - required
                     unit_id = result.get("unitId")
                     if unit_id is None:
                         raise ValueError(f"result missing 'unitId' field for action_type '{action_type}'. result keys: {list(result.keys())}")
@@ -1243,33 +1291,29 @@ class W40KEngine(gym.Env):
                             # CRITICAL FIX: Always use result for positions (populated by movement handler)
                             # This ensures correct positions even if pre_action_positions is missing
                             if action_type == "flee":
-                                # CRITICAL: No fallbacks - require explicit coordinates from result or action
+                                # CRITICAL: No defaults - require explicit coordinates from result
                                 if not isinstance(result, dict):
                                     raise ValueError(f"Flee action missing result dict: unit_id={unit_id}")
                                 if result.get("fromCol") is None or result.get("fromRow") is None:
                                     raise ValueError(f"Flee action missing fromCol/fromRow in result: unit_id={unit_id}, result keys={list(result.keys())}")
                                 if result.get("toCol") is None or result.get("toRow") is None:
-                                    # Try action as fallback
-                                    if isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
-                                        dest_col = action.get("destCol")
-                                        dest_row = action.get("destRow")
-                                    else:
-                                        raise ValueError(f"Flee action missing toCol/toRow: result.toCol={result.get('toCol')}, result.toRow={result.get('toRow')}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
-                                else:
-                                    dest_col = result.get("toCol")
-                                    dest_row = result.get("toRow")
+                                    raise ValueError(
+                                        f"Flee action missing toCol/toRow: result.toCol={result.get('toCol')}, result.toRow={result.get('toRow')}"
+                                    )
+                                dest_col = result.get("toCol")
+                                dest_row = result.get("toRow")
                                 start_pos = (result.get("fromCol"), result.get("fromRow"))
                                 end_pos = (dest_col, dest_row)
                             else:
-                                # CRITICAL: No fallbacks - require explicit coordinates from result or pre_action_positions
+                                # CRITICAL: No defaults - require explicit coordinates from result
                                 if isinstance(result, dict) and result.get("fromCol") is not None and result.get("fromRow") is not None:
                                     start_pos = (result.get("fromCol"), result.get("fromRow"))
-                                elif str(unit_id) in pre_action_positions:
-                                    start_pos = pre_action_positions[str(unit_id)]
                                 else:
-                                    raise ValueError(f"Move action missing start position: unit_id={unit_id}, result.fromCol={result.get('fromCol') if isinstance(result, dict) else None}, result.fromRow={result.get('fromRow') if isinstance(result, dict) else None}, pre_action_positions has unit={str(unit_id) in pre_action_positions}")
+                                    raise ValueError(
+                                        f"Move action missing start position in result: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}"
+                                    )
                                 # CRITICAL: Use semantic action destination from result (set by movement handler)
-                                # NO FALLBACK to action - result must contain toCol/toRow (set by movement_destination_selection_handler)
+                                # Result must contain toCol/toRow (set by movement_destination_selection_handler)
                                 if not isinstance(result, dict):
                                     raise TypeError(f"result must be a dict for move action, got {type(result).__name__}")
                                 dest_col = result.get("toCol")
@@ -1296,19 +1340,18 @@ class W40KEngine(gym.Env):
 
                         if action_type == "advance":
                             # ADVANCE_IMPLEMENTATION: Handle advance action logging (similar to move)
-                            # CRITICAL: No fallbacks - require explicit coordinates
+                            # CRITICAL: No defaults - require explicit coordinates
                             if str(unit_id) not in pre_action_positions:
                                 raise ValueError(f"Advance action missing start position in pre_action_positions: unit_id={unit_id}")
                             start_pos = pre_action_positions[str(unit_id)]
-                            # Use result destination (from advance handler) or action, no fallback to updated_unit
+                            # Use result destination (from advance handler)
                             if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
                                 dest_col = result.get("toCol")
                                 dest_row = result.get("toRow")
-                            elif isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
-                                dest_col = action.get("destCol")
-                                dest_row = action.get("destRow")
                             else:
-                                raise ValueError(f"Advance action missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
+                                raise ValueError(
+                                    f"Advance action missing destination in result: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}"
+                                )
                             end_pos = (dest_col, dest_row)
                             action_details.update({
                                 "start_pos": start_pos,
@@ -1323,19 +1366,18 @@ class W40KEngine(gym.Env):
                         # charge and combat have specialized logging with early return
                         if action_type == "charge":
                             # Add charge-specific data with position info for step logger
-                            # CRITICAL: No fallbacks - require explicit coordinates
+                            # CRITICAL: No defaults - require explicit coordinates
                             if str(unit_id) not in pre_action_positions:
                                 raise ValueError(f"Charge action missing start position in pre_action_positions: unit_id={unit_id}")
                             start_pos = pre_action_positions[str(unit_id)]
-                            # Get destination from result (populated by charge handler) or action, no fallback to updated_unit
+                            # Get destination from result (populated by charge handler)
                             if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
                                 dest_col = result.get("toCol")
                                 dest_row = result.get("toRow")
-                            elif isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
-                                dest_col = action.get("destCol")
-                                dest_row = action.get("destRow")
                             else:
-                                raise ValueError(f"Charge action missing destination: result.toCol={result.get('toCol') if isinstance(result, dict) else None}, result.toRow={result.get('toRow') if isinstance(result, dict) else None}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
+                                raise ValueError(
+                                    f"Charge action missing destination in result: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}"
+                                )
                             end_pos = (dest_col, dest_row)
                             target_id_from_result = result.get("targetId")
                             action_details.update({
@@ -1379,19 +1421,17 @@ class W40KEngine(gym.Env):
 
                         elif action_type == "charge_fail":
                             # Add charge_fail-specific data for step logger
-                            # CRITICAL: No fallbacks - require explicit coordinates
+                            # CRITICAL: No defaults - require explicit coordinates
                             if str(unit_id) not in pre_action_positions:
                                 raise ValueError(f"Charge_fail missing start position in pre_action_positions: unit_id={unit_id}")
                             start_pos = pre_action_positions[str(unit_id)]
-                            # For failed charges, end_pos is the intended destination (from result, action, or error)
+                            # For failed charges, end_pos is the intended destination (from result)
                             end_pos = result.get("end_pos")
                             if end_pos is None:
-                                # Try action as fallback
-                                if isinstance(action, dict) and action.get("destCol") is not None and action.get("destRow") is not None:
-                                    end_pos = (action.get("destCol"), action.get("destRow"))
-                                else:
-                                    # Unit didn't move, so end_pos should equal start_pos, but we require explicit value
-                                    raise ValueError(f"Charge_fail missing end_pos: result.end_pos={result.get('end_pos')}, action.destCol={action.get('destCol') if isinstance(action, dict) else None}, action.destRow={action.get('destRow') if isinstance(action, dict) else None}")
+                                # Unit didn't move, so end_pos should equal start_pos, but we require explicit value
+                                raise ValueError(
+                                    f"Charge_fail missing end_pos: result.end_pos={result.get('end_pos')}, unit_id={unit_id}"
+                                )
                             
                             # CRITICAL: No default values - require explicit charge_failed_reason
                             charge_failed_reason = result.get("charge_failed_reason")
@@ -1461,10 +1501,12 @@ class W40KEngine(gym.Env):
                                             f"action_type={action_type}, unit_id={unit_id}"
                                         )
                                     
-                                    # CRITICAL: Use shooterId from attack_result if available, otherwise fallback to unit_id from result
-                                    # This ensures we log the correct unit that actually performed the attack
-                                    actual_shooter_id = attack_result.get("shooterId", unit_id)
-                                    target_id = attack_result.get("targetId", result.get("targetId"))
+                                    # CRITICAL: Use shooterId for shoot, attackerId for combat
+                                    if action_type == "combat":
+                                        actual_shooter_id = require_key(attack_result, "attackerId")
+                                    else:
+                                        actual_shooter_id = require_key(attack_result, "shooterId")
+                                    target_id = require_key(attack_result, "targetId")
                                     
                                     # Validate that actual_shooter_id matches the unit_id from result
                                     if str(actual_shooter_id) != str(unit_id):
@@ -1480,21 +1522,20 @@ class W40KEngine(gym.Env):
                                     actual_shooter_unit = self._get_unit_by_id(str(actual_shooter_id)) if actual_shooter_id else updated_unit
                                     target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                                     target_coords = None
-                                    if target_unit:
+                                    if action_type == "combat":
+                                        target_coords = require_key(attack_result, "target_coords")
+                                    elif target_unit:
                                         target_coords = require_unit_position(target_unit, self.game_state)
                                     
                                     # CRITICAL FIX: Use CURRENT position from game_state for combat actions
                                     # Units do NOT move during FIGHT phase, so use current position from game_state
                                     # This ensures accurate position logging after movements in previous phases
-                                    if actual_shooter_unit:
-                                        # Use current position from game_state (source of truth)
-                                        unit_col, unit_row = require_unit_position(actual_shooter_unit, self.game_state)
-                                    elif str(actual_shooter_id) in pre_action_positions:
-                                        # Fallback to pre_action_positions if unit not found
-                                        unit_col, unit_row = pre_action_positions[str(actual_shooter_id)]
-                                    else:
-                                        # Last resort: use updated_unit position
-                                        unit_col, unit_row = require_unit_position(updated_unit, self.game_state)
+                                    if not actual_shooter_unit:
+                                        raise ValueError(
+                                            f"Attack logging missing shooter unit: shooterId={actual_shooter_id}, unit_id={unit_id}"
+                                        )
+                                    # Use current position from game_state (source of truth)
+                                    unit_col, unit_row = require_unit_position(actual_shooter_unit, self.game_state)
                                     
                                     attack_details = {
                                         "current_turn": pre_action_turn,
@@ -1554,14 +1595,11 @@ class W40KEngine(gym.Env):
                             
                             # CRITICAL FIX: For wait actions in movement phase, ensure unit_with_coords is defined with current unit position
                             elif action_type == "wait" and pre_action_phase == "move":
-                                # For wait actions, unit didn't move, so use current position from result or updated_unit
+                                # For wait actions, unit didn't move, so use current position from result
                                 if isinstance(result, dict) and result.get("fromCol") is not None and result.get("fromRow") is not None:
                                     # Use fromCol/fromRow from result (unit position before/after wait - same position)
                                     wait_col = result.get("fromCol")
                                     wait_row = result.get("fromRow")
-                                elif updated_unit:
-                                    # Fallback to current unit position (from cache)
-                                    wait_col, wait_row = require_unit_position(updated_unit, self.game_state)
                                 else:
                                     raise ValueError(f"Wait action in movement phase missing position data: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}")
                                 
@@ -1726,6 +1764,7 @@ class W40KEngine(gym.Env):
         # Check response for phase_complete flag
         if result.get("phase_complete"):
             self._movement_phase_initialized = False
+            self._shooting_phase_initialized = False
             self._shooting_phase_init()
             result["phase_transition"] = True
             result["next_phase"] = "shoot"
@@ -1737,6 +1776,10 @@ class W40KEngine(gym.Env):
         """
         AI_TURN.md EXACT: Pure delegation - handler manages complete phase lifecycle
         """
+        # Align with MOVE phase: initialize shooting phase once per phase
+        if not getattr(self, "_shooting_phase_initialized", False):
+            shooting_handlers.shooting_phase_start(self.game_state)
+            self._shooting_phase_initialized = True
         # Pure delegation - handler manages initialization, player progression, everything
         handler_response = shooting_handlers.execute_action(self.game_state, None, action, self.config)
         if isinstance(handler_response, tuple) and len(handler_response) == 2:
@@ -1854,6 +1897,8 @@ class W40KEngine(gym.Env):
                     self.game_state["game_over"] = True
                     return
         
+        # Reset shooting phase initialization on player switch (align with MOVE phase re-init behavior)
+        self._shooting_phase_initialized = False
         # Phase progression logic - simplified to move -> shoot -> move
         if self.game_state["phase"] == "move":
             self._shooting_phase_init()
@@ -1977,6 +2022,18 @@ class W40KEngine(gym.Env):
     
     def _build_observation(self) -> np.ndarray:
         """Build observation - delegates to observation_builder."""
+        action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        if not eligible_units:
+            current_phase = self.game_state.get("phase", "unknown")
+            advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
+            advance_success, advance_result = self._process_semantic_action(advance_action)
+            if not advance_success:
+                raise RuntimeError(f"advance_phase failed: {advance_result}")
+            _action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+            if not eligible_units:
+                if not hasattr(self.obs_builder, "obs_size"):
+                    raise KeyError("obs_builder missing required 'obs_size' field")
+                return np.zeros(self.obs_builder.obs_size, dtype=np.float32)
         return self.obs_builder.build_observation(self.game_state)
     
     
@@ -2015,7 +2072,7 @@ class W40KEngine(gym.Env):
         scenario_result = self._load_units_from_scenario(scenario_file, self.unit_registry)
         scenario_units = scenario_result["units"]
 
-        # Determine wall_hexes: use scenario if provided, otherwise fallback to board config
+        # Determine wall_hexes: use scenario if provided, otherwise use board config
         if scenario_result.get("wall_hexes") is not None:
             self._scenario_wall_hexes = scenario_result["wall_hexes"]
         else:
@@ -2025,7 +2082,7 @@ class W40KEngine(gym.Env):
             else:
                 self._scenario_wall_hexes = board_config["wall_hexes"] if "wall_hexes" in board_config else []
 
-        # Determine objectives: use scenario if provided, otherwise fallback to board config
+        # Determine objectives: use scenario if provided, otherwise use board config
         if scenario_result.get("objectives") is not None:
             self._scenario_objectives = scenario_result["objectives"]
         else:

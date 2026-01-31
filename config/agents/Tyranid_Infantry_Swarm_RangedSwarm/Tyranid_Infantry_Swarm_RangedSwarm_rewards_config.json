@@ -4,16 +4,11 @@
   "Tyranid_Infantry_Swarm_RangedSwarm": {
     "Unit": "######################################## Tyranid_Infantry_Swarm_RangedSwarm ########################################",
     "base_actions": {
-      "move_close": 0.2,
-      "move_away": 0.2,
-      "move_to_charge": 0.1,
-      "move_to_los": 0.3,
       "ranged_attack": 0.4,
       "melee_attack": 0.2,
       "charge": 0.2,
       "charge_success": 0.2,
       "being_charged": -0.2,
-      "move_wait": -0.2,
       "shoot_wait": -0.5
     },
     "target_type_bonuses": {

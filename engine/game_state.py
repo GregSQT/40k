@@ -216,7 +216,7 @@ class GameStateManager:
                 enhanced_units.append(enhanced_unit)
 
             # Extract optional terrain data from scenario
-            # If present in scenario, use it; if not, return None to signal fallback to board config
+            # If present in scenario, use it; otherwise return None for board config selection
             scenario_walls = None
             scenario_objectives = None
 
@@ -526,9 +526,9 @@ class GameStateManager:
         game_ended_by_turns = False
         if len(living_players) == 2:  # Both players still alive
             # Check if turn_limit_reached flag is set (set by fight_handlers when P1 completes turn 5)
-            if game_state.get("turn_limit_reached", False):
+            if require_key(game_state, "turn_limit_reached"):
                 game_ended_by_turns = True
-            # Note: We don't check turn number as fallback - only when flag is explicitly set
+            # Note: We don't check turn number; only when flag is explicitly set
 
         if game_ended_by_turns:
             # OBJECTIVE-BASED VICTORY at turn limit
@@ -548,7 +548,7 @@ class GameStateManager:
                     unit = unit_by_id.get(str(unit_id))
                     if not unit:
                         raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                    unit_value = unit.get("VALUE", 10)
+                    unit_value = require_key(unit, "VALUE")
                     if entry["player"] == 0:
                         p0_value += unit_value
                     else:
@@ -564,12 +564,12 @@ class GameStateManager:
         # Game still ongoing
         # CRITICAL: If game_over is True, we should never reach here
         # This indicates a bug - log it but return None to indicate the issue
-        if game_state.get("game_over", False):
+        if require_key(game_state, "game_over"):
             # BUG: Game is over but no winner determined
             # This should not happen - log error but don't crash
             import warnings
             warnings.warn(f"BUG: game_over=True but no winner determined. Turn={current_turn}, Living players={living_players}")
-            # Return draw as fallback to prevent None win_method
+            # Return draw to prevent None win_method
             return -1, "draw"
         else:
             # Game still ongoing - this is normal

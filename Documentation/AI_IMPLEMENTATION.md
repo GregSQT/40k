@@ -92,7 +92,7 @@ The `game_state` dictionary exists only in `W40KEngine` (in `w40k_core.py`). All
 - **Death** : When a unit dies (shooting or fight), `update_units_cache_hp(..., 0)` is called. It removes the entry from `units_cache` (single source of truth).
 - **Aliveness** : Use `is_unit_alive(unit_id, game_state)` (present in cache **and** `HP_CUR > 0`). Absence from cache means dead.
 - **Position updates** : After any move (MOVE, ADVANCE, CHARGE, FLED), call `update_units_cache_position(game_state, unit_id, col, row)`.
-- **Snapshot** : `game_state["units_cache_prev"]` is a copy of `units_cache` at the **start** of each `step()`, used for movement-direction features (observation, reward).
+- **Snapshot** : `game_state["units_cache_prev"]` is a copy of `units_cache` at the **start** of each `step()`, used for movement-direction features (observation).
 
 See `Documentation/unit_cache21.md` for the full implementation plan.
 
@@ -301,22 +301,10 @@ engine/
 - `_calculate_combat_mix_score(unit)` - Combat preference score
 - `_calculate_expected_damage()` - Expected damage calculations
 - `_calculate_favorite_target(unit)` - Target preference
-- `_calculate_movement_direction(unit)` - Movement tracking
 - `_calculate_kill_probability(shooter, target)` - Kill chance
 - `_calculate_danger_probability(defender, attacker)` - Threat level
 - `_calculate_army_weighted_threat(target, valid_targets)` - Army threat
 - `_calculate_target_type_match(active_unit, target)` - Target matching
-
-**Movement Bonuses:**
-- `_moved_to_cover_from_enemies()` - Bonus for defensive positioning
-- `_moved_closer_to_enemies()` - Bonus for aggressive advance
-- `_moved_away_from_enemies()` - Penalty for retreat without reason
-- `_moved_to_optimal_range()` - Bonus for weapon range positioning
-- `_moved_to_charge_range()` - Bonus for charge setup
-- `_moved_to_safety()` - Bonus for escaping danger
-- `_gained_los_on_priority_target()` - Bonus for tactical positioning
-- `_safe_from_enemy_charges()` - Bonus for charge avoidance
-- `_safe_from_enemy_ranged()` - Bonus for ranged threat avoidance
 
 **Reward Mapper Integration:**
 - `_get_reward_mapper()` - Access shared reward_mapper
@@ -330,7 +318,6 @@ engine/
 - Apply system penalties (invalid actions, forbidden actions)
 - Calculate situational rewards (win/loss/draw)
 - Integrate with reward_mapper for unit-specific rewards
-- Provide tactical bonuses for good positioning
 
 ---
 

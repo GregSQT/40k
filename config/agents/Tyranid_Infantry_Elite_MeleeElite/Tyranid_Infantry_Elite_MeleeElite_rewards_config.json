@@ -4,16 +4,11 @@
   "Tyranid_Infantry_Elite_MeleeElite": {
     "Unit": "######################################## Tyranid_Infantry_Elite_MeleeElite ########################################",
     "base_actions": {
-      "move_close": 0.3,
-      "move_away": -0.1,
-      "move_to_charge": 0.5,
-      "move_to_los": 0.0,
       "ranged_attack": 0.2,
       "melee_attack": 0.6,
       "charge": 0.4,
       "charge_success": 0.4,
       "being_charged": 0.0,
-      "move_wait": -0.1,
       "shoot_wait": -0.3
     },
     "target_type_bonuses": {

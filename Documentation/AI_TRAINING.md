@@ -238,7 +238,7 @@ Research and testing show curriculum learning **fails** for tactical games like 
    - Can't learn optimal shooting without walls/cover
 
 3. **Dense rewards + simple exploration**
-   - Agent gets rewards for shooting, moving, objectives
+  - Agent gets rewards for shooting and objectives
    - Random policy can discover basic strategies
    - No need for staged difficulty
 
@@ -261,10 +261,6 @@ Research and testing show curriculum learning **fails** for tactical games like 
 ```json
 {
   "SpaceMarineRanged": {
-    "move_close": 0.2,
-    "move_away": 0.4,
-    "move_to_safe": 0.6,
-    "move_to_rng": 0.8,
     "ranged_attack": 0.2,
     "enemy_killed_r": 0.4,
     "enemy_killed_lowests_hp_r": 0.6,
@@ -374,13 +370,6 @@ Each unit archetype has a single reward profile. No phased profiles.
 ```json
 {
   "SpaceMarineRanged": {
-    // Movement rewards
-    "move_close": 0.2,           // Moving closer to enemy
-    "move_away": 0.4,            // Moving away (for ranged units)
-    "move_to_safe": 0.6,         // Moving to safety
-    "move_to_rng": 0.8,          // Moving into shooting range
-    "move_to_charge": 0.2,       // Moving into charge range
-
     // Combat rewards
     "ranged_attack": 0.2,        // Shooting action
     "enemy_killed_r": 0.4,       // Kill with ranged
@@ -412,7 +401,7 @@ Each unit archetype has a single reward profile. No phased profiles.
 - Example: `kill_target: 100.0` → Agent ignores positioning to chase kills
 
 ❌ **Conflicting Rewards**: Mixed signals confuse learning
-- Example: `move_close: 0.5` AND `move_away: 0.5` → Random movement
+- Example: equal rewards on opposed actions → Random behavior
 
 ❌ **Sparse Rewards**: Agent never learns what's good
 - Example: Only `win: 1.0`, no intermediate rewards → Random actions
@@ -622,8 +611,7 @@ bots = {
 ```json
 {
   "SpaceMarineRanged": {
-    "wait": -0.9,          // Moderate penalty (not too harsh)
-    "move_away": 0.4       // Allow tactical retreat
+    "wait": -0.9           // Moderate penalty (not too harsh)
   }
 }
 ```
@@ -635,7 +623,6 @@ bots = {
 
 **Tuning recommendations**:
 - **Wait penalty**: -0.5 to -1.0 (avoid -2.0+ which forces reckless play)
-- **Move penalties**: Keep balanced to allow tactical flexibility
 - **Win/lose**: Keep at ±1.0 for stable training
 
 ---
@@ -752,7 +739,6 @@ This forces continuous adaptation and prevents exploitation strategies.
 | GreedyBot randomness | 0.0 | 0.15 | Unpredictable greedy play |
 | DefensiveBot randomness | 0.0 | 0.15 | Unpredictable defensive play |
 | Phase1 shoot_wait penalty | -30.0 | -10.0 | Less forced aggression |
-| Phase1 move_away penalty | -3.0 | -1.0 | More tactical flexibility |
 | RandomBot eval weight | 20% | 35% | Higher importance in model selection |
 | DefensiveBot eval weight | 50% | 35% | Balanced with random |
 
@@ -769,7 +755,6 @@ This forces continuous adaptation and prevents exploitation strategies.
 **Agent becomes too passive**:
 - Increase wait penalty (make more negative: -0.5 → -1.0)
 - Check ent_coef isn't too low (should be 0.10+)
-- Verify movement rewards aren't too high
 
 **Agent performs poorly against all bots**:
 - Rewards may be too balanced (not enough learning signal)

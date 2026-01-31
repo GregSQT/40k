@@ -97,7 +97,7 @@ class PvEController:
         Uses SAME handler paths as humans after decision is made.
         """
         # Get observation for AI model from engine
-        obs = engine.obs_builder.build_observation(game_state)
+        obs = engine._build_observation()
         
         # Get AI model prediction
         prediction_result = self.ai_model.predict(obs, deterministic=True)

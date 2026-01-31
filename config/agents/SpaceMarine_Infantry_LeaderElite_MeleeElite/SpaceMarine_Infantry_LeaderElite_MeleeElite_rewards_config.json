@@ -4,16 +4,11 @@
   "SpaceMarine_Infantry_LeaderElite_MeleeElite": {
     "Unit": "######################################## SpaceMarine_Infantry_LeaderElite_MeleeElite ########################################",
     "base_actions": {
-      "move_close": 0.2,
-      "move_away": 0.1,
-      "move_to_charge": 0.4,
-      "move_to_los": 0.1,
       "ranged_attack": 0.4,
       "melee_attack": 0.6,
       "charge": 0.4,
       "charge_success": 0.4,
       "being_charged": 0.0,
-      "move_wait": -0.2,
       "shoot_wait": -0.5
     },
     "target_type_bonuses": {

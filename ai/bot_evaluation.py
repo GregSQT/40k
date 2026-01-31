@@ -190,7 +190,26 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     # - Turn 5 completed (objective-based victory)
                     while not done:
                         if step_count >= max_steps:
-                            print(f"ERROR: Episode exceeded {max_steps} steps! Forcing termination.", flush=True)
+                            game_state = bot_env.engine.game_state
+                            episode = require_key(game_state, "episode_number")
+                            turn = require_key(game_state, "turn")
+                            phase = require_key(game_state, "phase")
+                            current_player = require_key(game_state, "current_player")
+                            fight_subphase = game_state.get("fight_subphase")
+                            move_pool = len(game_state["move_activation_pool"]) if "move_activation_pool" in game_state else "missing"
+                            shoot_pool = len(game_state["shoot_activation_pool"]) if "shoot_activation_pool" in game_state else "missing"
+                            charge_pool = len(game_state["charge_activation_pool"]) if "charge_activation_pool" in game_state else "missing"
+                            charging_pool = len(game_state["charging_activation_pool"]) if "charging_activation_pool" in game_state else "missing"
+                            active_alt_pool = len(game_state["active_alternating_activation_pool"]) if "active_alternating_activation_pool" in game_state else "missing"
+                            non_active_alt_pool = len(game_state["non_active_alternating_activation_pool"]) if "non_active_alternating_activation_pool" in game_state else "missing"
+                            print(
+                                f"\n❌ ERROR: Episode exceeded {max_steps} steps (episode={episode}, turn={turn}, "
+                                f"phase={phase}, player={current_player}, fight_subphase={fight_subphase}, "
+                                f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}, "
+                                f"charging_pool={charging_pool}, active_alt_pool={active_alt_pool}, "
+                                f"non_active_alt_pool={non_active_alt_pool}). Forcing termination.",
+                                flush=True
+                            )
                             
                             # LOG TEMPORAIRE: Log when step limit is reached (only if --debug)
                             if debug_mode:

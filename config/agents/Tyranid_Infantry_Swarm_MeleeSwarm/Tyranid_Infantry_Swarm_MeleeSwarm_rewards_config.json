@@ -4,16 +4,11 @@
   "Tyranid_Infantry_Swarm_MeleeSwarm": {
     "Unit": "######################################## Tyranid_Infantry_Swarm_MeleeSwarm ########################################",
     "base_actions": {
-      "move_close": 0.4,
-      "move_away": -0.3,
-      "move_to_charge": 0.5,
-      "move_to_los": -0.1,
       "ranged_attack": -0.5,
       "melee_attack": 0.5,
       "charge": 0.4,
       "charge_success": 0.4,
       "being_charged": -0.1,
-      "move_wait": -0.3,
       "shoot_wait": -0.6
     },
     "target_type_bonuses": {

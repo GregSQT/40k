@@ -157,8 +157,11 @@ class BotControlledEnv(gym.Wrapper):
 
     def _get_bot_action(self, debug=False) -> int:
         game_state = self.engine.game_state
-        action_mask = self.engine.get_action_mask()
-        valid_actions = [i for i in range(12) if action_mask[i]]
+        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(game_state)
+        if not eligible_units:
+            # Pool empty -> advance phase via WAIT/invalid action handling
+            return 11
+        valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
 
         if not valid_actions:
             # AI_IMPLEMENTATION.md: No hidden contracts on magic actions.
@@ -425,8 +428,11 @@ class SelfPlayWrapper(gym.Wrapper):
         """
         if self.frozen_model is None:
             # No frozen model yet - use random valid action
-            action_mask = self.engine.get_action_mask()
-            valid_actions = [i for i in range(12) if action_mask[i]]
+            action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(self.engine.game_state)
+            if not eligible_units:
+                # Pool empty -> advance phase via WAIT/invalid action handling
+                return 11
+            valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
             if not valid_actions:
                 # AI_IMPLEMENTATION.md: Empty masks indicate a flow/phase bug;
                 # SelfPlayWrapper must not silently inject dummy actions.
@@ -438,8 +444,11 @@ class SelfPlayWrapper(gym.Wrapper):
 
         # Use frozen model to predict action WITH action masking
         # CRITICAL: MaskablePPO requires action_masks parameter for proper masked inference
-        obs = self.engine.obs_builder.build_observation(self.engine.game_state)
-        action_mask = self.engine.get_action_mask()
+        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(self.engine.game_state)
+        if not eligible_units:
+            # Pool empty -> advance phase via WAIT/invalid action handling
+            return 11
+        obs = self.engine._build_observation()
 
         # MaskablePPO.predict() expects action_masks as keyword argument
         # CRITICAL: Use deterministic=False so P1 explores like P0 (fair self-play)

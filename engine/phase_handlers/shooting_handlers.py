@@ -402,6 +402,13 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Initialize weapon.shot = 0 for all weapons in all units
     # Reset weapon.shot flag at phase start
     current_player = game_state["current_player"]
+    try:
+        current_player = int(current_player)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid current_player value: {current_player}") from exc
+    if current_player not in (1, 2):
+        raise ValueError(f"Invalid current_player value: {current_player}")
+    game_state["current_player"] = current_player
     units_cache = require_key(game_state, "units_cache")
     for unit_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) == int(current_player):
@@ -470,14 +477,15 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
     
-    # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
-    # Required for convert_gym_action, get_action_mask, and any reader (e.g. debug log).
-    if eligible_units:
-        game_state["active_shooting_unit"] = eligible_units[0]
-        # Kill probability cache is built lazily on first use (select_best_ranged_weapon) to avoid ~2.9s step spike.
-    else:
+    # If no eligible units, end phase immediately (align with MOVE phase)
+    if not eligible_units:
         if "active_shooting_unit" in game_state:
             del game_state["active_shooting_unit"]
+        return shooting_phase_end(game_state)
+    
+    # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+    # Required for convert_gym_action, get_action_mask, and any reader (e.g. debug log).
+    game_state["active_shooting_unit"] = eligible_units[0]
     
     # Silent pool building - no console logs during normal operation
     if "console_logs" not in game_state:
@@ -542,7 +550,7 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         # PERFORMANCE: Use has_line_of_sight_coords() instead of _get_unit_by_id() + _has_line_of_sight()
         has_los = has_line_of_sight_coords(unit_col, unit_row, target_col, target_row, game_state)
 
-        unit["los_cache"][target_id] = has_los
+        unit["los_cache"][str(target_id)] = has_los
 
 
 def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
@@ -750,7 +758,9 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     """
     Build activation pool with comprehensive debug logging
     """
-    current_player = game_state["current_player"]
+    current_player = int(game_state["current_player"]) if game_state["current_player"] is not None else None
+    if current_player is None:
+        raise ValueError("game_state['current_player'] must be set for shooting activation pool")
     shoot_activation_pool = []
     
     # DEBUG: Log pool building for dead unit detection
@@ -769,7 +779,11 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
         unit_id = unit.get("id", "?")
         hp_cur = require_key(cache_entry, "HP_CUR")
-        unit_player = cache_entry.get("player", -1)
+        cache_player = require_key(cache_entry, "player")
+        try:
+            unit_player = int(cache_player)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid player value in units_cache for unit {unit_id}: {cache_player}") from exc
         
         # CRITICAL: Only process units of current player
         if unit_player != current_player:
@@ -2416,10 +2430,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     AI_SHOOT.md EXACT: Complete action routing with full phase lifecycle management
     """
     
-    # Phase initialization on first call
-    if "_shooting_phase_initialized" not in game_state or not game_state["_shooting_phase_initialized"]:
-        shooting_phase_start(game_state)
-        game_state["_shooting_phase_initialized"] = True
+    # Handler self-initialization (aligned with MOVE phase)
+    game_state_phase = game_state["phase"] if "phase" in game_state else None
+    shoot_pool_exists = bool(game_state.get("shoot_activation_pool"))
+    if game_state_phase != "shoot" or not shoot_pool_exists:
+        phase_init_result = shooting_phase_start(game_state)
+        if phase_init_result.get("phase_complete"):
+            return True, phase_init_result
     
     if "action" not in action:
         raise KeyError(f"Action missing required 'action' field: {action}")

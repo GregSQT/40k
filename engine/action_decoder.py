@@ -168,6 +168,11 @@ class ActionDecoder:
             if "shoot_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'shoot_activation_pool' field")
             pool_unit_ids = game_state["shoot_activation_pool"]
+            current_player = require_key(game_state, "current_player")
+            try:
+                current_player_int = int(current_player)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid current_player value: {current_player}") from exc
             # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool should never contain dead units
             # If a unit dies after pool build, _remove_dead_unit_from_pools should have removed it
             # Defense in depth: filter dead units here as safety check only
@@ -178,8 +183,17 @@ class ActionDecoder:
                 uid_str = str(uid)
                 unit = get_unit_by_id(uid_str, game_state)
                 if unit and is_unit_alive(str(unit["id"]), game_state):
-                    # AI_TURN.md: All units in pool are eligible - no SHOOT_LEFT filtering
-                    eligible.append(unit)
+                    cache_entry = require_key(game_state, "units_cache").get(uid_str)
+                    if cache_entry is None:
+                        raise KeyError(f"Unit {uid_str} missing from units_cache")
+                    unit_player = require_key(cache_entry, "player")
+                    try:
+                        unit_player_int = int(unit_player)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(f"Invalid player value in units_cache for unit {uid_str}: {unit_player}") from exc
+                    if unit_player_int == current_player_int:
+                        # AI_TURN.md: All units in pool are eligible - no SHOOT_LEFT filtering
+                        eligible.append(unit)
             return eligible
         elif current_phase == "charge":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
@@ -312,16 +326,14 @@ class ActionDecoder:
                 target_slot = action_int - 4  # Convert to slot index (0-4)
                 
                 # PERFORMANCE: Use cached pool from unit activation instead of recalculating
-                # Pool is built at activation and after advance, should always be available here
+                # Pool is built at activation and after advance; it must be available here
                 # Pool is automatically updated when targets die (dead targets are removed, shooting_handlers.py line 3183)
                 selected_unit = get_unit_by_id(selected_unit_id, game_state)
-                valid_targets = selected_unit.get("valid_target_pool") if selected_unit else None
+                if not selected_unit:
+                    raise ValueError(f"Selected unit not found for shooting: unit_id={selected_unit_id}")
+                valid_targets = require_key(selected_unit, "valid_target_pool")
                 if valid_targets is None:
-                    # Fallback: build pool if somehow missing (shouldn't happen)
-                    from engine.phase_handlers import shooting_handlers
-                    valid_targets = shooting_handlers.shooting_build_valid_target_pool(
-                        game_state, selected_unit_id
-                    )
+                    raise ValueError(f"valid_target_pool is None for unit: unit_id={selected_unit_id}")
                 
                 # CRITICAL: Validate target slot is within valid range
                 if target_slot < len(valid_targets):
