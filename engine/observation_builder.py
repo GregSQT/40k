@@ -286,7 +286,7 @@ class ObservationBuilder:
     
     def _check_los_cached(self, shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         """
-        Check LoS using cache if available, fallback to calculation.
+        Check LoS using cache; los_cache is required.
         AI_TURN.md COMPLIANCE: Direct field access, uses game_state cache.
         
         Returns:
@@ -296,14 +296,10 @@ class ObservationBuilder:
         # AI_TURN_SHOOTING_UPDATE.md: Use shooter["los_cache"] (new architecture)
         target_id = target["id"]
         
-        if "los_cache" in shooter and shooter["los_cache"]:
-            if target_id in shooter["los_cache"]:
-                return 1.0 if shooter["los_cache"][target_id] else 0.0
-        
-        # Fallback: calculate LoS (happens if cache not built yet or used outside shooting phase)
-        from engine.phase_handlers import shooting_handlers
-        has_los = shooting_handlers._has_line_of_sight(game_state, shooter, target)
-        return 1.0 if has_los else 0.0
+        los_cache = require_key(shooter, "los_cache")
+        if target_id not in los_cache:
+            raise KeyError(f"los_cache missing target_id={target_id} for shooter_id={shooter.get('id')}")
+        return 1.0 if los_cache[target_id] else 0.0
 
     def _build_los_cache_for_observation(
         self,
@@ -354,21 +350,15 @@ class ObservationBuilder:
         current_phase = game_state["phase"]
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
-        from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
         from engine.ai.weapon_selector import get_best_weapon_for_target
 
         if current_phase == "shoot":
             # Get best weapon for this target
             best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=True)
-            if best_weapon_idx >= 0 and shooter.get("RNG_WEAPONS"):
-                weapon = shooter["RNG_WEAPONS"][best_weapon_idx]
-            else:
-                # Fallback to selected weapon
-                weapon = get_selected_ranged_weapon(shooter)
-                if not weapon and shooter.get("RNG_WEAPONS"):
-                    weapon = shooter["RNG_WEAPONS"][0]  # Fallback to first weapon
-                if not weapon:
-                    return 0.0
+            rng_weapons = require_key(shooter, "RNG_WEAPONS")
+            if best_weapon_idx < 0 or best_weapon_idx >= len(rng_weapons):
+                raise ValueError(f"Invalid best ranged weapon index {best_weapon_idx} for shooter_id={shooter.get('id')}")
+            weapon = rng_weapons[best_weapon_idx]
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
@@ -378,15 +368,10 @@ class ObservationBuilder:
         else:
             # Get best weapon for this target
             best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=False)
-            if best_weapon_idx >= 0 and shooter.get("CC_WEAPONS"):
-                weapon = shooter["CC_WEAPONS"][best_weapon_idx]
-            else:
-                # Fallback to selected weapon
-                weapon = get_selected_melee_weapon(shooter)
-                if not weapon and shooter.get("CC_WEAPONS"):
-                    weapon = shooter["CC_WEAPONS"][0]  # Fallback to first weapon
-                if not weapon:
-                    return 0.0
+            cc_weapons = require_key(shooter, "CC_WEAPONS")
+            if best_weapon_idx < 0 or best_weapon_idx >= len(cc_weapons):
+                raise ValueError(f"Invalid best melee weapon index {best_weapon_idx} for shooter_id={shooter.get('id')}")
+            weapon = cc_weapons[best_weapon_idx]
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
@@ -465,13 +450,10 @@ class ObservationBuilder:
         if can_use_ranged and not can_use_melee:
             # Use best ranged weapon
             best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=True)
-            if best_weapon_idx >= 0 and attacker.get("RNG_WEAPONS"):
-                weapon = attacker["RNG_WEAPONS"][best_weapon_idx]
-            elif attacker.get("RNG_WEAPONS"):
-                weapon = attacker["RNG_WEAPONS"][0]  # Fallback to first weapon
-            else:
-                self._danger_probability_cache[cache_key] = 0.0
-                return 0.0
+            rng_weapons = require_key(attacker, "RNG_WEAPONS")
+            if best_weapon_idx < 0 or best_weapon_idx >= len(rng_weapons):
+                raise ValueError(f"Invalid best ranged weapon index {best_weapon_idx} for attacker_id={attacker.get('id')}")
+            weapon = rng_weapons[best_weapon_idx]
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
@@ -481,13 +463,10 @@ class ObservationBuilder:
         else:
             # Use best melee weapon (or if both available, prefer melee if in range)
             best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=False)
-            if best_weapon_idx >= 0 and attacker.get("CC_WEAPONS"):
-                weapon = attacker["CC_WEAPONS"][best_weapon_idx]
-            elif attacker.get("CC_WEAPONS"):
-                weapon = attacker["CC_WEAPONS"][0]  # Fallback to first weapon
-            else:
-                self._danger_probability_cache[cache_key] = 0.0
-                return 0.0
+            cc_weapons = require_key(attacker, "CC_WEAPONS")
+            if best_weapon_idx < 0 or best_weapon_idx >= len(cc_weapons):
+                raise ValueError(f"Invalid best melee weapon index {best_weapon_idx} for attacker_id={attacker.get('id')}")
+            weapon = cc_weapons[best_weapon_idx]
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
@@ -696,7 +675,9 @@ class ObservationBuilder:
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
         phase_encoding = {"command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
-        obs[1] = phase_encoding.get(game_state["phase"], 0.0)  # Fallback à 0.0 si phase inconnue
+        if game_state["phase"] not in phase_encoding:
+            raise KeyError(f"Unknown phase for observation: {game_state['phase']}")
+        obs[1] = phase_encoding[game_state["phase"]]
         obs[2] = min(1.0, game_state["turn"] / 5.0)  # Normalized by max 5 turns
         obs[3] = min(1.0, game_state["episode_steps"] / 100.0)
         hp_cur = get_hp_from_cache(str(active_unit["id"]), game_state)
@@ -881,12 +862,7 @@ class ObservationBuilder:
             if unit and unit["player"] == current_player:
                 return unit
         
-        # Fallback: return any alive unit from current player
-        for unit in game_state["units"]:
-            if unit["player"] == current_player and is_unit_alive(str(unit["id"]), game_state):
-                return unit
-        
-        return None
+        raise ValueError(f"No active unit found in pool for player {current_player} (phase={current_phase})")
     
     def _encode_directional_terrain(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
         """
@@ -1049,9 +1025,7 @@ class ObservationBuilder:
 
         Asymmetric design: MORE complete information about enemies for tactical decisions.
 
-        When los_cache_obs is provided (from build_observation), feature 14 (visibility_to_allies)
-        uses this cache instead of _check_los_cached to avoid repeated _has_line_of_sight calls.
-        When los_cache_obs is None (e.g. call from test), feature 14 uses _check_los_cached (current behavior).
+        los_cache_obs is required (built in build_observation) for visibility features.
 
         Features per enemy (22 floats):
         0. relative_col, 1. relative_row (egocentric position)
@@ -1076,6 +1050,8 @@ class ObservationBuilder:
         When six_enemies is provided (from build_observation), uses that list so obs[141:273]
         matches enemy_index_map in _encode_valid_targets (avoids "Required key 'X' missing").
         """
+        if los_cache_obs is None:
+            raise ValueError("los_cache_obs is required for enemy unit encoding")
         perception_radius = self.perception_radius
         if six_enemies is not None:
             enemies = six_enemies
@@ -1174,12 +1150,11 @@ class ObservationBuilder:
                 combined_threat = 0.0
                 for ally in game_state["units"]:
                     if ally["player"] == active_unit["player"] and is_unit_alive(str(ally["id"]), game_state):
-                        if los_cache_obs is not None:
-                            if los_cache_obs.get((str(ally["id"]), str(enemy["id"])), False):
-                                visibility += 1.0
-                        else:
-                            if self._check_los_cached(ally, enemy, game_state) > 0.5:
-                                visibility += 1.0
+                        cache_key = (str(ally["id"]), str(enemy["id"]))
+                        if cache_key not in los_cache_obs:
+                            raise KeyError(f"los_cache_obs missing key={cache_key}")
+                        if los_cache_obs[cache_key]:
+                            visibility += 1.0
                         combined_threat += self._calculate_danger_probability(enemy, ally, game_state)
                 obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)
                 obs[feature_base + 15] = min(1.0, combined_threat / 5.0)  # combined_friendly_threat (était feature 14)
@@ -1362,8 +1337,13 @@ class ObservationBuilder:
                 
                 offensive_type = 1.0 if max_rng_range > melee_range else 0.0
                 
-                # LoS check using cache
-                has_los = self._check_los_cached(active_unit, unit, game_state)
+                # LoS check using cache (only for enemies)
+                has_los = 0.0
+                if is_enemy > 0.5:
+                    cache_key = (str(active_unit["id"]), str(unit["id"]))
+                    if cache_key not in los_cache_obs:
+                        raise KeyError(f"los_cache_obs missing key={cache_key}")
+                    has_los = 1.0 if los_cache_obs[cache_key] else 0.0
                 
                 # Target preference match (placeholder - will enhance with unit registry)
                 target_match = 0.5
