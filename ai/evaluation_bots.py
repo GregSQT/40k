@@ -13,6 +13,7 @@ All bots implement all 4 phases: MOVE, SHOOT, CHARGE, FIGHT
 
 import random
 from typing import Dict, List, Tuple, Any, Optional
+from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache,
@@ -111,7 +112,7 @@ class GreedyBot:
     
     def _get_unit_by_id(self, game_state, unit_id: str):
         """Helper to find unit by ID."""
-        for unit in game_state.get('units', []):
+        for unit in require_key(game_state, 'units'):
             if str(unit['id']) == str(unit_id):
                 return unit
         return None
@@ -172,10 +173,10 @@ class DefensiveBot:
         Enhanced defensive logic with threat awareness.
         Prioritize shooting threats, move away from danger zones.
         """
-        current_player = game_state.get('current_player', 1)
+        current_player = require_key(game_state, 'current_player')
         
         active_unit = None
-        for unit in game_state.get('units', []):
+        for unit in require_key(game_state, 'units'):
             if unit['player'] == current_player and is_unit_alive(str(unit["id"]), game_state):
                 active_unit = unit
                 break
@@ -198,7 +199,7 @@ class DefensiveBot:
         threat_count = 0
         threat_range = 12
 
-        for enemy in game_state.get('units', []):
+        for enemy in require_key(game_state, 'units'):
             if enemy['player'] != unit['player'] and is_unit_alive(str(enemy["id"]), game_state):
                 distance = calculate_hex_distance(unit['col'], unit['row'], enemy['col'], enemy['row'])
                 if distance <= threat_range:
@@ -291,7 +292,7 @@ class TacticalBot:
             active_unit = self._get_active_unit(game_state)
             if active_unit:
                 # Charge if unit has good melee damage
-                cc_dmg = active_unit.get('CC_DMG', 0)
+                cc_dmg = require_key(active_unit, 'CC_DMG')
                 if cc_dmg >= 2:  # Worth charging
                     return 5
 
@@ -338,7 +339,7 @@ class TacticalBot:
         hp_cur = get_hp_from_cache(str(unit["id"]), game_state)
         if hp_cur is None:
             return valid_destinations[0]
-        hp_max = unit.get("HP_MAX", 1)
+        hp_max = require_key(unit, "HP_MAX")
         if hp_max <= 0 or hp_cur < hp_max * 0.5:
             return self._find_safest_position(unit, valid_destinations, game_state)
 
@@ -367,7 +368,7 @@ class TacticalBot:
         if not active_unit:
             return valid_targets[0]
 
-        our_damage = active_unit.get('RNG_DMG', 1)
+        our_damage = require_key(active_unit, 'RNG_DMG')
         best_target = valid_targets[0]
         best_score = -float('inf')
 
@@ -379,7 +380,7 @@ class TacticalBot:
             hp = get_hp_from_cache(str(target["id"]), game_state)
             if hp is None:
                 continue
-            threat = max(target.get('RNG_DMG', 0), target.get('CC_DMG', 0))
+            threat = max(require_key(target, 'RNG_DMG'), require_key(target, 'CC_DMG'))
 
             # Scoring: killable > low HP > high threat
             score = 0
@@ -415,7 +416,7 @@ class TacticalBot:
         if not active_unit:
             return valid_targets[0]
 
-        our_melee_damage = active_unit.get('CC_DMG', 1)
+        our_melee_damage = require_key(active_unit, 'CC_DMG')
         best_target = valid_targets[0]
         best_score = -float('inf')
 
@@ -427,7 +428,7 @@ class TacticalBot:
             hp = get_hp_from_cache(str(target["id"]), game_state)
             if hp is None:
                 continue
-            ranged_threat = target.get('RNG_DMG', 0)
+            ranged_threat = require_key(target, 'RNG_DMG')
 
             # Scoring: killable > high ranged threat
             score = 0
@@ -449,15 +450,15 @@ class TacticalBot:
 
     def _get_active_unit(self, game_state: Dict) -> Optional[Dict]:
         """Get the currently active unit."""
-        current_player = game_state.get('current_player', 0)
-        for unit in game_state.get('units', []):
+        current_player = require_key(game_state, 'current_player')
+        for unit in require_key(game_state, 'units'):
             if unit.get('player') == current_player and is_unit_alive(str(unit.get("id")), game_state):
                 return unit
         return None
 
     def _get_unit_by_id(self, game_state: Dict, unit_id: str) -> Optional[Dict]:
         """Find unit by ID."""
-        for unit in game_state.get('units', []):
+        for unit in require_key(game_state, 'units'):
             if str(unit.get('id')) == str(unit_id):
                 return unit
         return None
@@ -467,7 +468,7 @@ class TacticalBot:
         nearest = None
         min_dist = float('inf')
 
-        for enemy in game_state.get('units', []):
+        for enemy in require_key(game_state, 'units'):
             if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
                 dist = calculate_hex_distance(
                     unit['col'], unit['row'],
@@ -487,10 +488,10 @@ class TacticalBot:
 
         for col, row in destinations:
             min_enemy_dist = float('inf')
-            for enemy in game_state.get('units', []):
+            for enemy in require_key(game_state, 'units'):
                 if enemy.get('player') != unit.get('player') and is_unit_alive(str(enemy.get("id")), game_state):
                     # Only consider melee threats
-                    if enemy.get('CC_DMG', 0) > enemy.get('RNG_DMG', 0):
+                    if require_key(enemy, 'CC_DMG') > require_key(enemy, 'RNG_DMG'):
                         dist = calculate_hex_distance(col, row, enemy['col'], enemy['row'])
                         min_enemy_dist = min(min_enemy_dist, dist)
 
@@ -505,7 +506,8 @@ class TacticalBot:
         """Find position closest to target but within shooting range."""
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
         from engine.utils.weapon_helpers import get_max_ranged_range
-        rng_rng = get_max_ranged_range(unit) if unit.get('RNG_WEAPONS') else 0
+        rng_weapons = require_key(unit, 'RNG_WEAPONS')
+        rng_rng = get_max_ranged_range(unit) if rng_weapons else 0
         best_pos = destinations[0]
         best_dist = float('inf')
 

@@ -223,9 +223,9 @@ def get_best_weapon_for_target(unit: Dict[str, Any], target: Dict[str, Any],
     hp_cur = require_hp_from_cache(target_id, game_state)
     
     if is_ranged:
-        weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
+        weapons = require_key(unit, "RNG_WEAPONS")
     else:
-        weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
+        weapons = require_key(unit, "CC_WEAPONS")
     
     if weapon_index >= len(weapons):
         return (-1, 0.0)
@@ -266,10 +266,18 @@ def precompute_kill_probability_cache(game_state: Dict[str, Any], phase: str):
     current_player = require_key(game_state, "current_player")
     
     # Get active units (current player's units)
-    active_units = [u for u in game_state["units"] if require_key(u, "player") == current_player and is_unit_alive(str(u["id"]), game_state)]
-    
-    # Get all enemy units as targets
-    enemy_units = [u for u in game_state["units"] if require_key(u, "player") != current_player and is_unit_alive(str(u["id"]), game_state)]
+    units_cache = require_key(game_state, "units_cache")
+    unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+    active_units = []
+    enemy_units = []
+    for unit_id, entry in units_cache.items():
+        unit = unit_by_id.get(str(unit_id))
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        if entry["player"] == current_player:
+            active_units.append(unit)
+        else:
+            enemy_units.append(unit)
     
     for unit in active_units:
         unit_id = str(unit["id"])

@@ -44,9 +44,18 @@ class PvEController:
                 print(f"DEBUG: Default AI model key: {ai_model_key}")
             
             if self.unit_registry:
-                player2_units = [u for u in game_state["units"] if u["player"] == 2]
-                if player2_units:
-                    unit_type = player2_units[0]["unitType"]
+                if "units_cache" not in game_state:
+                    raise KeyError("game_state missing required 'units_cache' field")
+                unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+                player2_unit = None
+                for unit_id, entry in game_state["units_cache"].items():
+                    if entry["player"] == 2:
+                        player2_unit = unit_by_id.get(str(unit_id))
+                        if not player2_unit:
+                            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                        break
+                if player2_unit:
+                    unit_type = player2_unit["unitType"]
                     ai_model_key = self.unit_registry.get_model_key(unit_type)
             
             model_path = f"ai/models/current/model_{ai_model_key}.zip"
@@ -259,7 +268,16 @@ class PvEController:
         
         # Strategy: Move toward nearest enemy for aggressive positioning
         # Uses BFS pathfinding to respect walls when calculating distance
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        if "units_cache" not in game_state:
+            raise KeyError("game_state missing required 'units_cache' field")
+        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+        enemies = []
+        for enemy_id, entry in game_state["units_cache"].items():
+            if entry["player"] != unit["player"]:
+                enemy = unit_by_id.get(str(enemy_id))
+                if not enemy:
+                    raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
+                enemies.append(enemy)
 
         if enemies:
             # Find nearest enemy using BFS pathfinding distance (respects walls)

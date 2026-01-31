@@ -156,9 +156,10 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             scenario_data = json.load(f)
     
         # Get first Player 0 unit to determine agent type
-        player_0_units = [u for u in scenario_data.get("units", []) if u.get("player") == 0]
+        units = require_key(scenario_data, "units")
+        player_0_units = [u for u in units if require_key(u, "player") == 0]
         if player_0_units:
-            first_unit_type = player_0_units[0].get("unit_type")
+            first_unit_type = require_key(player_0_units[0], "unit_type")
             if first_unit_type:
                 base_agent_key = unit_registry.get_model_key(first_unit_type)
                 
@@ -178,7 +179,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         raise ValueError(f"Cannot proceed without controlled_agent - auto-detection failed: {e}")
     
     # ✓ CHANGE 3: Check if vectorization is enabled in config
-    n_envs = training_config.get("n_envs", 1)  # Default to 1 (no vectorization)
+    n_envs = require_key(training_config, "n_envs")
     
     # ✓ CHANGE 3: Special handling for replay/steplog modes (must be single env)
     if args.replay or args.convert_steplog:
@@ -276,7 +277,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
     # GPU only beneficial for CNN policies or networks with >2000 hidden units
-    net_arch = model_params.get("policy_kwargs", {}).get("net_arch", [256, 256])
+    policy_kwargs = require_key(model_params, "policy_kwargs")
+    net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
 
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
@@ -442,7 +444,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
     # ✓ CHANGE 8: Check if vectorization is enabled in config
-    n_envs = training_config.get("n_envs", 1)
+    n_envs = require_key(training_config, "n_envs")
     
     if n_envs > 1:
         # ✓ CHANGE 8: Create vectorized environments for parallel training
@@ -513,7 +515,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
     # GPU only beneficial for CNN policies or networks with >2000 hidden units
-    net_arch = model_params.get("policy_kwargs", {}).get("net_arch", [256, 256])
+    policy_kwargs = require_key(model_params, "policy_kwargs")
+    net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
 
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
@@ -665,7 +668,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     first_scenario = scenario_list[0]
     with open(first_scenario, 'r') as f:
         scenario_data = json.load(f)
-    num_units = len(scenario_data.get("units", []))
+    num_units = len(require_key(scenario_data, "units"))
 
     # Import GAME_PHASES from action_decoder - single source of truth
     from engine.action_decoder import GAME_PHASES
@@ -974,10 +977,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 # Log final results to metrics tracker
                 if metrics_tracker and bot_results:
                     final_bot_results = {
-                        'random': bot_results.get('random'),
-                        'greedy': bot_results.get('greedy'),
-                        'defensive': bot_results.get('defensive'),
-                        'combined': bot_results.get('combined', 0)
+                        'random': require_key(bot_results, 'random'),
+                        'greedy': require_key(bot_results, 'greedy'),
+                        'defensive': require_key(bot_results, 'defensive'),
+                        'combined': require_key(bot_results, 'combined')
                     }
                     metrics_tracker.log_bot_evaluations(final_bot_results)
 
@@ -989,12 +992,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     for bot_name in ['random', 'greedy', 'defensive']:
                         if bot_name in bot_results:
                             win_rate = bot_results[bot_name] * 100
-                            wins = bot_results.get(f'{bot_name}_wins', 0)
-                            losses = bot_results.get(f'{bot_name}_losses', 0)
-                            draws = bot_results.get(f'{bot_name}_draws', 0)
+                            wins = require_key(bot_results, f'{bot_name}_wins')
+                            losses = require_key(bot_results, f'{bot_name}_losses')
+                            draws = require_key(bot_results, f'{bot_name}_draws')
                             print(f"  vs {bot_name.capitalize()}Bot:    {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
 
-                    combined = bot_results.get('combined', 0) * 100
+                    combined = require_key(bot_results, 'combined') * 100
                     print(f"  Combined Score: {combined:5.1f}%")
                 print(f"{'='*80}\n")
 
@@ -1091,12 +1094,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     # Add enhanced bot evaluation callback (replaces standard EvalCallback)
     if EVALUATION_BOTS_AVAILABLE:
         # Read bot evaluation parameters from config
-        bot_eval_freq = callback_params.get("bot_eval_freq")
-        bot_n_episodes_intermediate = callback_params.get("bot_eval_intermediate")
-        bot_eval_use_episodes = callback_params.get("bot_eval_use_episodes", False)
+        bot_eval_freq = require_key(callback_params, "bot_eval_freq")
+        bot_n_episodes_intermediate = require_key(callback_params, "bot_eval_intermediate")
+        bot_eval_use_episodes = require_key(callback_params, "bot_eval_use_episodes")
         
         # Store final eval count for use after training completes
-        training_config["_bot_eval_final"] = callback_params.get("bot_eval_final")
+        training_config["_bot_eval_final"] = require_key(callback_params, "bot_eval_final")
         
         bot_eval_callback = BotEvaluationCallback(
             eval_freq=bot_eval_freq,
@@ -1286,7 +1289,7 @@ def test_trained_model(model, num_episodes, training_config_name="default", agen
         total_rewards.append(episode_reward)
 
         # CRITICAL FIX: Learning agent is Player 0, not Player 1!
-        if info.get('winner') == 0:  # AI (Player 0) won
+        if require_key(info, 'winner') == 0:  # AI (Player 0) won
             wins += 1
     
     if num_episodes <= 0:

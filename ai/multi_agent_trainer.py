@@ -31,6 +31,7 @@ sys.path.insert(0, project_root)
 
 from ai.unit_registry import UnitRegistry
 from ai.scenario_manager import ScenarioManager, TrainingMatchup
+from shared.data_validation import require_key, require_present
 from config_loader import get_config_loader
 
 @dataclass
@@ -412,7 +413,7 @@ class MultiAgentTrainer:
                         self._update_slowest_progress()
                     
                     #print(f"✅ Session {self.completed_sessions}/{self.total_sessions}: {result['agent_key']} vs {result['opponent_agent']} | "
-                    #      f"WR:{result.get('final_win_rate', 0):.0%} R:{result.get('final_avg_reward', 0):.1f}")
+                    #      f"WR:{require_key(result, 'final_win_rate'):.0%} R:{require_key(result, 'final_avg_reward'):.1f}")
                     
                 except Exception as e:
                     orchestration_results["session_results"].append({
@@ -1048,7 +1049,7 @@ class MultiAgentTrainer:
                             "game_info": {
                                 "scenario": "evaluation_episode", 
                                 "total_turns": max(1, current_turn),
-                                "winner": info.get('winner', None)
+                                "winner": require_present(require_key(info, "winner"), "winner")
                             }
                         }
                         

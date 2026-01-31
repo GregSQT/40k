@@ -178,7 +178,10 @@ def _get_episode_with_fallback(line_num: int, episode_map: Dict[int, int]) -> in
     Returns:
         Episode number (defaults to 1 if no mapping found)
     """
-    episode = episode_map.get(line_num, None)
+    if line_num in episode_map:
+        episode = episode_map[line_num]
+    else:
+        episode = None
     if episode is None:
         # Find the last known episode before this line
         last_episode = 1  # Default to episode 1
@@ -563,13 +566,13 @@ def check_unlogged_attacks(debug_attacks: List[Dict], step_attacks: List[Dict]) 
         target = normalize_id(attack['target'])
         key = (attack['episode'], attack['turn'], attack['phase'], attacker, target)
         debug_count = debug_attacks_counter[key]
-        step_count = step_attacks_counter.get(key, 0)
+        step_count = step_attacks_counter[key]
         
         # If not found in exact turn, check previous turn (T-1) due to phase transitions
         # This handles cases where fight phase completes and attacks are logged in next turn
         if step_count == 0 and attack['turn'] > 1:
             key_prev_turn = (attack['episode'], attack['turn'] - 1, attack['phase'], attacker, target)
-            step_count = step_attacks_counter.get(key_prev_turn, 0)
+            step_count = step_attacks_counter[key_prev_turn]
         
         if step_count < debug_count:
             # This attack is missing or partially missing
@@ -603,7 +606,7 @@ def check_missing_fight_attacks(activations: List[Dict], step_attacks: List[Dict
     for activation in activations:
         if activation['count'] > 0:  # Has valid targets
             key = (activation['episode'], activation['turn'], activation['unit_id'])
-            attacked_targets = fight_attacks_by_unit.get(key, set())
+            attacked_targets = fight_attacks_by_unit[key]
             
             # Check if unit attacked AT LEAST ONE valid target
             valid_targets_set = set(activation['valid_targets'])
@@ -834,9 +837,9 @@ def main():
         traceback.print_exc(file=output_f)
     finally:
         if total_issues > 0:
-            log_print(f"\n⚠️ hidden_action_finder.py :  {total_issues} erreur(s) détectée(s)   -   Output : {output_file}")
+            log_print(f"⚠️ hidden_action_finder.py :  {total_issues} erreur(s) détectée(s)   -   Output : {output_file}")
         else:
-            log_print(f"\n✅ hidden_action_finder.py : Aucune erreur détectée   -   Output : {output_file}")
+            log_print(f"✅ hidden_action_finder.py : Aucune erreur détectée   -   Output : {output_file}")
         output_f.close()
 
 if __name__ == '__main__':

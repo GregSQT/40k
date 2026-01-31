@@ -8,6 +8,8 @@ ZERO TOLERANCE for deviations from specification
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
+from shared.data_validation import require_key
+from engine.combat_utils import get_unit_by_id
 from .shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
@@ -364,11 +366,12 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
     active_alternating = []
     non_active_alternating = []
 
-    for unit in game_state["units"]:
-        unit_id = unit["id"]
-        if not is_unit_alive(str(unit_id), game_state):
-            continue
-        player = unit["player"]
+    units_cache = require_key(game_state, "units_cache")
+    for unit_id, cache_entry in units_cache.items():
+        unit = get_unit_by_id(game_state, unit_id)
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        player = cache_entry["player"]
 
         # Skip units that already charged (they had their turn)
         if unit_id in game_state["units_charged"]:
@@ -401,9 +404,11 @@ def _is_adjacent_to_enemy_for_fight(game_state: Dict[str, Any], unit: Dict[str, 
     cc_range = get_melee_range()  # Always 1
     unit_col, unit_row = require_unit_position(unit, game_state)
 
-    for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
-            enemy_col, enemy_row = require_unit_position(enemy, game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    for enemy_id, cache_entry in units_cache.items():
+        if int(cache_entry["player"]) != unit_player:
+            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
             distance = _calculate_hex_distance_for_fight(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= cc_range:
                 return True

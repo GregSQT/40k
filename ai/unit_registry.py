@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 import sys
+from shared.data_validation import require_key
 
 class UnitRegistry:
     """Dynamic unit discovery and faction-role management system."""
@@ -121,8 +122,9 @@ class UnitRegistry:
                     return None
             
             # Validate at least one weapon type exists
-            if (not unit_data.get("RNG_WEAPONS") or len(unit_data.get("RNG_WEAPONS", [])) == 0) and \
-               (not unit_data.get("CC_WEAPONS") or len(unit_data.get("CC_WEAPONS", [])) == 0):
+            rng_weapons = require_key(unit_data, "RNG_WEAPONS")
+            cc_weapons = require_key(unit_data, "CC_WEAPONS")
+            if (not rng_weapons or len(rng_weapons) == 0) and (not cc_weapons or len(cc_weapons) == 0):
                 print(f"    ⚠️ Unit {unit_type} must have at least RNG_WEAPONS or CC_WEAPONS")
                 return None
             
@@ -202,68 +204,66 @@ class UnitRegistry:
         # Pattern 2: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
         # Only process weapons if import succeeded
         if not weapons_available:
-            properties["RNG_WEAPONS"] = []
-            properties["CC_WEAPONS"] = []
-            return properties
+            raise ImportError("engine.weapons.get_weapons is required to load RNG_WEAPONS/CC_WEAPONS")
         
         rng_codes_match = re.search(
-            r'static\s+RNG_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+            r'static\s+RNG_WEAPON_CODES(?:\s*:\s*[^=]+)?\s*=\s*\[([^\]]*)\];',
             content,
             re.MULTILINE | re.DOTALL  # Support multi-lignes
         )
-        if rng_codes_match:
-            codes_str = rng_codes_match.group(1).strip()
-            if codes_str:
-                # Gérer guillemets simples ET doubles
-                codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
-            else:
-                codes = []  # Array vide
-            
-            # Détection faction robuste avec faction_name (pas path)
-            # faction_name est le nom du répertoire (ex: "spaceMarine" ou "tyranid")
-            # Normalize faction name for armory parser (spaceMarine -> SpaceMarine)
-            if faction_name.lower() in ['spacemarine', 'spacemarines']:
-                faction = 'SpaceMarine'
-            elif faction_name.lower() == 'tyranid':
-                faction = 'Tyranid'
-            else:
-                faction = faction_name
-            
-            properties["RNG_WEAPONS"] = get_weapons(faction, codes)
+        if not rng_codes_match:
+            raise ValueError("Unit definition missing required RNG_WEAPON_CODES (use [] if none)")
+        codes_str = rng_codes_match.group(1).strip()
+        if codes_str:
+            # Gérer guillemets simples ET doubles
+            codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+        else:
+            codes = []  # Array vide
+        
+        # Détection faction robuste avec faction_name (pas path)
+        # faction_name est le nom du répertoire (ex: "spaceMarine" ou "tyranid")
+        # Normalize faction name for armory parser (spaceMarine -> SpaceMarine)
+        if faction_name.lower() in ['spacemarine', 'spacemarines']:
+            faction = 'SpaceMarine'
+        elif faction_name.lower() == 'tyranid':
+            faction = 'Tyranid'
+        else:
+            faction = faction_name
+        
+        properties["RNG_WEAPONS"] = get_weapons(faction, codes)
         
         # Pattern 3: CC_WEAPON_CODES (même logique)
         cc_codes_match = re.search(
-            r'static\s+CC_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+            r'static\s+CC_WEAPON_CODES(?:\s*:\s*[^=]+)?\s*=\s*\[([^\]]*)\];',
             content,
             re.MULTILINE | re.DOTALL
         )
-        if cc_codes_match:
-            codes_str = cc_codes_match.group(1).strip()
-            if codes_str:
-                codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
-            else:
-                codes = []
-            
-            # Normalize faction name for armory parser (spaceMarine -> SpaceMarine)
-            if faction_name.lower() in ['spacemarine', 'spacemarines']:
-                faction = 'SpaceMarine'
-            elif faction_name.lower() == 'tyranid':
-                faction = 'Tyranid'
-            else:
-                faction = faction_name
-            
-            properties["CC_WEAPONS"] = get_weapons(faction, codes)
+        if not cc_codes_match:
+            raise ValueError("Unit definition missing required CC_WEAPON_CODES (use [] if none)")
+        codes_str = cc_codes_match.group(1).strip()
+        if codes_str:
+            codes = re.findall(r'["\']([^"\']+)["\']', codes_str)
+        else:
+            codes = []
         
-        # Normalize output: every unit must have both keys ([] if not defined in TS)
-        if "RNG_WEAPONS" not in properties:
-            properties["RNG_WEAPONS"] = []
-        if "CC_WEAPONS" not in properties:
-            properties["CC_WEAPONS"] = []
+        # Normalize faction name for armory parser (spaceMarine -> SpaceMarine)
+        if faction_name.lower() in ['spacemarine', 'spacemarines']:
+            faction = 'SpaceMarine'
+        elif faction_name.lower() == 'tyranid':
+            faction = 'Tyranid'
+        else:
+            faction = faction_name
+        
+        properties["CC_WEAPONS"] = get_weapons(faction, codes)
+        
+        # Normalize output: both keys must exist (validated above)
         
         # Initialiser selectedWeaponIndex
-        if properties.get("RNG_WEAPONS"):
+        rng_weapons = require_key(properties, "RNG_WEAPONS")
+        if rng_weapons:
             properties["selectedRngWeaponIndex"] = 0
-        if properties.get("CC_WEAPONS"):
+        cc_weapons = require_key(properties, "CC_WEAPONS")
+        if cc_weapons:
             properties["selectedCcWeaponIndex"] = 0
         
         return properties
@@ -360,7 +360,7 @@ class UnitRegistry:
     
     def get_units_for_model(self, model_key: str) -> List[str]:
         """Get list of unit types that use a specific model."""
-        return self.faction_role_matrix.get(model_key, [])
+        return require_key(self.faction_role_matrix, model_key)
     
     def get_unit_data(self, unit_type: str) -> Dict:
         """Get complete data for a unit type."""
@@ -420,7 +420,7 @@ class UnitRegistry:
             print(f"  {faction}: {len(faction_units)} units")
             for unit_type in sorted(faction_units):
                 unit_data = self.units[unit_type]
-                stats = f"HP:{unit_data.get('HP_MAX', '?')} MOVE:{unit_data.get('MOVE', '?')} RNG:{unit_data.get('RNG_RNG', '?')}"
+                stats = f"HP:{require_key(unit_data, 'HP_MAX')} MOVE:{require_key(unit_data, 'MOVE')} RNG:{require_key(unit_data, 'RNG_RNG')}"
                 print(f"    - {unit_type} ({unit_data['role']}) [{stats}]")
 
 

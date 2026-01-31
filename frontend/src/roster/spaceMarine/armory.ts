@@ -30,6 +30,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 5,
     AP: -3,
     DMG: 2,
+    WEAPON_RULES: [],
   },
   Termagant_RNG_killer: {
     display_name: "Termagant_RNG_killer",
@@ -39,6 +40,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 3,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   SM_CC_killer: {
     display_name: "SM_CC_killer",
@@ -47,6 +49,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 5,
     AP: -3,
     DMG: 2,
+    WEAPON_RULES: [],
   },
   Termagant_CC_killer: {
     display_name: "Termagant_CC_killer",
@@ -55,6 +58,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 3,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   // #########################################################################################
   // #################################### Range Weapons ######################################
@@ -87,6 +91,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 3,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   pistor: {
     display_name: "Pistor",
@@ -106,6 +111,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   master_crafted_boltgun: {
     display_name: "Master-crafted Boltgun",
@@ -115,6 +121,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: -1,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   // #########################################################################################
   // #################################### Melee Weapons ######################################
@@ -126,6 +133,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   intercessor_sergeant_power_fist: {
     display_name: "Power Fist",
@@ -134,13 +142,16 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 8,
     AP: -2,
     DMG: 2,
-  },intercessor_sergeant_power_weapon: {
+    WEAPON_RULES: [],
+  },
+  intercessor_sergeant_power_weapon: {
     display_name: "Power Weapon",
     NB: 4,
     ATK: 3,
     STR: 5,
     AP: -2,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   intercessor_sergeant_chainsword: {
     display_name: "Astartes Chainsword",
@@ -149,6 +160,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: -1,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   assault_intercessor_chainsword: {
     display_name: "Astartes Chainsword",
@@ -157,6 +169,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: -1,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   power_fist: {
     display_name: "Power Fist",
@@ -165,6 +178,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 8,
     AP: -2,
     DMG: 2,
+    WEAPON_RULES: [],
   },
   power_fist_terminator: {
     display_name: "Power Fist",
@@ -173,6 +187,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 8,
     AP: -2,
     DMG: 2,
+    WEAPON_RULES: [],
   },
 };
 

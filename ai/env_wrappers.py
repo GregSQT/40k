@@ -14,6 +14,7 @@ from typing import Optional, Any
 import random
 import os
 import time
+from shared.data_validation import require_key, require_present
 
 __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
 
@@ -49,12 +50,12 @@ class BotControlledEnv(gym.Wrapper):
 
     def reset(self, seed=None, options=None):
         # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
-        debug_mode = self.engine.game_state.get("debug_mode", False)
+        debug_mode = require_key(self.engine.game_state, "debug_mode")
         t0 = time.perf_counter() if debug_mode else None
         obs, info = self.env.reset(seed=seed, options=options)
         if debug_mode and t0 is not None:
             reset_s = time.perf_counter() - t0
-            ep = int(self.engine.game_state.get("episode_number", 0))
+            ep = int(require_key(self.engine.game_state, "episode_number"))
             try:
                 debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                 with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
@@ -78,11 +79,11 @@ class BotControlledEnv(gym.Wrapper):
 
     def step(self, agent_action):
         # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)
-        debug_mode = self.engine.game_state.get("debug_mode", False)
+        debug_mode = require_key(self.engine.game_state, "debug_mode")
         if debug_mode and self._last_step_return_time is not None:
             between_s = time.perf_counter() - self._last_step_return_time
-            ep = int(self.engine.game_state.get("episode_number", 0))
-            step_idx = int(self.engine.game_state.get("episode_steps", 0))
+            ep = int(require_key(self.engine.game_state, "episode_number"))
+            step_idx = int(require_key(self.engine.game_state, "episode_steps"))
             try:
                 debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                 with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
@@ -94,7 +95,7 @@ class BotControlledEnv(gym.Wrapper):
         # Skip get_action_mask() call here to avoid redundant computation - action_masks are already computed
         # by ActionMasker wrapper and passed to model.predict() in bot_evaluation.py
         game_state = self.engine.game_state
-        current_phase = game_state.get("phase", "")
+        current_phase = require_key(game_state, "phase")
         
         # Track actions for diagnostics WITHOUT calling get_action_mask() (performance optimization)
         # We can infer shoot opportunities from action type instead of checking mask
@@ -112,8 +113,8 @@ class BotControlledEnv(gym.Wrapper):
         t0_agent = time.perf_counter() if debug_mode else None
         obs, reward, terminated, truncated, info = self.env.step(agent_action)
         if debug_mode and t0_agent is not None:
-            ep = int(self.engine.game_state.get("episode_number", 0))
-            step_idx = int(self.engine.game_state.get("episode_steps", 0))
+            ep = int(require_key(self.engine.game_state, "episode_number"))
+            step_idx = int(require_key(self.engine.game_state, "episode_steps"))
             duration_s = time.perf_counter() - t0_agent
             try:
                 debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
@@ -130,16 +131,17 @@ class BotControlledEnv(gym.Wrapper):
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
             bot_loop_count += 1
             if bot_loop_count > max_bot_iterations:
-                print(f"\n[DEBUG] BotControlledEnv: Infinite loop detected! Loop count: {bot_loop_count}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
-                raise RuntimeError(f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={self.engine.game_state.get('phase', '?')}")
+                current_phase = require_key(self.engine.game_state, "phase")
+                print(f"\n[DEBUG] BotControlledEnv: Infinite loop detected! Loop count: {bot_loop_count}, episode_length: {self.episode_length}, phase: {current_phase}", flush=True)
+                raise RuntimeError(f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={current_phase}")
             debug_bot = self.episode_length < 10
             bot_action = self._get_bot_action(debug=debug_bot)
             # LOG TEMPORAIRE: time full env.step(bot_action) (--debug)
             t0_bot = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(bot_action)
             if debug_mode and t0_bot is not None:
-                ep = int(self.engine.game_state.get("episode_number", 0))
-                step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                ep = int(require_key(self.engine.game_state, "episode_number"))
+                step_idx = int(require_key(self.engine.game_state, "episode_steps"))
                 duration_s = time.perf_counter() - t0_bot
                 try:
                     debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
@@ -171,7 +173,7 @@ class BotControlledEnv(gym.Wrapper):
             )
 
         # DIAGNOSTIC: Track shoot phase opportunities
-        current_phase = game_state.get("phase", "")
+        current_phase = require_key(game_state, "phase")
         if current_phase == "shoot" and 4 in valid_actions:
             self.shoot_opportunities += 1
 
@@ -259,12 +261,12 @@ class SelfPlayWrapper(gym.Wrapper):
     def reset(self, seed=None, options=None):
         """Reset environment for new episode."""
         # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
-        debug_mode = self.engine.game_state.get("debug_mode", False)
+        debug_mode = require_key(self.engine.game_state, "debug_mode")
         t0 = time.perf_counter() if debug_mode else None
         obs, info = self.env.reset(seed=seed, options=options)
         if debug_mode and t0 is not None:
             reset_s = time.perf_counter() - t0
-            ep = int(self.engine.game_state.get("episode_number", 0))
+            ep = int(require_key(self.engine.game_state, "episode_number"))
             try:
                 debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                 with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
@@ -284,11 +286,11 @@ class SelfPlayWrapper(gym.Wrapper):
         If it's Player 2's turn: Use frozen model action instead
         """
         # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)
-        debug_mode = self.engine.game_state.get("debug_mode", False)
+        debug_mode = require_key(self.engine.game_state, "debug_mode")
         if debug_mode and self._last_step_return_time is not None:
             between_s = time.perf_counter() - self._last_step_return_time
-            ep = int(self.engine.game_state.get("episode_number", 0))
-            step_idx = int(self.engine.game_state.get("episode_steps", 0))
+            ep = int(require_key(self.engine.game_state, "episode_number"))
+            step_idx = int(require_key(self.engine.game_state, "episode_steps"))
             try:
                 debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                 with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
@@ -310,15 +312,16 @@ class SelfPlayWrapper(gym.Wrapper):
         while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
             p1_actions_before += 1
             if p1_actions_before > max_iterations:
-                print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 before loop! Count: {p1_actions_before}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
-                raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 before): {p1_actions_before} iterations, phase={self.engine.game_state.get('phase', '?')}")
+                current_phase = require_key(self.engine.game_state, "phase")
+                print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 before loop! Count: {p1_actions_before}, episode_length: {self.episode_length}, phase: {current_phase}", flush=True)
+                raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 before): {p1_actions_before} iterations, phase={current_phase}")
             player1_action = self._get_frozen_model_action()
             # LOG TEMPORAIRE: time full env.step() (--debug)
             t0_p1 = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(player1_action)
             if debug_mode and t0_p1 is not None:
-                ep = int(self.engine.game_state.get("episode_number", 0))
-                step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                ep = int(require_key(self.engine.game_state, "episode_number"))
+                step_idx = int(require_key(self.engine.game_state, "episode_steps"))
                 duration_s = time.perf_counter() - t0_p1
                 try:
                     debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
@@ -339,8 +342,8 @@ class SelfPlayWrapper(gym.Wrapper):
             t0_p0 = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(agent_action)
             if debug_mode and t0_p0 is not None:
-                ep = int(self.engine.game_state.get("episode_number", 0))
-                step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                ep = int(require_key(self.engine.game_state, "episode_number"))
+                step_idx = int(require_key(self.engine.game_state, "episode_steps"))
                 duration_s = time.perf_counter() - t0_p0
                 try:
                     debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
@@ -362,8 +365,9 @@ class SelfPlayWrapper(gym.Wrapper):
             while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
                 p1_actions_after += 1
                 if p1_actions_after > max_iterations:
-                    print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 after loop! Count: {p1_actions_after}, episode_length: {self.episode_length}, phase: {self.engine.game_state.get('phase', '?')}", flush=True)
-                    raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 after): {p1_actions_after} iterations, phase={self.engine.game_state.get('phase', '?')}")
+                    current_phase = require_key(self.engine.game_state, "phase")
+                    print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 after loop! Count: {p1_actions_after}, episode_length: {self.episode_length}, phase: {current_phase}", flush=True)
+                    raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 after): {p1_actions_after} iterations, phase={current_phase}")
                 player1_action = self._get_frozen_model_action()
                 # CRITICAL FIX: Capture reward when P1's action ends game!
                 # When P1 kills last P0 unit, reward contains P0's LOSE penalty
@@ -371,8 +375,8 @@ class SelfPlayWrapper(gym.Wrapper):
                 t0_p1_after = time.perf_counter() if debug_mode else None
                 obs, p1_step_reward, terminated, truncated, info = self.env.step(player1_action)
                 if debug_mode and t0_p1_after is not None:
-                    ep = int(self.engine.game_state.get("episode_number", 0))
-                    step_idx = int(self.engine.game_state.get("episode_steps", 0))
+                    ep = int(require_key(self.engine.game_state, "episode_number"))
+                    step_idx = int(require_key(self.engine.game_state, "episode_steps"))
                     duration_s = time.perf_counter() - t0_p1_after
                     try:
                         debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
@@ -402,7 +406,7 @@ class SelfPlayWrapper(gym.Wrapper):
             self.episodes_since_update += 1
 
             # Track wins/losses
-            winner = info.get("winner", -1)
+            winner = require_present(require_key(info, "winner"), "winner")
             if winner == 1:
                 self.player1_wins += 1
             elif winner == 2:

@@ -318,10 +318,15 @@ class ObservationBuilder:
         """
         from engine.phase_handlers import shooting_handlers
 
-        allies = [
-            u for u in game_state["units"]
-            if u["player"] == active_unit["player"] and is_unit_alive(str(u["id"]), game_state)
-        ]
+        units_cache = require_key(game_state, "units_cache")
+        active_player = int(active_unit["player"]) if active_unit["player"] is not None else None
+        allies = []
+        for ally_id, cache_entry in units_cache.items():
+            if int(cache_entry["player"]) == active_player:
+                ally = get_unit_by_id(ally_id, game_state)
+                if ally is None:
+                    raise KeyError(f"Unit {ally_id} missing from game_state['units']")
+                allies.append(ally)
         result: Dict[Tuple[str, str], bool] = {}
         for ally in allies:
             for _distance, enemy in six_enemies:
@@ -678,10 +683,6 @@ class ObservationBuilder:
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
         """
-        # LOG TEMPORAIRE: BUILD_OBS_TIMING pour identifier la section lente dans build_observation.
-        debug_build_obs = game_state.get("debug_mode", False)
-        t0 = time.time() if debug_build_obs else None
-
         # PERFORMANCE: Clear per-observation cache (same pairs recalculated multiple times)
         self._danger_probability_cache = {}
 
@@ -692,8 +693,6 @@ class ObservationBuilder:
         if not active_unit:
             # No active unit - return zero observation
             return obs
-        t1 = time.time() if debug_build_obs else None
-
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
         phase_encoding = {"command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
@@ -706,7 +705,7 @@ class ObservationBuilder:
         obs[6] = 1.0 if active_unit["id"] in game_state["units_shot"] else 0.0
         obs[7] = 1.0 if active_unit["id"] in game_state["units_attacked"] else 0.0
         # ADVANCE_IMPLEMENTATION: Track if unit has advanced this turn
-        obs[8] = 1.0 if active_unit["id"] in game_state.get("units_advanced", set()) else 0.0
+        obs[8] = 1.0 if active_unit["id"] in require_key(game_state, "units_advanced") else 0.0
 
         # Count alive units for strategic awareness
         alive_friendlies = sum(1 for u in game_state["units"]
@@ -720,8 +719,6 @@ class ObservationBuilder:
         # Objective control status (5 floats for 5 objectives)
         # -1.0 = enemy controls, 0.0 = contested/empty, 1.0 = we control
         self._encode_objective_control(obs, active_unit, game_state, base_idx=11)
-        t2 = time.time() if debug_build_obs else None
-
         # === SECTION 2: Active Unit Capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md ===
         obs[16] = require_key(active_unit, "MOVE") / 12.0
 
@@ -773,21 +770,15 @@ class ObservationBuilder:
 
         obs[36] = require_key(active_unit, "T") / 10.0
         obs[37] = require_key(active_unit, "ARMOR_SAVE") / 6.0
-        t3 = time.time() if debug_build_obs else None
-
         # === SECTION 3: Directional Terrain Awareness (32 floats) ===
         # Global Context: [0:16] = 16 floats (ADVANCE_IMPLEMENTATION: +1 for has_advanced)
         # Active Unit Capabilities: [16:38] = 22 floats
         # base_idx = 16 + 22 = 38
         self._encode_directional_terrain(obs, active_unit, game_state, base_idx=38)
-        t4 = time.time() if debug_build_obs else None
-
         # === SECTION 4: Allied Units (72 floats) ===
         # Directional Terrain: [38:70] = 32 floats
         # base_idx = 38 + 32 = 70
         self._encode_allied_units(obs, active_unit, game_state, base_idx=70)
-        t5 = time.time() if debug_build_obs else None
-
         # === SECTION 5: Enemy Units (132 floats) ===
         # Allied Units: [70:142] = 72 floats
         # base_idx = 70 + 72 = 142
@@ -799,29 +790,12 @@ class ObservationBuilder:
         six_enemies = self._get_six_reference_enemies(active_unit, game_state, valid_targets)
         los_cache_obs = self._build_los_cache_for_observation(active_unit, game_state, six_enemies)
         self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies, los_cache_obs=los_cache_obs)
-        t6 = time.time() if debug_build_obs else None
-
         # Enemy Units: [142:274] = 132 floats (6 × 22 features)
         # base_idx = 142 + 132 = 274
         self._encode_valid_targets(
             obs, active_unit, game_state, base_idx=274,
             valid_targets=valid_targets, six_enemies=six_enemies
         )
-        t7 = time.time() if debug_build_obs else None
-
-        # LOG TEMPORAIRE: écriture BUILD_OBS_TIMING (voir bloc t0 en début de build_observation).
-        if debug_build_obs and t0 is not None and t1 is not None:
-            try:
-                debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                with open(debug_log_path, "a") as f:
-                    f.write(
-                        f"BUILD_OBS_TIMING get_active_s={t1 - t0:.6f} global_s={t2 - t1:.6f} active_cap_s={t3 - t2:.6f} "
-                        f"terrain_s={t4 - t3:.6f} allies_s={t5 - t4:.6f} enemies_s={t6 - t5:.6f} targets_s={t7 - t6:.6f} "
-                        f"turn={game_state.get('turn', 0)} phase={game_state.get('phase', '')}\n"
-                    )
-            except Exception:
-                pass
-
         return obs
     
     # ============================================================================

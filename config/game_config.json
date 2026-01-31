@@ -3,7 +3,8 @@
     "max_turns": 5,
     "turn_limit_penalty": -1,
     "charge_max_distance": 13,
-    "advance_distance_range": 6
+    "advance_distance_range": 6,
+    "avg_charge_roll": 7
   },
   "gameplay": {
     "phase_order": ["move", "shoot", "charge", "fight"],

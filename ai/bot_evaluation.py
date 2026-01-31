@@ -12,6 +12,8 @@ import os
 import sys
 import numpy as np
 
+from shared.data_validation import require_key
+
 __all__ = ['evaluate_against_bots']
 
 
@@ -193,15 +195,15 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                             # LOG TEMPORAIRE: Log when step limit is reached (only if --debug)
                             if debug_mode:
                                 game_state = bot_env.engine.game_state
-                                episode = game_state.get("episode_number", "?")
-                                turn = game_state.get("turn", "?")
-                                phase = game_state.get("phase", "?")
-                                current_player = game_state.get("current_player", "?")
+                                episode = require_key(game_state, "episode_number")
+                                turn = require_key(game_state, "turn")
+                                phase = require_key(game_state, "phase")
+                                current_player = require_key(game_state, "current_player")
                                 
                                 # Get pool states
-                                shoot_pool = game_state.get("shoot_activation_pool", [])
-                                move_pool = game_state.get("move_activation_pool", [])
-                                active_shooting_unit = game_state.get("active_shooting_unit", None)
+                                shoot_pool = require_key(game_state, "shoot_activation_pool")
+                                move_pool = require_key(game_state, "move_activation_pool")
+                                active_shooting_unit = require_key(game_state, "active_shooting_unit")
                                 
                                 # Get eligible units
                                 action_mask = bot_env.engine.get_action_mask()
@@ -227,13 +229,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                             
                             break
                         # LOG TEMPORAIRE: GET_MASK_TIMING (get_action_mask in bot loop; only if --debug)
-                        ep_num = 0
-                        try:
-                            ep_num = bot_env.engine.game_state.get("episode_number", 0)
-                            if not isinstance(ep_num, (int, float)):
-                                ep_num = 0
-                        except (AttributeError, TypeError):
-                            ep_num = 0
+                        ep_num = require_key(bot_env.engine.game_state, "episode_number")
                         t_get_mask0 = time.perf_counter() if debug_mode else None
                         action_masks = bot_env.engine.get_action_mask()
                         # LOG TEMPORAIRE: only every 50 steps to avoid I/O bottleneck (episode can appear stuck otherwise)

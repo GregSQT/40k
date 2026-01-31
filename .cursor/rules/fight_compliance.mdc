@@ -92,9 +92,9 @@ def get_charging_units(game_state):
 **Règle** : Après sub-phase 1, les unités restantes alternent entre joueurs.
 
 **Alternance** :
-- Commence par `current_player`
-- Puis adversaire
-- Puis `current_player` à nouveau
+- Commence par le joueur **non actif**
+- Puis `current_player`
+- Puis le joueur **non actif** à nouveau
 - Continue jusqu'à ce qu'aucune unité ne soit éligible
 
 ```python
@@ -111,14 +111,14 @@ def process_alternating_fight(game_state):
     
     # Alterner entre joueurs
     while True:
-        # Current player
-        eligible = get_eligible_fight_units(game_state, current_player)
+        # Non-active player first
+        eligible = get_eligible_fight_units(game_state, opponent)
         if not eligible:
             break
         process_fight_unit(eligible[0], game_state)
         
-        # Opponent
-        eligible = get_eligible_fight_units(game_state, opponent)
+        # Then current_player
+        eligible = get_eligible_fight_units(game_state, current_player)
         if not eligible:
             break
         process_fight_unit(eligible[0], game_state)

@@ -123,14 +123,17 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     game_state["non_active_alternating_activation_pool"] = []
     charging_activation_pool = []
     add_console_log(game_state, f"FIGHT POOL BUILD: Building charging pool for player {current_player}")
-    for unit in game_state["units"]:
-        if is_unit_alive(str(unit["id"]), game_state):
-            if unit["player"] == current_player:
-                if unit["id"] in game_state["units_charged"]:
-                    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-                    if is_adjacent:
-                        charging_activation_pool.append(unit["id"])
-                        add_console_log(game_state, f"ADDED TO CHARGING POOL: Unit {unit['id']}")
+    units_cache = require_key(game_state, "units_cache")
+    for unit_id, cache_entry in units_cache.items():
+        unit = get_unit_by_id(game_state, unit_id)
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        if cache_entry["player"] == current_player:
+            if str(unit_id) in {str(uid) for uid in game_state["units_charged"]}:
+                valid_targets = _fight_build_valid_target_pool(game_state, unit)
+                if valid_targets:
+                    charging_activation_pool.append(unit_id)
+                    add_console_log(game_state, f"ADDED TO CHARGING POOL: Unit {unit_id}")
 
     game_state["charging_activation_pool"] = charging_activation_pool
     add_console_log(game_state, f"CHARGING POOL SIZE: {len(charging_activation_pool)}")
@@ -153,17 +156,19 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     non_active_alternating = []
 
     add_console_log(game_state, f"FIGHT POOL BUILD: Building alternating pools")
-    for unit in game_state["units"]:
-        if is_unit_alive(str(unit["id"]), game_state):
-            if unit["id"] not in game_state["units_charged"]:
-                is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-                if is_adjacent:
-                    if unit["player"] == current_player:
-                        active_alternating.append(unit["id"])
-                        add_console_log(game_state, f"ADDED TO ACTIVE ALTERNATING: Unit {unit['id']} (player {unit['player']})")
-                    else:
-                        non_active_alternating.append(unit["id"])
-                        add_console_log(game_state, f"ADDED TO NON-ACTIVE ALTERNATING: Unit {unit['id']} (player {unit['player']})")
+    for unit_id, cache_entry in units_cache.items():
+        unit = get_unit_by_id(game_state, unit_id)
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        if unit_id not in game_state["units_charged"]:
+            valid_targets = _fight_build_valid_target_pool(game_state, unit)
+            if valid_targets:
+                if cache_entry["player"] == current_player:
+                    active_alternating.append(unit_id)
+                    add_console_log(game_state, f"ADDED TO ACTIVE ALTERNATING: Unit {unit_id} (player {cache_entry['player']})")
+                else:
+                    non_active_alternating.append(unit_id)
+                    add_console_log(game_state, f"ADDED TO NON-ACTIVE ALTERNATING: Unit {unit_id} (player {cache_entry['player']})")
 
     game_state["active_alternating_activation_pool"] = active_alternating
     game_state["non_active_alternating_activation_pool"] = non_active_alternating
@@ -210,13 +215,15 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
 
-    for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
-            enemy_col, enemy_row = require_unit_position(enemy, game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    for enemy_id, cache_entry in units_cache.items():
+        if int(cache_entry["player"]) != unit_player:
+            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
             distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
-            add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy['id']} @ ({enemy['col']},{enemy['row']}) distance={distance}")
+            add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy_id} @ ({enemy_col},{enemy_row}) distance={distance}")
             if distance <= cc_range:
-                add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy['id']} (dist {distance} <= melee_range {cc_range})")
+                add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy_id} (dist {distance} <= melee_range {cc_range})")
                 return True
 
     add_console_log(game_state, f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within melee_range {cc_range}")
@@ -340,7 +347,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "phase_transition": True,
             "next_phase": "command",
             "current_player": 2,
-            "units_processed": len(game_state.get("units_fought", set())),
+            "units_processed": len(require_key(game_state, "units_fought")),
             "clear_blinking_gentle": True,
             "reset_mode": "select",
             "clear_selected_unit": True,
@@ -358,7 +365,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "phase_complete": True,
                 "game_over": True,
                 "turn_limit_reached": True,
-                "units_processed": len(game_state.get("units_fought", set())),
+                "units_processed": len(require_key(game_state, "units_fought")),
                 "clear_blinking_gentle": True,
                 "reset_mode": "select",
                 "clear_selected_unit": True,
@@ -379,7 +386,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 "next_phase": "command",
                 "current_player": 1,
                 "new_turn": game_state["turn"],
-                "units_processed": len(game_state.get("units_fought", set())),
+                "units_processed": len(require_key(game_state, "units_fought")),
                 "clear_blinking_gentle": True,
                 "reset_mode": "select",
                 "clear_selected_unit": True,
@@ -558,8 +565,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         }
 
     # Check for gym training mode and PvE AI mode
-    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 1
-    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
+    is_gym_training = config.get("gym_training_mode", False)
+    is_pve_ai = config.get("pve_mode", False)
 
     # GYM TRAINING / PvE AI: Auto-activate unit if not already active
     active_fight_unit = game_state.get("active_fight_unit")
@@ -1049,27 +1056,24 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
     from engine.utils.weapon_helpers import get_melee_range
     cc_range = get_melee_range()  # Always 1
     unit_col, unit_row = require_unit_position(unit, game_state)
-    unit_player = unit["player"]
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
 
     valid_targets = []
 
-    for target in game_state["units"]:
+    units_cache = require_key(game_state, "units_cache")
+    for target_id, cache_entry in units_cache.items():
         # Enemy check
-        if target["player"] == unit_player:
-            continue
-
-        # Alive check (units_cache is source of truth)
-        if not is_unit_alive(str(target["id"]), game_state):
+        if int(cache_entry["player"]) == unit_player:
             continue
 
         # Adjacent check (within melee range)
-        target_col, target_row = require_unit_position(target, game_state)
+        target_col, target_row = require_unit_position(target_id, game_state)
         distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
         if distance > cc_range:
             continue
 
         # Valid target
-        valid_targets.append(target["id"])
+        valid_targets.append(target_id)
 
     return valid_targets
 
@@ -1374,6 +1378,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["action"] = "combat"  # Must be "combat" for step_logger (not "fight")
         result["phase"] = "fight"  # For metrics tracking
         result["unitId"] = unit_id  # For step_logger
+        result["waiting_for_player"] = False  # Combat resolved, no further input
         result["targetId"] = target_id  # For reward calculator
         result["attack_result"] = attack_result
         result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False  # For metrics tracking
@@ -1476,6 +1481,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["action"] = "combat"  # Must be "combat" for step_logger (not "fight")
         result["phase"] = "fight"  # For metrics tracking
         result["unitId"] = unit_id  # For step_logger
+        result["waiting_for_player"] = False  # Combat resolved, no further input
         result["targetId"] = target_id  # For reward calculator
         result["attack_result"] = attack_result
         result["target_died"] = attack_result.get("target_died", False)  # For metrics tracking
@@ -1835,9 +1841,11 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     if rng_rng <= 0:
         return False
     
-    for enemy in game_state["units"]:
-        if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
-            distance = calculate_hex_distance(*require_unit_position(unit, game_state), *require_unit_position(enemy, game_state))
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    for enemy_id, cache_entry in units_cache.items():
+        if int(cache_entry["player"]) != unit_player:
+            distance = calculate_hex_distance(*require_unit_position(unit, game_state), *require_unit_position(enemy_id, game_state))
             if distance <= rng_rng:
                 return True  # Simplified - assume clear LoS for now
     

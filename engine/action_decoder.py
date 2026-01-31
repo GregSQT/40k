@@ -75,7 +75,7 @@ class ActionDecoder:
                 can_advance = active_unit.get("_can_advance", True)  # Default True if flag not set
                 if can_advance:
                     # Check if unit has NOT already advanced this turn
-                    units_advanced = game_state.get("units_advanced", set())
+                    units_advanced = require_key(game_state, "units_advanced")
                     if active_unit["id"] not in units_advanced:
                         mask[12] = True  # Advance action
 
@@ -345,20 +345,6 @@ class ActionDecoder:
                     }
                     
             elif action_int == 11:  # WAIT - agent chooses not to shoot
-                # LOG TEMPORAIRE: Log WAIT action to debug.log (only if --debug)
-                if game_state.get("debug_mode", False):
-                    import os
-                    episode = game_state.get("episode_number", "?")
-                    turn = game_state.get("turn", "?")
-                    pool_before = list(require_key(game_state, "shoot_activation_pool"))
-                    active_before = require_key(game_state, "active_shooting_unit")
-                    debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
-                    try:
-                        with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
-                            f.write(f"[WAIT ACTION DEBUG] E{episode} T{turn} convert_gym_action: WAIT action for unit {selected_unit_id}, pool_before={pool_before}, active_shooting_unit={active_before}\n")
-                            f.flush()
-                    except Exception:
-                        pass
                 return {"action": "wait", "unitId": selected_unit_id}
             
             elif action_int == 12:  # ADVANCE - agent chooses to advance instead of shoot
@@ -436,8 +422,13 @@ class ActionDecoder:
     def get_all_valid_targets(self, unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get all valid targets for unit based on current phase."""
         targets = []
-        for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
+        units_cache = require_key(game_state, "units_cache")
+        unit_player = int(unit["player"]) if unit["player"] is not None else None
+        for enemy_id, cache_entry in units_cache.items():
+            if int(cache_entry["player"]) != unit_player:
+                enemy = get_unit_by_id(enemy_id, game_state)
+                if enemy is None:
+                    raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
                 targets.append(enemy)
         return targets
     
@@ -445,20 +436,22 @@ class ActionDecoder:
         """Check if any friendly melee units can charge this target."""
         current_player = game_state["current_player"]
         
-        for unit in game_state["units"]:
-            if (unit["player"] == current_player and 
-                is_unit_alive(str(unit["id"]), game_state) and
-                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
-                (unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0 and
-                 any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"]))):  # Has melee capability
-                
-                # Simple charge range check (2d6 movement + unit MOVE)
-                distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
-                if "MOVE" not in unit:
-                    raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
-                
-                if distance <= max_charge_range:
-                    return True
+        units_cache = require_key(game_state, "units_cache")
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] == current_player:
+                unit = get_unit_by_id(unit_id, game_state)
+                if unit is None:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                if (unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0 and
+                    any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"])):  # Has melee capability
+                    
+                    # Simple charge range check (2d6 movement + unit MOVE)
+                    distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
+                    if "MOVE" not in unit:
+                        raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
+                    max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
+                    
+                    if distance <= max_charge_range:
+                        return True
         
         return False

@@ -8,6 +8,7 @@
       "ranged_attack": 3.0,
       "melee_attack": 3.0,
       "charge_success": 3.0,
+      "advance": 0.0,
       "move_wait": 0.0,
       "shoot_wait": -2.0,
       "move_close": 0.0,
@@ -15,10 +16,24 @@
       "move_to_charge": 0.0,
       "move_to_los": 0.0
     },
+    "charge_priority_1": 0.0,
+    "charge_priority_2": 0.0,
+    "charge_priority_3": 0.0,
+    "attack_priority_1": 0.0,
+    "attack_priority_2": 0.0,
     "result_bonuses": {
       "kill_target": 30.0,
       "target_lowest_hp": 5.0
     },
+    "tactical_bonuses": {
+      "advanced_closer": 0.0,
+      "advanced_to_cover": 0.0,
+      "gained_los_on_target": 0.0,
+      "moved_to_cover": 0.0,
+      "safe_from_charges": 0.0,
+      "safe_from_ranged": 0.0
+    },
+    "target_type_bonuses": {},
     "situational_modifiers": {
       "win": 100.0,
       "lose": -100.0,

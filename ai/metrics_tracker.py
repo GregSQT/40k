@@ -36,6 +36,7 @@ from collections import deque
 from torch.utils.tensorboard import SummaryWriter
 import os
 from typing import Dict, Any, List, Optional
+from shared.data_validation import require_key
 
 class W40KMetricsTracker:
     """
@@ -154,9 +155,9 @@ class W40KMetricsTracker:
         self.episode_count += 1
 
         # Extract data
-        total_reward = episode_data.get('total_reward', 0)
-        winner = episode_data.get('winner', None)
-        episode_length = episode_data.get('episode_length', 0)
+        total_reward = require_key(episode_data, 'total_reward')
+        winner = require_key(episode_data, 'winner')
+        episode_length = require_key(episode_data, 'episode_length')
         
         # GAME CRITICAL: Episode reward - Individual episode rewards
         self.writer.add_scalar('game_critical/episode_reward', total_reward, self.episode_count)
@@ -198,23 +199,23 @@ class W40KMetricsTracker:
         
         # GAME TACTICAL: Shooting accuracy - Hit rate
         if 'shots_fired' in tactical_data and tactical_data['shots_fired'] > 0:
-            hits = tactical_data.get('hits', 0)
+            hits = require_key(tactical_data, 'hits')
             accuracy = hits / tactical_data['shots_fired']
             self.writer.add_scalar('game_tactical/shooting_accuracy', accuracy, self.episode_count)
         
         # GAME TACTICAL: Kill efficiency - Kill rate
         if 'total_enemies' in tactical_data and tactical_data['total_enemies'] > 0:
-            killed_enemies = tactical_data.get('units_killed', 0)  # FIXED: use units_killed from engine
+            killed_enemies = require_key(tactical_data, 'units_killed')  # FIXED: use units_killed from engine
             slaughter_efficiency = killed_enemies / tactical_data['total_enemies']
             self.writer.add_scalar('game_tactical/kill_efficiency', slaughter_efficiency, self.episode_count)
         
         # GAME DETAILED: Damage dealt - Offensive power
-        damage_dealt = tactical_data.get('damage_dealt', 0)
+        damage_dealt = require_key(tactical_data, 'damage_dealt')
         if damage_dealt > 0:
             self.writer.add_scalar('game_detailed/damage_dealt', damage_dealt, self.episode_count)
         
         # GAME DETAILED: Damage received - Defensive capability
-        damage_received = tactical_data.get('damage_received', 0)
+        damage_received = require_key(tactical_data, 'damage_received')
         if damage_received > 0:
             self.writer.add_scalar('game_detailed/damage_received', damage_received, self.episode_count)
         
@@ -224,12 +225,12 @@ class W40KMetricsTracker:
             self.writer.add_scalar('game_tactical/damage_efficiency', damage_efficiency, self.episode_count)
         
         # GAME DETAILED: Units lost - Unit preservation
-        units_lost = tactical_data.get('units_lost', 0)
+        units_lost = require_key(tactical_data, 'units_lost')
         if units_lost >= 0:
             self.writer.add_scalar('game_detailed/units_lost', units_lost, self.episode_count)
         
         # GAME DETAILED: Units killed - Lethality
-        units_killed = tactical_data.get('units_killed', 0)
+        units_killed = require_key(tactical_data, 'units_killed')
         if units_killed >= 0:
             self.writer.add_scalar('game_detailed/units_killed', units_killed, self.episode_count)
         
@@ -244,8 +245,8 @@ class W40KMetricsTracker:
             self.writer.add_scalar('game_tactical/unit_trade_ratio', trade_ratio, self.episode_count)
         
         # GAME CRITICAL: Invalid action rate - AI_TURN.md compliance
-        valid_actions = tactical_data.get('valid_actions', 0)
-        invalid_actions = tactical_data.get('invalid_actions', 0)
+        valid_actions = require_key(tactical_data, 'valid_actions')
+        invalid_actions = require_key(tactical_data, 'invalid_actions')
         total_actions = valid_actions + invalid_actions
         
         if total_actions > 0:
@@ -257,7 +258,7 @@ class W40KMetricsTracker:
             self.writer.add_scalar('game_tactical/action_efficiency', action_efficiency, self.episode_count)
         
         # GAME TACTICAL: Wait frequency - Decision confidence
-        wait_actions = tactical_data.get('wait_actions', 0)
+        wait_actions = require_key(tactical_data, 'wait_actions')
         if total_actions > 0:
             wait_frequency = wait_actions / total_actions
             self.writer.add_scalar('game_tactical/wait_frequency', wait_frequency, self.episode_count)
@@ -366,7 +367,7 @@ class W40KMetricsTracker:
         - game_detailed/aiturn_pool_corruption
         """
         # GAME DETAILED: Units per step (should always be 1.0)
-        units_activated = compliance_data.get('units_activated_this_step', 1)
+        units_activated = require_key(compliance_data, 'units_activated_this_step')
         self.compliance_data['units_per_step'].append(units_activated)
         if len(self.compliance_data['units_per_step']) > 1000:
             self.compliance_data['units_per_step'].pop(0)
@@ -375,7 +376,7 @@ class W40KMetricsTracker:
         self.writer.add_scalar('game_detailed/aiturn_units_per_step', avg_units_per_step, self.episode_count)
         
         # GAME DETAILED: Phase end reason
-        phase_end_reason = compliance_data.get('phase_end_reason', 'unknown')
+        phase_end_reason = require_key(compliance_data, 'phase_end_reason')
         if phase_end_reason == 'eligibility':
             self.compliance_data['phase_end_reasons'].append(1)
         elif phase_end_reason == 'step_count':
@@ -389,8 +390,8 @@ class W40KMetricsTracker:
             self.writer.add_scalar('game_detailed/aiturn_eligibility_based_ends', eligibility_rate, self.episode_count)
         
         # GAME DETAILED: Tracking violations
-        duplicate_attempts = compliance_data.get('duplicate_activation_attempts', 0)
-        pool_corruption = compliance_data.get('pool_corruption_detected', 0)
+        duplicate_attempts = require_key(compliance_data, 'duplicate_activation_attempts')
+        pool_corruption = require_key(compliance_data, 'pool_corruption_detected')
         
         self.writer.add_scalar('game_detailed/aiturn_duplicate_activations', duplicate_attempts, self.episode_count)
         self.writer.add_scalar('game_detailed/aiturn_pool_corruption', pool_corruption, self.episode_count)
@@ -416,7 +417,7 @@ class W40KMetricsTracker:
             self.reward_mapper_stats['movement_actions'] += 1
         
         # Track mapper failures
-        if mapper_data.get('mapper_failed', False):
+        if 'mapper_failed' in mapper_data and mapper_data['mapper_failed']:
             self.reward_mapper_stats['mapper_failures'] += 1
         
         # GAME DETAILED: Log to tensorboard
@@ -476,8 +477,8 @@ class W40KMetricsTracker:
         - charge: charged, skipped counts
         - fight: fought, skipped counts
         """
-        phase = phase_data.get('phase', 'unknown')
-        action = phase_data.get('action', 'unknown')
+        phase = require_key(phase_data, 'phase')
+        action = require_key(phase_data, 'action')
         
         # Track phase-specific actions (accumulate only)
         if phase == 'move':
@@ -485,7 +486,7 @@ class W40KMetricsTracker:
                 self.phase_stats['movement']['moved'] += 1
             elif action == 'wait' or action == 'skip':
                 self.phase_stats['movement']['waited'] += 1
-            if phase_data.get('was_flee', False):
+            if 'was_flee' in phase_data and phase_data['was_flee']:
                 self.phase_stats['movement']['fled'] += 1
         
         elif phase == 'shoot':
@@ -762,7 +763,7 @@ class W40KMetricsTracker:
             self.writer.add_scalar('0_critical/g_approx_kl', kl_smooth, self.episode_count)
 
         # 5. Explained Variance - Value function quality
-        if len(self.hyperparameter_tracking.get('explained_variances', [])) >= 1:
+        if len(require_key(self.hyperparameter_tracking, 'explained_variances')) >= 1:
             ev_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['explained_variances'], window_size=20
             )
@@ -813,8 +814,8 @@ class W40KMetricsTracker:
         
         # Invalid Action Rate - Moved to game_critical (game-specific, not training-critical)
         if hasattr(self, 'episode_tactical_data') and self.episode_tactical_data:
-            total_actions = self.episode_tactical_data.get('total_actions', 0)
-            invalid_actions = self.episode_tactical_data.get('invalid_actions', 0)
+            total_actions = require_key(self.episode_tactical_data, 'total_actions')
+            invalid_actions = require_key(self.episode_tactical_data, 'invalid_actions')
             if total_actions > 0:
                 invalid_rate = invalid_actions / total_actions
                 self.writer.add_scalar('game_critical/invalid_action_rate', invalid_rate, self.episode_count)
@@ -915,7 +916,7 @@ class TrainingMonitor:
         # Check win rate (recent 100 episodes)
         if 'win_rate_100ep' in metrics_summary:
             win_rate = metrics_summary['win_rate_100ep']
-            min_win_rate = self.thresholds.get('min_win_rate', 0.3)
+            min_win_rate = require_key(self.thresholds, 'min_win_rate')
             if win_rate < min_win_rate:
                 alerts.append(f"⚠️ Win rate ({win_rate:.1%}) below threshold ({min_win_rate:.1%})")
         
@@ -936,5 +937,5 @@ class TrainingMonitor:
 # Integration function for existing training loop
 def create_metrics_tracker(agent_key: str, config: Dict[str, Any]) -> W40KMetricsTracker:
     """Factory function to create metrics tracker with config"""
-    log_dir = config.get('tensorboard_log', './tensorboard/')
+    log_dir = require_key(config, 'tensorboard_log')
     return W40KMetricsTracker(agent_key, log_dir)

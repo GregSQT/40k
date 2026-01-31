@@ -127,7 +127,6 @@ class RewardCalculator:
         # CRITICAL: Only give rewards to the controlled player (P1 during training)
         # Player 2's actions are part of the environment, not the learning agent
         controlled_player = self.config.get("controlled_player", 1)
-        from shared.data_validation import require_key
         if require_key(acting_unit, "player") != controlled_player:
             # No action rewards for opponent, BUT check if game ended
             # If P1's action ended the game, P0 still needs the win/lose reward!
@@ -376,7 +375,6 @@ class RewardCalculator:
             
         elif action_type == "wait":
             # FIXED: Wait means agent chose not to act when action was available
-            from shared.data_validation import require_key
             current_phase = require_key(game_state, "phase")
             if current_phase == "move":
                 wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
@@ -647,9 +645,12 @@ class RewardCalculator:
         # Get any Player 0 unit to access reward config (learning agent is P0)
         # CRITICAL FIX: Learning agent is Player 1, not Player 2!
         acting_unit = None
-        for unit in game_state["units"]:
-            if unit["player"] == 1:  # Learning agent is Player 1
-                acting_unit = unit
+        units_cache = require_key(game_state, "units_cache")
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] == 1:  # Learning agent is Player 1
+                acting_unit = get_unit_by_id(unit_id, game_state)
+                if not acting_unit:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
                 break
 
         if not acting_unit:
@@ -719,12 +720,12 @@ class RewardCalculator:
         # If winner is determined by elimination, don't give objective rewards
         # (objectives only matter when game ends at turn 5)
         living_units_by_player = {}
-        for unit in game_state["units"]:
-            if is_unit_alive(str(unit["id"]), game_state):
-                player = unit["player"]
-                if player not in living_units_by_player:
-                    living_units_by_player[player] = 0
-                living_units_by_player[player] += 1
+        units_cache = require_key(game_state, "units_cache")
+        for _unit_id, cache_entry in units_cache.items():
+            player = cache_entry["player"]
+            if player not in living_units_by_player:
+                living_units_by_player[player] = 0
+            living_units_by_player[player] += 1
         
         # If one player has no living units, game ended by elimination (not turn 5)
         if len(living_units_by_player) < 2:
@@ -918,11 +919,10 @@ class RewardCalculator:
             target_invul = 7  # No invul
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate max expected damage from all weapons
-        from shared.data_validation import require_key
         
         # Calculate max EXPECTED ranged damage from all ranged weapons
         ranged_expected_list = []
-        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
+        rng_weapons = require_key(unit, "RNG_WEAPONS")
         for weapon in rng_weapons:
             expected = self._calculate_expected_damage(
                 num_attacks=require_key(weapon, "NB"),
@@ -1259,7 +1259,6 @@ class RewardCalculator:
         if not weapon:
             return 0.0
         
-        from shared.data_validation import require_key
         hit_target = require_key(weapon, "ATK")
         strength = require_key(weapon, "STR")
         damage = require_key(weapon, "DMG")
@@ -1306,10 +1305,14 @@ class RewardCalculator:
         Returns: 0.0-1.0 (1.0 = highest strategic threat among all targets)
         """
         my_player = game_state["current_player"]
-        friendly_units = [
-            u for u in game_state["units"]
-            if u["player"] == my_player and is_unit_alive(str(u["id"]), game_state)
-        ]
+        units_cache = require_key(game_state, "units_cache")
+        friendly_units = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] == my_player:
+                unit = get_unit_by_id(unit_id, game_state)
+                if not unit:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                friendly_units.append(unit)
         
         if not friendly_units:
             return 0.0
@@ -1353,7 +1356,6 @@ class RewardCalculator:
             if not hasattr(self, 'unit_registry') or not self.unit_registry:
                 return 0.5
             
-            from shared.data_validation import require_key
             unit_type = require_key(active_unit, "unitType")
             
             if "Swarm" in unit_type:
@@ -1392,8 +1394,14 @@ class RewardCalculator:
     
     def _moved_to_cover_from_enemies(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit is hidden from enemy RANGED units (melee LoS irrelevant)."""
-        enemies = [u for u in game_state["units"] 
-                  if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
         
         if not enemies:
             return False
@@ -1430,7 +1438,14 @@ class RewardCalculator:
     
     def _moved_closer_to_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved closer to enemies (or maintained same distance = lateral move)."""
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
         if not enemies:
             return False
 
@@ -1442,7 +1457,14 @@ class RewardCalculator:
     
     def _moved_away_from_enemies(self, unit: Dict[str, Any], old_pos: Tuple[int, int], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved away from enemies."""
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
         if not enemies:
             return False
 
@@ -1465,7 +1487,14 @@ class RewardCalculator:
             return False
         
         min_range = get_melee_range()  # Minimum engagement distance (always 1)
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
 
         # Create temporary unit state at new position for LOS check
         temp_unit = unit.copy()
@@ -1495,12 +1524,18 @@ class RewardCalculator:
             return False
         
         # Check if any melee weapon has damage > 0
-        from shared.data_validation import require_key
         has_melee_damage = any(require_key(w, "DMG") > 0 for w in cc_weapons)
         if not has_melee_damage:
             return False
 
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
         if "MOVE" not in unit:
             raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
         max_charge_range = unit["MOVE"] + 12  # Average 2d6 charge distance
@@ -1516,7 +1551,14 @@ class RewardCalculator:
     
     def _moved_to_safety(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit moved to safety from enemy threats."""
-        enemies = [u for u in game_state["units"] if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
 
         # No enemies should mean game is over - don't mask this with return True
         if not enemies:
@@ -1550,10 +1592,12 @@ class RewardCalculator:
         
         # Get all enemies in shooting range
         enemies_in_range = []
-        for enemy in game_state["units"]:
-            if "player" not in enemy:
-                raise KeyError(f"Enemy unit missing required 'player' field: {enemy}")
-            if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
+        units_cache = require_key(game_state, "units_cache")
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
                 if "col" not in enemy or "row" not in enemy:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
                 
@@ -1590,8 +1634,14 @@ class RewardCalculator:
 
         Uses BFS pathfinding distance to respect walls for charge reachability.
         """
-        enemies = [u for u in game_state["units"]
-                  if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
 
         from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
         
@@ -1609,7 +1659,6 @@ class RewardCalculator:
             is_melee_unit = len(cc_weapons) > 0 and max_rng_range <= melee_range
             
             # Check if any melee weapon has damage > 0
-            from shared.data_validation import require_key
             has_melee_damage = any(require_key(w, "DMG") > 0 for w in cc_weapons) if cc_weapons else False
 
             if is_melee_unit and has_melee_damage:
@@ -1629,8 +1678,14 @@ class RewardCalculator:
     
     def _safe_from_enemy_ranged(self, unit: Dict[str, Any], new_pos: Tuple[int, int], game_state: Dict[str, Any]) -> bool:
         """Check if unit is beyond range of enemy RANGED units."""
-        enemies = [u for u in game_state["units"] 
-                  if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                enemies.append(enemy)
         
         safe_distance_count = 0
         total_ranged_enemies = 0
@@ -1684,12 +1739,12 @@ class RewardCalculator:
         # Fallback for backward compatibility (should not happen in normal usage)
         # This is the old logic that ignores objectives
         living_units_by_player = {}
-        for unit in game_state["units"]:
-            if is_unit_alive(str(unit["id"]), game_state):
-                player = unit["player"]
-                if player not in living_units_by_player:
-                    living_units_by_player[player] = 0
-                living_units_by_player[player] += 1
+        units_cache = require_key(game_state, "units_cache")
+        for _unit_id, cache_entry in units_cache.items():
+            player = cache_entry["player"]
+            if player not in living_units_by_player:
+                living_units_by_player[player] = 0
+            living_units_by_player[player] += 1
         
         living_players = list(living_units_by_player.keys())
         if len(living_players) == 1:
@@ -1744,8 +1799,8 @@ class RewardCalculator:
             raise KeyError(f"Unit missing required 'unitType' field: {unit}")
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get max damage from all weapons
-        rng_weapons = unit["RNG_WEAPONS"] if "RNG_WEAPONS" in unit else []
-        cc_weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
+        rng_weapons = require_key(unit, "RNG_WEAPONS")
+        cc_weapons = require_key(unit, "CC_WEAPONS")
         
         rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
         cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
@@ -1779,11 +1834,13 @@ class RewardCalculator:
 
         targets = []
         acting_player = require_key(acting_unit, "player")
-        units = require_key(game_state, "units")
+        units_cache = require_key(game_state, "units_cache")
 
-        for unit in units:
-            # Enemy units that are alive
-            if require_key(unit, "player") != acting_player and is_unit_alive(str(unit["id"]), game_state):
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != acting_player:
+                unit = get_unit_by_id(unit_id, game_state)
+                if not unit:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
                 targets.append(unit)
 
         return targets
@@ -1848,8 +1905,12 @@ class RewardCalculator:
 
         # Get all visible enemies
         visible_enemies = []
-        for enemy in game_state["units"]:
-            if enemy["player"] != unit["player"] and is_unit_alive(str(enemy["id"]), game_state):
+        units_cache = require_key(game_state, "units_cache")
+        for unit_id, cache_entry in units_cache.items():
+            if cache_entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(unit_id, game_state)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
                 if has_line_of_sight(temp_unit, enemy, game_state):
                     # Check if in range
                     enemy_col, enemy_row = require_unit_position(enemy, game_state)
@@ -1865,7 +1926,6 @@ class RewardCalculator:
         if not selected_weapon:
             return 0.0
         
-        from shared.data_validation import require_key
         num_attacks = require_key(selected_weapon, "NB")
 
         # Calculate attacks_needed and VALUE for each target
@@ -1926,12 +1986,17 @@ class RewardCalculator:
         my_value = unit["VALUE"]
 
         # Get all living friendly units
-        friendlies = [u for u in game_state["units"]
-                     if u["player"] == my_player and is_unit_alive(str(u["id"]), game_state)]
-
-        # Get all living enemy units
-        enemies = [u for u in game_state["units"]
-                  if u["player"] != my_player and is_unit_alive(str(u["id"]), game_state)]
+        units_cache = require_key(game_state, "units_cache")
+        friendlies = []
+        enemies = []
+        for unit_id, cache_entry in units_cache.items():
+            unit_entry = get_unit_by_id(unit_id, game_state)
+            if not unit_entry:
+                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            if cache_entry["player"] == my_player:
+                friendlies.append(unit_entry)
+            else:
+                enemies.append(unit_entry)
 
         if not enemies:
             return 0.0
@@ -2067,8 +2132,12 @@ class RewardCalculator:
 
         # PERFORMANCE: Pre-compute occupied positions once for this BFS
         # CRITICAL: Normalize coordinates to int to ensure consistent tuple comparison
-        occupied_positions = {require_unit_position(u, game_state) for u in game_state["units"]
-                             if is_unit_alive(str(u["id"]), game_state) and u["id"] != enemy["id"]}
+        units_cache = require_key(game_state, "units_cache")
+        occupied_positions = {
+            require_unit_position(get_unit_by_id(unit_id, game_state), game_state)
+            for unit_id, _cache_entry in units_cache.items()
+            if str(unit_id) != str(enemy["id"])
+        }
 
         # BFS to find reachable positions
         visited = {start_pos: 0}

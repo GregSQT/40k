@@ -10,6 +10,7 @@ import os
 import sys
 import json
 from typing import Dict, List, Optional, Tuple
+from shared.data_validation import require_key
 from stable_baselines3 import DQN
 from stable_baselines3.common.env_checker import check_env
 
@@ -154,8 +155,9 @@ class TrainingOrchestrator:
         """Estimate maximum steps per episode from config."""
         
         # Extract from game rules
-        max_turns = self.config.get('game_rules', {}).get('max_turns', 5)
-        max_units = len(self.config.get('units', []))
+        game_rules = require_key(self.config, 'game_rules')
+        max_turns = require_key(game_rules, 'max_turns')
+        max_units = len(require_key(self.config, 'units'))
         phases_per_turn = 4  # movement, shooting, charge, combat
         
         # Conservative estimate: each unit acts once per phase

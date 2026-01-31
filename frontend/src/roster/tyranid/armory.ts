@@ -26,6 +26,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 5,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   deathspitter: {
     display_name: "Deathspitter",
@@ -35,6 +36,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 5,
     AP: -1,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   venom_cannon: {
     display_name: "Venom Cannon",
@@ -44,6 +46,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 7,
     AP: -2,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   
   // Melee Weapons
@@ -54,6 +57,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 4,
     AP: -2,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   rending_claws_warrior: {
     display_name: "Rending Claws",
@@ -62,6 +66,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 5,
     AP: -1,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   rending_claws_prime: {
     display_name: "Rending Claws",
@@ -70,6 +75,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 6,
     AP: -2,
     DMG: 2,
+    WEAPON_RULES: [],
   },
   scything_talons: {
     display_name: "Scything Talons",
@@ -78,6 +84,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 3,
     AP: -1,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   flesh_hooks: {
     display_name: "Flesh Hooks",
@@ -86,6 +93,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 3,
     AP: 0,
     DMG: 1,
+    WEAPON_RULES: [],
   },
   monstrous_scything_talons: {
     display_name: "Monstrous Scything Talons",
@@ -94,6 +102,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 9,
     AP: -2,
     DMG: 3,
+    WEAPON_RULES: [],
   },
 };
 

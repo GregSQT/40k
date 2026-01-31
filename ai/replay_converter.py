@@ -20,6 +20,8 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
+from shared.data_validation import require_key
+
 # Import required modules for generate_steplog_and_replay
 from ai.step_logger import StepLogger
 from ai.training_utils import setup_imports
@@ -77,9 +79,10 @@ def convert_steplog_to_replay(steplog_path):
         json.dump(replay_data, f, indent=2, ensure_ascii=False)
     
     print(f"✅ Conversion complete: {output_file}")
-    print(f"   📊 {len(replay_data.get('combat_log', []))} combat log entries")
-    print(f"   🎯 {len(replay_data.get('game_states', []))} game state snapshots")
-    print(f"   🎮 {replay_data.get('game_info', {}).get('total_turns', 0)} turns")
+    print(f"   📊 {len(require_key(replay_data, 'combat_log'))} combat log entries")
+    print(f"   🎯 {len(require_key(replay_data, 'game_states'))} game state snapshots")
+    game_info = require_key(replay_data, 'game_info')
+    print(f"   🎮 {require_key(game_info, 'total_turns')} turns")
     
     return True
 
@@ -516,7 +519,7 @@ def convert_to_replay_format(steplog_data):
         unit_data = {
             'id': unit_id,
             'unit_type': scenario_unit['unit_type'],
-            'player': scenario_unit.get('player', 0),
+            'player': require_key(scenario_unit, 'player'),
             'col': final_col,  # Use FINAL position from steplog tracking
             'row': final_row   # Use FINAL position from steplog tracking
         }

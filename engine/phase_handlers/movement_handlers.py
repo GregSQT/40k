@@ -19,6 +19,7 @@ from engine.combat_utils import (
     is_hex_adjacent_to_enemy
 )
 from .shared_utils import (
+    ACTION, WAIT, NO, PASS, ERROR, MOVE, FLED,
     build_enemy_adjacent_hexes, update_units_cache_position, is_unit_alive,
     get_unit_position, require_unit_position,
 )
@@ -58,39 +59,10 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
     from .shooting_handlers import _target_pool_cache
     _target_pool_cache.clear()
     
-    # LOG TEMPORAIRE: Log invalidation (only if --debug)
-    if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
-        episode = game_state["episode_number"]
-        turn = game_state["turn"]
-        phase = game_state.get("phase", "?")
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
-        log_message = f"[POOL INVALIDATION] E{episode} T{turn} {phase}: All destination pools invalidated after movement"
-        from engine.game_utils import add_console_log
-        from engine.game_utils import safe_print
-        add_console_log(game_state, log_message)
-        safe_print(game_state, log_message)
-
 
 def _log_movement_debug(game_state: Dict[str, Any], function_name: str, unit_id: str, message: str) -> None:
-    """LOG TEMPORAIRE: Helper to log movement debug with episode/turn/phase (only if --debug)."""
-    if not game_state.get("debug_mode", False):
-        return
-    if "episode_number" not in game_state or "turn" not in game_state or "phase" not in game_state:
-        return  # Skip logging if not in training context
-    
-    episode = game_state["episode_number"]
-    turn = game_state["turn"]
-    phase = game_state["phase"]
-    
-    if "console_logs" not in game_state:
-        game_state["console_logs"] = []
-    
-    log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} {function_name} Unit {unit_id}: {message}"
-    from engine.game_utils import add_debug_log
-    from engine.game_utils import safe_print
-    add_debug_log(game_state, log_message)
-    safe_print(game_state, log_message)  # Also print to console for immediate visibility
+    """Helper to keep debug logging calls stable (no-op)."""
+    return
 
 
 def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -102,7 +74,7 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Pre-compute enemy_adjacent_hexes once at phase start for current player
     # Cache will be reused throughout the phase for all units
-    current_player = game_state.get("current_player", 1)
+    current_player = require_key(game_state, "current_player")
     build_enemy_adjacent_hexes(game_state, current_player)
     
     # Invalidate all destination pools at the START of the phase
@@ -131,7 +103,7 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
     AI_MOVE.md: Build activation pool with eligibility checks
     """
-    current_player = game_state.get("current_player", "N/A")
+    current_player = require_key(game_state, "current_player")
     # Clear pool before rebuilding (defense in depth)
     game_state["move_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
@@ -151,32 +123,27 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     eligible_units = []
     current_player = game_state["current_player"]
 
-    for unit in game_state["units"]:
-        unit_id = unit["id"]
-        
-        # unit alive? (units_cache is source of truth)
-        if not is_unit_alive(str(unit["id"]), game_state):
-            continue  # Dead unit (Skip, no log)
-
+    units_cache = require_key(game_state, "units_cache")
+    for unit_id, cache_entry in units_cache.items():
         # "unit.player === current_player?"
-        if unit["player"] != current_player:
+        if cache_entry["player"] != current_player:
             continue  # Wrong player (Skip, no log)
 
         # Check if unit has at least one adjacent hex that is not occupied and not adjacent to enemy
         # This ensures the unit can actually move
-        unit_col, unit_row = require_unit_position(unit, game_state)
+        unit_col, unit_row = require_unit_position(unit_id, game_state)
         neighbors = get_hex_neighbors(unit_col, unit_row)
         
         # Pre-compute occupied positions and enemy adjacent hexes for this check
         occupied_positions = set()
-        for u in game_state["units"]:
-            # Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
-            if is_unit_alive(str(u["id"]), game_state) and str(u["id"]) != str(unit["id"]):
-                col_int, row_int = require_unit_position(u, game_state)
-                occupied_positions.add((col_int, row_int))
+        for other_id in units_cache.keys():
+            if other_id == unit_id:
+                continue
+            col_int, row_int = require_unit_position(other_id, game_state)
+            occupied_positions.add((col_int, row_int))
         # Use cached enemy_adjacent_hexes from phase start
         # Cache is built once per phase in movement_phase_start()/shooting_phase_start()/charge_phase_start()
-        current_player = game_state.get("current_player")
+        current_player = require_key(game_state, "current_player")
         if current_player is None:
             raise KeyError("game_state missing required 'current_player' field")
         cache_key = f"enemy_adjacent_hexes_player_{current_player}"
@@ -215,7 +182,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             continue  # Unit cannot move (no valid adjacent hex)
 
         # Unit passes all conditions
-        eligible_units.append(unit["id"])
+        eligible_units.append(unit_id)
 
     # Log eligible units result
     _log_with_context(game_state, "MOVE DEBUG", f"get_eligible_units: eligible={eligible_units} count={len(eligible_units)}")
@@ -332,10 +299,10 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             # AI_TURN.md EXACT: Invalid actions [shoot, charge, attack] → end_activation(ERROR, 0, PASS, MOVE, 1, 1)
             result = end_activation(
                 game_state, active_unit,
-                "ERROR",       # Arg1: ERROR (not SKIP)
+                ERROR,       # Arg1: ERROR (not SKIP)
                 0,             # Arg2: No step increment (error doesn't count as action)
-                "PASS",        # Arg3: PASS tracking
-                "MOVE",        # Arg4: Remove from move pool
+                PASS,        # Arg3: PASS tracking
+                MOVE,        # Arg4: Remove from move pool
                 1              # Arg5: Error logging enabled
             )
             result["invalid_action_penalty"] = True
@@ -413,10 +380,10 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
         movement_clear_preview(game_state)
         result = end_activation(
             game_state, unit,
-            "NO",         # Arg1: NO (no action taken)
+            NO,         # Arg1: NO (no action taken)
             0,            # Arg2: No step increment (no action)
-            "PASS",       # Arg3: PASS tracking
-            "MOVE",       # Arg4: Remove from move_activation_pool
+            PASS,       # Arg3: PASS tracking
+            MOVE,       # Arg4: Remove from move_activation_pool
             1             # Arg5: Error logging enabled
         )
         result.update({
@@ -486,21 +453,18 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     phase = game_state.get("phase", "move")
     
     # Check all units for occupation
-    for check_unit in game_state["units"]:
-        check_pos = get_unit_position(check_unit, game_state)
-        if check_pos is None:
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    for other_id in units_cache.keys():
+        if other_id == unit_id_str:
             continue
-        check_col, check_row = check_pos
+        check_col, check_row = require_unit_position(other_id, game_state)
         
-        # Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
-        if (str(check_unit["id"]) != str(unit["id"]) and
-            is_unit_alive(str(check_unit["id"]), game_state) and
-            check_col == dest_col_int and
-            check_row == dest_row_int):
+        if check_col == dest_col_int and check_row == dest_row_int:
             # Another unit already occupies this destination - prevent collision
             if "console_logs" not in game_state:
                 game_state["console_logs"] = []
-            log_msg = f"[MOVE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot move to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_unit['id']}"
+            log_msg = f"[MOVE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot move to ({dest_col_int},{dest_row_int}) - occupied by Unit {other_id}"
             from engine.game_utils import add_console_log, safe_print
             add_console_log(game_state, log_msg)
             safe_print(game_state, log_msg)
@@ -509,7 +473,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
             logging.info(log_msg)
             return False, {
                 "error": "destination_occupied",
-                "occupant_id": check_unit["id"],
+                "occupant_id": other_id,
                 "destination": (dest_col_int, dest_row_int)
             }
 
@@ -608,15 +572,16 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
                 game_state["console_logs"] = []
             # Also check which enemies make this hex adjacent
             adjacent_enemies = []
-            for enemy in game_state["units"]:
+            units_cache = require_key(game_state, "units_cache")
+            unit_player = int(unit["player"]) if unit["player"] is not None else None
+            for enemy_id, cache_entry in units_cache.items():
                 # Normalize player values to int for consistent comparison (handles int/string mismatches)
-                enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
-                unit_player = int(unit["player"]) if unit["player"] is not None else None
-                if enemy_player != unit_player and is_unit_alive(str(enemy["id"]), game_state):
-                    enemy_col, enemy_row = require_unit_position(enemy, game_state)
+                enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+                if enemy_player != unit_player:
+                    enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
                     neighbors = get_hex_neighbors(enemy_col, enemy_row)
                     if (col_int, row_int) in neighbors:
-                        adjacent_enemies.append(f"Unit {enemy['id']} at ({enemy_col},{enemy_row})")
+                        adjacent_enemies.append(f"Unit {enemy_id} at ({enemy_col},{enemy_row})")
             log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} is_valid_destination: hex ({col_int},{row_int}) INVALID - adjacent to enemy (in enemy_adjacent_hexes) enemies={adjacent_enemies}"
             from engine.game_utils import add_console_log, safe_print
             add_console_log(game_state, log_message)
@@ -646,25 +611,27 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     result = False
     if cc_range == 1:
         hex_neighbors = set(get_hex_neighbors(unit_col, unit_row))
-        for enemy in game_state["units"]:
+        units_cache = require_key(game_state, "units_cache")
+        unit_player = int(unit["player"]) if unit["player"] is not None else None
+        for enemy_id, cache_entry in units_cache.items():
             # Normalize player values to int for consistent comparison (handles int/string mismatches)
-            enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
-            unit_player = int(unit["player"]) if unit["player"] is not None else None
-            if enemy_player != unit_player and is_unit_alive(str(enemy["id"]), game_state):
+            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+            if enemy_player != unit_player:
                 # Normalize coordinates to int - raises error if invalid
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
                 enemy_pos = (enemy_col, enemy_row)
                 if enemy_pos in hex_neighbors:
                     result = True
                     break
     else:
         # For longer ranges, use proper hex distance calculation
-        for enemy in game_state["units"]:
+        units_cache = require_key(game_state, "units_cache")
+        unit_player = int(unit["player"]) if unit["player"] is not None else None
+        for enemy_id, cache_entry in units_cache.items():
             # Normalize player values to int for consistent comparison (handles int/string mismatches)
-            enemy_player = int(enemy["player"]) if enemy["player"] is not None else None
-            unit_player = int(unit["player"]) if unit["player"] is not None else None
-            if enemy_player != unit_player and is_unit_alive(str(enemy["id"]), game_state):
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+            if enemy_player != unit_player:
+                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
                 hex_dist = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
                 if hex_dist <= cc_range:
                     result = True
@@ -731,7 +698,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     # Use cached enemy_adjacent_hexes from phase start
     # Cache is built once per phase in movement_phase_start()/shooting_phase_start()/charge_phase_start()
     # This reduces O(n) per hex check to O(1) set lookup
-    current_player = game_state.get("current_player")
+    current_player = require_key(game_state, "current_player")
     if current_player is None:
         raise KeyError("game_state missing required 'current_player' field")
     
@@ -746,33 +713,33 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     # Rebuild occupied_positions at the START of BFS to ensure it's current
     # This is done at the start of unit activation, so no other unit can move during this activation
     occupied_positions = set()
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
     units_processed = 0
     units_skipped = 0
-    for u in game_state["units"]:
+    for other_id in units_cache.keys():
         units_processed += 1
-        # Normalize unit IDs to strings for consistent comparison (handles int/string mismatches)
-        if is_unit_alive(str(u["id"]), game_state) and str(u["id"]) != str(unit["id"]):
+        if other_id != unit_id_str:
             # Normalize coordinates - raises clear error if invalid (no defensive try/except)
-            col_int, row_int = require_unit_position(u, game_state)
+            col_int, row_int = require_unit_position(other_id, game_state)
             occupied_positions.add((col_int, row_int))
     
     # DEBUG: Log all units and their positions for collision debugging
     if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state:
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
-        total_units = len(game_state["units"])
-        active_units = sum(1 for u in game_state["units"] if is_unit_alive(str(u["id"]), game_state))
+        total_units = len(units_cache)
+        active_units = total_units
         occupied_count = len(occupied_positions)
-        expected_count = active_units - (1 if is_unit_alive(str(unit["id"]), game_state) else 0)  # Minus the active unit itself
+        expected_count = active_units - (1 if unit_id_str in units_cache else 0)  # Minus the active unit itself
         
         # Log all units and their positions
         units_info = []
-        for u in game_state["units"]:
-            if is_unit_alive(str(u["id"]), game_state):
-                # Normalize coordinates - raises clear error if invalid (no defensive try/except)
-                col_int, row_int = require_unit_position(u, game_state)
-                in_occupied = (col_int, row_int) in occupied_positions
-                units_info.append(f"Unit {u['id']}@({col_int},{row_int}){'✓' if in_occupied else '✗'}")
+        for other_id in units_cache.keys():
+            # Normalize coordinates - raises clear error if invalid (no defensive try/except)
+            col_int, row_int = require_unit_position(other_id, game_state)
+            in_occupied = (col_int, row_int) in occupied_positions
+            units_info.append(f"Unit {other_id}@({col_int},{row_int}){'✓' if in_occupied else '✗'}")
         
         from engine.game_utils import add_console_log, safe_print
         log_msg = f"[OCCUPIED_POSITIONS] E{episode} T{turn} Unit {unit['id']}: total={total_units}, active={active_units}, occupied={occupied_count}, expected={expected_count}, units={','.join(units_info[:10])}"
@@ -836,16 +803,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     game_state["valid_move_destinations_pool"] = valid_destinations
 
-    # LOG TEMPORAIRE: One summary line for build_valid_destinations (only if --debug)
-    if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        phase = game_state.get("phase", "move")
-        from engine.game_utils import add_console_log, safe_print
-        log_msg = f"[POOL DEBUG] E{episode} T{turn} {phase} Unit {unit_id}: blocked_enemy_adjacent={blocked_enemy_adjacent_count}, occupied={len(occupied_positions)}, valid_destinations={len(valid_destinations)}"
-        add_console_log(game_state, log_msg)
-        safe_print(game_state, log_msg)
-
     _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)}")
 
     return valid_destinations
@@ -887,9 +844,11 @@ def _select_strategic_destination(
     if not valid_destinations:
         return require_unit_position(unit, game_state)
 
-    # Get enemy units
-    enemy_units = [u for u in game_state["units"]
-                   if u["player"] != unit["player"] and is_unit_alive(str(u["id"]), game_state)]
+    # Get enemy units (units_cache = source of truth for living units)
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    enemy_units = [enemy_id for enemy_id, cache_entry in units_cache.items()
+                   if int(cache_entry["player"]) != unit_player]
 
     # If no enemies, just pick first destination
     if not enemy_units:
@@ -902,8 +861,8 @@ def _select_strategic_destination(
 
         for dest in valid_destinations:
             # Find distance to nearest enemy from this destination
-            for enemy in enemy_units:
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+            for enemy_id in enemy_units:
+                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_enemy:
                     min_dist_to_enemy = dist
@@ -920,8 +879,8 @@ def _select_strategic_destination(
 
         for dest in valid_destinations:
             targets_in_range = 0
-            for enemy in enemy_units:
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+            for enemy_id in enemy_units:
+                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist <= weapon_range:
                     # Check LoS (simplified - assumes LoS if in range for now)
@@ -941,8 +900,8 @@ def _select_strategic_destination(
         for dest in valid_destinations:
             # Find distance to nearest enemy (we want to maximize this)
             min_dist_to_any_enemy = float('inf')
-            for enemy in enemy_units:
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+            for enemy_id in enemy_units:
+                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_any_enemy:
                     min_dist_to_any_enemy = dist
@@ -1172,13 +1131,13 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     # End activation with position data for reward calculation
     # AI_TURN.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
-    action_type = "FLED" if was_adjacent else "MOVE"
+    action_type = FLED if was_adjacent else MOVE
     result = end_activation(
         game_state, unit,
-        "ACTION",      # Arg1: Log the action (movement already logged)
+        ACTION,      # Arg1: Log the action (movement already logged)
         1,             # Arg2: +1 step increment
         action_type,   # Arg3: MOVE or FLED tracking
-        "MOVE",        # Arg4: Remove from move_activation_pool
+        MOVE,        # Arg4: Remove from move_activation_pool
         1              # Arg5: No error logging
     )
 
@@ -1236,10 +1195,10 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
         # AI_TURN.md EXACT: end_activation(WAIT, 1, PASS, MOVE, 1, 1)
         result = end_activation(
             game_state, unit,
-            "WAIT",        # Arg1: Log wait action (SINGLE SOURCE)
+            WAIT,        # Arg1: Log wait action (SINGLE SOURCE)
             1,             # Arg2: +1 step increment
-            "PASS",        # Arg3: PASS tracking (not MOVE)
-            "MOVE",        # Arg4: Remove from move_activation_pool
+            PASS,        # Arg3: PASS tracking (not MOVE)
+            MOVE,        # Arg4: Remove from move_activation_pool
             1              # Arg5: Error logging enabled
         )
         result.update({
@@ -1251,10 +1210,10 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
         # AI_TURN.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1) - no step (unit could not act)
         result = end_activation(
             game_state, unit,
-            "NO",         # Arg1: NO (no action taken)
+            NO,         # Arg1: NO (no action taken)
             0,            # Arg2: No step increment
-            "PASS",       # Arg3: PASS tracking
-            "MOVE",       # Arg4: Remove from move_activation_pool
+            PASS,       # Arg3: PASS tracking
+            MOVE,       # Arg4: Remove from move_activation_pool
             1             # Arg5: Error logging enabled
         )
         result.update({
@@ -1282,7 +1241,7 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "phase_complete": True,
         "next_phase": "shoot",
-        "units_processed": len([u for u in game_state["units"] if str(u["id"]) in game_state["units_moved"]])
+        "units_processed": len([uid for uid in require_key(game_state, "units_cache").keys() if uid in game_state["units_moved"]])
     }
 
 

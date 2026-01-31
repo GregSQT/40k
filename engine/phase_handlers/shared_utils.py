@@ -297,7 +297,7 @@ def get_hp_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[int]
     entry = get_unit_from_cache(str(unit_id), game_state)
     if entry is None:
         return None
-    return entry.get("HP_CUR", 0)
+    return require_key(entry, "HP_CUR")
 
 
 def require_hp_from_cache(unit_id: str, game_state: Dict[str, Any]) -> int:
@@ -347,9 +347,13 @@ def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]
     """Check if any friendly melee unit can charge this target."""
     current_player = game_state["current_player"]
     
-    for unit in game_state["units"]:
-        if (unit["player"] == current_player and 
-            is_unit_alive(str(unit["id"]), game_state)):
+    units_cache = require_key(game_state, "units_cache")
+    unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+    for unit_id, entry in units_cache.items():
+        unit = unit_by_id.get(str(unit_id))
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        if entry["player"] == current_player:
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has melee weapons
             from engine.utils.weapon_helpers import get_selected_melee_weapon
             has_melee = False
@@ -366,7 +370,10 @@ def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]
                 distance = calculate_hex_distance(*unit_pos, *target_pos)
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                max_charge = unit["MOVE"] + 7  # Average 2d6 = 7
+                config = require_key(game_state, "config")
+                game_rules = require_key(config, "game_rules")
+                avg_charge_roll = require_key(game_rules, "avg_charge_roll")
+                max_charge = unit["MOVE"] + avg_charge_roll
                 if distance <= max_charge:
                     return True
     
@@ -499,24 +506,13 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist (call build_units_cache at reset)")
     
-    # LOG TEMPORAIRE: Log build_enemy_adjacent_hexes call (only if --debug)
-    debug_mode_val = game_state.get("debug_mode", False)
-    if debug_mode_val:
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        phase = game_state.get("phase", "?")
-        test_log = f"[DEBUG TEST] build_enemy_adjacent_hexes called: episode={episode}, turn={turn}, phase={phase}, player={player}"
-        game_state["console_logs"].append(test_log)
-    
     enemy_adjacent_hexes = set()
     alive_enemy_count = 0  # For debug summary only
     player_int = int(player) if player is not None else None
 
     # Iterate over units_cache (only living enemies: HP_CUR > 0)
     for unit_id, entry in game_state["units_cache"].items():
-        if entry.get("HP_CUR", 0) <= 0:
+        if require_key(entry, "HP_CUR") <= 0:
             continue  # Skip dead units
         enemy_player = entry["player"]
         
@@ -535,20 +531,6 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
                 neighbor_col < game_state.get("board_cols", 999999) and
                 neighbor_row < game_state.get("board_rows", 999999)):
                 enemy_adjacent_hexes.add((neighbor_col, neighbor_row))
-
-    # LOG TEMPORAIRE: One-line summary for build_enemy_adjacent_hexes (only if --debug)
-    should_log = game_state.get("debug_mode", False)
-    if should_log:
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        phase = game_state.get("phase", "?")
-        if "console_logs" not in game_state:
-            game_state["console_logs"] = []
-        log_message = f"[MOVE DEBUG] E{episode} T{turn} {phase} build_enemy_adjacent_hexes player={player}: hexes={len(enemy_adjacent_hexes)}, alive_enemies={alive_enemy_count}"
-        from engine.game_utils import add_console_log
-        from engine.game_utils import safe_print
-        add_console_log(game_state, log_message)
-        safe_print(game_state, log_message)
 
     # Store result in game_state cache for reuse during phase
     cache_key = f"enemy_adjacent_hexes_player_{player}"

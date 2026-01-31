@@ -11,6 +11,7 @@ import numpy as np
 import sys
 import os
 from typing import Dict, Any, Tuple
+from shared.data_validation import require_key
 
 # Fix import paths for your project structure
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -94,7 +95,7 @@ class W40KGymEnv(gym.Env):
     
     def _get_active_unit(self) -> Dict[str, Any]:
         """Get active unit from engine."""
-        pool = self.engine.game_state.get("move_activation_pool", [])
+        pool = require_key(self.engine.game_state, "move_activation_pool")
         if pool:
             return self.engine._get_unit_by_id(pool[0])
         return None

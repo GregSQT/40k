@@ -165,8 +165,12 @@ game_state ← Single authoritative object
 
 **Field Categories:**
 - **Movement**: MOVE, col, row
-- **Shooting**: RNG_WEAPONS[], selectedRngWeaponIndex, SHOOT_LEFT
+- **Shooting**: RNG_WEAPONS[], selectedRngWeaponIndex, SHOOT_LEFT  
+  - `RNG_WEAPON_CODES` est **obligatoire** dans les définitions d’unités (même `[]` si aucune arme).
+  - `RNG_WEAPONS` est **toujours présent** en runtime (liste vide autorisée).
 - **Fight**: CC_WEAPONS[], selectedCcWeaponIndex, ATTACK_LEFT  
+  - `CC_WEAPON_CODES` est **obligatoire** dans les définitions d’unités (même `[]` si aucune arme).
+  - `CC_WEAPONS` est **toujours présent** en runtime (liste vide autorisée).
 - **Defense**: HP_CUR, HP_MAX, T, ARMOR_SAVE, INVUL_SAVE
 
 **⚠️ MULTIPLE_WEAPONS_IMPLEMENTATION.md**: Units now have weapon arrays instead of single weapon fields. Use `engine.utils.weapon_helpers` functions to access weapon data.
@@ -1752,13 +1756,13 @@ For each unit
 
 ### Charge Timing Logic
 
-**When 2d6 is Rolled**: Immediately when unit is selected by its player
+**When 2d6 is Rolled**: Immediately after target selection by the player/agent
 **Charge roll duration**: The charge roll value is discarded at the end of the unit's activation
 
 ### Charge Distance Logic
 
 **2D6 Roll System:**
-- **When rolled**: When unit becomes eligible for charge (not when action chosen)
+- **When rolled**: After target selection (not when unit becomes eligible)
 - **Distance determination**: Roll determines how far unit can charge this activation
 - **Variability purpose**: Adds uncertainty and risk to charge decisions
 

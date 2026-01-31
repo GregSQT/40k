@@ -37,9 +37,10 @@ L'autonomie est secondaire.
 - Une seule hypothèse à la fois.
 - Attendre confirmation avant de continuer.
 
-3. UNE SEULE MODIFICATION PAR ITÉRATION
-- Une réponse = une modification ciblée.
-- Si cette modification échoue, STOP et demander instruction.
+3. SCOPE DE MODIFICATION PAR ITÉRATION
+- Par défaut : Une réponse = une modification ciblée.
+  - Si cette modification échoue, STOP et demander instruction.
+- Si l'utilisateur le demande, on peut procéder à la modification d'un fichier complet par itération
 
 4. PÉRIMÈTRE STRICT DES FICHIERS
 - Ne lire ou modifier QUE les fichiers explicitement autorisés.

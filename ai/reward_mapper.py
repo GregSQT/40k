@@ -7,6 +7,7 @@ using existing parameter unitTypes from rewards_config.json
 from typing import Dict, List, Any, Tuple
 from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage, get_selected_ranged_weapon, get_selected_melee_weapon
 from engine.phase_handlers.shared_utils import get_hp_from_cache
+from shared.data_validation import require_key
 
 class RewardMapper:
     """Maps AI_GAME_OVERVIEW.md tactical priorities to existing reward parameters."""
@@ -42,12 +43,12 @@ class RewardMapper:
             weapon = get_selected_ranged_weapon(unit)
             if not weapon:
                 return False
-            max_damage = weapon.get("NB", 0) * weapon.get("DMG", 0)
+            max_damage = require_key(weapon, "NB") * require_key(weapon, "DMG")
         else:
             weapon = get_selected_melee_weapon(unit)
             if not weapon:
                 return False
-            max_damage = weapon.get("NB", 0) * weapon.get("DMG", 0)
+            max_damage = require_key(weapon, "NB") * require_key(weapon, "DMG")
         
         return target_hp <= max_damage
     
@@ -70,7 +71,7 @@ class RewardMapper:
            - can be killed by active unit in 1 shooting phase
         """
         unit_rewards = self._get_unit_rewards(unit)
-        base_actions = unit_rewards.get("base_actions", {})
+        base_actions = require_key(unit_rewards, "base_actions")
         if "ranged_attack" not in base_actions:
             raise ValueError("ranged_attack reward not found in unit rewards config")
         base_reward = base_actions["ranged_attack"]
@@ -117,7 +118,7 @@ class RewardMapper:
         1. Enemy with highest threat score, highest current HP, can be killed in 1 melee phase
         """
         unit_rewards = self._get_unit_rewards(unit)
-        base_actions = unit_rewards.get("base_actions", {})
+        base_actions = require_key(unit_rewards, "base_actions")
         if "charge_success" not in base_actions:
             raise ValueError("charge_success reward not found in unit rewards config")
         base_reward = base_actions["charge_success"]
@@ -131,28 +132,30 @@ class RewardMapper:
         if unit["is_melee"]:  # Melee unit charge priorities
             # Priority 1: Can kill in 1 melee phase
             if can_kill_1_phase and self._is_highest_threat_in_range(target, all_targets):
-                return base_reward + unit_rewards.get("charge_priority_1", 0)
+                return base_reward + require_key(unit_rewards, "charge_priority_1")
 
             # Priority 2: High threat, low HP, HP >= unit's damage
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use melee weapon damage
             melee_weapon = get_selected_melee_weapon(unit)
-            unit_melee_dmg = (melee_weapon.get("NB", 0) * melee_weapon.get("DMG", 0)) if melee_weapon else 0
+            if not melee_weapon:
+                raise ValueError("Selected melee weapon is required for melee charge priority calculation")
+            unit_melee_dmg = require_key(melee_weapon, "NB") * require_key(melee_weapon, "DMG")
             target_hp = self._get_target_hp(target, game_state)
             if (target_hp >= unit_melee_dmg and
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets, game_state)):
-                return base_reward + unit_rewards.get("charge_priority_2", 0)
+                return base_reward + require_key(unit_rewards, "charge_priority_2")
 
             # Priority 3: High threat, lowest HP
             if (self._is_highest_threat_in_range(target, all_targets) and
                 self._is_lowest_hp_among_threats(target, all_targets, game_state)):
-                return base_reward + unit_rewards.get("charge_priority_3", 0)
+                return base_reward + require_key(unit_rewards, "charge_priority_3")
 
         else:  # Ranged unit charge priorities (different logic)
             if (can_kill_1_phase and
                 self._is_highest_threat_in_range(target, all_targets) and
                 self._is_highest_hp_among_threats(target, all_targets, game_state)):
-                return base_reward + unit_rewards.get("charge_priority_1", 0)
+                return base_reward + require_key(unit_rewards, "charge_priority_1")
 
         return base_reward
     
@@ -164,7 +167,7 @@ class RewardMapper:
         2. Enemy with highest threat score, if multiple then lowest current HP
         """
         unit_rewards = self._get_unit_rewards(unit)
-        base_actions = unit_rewards.get("base_actions", {})
+        base_actions = require_key(unit_rewards, "base_actions")
         if "melee_attack" not in base_actions:
             raise ValueError("melee_attack reward not found in unit rewards config")
         base_reward = base_actions["melee_attack"]
@@ -174,13 +177,13 @@ class RewardMapper:
 
         # Priority 1: Can kill in 1 melee phase with highest threat
         if can_kill_1_phase and self._is_highest_threat_adjacent(target, all_targets):
-            priority_bonus = unit_rewards.get("attack_priority_1", 0)
+            priority_bonus = require_key(unit_rewards, "attack_priority_1")
             return base_reward + priority_bonus
 
         # Priority 2: Highest threat, lowest HP if multiple high threats
         if (self._is_highest_threat_adjacent(target, all_targets) and
             self._is_lowest_hp_among_adjacent_threats(target, all_targets, game_state)):
-            priority_bonus = unit_rewards.get("attack_priority_2", 0)
+            priority_bonus = require_key(unit_rewards, "attack_priority_2")
             return base_reward + priority_bonus
 
         return base_reward
@@ -193,7 +196,7 @@ class RewardMapper:
         if target_hp - damage_dealt <= 0:  # Target will be killed
             phase = self._get_current_phase()
             
-            result_bonuses = unit_rewards.get("result_bonuses", {})
+            result_bonuses = require_key(unit_rewards, "result_bonuses")
             if phase == "shoot":
                 if "kill_target" not in result_bonuses:
                     raise ValueError("kill_target reward not found in unit rewards config")
@@ -249,30 +252,24 @@ class RewardMapper:
             tuple: (reward_value, action_name) where action_name is the reward config key
         """
         unit_rewards = self._get_unit_rewards(unit)
-        base_actions = unit_rewards.get("base_actions", {})
+        base_actions = require_key(unit_rewards, "base_actions")
         
-        # Base advance reward (should be defined in rewards_config.json)
-        # Default to move_close reward if advance not specifically defined
-        if "advance" in base_actions:
-            base_reward = base_actions["advance"]
-            action_name = "advance"
-        else:
-            # Fallback: advance is similar to aggressive movement but during shooting
-            base_reward = base_actions.get("move_close", 0.1)
-            action_name = "advance_fallback"
+        # Base advance reward (required in rewards_config.json)
+        base_reward = require_key(base_actions, "advance")
+        action_name = "advance"
         
         total_reward = base_reward
         
         # Tactical bonuses for advance
-        tactical_bonuses = unit_rewards.get("tactical_bonuses", {})
+        tactical_bonuses = require_key(unit_rewards, "tactical_bonuses")
         
         # Bonus: Advanced closer to enemies (aggressive positioning)
         if tactical_context.get("moved_closer"):
-            total_reward += tactical_bonuses.get("advanced_closer", 0.1)
+            total_reward += require_key(tactical_bonuses, "advanced_closer")
         
         # Bonus: Advanced to better cover position
         if tactical_context.get("moved_to_cover"):
-            total_reward += tactical_bonuses.get("advanced_to_cover", 0.1)
+            total_reward += require_key(tactical_bonuses, "advanced_to_cover")
         
         # Penalty: Advanced away from enemies (usually suboptimal)
         if tactical_context.get("moved_away"):
@@ -288,7 +285,7 @@ class RewardMapper:
         """
         unit_rewards = self._get_unit_rewards(unit)
         base_actions = unit_rewards["base_actions"]
-        tactical_bonuses = unit_rewards.get("tactical_bonuses", {})
+        tactical_bonuses = require_key(unit_rewards, "tactical_bonuses")
         
         if unit.get("is_ranged", False):
             # CHANGE 3: Base movement reward (unchanged)
@@ -315,19 +312,19 @@ class RewardMapper:
             
             # Bonus 1: Gained LoS on priority target (+0.2)
             if tactical_context.get("gained_los_on_priority_target"):
-                total_reward += tactical_bonuses.get("gained_los_on_target", 0.2)
+                total_reward += require_key(tactical_bonuses, "gained_los_on_target")
             
             # Bonus 2: Moved to cover from enemies (+0.15)
             if tactical_context.get("moved_to_cover_from_enemies"):
-                total_reward += tactical_bonuses.get("moved_to_cover", 0.15)
+                total_reward += require_key(tactical_bonuses, "moved_to_cover")
             
             # Bonus 3: Safe from enemy charges (+0.1)
             if tactical_context.get("safe_from_enemy_charges"):
-                total_reward += tactical_bonuses.get("safe_from_charges", 0.1)
+                total_reward += require_key(tactical_bonuses, "safe_from_charges")
             
             # Bonus 4: Safe from enemy ranged (+0.05 - secondary benefit)
             if tactical_context.get("safe_from_enemy_ranged"):
-                total_reward += tactical_bonuses.get("safe_from_ranged", 0.05)
+                total_reward += require_key(tactical_bonuses, "safe_from_ranged")
             
             return (total_reward, action_name)
         else:
@@ -375,7 +372,7 @@ class RewardMapper:
     def _get_target_type_bonus(self, unit: Dict[str, Any], target: Dict[str, Any]) -> float:
         """Calculate target type bonus based on unit's attack preference vs target's characteristics."""
         unit_rewards = self._get_unit_rewards(unit)
-        target_bonuses = unit_rewards.get("target_type_bonuses", {})
+        target_bonuses = require_key(unit_rewards, "target_type_bonuses")
         
         # Parse both unit and target types
         unit_parsed = self._parse_unit_type(unit.get("unitType", ""))

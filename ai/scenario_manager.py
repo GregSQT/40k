@@ -15,6 +15,8 @@ from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from collections import defaultdict
 
+from shared.data_validation import require_key
+
 units_per_player_setup = 2
 
 # Fix import paths - Add both script dir and project root
@@ -423,8 +425,8 @@ class ScenarioManager:
         history_key = (agent1, agent2)
         reverse_key = (agent2, agent1)
         
-        history_count = len(self.training_history.get(history_key, []))
-        reverse_count = len(self.training_history.get(reverse_key, []))
+        history_count = len(self.training_history[history_key])
+        reverse_count = len(self.training_history[reverse_key])
         total_history = history_count + reverse_count
         
         # Prioritize less-trained matchups
@@ -539,7 +541,7 @@ class ScenarioManager:
         faction_episodes = defaultdict(int)
         for agent in self.available_agents:
             faction = agent.split('_')[0]
-            faction_episodes[faction] += balance_analysis["episode_distribution"].get(agent, 0)
+            faction_episodes[faction] += require_key(balance_analysis["episode_distribution"], agent)
         
         balance_analysis["faction_balance"] = dict(faction_episodes)
         

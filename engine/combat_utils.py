@@ -423,12 +423,14 @@ def calculate_wound_target(strength: int, toughness: int) -> int:
 def has_valid_shooting_targets(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
         """Check if unit has valid shooting targets per AI_TURN.md restrictions."""
         from engine.phase_handlers import shooting_handlers
-        from engine.phase_handlers.shared_utils import is_unit_alive
-        for enemy in game_state["units"]:
-            if (enemy["player"] != unit["player"] and 
-                is_unit_alive(str(enemy["id"]), game_state) and
-                shooting_handlers._is_valid_shooting_target(game_state, unit, enemy)):
-                return True
+        units_cache = require_key(game_state, "units_cache")
+        for unit_id, entry in units_cache.items():
+            if entry["player"] != unit["player"]:
+                enemy = get_unit_by_id(game_state, unit_id)
+                if not enemy:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                if shooting_handlers._is_valid_shooting_target(game_state, unit, enemy):
+                    return True
         return False
 
 

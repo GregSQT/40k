@@ -240,8 +240,8 @@ def validate_weapon_rules_field(weapon: Dict[str, Any], registry: WeaponRulesReg
     Raises:
         ConfigurationError: If WEAPON_RULES field is invalid
     """
-    # WEAPON_RULES is optional - empty array if not present
-    rule_strings = weapon.get("WEAPON_RULES", [])  # get allowed
+    # WEAPON_RULES is required (use [] if none)
+    rule_strings = require_key(weapon, "WEAPON_RULES")
     
     # Validate field type
     if not isinstance(rule_strings, list):
@@ -289,7 +289,7 @@ class WeaponRulesApplier:
             Phase 2 implementation - specific rule logic to be added.
         """
         # Parse weapon rules
-        parsed_rules = weapon.get("_parsed_rules", [])  # get allowed
+        parsed_rules = require_key(weapon, "_parsed_rules")
         
         # Apply each rule in order
         for rule in parsed_rules:

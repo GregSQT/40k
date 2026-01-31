@@ -11,6 +11,8 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import time
 import builtins
 
+from shared.data_validation import require_key
+
 __all__ = ['StepLogger']
 
 class StepLogger:
@@ -58,7 +60,7 @@ class StepLogger:
         if self.debug_mode and action_type == "move" and action_details:
             try:
                 with open("debug.log", "a") as f:
-                    f.write(f"[STEP_LOGGER log_action CALLED] ID={call_id} Unit {unit_id}: enabled={self.enabled} unit_with_coords={action_details.get('unit_with_coords', 'N/A')} end_pos={action_details.get('end_pos', 'N/A')} col={action_details.get('col', 'N/A')} row={action_details.get('row', 'N/A')}\n")
+                    f.write(f"[STEP_LOGGER log_action CALLED] ID={call_id} Unit {unit_id}: enabled={self.enabled} unit_with_coords={action_details.get('unit_with_coords')} end_pos={action_details.get('end_pos')} col={action_details.get('col')} row={action_details.get('row')}\n")
             except Exception:
                 pass
         
@@ -90,13 +92,6 @@ class StepLogger:
             # Format message using gameLogUtils.ts style
             message = self._format_replay_style_message(unit_id, action_type, action_details)
             
-            # LOG TEMPORAIRE: Log message just before writing to step.log (only if --debug)
-            if self.debug_mode and action_type == "move":
-                try:
-                    with open("debug.log", "a") as f_debug:
-                        f_debug.write(f"[STEP_LOGGER BEFORE WRITE] ID={call_id} Unit {unit_id}: message={message} unit_with_coords={action_details.get('unit_with_coords', 'N/A') if action_details else 'N/A'}\n")
-                except Exception:
-                    pass
             
             # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
             step_status = "STEP: YES" if step_increment else "STEP: NO"
@@ -104,7 +99,9 @@ class StepLogger:
             phase_upper = phase.upper()
             
             # Get turn and episode from SINGLE SOURCE OF TRUTH
-            turn_number = action_details.get('current_turn', 1) if action_details else 1
+            if action_details is None:
+                raise ValueError("action_details is required to log current_turn")
+            turn_number = require_key(action_details, 'current_turn')
             # Use self.episode_number which is updated in log_episode_start()
             episode_number = self.episode_number
             # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
@@ -194,8 +191,11 @@ class StepLogger:
                 if objectives:
                     obj_strs = []
                     for obj in objectives:
-                        name = obj.get("name", f"Obj{obj.get('id', '?')}")
-                        hexes = obj.get("hexes", [])
+                        if "name" in obj:
+                            name = obj["name"]
+                        else:
+                            name = f"Obj{require_key(obj, 'id')}"
+                        hexes = require_key(obj, "hexes")
                         hex_coords = ";".join([f"({h[0]},{h[1]})" for h in hexes])
                         obj_strs.append(f"{name}:{hex_coords}")
                     f.write(f"[{timestamp}] Objectives: {'|'.join(obj_strs)}\n")
@@ -204,19 +204,12 @@ class StepLogger:
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:
-                    unit_type = unit.get("unitType", "Unknown")
+                    unit_type = require_key(unit, "unitType")
                     player_name = f"P{unit['player']}"
                     f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}) {player_name}: Starting position ({unit['col']},{unit['row']})\n")
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
             
-            # LOG TEMPORAIRE: Write episode marker to debug.log for episode extraction (only if --debug)
-            if self.debug_mode:
-                try:
-                    with open("debug.log", "a") as f_debug:
-                        f_debug.write(episode_marker)
-                except Exception:
-                    pass  # Don't fail if debug.log write fails
                 
         except Exception as e:
             print(f"⚠️ Episode start logging error: {e}")
@@ -245,7 +238,7 @@ class StepLogger:
                 if self.debug_mode:
                     try:
                         with open("debug.log", "a") as f:
-                            f.write(f"[STEP_LOGGER DEBUG] Unit {unit_id}: unit_coords={unit_coords} start_pos=({start_col},{start_row}) end_pos=({end_col},{end_row}) unit_with_coords={details.get('unit_with_coords', 'N/A')} col={details.get('col', 'N/A')} row={details.get('row', 'N/A')}\n")
+                            f.write(f"[STEP_LOGGER DEBUG] Unit {unit_id}: unit_coords={unit_coords} start_pos=({start_col},{start_row}) end_pos=({end_col},{end_row}) unit_with_coords={details.get('unit_with_coords')} col={details.get('col')} row={details.get('row')}\n")
                     except Exception:
                         pass  # Don't fail if logging fails
                 base_msg = f"Unit {unit_id}{unit_coords} MOVED from ({start_col},{start_row}) to ({end_col},{end_row})"
@@ -286,7 +279,7 @@ class StepLogger:
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                advance_range = details.get("advance_range", 0)
+                advance_range = details.get("advance_range")
                 if advance_range is not None and advance_range > 0:
                     base_msg = f"Unit {unit_id}{unit_coords} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}]"
                 else:
@@ -342,7 +335,7 @@ class StepLogger:
             save_target = details["save_target"]
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
-            weapon_name = details.get("weapon_name", "")
+            weapon_name = details.get("weapon_name")
             target_coords = details.get("target_coords")
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             
@@ -447,9 +440,9 @@ class StepLogger:
 
         elif action_type == "charge_fail" and details:
             # Charge failed because roll was too low
-            target_id = details.get("target_id", "unknown")
+            target_id = require_key(details, "target_id")
             charge_roll = details.get("charge_roll")
-            charge_failed_reason = details.get("charge_failed_reason", "roll_too_low")
+            charge_failed_reason = require_key(details, "charge_failed_reason")
             
             # Get start and end positions for format: "from (x,y) to (a,b)"
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
@@ -494,7 +487,7 @@ class StepLogger:
             save_target = details["save_target"]
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
-            weapon_name = details.get("weapon_name", "")
+            weapon_name = details.get("weapon_name")
             target_coords = details.get("target_coords")
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             
@@ -561,7 +554,7 @@ class StepLogger:
                 save_target = details["save_target"]
                 
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
-                weapon_name = details.get("weapon_name", "")
+                weapon_name = details.get("weapon_name")
                 if weapon_name:
                     base_msg = f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks})"
                 else:
@@ -576,7 +569,7 @@ class StepLogger:
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
                 return base_msg + detail_msg
             else:
-                weapon_name = details.get("weapon_name", "")
+                weapon_name = details.get("weapon_name")
                 if weapon_name:
                     return f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks}) - MISS"
                 else:

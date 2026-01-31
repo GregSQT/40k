@@ -293,11 +293,14 @@ class GameStateManager:
             player_0_oc = 0
             player_1_oc = 0
 
-            for unit in game_state["units"]:
-                if not is_unit_alive(str(unit["id"]), game_state):
-                    continue  # Dead units don't control
+            units_cache = require_key(game_state, "units_cache")
+            unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+            for unit_id, entry in units_cache.items():
+                unit = unit_by_id.get(str(unit_id))
+                if not unit:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 
-                unit_pos = get_unit_coordinates(unit)
+                unit_pos = normalize_coordinates(entry["col"], entry["row"])
                 if unit_pos in hex_set:
                     oc = require_key(unit, "OC")
                     if unit["player"] == 0:
@@ -373,17 +376,12 @@ class GameStateManager:
         living_units_by_player = {}
         dead_units_by_player = {}
 
-        for unit in game_state["units"]:
-            player = unit["player"]
+        units_cache = require_key(game_state, "units_cache")
+        for _unit_id, entry in units_cache.items():
+            player = entry["player"]
             if player not in living_units_by_player:
                 living_units_by_player[player] = 0
-            if player not in dead_units_by_player:
-                dead_units_by_player[player] = 0
-            
-            if is_unit_alive(str(unit["id"]), game_state):
-                living_units_by_player[player] += 1
-            else:
-                dead_units_by_player[player] += 1
+            living_units_by_player[player] += 1
 
         # Check if any player has no living units (elimination condition)
         players_with_no_living_units = [pid for pid, count in living_units_by_player.items() if count == 0]
@@ -409,13 +407,12 @@ class GameStateManager:
             None = Game still ongoing
         """
         living_units_by_player = {}
-
-        for unit in game_state["units"]:
-            if is_unit_alive(str(unit["id"]), game_state):
-                player = unit["player"]
-                if player not in living_units_by_player:
-                    living_units_by_player[player] = 0
-                living_units_by_player[player] += 1
+        units_cache = require_key(game_state, "units_cache")
+        for _unit_id, entry in units_cache.items():
+            player = entry["player"]
+            if player not in living_units_by_player:
+                living_units_by_player[player] = 0
+            living_units_by_player[player] += 1
 
         current_turn = game_state["turn"]
         max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else 5
@@ -462,10 +459,19 @@ class GameStateManager:
                 return 1
             else:
                 # Tiebreaker: More cumulated VALUE of living units wins
-                p0_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 0 and is_unit_alive(str(u["id"]), game_state))
-                p1_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 1 and is_unit_alive(str(u["id"]), game_state))
+                units_cache = require_key(game_state, "units_cache")
+                unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+                p0_value = 0
+                p1_value = 0
+                for unit_id, entry in units_cache.items():
+                    unit = unit_by_id.get(str(unit_id))
+                    if not unit:
+                        raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                    unit_value = unit.get("VALUE", 10)
+                    if entry["player"] == 0:
+                        p0_value += unit_value
+                    else:
+                        p1_value += unit_value
                 if not self.quiet:
                     print(f"   Equal objectives ({obj_counts[0]}), tiebreaker by VALUE: P0={p0_value}, P1={p1_value}")
 
@@ -497,13 +503,12 @@ class GameStateManager:
             - win_method: "elimination", "objectives", "value_tiebreaker", "draw", or None
         """
         living_units_by_player = {}
-
-        for unit in game_state["units"]:
-            if is_unit_alive(str(unit["id"]), game_state):
-                player = unit["player"]
-                if player not in living_units_by_player:
-                    living_units_by_player[player] = 0
-                living_units_by_player[player] += 1
+        units_cache = require_key(game_state, "units_cache")
+        for _unit_id, entry in units_cache.items():
+            player = entry["player"]
+            if player not in living_units_by_player:
+                living_units_by_player[player] = 0
+            living_units_by_player[player] += 1
 
         current_turn = game_state["turn"]
         max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else 5
@@ -535,10 +540,19 @@ class GameStateManager:
                 return 1, "objectives"
             else:
                 # Tiebreaker: More cumulated VALUE of living units wins
-                p0_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 0 and is_unit_alive(str(u["id"]), game_state))
-                p1_value = sum(u.get("VALUE", 10) for u in game_state["units"]
-                              if u["player"] == 1 and is_unit_alive(str(u["id"]), game_state))
+                units_cache = require_key(game_state, "units_cache")
+                unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+                p0_value = 0
+                p1_value = 0
+                for unit_id, entry in units_cache.items():
+                    unit = unit_by_id.get(str(unit_id))
+                    if not unit:
+                        raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                    unit_value = unit.get("VALUE", 10)
+                    if entry["player"] == 0:
+                        p0_value += unit_value
+                    else:
+                        p1_value += unit_value
 
                 if p0_value > p1_value:
                     return 0, "value_tiebreaker"

@@ -101,14 +101,13 @@ class ArmoryParser:
             # WEAPON_RULES array: ["RAPID_FIRE:1", "ASSAULT"]
             # Pattern: WEAPON_RULES: ["rule1", "rule2", ...]
             weapon_rules_match = re.search(r'WEAPON_RULES:\s*\[([^\]]*)\]', weapon_body)
-            if weapon_rules_match:
-                rules_content = weapon_rules_match.group(1)
-                # Extract individual rule strings from quotes
-                rule_strings = re.findall(r'["\']([^"\']+)["\']', rules_content)
-                weapon['WEAPON_RULES'] = rule_strings
-            else:
-                # No WEAPON_RULES field = empty array (no rules)
-                weapon['WEAPON_RULES'] = []
+            weapon_name = weapon.get('display_name', weapon_code)
+            if not weapon_rules_match:
+                raise ValueError(f"Weapon '{weapon_name}' missing required WEAPON_RULES (use [] if none)")
+            rules_content = weapon_rules_match.group(1)
+            # Extract individual rule strings from quotes
+            rule_strings = re.findall(r'["\']([^"\']+)["\']', rules_content)
+            weapon['WEAPON_RULES'] = rule_strings
             
             # VALIDATE WEAPON_RULES: Parse and validate all rules (fail-fast)
             try:
