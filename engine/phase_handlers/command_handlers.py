@@ -8,6 +8,7 @@ before the movement phase. It auto-advances to the movement phase.
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
+from shared.data_validation import require_key
 
 
 def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -24,6 +25,12 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     # Set phase
     game_state["phase"] = "command"
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    units_cache = require_key(game_state, "units_cache")
+    add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} command units_cache={units_cache}")
     
     # Reset ALL tracking sets (moved from movement_phase_start)
     game_state["units_moved"] = set()
@@ -45,6 +52,9 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Build activation pool (empty for now, structure ready for future)
     command_build_activation_pool(game_state)
+
+    command_pool = require_key(game_state, "command_activation_pool")
+    add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} command command_activation_pool={command_pool}")
     
     # Console log
     from engine.game_utils import add_console_log
@@ -70,6 +80,12 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     from engine.game_utils import add_console_log
     add_console_log(game_state, "COMMAND PHASE COMPLETE")
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    command_pool = require_key(game_state, "command_activation_pool")
+    add_debug_file_log(game_state, f"[POOL PRE-TRANSITION] E{episode} T{turn} command command_activation_pool={command_pool}")
     
     # Return only the dict - cascade loop will call movement_phase_start()
     return {

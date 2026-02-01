@@ -61,6 +61,20 @@ class ActionDecoder:
             active_unit = eligible_units[0] if eligible_units else None
             
             if active_unit:
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    current_player = game_state.get("current_player", "?")
+                    active_shooting_unit = game_state.get("active_shooting_unit")
+                    shoot_pool = game_state.get("shoot_activation_pool")
+                    add_debug_file_log(
+                        game_state,
+                        f"[MASK DEBUG] E{episode} T{turn} P{current_player} shoot mask: "
+                        f"active_unit={active_unit.get('id')} active_shooting_unit={active_shooting_unit} "
+                        f"valid_target_pool={active_unit.get('valid_target_pool')} "
+                        f"shoot_activation_pool={shoot_pool}"
+                    )
                 # Enable shoot actions only when pool already exists (built during activation)
                 valid_targets = active_unit.get("valid_target_pool")
                 if valid_targets is not None:

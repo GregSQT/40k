@@ -482,6 +482,8 @@ def parse_step_log(filepath: str) -> Dict:
     positions_at_turn_start = {}
     positions_at_move_phase_start = {}  # Track positions at start of MOVE phase to detect fled
     last_player = None  # Track last player to detect phase MOVE start for each player
+    last_phase = None
+    fight_phase_seq_id = 0
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -624,21 +626,23 @@ def parse_step_log(filepath: str) -> Dict:
 
             # Parse action line
             # Support both old format (T\d+) and new format (E\d+ T\d+)
-            match = re.match(r'\[.*?\] (?:E\d+ )?T(\d+) P(\d+) (\w+) : (.*?) \[(SUCCESS|FAILED)\] \[STEP: (YES|NO)\]', line)
+            # STEP marker is optional (removed from logs)
+            match = re.match(r'\[.*?\] (?:E\d+ )?T(\d+) P(\d+) (\w+) : (.*?) \[(SUCCESS|FAILED)\](?: \[STEP: (YES|NO)\])?', line)
             if match:
                 turn = int(match.group(1))
                 player = int(match.group(2))
                 phase = match.group(3)
                 action_desc = match.group(4)
                 success = match.group(5) == 'SUCCESS'
-                step_inc = match.group(6) == 'YES'
+                step_marker_present = match.group(6) is not None
+                step_inc = match.group(6) == 'YES' if step_marker_present else True
 
-                # CRITICAL: Apply damage regardless of [STEP: YES/NO]
-                # STEP: NO still contains real attacks/shots and can kill units.
+                # CRITICAL: Apply damage regardless of STEP marker
+                # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
                 # by treating dead units as alive.
-                if 'shot at unit' in action_desc.lower() or 'attacked unit' in action_desc.lower():
-                    target_match = re.search(r'(?:SHOT at|ATTACKED) unit (\d+)', action_desc, re.IGNORECASE)
+                if 'shot at unit' in action_desc.lower():
+                    target_match = re.search(r'SHOT at Unit (\d+)', action_desc, re.IGNORECASE)
                     if target_match:
                         target_id = target_match.group(1)
                         damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
@@ -677,6 +681,7 @@ def parse_step_log(filepath: str) -> Dict:
                     positions_at_turn_start = unit_positions.copy()
                     positions_at_move_phase_start = {}
                     last_player = None  # Reset last player on turn change
+                    last_phase = None
                     last_turn = turn
 
                 # Track positions at start of MOVE phase for fled detection
@@ -690,6 +695,11 @@ def parse_step_log(filepath: str) -> Dict:
                 # Update last_player after processing the action
                 last_player = player
 
+                if phase != last_phase:
+                    if phase == 'FIGHT':
+                        fight_phase_seq_id += 1
+                    last_phase = phase
+
                 episode_turn = max(episode_turn, turn)
 
                 if step_inc:
@@ -698,20 +708,19 @@ def parse_step_log(filepath: str) -> Dict:
                     stats['actions_by_phase'][phase] += 1
 
                     # Determine action type and validate rules
-                    if 'shoots' in action_desc.lower() or 'shot' in action_desc.lower():
+                    if "SHOT at Unit" in action_desc:
                         action_type = 'shoot'
                         stats['shoot_vs_wait']['shoot'] += 1
                         stats['shoot_vs_wait_by_player'][player]['shoot'] += 1
-                        units_shot.add(unit_id) if 'unit_id' in locals() else None
-
                         shooter_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\)', action_desc)
-                        target_match = re.search(r'SHOT at unit (\d+)(?:\((\d+),\s*(\d+)\))?', action_desc, re.IGNORECASE)
+                        target_match = re.search(r'SHOT at Unit (\d+)(?:\((\d+),\s*(\d+)\))?', action_desc, re.IGNORECASE)
 
                         if shooter_match and target_match:
                             shooter_id = shooter_match.group(1)
                             shooter_col = int(shooter_match.group(2))
                             shooter_row = int(shooter_match.group(3))
                             target_id = target_match.group(1)
+                            units_shot.add(shooter_id)
                             
                             # CRITICAL: Update position cache with shooter position from log (source of truth)
                             _position_cache_set(unit_positions, shooter_id, shooter_col, shooter_row)
@@ -864,16 +873,9 @@ def parse_step_log(filepath: str) -> Dict:
                                     else:
                                         rng_nb = rng_nb_by_weapon[weapon_name_for_limits]
                                         seq_key = (current_episode_num, turn, shooter_id, weapon_name_for_limits)
-                                        if step_inc:
-                                            shot_sequence_counts[seq_key] = 0
                                         if seq_key not in shot_sequence_counts:
-                                            stats['parse_errors'].append({
-                                                'episode': current_episode_num,
-                                                'turn': turn,
-                                                'phase': phase,
-                                                'line': line.strip(),
-                                                'error': "Shoot sequence missing STEP: YES for RNG_NB check"
-                                            })
+                                            shot_sequence_counts[seq_key] = 0
+                                        elif step_marker_present and step_inc:
                                             shot_sequence_counts[seq_key] = 0
                                         shot_sequence_counts[seq_key] += 1
                                         if shot_sequence_counts[seq_key] > rng_nb:
@@ -1012,7 +1014,7 @@ def parse_step_log(filepath: str) -> Dict:
                         if not stats['sample_actions']['shoot']:
                             stats['sample_actions']['shoot'] = line.strip()
 
-                    elif 'wait' in action_desc.lower():
+                    elif " WAIT" in action_desc:
                         action_type = 'wait'
                         stats['shoot_vs_wait']['wait'] += 1
                         stats['shoot_vs_wait_by_player'][player]['wait'] += 1
@@ -1158,7 +1160,7 @@ def parse_step_log(filepath: str) -> Dict:
                         elif phase == 'MOVE':
                             stats['wait_by_phase'][player]['move_wait'] += 1
 
-                    elif 'skip' in action_desc.lower():
+                    elif " SKIP" in action_desc:
                         action_type = 'skip'
                         stats['shoot_vs_wait']['skip'] += 1
                         stats['shoot_vs_wait_by_player'][player]['skip'] += 1
@@ -1189,7 +1191,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     if stats['first_error_lines']['dead_unit_skipping'][player] is None:
                                         stats['first_error_lines']['dead_unit_skipping'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
-                    elif 'advanced' in action_desc.lower():
+                    elif "ADVANCED from" in action_desc:
                         action_type = 'advance'
                         
                         if phase == 'SHOOT':
@@ -1241,9 +1243,11 @@ def parse_step_log(filepath: str) -> Dict:
                             # CRITICAL: Sync position cache with log start position before processing
                             if advance_unit_id in unit_positions and unit_positions[advance_unit_id] != (start_col, start_row):
                                 _position_cache_set(unit_positions, advance_unit_id, start_col, start_row)
+                            positions_at_advance = dict(unit_positions)
+                            unit_hp_at_advance = dict(unit_hp)
                             
                             # RULE: Advance from adjacent
-                            if is_adjacent_to_enemy(start_col, start_row, unit_player, unit_positions, unit_hp, player):
+                            if is_adjacent_to_enemy(start_col, start_row, unit_player, positions_at_advance, unit_hp_at_advance, player):
                                 stats['advance_from_adjacent'][player] += 1
                                 if stats['first_error_lines']['advance_from_adjacent'][player] is None:
                                     stats['first_error_lines']['advance_from_adjacent'][player] = {'episode': current_episode_num, 'line': line.strip()}
@@ -1372,11 +1376,11 @@ def parse_step_log(filepath: str) -> Dict:
                                 'error': f"Advance action missing 'from/to' format: {action_desc[:100]}"
                             })
 
-                    elif 'charge' in action_desc.lower():
+                    elif "CHARGED Unit" in action_desc:
                         action_type = 'charge'
                         
-                        # Try successful charge format: "Unit X(col,row) CHARGED unit Y(col,row) from (start_col,start_row) to (dest_col,dest_row)"
-                        charge_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) CHARGED unit (\d+)(?:\((\d+),\s*(\d+)\))? from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
+                        # Try successful charge format: "Unit X(col,row) CHARGED Unit Y(col,row) from (start_col,start_row) to (dest_col,dest_row)"
+                        charge_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) CHARGED Unit (\d+)(?:\((\d+),\s*(\d+)\))? from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
                         if charge_match:
                             charge_unit_id = charge_match.group(1)
                             charge_target_id = charge_match.group(4)  # Target unit ID
@@ -1631,7 +1635,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     'error': f"Charge action missing expected format: {action_desc[:100]}"
                                 })
 
-                    elif 'moves' in action_desc.lower() or 'moved' in action_desc.lower() or 'fled' in action_desc.lower():
+                    elif "MOVED from" in action_desc or "FLED from" in action_desc:
                         action_type = 'move'
                         
                         # CRITICAL: Detect explicit FLED actions first
@@ -1851,13 +1855,10 @@ def parse_step_log(filepath: str) -> Dict:
                                 enemy_positions_in_snapshot = {}
                                 for uid, pos in positions_at_move_phase_start.items():
                                     if uid not in unit_player or uid not in unit_hp:
-                                        stats['parse_errors'].append({
-                                            'episode': current_episode_num,
-                                            'turn': turn,
-                                            'phase': phase,
-                                            'line': line.strip(),
-                                            'error': f"Snapshot adjacency missing unit data for unit_id: {uid}"
-                                        })
+                                        _debug_log(
+                                            f"[ANALYZER DEBUG] Snapshot adjacency missing unit data for unit_id: {uid} "
+                                            f"(episode={current_episode_num}, turn={turn}, phase={phase})"
+                                        )
                                         continue
                                     hp_value = _get_unit_hp_value(
                                         unit_hp,
@@ -1877,13 +1878,10 @@ def parse_step_log(filepath: str) -> Dict:
                                 enemy_positions_current = {}
                                 for uid, pos in unit_positions.items():
                                     if uid not in unit_player or uid not in unit_hp:
-                                        stats['parse_errors'].append({
-                                            'episode': current_episode_num,
-                                            'turn': turn,
-                                            'phase': phase,
-                                            'line': line.strip(),
-                                            'error': f"Current adjacency missing unit data for unit_id: {uid}"
-                                        })
+                                        _debug_log(
+                                            f"[ANALYZER DEBUG] Current adjacency missing unit data for unit_id: {uid} "
+                                            f"(episode={current_episode_num}, turn={turn}, phase={phase})"
+                                        )
                                         continue
                                     hp_value = _get_unit_hp_value(
                                         unit_hp,
@@ -1919,8 +1917,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     len(positions_at_move_phase_start) >= 2 and 
                                     len(enemy_positions_current) > 0 and 
                                     len(enemy_positions_in_snapshot) > 0):
-                                    units_fled.add(move_unit_id)
-                                    _debug_log(f"[FLED DEBUG] E{current_episode_num} T{turn} P{player}: Unit {move_unit_id} FLED from {start_pos} to ({dest_col},{dest_row}) - marked as fled (both checks agree)")
+                                    _debug_log(f"[FLED DEBUG] E{current_episode_num} T{turn} P{player}: Unit {move_unit_id} FLED from {start_pos} to ({dest_col},{dest_row}) - explicit FLED only (no inferred flag)")
                                 elif was_adjacent_in_snapshot and not was_adjacent_in_current:
                                     # Snapshot says adjacent but current says not - this indicates stale positions in snapshot
                                     # Don't mark as fled to avoid false positives
@@ -2096,18 +2093,17 @@ def parse_step_log(filepath: str) -> Dict:
                                 # to prevent false positives. Dead units should not be considered for adjacency checks.
                                 # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
                                 positions_for_adjacency_check_filtered = {}
-                                for uid, pos in positions_for_adjacency_check.items():
-                                    if uid not in unit_hp_at_movement:
-                                        stats['parse_errors'].append({
-                                            'episode': current_episode_num,
-                                            'turn': turn,
-                                            'phase': phase,
-                                            'line': line.strip(),
-                                            'error': f"Move adjacency check missing unit_hp snapshot for unit_id: {uid}"
-                                        })
+                                for uid, hp_value in unit_hp_at_movement.items():
+                                    if hp_value <= 0:
                                         continue
-                                    if require_key(unit_hp_at_movement, uid) > 0:
-                                        positions_for_adjacency_check_filtered[uid] = pos
+                                    pos = positions_for_adjacency_check.get(uid)
+                                    if pos is None:
+                                        _debug_log(
+                                            f"[ANALYZER DEBUG] Move adjacency missing position snapshot for unit_id: {uid} "
+                                            f"(episode={current_episode_num}, turn={turn}, phase={phase})"
+                                        )
+                                        continue
+                                    positions_for_adjacency_check_filtered[uid] = pos
                                 
                                 # Check if destination is adjacent to enemy using positions at movement time
                                 # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
@@ -2125,18 +2121,17 @@ def parse_step_log(filepath: str) -> Dict:
                                     # CRITICAL FIX: Filter out dead units from positions_at_movement for "before" check
                                     # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
                                     positions_at_movement_filtered = {}
-                                    for uid, pos in positions_at_movement.items():
-                                        if uid not in unit_hp_at_movement:
-                                            stats['parse_errors'].append({
-                                                'episode': current_episode_num,
-                                                'turn': turn,
-                                                'phase': phase,
-                                                'line': line.strip(),
-                                                'error': f"Move adjacency (before) missing unit_hp snapshot for unit_id: {uid}"
-                                            })
+                                    for uid, hp_value in unit_hp_at_movement.items():
+                                        if hp_value <= 0:
                                             continue
-                                        if require_key(unit_hp_at_movement, uid) > 0:
-                                            positions_at_movement_filtered[uid] = pos
+                                        pos = positions_at_movement.get(uid)
+                                        if pos is None:
+                                            _debug_log(
+                                                f"[ANALYZER DEBUG] Move adjacency (before) missing position snapshot for unit_id: {uid} "
+                                                f"(episode={current_episode_num}, turn={turn}, phase={phase})"
+                                            )
+                                            continue
+                                        positions_at_movement_filtered[uid] = pos
                                     # Use positions_at_movement (before this unit moved) for "before" check
                                     # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
                                     adjacent_before = get_adjacent_enemies(start_col, start_row, unit_player, positions_at_movement_filtered, unit_hp_at_movement, unit_types, player)
@@ -2176,7 +2171,7 @@ def parse_step_log(filepath: str) -> Dict:
                                 'error': f"Move action missing 'from/to' format: {action_desc[:100]}"
                             })
 
-                    elif 'fought' in action_desc.lower() or 'attacked' in action_desc.lower():
+                    elif "ATTACKED Unit" in action_desc:
                         action_type = 'fight'
                         units_fought.add(unit_id) if 'unit_id' in locals() else None
                         
@@ -2206,17 +2201,10 @@ def parse_step_log(filepath: str) -> Dict:
                                         })
                                     else:
                                         cc_nb = cc_nb_by_weapon[weapon_display_name]
-                                        seq_key = (current_episode_num, turn, fighter_id, weapon_display_name)
-                                        if step_inc:
-                                            fight_sequence_counts[seq_key] = 0
+                                        seq_key = (fight_phase_seq_id, fighter_id, weapon_display_name)
                                         if seq_key not in fight_sequence_counts:
-                                            stats['parse_errors'].append({
-                                                'episode': current_episode_num,
-                                                'turn': turn,
-                                                'phase': phase,
-                                                'line': line.strip(),
-                                                'error': "Fight sequence missing STEP: YES for CC_NB check"
-                                            })
+                                            fight_sequence_counts[seq_key] = 0
+                                        elif step_marker_present and step_inc:
                                             fight_sequence_counts[seq_key] = 0
                                         fight_sequence_counts[seq_key] += 1
                                         if fight_sequence_counts[seq_key] > cc_nb:

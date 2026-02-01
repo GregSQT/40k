@@ -1,0 +1,35 @@
+{
+  "id": "objectives_control",
+  "name": "Objectives Control",
+  "identifier": "objectives_control",
+  "description": "Primary objective scoring: from turn 2, score 5 VP for controlling >=1 objective, 5 VP for controlling >=2 objectives, and 5 VP for controlling more objectives than the opponent (max 15 per turn). Round 5: second player scores at end of fight phase instead of command phase.",
+  "scoring": {
+    "start_turn": 2,
+    "max_points_per_turn": 15,
+    "rules": [
+      {
+        "id": "control_at_least_one",
+        "points": 5,
+        "condition": "control_at_least_one"
+      },
+      {
+        "id": "control_at_least_two",
+        "points": 5,
+        "condition": "control_at_least_two"
+      },
+      {
+        "id": "control_more_than_opponent",
+        "points": 5,
+        "condition": "control_more_than_opponent"
+      }
+    ]
+  },
+  "timing": {
+    "default_phase": "command",
+    "round5_second_player_phase": "fight"
+  },
+  "control": {
+    "method": "oc_sum_greater",
+    "tie_behavior": "no_control"
+  }
+}

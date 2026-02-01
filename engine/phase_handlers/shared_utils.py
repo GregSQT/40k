@@ -73,6 +73,12 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
     
     game_state["units_cache"] = units_cache
 
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    phase = game_state.get("phase", "?")
+    add_debug_file_log(game_state, f"[UNITS_CACHE BUILD] E{episode} T{turn} {phase} units_cache={units_cache}")
+
 
 def update_units_cache_unit(
     game_state: Dict[str, Any],

@@ -390,6 +390,12 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Set phase
     game_state["phase"] = "shoot"
 
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    units_cache = require_key(game_state, "units_cache")
+    add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} shoot units_cache={units_cache}")
+
     # Initialize weapon_rule (weapon rules activated = 1)
     # This is a global variable that determines if weapon rules are applied
     game_state["weapon_rule"] = 1
@@ -807,6 +813,9 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool is built correctly (only alive units of current player via _has_valid_shooting_targets)
     game_state["shoot_activation_pool"] = shoot_activation_pool
     add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} shooting_build_activation_pool: Pool built with {len(shoot_activation_pool)} units: {shoot_activation_pool}")
+
+    from engine.game_utils import add_debug_file_log
+    add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} shoot shoot_activation_pool={shoot_activation_pool}")
     
     return game_state["shoot_activation_pool"]
 
@@ -999,6 +1008,17 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
                 
                 if friendly_distance <= melee_range:
                     # Enemy is engaged with friendly unit - cannot shoot
+                    if game_state.get("debug_mode", False):
+                        from engine.game_utils import add_debug_file_log
+                        episode = game_state.get("episode_number", "?")
+                        turn = game_state.get("turn", "?")
+                        target_id_str = str(target["id"])
+                        add_debug_file_log(
+                            game_state,
+                            f"[SHOOT DEBUG] E{episode} T{turn} _is_valid_shooting_target: "
+                            f"Shooter {shooter_id_str} blocked - target {target_id_str} engaged with "
+                            f"friendly {friendly_id} (dist={friendly_distance})"
+                        )
                     return False
 
     # PERFORMANCE: Prefer unit-local los_cache (built at activation), then global, then direct calc.
@@ -1125,6 +1145,17 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # YES -> SHOOTING ACTIONS AVAILABLE -> Go to STEP 3: ACTION_SELECTION
     unit["valid_target_pool"] = valid_target_pool
     
+    if game_state.get("debug_mode", False):
+        from engine.game_utils import add_debug_file_log
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        shoot_left = unit.get("SHOOT_LEFT")
+        add_debug_file_log(
+            game_state,
+            f"[SHOOT DEBUG] E{episode} T{turn} shooting_unit_activation_start: "
+            f"Unit {unit_id_str} SHOOT_LEFT={shoot_left} valid_targets={valid_target_pool}"
+        )
+    
     # AI_TURN.md STEP 3: Pre-select first available weapon
     # If unit is adjacent to enemy, prioritize PISTOL weapons
     usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
@@ -1220,12 +1251,19 @@ def valid_target_pool_build(
     unit_id_normalized = str(unit["id"])
     current_player_int = int(current_player) if current_player is not None else None
     
-    # DEBUG: Log pool building start
+    # DEBUG: Log pool building start (debug.log only, when --debug)
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
-    from engine.game_utils import add_console_log, add_debug_log
+    from engine.game_utils import add_console_log
     unit_col, unit_row = require_unit_position(unit_id_normalized, game_state)
-    add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Unit {unit_id_normalized}({unit_col},{unit_row}) building pool (advance_status={advance_status}, adjacent_status={adjacent_status})")
+    if game_state.get("debug_mode", False):
+        from engine.game_utils import add_debug_file_log
+        add_debug_file_log(
+            game_state,
+            f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+            f"Unit {unit_id_normalized}({unit_col},{unit_row}) building pool "
+            f"(advance_status={advance_status}, adjacent_status={adjacent_status})"
+        )
     
     # AI_TURN.md: ASSERT unit["los_cache"] exists (must be created by build_unit_los_cache at activation)
     if "los_cache" not in unit:
@@ -1245,7 +1283,13 @@ def valid_target_pool_build(
         if has_los == True
     }
     
-    add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Found {len(targets_with_los)} targets with LoS out of {len(unit['los_cache'])} total targets")
+    if game_state.get("debug_mode", False):
+        from engine.game_utils import add_debug_file_log
+        add_debug_file_log(
+            game_state,
+            f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+            f"Found {len(targets_with_los)} targets with LoS out of {len(unit['los_cache'])} total targets"
+        )
     
     # For each target_id in targets_with_los.keys():
     for target_id_str in targets_with_los.keys():
@@ -1260,11 +1304,24 @@ def valid_target_pool_build(
         enemy_pos_check = enemy_pos if enemy_pos is not None else ("?", "?")
         enemy_hp_check = get_hp_from_cache(str(enemy["id"]), game_state)  # Phase 2: from cache
         enemy_player_check = enemy.get("player", "?")
-        add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Checking Enemy {enemy_id_check}({enemy_pos_check[0]},{enemy_pos_check[1]}) HP={enemy_hp_check} player={enemy_player_check}")
+        if game_state.get("debug_mode", False):
+            from engine.game_utils import add_debug_file_log
+            add_debug_file_log(
+                game_state,
+                f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                f"Checking Enemy {enemy_id_check}({enemy_pos_check[0]},{enemy_pos_check[1]}) "
+                f"HP={enemy_hp_check} player={enemy_player_check}"
+            )
         
         # unit alive? (units_cache is source of truth) -> NO -> Skip enemy unit
         if not is_unit_alive(str(enemy["id"]), game_state):
-            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_check} EXCLUDED - not alive (units_cache)")
+            if game_state.get("debug_mode", False):
+                from engine.game_utils import add_debug_file_log
+                add_debug_file_log(
+                    game_state,
+                    f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                    f"Enemy {enemy_id_check} EXCLUDED - not alive (units_cache)"
+                )
             continue
         
         # CRITICAL: Normalize enemy ID for consistent comparison
@@ -1320,7 +1377,13 @@ def valid_target_pool_build(
             
             # If no PISTOL weapon available, cannot shoot at adjacent enemy
             if not has_pistol_weapon:
-                add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - adjacent without PISTOL weapon")
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    add_debug_file_log(
+                        game_state,
+                        f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                        f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - adjacent without PISTOL weapon"
+                    )
                 continue
         
         # Unit NOT adjacent to friendly unit (excluding active unit)? -> NO -> Skip enemy unit
@@ -1330,6 +1393,8 @@ def valid_target_pool_build(
         if not enemy_adjacent_to_shooter:
             # Enemy is NOT adjacent to shooter - apply normal engaged enemy rule
             enemy_adjacent_to_friendly = False
+            engaged_friendly_id = None
+            engaged_friendly_distance = None
             units_cache = require_key(game_state, "units_cache")
             for friendly_id, cache_entry in units_cache.items():
                 # CRITICAL: Convert to int for consistent comparison (player can be int or string)
@@ -1343,10 +1408,26 @@ def valid_target_pool_build(
                     )
                     if friendly_distance <= melee_range:
                         enemy_adjacent_to_friendly = True
+                        engaged_friendly_id = friendly_id
+                        engaged_friendly_distance = friendly_distance
                         break
             
             if enemy_adjacent_to_friendly:
-                add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - engaged with friendly unit")
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    add_debug_file_log(
+                        game_state,
+                        f"[SHOOT DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                        f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) engaged with friendly "
+                        f"{engaged_friendly_id} (dist={engaged_friendly_distance})"
+                    )
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    add_debug_file_log(
+                        game_state,
+                        f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                        f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - engaged with friendly unit"
+                    )
                 continue
         
         # AI_TURN.md: LoS check already done in build_unit_los_cache()
@@ -1376,10 +1457,24 @@ def valid_target_pool_build(
                 add_console_log(game_state, f"[CRITICAL BUG] E{episode} T{turn} valid_target_pool_build: Attempted to ADD friendly unit {enemy_id_normalized} (player={enemy_player}) to pool for Unit {unit_id_normalized} (player={current_player_int}) - BLOCKED")
                 continue  # Skip friendly units
             valid_target_pool.append(str(enemy["id"]))
-            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) ADDED to pool (distance={distance}, shooter_player={current_player_int}, target_player={enemy_player})")
+            if game_state.get("debug_mode", False):
+                from engine.game_utils import add_debug_file_log
+                add_debug_file_log(
+                    game_state,
+                    f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                    f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) ADDED to pool "
+                    f"(distance={distance}, shooter_player={current_player_int}, target_player={enemy_player})"
+                )
         else:
             max_rng = max((require_key(w, "RNG") for w in rng_weapons), default=0)
-            add_debug_log(game_state, f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - out of range (distance={distance}, max_range={max_rng})")
+            if game_state.get("debug_mode", False):
+                from engine.game_utils import add_debug_file_log
+                add_debug_file_log(
+                    game_state,
+                    f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                    f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - out of range "
+                    f"(distance={distance}, max_range={max_rng})"
+                )
     
     return valid_target_pool
 
@@ -1912,6 +2007,11 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
     
     # Final cleanup
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    shoot_pool = require_key(game_state, "shoot_activation_pool")
+    add_debug_file_log(game_state, f"[POOL PRE-TRANSITION] E{episode} T{turn} shoot shoot_activation_pool={shoot_pool}")
     game_state["shoot_activation_pool"] = []
     
     # PERFORMANCE: Clear LoS cache at phase end (will rebuild next shooting phase)
@@ -2105,6 +2205,7 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
         shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
         if shoot_attack_results:
             result["all_attack_results"] = list(shoot_attack_results)
+            game_state["shoot_attack_results"] = []
     
     return True, result
 
@@ -2409,6 +2510,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         response["all_attack_results"] = list(shoot_attack_results)
         # Change action to "shoot" if attacks were executed (not just waiting)
         response["action"] = "shoot"
+        game_state["shoot_attack_results"] = []
     
     return True, response
 
@@ -3223,6 +3325,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
                 if shoot_attack_results:
                     loop_result["all_attack_results"] = list(shoot_attack_results)
+                    game_state["shoot_attack_results"] = []
                 return success, loop_result
             else:
                 # NO -> All weapons exhausted -> End activation
@@ -3271,6 +3374,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
             if shoot_attack_results:
                 loop_result["all_attack_results"] = list(shoot_attack_results)
+                game_state["shoot_attack_results"] = []
             return success, loop_result
     
     except Exception as e:
@@ -3282,6 +3386,13 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     """
     attack_sequence(RNG) implementation with proper logging
     """
+    # CRITICAL: Enforce activation pool membership (no out-of-pool shooting)
+    shoot_pool = require_key(game_state, "shoot_activation_pool")
+    unit_id_str = str(unit_id)
+    if unit_id_str not in [str(uid) for uid in shoot_pool]:
+        raise ValueError(
+            f"shooting_attack_controller: unit {unit_id_str} not in shoot_activation_pool={shoot_pool}"
+        )
     shooter = _get_unit_by_id(game_state, unit_id)
     target = _get_unit_by_id(game_state, target_id)
     
@@ -3337,9 +3448,27 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             shooter["TOTAL_ATTACK_LOG"] = attack_log_message
 
     # Apply damage immediately per AI_TURN.md — HP_CUR single write path: update_units_cache_hp only (Phase 2: from cache)
-    if attack_result["damage"] > 0:
-        new_hp = max(0, target_hp_before_damage - attack_result["damage"])
-        update_units_cache_hp(game_state, str(target["id"]), new_hp)
+    damage = require_key(attack_result, "damage")
+    if damage > 0:
+        new_hp = max(0, target_hp_before_damage - damage)
+        target_id_str = str(target["id"])
+        if not is_unit_alive(target_id_str, game_state):
+            episode = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            from engine.game_utils import _write_diagnostic_to_debug_log
+            _write_diagnostic_to_debug_log(
+                f"[ERROR] E{episode} T{turn} shooting_attack_controller: target {target_id_str} missing from units_cache before damage application"
+            )
+        update_units_cache_hp(game_state, target_id_str, new_hp)
+        from engine.game_utils import add_debug_file_log
+        hp_after = get_hp_from_cache(target_id_str, game_state)
+        if hp_after is not None and hp_after != new_hp:
+            episode = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            add_debug_file_log(
+                game_state,
+                f"[HP MISMATCH] E{episode} T{turn} shooting_attack_controller: target={target_id_str} expected_hp={new_hp} actual_hp={hp_after}"
+            )
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate kill probability cache for target
         from engine.ai.weapon_selector import invalidate_cache_for_target
@@ -3962,12 +4091,56 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     # Pool is source of truth: if can_advance is False, unit cannot advance
     can_advance = unit["_can_advance"] if "_can_advance" in unit else None
     if can_advance is False:
+        if game_state.get("debug_mode", False):
+            from engine.game_utils import add_debug_file_log
+            episode = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            unit_id_str = str(unit["id"])
+            unit_player_int = int(unit["player"]) if unit["player"] is not None else None
+            neighbors = set(get_hex_neighbors(orig_col, orig_row))
+            units_cache = require_key(game_state, "units_cache")
+            adjacent_enemies = []
+            for enemy_id, cache_entry in units_cache.items():
+                enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+                if enemy_player != unit_player_int:
+                    enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                    if (enemy_col, enemy_row) in neighbors:
+                        adjacent_enemies.append(f"{enemy_id}@({enemy_col},{enemy_row})")
+            add_debug_file_log(
+                game_state,
+                f"[ADVANCE DEBUG] E{episode} T{turn} _handle_advance_action: "
+                f"Unit {unit_id_str} at ({orig_col},{orig_row}) advance blocked "
+                f"(adjacent_enemies={adjacent_enemies})"
+            )
         success, result = _handle_shooting_end_activation(
             game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
         )
         result["advance_rejected"] = True
         result["skip_reason"] = "cannot_advance_adjacent_to_enemy"
         return success, result
+    
+    if game_state.get("debug_mode", False):
+        from engine.game_utils import add_debug_file_log
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        unit_id_str = str(unit["id"])
+        unit_player_int = int(unit["player"]) if unit["player"] is not None else None
+        neighbors = set(get_hex_neighbors(orig_col, orig_row))
+        units_cache = require_key(game_state, "units_cache")
+        adjacent_enemies = []
+        for enemy_id, cache_entry in units_cache.items():
+            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+            if enemy_player != unit_player_int:
+                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                if (enemy_col, enemy_row) in neighbors:
+                    adjacent_enemies.append(f"{enemy_id}@({enemy_col},{enemy_row})")
+        if adjacent_enemies:
+            add_debug_file_log(
+                game_state,
+                f"[ADVANCE DEBUG] E{episode} T{turn} _handle_advance_action: "
+                f"Unit {unit_id_str} at ({orig_col},{orig_row}) advance allowed "
+                f"while adjacent_enemies={adjacent_enemies}"
+            )
     
     # Use existing advance_range if already rolled (to keep same roll for destination selection)
     # Otherwise roll new 1D6 for advance range (from config)

@@ -263,7 +263,7 @@ def parse_steplog_file(steplog_path):
     units_positions = {}
     
     # Regex patterns for parsing
-    action_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) (\w+) : (.+?) \[(SUCCESS|FAILED)\] \[STEP: (YES|NO)\]'
+    action_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) (\w+) : (.+?) \[(SUCCESS|FAILED)\](?: \[STEP: (YES|NO)\])?'
     phase_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) (\w+) phase Start'
     
     for line in action_lines:
@@ -271,6 +271,7 @@ def parse_steplog_file(steplog_path):
         action_match = re.match(action_pattern, line)
         if action_match:
             timestamp, turn, player, phase, message, success, step_increment = action_match.groups()
+            step_increment_flag = step_increment == 'YES' if step_increment is not None else True
             
             # Parse action details from message
             action_data = parse_action_message(message, {
@@ -279,7 +280,7 @@ def parse_steplog_file(steplog_path):
                 'player': int(player), 
                 'phase': phase.lower(),
                 'success': success == 'SUCCESS',
-                'step_increment': step_increment == 'YES'
+                'step_increment': step_increment_flag
             })
             
             if action_data:

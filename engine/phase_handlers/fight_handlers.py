@@ -40,6 +40,12 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Set phase
     game_state["phase"] = "fight"
 
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    units_cache = require_key(game_state, "units_cache")
+    add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} fight units_cache={units_cache}")
+
     # UNITS_CACHE: Verify units_cache exists (built at reset, not here - "reset only" policy)
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist at fight_phase_start (should be built at reset)")
@@ -175,6 +181,16 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     game_state["non_active_alternating_activation_pool"] = non_active_alternating
     add_console_log(game_state, f"ALTERNATING POOLS: active={len(active_alternating)}, non_active={len(non_active_alternating)}")
 
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    add_debug_file_log(
+        game_state,
+        f"[POOL BUILD] E{episode} T{turn} fight charging_activation_pool={charging_activation_pool} "
+        f"active_alternating_activation_pool={active_alternating} "
+        f"non_active_alternating_activation_pool={non_active_alternating}"
+    )
+
 
 def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str) -> None:
     """
@@ -302,6 +318,19 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     - P0 ->    P1 movement phase
     - P1 ->       increment turn, P0 movement phase
     """
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    charging_pool = require_key(game_state, "charging_activation_pool")
+    active_alt_pool = require_key(game_state, "active_alternating_activation_pool")
+    non_active_alt_pool = require_key(game_state, "non_active_alternating_activation_pool")
+    add_debug_file_log(
+        game_state,
+        f"[POOL PRE-TRANSITION] E{episode} T{turn} fight charging_activation_pool={charging_pool} "
+        f"active_alternating_activation_pool={active_alt_pool} "
+        f"non_active_alternating_activation_pool={non_active_alt_pool}"
+    )
+
     # Final cleanup
     game_state["charging_activation_pool"] = []
     game_state["active_alternating_activation_pool"] = []
@@ -1290,6 +1319,10 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                                     rec_result["all_attack_results"] = list(attacks_before_recursive)
                                     recursive_result = (rec_success, rec_result)
                     
+                    if isinstance(recursive_result, tuple) and len(recursive_result) == 2:
+                        _, rec_result = recursive_result
+                        if isinstance(rec_result, dict) and rec_result.get("all_attack_results"):
+                            game_state["fight_attack_results"] = []
                     return recursive_result
                 # No valid target selected - fall through to end activation
 
@@ -1329,6 +1362,8 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight _handle_fight_attack: waiting_for_player attack[{i}] -> Unit {target_id} damage={damage}"
                         add_console_log(game_state, log_msg)
                         safe_print(game_state, log_msg)
+                if all_attack_results:
+                    game_state["fight_attack_results"] = []
                 return True, {
                     "attack_executed": True,
                     "attack_result": attack_result,

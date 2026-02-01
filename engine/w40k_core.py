@@ -652,6 +652,19 @@ class W40KEngine(gym.Env):
         # This handles the case where fight phase pools are empty
         # PERF: compute mask+eligible_units once, reuse for convert_gym_action
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
+        if self.game_state.get("debug_mode", False):
+            from engine.game_utils import add_debug_file_log
+            episode = self.game_state.get("episode_number", "?")
+            turn = self.game_state.get("turn", "?")
+            phase = self.game_state.get("phase", "?")
+            current_player = self.game_state.get("current_player", "?")
+            mask_indices = [i for i, v in enumerate(action_mask) if v]
+            add_debug_file_log(
+                self.game_state,
+                f"[GYM ACTION DEBUG] E{episode} T{turn} P{current_player} step: "
+                f"phase={phase} action_int={action} mask_true_indices={mask_indices} "
+                f"eligible_units={[u.get('id') for u in eligible_units]}"
+            )
         _step_t1 = time.perf_counter() if _step_t0 is not None else None
         if not eligible_units:
             # No eligible units - trigger phase transition
@@ -695,6 +708,16 @@ class W40KEngine(gym.Env):
         semantic_action = self.action_decoder.convert_gym_action(
             action, self.game_state, action_mask=action_mask, eligible_units=eligible_units
         )
+        if self.game_state.get("debug_mode", False):
+            from engine.game_utils import add_debug_file_log
+            episode = self.game_state.get("episode_number", "?")
+            turn = self.game_state.get("turn", "?")
+            current_player = self.game_state.get("current_player", "?")
+            add_debug_file_log(
+                self.game_state,
+                f"[GYM ACTION DEBUG] E{episode} T{turn} P{current_player} step: "
+                f"semantic_action={semantic_action}"
+            )
         _step_t2 = time.perf_counter() if _step_t0 is not None else None
 
         # CRITICAL: Capture pre-action state for replay_logger BEFORE action execution
@@ -1117,16 +1140,18 @@ class W40KEngine(gym.Env):
         pre_action_turn = self.game_state.get("turn", 1)
         pre_action_episode = self.game_state.get("episode_number", 1)  # CRITICAL: Capture episode BEFORE action execution
         pre_action_positions = {}
-        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-            # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
-            if "unitId" not in action:
-                unit_id = None
-            else:
-                unit_id = action["unitId"]
-            if unit_id:
-                pre_unit = self._get_unit_by_id(str(unit_id))
-                if pre_unit:
-                    pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
+        # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
+        if "unitId" not in action:
+            unit_id = None
+        else:
+            unit_id = action["unitId"]
+        if unit_id:
+            pre_unit = self._get_unit_by_id(str(unit_id))
+            if not pre_unit:
+                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            pre_action_player = require_key(pre_unit, "player")
+            if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+                pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
 
         # Handle special "advance_phase" action when pool is empty
         if action.get("action") == "advance_phase":
@@ -1426,7 +1451,7 @@ class W40KEngine(gym.Env):
                                 unit_id=updated_unit["id"],
                                 action_type=action_type,
                                 phase=pre_action_phase,
-                                player=pre_action_player,
+                                player=require_key(updated_unit, "player"),
                                 success=success,
                                 step_increment=step_increment,
                                 action_details=action_details,
@@ -1476,7 +1501,7 @@ class W40KEngine(gym.Env):
                                 unit_id=updated_unit["id"],
                                 action_type=action_type,
                                 phase=pre_action_phase,
-                                player=pre_action_player,
+                                player=require_key(updated_unit, "player"),
                                 success=success,
                                 step_increment=step_increment,
                                 action_details=action_details,
@@ -1583,7 +1608,7 @@ class W40KEngine(gym.Env):
                                         unit_id=actual_shooter_id,  # CRITICAL: Use actual shooter ID from attack_result
                                         action_type=action_type,
                                         phase=pre_action_phase,
-                                        player=pre_action_player,
+                                        player=require_key(actual_shooter_unit, "player"),
                                         success=success,
                                         step_increment=step_increment,
                                         action_details=attack_details,
@@ -1591,6 +1616,12 @@ class W40KEngine(gym.Env):
                                     )
                                     if step_increment:
                                         self._step_calls_since_increment = 0
+                                
+                                # Clear attack results after logging to prevent duplicate log entries
+                                if action_type == "shoot" and "shoot_attack_results" in self.game_state:
+                                    self.game_state["shoot_attack_results"] = []
+                                elif action_type == "combat" and "fight_attack_results" in self.game_state:
+                                    self.game_state["fight_attack_results"] = []
                         else:
                             # Non-specialized actions (move, wait)
                             # charge, combat, and shoot have their own logging above with specialized multi-attack handling
@@ -1647,7 +1678,7 @@ class W40KEngine(gym.Env):
                                 unit_id=updated_unit["id"],
                                 action_type=action_type,
                                 phase=pre_action_phase,
-                                player=pre_action_player,
+                                player=require_key(updated_unit, "player"),
                                 success=success,
                                 step_increment=step_increment,
                                 action_details=action_details,

@@ -26,6 +26,19 @@ def _write_diagnostic_to_debug_log(message: str) -> None:
         pass
 
 
+def add_debug_file_log(game_state: Dict[str, Any], message: str) -> None:
+    """
+    Write debug message to debug.log only if debug_mode is enabled.
+    
+    Args:
+        game_state: Game state dictionary (must contain "debug_mode" key)
+        message: Debug message to log
+    """
+    if not game_state.get("debug_mode", False):
+        return
+    _write_diagnostic_to_debug_log(message)
+
+
 def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     AI_TURN.md COMPLIANCE: Direct lookup from game_state.

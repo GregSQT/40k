@@ -30,6 +30,12 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Set phase
     game_state["phase"] = "charge"
 
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    units_cache = require_key(game_state, "units_cache")
+    add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} charge units_cache={units_cache}")
+
     # Tracking sets are NOT cleared at charge phase start
     # They persist from movement phase (units_fled, units_moved, units_shot remain)
 
@@ -74,6 +80,11 @@ def charge_build_activation_pool(game_state: Dict[str, Any]) -> None:
     game_state["charge_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
     game_state["charge_activation_pool"] = list(eligible_units)  # Ensure it's a new list, not a reference
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} charge charge_activation_pool={eligible_units}")
 
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """
@@ -1760,6 +1771,12 @@ def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state['last_compliance_data']['phase_end_reason'] = 'eligibility'
 
     add_console_log(game_state, "CHARGE PHASE COMPLETE")
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    charge_pool = require_key(game_state, "charge_activation_pool")
+    add_debug_file_log(game_state, f"[POOL PRE-TRANSITION] E{episode} T{turn} charge charge_activation_pool={charge_pool}")
 
     return {
         "phase_complete": True,

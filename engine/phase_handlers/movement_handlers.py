@@ -71,6 +71,12 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     # Set phase
     game_state["phase"] = "move"
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    units_cache = require_key(game_state, "units_cache")
+    add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} move units_cache={units_cache}")
     
     # Pre-compute enemy_adjacent_hexes once at phase start for current player
     # Cache will be reused throughout the phase for all units
@@ -108,6 +114,11 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
     game_state["move_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
     game_state["move_activation_pool"] = eligible_units
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} move move_activation_pool={eligible_units}")
     
     # Log pool build result
     _log_with_context(game_state, "MOVE DEBUG", f"movement_build_activation_pool: pool_size={len(eligible_units)} units={eligible_units}")
@@ -1182,6 +1193,12 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     from engine.game_utils import add_console_log
     add_console_log(game_state, "MOVEMENT PHASE COMPLETE")
+
+    from engine.game_utils import add_debug_file_log
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    move_pool = require_key(game_state, "move_activation_pool")
+    add_debug_file_log(game_state, f"[POOL PRE-TRANSITION] E{episode} T{turn} move move_activation_pool={move_pool}")
     
     return {
         "phase_complete": True,

@@ -44,8 +44,8 @@ class StepLogger:
             with open(self.output_file, 'w') as f:
                 f.write("=== STEP-BY-STEP ACTION LOG ===\n")
                 f.write("AI_TURN.md COMPLIANCE: Actions that increment episode_steps are logged\n")
-                f.write("STEP INCREMENT ACTIONS: move, shoot, charge, combat, wait (SUCCESS OR FAILURE)\n")
-                f.write("NO STEP INCREMENT: auto-skip ineligible units, phase transitions\n")
+                f.write("INCREMENTED ACTIONS: move, shoot, charge, combat, wait (SUCCESS OR FAILURE)\n")
+                f.write("NON-INCREMENTED: auto-skip ineligible units, phase transitions\n")
                 f.write("FAILED ACTIONS: Still increment steps - unit consumed time/effort\n")
                 f.write("=" * 80 + "\n\n")
             print(f"📝 Step logging enabled: {self.output_file}")
@@ -93,8 +93,7 @@ class StepLogger:
             message = self._format_replay_style_message(unit_id, action_type, action_details)
             
             
-            # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED] [STEP: YES/NO]
-            step_status = "STEP: YES" if step_increment else "STEP: NO"
+            # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED]
             success_status = "SUCCESS" if success else "FAILED"
             phase_upper = phase.upper()
             
@@ -105,7 +104,7 @@ class StepLogger:
             # Use self.episode_number which is updated in log_episode_start()
             episode_number = self.episode_number
             # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
-            log_line = f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}] [{step_status}]\n"
+            log_line = f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}]\n"
             # PERFORMANCE: Buffer logs and flush periodically to reduce I/O overhead
             self.log_buffer.append(log_line)
             if len(self.log_buffer) >= self.buffer_size:

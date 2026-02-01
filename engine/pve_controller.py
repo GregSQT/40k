@@ -111,6 +111,18 @@ class PvEController:
         
         # Apply action mask like in training - force valid action if predicted action is invalid
         action_mask = engine.action_decoder.get_action_mask(game_state)
+        if game_state.get("debug_mode", False):
+            from engine.game_utils import add_debug_file_log
+            episode = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            current_phase = game_state.get("phase", "?")
+            mask_indices = [i for i, v in enumerate(action_mask) if v]
+            add_debug_file_log(
+                game_state,
+                f"[AI_DECISION DEBUG] E{episode} T{turn} P2 make_ai_decision: "
+                f"phase={current_phase} predicted_action={predicted_action} "
+                f"mask_true_indices={mask_indices}"
+            )
         if not action_mask[predicted_action]:
             # Find first valid action in mask (same logic as training)
             valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
@@ -127,6 +139,15 @@ class PvEController:
         
         # Convert to semantic action using engine's method
         semantic_action = engine.action_decoder.convert_gym_action(action_int, game_state)
+        if game_state.get("debug_mode", False):
+            from engine.game_utils import add_debug_file_log
+            episode = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            add_debug_file_log(
+                game_state,
+                f"[AI_DECISION DEBUG] E{episode} T{turn} P2 make_ai_decision: "
+                f"action_int={action_int} semantic_action={semantic_action}"
+            )
         
         # Ensure AI player context
         current_player = game_state["current_player"]
@@ -198,6 +219,15 @@ class PvEController:
             
             if ai_unit_id:
                 semantic_action["unitId"] = ai_unit_id
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    add_debug_file_log(
+                        game_state,
+                        f"[AI_DECISION DEBUG] E{episode} T{turn} P2 make_ai_decision: "
+                        f"assigned_unitId={ai_unit_id} eligible_pool={eligible_pool}"
+                    )
             else:
                 print(f"⚠️ [AI_DECISION] No AI unit found in eligible pool: {eligible_pool}")
             
