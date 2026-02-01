@@ -257,7 +257,7 @@ class TacticalBot:
         elif phase == 'fight':
             return self._select_fight_action(valid_actions, game_state)
         else:
-            # Fallback: prefer combat actions
+            # Prefer combat actions when phase is unknown
             if 4 in valid_actions:  # Shoot
                 return 4
             if 5 in valid_actions:  # Charge

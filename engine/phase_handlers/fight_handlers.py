@@ -242,17 +242,12 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
 
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
-        return valid_targets[0]
+        raise ValueError(f"Unit not found for fight target selection: unit_id={unit_id}")
     
     try:
         from ai.reward_mapper import RewardMapper
 
-        if "reward_configs" in game_state:
-            reward_configs = game_state["reward_configs"]
-        else:
-            reward_configs = None
-        if not reward_configs:
-            return valid_targets[0]
+        reward_configs = require_key(game_state, "reward_configs")
 
         # Get unit type for config lookup
         from ai.unit_registry import UnitRegistry
@@ -260,10 +255,8 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
         fighter_unit_type = unit["unitType"]
         fighter_agent_key = unit_registry.get_model_key(fighter_unit_type)
 
-        # Get unit-specific config or fallback to default
-        unit_reward_config = reward_configs.get(fighter_agent_key)
-        if not unit_reward_config:
-            raise ValueError(f"No reward config found for unit type '{fighter_agent_key}' in reward_configs")
+        # Get unit-specific config (required)
+        unit_reward_config = require_key(reward_configs, fighter_agent_key)
 
         reward_mapper = RewardMapper(unit_reward_config)
 
@@ -600,9 +593,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     if target_id:
                         action["targetId"] = target_id
                     else:
-                        # Fallback to first target if AI selection failed
-                        first_target = valid_targets[0]
-                        action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+                        raise ValueError(f"AI target selection failed for unit {unit_id}")
                 else:
                     # Auto-select first target (gym training, bots, etc.)
                     first_target = valid_targets[0]
@@ -1309,14 +1300,15 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                 # CRITICAL: Always get ALL attacks from fight_attack_results
                 fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
                 if not fight_attack_results and attack_result:
-                    # Fallback: if fight_attack_results is empty but we have attack_result, use it
-                    # This should never happen if attacks are properly added to fight_attack_results
-                    fight_attack_results = [attack_result]
+                    raise ValueError(
+                        f"fight_attack_results is empty despite attack_result for unit {unit_id}"
+                    )
                 all_attack_results = fight_attack_results
                 # CRITICAL ASSERTION: If we have attack_result, it MUST be in all_attack_results
                 if attack_result and attack_result not in all_attack_results:
-                    # This should never happen - add it to ensure it's logged
-                    all_attack_results.append(attack_result)
+                    raise ValueError(
+                        f"attack_result missing from all_attack_results for unit {unit_id}"
+                    )
                 # DEBUG: Log all_attack_results being returned with waiting_for_player
                 if "episode_number" in game_state and "turn" in game_state:
                     episode = game_state["episode_number"]
@@ -1389,9 +1381,9 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         # CRITICAL: Always use fight_attack_results - it should contain ALL attacks from this activation
         fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
         if not fight_attack_results and attack_result:
-            # Fallback: if fight_attack_results is empty but we have attack_result, use it
-            # This should never happen if attacks are properly added to fight_attack_results
-            fight_attack_results = [attack_result]
+            raise ValueError(
+                f"fight_attack_results is empty despite attack_result for unit {unit_id}"
+            )
         result["all_attack_results"] = list(fight_attack_results)  # Copie explicite pour sécurité
         # DEBUG: Log all_attack_results being set in result (no_more_targets path)
         if "episode_number" in game_state and "turn" in game_state:

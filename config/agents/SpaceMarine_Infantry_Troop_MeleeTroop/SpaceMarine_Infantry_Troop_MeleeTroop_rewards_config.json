@@ -11,6 +11,9 @@
       "being_charged": -0.2,
       "shoot_wait": -0.5
     },
+    "shoot_priority_1": 0.0,
+    "shoot_priority_2": 0.0,
+    "shoot_priority_3": 0.0,
     "target_type_bonuses": {
       "vs_melee": 0.0,
       "vs_ranged": 0.1,

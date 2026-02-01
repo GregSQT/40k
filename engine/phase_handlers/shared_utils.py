@@ -303,7 +303,7 @@ def get_hp_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[int]
 def require_hp_from_cache(unit_id: str, game_state: Dict[str, Any]) -> int:
     """
     Return current HP for a unit that must be alive (in units_cache).
-    No fallback: raises ValueError if unit is dead or absent.
+    Raises ValueError if unit is dead or absent.
     """
     hp = get_hp_from_cache(str(unit_id), game_state)
     if hp is None:

@@ -865,7 +865,7 @@ def _is_hex_adjacent_to_enemy(game_state: Dict[str, Any], col: int, row: int, pl
     if enemy_adjacent_hexes is not None:
         return (col, row) in enemy_adjacent_hexes
 
-    # Fallback: compute dynamically (original behavior)
+    # Calcul dynamique si aucun cache n'est fourni (comportement historique)
     hex_neighbors = set(get_hex_neighbors(col, row))
 
     units_cache = require_key(game_state, "units_cache")
@@ -1595,45 +1595,18 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     action_reward = 0.0
     action_name = "CHARGE"
 
-    try:
-        from ai.reward_mapper import RewardMapper
+    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    reward_configs = require_key(game_state, "reward_configs")
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    scenario_unit_type = require_key(unit, "unitType")
+    reward_config_key = unit_registry.get_model_key(scenario_unit_type)
 
-        # AI_TURN.md COMPLIANCE: Direct field access with validation
-        if "reward_configs" not in game_state:
-            reward_configs = {}
-        else:
-            reward_configs = game_state["reward_configs"]
+    unit_reward_config = require_key(reward_configs, reward_config_key)
 
-        if reward_configs:
-            from ai.unit_registry import UnitRegistry
-            unit_registry = UnitRegistry()
-            scenario_unit_type = unit["unitType"]
-            reward_config_key = unit_registry.get_model_key(scenario_unit_type)
-
-            # Check if config exists
-            if reward_config_key not in reward_configs:
-                unit_reward_config = None
-            else:
-                unit_reward_config = reward_configs[reward_config_key]
-
-            if not unit_reward_config:
-                raise ValueError(f"No reward config found for unit type '{reward_config_key}' in reward_configs")
-
-            reward_mapper = RewardMapper(unit_reward_config)
-
-            # Get base charge reward (if configured)
-            unit_rewards = reward_mapper._get_unit_rewards(unit)
-
-            # AI_TURN.md COMPLIANCE: Direct field access
-            if "base_actions" not in unit_rewards:
-                base_actions = {}
-            else:
-                base_actions = unit_rewards["base_actions"]
-
-            if "charge" in base_actions:
-                action_reward = base_actions["charge"]
-    except Exception:
-        pass  # Silent fallback
+    # Base charge reward is required in rewards config
+    base_actions = require_key(unit_reward_config, "base_actions")
+    action_reward = require_key(base_actions, "charge_success")
 
     # AI_TURN.md COMPLIANCE: Direct field access for current_turn
     if "current_turn" not in game_state:

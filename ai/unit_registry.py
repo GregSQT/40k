@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 import sys
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_present
 
 class UnitRegistry:
     """Dynamic unit discovery and faction-role management system."""
@@ -160,7 +160,10 @@ class UnitRegistry:
             if faction_match:
                 faction = faction_match.group(1)
             else:
-                # Fallback to directory name
+                # Use directory name when base class doesn't encode faction
+                require_present(faction_dir_name, "faction_dir_name")
+                if not faction_dir_name.strip():
+                    raise ValueError("faction_dir_name must be a non-empty string")
                 faction = faction_dir_name.title()
         
         return faction, role

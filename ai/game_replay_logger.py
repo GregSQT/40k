@@ -433,36 +433,7 @@ class GameReplayLogger:
                 self.initial_game_state = {"units": formatted_units}
                 return
         
-        # FALLBACK: Use controller units only if no config available
-        if hasattr(self.env, 'controller'):
-            units = self.env.controller.get_units()
-            if units:
-                formatted_units = []
-                for unit in units:
-                    # Validate ALL required fields - NO DEFAULTS
-                    required_fields = ["id", "unit_type", "player", "col", "row",
-                                 "CUR_HP", "HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "CC_RNG"]
-                    for field in required_fields:
-                        if field not in unit:
-                            raise ValueError(f"Unit missing required field '{field}': {unit}")
-                    
-                    formatted_units.append({
-                        "id": unit["id"],
-                        "unit_type": unit["unit_type"],
-                        "player": unit["player"],
-                        "col": get_unit_coordinates(unit)[0],
-                        "row": get_unit_coordinates(unit)[1],
-                        "CUR_HP": unit["CUR_HP"],
-                        "HP_MAX": unit["HP_MAX"],
-                        "MOVE": unit["MOVE"],
-                        "RNG_RNG": unit["RNG_RNG"],
-                        "RNG_DMG": unit["RNG_DMG"],
-                        "CC_DMG": unit["CC_DMG"],
-                        "CC_RNG": unit["CC_RNG"]
-                    })
-                
-                # Store for later use in save_replay
-                self.initial_game_state = {"units": formatted_units}
+        raise ValueError("Initial units missing from env.config.initial_units; cannot build replay initial state")
     
     def capture_game_end(self, winner: str, final_reward: float):
         """Capture final game state - compatibility method."""

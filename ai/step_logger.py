@@ -284,9 +284,6 @@ class StepLogger:
                     base_msg = f"Unit {unit_id}{unit_coords} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}]"
                 else:
                     base_msg = f"Unit {unit_id}{unit_coords} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row})"
-            elif "col" in details and "row" in details:
-                # Fallback: use destination coordinates
-                base_msg = f"Unit {unit_id}{unit_coords} ADVANCED to ({details['col']},{details['row']})"
             else:
                 raise KeyError("Advance action missing required position data")
 
@@ -450,11 +447,7 @@ class StepLogger:
                 end_col, end_row = details["end_pos"]
                 base_msg = f"Unit {unit_id}{unit_coords} FAILED CHARGE unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
-                # Fallback if positions not available (backward compatibility)
-                if charge_roll is not None:
-                    base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [Roll:{charge_roll}] [FAILED: {charge_failed_reason}]"
-                else:
-                    base_msg = f"Unit {unit_id}{unit_coords} FAILED charge to unit {target_id} [FAILED: {charge_failed_reason}]"
+                raise KeyError("Charge_fail action missing required position data")
 
             # Add reward if available (should be negative penalty)
             reward = details.get("reward")
@@ -592,7 +585,7 @@ class StepLogger:
             return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
         else:
-            raise ValueError(f"Unknown action_type '{action_type}' - no fallback allowed")
+            raise ValueError(f"Unknown action_type '{action_type}'")
     
     def log_phase_transition(self, from_phase, to_phase, player, turn_number=1):
         """Log phase transitions (no step increment) using simplified format"""

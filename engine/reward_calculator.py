@@ -905,12 +905,9 @@ class RewardCalculator:
             if best_weapon_idx >= 0 and shooter.get("RNG_WEAPONS"):
                 weapon = shooter["RNG_WEAPONS"][best_weapon_idx]
             else:
-                # Fallback to selected weapon
                 weapon = get_selected_ranged_weapon(shooter)
-                if not weapon and shooter.get("RNG_WEAPONS"):
-                    weapon = shooter["RNG_WEAPONS"][0]  # Fallback to first weapon
                 if not weapon:
-                    return 0.0
+                    raise ValueError(f"No selected ranged weapon for shooter {shooter.get('id')}")
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
@@ -923,12 +920,9 @@ class RewardCalculator:
             if best_weapon_idx >= 0 and shooter.get("CC_WEAPONS"):
                 weapon = shooter["CC_WEAPONS"][best_weapon_idx]
             else:
-                # Fallback to selected weapon
                 weapon = get_selected_melee_weapon(shooter)
-                if not weapon and shooter.get("CC_WEAPONS"):
-                    weapon = shooter["CC_WEAPONS"][0]  # Fallback to first weapon
                 if not weapon:
-                    return 0.0
+                    raise ValueError(f"No selected melee weapon for shooter {shooter.get('id')}")
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
@@ -999,22 +993,20 @@ class RewardCalculator:
             if best_weapon_idx >= 0 and attacker.get("RNG_WEAPONS"):
                 weapon = attacker["RNG_WEAPONS"][best_weapon_idx]
             else:
-                # Fallback to selected or first weapon
                 from engine.utils.weapon_helpers import get_selected_ranged_weapon
                 weapon = get_selected_ranged_weapon(attacker)
-                if not weapon and attacker.get("RNG_WEAPONS"):
-                    weapon = attacker["RNG_WEAPONS"][0]
+                if not weapon:
+                    raise ValueError(f"No selected ranged weapon for attacker {attacker.get('id')}")
         elif can_use_melee and not can_use_ranged:
             # Only melee available
             best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=False)
             if best_weapon_idx >= 0 and attacker.get("CC_WEAPONS"):
                 weapon = attacker["CC_WEAPONS"][best_weapon_idx]
             else:
-                # Fallback to selected or first weapon
                 from engine.utils.weapon_helpers import get_selected_melee_weapon
                 weapon = get_selected_melee_weapon(attacker)
-                if not weapon and attacker.get("CC_WEAPONS"):
-                    weapon = attacker["CC_WEAPONS"][0]
+                if not weapon:
+                    raise ValueError(f"No selected melee weapon for attacker {attacker.get('id')}")
         else:
             # Both available - choose best overall
             best_rng_idx, rng_kill_prob = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=True)
@@ -1025,12 +1017,10 @@ class RewardCalculator:
             elif best_cc_idx >= 0 and attacker.get("CC_WEAPONS"):
                 weapon = attacker["CC_WEAPONS"][best_cc_idx]
             else:
-                # Fallback to selected ranged or melee
                 from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
                 weapon = get_selected_ranged_weapon(attacker) or get_selected_melee_weapon(attacker)
-        
-        if not weapon:
-            return 0.0
+                if not weapon:
+                    raise ValueError(f"No selected weapon for attacker {attacker.get('id')}")
         
         hit_target = require_key(weapon, "ATK")
         strength = require_key(weapon, "STR")
@@ -1181,8 +1171,8 @@ class RewardCalculator:
             winner, _ = self.state_manager.determine_winner_with_method(game_state)
             return winner
         
-        # Fallback for backward compatibility (should not happen in normal usage)
-        # This is the old logic that ignores objectives
+        # Legacy winner logic (should not happen in normal usage)
+        # This path ignores objectives
         living_units_by_player = {}
         units_cache = require_key(game_state, "units_cache")
         for _unit_id, cache_entry in units_cache.items():
@@ -1210,21 +1200,9 @@ class RewardCalculator:
         enriched = unit.copy()
 
         # CRITICAL FIX: Use controlled_agent for reward config lookup (includes phase suffix)
-        config_controlled_agent = self.config.get("controlled_agent") if self.config else None
-
-        # AI_TURN.md COMPLIANCE: NO FALLBACKS - proper error handling
-        if config_controlled_agent:
-            # Training mode: use controlled_agent which includes phase suffix
-            agent_key = config_controlled_agent
-        elif hasattr(self, 'unit_registry') and self.unit_registry:
-            # Direct access - NO DEFAULTS allowed
-            if "unitType" not in unit:
-                raise KeyError(f"Unit missing required 'unitType' field: {unit}")
-            scenario_unit_type = unit["unitType"]
-            # Let unit_registry.get_model_key() raise ValueError if unit type not found
-            agent_key = self.unit_registry.get_model_key(scenario_unit_type)
-        else:
-            raise ValueError("Missing both controlled_agent config and unit_registry - cannot determine agent key")
+        if not self.config:
+            raise ValueError("Missing config - cannot determine controlled_agent for reward mapper")
+        agent_key = require_key(self.config, "controlled_agent")
 
         # CRITICAL: Set the agent type as unitType for reward config lookup
         enriched["unitType"] = agent_key
@@ -1323,12 +1301,9 @@ class RewardCalculator:
         if best_weapon_idx >= 0 and attacker.get("RNG_WEAPONS"):
             weapon = attacker["RNG_WEAPONS"][best_weapon_idx]
         else:
-            # Fallback to selected weapon
             weapon = get_selected_ranged_weapon(attacker)
-            if not weapon and attacker.get("RNG_WEAPONS"):
-                weapon = attacker["RNG_WEAPONS"][0]  # Fallback to first weapon
             if not weapon:
-                return 0.0
+                raise ValueError(f"No selected ranged weapon for attacker {attacker.get('id')}")
         
         num_attacks = weapon["NB"]
         if num_attacks == 0:

@@ -813,62 +813,50 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
 def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
     """AI target selection using RewardMapper system"""
     if not valid_targets:
-        return ""
+        raise ValueError("valid_targets required for AI shooting target selection")
     
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
-        return valid_targets[0]
+        raise ValueError(f"AI shooting target selection missing unit: unit_id={unit_id}")
     
-    try:
-        from ai.reward_mapper import RewardMapper
-        
-        if "reward_configs" in game_state:
-            reward_configs = game_state["reward_configs"]
-        else:
-            reward_configs = None
-        if not reward_configs:
-            return valid_targets[0]
-        
-        # Get unit type for config lookup
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
-        shooter_unit_type = unit["unitType"]
-        shooter_agent_key = unit_registry.get_model_key(shooter_unit_type)
-        
-        # Get unit-specific config or fallback to default
-        unit_reward_config = reward_configs.get(shooter_agent_key)
-        if not unit_reward_config:
-            raise ValueError(f"No reward config found for unit type '{shooter_agent_key}' in reward_configs")
-        
-        reward_mapper = RewardMapper(unit_reward_config)
-        
-        # Build target list for reward mapper (single lookup per tid)
-        all_targets = []
-        for tid in valid_targets:
-            t = _get_unit_by_id(game_state, tid)
-            if t:
-                all_targets.append(t)
+    from ai.reward_mapper import RewardMapper
+    reward_configs = require_key(game_state, "reward_configs")
+    
+    # Get unit type for config lookup
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    shooter_unit_type = require_key(unit, "unitType")
+    shooter_agent_key = unit_registry.get_model_key(shooter_unit_type)
+    
+    # Get unit-specific config
+    unit_reward_config = require_key(reward_configs, shooter_agent_key)
+    reward_mapper = RewardMapper(unit_reward_config)
+    
+    # Build target list for reward mapper (single lookup per tid)
+    all_targets = []
+    for tid in valid_targets:
+        t = _get_unit_by_id(game_state, tid)
+        if not t:
+            raise ValueError(f"AI shooting target selection missing target: target_id={tid}")
+        all_targets.append(t)
 
-        best_target = valid_targets[0]
-        best_reward = -999999
+    best_target = valid_targets[0]
+    best_reward = None
+    
+    for target_id in valid_targets:
+        target = _get_unit_by_id(game_state, target_id)
+        if not target:
+            raise ValueError(f"AI shooting target selection missing target: target_id={target_id}")
         
-        for target_id in valid_targets:
-            target = _get_unit_by_id(game_state, target_id)
-            if not target:
-                continue
-            
-            can_melee_charge = False  # TODO: implement melee charge check
-            
-            reward = reward_mapper.get_shooting_priority_reward(unit, target, all_targets, can_melee_charge, game_state)
-            
-            if reward > best_reward:
-                best_reward = reward
-                best_target = target_id
+        can_melee_charge = False  # TODO: implement melee charge check
+        
+        reward = reward_mapper.get_shooting_priority_reward(unit, target, all_targets, can_melee_charge, game_state)
+        
+        if best_reward is None or reward > best_reward:
+            best_reward = reward
+            best_target = target_id
 
-        return best_target
-        
-    except Exception as e:
-        return valid_targets[0]
+    return best_target
 
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
     """
@@ -1531,12 +1519,17 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     if "unitType" not in unit:
         raise KeyError(f"Unit missing required 'unitType' field: {unit}")
 
+    rng_weapons = require_key(unit, "RNG_WEAPONS")
+    if not rng_weapons:
+        # No ranged weapons: return pool without priority scoring
+        return valid_target_pool
+
     # Cache unit stats for priority calculations
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or first weapon for priority
     from engine.utils.weapon_helpers import get_selected_ranged_weapon
     selected_weapon = get_selected_ranged_weapon(unit)
-    if not selected_weapon and unit.get("RNG_WEAPONS"):
-        selected_weapon = unit["RNG_WEAPONS"][0]  # Fallback to first weapon
+    if not selected_weapon:
+        raise ValueError(f"Selected ranged weapon is required for shooting priority calculation: unit_id={unit.get('id')}")
     
     unit_t = unit["T"]
     unit_save = unit["ARMOR_SAVE"]
@@ -1604,10 +1597,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         # Step 1: Calculate target's threat to us (probability to wound per turn)
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected ranged weapon or best weapon
         target_rng_weapon = get_selected_ranged_weapon(target)
-        if not target_rng_weapon and target.get("RNG_WEAPONS"):
-            target_rng_weapon = target["RNG_WEAPONS"][0]  # Fallback to first weapon
-        
+        target_rng_weapons = require_key(target, "RNG_WEAPONS")
         if not target_rng_weapon:
+            if target_rng_weapons:
+                raise ValueError(f"Selected ranged weapon is required for target threat calculation: target_id={target.get('id')}")
             # Target has no ranged weapons, use default values (threat = 0)
             target_attacks = 0
             target_bs = 7  # Can't hit
@@ -2367,13 +2360,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         # Unit has fired at least once, use stored category
         current_weapon_is_pistol = unit["_shooting_with_pistol"]
     else:
-        # Fallback: Check if unit has fired by comparing SHOOT_LEFT
-        from engine.utils.weapon_helpers import get_selected_ranged_weapon
-        selected_weapon = get_selected_ranged_weapon(unit)
-        if selected_weapon and require_key(unit, "SHOOT_LEFT") < require_key(selected_weapon, "NB"):
-            # Unit has already fired (SHOOT_LEFT decreased), determine category from current weapon
-            weapon_rules = selected_weapon["WEAPON_RULES"] if "WEAPON_RULES" in selected_weapon else []
-            current_weapon_is_pistol = "PISTOL" in weapon_rules
+        raise KeyError(f"Unit missing required '_shooting_with_pistol' field: unit_id={unit.get('id')}")
         
     # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
     if "weapon_rule" not in game_state:
@@ -2873,7 +2860,7 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
 def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md: Handle target selection and shooting execution.
-    Supports both agent-selected targetId and auto-selection fallback for humans.
+    Requires explicit targetId selection.
     """    
     try:
         unit = _get_unit_by_id(game_state, unit_id)
@@ -3127,94 +3114,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             # Agent provided invalid target
             return False, {"error": "target_not_valid", "targetId": target_id}
         else:
-            # No target provided - auto-select first valid target (human player fallback)
-            selected_target_id = valid_targets[0]
-            
-            # === MULTIPLE_WEAPONS_IMPLEMENTATION.md: Sélection d'arme pour cible auto-sélectionnée ===
-            target = _get_unit_by_id(game_state, selected_target_id)
-            if not target:
-                return False, {"error": "target_not_found", "targetId": selected_target_id}
-                # Only auto-select weapon if autoSelectWeapon is enabled
-                cfg = game_state["config"] if "config" in game_state else None
-                gs = cfg["game_settings"] if cfg and "game_settings" in cfg else None
-                auto_select = gs["autoSelectWeapon"] if gs and "autoSelectWeapon" in gs else True
-                
-                if auto_select:
-                    # AI_TURN.md ligne 526-535: Use weapon_availability_check instead
-                    if "weapon_rule" not in game_state:
-                        raise KeyError("game_state missing required 'weapon_rule' field")
-                    weapon_rule = game_state["weapon_rule"]
-                    unit_id_str = str(unit["id"])
-                    has_advanced = unit_id_str in require_key(game_state, "units_advanced")
-                    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
-                    advance_status = 1 if has_advanced else 0
-                    adjacent_status = 1 if is_adjacent else 0
-                    
-                    try:
-                        weapon_available_pool = weapon_availability_check(
-                            game_state, unit, weapon_rule, advance_status, adjacent_status
-                        )
-                        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
-                        # Filter by same category (PISTOL or non-PISTOL) if needed
-                        if current_weapon_is_pistol:
-                            usable_weapons = [w for w in usable_weapons if _weapon_has_pistol_rule(w["weapon"])]
-                        else:
-                            usable_weapons = [w for w in usable_weapons if not _weapon_has_pistol_rule(w["weapon"])]
-                        
-                        available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
-                    except Exception as e:
-                        # If weapon selection fails, return error
-                        if current_weapon_is_pistol:
-                            return False, {"error": "no_pistol_weapons_available", "unitId": unit_id}
-                        else:
-                            return False, {"error": "no_non_pistol_weapons_available", "unitId": unit_id}
-                    
-                    # Filter to only usable weapons
-                    usable_weapons = [w for w in available_weapons if w["can_use"]]
-                    
-                    if not usable_weapons:
-                        if current_weapon_is_pistol:
-                            return False, {"error": "no_pistol_weapons_available", "unitId": unit_id}
-                        else:
-                            return False, {"error": "no_non_pistol_weapons_available", "unitId": unit_id}
-                    
-                    # Create temporary unit with filtered weapons for selection
-                    from engine.ai.weapon_selector import select_best_ranged_weapon
-                    filtered_weapons = [w["weapon"] for w in usable_weapons]
-                    filtered_indices = [w["index"] for w in usable_weapons]
-                    temp_unit = unit.copy()
-                    temp_unit["RNG_WEAPONS"] = filtered_weapons
-                    best_weapon_idx_in_filtered = select_best_ranged_weapon(temp_unit, target, game_state)
-                    
-                    if best_weapon_idx_in_filtered >= 0:
-                        # Map back to original weapon index
-                        best_weapon_idx = filtered_indices[best_weapon_idx_in_filtered]
-                        unit["selectedRngWeaponIndex"] = best_weapon_idx
-                        weapon = unit["RNG_WEAPONS"][best_weapon_idx]
-                        current_shoot_left = require_key(unit, "SHOOT_LEFT")
-                        if current_shoot_left == 0:
-                            unit["SHOOT_LEFT"] = weapon["NB"]
-                    else:
-                        unit["SHOOT_LEFT"] = 0
-                        return False, {"error": "no_weapons_available", "unitId": unit_id}
-                else:
-                    # Manual mode: Use already selected weapon, just update SHOOT_LEFT if needed
-                    from engine.utils.weapon_helpers import get_selected_ranged_weapon
-                    selected_weapon = get_selected_ranged_weapon(unit)
-                    if selected_weapon:
-                        current_shoot_left = require_key(unit, "SHOOT_LEFT")
-                        # Only initialize SHOOT_LEFT if it hasn't been initialized yet
-                        active_shooting_unit = game_state["active_shooting_unit"] if "active_shooting_unit" in game_state else None
-                        if current_shoot_left == 0 and active_shooting_unit != unit_id:
-                            # Unit hasn't started shooting yet, initialize SHOOT_LEFT
-                            unit["SHOOT_LEFT"] = selected_weapon["NB"]
-                        elif current_shoot_left == 0 and active_shooting_unit == unit_id:
-                            # Unit has already shot and SHOOT_LEFT is 0
-                            # This case is already handled at the beginning of the function
-                            # If we reach here, it means the weapon is not PISTOL, so allow weapon selection
-                            # Return error to force manual weapon selection
-                            return False, {"error": "weapon_selection_required", "unitId": unit_id, "shootLeft": 0}
-            # === FIN NOUVEAU ===
+            return False, {"error": "missing_target", "unitId": unit_id}
         
         # Determine selected_target_id if not already set (from if/elif blocks above)
         if 'selected_target_id' not in locals():
@@ -3225,7 +3125,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             elif target_id_str:
                 return False, {"error": "target_not_valid", "targetId": target_id_str, "valid_targets": valid_targets[:5]}
             else:
-                selected_target_id = valid_targets[0]
+                return False, {"error": "missing_target", "unitId": unit_id}
         
         target = _get_unit_by_id(game_state, selected_target_id)
         if not target:
@@ -3249,11 +3149,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         actual_attack_result["targetId"] = selected_target_id
         # CRITICAL: Include shooterId in actual_attack_result for correct logging
         # shooting_attack_controller returns shooterId in the wrapper, we need it in the attack_result for logging
-        if "shooterId" in attack_result:
-            actual_attack_result["shooterId"] = attack_result["shooterId"]
-        else:
-            # Fallback: use unit_id if shooterId not in wrapper (shouldn't happen but be safe)
-            actual_attack_result["shooterId"] = unit_id
+        actual_attack_result["shooterId"] = require_key(attack_result, "shooterId")
         # CRITICAL: Ensure target_died is always present (it's added in shooting_attack_controller but may be missing)
         if "target_died" not in actual_attack_result:
             actual_attack_result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
@@ -3595,23 +3491,13 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
    
         try:
             from ai.reward_mapper import RewardMapper
-            rewards_configs = game_state.get("rewards_configs")
-            if not rewards_configs:
-                raise ValueError(f"rewards_configs is missing from game_state for shooter {shooter.get('id', 'unknown')}")
+            rewards_configs = require_key(game_state, "rewards_configs")
 
         # CRITICAL FIX: Use controlled_agent for reward config lookup (includes phase suffix)
-            cfg2 = game_state["config"] if "config" in game_state else None
-            controlled_agent = cfg2["controlled_agent"] if cfg2 and "controlled_agent" in cfg2 else None
-
-            if not controlled_agent:
-                # Fallback: use unit_registry mapping if no controlled_agent
-                from ai.unit_registry import UnitRegistry
-                unit_registry = UnitRegistry()
-                shooter_unit_type = shooter["unitType"]
-                reward_config_key = unit_registry.get_model_key(shooter_unit_type)
-            else:
-                # Training mode: use controlled_agent which includes phase suffix
-                reward_config_key = controlled_agent
+            cfg2 = require_key(game_state, "config")
+            controlled_agent = require_key(cfg2, "controlled_agent")
+            # Training mode: use controlled_agent which includes phase suffix
+            reward_config_key = controlled_agent
 
         # Get unit-specific config - RAISE ERROR if not found
             unit_reward_config = rewards_configs.get(reward_config_key)

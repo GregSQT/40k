@@ -1478,7 +1478,7 @@ def main():
         
         # Multi-agent orchestration mode
         if args.orchestrate:
-            # Use config fallback for total_episodes if not provided
+            # Use training config value when total_episodes is not provided
             total_episodes = args.total_episodes
             if total_episodes is None:
                 # Orchestration mode requires agent parameter

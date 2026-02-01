@@ -150,7 +150,7 @@ class W40KEngine(gym.Env):
             if scenario_result.get("objectives") is not None:
                 scenario_objectives = scenario_result["objectives"]
             else:
-                # Fallback to board config (legacy flat list or new grouped format)
+                # Use board config (legacy flat list or new grouped format)
                 if "default" in board_config:
                     d = board_config["default"]
                     scenario_objectives = d["objectives"] if "objectives" in d else (d["objective_hexes"] if "objective_hexes" in d else [])
@@ -300,6 +300,8 @@ class W40KEngine(gym.Env):
             "rewards_configs": {
                 self.config.get("controlled_agent", "default"): self.rewards_config
             },
+            # Handler access for single-agent reward config (required, no defaults)
+            "reward_configs": self.rewards_config,
             "config": self.config,
             
             # Board state - handle both config formats
@@ -323,6 +325,20 @@ class W40KEngine(gym.Env):
         
         # Initialize units from config AFTER game_state exists
         self._initialize_units()
+
+        # Build reward_configs for all units present in the scenario (no defaults)
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        reward_configs = {}
+        units = require_key(self.game_state, "units")
+        for unit in units:
+            unit_type = require_key(unit, "unitType")
+            model_key = self.unit_registry.get_model_key(unit_type)
+            if model_key not in reward_configs:
+                agent_rewards = config_loader.load_agent_rewards_config(model_key)
+                reward_configs[model_key] = require_key(agent_rewards, model_key)
+        self.game_state["reward_configs"] = reward_configs
+        self.game_state["rewards_configs"] = reward_configs
 
         # CRITICAL: Initialize Gym spaces BEFORE any other operations
         # Gym interface properties - dynamic action space based on phase

@@ -383,7 +383,7 @@ def has_line_of_sight_coords(from_col: int, from_row: int, to_col: int, to_row: 
 
 def check_los_cached(shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         """
-        Check LoS using cache if available, fallback to calculation.
+        Check LoS using cache (required).
         AI_TURN.md COMPLIANCE: Direct field access, uses game_state cache.
         
         Returns:
@@ -391,16 +391,17 @@ def check_los_cached(shooter: Dict[str, Any], target: Dict[str, Any], game_state
         - 0.0 = Blocked line of sight
         """
         # AI_TURN_SHOOTING_UPDATE.md: Use shooter["los_cache"] (new architecture)
+        if "id" not in target:
+            raise KeyError(f"Target missing required 'id' field: {target}")
         target_id = target["id"]
         
-        if "los_cache" in shooter and shooter["los_cache"]:
-            if target_id in shooter["los_cache"]:
-                return 1.0 if shooter["los_cache"][target_id] else 0.0
+        if "los_cache" not in shooter or not shooter["los_cache"]:
+            raise ValueError(f"los_cache missing for shooter {shooter.get('id')}")
         
-        # Fallback: calculate LoS (happens if cache not built yet or used outside shooting phase)
-        from engine.phase_handlers import shooting_handlers
-        has_los = shooting_handlers._has_line_of_sight(game_state, shooter, target)
-        return 1.0 if has_los else 0.0
+        if target_id not in shooter["los_cache"]:
+            raise ValueError(f"los_cache missing target {target_id} for shooter {shooter.get('id')}")
+        
+        return 1.0 if shooter["los_cache"][target_id] else 0.0
 
 # ============================================================================
 # COMBAT VALIDATION

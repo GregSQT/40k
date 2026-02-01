@@ -1,8 +1,8 @@
 {
-  "description": "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_rewards_config.json",
+  "description": "config/agents/Tyranid_Infantry_Troop_RangedTroop/Tyranid_Infantry_Troop_RangedTroop_rewards_config.json",
 
-  "SpaceMarine_Infantry_Troop_RangedSwarm": {
-    "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
+  "Tyranid_Infantry_Troop_RangedTroop": {
+    "Unit": "######################### Tyranid_Infantry_Troop_RangedTroop ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "base_actions": {
       "ranged_attack": 3.0,

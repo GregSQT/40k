@@ -48,7 +48,7 @@ def extract_scenario_name_for_replay():
     if hasattr(convert_to_replay_format, '_detected_template_name') and convert_to_replay_format._detected_template_name:
         return convert_to_replay_format._detected_template_name
     
-    # Fallback: use scenario from filename if template not available
+    # Use scenario name from filename if template not available
     return "scenario"   
 
 def convert_steplog_to_replay(steplog_path):

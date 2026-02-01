@@ -137,7 +137,7 @@ def parse_episodes_from_step(step_log: str) -> Dict[int, int]:
                 for line_num in range(start_line, next_start_line):
                     episode_map[line_num] = episode
     else:
-        # Fallback: use EPISODE END markers if START markers don't exist
+        # Use EPISODE END markers if START markers don't exist
         episode_ends = {}
         for line_num, line in enumerate(lines, 1):
             if 'EPISODE END' in line:
@@ -164,9 +164,9 @@ def parse_episodes_from_step(step_log: str) -> Dict[int, int]:
     
     return episode_map
 
-def _get_episode_with_fallback(line_num: int, episode_map: Dict[int, int]) -> int:
+def _get_episode_with_context(line_num: int, episode_map: Dict[int, int]) -> int:
     """
-    Get episode for a line number with fallback logic.
+    Get episode for a line number with context-based logic.
     
     If episode is not mapped, infer from context by finding the last known episode
     before this line. This prevents skipping valid log entries due to mapping gaps.
@@ -225,7 +225,7 @@ def parse_moves_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Di
             # Try MOVED without episode (old format)
             match = re.search(moved_pattern_old, line)
             if match:
-                episode = _get_episode_with_fallback(line_num, episode_map)
+                episode = _get_episode_with_context(line_num, episode_map)
                 timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
                 moves.append({
                     'episode': episode,
@@ -256,7 +256,7 @@ def parse_moves_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Di
                     # Try FLED without episode (old format)
                     match = re.search(fled_pattern_old, line)
                     if match:
-                        episode = _get_episode_with_fallback(line_num, episode_map)
+                        episode = _get_episode_with_context(line_num, episode_map)
                         timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
                         moves.append({
                             'episode': episode,
@@ -299,7 +299,7 @@ def parse_charges_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
             # Try without episode (old format)
             match = re.search(pattern_old, line)
             if match:
-                episode = _get_episode_with_fallback(line_num, episode_map)
+                episode = _get_episode_with_context(line_num, episode_map)
                 timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
                 charges.append({
                     'episode': episode,
@@ -341,7 +341,7 @@ def parse_advances_from_step(step_log: str, episode_map: Dict[int, int]) -> List
             # Try without episode (old format)
             match = re.search(pattern_old, line)
             if match:
-                episode = _get_episode_with_fallback(line_num, episode_map)
+                episode = _get_episode_with_context(line_num, episode_map)
                 timestamp, turn, player, unit_id, col, row, from_col, from_row, to_col, to_row = match.groups()
                 advances.append({
                     'episode': episode,
@@ -383,7 +383,7 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
             # Try without episode (old format)
             match = re.search(shoot_pattern_old, line)
             if match:
-                episode = _get_episode_with_fallback(line_num, episode_map)
+                episode = _get_episode_with_context(line_num, episode_map)
                 timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
                 attacks.append({
                     'episode': episode,
@@ -417,7 +417,7 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
             # Try without episode (old format)
             match = re.search(fight_pattern_old, line)
             if match:
-                episode = _get_episode_with_fallback(line_num, episode_map)
+                episode = _get_episode_with_context(line_num, episode_map)
                 timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
                 attacks.append({
                     'episode': episode,

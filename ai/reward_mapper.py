@@ -340,7 +340,12 @@ class RewardMapper:
     
     def _get_unit_rewards(self, unit):
         """Get reward configuration using unit naming convention."""
-        unit_type = unit.get("unitType", "unknown")
+        unit_type = require_key(unit, "unitType")
+
+        # If rewards_config is already an agent section, return it directly
+        if "base_actions" in self.rewards_config:
+            require_key(self.rewards_config, "base_actions")
+            return self.rewards_config
 
         # Direct lookup using exact unit type from rewards_config.json
         if unit_type in self.rewards_config:
@@ -484,13 +489,13 @@ class RewardMapper:
     def _get_max_melee_damage_vs_target(self, target):
         """Get maximum melee damage our units can do to target.""" 
         # This would need access to friendly units list
-        # Throw error instead of using default - no fallbacks allowed
-        raise NotImplementedError("_get_max_melee_damage_vs_target requires access to friendly units list - no fallback defaults allowed")
+        # Throw error instead of using default
+        raise NotImplementedError("_get_max_melee_damage_vs_target requires access to friendly units list")
     
     def _get_current_phase(self):
         """Get current game phase."""
         # This would need access to game state
-        raise NotImplementedError("_get_current_phase requires access to game state - no fallback defaults allowed")
+        raise NotImplementedError("_get_current_phase requires access to game state")
     
     def _was_lowest_hp_target(self, target, game_state: Dict[str, Any]):
         """Check if this was the lowest HP target when action was taken. Phase 2: HP from get_hp_from_cache."""
