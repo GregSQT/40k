@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script pour debugger le calcul LoS pour l'exemple concret :
-Episode 2, Turn 1, Unit 1(21,6) SHOT at unit 10(14,7)
+Episode 2, Turn 1, Unit 1(21,6) SHOT at Unit 10(14,7)
 """
 
 import sys
@@ -47,7 +47,7 @@ def debug_los(shooter_col, shooter_row, target_col, target_row, wall_hexes):
 
 if __name__ == "__main__":
     # Example from analyzer_output.txt
-    # Episode 2, Turn 1, Unit 1(21,6) SHOT at unit 10(14,7)
+    # Episode 2, Turn 1, Unit 1(21,6) SHOT at Unit 10(14,7)
     shooter_col, shooter_row = 21, 6
     target_col, target_row = 14, 7
     

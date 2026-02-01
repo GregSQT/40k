@@ -617,7 +617,7 @@ export const BoardReplay: React.FC = () => {
 
         gameLog.addEvent({
           type: 'charge',
-          message: `Unit ${unitId}(${action.to.col},${action.to.row}) CHARGED unit ${targetId}(${targetPos.col},${targetPos.row}) from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})${rollInfo}`,
+          message: `Unit ${unitId}(${action.to.col},${action.to.row}) CHARGED Unit ${targetId}(${targetPos.col},${targetPos.row}) from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})${rollInfo}`,
           unitId: unitId,
           targetId: targetId,
           turnNumber: turnNumber,

@@ -22,9 +22,9 @@ def analyze_log_file(log_path):
         for line_num, line in enumerate(f, 1):
             # Detect charge lines
             if 'CHARGE' in line and 'CHARGED' in line:
-                # Parse: "Unit X(col, row) CHARGED unit Y from (a, b) to (c, d)"
+                # Parse: "Unit X(col, row) CHARGED Unit Y from (a, b) to (c, d)"
                 charge_match = re.search(
-                    r'Unit (\d+)\((\d+), (\d+)\) CHARGED unit (\d+|None) from \((\d+), (\d+)\) to \((\d+), (\d+)\)',
+                    r'Unit (\d+)\((\d+), (\d+)\) CHARGED Unit (\d+|None) from \((\d+), (\d+)\) to \((\d+), (\d+)\)',
                     line
                 )
                 

@@ -277,9 +277,9 @@ def parse_charges_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
     """
     charges = []
     # Pattern with episode (new format)
-    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED Unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     # Pattern without episode (old format)
-    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED Unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)
@@ -362,9 +362,9 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
     attacks = []
     
     # SHOOT attacks with episode (new format)
-    shoot_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at unit (\d+)\((\d+),(\d+)\)'
+    shoot_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at Unit (\d+)\((\d+),(\d+)\)'
     # SHOOT attacks without episode (old format)
-    shoot_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at unit (\d+)\((\d+),(\d+)\)'
+    shoot_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at Unit (\d+)\((\d+),(\d+)\)'
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)
         match = re.search(shoot_pattern_with_ep, line)
@@ -396,9 +396,9 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                 })
     
     # FIGHT attacks with episode (new format)
-    fight_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)\((\d+),(\d+)\)'
+    fight_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED Unit (\d+)\((\d+),(\d+)\)'
     # FIGHT attacks without episode (old format)
-    fight_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED unit (\d+)\((\d+),(\d+)\)'
+    fight_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED Unit (\d+)\((\d+),(\d+)\)'
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)
         match = re.search(fight_pattern_with_ep, line)

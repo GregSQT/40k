@@ -20,7 +20,7 @@ with open("train_step.log", "r", encoding="utf-8") as f:
                 bot_type = "defensive"
 
         # Track damage dealt
-        if "SHOT at unit" in line and "Dmg:" in line:
+        if "SHOT at Unit" in line and "Dmg:" in line:
             match = re.search(r'(P[01]).*Dmg:(\d+)HP', line)
             if match:
                 player = match.group(1)

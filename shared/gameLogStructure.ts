@@ -148,7 +148,7 @@ export function createLogEntry(params: LogEntryParams): BaseLogEntry {
       } catch (error) {
         // Fallback to original format if parsing fails
       }
-      return `Unit ${unitName} ${unitId} CHARGED unit ${targetName} ${targetId} from ${startHex} to ${endHex}`;
+      return `Unit ${unitName} ${unitId} CHARGED Unit ${targetName} ${targetId} from ${startHex} to ${endHex}`;
     },
     death: formatDeathMessage,
     move_cancel: formatMoveCancelMessage,

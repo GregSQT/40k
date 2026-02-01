@@ -36,7 +36,7 @@
    - Position non mise à jour correctement après mouvement
 
 **Shoot at friendly unit** :
-1. Extraire 2-3 exemples spécifiques (E1 T1 SHOOT : Unit X SHOT at unit Y)
+1. Extraire 2-3 exemples spécifiques (E1 T1 SHOOT : Unit X SHOT at Unit Y)
 2. Vérifier si `target_id` est une unité amie
 3. Identifier si le problème vient de :
    - Filtrage des cibles insuffisant dans `valid_target_pool_build`
@@ -52,14 +52,14 @@
    - Validation manquante avant l'exécution du mouvement
 
 **Shoot at engaged enemy** :
-1. Extraire 2-3 exemples spécifiques (E1 T1 SHOOT : Unit X SHOT at unit Y)
+1. Extraire 2-3 exemples spécifiques (E1 T1 SHOOT : Unit X SHOT at Unit Y)
 2. Vérifier si la cible est engagée (adjacente à une unité amie)
 3. Identifier si le problème vient de :
    - Filtrage insuffisant dans `valid_target_pool_build` (règle de l'unité adjacente)
    - Validation manquante avant l'exécution du tir
 
 **Charges from adjacent hex** :
-1. Extraire 2-3 exemples spécifiques (E1 T1 CHARGE : Unit X CHARGED unit Y from (a,b) to (c,d))
+1. Extraire 2-3 exemples spécifiques (E1 T1 CHARGE : Unit X CHARGED Unit Y from (a,b) to (c,d))
 2. Vérifier si l'unité était déjà adjacente à la cible avant le charge
 3. Identifier si le problème vient de :
    - `charge_build_valid_destinations` n'exclut pas les positions où l'unité est déjà adjacente

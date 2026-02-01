@@ -372,8 +372,8 @@ def parse_action_message(message, context):
             })
     
     elif "SHOT at" in message:
-        # Unit X(col, row) SHOT at unit Y - details...
-        shoot_match = re.match(r'Unit (\d+)\([^)]+\) SHOT at unit (\d+)', message)
+        # Unit X(col, row) SHOT at Unit Y - details...
+        shoot_match = re.match(r'Unit (\d+)\([^)]+\) SHOT at Unit (\d+)', message)
         if shoot_match:
             unit_id, target_id = shoot_match.groups()
             action_type = 'shoot'
@@ -398,8 +398,8 @@ def parse_action_message(message, context):
             })
     
     elif "CHARGED" in message:
-        # Unit X(col, row) CHARGED unit Y from (start) to (end)
-        charge_match = re.match(r'Unit (\d+)\([^)]+\) CHARGED unit (\d+)', message)
+        # Unit X(col, row) CHARGED Unit Y from (start) to (end)
+        charge_match = re.match(r'Unit (\d+)\([^)]+\) CHARGED Unit (\d+)', message)
         if charge_match:
             unit_id, target_id = charge_match.groups()
             action_type = 'charge'

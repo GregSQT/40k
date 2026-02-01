@@ -100,8 +100,8 @@ with open("train_step.log", "r", encoding="utf-8") as f:
 
                 unit_positions[uid] = (to_col, to_row)
 
-        if "SHOT at unit" in line and "Dmg:" in line:
-            match = re.search(r'SHOT at unit (\d+).*Dmg:(\d+)HP', line)
+        if "SHOT at Unit" in line and "Dmg:" in line:
+            match = re.search(r'SHOT at Unit (\d+).*Dmg:(\d+)HP', line)
             if match:
                 target_id = int(match.group(1))
                 damage = int(match.group(2))

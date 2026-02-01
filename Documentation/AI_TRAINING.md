@@ -191,8 +191,8 @@ The `train_step.log` uses this format:
 [HH:MM:SS] Unit 1 (Intercessor) P0: Starting position (9, 12)
 [HH:MM:SS] === ACTIONS START ===
 [HH:MM:SS] T1 P0 MOVE : Unit 1(6, 15) MOVED from (9, 12) to (6, 15) [SUCCESS] [STEP: YES]
-[HH:MM:SS] T1 P0 SHOOT : Unit 1(6, 15) SHOT at unit 5 - Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED) Dmg:1HP [SUCCESS] [STEP: YES]
-[HH:MM:SS] T1 P0 CHARGE : Unit 2(9, 6) CHARGED unit 8 from (7, 13) to (9, 6) [Roll:7] [R:+3.0] [SUCCESS] [STEP: YES]
+[HH:MM:SS] T1 P0 SHOOT : Unit 1(6, 15) SHOT at Unit 5 - Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED) Dmg:1HP [SUCCESS] [STEP: YES]
+[HH:MM:SS] T1 P0 CHARGE : Unit 2(9, 6) CHARGED Unit 8 from (7, 13) to (9, 6) [Roll:7] [R:+3.0] [SUCCESS] [STEP: YES]
 [HH:MM:SS] T1 P0 CHARGE : Unit 3(10, 5) WAIT [SUCCESS] [STEP: YES]
 [HH:MM:SS] T1 P0 FIGHT : Unit 2(9, 6) FOUGHT unit 8 - Hit:3+:5(HIT) Wound:4+:4(SUCCESS) Save:4+:6(SAVED) Dmg:0HP [SUCCESS] [STEP: YES]
 [HH:MM:SS] EPISODE END: Winner=0, Actions=68, Steps=68, Total=138
@@ -203,8 +203,8 @@ The `train_step.log` uses this format:
 | Action | Format |
 |--------|--------|
 | MOVE | `Unit X(col, row) MOVED from (a, b) to (c, d)` |
-| SHOOT | `Unit X(col, row) SHOT at unit Y - Hit:T+:R(HIT/MISS) Wound:T+:R(SUCCESS/FAIL) Save:T+:R(SAVED/FAILED) Dmg:NHP` |
-| CHARGE | `Unit X(col, row) CHARGED unit Y from (a, b) to (c, d) [Roll:N]` where N is the 2d6 charge roll |
+| SHOOT | `Unit X(col, row) SHOT at Unit Y - Hit:T+:R(HIT/MISS) Wound:T+:R(SUCCESS/FAIL) Save:T+:R(SAVED/FAILED) Dmg:NHP` |
+| CHARGE | `Unit X(col, row) CHARGED Unit Y from (a, b) to (c, d) [Roll:N]` where N is the 2d6 charge roll |
 | CHARGE WAIT | `Unit X(col, row) WAIT` (unit chose not to charge or roll was too low) |
 | FIGHT | `Unit X(col, row) FOUGHT unit Y - Hit:T+:R(HIT/MISS) Wound:T+:R(SUCCESS/FAIL) Save:T+:R(SAVED/FAILED) Dmg:NHP` |
 

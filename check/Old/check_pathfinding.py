@@ -268,9 +268,9 @@ def parse_move_action(line: str) -> Dict[str, Any]:
 def parse_shoot_action(line: str) -> Dict[str, Any]:
     """
     Parse shooting line.
-    Example: [01:55:52] T1 P0 SHOOT : Unit 4(9, 9) SHOT at unit 5 - Hit:3+:6(HIT) ...
+    Example: [01:55:52] T1 P0 SHOOT : Unit 4(9, 9) SHOT at Unit 5 - Hit:3+:6(HIT) ...
     """
-    match = re.search(r'Unit (\d+)\((\d+), (\d+)\) SHOT at unit (\d+)', line)
+    match = re.search(r'Unit (\d+)\((\d+), (\d+)\) SHOT at Unit (\d+)', line)
     if match:
         shooter_id = int(match.group(1))
         shooter_col, shooter_row = int(match.group(2)), int(match.group(3))

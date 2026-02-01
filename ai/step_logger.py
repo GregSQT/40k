@@ -337,9 +337,9 @@ class StepLogger:
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             
             if weapon_name:
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str} with [{weapon_name}]"
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str} with [{weapon_name}]"
             else:
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str}"
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str}"
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             
             # Add reward if available
@@ -375,7 +375,7 @@ class StepLogger:
                 
                 target_coords = details.get("target_coords")
                 target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots})"
+                base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots})"
                 if hit_result == "MISS":
                     detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
                 elif wound_result == "FAIL":
@@ -388,7 +388,7 @@ class StepLogger:
             else:
                 target_coords = details.get("target_coords")
                 target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-                return f"Unit {unit_id}{unit_coords} SHOT at unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots}) - MISS"
+                return f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots}) - MISS"
                 
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence
@@ -406,7 +406,7 @@ class StepLogger:
             
             target_coords = details.get("target_coords")
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-            return f"Unit {unit_id}{unit_coords} SHOOTING COMPLETE at unit {target_id}{target_coords_str} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
+            return f"Unit {unit_id}{unit_coords} SHOOTING COMPLETE at Unit {target_id}{target_coords_str} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
         elif action_type == "charge" and details:
             if "target_id" in details:
@@ -420,11 +420,11 @@ class StepLogger:
                     # Include charge roll (2d6) if available
                     charge_roll = details.get("charge_roll")
                     if charge_roll is not None:
-                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}{target_coords_str} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll:{charge_roll}]"
+                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED Unit {target_id}{target_coords_str} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll:{charge_roll}]"
                     else:
-                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}{target_coords_str} from ({start_col},{start_row}) to ({end_col},{end_row})"
+                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED Unit {target_id}{target_coords_str} from ({start_col},{start_row}) to ({end_col},{end_row})"
                 else:
-                    base_msg = f"Unit {unit_id}{unit_coords} CHARGED unit {target_id}"
+                    base_msg = f"Unit {unit_id}{unit_coords} CHARGED Unit {target_id}"
             else:
                 base_msg = f"Unit {unit_id}{unit_coords} CHARGED"
 
@@ -445,7 +445,7 @@ class StepLogger:
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                base_msg = f"Unit {unit_id}{unit_coords} FAILED CHARGE unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"
+                base_msg = f"Unit {unit_id}{unit_coords} FAILED CHARGE Unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
                 raise KeyError("Charge_fail action missing required position data")
 
@@ -485,7 +485,7 @@ class StepLogger:
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             
             if weapon_name:
-                base_msg = f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id}{target_coords_str} with [{weapon_name}]"
+                base_msg = f"Unit {unit_id}{unit_coords} ATTACKED Unit {target_id}{target_coords_str} with [{weapon_name}]"
             else:
                 base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}{target_coords_str}"
             
@@ -549,7 +549,7 @@ class StepLogger:
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
                 weapon_name = details.get("weapon_name")
                 if weapon_name:
-                    base_msg = f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks})"
+                    base_msg = f"Unit {unit_id}{unit_coords} ATTACKED Unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks})"
                 else:
                     base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks})"
                 if hit_result == "MISS":
@@ -564,7 +564,7 @@ class StepLogger:
             else:
                 weapon_name = details.get("weapon_name")
                 if weapon_name:
-                    return f"Unit {unit_id}{unit_coords} ATTACKED unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks}) - MISS"
+                    return f"Unit {unit_id}{unit_coords} ATTACKED Unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks}) - MISS"
                 else:
                     return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks}) - MISS"
                 
@@ -582,7 +582,7 @@ class StepLogger:
             wounds = details.get("wounds")
             failed_saves = details.get("failed_saves")
             
-            return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
+            return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at Unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
         else:
             raise ValueError(f"Unknown action_type '{action_type}'")

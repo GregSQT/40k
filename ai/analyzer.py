@@ -2180,7 +2180,7 @@ def parse_step_log(filepath: str) -> Dict:
                         action_type = 'fight'
                         units_fought.add(unit_id) if 'unit_id' in locals() else None
                         
-                        fight_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) ATTACKED unit (\d+)\((\d+),\s*(\d+)\)', action_desc)
+                        fight_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) ATTACKED Unit (\d+)\((\d+),\s*(\d+)\)', action_desc)
                         if fight_match:
                             fighter_id = fight_match.group(1)
                             fighter_col = int(fight_match.group(2))

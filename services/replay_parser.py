@@ -156,7 +156,7 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
 
             # Parse SHOOT actions
             shoot_match = re.search(
-                r'\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+), (\d+)\) (SHOT at unit|WAIT)',
+                r'\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+), (\d+)\) (SHOT at Unit|WAIT)',
                 line
             )
             if shoot_match:
@@ -168,9 +168,9 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
                 shooter_row = int(shoot_match.group(6))
                 action_type = shoot_match.group(7)
 
-                if action_type == "SHOT at unit":
+                if action_type == "SHOT at Unit":
                     # Extract target and damage
-                    target_match = re.search(r'SHOT at unit (\d+)', line)
+                    target_match = re.search(r'SHOT at Unit (\d+)', line)
                     damage_match = re.search(r'Dmg:(\d+)HP', line)
                     hit_match = re.search(r'Hit:(\d+)\+:(\d+)\((HIT|MISS)\)', line)
 

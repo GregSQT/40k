@@ -7,7 +7,7 @@
  * This is the REFERENCE implementation - do not modify
  */
 export function formatShootingMessage(shooterId: number, targetId: number): string {
-  return `Unit ${shooterId} SHOT at unit ${targetId}`;
+  return `Unit ${shooterId} SHOT at Unit ${targetId}`;
 }
 
 export function formatMoveMessage(unitId: number, startCol: number, startRow: number, endCol: number, endRow: number): string {
@@ -27,7 +27,7 @@ export function formatCombatMessage(attackerId: number, targetId: number): strin
 export function formatChargeMessage(unitName: string, unitId: number, targetName: string, targetId: number, startCol: number, startRow: number, endCol: number, endRow: number): string {
   const startHex = `(${startCol}, ${startRow})`;
   const endHex = `(${endCol}, ${endRow})`;
-  return `Unit ${unitName} ${unitId} CHARGED unit ${targetName} ${targetId} from ${startHex} to ${endHex}`;
+  return `Unit ${unitName} ${unitId} CHARGED Unit ${targetName} ${targetId} from ${startHex} to ${endHex}`;
 }
 
 export function formatDeathMessage(unitId: number, unitType: string): string {

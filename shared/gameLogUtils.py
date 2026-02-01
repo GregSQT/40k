@@ -10,7 +10,7 @@ DO NOT modify these - they must match the PvP reference exactly.
 
 def format_shooting_message(shooter_id: int, target_id: int) -> str:
     """Format shooting message exactly like PvP"""
-    return f"Unit {shooter_id} SHOT at unit {target_id}"
+    return f"Unit {shooter_id} SHOT at Unit {target_id}"
 
 def format_move_message(unit_id: int, start_col: int, start_row: int, end_col: int, end_row: int) -> str:
     """Format move message exactly like PvP"""
@@ -31,7 +31,7 @@ def format_charge_message(unit_name: str, unit_id: int, target_name: str, target
     """Format charge message exactly like PvP"""
     start_hex = f"({start_col}, {start_row})"
     end_hex = f"({end_col}, {end_row})"
-    return f"Unit {unit_name} {unit_id} CHARGED unit {target_name} {target_id} from {start_hex} to {end_hex}"
+    return f"Unit {unit_name} {unit_id} CHARGED Unit {target_name} {target_id} from {start_hex} to {end_hex}"
 
 def format_death_message(unit_id: int, unit_type: str) -> str:
     """Format death message exactly like PvP"""
