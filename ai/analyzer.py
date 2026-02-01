@@ -9,7 +9,7 @@ import os
 import re
 import math
 from collections import defaultdict, Counter
-from typing import Dict, List, Tuple, Set, Optional
+from typing import Dict, List, Tuple, Set, Optional, Any
 
 # Add project root to Python path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -57,6 +57,70 @@ def _get_unit_hp_value(
         return None
     return require_key(unit_hp, unit_id)
 
+
+def _apply_damage_and_handle_death(
+    target_id: str,
+    damage: int,
+    player: int,
+    turn: int,
+    phase: str,
+    line_number: int,
+    current_episode_num: int,
+    unit_hp: Dict[str, int],
+    unit_types: Dict[str, str],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_deaths: List[Tuple[int, str, str, int]],
+    stats: Dict[str, Any]
+) -> None:
+    """Apply damage to target and remove unit when HP <= 0."""
+    if damage <= 0:
+        return
+    if target_id not in unit_hp:
+        _debug_log(
+            f"[DAMAGE IGNORED] E{current_episode_num} T{turn} {phase} "
+            f"target_id={target_id} damage={damage} reason=target_missing_unit_hp"
+        )
+        return
+    _debug_log(
+        f"[DAMAGE APPLY] E{current_episode_num} T{turn} {phase} "
+        f"target_id={target_id} damage={damage} old_hp={unit_hp[target_id]}"
+    )
+    unit_hp[target_id] -= damage
+    if unit_hp[target_id] <= 0:
+        target_type = require_key(unit_types, target_id)
+        stats['current_episode_deaths'].append((player, target_id, target_type))
+        stats['wounded_enemies'][player].discard(target_id)
+        _position_cache_remove(unit_positions, target_id)
+        # Track death with line number for chronological order checking
+        unit_deaths.append((turn, phase, target_id, line_number))
+        _debug_log(
+            f"[DEATH REMOVED] E{current_episode_num} T{turn} {phase} "
+            f"target_id={target_id} target_type={target_type}"
+        )
+        del unit_hp[target_id]
+    else:
+        stats['wounded_enemies'][player].add(target_id)
+        _debug_log(
+            f"[DAMAGE RESULT] E{current_episode_num} T{turn} {phase} "
+            f"target_id={target_id} new_hp={unit_hp[target_id]}"
+        )
+
+
+def _get_latest_position_from_history(
+    unit_id: str,
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_movement_history: Dict[str, List[Dict[str, Any]]]
+) -> Tuple[int, int]:
+    """Return latest known position from movement history."""
+    require_key(unit_positions, unit_id)
+    history = require_key(unit_movement_history, unit_id)
+    if not history:
+        raise ValueError(f"Movement history is empty for unit_id {unit_id}")
+    last_entry = history[-1]
+    last_pos = require_key(last_entry, "position")
+    if last_pos is None:
+        raise ValueError(f"Movement history position is None for unit_id {unit_id}")
+    return last_pos
 
 def hex_to_pixel(col: int, row: int, hex_radius: float = 21.0) -> Tuple[float, float]:
     """Convert hex coordinates to pixel coordinates (matching frontend algorithm)."""
@@ -472,6 +536,8 @@ def parse_step_log(filepath: str) -> Dict:
     unit_movement_history = {}
     shot_sequence_counts = {}
     fight_sequence_counts = {}
+    last_fight_fighter_id = None
+    last_fight_weapon = None
     
     # Turn/phase markers
     units_moved = set()
@@ -530,6 +596,8 @@ def parse_step_log(filepath: str) -> Dict:
                 unit_movement_history = {}  # Reset movement history for new episode
                 shot_sequence_counts = {}
                 fight_sequence_counts = {}
+                last_fight_fighter_id = None
+                last_fight_weapon = None
                 unit_deaths = []  # Reset deaths tracking for new episode
                 continue
 
@@ -576,6 +644,7 @@ def parse_step_log(filepath: str) -> Dict:
                 unit_types[unit_id] = unit_type
                 stats['unit_types'][unit_id] = unit_type
                 positions_at_turn_start[unit_id] = (col, row)
+                unit_movement_history[unit_id] = [{"position": (col, row)}]
                 continue
 
             # Episode end
@@ -655,18 +724,22 @@ def parse_step_log(filepath: str) -> Dict:
                                     stats['shoot_at_dead_unit'][player] += 1
                                     if stats['first_error_lines']['shoot_at_dead_unit'][player] is None:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': current_episode_num, 'line': line.strip()}
-                            if damage > 0 and target_id in unit_hp:
-                                unit_hp[target_id] -= damage
-                                if unit_hp[target_id] <= 0:
-                                    target_type = require_key(unit_types, target_id)
-                                    stats['current_episode_deaths'].append((player, target_id, target_type))
-                                    stats['wounded_enemies'][player].discard(target_id)
-                                    _position_cache_remove(unit_positions, target_id)
-                                    # Track death with line number for chronological order checking
-                                    unit_deaths.append((turn, phase, target_id, line_number))
-                                    del unit_hp[target_id]
-                                else:
-                                    stats['wounded_enemies'][player].add(target_id)
+                            _apply_damage_and_handle_death(
+                                target_id, damage, player, turn, phase, line_number, current_episode_num,
+                                unit_hp, unit_types, unit_positions, unit_deaths, stats
+                            )
+                
+                if 'attacked unit' in action_desc.lower():
+                    target_match = re.search(r'ATTACKED Unit (\d+)', action_desc, re.IGNORECASE)
+                    if target_match:
+                        target_id = target_match.group(1)
+                        damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
+                        if damage_match:
+                            damage = int(damage_match.group(1))
+                            _apply_damage_and_handle_death(
+                                target_id, damage, player, turn, phase, line_number, current_episode_num,
+                                unit_hp, unit_types, unit_positions, unit_deaths, stats
+                            )
 
                 # Reset markers when turn changes
                 if turn != last_turn:
@@ -682,6 +755,8 @@ def parse_step_log(filepath: str) -> Dict:
                     positions_at_move_phase_start = {}
                     last_player = None  # Reset last player on turn change
                     last_phase = None
+                    last_fight_fighter_id = None
+                    last_fight_weapon = None
                     last_turn = turn
 
                 # Track positions at start of MOVE phase for fled detection
@@ -696,8 +771,13 @@ def parse_step_log(filepath: str) -> Dict:
                 last_player = player
 
                 if phase != last_phase:
+                    if phase == 'MOVE':
+                        # Reset snapshot at the start of each MOVE phase
+                        positions_at_move_phase_start = {}
                     if phase == 'FIGHT':
                         fight_phase_seq_id += 1
+                        last_fight_fighter_id = None
+                        last_fight_weapon = None
                     last_phase = phase
 
                 episode_turn = max(episode_turn, turn)
@@ -1245,9 +1325,35 @@ def parse_step_log(filepath: str) -> Dict:
                                 _position_cache_set(unit_positions, advance_unit_id, start_col, start_row)
                             positions_at_advance = dict(unit_positions)
                             unit_hp_at_advance = dict(unit_hp)
+                            positions_at_advance_reconciled = {}
+                            for uid in positions_at_advance.keys():
+                                latest_pos = _get_latest_position_from_history(
+                                    uid, positions_at_advance, unit_movement_history
+                                )
+                                if latest_pos is not None:
+                                    positions_at_advance_reconciled[uid] = latest_pos
                             
                             # RULE: Advance from adjacent
-                            if is_adjacent_to_enemy(start_col, start_row, unit_player, positions_at_advance, unit_hp_at_advance, player):
+                            if is_adjacent_to_enemy(start_col, start_row, unit_player, positions_at_advance_reconciled, unit_hp_at_advance, player):
+                                adjacent_enemies = get_adjacent_enemies(
+                                    start_col, start_row, unit_player, positions_at_advance_reconciled, unit_hp_at_advance, unit_types, player
+                                )
+                                adjacent_enemy_positions = []
+                                for enemy_id in adjacent_enemies:
+                                    if enemy_id in positions_at_advance_reconciled:
+                                        enemy_pos = positions_at_advance_reconciled[enemy_id]
+                                        enemy_hp = unit_hp_at_advance.get(enemy_id)
+                                        adjacent_enemy_positions.append(
+                                            f"{enemy_id}@({enemy_pos[0]},{enemy_pos[1]}) HP={enemy_hp}"
+                                        )
+                                _debug_log(
+                                    f"[ADVANCE_FROM_ADJACENT] E{current_episode_num} T{turn} P{player} "
+                                    f"Unit {advance_unit_id} at ({start_col},{start_row}) adjacent_enemies={adjacent_enemies}"
+                                )
+                                _debug_log(
+                                    f"[ADVANCE_FROM_ADJACENT POS] E{current_episode_num} T{turn} P{player} "
+                                    f"Unit {advance_unit_id} adjacent_enemy_positions={adjacent_enemy_positions}"
+                                )
                                 stats['advance_from_adjacent'][player] += 1
                                 if stats['first_error_lines']['advance_from_adjacent'][player] is None:
                                     stats['first_error_lines']['advance_from_adjacent'][player] = {'episode': current_episode_num, 'line': line.strip()}
@@ -2202,6 +2308,11 @@ def parse_step_log(filepath: str) -> Dict:
                                     else:
                                         cc_nb = cc_nb_by_weapon[weapon_display_name]
                                         seq_key = (fight_phase_seq_id, fighter_id, weapon_display_name)
+                                        if (last_fight_fighter_id != fighter_id or
+                                                last_fight_weapon != weapon_display_name):
+                                            fight_sequence_counts[seq_key] = 0
+                                        last_fight_fighter_id = fighter_id
+                                        last_fight_weapon = weapon_display_name
                                         if seq_key not in fight_sequence_counts:
                                             fight_sequence_counts[seq_key] = 0
                                         elif step_marker_present and step_inc:
@@ -2227,20 +2338,7 @@ def parse_step_log(filepath: str) -> Dict:
                             
                             # CRITICAL: Track damage and deaths in fight phase (same as shoot phase)
                             # This ensures dead units are properly removed from unit_hp and unit_positions
-                            damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
-                            if damage_match:
-                                damage = int(damage_match.group(1))
-                                if damage > 0 and target_id in unit_hp:
-                                    unit_hp[target_id] -= damage
-                                    if unit_hp[target_id] <= 0:
-                                        # Unit died - remove from tracking
-                                        target_type = require_key(unit_types, target_id)
-                                        stats['current_episode_deaths'].append((player, target_id, target_type))
-                                        stats['wounded_enemies'][player].discard(target_id)
-                                        _position_cache_remove(unit_positions, target_id)
-                                        del unit_hp[target_id]
-                                    else:
-                                        stats['wounded_enemies'][player].add(target_id)
+                            # Damage application is handled earlier (regardless of STEP marker).
                             
                             # RULE: Fight from non-adjacent
                             if not is_adjacent(fighter_col, fighter_row, target_col, target_row):

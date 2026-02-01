@@ -7,6 +7,8 @@ AI_TURN.md COMPLIANCE: Pure lookup functions, no game logic
 import os
 from typing import Dict, Any, Optional
 
+_debug_log_initialized = False
+
 
 def _write_diagnostic_to_debug_log(message: str) -> None:
     """Write diagnostic message directly to debug.log"""
@@ -17,7 +19,13 @@ def _write_diagnostic_to_debug_log(message: str) -> None:
         engine_dir = os.path.dirname(current_file)
         project_root = os.path.dirname(engine_dir)
         debug_log_path = os.path.join(project_root, 'debug.log')
-        
+        global _debug_log_initialized
+        if not _debug_log_initialized:
+            with open(debug_log_path, 'w', encoding='utf-8', errors='replace') as f:
+                f.write(message + "\n")
+                f.flush()
+            _debug_log_initialized = True
+            return
         with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
             f.write(message + "\n")
             f.flush()

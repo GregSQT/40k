@@ -365,6 +365,8 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
     # Rebuild alternating pools (units NOT in units_charged, adjacent to enemies)
     active_alternating = []
     non_active_alternating = []
+    units_charged_set = {str(uid) for uid in game_state["units_charged"]}
+    units_fought_set = {str(uid) for uid in game_state["units_fought"]}
 
     units_cache = require_key(game_state, "units_cache")
     for unit_id, cache_entry in units_cache.items():
@@ -374,11 +376,11 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
         player = cache_entry["player"]
 
         # Skip units that already charged (they had their turn)
-        if unit_id in game_state["units_charged"]:
+        if str(unit_id) in units_charged_set:
             continue
 
         # Skip units that already fought
-        if unit_id in game_state["units_fought"]:
+        if str(unit_id) in units_fought_set:
             continue
 
         is_adjacent = _is_adjacent_to_enemy_for_fight(game_state, unit)

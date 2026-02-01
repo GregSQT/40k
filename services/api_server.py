@@ -330,17 +330,6 @@ def initialize_pve_engine():
         engine.game_state["rewards_configs"] = all_rewards_configs
         engine.game_state["agent_keys"] = list(agent_keys)
         
-        # CRITICAL FIX: Load AI model for PvE mode after engine initialization
-        print("DEBUG: Loading AI model for PvE mode...")
-        try:
-            engine.pve_controller.load_ai_model_for_pve(engine.game_state, engine)
-            print(f"✅ PvE: AI model loaded successfully")
-        except Exception as model_error:
-            print(f"❌ Failed to load AI model: {model_error}")
-            import traceback
-            print(f"❌ Model loading traceback: {traceback.format_exc()}")
-            raise
-        
         # Restore original working directory
         os.chdir(original_cwd)
         

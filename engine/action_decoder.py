@@ -75,6 +75,12 @@ class ActionDecoder:
                         f"valid_target_pool={active_unit.get('valid_target_pool')} "
                         f"shoot_activation_pool={shoot_pool}"
                     )
+                # Ensure valid_target_pool is built before masking (activation may not have run yet)
+                if "valid_target_pool" not in active_unit or active_unit.get("valid_target_pool") is None:
+                    from engine.phase_handlers.shooting_handlers import shooting_unit_activation_start
+                    activation_result = shooting_unit_activation_start(game_state, str(active_unit.get("id")))
+                    if activation_result.get("error"):
+                        raise RuntimeError(f"shooting_unit_activation_start failed: {activation_result}")
                 # Enable shoot actions only when pool already exists (built during activation)
                 valid_targets = active_unit.get("valid_target_pool")
                 if valid_targets is not None:

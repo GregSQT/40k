@@ -5,6 +5,7 @@ Functions used across multiple phase handlers to avoid duplication.
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any, Union
+import inspect
 
 from shared.data_validation import require_key
 from engine.combat_utils import get_unit_coordinates, normalize_coordinates, calculate_hex_distance, get_hex_neighbors
@@ -159,6 +160,17 @@ def remove_from_units_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist before removing (call build_units_cache at reset)")
     
+    entry = game_state["units_cache"].get(unit_id)
+    if entry is not None:
+        from engine.game_utils import add_debug_file_log
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "?")
+        add_debug_file_log(
+            game_state,
+            f"[UNITS_CACHE REMOVE] E{episode} T{turn} {phase} unit_id={unit_id} "
+            f"pos=({entry.get('col')},{entry.get('row')}) HP_CUR={entry.get('HP_CUR')} player={entry.get('player')}"
+        )
     game_state["units_cache"].pop(unit_id, None)
     _remove_unit_from_all_activation_pools(game_state, str(unit_id))
 
@@ -284,11 +296,26 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
         # Unit not in cache - no-op
         return
     
+    old_col = entry.get("col")
+    old_row = entry.get("row")
+
     # Normalize coordinates
     norm_col, norm_row = normalize_coordinates(col, row)
     
     entry["col"] = norm_col
     entry["row"] = norm_row
+
+    if game_state.get("debug_mode", False):
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "?")
+        caller = inspect.stack()[1].function
+        from engine.game_utils import add_debug_file_log
+        add_debug_file_log(
+            game_state,
+            f"[UNITS_CACHE POSITION_UPDATE] E{episode} T{turn} {phase} unit_id={unit_id} "
+            f"old=({old_col},{old_row}) new=({norm_col},{norm_row}) caller={caller}"
+        )
 
 
 def get_hp_from_cache(unit_id: str, game_state: Dict[str, Any]) -> Optional[int]:
@@ -344,8 +371,26 @@ def update_units_cache_hp(game_state: Dict[str, Any], unit_id: str, new_hp_cur: 
     if entry is None:
         return
     if effective_hp <= 0:
+        from engine.game_utils import add_debug_file_log
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "?")
+        add_debug_file_log(
+            game_state,
+            f"[UNITS_CACHE HP_UPDATE] E{episode} T{turn} {phase} unit_id={unit_id_str} "
+            f"old_hp={entry.get('HP_CUR')} new_hp={effective_hp} -> REMOVE"
+        )
         remove_from_units_cache(game_state, unit_id_str)
     else:
+        from engine.game_utils import add_debug_file_log
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "?")
+        add_debug_file_log(
+            game_state,
+            f"[UNITS_CACHE HP_UPDATE] E{episode} T{turn} {phase} unit_id={unit_id_str} "
+            f"old_hp={entry.get('HP_CUR')} new_hp={effective_hp}"
+        )
         entry["HP_CUR"] = effective_hp
 
 

@@ -119,6 +119,7 @@ class W40KEngine(gym.Env):
             
             # Load base configuration
             board_config = config_loader.get_board_config()
+            game_config = config_loader.get_game_config()
 
             # CRITICAL FIX: Initialize PvE mode BEFORE config creation
             # Training mode: pve_mode=False (SelfPlayWrapper handles Player 1)
@@ -170,6 +171,7 @@ class W40KEngine(gym.Env):
 
             self.config = {
                 "board": board_config,
+                "game_rules": require_key(game_config, "game_rules"),
                 "units": scenario_units,
                 "name": scenario_name,  # Store scenario name for logging
                 "rewards_config_name": self.rewards_config_name,
@@ -321,7 +323,7 @@ class W40KEngine(gym.Env):
         _rc = self.config["rewards_config"] if "rewards_config" in self.config else {}
         rewards_cfg = getattr(self, 'rewards_config', _rc)
         self.reward_calculator = RewardCalculator(self.config, self.rewards_config, self.unit_registry, self.state_manager)
-        self.pve_controller = PvEController(self.config)
+        self.pve_controller = PvEController(self.config, self.unit_registry)
         
         # Initialize units from config AFTER game_state exists
         self._initialize_units()
@@ -410,17 +412,8 @@ class W40KEngine(gym.Env):
             'total_enemies': 0
         }
         
-        # Load AI model for PvE mode
-        if self.is_pve_mode:
-            self.pve_controller.load_ai_model_for_pve(self.game_state, self)
-        
-        # ✓ CHANGE 2: Removed duplicate module instantiations (already done at line 181-187)
-        
-        if self.is_pve_mode:
-            self.pve_controller = PvEController(self.config, self.unit_registry)
-            self.pve_controller.load_ai_model_for_pve(self.game_state, self)
-        # ==================================================    
-    
+        # ==================================================
+
     # ============================================================================
     # GYM INTERFACE - KEEP THESE CORE METHODS
     # ============================================================================
@@ -438,6 +431,19 @@ class W40KEngine(gym.Env):
         if self._random_scenario_mode and len(self._scenario_files) > 1:
             self._current_scenario_file = random.choice(self._scenario_files)
             self._reload_scenario(self._current_scenario_file)
+            # Rebuild reward configs for units in the new scenario (no defaults)
+            from config_loader import get_config_loader
+            config_loader = get_config_loader()
+            reward_configs = {}
+            units = require_key(self.game_state, "units")
+            for unit in units:
+                unit_type = require_key(unit, "unitType")
+                model_key = self.unit_registry.get_model_key(unit_type)
+                if model_key not in reward_configs:
+                    agent_rewards = config_loader.load_agent_rewards_config(model_key)
+                    reward_configs[model_key] = require_key(agent_rewards, model_key)
+            self.game_state["reward_configs"] = reward_configs
+            self.game_state["rewards_configs"] = reward_configs
 
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
@@ -527,6 +533,10 @@ class W40KEngine(gym.Env):
             uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
             for uid, d in uc.items()
         }
+
+        # Load AI model for PvE mode after units_cache is built
+        if self.is_pve_mode and self.pve_controller.ai_model is None:
+            self.pve_controller.load_ai_model_for_pve(self.game_state, self)
         
         # Initialize command phase for game start using handler delegation
         # CRITICAL: reset() is not in the cascade loop, so we need to handle initialization differently
@@ -647,7 +657,7 @@ class W40KEngine(gym.Env):
         }
 
         _step_t0 = None
-
+        
         # CRITICAL FIX: Auto-advance phase when no valid actions exist
         # This handles the case where fight phase pools are empty
         # PERF: compute mask+eligible_units once, reuse for convert_gym_action
@@ -1344,7 +1354,6 @@ class W40KEngine(gym.Env):
                                 dest_col = result.get("toCol")
                                 dest_row = result.get("toRow")
                                 start_pos = (result.get("fromCol"), result.get("fromRow"))
-                                end_pos = (dest_col, dest_row)
                             else:
                                 # CRITICAL: No defaults - require explicit coordinates from result
                                 if isinstance(result, dict) and result.get("fromCol") is not None and result.get("fromRow") is not None:
@@ -1369,13 +1378,22 @@ class W40KEngine(gym.Env):
                                 from engine.game_utils import add_debug_log
                                 add_debug_log(self.game_state, debug_msg)
                                 safe_print(self.game_state, debug_msg)
-                                end_pos = (dest_col, dest_row)
+                            
+                            if updated_unit is None:
+                                raise ValueError(f"Move action missing updated unit in game_state: unit_id={unit_id}")
+                            actual_col, actual_row = require_unit_position(updated_unit, self.game_state)
+                            if (actual_col, actual_row) != (dest_col, dest_row):
+                                raise ValueError(
+                                    f"Move action destination mismatch: unit_id={unit_id} "
+                                    f"result=({dest_col},{dest_row}) actual=({actual_col},{actual_row})"
+                                )
+                            end_pos = (actual_col, actual_row)
                             action_details.update({
                                 "start_pos": start_pos,
                                 "end_pos": end_pos,
-                                "col": dest_col,  # Use semantic action destination
-                                "row": dest_row,  # Use semantic action destination
-                                "unit_with_coords": f"{unit_id}({dest_col},{dest_row})"  # CRITICAL FIX: Update with correct destination coordinates
+                                "col": actual_col,
+                                "row": actual_row,
+                                "unit_with_coords": f"{unit_id}({actual_col},{actual_row})"
                             })
                             
 
@@ -1393,14 +1411,20 @@ class W40KEngine(gym.Env):
                                 raise ValueError(
                                     f"Advance action missing destination in result: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}"
                                 )
-                            end_pos = (dest_col, dest_row)
+                            actual_col, actual_row = require_unit_position(updated_unit, self.game_state)
+                            if (actual_col, actual_row) != (dest_col, dest_row):
+                                raise ValueError(
+                                    f"Advance action destination mismatch: unit_id={unit_id} "
+                                    f"result=({dest_col},{dest_row}) actual=({actual_col},{actual_row})"
+                                )
+                            end_pos = (actual_col, actual_row)
                             action_details.update({
                                 "start_pos": start_pos,
                                 "end_pos": end_pos,
-                                "col": dest_col,
-                                "row": dest_row,
+                                "col": actual_col,
+                                "row": actual_row,
                                 "advance_range": result.get("advance_range"),  # Include advance roll
-                                "unit_with_coords": f"{unit_id}({dest_col},{dest_row})"  # CRITICAL FIX: Update with correct destination coordinates
+                                "unit_with_coords": f"{unit_id}({actual_col},{actual_row})"  # CRITICAL FIX: Update with correct destination coordinates
                             })
 
                         # shoot actions now use all_attack_results (like combat) - handled in specialized block above
@@ -1510,6 +1534,15 @@ class W40KEngine(gym.Env):
                             if step_increment:
                                 self._step_calls_since_increment = 0
 
+                        # If handler returned attack results, ensure we log them even if action_type was mutated
+                        if "all_attack_results" in result and action_type not in ["combat", "shoot"]:
+                            action_type = require_key(result, "action")
+                            if action_type not in ["combat", "shoot"]:
+                                raise ValueError(
+                                    f"Action type must be 'combat' or 'shoot' when all_attack_results is present. "
+                                    f"action_type={action_type}, unit_id={unit_id}"
+                                )
+                        
                         elif action_type in ["combat", "shoot"]:
                             # Log combat or shoot action - handlers MUST return all_attack_results complete
                             all_attack_results = require_key(result, "all_attack_results")
@@ -1565,8 +1598,8 @@ class W40KEngine(gym.Env):
                                     target_coords = None
                                     if action_type == "combat":
                                         target_coords = require_key(attack_result, "target_coords")
-                                    elif target_unit:
-                                        target_coords = require_unit_position(target_unit, self.game_state)
+                                    elif action_type == "shoot":
+                                        target_coords = require_key(attack_result, "target_coords")
                                     
                                     # CRITICAL FIX: Use CURRENT position from game_state for combat actions
                                     # Units do NOT move during FIGHT phase, so use current position from game_state
@@ -1963,6 +1996,7 @@ class W40KEngine(gym.Env):
         self.game_state["units_fled"] = set()
         self.game_state["units_shot"] = set()
         self.game_state["units_charged"] = set()
+        self.game_state["units_fought"] = set()
         self.game_state["units_attacked"] = set()
         self.game_state["move_activation_pool"] = []
     

@@ -122,6 +122,8 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
     # AI_TURN.md COMPLIANCE: units_charged must exist (set by charge phase)
     if "units_charged" not in game_state:
         raise KeyError("game_state missing required 'units_charged' field - charge phase must run before fight phase")
+    units_charged_set = {str(uid) for uid in game_state["units_charged"]}
+    units_fought_set = {str(uid) for uid in game_state["units_fought"]}
 
     # Sub-Phase 1: Charging units (current player only, units in units_charged AND adjacent)
     # CRITICAL: Clear pools before rebuilding (defense in depth)
@@ -136,7 +138,9 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
         if not unit:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
         if cache_entry["player"] == current_player:
-            if str(unit_id) in {str(uid) for uid in game_state["units_charged"]}:
+            if str(unit_id) in units_fought_set:
+                continue
+            if str(unit_id) in units_charged_set:
                 valid_targets = _fight_build_valid_target_pool(game_state, unit)
                 if valid_targets:
                     charging_activation_pool.append(unit_id)
@@ -167,7 +171,9 @@ def fight_build_activation_pools(game_state: Dict[str, Any]) -> None:
         unit = get_unit_by_id(game_state, unit_id)
         if not unit:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-        if unit_id not in game_state["units_charged"]:
+        if str(unit_id) in units_fought_set:
+            continue
+        if str(unit_id) not in units_charged_set:
             valid_targets = _fight_build_valid_target_pool(game_state, unit)
             if valid_targets:
                 if cache_entry["player"] == current_player:
