@@ -1429,6 +1429,7 @@ class W40KEngine(gym.Env):
 
                         # shoot actions now use all_attack_results (like combat) - handled in specialized block above
                         # charge and combat have specialized logging with early return
+                        action_logged = False
                         if action_type == "charge":
                             # Add charge-specific data with position info for step logger
                             # CRITICAL: No defaults - require explicit coordinates
@@ -1483,6 +1484,7 @@ class W40KEngine(gym.Env):
                             )
                             if step_increment:
                                 self._step_calls_since_increment = 0
+                            action_logged = True
 
                         elif action_type == "charge_fail":
                             # Add charge_fail-specific data for step logger
@@ -1533,9 +1535,12 @@ class W40KEngine(gym.Env):
                             )
                             if step_increment:
                                 self._step_calls_since_increment = 0
+                            action_logged = True
 
                         # If handler returned attack results, ensure we log them even if action_type was mutated
-                        if "all_attack_results" in result and action_type not in ["combat", "shoot"]:
+                        if action_logged:
+                            pass
+                        elif "all_attack_results" in result and action_type not in ["combat", "shoot"]:
                             action_type = require_key(result, "action")
                             if action_type not in ["combat", "shoot"]:
                                 raise ValueError(

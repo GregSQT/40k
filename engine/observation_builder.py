@@ -694,7 +694,7 @@ class ObservationBuilder:
         obs[6] = 1.0 if active_unit["id"] in game_state["units_shot"] else 0.0
         obs[7] = 1.0 if active_unit["id"] in game_state["units_attacked"] else 0.0
         # ADVANCE_IMPLEMENTATION: Track if unit has advanced this turn
-        obs[8] = 1.0 if active_unit["id"] in require_key(game_state, "units_advanced") else 0.0
+        obs[8] = 1.0 if str(active_unit["id"]) in require_key(game_state, "units_advanced") else 0.0
 
         # Count alive units for strategic awareness
         alive_friendlies = sum(1 for u in game_state["units"]

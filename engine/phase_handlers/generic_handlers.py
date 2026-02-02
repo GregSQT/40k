@@ -126,6 +126,12 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         unit_id_str = str(unit_id)
         game_state["units_moved"].add(unit_id_str)
         game_state["units_fled"].add(unit_id_str)
+    elif arg3 == "ADVANCE":
+        if "units_advanced" not in game_state:
+            game_state["units_advanced"] = set()
+        # CRITICAL: Normalize unit ID to string for consistent storage (units_advanced stores strings)
+        unit_id_str = str(unit_id)
+        game_state["units_advanced"].add(unit_id_str)
     elif arg3 == "SHOOTING":
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()

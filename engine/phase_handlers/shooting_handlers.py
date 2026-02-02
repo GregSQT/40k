@@ -2478,7 +2478,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     # Only humans get waiting_for_player response
     # Get available weapons for frontend weapon menu
-    has_advanced = unit_id in require_key(game_state, "units_advanced")
+    has_advanced = str(unit_id) in require_key(game_state, "units_advanced")
     
     # Check if unit has already fired with a weapon to apply PISTOL category filter
     # Use _shooting_with_pistol if available (set after first shot), otherwise check if unit has fired

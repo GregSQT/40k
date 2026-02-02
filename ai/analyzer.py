@@ -17,7 +17,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Import utility functions from engine
-from engine.combat_utils import calculate_hex_distance, get_hex_line
+from engine.combat_utils import calculate_hex_distance, get_hex_line, get_hex_neighbors
 from shared.data_validation import require_key
 
 # Global variable for debug log file
@@ -66,6 +66,8 @@ def _apply_damage_and_handle_death(
     phase: str,
     line_number: int,
     current_episode_num: int,
+    line_text: str,
+    dead_units_current_episode: Set[str],
     unit_hp: Dict[str, int],
     unit_types: Dict[str, str],
     unit_positions: Dict[str, Tuple[int, int]],
@@ -76,11 +78,28 @@ def _apply_damage_and_handle_death(
     if damage <= 0:
         return
     if target_id not in unit_hp:
+        stats['damage_missing_unit_hp'][player] += 1
+        if stats['first_error_lines']['damage_missing_unit_hp'][player] is None:
+            stats['first_error_lines']['damage_missing_unit_hp'][player] = {
+                'episode': current_episode_num,
+                'line': line_text.strip()
+            }
         _debug_log(
             f"[DAMAGE IGNORED] E{current_episode_num} T{turn} {phase} "
             f"target_id={target_id} damage={damage} reason=target_missing_unit_hp"
         )
         return
+    if damage > unit_hp[target_id]:
+        stats['damage_exceeds_hp'][player] += 1
+        if stats['first_error_lines']['damage_exceeds_hp'][player] is None:
+            stats['first_error_lines']['damage_exceeds_hp'][player] = {
+                'episode': current_episode_num,
+                'line': line_text.strip()
+            }
+        _debug_log(
+            f"[DAMAGE OVERKILL] E{current_episode_num} T{turn} {phase} "
+            f"target_id={target_id} damage={damage} hp_before={unit_hp[target_id]}"
+        )
     _debug_log(
         f"[DAMAGE APPLY] E{current_episode_num} T{turn} {phase} "
         f"target_id={target_id} damage={damage} old_hp={unit_hp[target_id]}"
@@ -93,6 +112,7 @@ def _apply_damage_and_handle_death(
         _position_cache_remove(unit_positions, target_id)
         # Track death with line number for chronological order checking
         unit_deaths.append((turn, phase, target_id, line_number))
+        dead_units_current_episode.add(target_id)
         _debug_log(
             f"[DEATH REMOVED] E{current_episode_num} T{turn} {phase} "
             f"target_id={target_id} target_type={target_type}"
@@ -104,6 +124,42 @@ def _apply_damage_and_handle_death(
             f"[DAMAGE RESULT] E{current_episode_num} T{turn} {phase} "
             f"target_id={target_id} new_hp={unit_hp[target_id]}"
         )
+
+
+def _track_unit_reappearance(
+    unit_id: str,
+    unit_hp: Dict[str, int],
+    unit_player: Dict[str, int],
+    dead_units_current_episode: Set[str],
+    revived_units_current_episode: Set[str],
+    stats: Dict[str, Any],
+    current_episode_num: int,
+    line_text: str
+) -> None:
+    """Detect a unit that reappears alive after being removed as dead."""
+    if unit_id not in dead_units_current_episode or unit_id in revived_units_current_episode:
+        return
+    if unit_id not in unit_hp:
+        return
+    if require_key(unit_hp, unit_id) <= 0:
+        return
+    if unit_id not in unit_player:
+        stats['parse_errors'].append({
+            'episode': current_episode_num,
+            'turn': None,
+            'phase': None,
+            'line': line_text.strip(),
+            'error': f"unit_revived missing unit_player for unit_id: {unit_id}"
+        })
+        return
+    player = require_key(unit_player, unit_id)
+    stats['unit_revived'][player] += 1
+    if stats['first_error_lines']['unit_revived'][player] is None:
+        stats['first_error_lines']['unit_revived'][player] = {
+            'episode': current_episode_num,
+            'line': line_text.strip()
+        }
+    revived_units_current_episode.add(unit_id)
 
 
 def _get_latest_position_from_history(
@@ -291,6 +347,121 @@ def is_adjacent_to_enemy(col: int, row: int, unit_player: Dict[str, int], unit_p
     return False
 
 
+def _build_enemy_adjacent_hexes(
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_player: Dict[str, int],
+    unit_hp: Dict[str, int],
+    player: int
+) -> Set[Tuple[int, int]]:
+    """Build set of hexes adjacent to enemy units."""
+    enemy_player = 3 - player
+    enemy_player_int = int(enemy_player) if enemy_player is not None else None
+    adjacent_hexes = set()
+    for uid, pos in unit_positions.items():
+        if uid not in unit_player or uid not in unit_hp:
+            continue
+        if require_key(unit_hp, uid) <= 0:
+            continue
+        unit_p = require_key(unit_player, uid)
+        unit_p_int = int(unit_p) if unit_p is not None else None
+        if unit_p_int != enemy_player_int:
+            continue
+        for neighbor in get_hex_neighbors(pos[0], pos[1]):
+            adjacent_hexes.add(neighbor)
+    return adjacent_hexes
+
+
+def _build_occupied_positions(
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_hp: Dict[str, int],
+    exclude_unit_id: str
+) -> Set[Tuple[int, int]]:
+    """Build set of occupied positions (alive units only), excluding one unit."""
+    occupied = set()
+    for uid, pos in unit_positions.items():
+        if uid == exclude_unit_id:
+            continue
+        if uid not in unit_hp:
+            continue
+        if require_key(unit_hp, uid) <= 0:
+            continue
+        occupied.add(pos)
+    return occupied
+
+
+def _bfs_shortest_path_length(
+    start_col: int,
+    start_row: int,
+    dest_col: int,
+    dest_row: int,
+    max_steps: int,
+    wall_hexes: Set[Tuple[int, int]],
+    occupied_positions: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Set[Tuple[int, int]]
+) -> Optional[int]:
+    """Compute shortest path length using movement BFS rules."""
+    start_pos = (start_col, start_row)
+    dest_pos = (dest_col, dest_row)
+    if start_pos == dest_pos:
+        return 0
+    visited = {start_pos: 0}
+    queue: List[Tuple[int, int]] = [start_pos]
+    while queue:
+        current_pos = queue.pop(0)
+        current_dist = visited[current_pos]
+        if current_dist >= max_steps:
+            continue
+        for neighbor in get_hex_neighbors(current_pos[0], current_pos[1]):
+            if neighbor in visited:
+                continue
+            if neighbor in wall_hexes:
+                continue
+            if neighbor in occupied_positions:
+                continue
+            if neighbor in enemy_adjacent_hexes:
+                continue
+            next_dist = current_dist + 1
+            if neighbor == dest_pos:
+                return next_dist
+            visited[neighbor] = next_dist
+            queue.append(neighbor)
+    return None
+
+
+def _track_action_phase_accuracy(
+    stats: Dict[str, Any],
+    action_type: str,
+    phase: str,
+    current_episode_num: int,
+    line_text: str
+) -> None:
+    """Track action/phase alignment accuracy."""
+    expected_phase_by_action = {
+        "move": "MOVE",
+        "fled": "MOVE",
+        "shoot": "SHOOT",
+        "advance": "SHOOT",
+        "charge": "CHARGE",
+        "fight": "FIGHT"
+    }
+    if action_type not in expected_phase_by_action:
+        return
+    expected_phase = expected_phase_by_action[action_type]
+    action_phase_accuracy = require_key(stats, "action_phase_accuracy")
+    if action_type not in action_phase_accuracy:
+        action_phase_accuracy[action_type] = {"total": 0, "wrong": 0}
+    action_phase_accuracy[action_type]["total"] += 1
+    if phase != expected_phase:
+        action_phase_accuracy[action_type]["wrong"] += 1
+        first_errors = require_key(stats, "first_error_lines")
+        action_mismatch = require_key(first_errors, "action_phase_mismatch")
+        if action_mismatch.get(action_type) is None:
+            action_mismatch[action_type] = {
+                "episode": current_episode_num,
+                "line": line_text.strip()
+            }
+
+
 def get_adjacent_enemies(col: int, row: int, unit_player: Dict[str, int], unit_positions: Dict[str, Tuple[int, int]], 
                          unit_hp: Dict[str, int], unit_types: Dict[str, str], player: int) -> List[str]:
     """Get list of enemy unit IDs adjacent to a hex position."""
@@ -467,6 +638,42 @@ def parse_step_log(filepath: str) -> Dict:
         'fight_dead_unit_target': {1: 0, 2: 0},
         'fight_over_cc_nb': {1: 0, 2: 0},
         'advance_after_shoot': {1: 0, 2: 0},
+        'position_log_mismatch': {
+            'move': {'total': 0, 'mismatch': 0, 'missing': 0},
+            'advance': {'total': 0, 'mismatch': 0, 'missing': 0},
+            'charge': {'total': 0, 'mismatch': 0, 'missing': 0}
+        },
+        'damage_missing_unit_hp': {1: 0, 2: 0},
+        'damage_exceeds_hp': {1: 0, 2: 0},
+        'unit_revived': {1: 0, 2: 0},
+        'shoot_invalid': {
+            1: {'total': 0, 'no_los': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0},
+            2: {'total': 0, 'no_los': 0, 'out_of_range': 0, 'adjacent_non_pistol': 0}
+        },
+        'charge_invalid': {
+            1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
+            2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0}
+        },
+        'move_adjacent_before_non_flee': {1: 0, 2: 0},
+        'move_distance_over_limit': {
+            'move': {1: 0, 2: 0},
+            'advance': {1: 0, 2: 0}
+        },
+        'move_path_blocked': {
+            'move': {1: 0, 2: 0},
+            'advance': {1: 0, 2: 0}
+        },
+        'action_phase_accuracy': {
+            'move': {'total': 0, 'wrong': 0},
+            'fled': {'total': 0, 'wrong': 0},
+            'shoot': {'total': 0, 'wrong': 0},
+            'advance': {'total': 0, 'wrong': 0},
+            'charge': {'total': 0, 'wrong': 0},
+            'fight': {'total': 0, 'wrong': 0}
+        },
+        'fight_alternation_violations': {1: 0, 2: 0},
+        'fight_attacks_by_unit': {1: {}, 2: {}},
+        'fight_over_cc_nb_by_unit': {1: {}, 2: {}},
         # First occurrence lines for each error type (stores dict with 'episode' and 'line')
         'first_error_lines': {
             'wall_collisions': {1: None, 2: None},
@@ -493,6 +700,38 @@ def parse_step_log(filepath: str) -> Dict:
             'fight_dead_unit_target': {1: None, 2: None},
             'fight_over_cc_nb': {1: None, 2: None},
             'advance_after_shoot': {1: None, 2: None},
+            'damage_missing_unit_hp': {1: None, 2: None},
+            'damage_exceeds_hp': {1: None, 2: None},
+            'unit_revived': {1: None, 2: None},
+            'fled_action': {1: None, 2: None},
+            'shoot_invalid': {
+                1: None,
+                2: None
+            },
+            'charge_invalid': {1: None, 2: None},
+            'move_adjacent_before_non_flee': {1: None, 2: None},
+            'move_distance_over_limit': {
+                'move': {1: None, 2: None},
+                'advance': {1: None, 2: None}
+            },
+            'move_path_blocked': {
+                'move': {1: None, 2: None},
+                'advance': {1: None, 2: None}
+            },
+            'action_phase_mismatch': {
+                'move': None,
+                'fled': None,
+                'shoot': None,
+                'advance': None,
+                'charge': None,
+                'fight': None
+            },
+            'fight_alternation_violations': {1: None, 2: None},
+            'position_log_mismatch': {
+                'move': None,
+                'advance': None,
+                'charge': None
+            },
         },
         'unit_position_collisions': [],
         'parse_errors': [],
@@ -525,11 +764,14 @@ def parse_step_log(filepath: str) -> Dict:
     # FIGHT (target). Removed on unit death. Use _position_cache_set / _position_cache_remove for all updates.
     unit_positions = {}
     unit_types = {}
+    unit_move = {}
     wall_hexes = set()
     
     # Track unit deaths with line numbers for chronological order checking
     unit_deaths = []  # List of (turn, phase, unit_id, line_num) tuples
     line_number = 0  # Track line number for chronological order
+    dead_units_current_episode = set()
+    revived_units_current_episode = set()
     
     # Track all unit movements from logs (source of truth for collision detection)
     # Maps unit_id -> list of (position, timestamp, action_type) tuples
@@ -545,6 +787,8 @@ def parse_step_log(filepath: str) -> Dict:
     units_fled = set()
     units_advanced = set()
     units_fought = set()
+    charged_units_current_fight = set()
+    charged_units_fought = set()
     positions_at_turn_start = {}
     positions_at_move_phase_start = {}  # Track positions at start of MOVE phase to detect fled
     last_player = None  # Track last player to detect phase MOVE start for each player
@@ -584,15 +828,20 @@ def parse_step_log(filepath: str) -> Dict:
                 unit_player = {}
                 unit_positions = {}
                 unit_types = {}
+                unit_move = {}
                 wall_hexes = set()
                 positions_at_turn_start = {}
                 positions_at_move_phase_start = {}
+                dead_units_current_episode = set()
+                revived_units_current_episode = set()
                 current_scenario = 'Unknown'
                 units_moved = set()
                 units_shot = set()
                 units_fled = set()  # Reset at episode start is correct
                 units_advanced = set()
                 units_fought = set()
+                charged_units_current_fight = set()
+                charged_units_fought = set()
                 unit_movement_history = {}  # Reset movement history for new episode
                 shot_sequence_counts = {}
                 fight_sequence_counts = {}
@@ -635,6 +884,7 @@ def parse_step_log(filepath: str) -> Dict:
                 unit_data = require_key(unit_registry.units, unit_type)
                 hp_max = require_key(unit_data, "HP_MAX")
                 _debug_log(f"[ANALYZER] Unit {unit_id} ({unit_type}) HP_MAX={hp_max} from registry")
+                unit_move_value = require_key(unit_data, "MOVE")
                 
                 # Initialize HP_CUR = HP_MAX (unit starts at full HP)
                 unit_hp[unit_id] = hp_max
@@ -643,6 +893,7 @@ def parse_step_log(filepath: str) -> Dict:
                 _position_cache_set(unit_positions, unit_id, col, row)
                 unit_types[unit_id] = unit_type
                 stats['unit_types'][unit_id] = unit_type
+                unit_move[unit_id] = unit_move_value
                 positions_at_turn_start[unit_id] = (col, row)
                 unit_movement_history[unit_id] = [{"position": (col, row)}]
                 continue
@@ -726,7 +977,7 @@ def parse_step_log(filepath: str) -> Dict:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             _apply_damage_and_handle_death(
                                 target_id, damage, player, turn, phase, line_number, current_episode_num,
-                                unit_hp, unit_types, unit_positions, unit_deaths, stats
+                                line, dead_units_current_episode, unit_hp, unit_types, unit_positions, unit_deaths, stats
                             )
                 
                 if 'attacked unit' in action_desc.lower():
@@ -738,8 +989,22 @@ def parse_step_log(filepath: str) -> Dict:
                             damage = int(damage_match.group(1))
                             _apply_damage_and_handle_death(
                                 target_id, damage, player, turn, phase, line_number, current_episode_num,
-                                unit_hp, unit_types, unit_positions, unit_deaths, stats
+                                line, dead_units_current_episode, unit_hp, unit_types, unit_positions, unit_deaths, stats
                             )
+
+                actor_match = re.match(r'Unit (\d+)\(', action_desc)
+                if actor_match:
+                    actor_id = actor_match.group(1)
+                    _track_unit_reappearance(
+                        actor_id,
+                        unit_hp,
+                        unit_player,
+                        dead_units_current_episode,
+                        revived_units_current_episode,
+                        stats,
+                        current_episode_num,
+                        line
+                    )
 
                 # Reset markers when turn changes
                 if turn != last_turn:
@@ -751,6 +1016,8 @@ def parse_step_log(filepath: str) -> Dict:
                     units_fled = set()
                     units_advanced = set()
                     units_fought = set()
+                    charged_units_current_fight = set()
+                    charged_units_fought = set()
                     positions_at_turn_start = unit_positions.copy()
                     positions_at_move_phase_start = {}
                     last_player = None  # Reset last player on turn change
@@ -774,6 +1041,8 @@ def parse_step_log(filepath: str) -> Dict:
                     if phase == 'MOVE':
                         # Reset snapshot at the start of each MOVE phase
                         positions_at_move_phase_start = {}
+                        charged_units_current_fight = set()
+                        charged_units_fought = set()
                     if phase == 'FIGHT':
                         fight_phase_seq_id += 1
                         last_fight_fighter_id = None
@@ -801,6 +1070,8 @@ def parse_step_log(filepath: str) -> Dict:
                             shooter_row = int(shooter_match.group(3))
                             target_id = target_match.group(1)
                             units_shot.add(shooter_id)
+                            stats['shoot_invalid'][player]['total'] += 1
+                            _track_action_phase_accuracy(stats, "shoot", phase, current_episode_num, line)
                             
                             # CRITICAL: Update position cache with shooter position from log (source of truth)
                             _position_cache_set(unit_positions, shooter_id, shooter_col, shooter_row)
@@ -884,11 +1155,15 @@ def parse_step_log(filepath: str) -> Dict:
                                 stats['shoot_through_wall'][player] += 1
                                 if stats['first_error_lines']['shoot_through_wall'][player] is None:
                                     stats['first_error_lines']['shoot_through_wall'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                                stats['shoot_invalid'][player]['no_los'] += 1
+                                if stats['first_error_lines']['shoot_invalid'][player] is None:
+                                    stats['first_error_lines']['shoot_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # Check PISTOL weapon rules (needed before shoot_at_engaged_enemy check)
                             weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
                             is_pistol = False
                             weapon_found = False
+                            weapon_range = None
                             
                             # CRITICAL: Validate that shooter_id matches expected unit type
                             # This detects cases where unit ID is wrong in the log
@@ -904,6 +1179,7 @@ def parse_step_log(filepath: str) -> Dict:
                                 for weapon_info in weapons_info:
                                     if weapon_info['name'].lower() == weapon_name_lower:
                                         is_pistol = weapon_info['is_pistol']
+                                        weapon_range = weapon_info['range']
                                         weapon_found = True
                                         break
                                 
@@ -1067,6 +1343,13 @@ def parse_step_log(filepath: str) -> Dict:
                                 else:
                                     if distance == 1:
                                         stats['non_pistol_adjacent_shots'][player] += 1
+                                        stats['shoot_invalid'][player]['adjacent_non_pistol'] += 1
+                                        if stats['first_error_lines']['shoot_invalid'][player] is None:
+                                            stats['first_error_lines']['shoot_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                                if weapon_range is not None and distance > weapon_range:
+                                    stats['shoot_invalid'][player]['out_of_range'] += 1
+                                    if stats['first_error_lines']['shoot_invalid'][player] is None:
+                                        stats['first_error_lines']['shoot_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # Track shots after advance
                             if shooter_id in units_advanced:
@@ -1285,6 +1568,23 @@ def parse_step_log(filepath: str) -> Dict:
                             start_row = int(advance_match.group(5))
                             dest_col = int(advance_match.group(6))
                             dest_row = int(advance_match.group(7))
+                            _track_action_phase_accuracy(stats, "advance", phase, current_episode_num, line)
+                            
+                            stats['position_log_mismatch']['advance']['total'] += 1
+                            if advance_unit_id not in unit_positions:
+                                stats['position_log_mismatch']['advance']['missing'] += 1
+                                if stats['first_error_lines']['position_log_mismatch']['advance'] is None:
+                                    stats['first_error_lines']['position_log_mismatch']['advance'] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
+                            elif unit_positions[advance_unit_id] != (start_col, start_row):
+                                stats['position_log_mismatch']['advance']['mismatch'] += 1
+                                if stats['first_error_lines']['position_log_mismatch']['advance'] is None:
+                                    stats['first_error_lines']['position_log_mismatch']['advance'] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
                             
                             # RULE: Dead unit advancing
                             advance_unit_dead = advance_unit_id not in unit_hp or require_key(unit_hp, advance_unit_id) <= 0
@@ -1309,6 +1609,44 @@ def parse_step_log(filepath: str) -> Dict:
                                     stats['dead_unit_advancing'][player] += 1
                                     if stats['first_error_lines']['dead_unit_advancing'][player] is None:
                                         stats['first_error_lines']['dead_unit_advancing'][player] = {'episode': current_episode_num, 'line': line.strip()}
+
+                            advance_roll_match = re.search(r'\[Roll:\s*(\d+)\]', action_desc)
+                            if not advance_roll_match:
+                                stats['parse_errors'].append({
+                                    'episode': current_episode_num,
+                                    'turn': turn,
+                                    'phase': phase,
+                                    'line': line.strip(),
+                                    'error': f"Advance action missing roll for distance validation: {action_desc[:100]}"
+                                })
+                            else:
+                                advance_roll = int(advance_roll_match.group(1))
+                                occupied_positions = _build_occupied_positions(unit_positions, unit_hp, advance_unit_id)
+                                enemy_adjacent_hexes = _build_enemy_adjacent_hexes(unit_positions, unit_player, unit_hp, player)
+                                shortest_steps = _bfs_shortest_path_length(
+                                    start_col,
+                                    start_row,
+                                    dest_col,
+                                    dest_row,
+                                    advance_roll,
+                                    wall_hexes,
+                                    occupied_positions,
+                                    enemy_adjacent_hexes
+                                )
+                                if shortest_steps is None:
+                                    stats['move_path_blocked']['advance'][player] += 1
+                                    if stats['first_error_lines']['move_path_blocked']['advance'][player] is None:
+                                        stats['first_error_lines']['move_path_blocked']['advance'][player] = {
+                                            'episode': current_episode_num,
+                                            'line': line.strip()
+                                        }
+                                elif shortest_steps > advance_roll:
+                                    stats['move_distance_over_limit']['advance'][player] += 1
+                                    if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:
+                                        stats['first_error_lines']['move_distance_over_limit']['advance'][player] = {
+                                            'episode': current_episode_num,
+                                            'line': line.strip()
+                                        }
                             
                             units_advanced.add(advance_unit_id)
                             
@@ -1494,6 +1832,40 @@ def parse_step_log(filepath: str) -> Dict:
                             dest_row = int(charge_match.group(10))
                             start_col = int(charge_match.group(7))  # from "from (start_col,start_row)"
                             start_row = int(charge_match.group(8))
+                            _track_action_phase_accuracy(stats, "charge", phase, current_episode_num, line)
+                            stats['charge_invalid'][player]['total'] += 1
+                            if charge_unit_id in units_advanced:
+                                stats['charge_invalid'][player]['advanced'] += 1
+                                if stats['first_error_lines']['charge_invalid'][player] is None:
+                                    stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                            if charge_unit_id in units_fled:
+                                stats['charge_invalid'][player]['fled'] += 1
+                                if stats['first_error_lines']['charge_invalid'][player] is None:
+                                    stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                            charge_roll_match = re.search(r'\[Roll:(\d+)\]', action_desc)
+                            if charge_roll_match:
+                                charge_roll = int(charge_roll_match.group(1))
+                                charge_distance = calculate_hex_distance(start_col, start_row, dest_col, dest_row)
+                                if charge_distance > charge_roll:
+                                    stats['charge_invalid'][player]['distance_over_roll'] += 1
+                                    if stats['first_error_lines']['charge_invalid'][player] is None:
+                                        stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                            
+                            stats['position_log_mismatch']['charge']['total'] += 1
+                            if charge_unit_id not in unit_positions:
+                                stats['position_log_mismatch']['charge']['missing'] += 1
+                                if stats['first_error_lines']['position_log_mismatch']['charge'] is None:
+                                    stats['first_error_lines']['position_log_mismatch']['charge'] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
+                            elif unit_positions[charge_unit_id] != (start_col, start_row):
+                                stats['position_log_mismatch']['charge']['mismatch'] += 1
+                                if stats['first_error_lines']['position_log_mismatch']['charge'] is None:
+                                    stats['first_error_lines']['position_log_mismatch']['charge'] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
                             
                             # RULE: Dead unit charging
                             charge_unit_dead = charge_unit_id not in unit_hp or require_key(unit_hp, charge_unit_id) <= 0
@@ -1518,6 +1890,8 @@ def parse_step_log(filepath: str) -> Dict:
                                     stats['dead_unit_charging'][player] += 1
                                     if stats['first_error_lines']['dead_unit_charging'][player] is None:
                                         stats['first_error_lines']['dead_unit_charging'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                            if charge_unit_id in unit_hp and require_key(unit_hp, charge_unit_id) > 0:
+                                charged_units_current_fight.add(charge_unit_id)
                             
                             # CRITICAL: Sync position cache with log start position before processing
                             if charge_unit_id in unit_positions and unit_positions[charge_unit_id] != (start_col, start_row):
@@ -1752,10 +2126,17 @@ def parse_step_log(filepath: str) -> Dict:
                             start_row = int(fled_match.group(5))
                             dest_col = int(fled_match.group(6))
                             dest_row = int(fled_match.group(7))
+                            action_type = 'fled'
                             
                             units_moved.add(move_unit_id)
                             # CRITICAL: Explicit FLED action - mark as fled
                             units_fled.add(move_unit_id)
+                            _track_action_phase_accuracy(stats, "fled", phase, current_episode_num, line)
+                            if stats['first_error_lines']['fled_action'][player] is None:
+                                stats['first_error_lines']['fled_action'][player] = {
+                                    'episode': current_episode_num,
+                                    'line': line.strip()
+                                }
                             
                             # DEBUG: Log FLED action processing
                             _debug_log(f"[FLED DEBUG] E{current_episode_num} T{turn} P{player}: Unit {move_unit_id} FLED from ({start_col},{start_row}) to ({dest_col},{dest_row})")
@@ -1888,6 +2269,23 @@ def parse_step_log(filepath: str) -> Dict:
                             start_row = int(move_match.group(5))
                             dest_col = int(move_match.group(6))
                             dest_row = int(move_match.group(7))
+                            _track_action_phase_accuracy(stats, "move", phase, current_episode_num, line)
+                            
+                            stats['position_log_mismatch']['move']['total'] += 1
+                            if move_unit_id not in unit_positions:
+                                stats['position_log_mismatch']['move']['missing'] += 1
+                                if stats['first_error_lines']['position_log_mismatch']['move'] is None:
+                                    stats['first_error_lines']['position_log_mismatch']['move'] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
+                            elif unit_positions[move_unit_id] != (start_col, start_row):
+                                stats['position_log_mismatch']['move']['mismatch'] += 1
+                                if stats['first_error_lines']['position_log_mismatch']['move'] is None:
+                                    stats['first_error_lines']['position_log_mismatch']['move'] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
                             
                             # RULE: Dead unit moving
                             move_unit_dead = move_unit_id not in unit_hp or require_key(unit_hp, move_unit_id) <= 0
@@ -2069,6 +2467,35 @@ def parse_step_log(filepath: str) -> Dict:
                                 # CRITICAL FIX: Save unit_hp snapshot at movement time to prevent false positives
                                 # If a unit dies AFTER movement but BEFORE check, we should use its HP at movement time
                                 unit_hp_at_movement = dict(unit_hp)
+
+                                move_range_raw = require_key(unit_move, move_unit_id)
+                                move_range = int(move_range_raw)
+                                occupied_positions = _build_occupied_positions(positions_at_movement, unit_hp_at_movement, move_unit_id)
+                                enemy_adjacent_hexes = _build_enemy_adjacent_hexes(positions_at_movement, unit_player, unit_hp_at_movement, player)
+                                shortest_steps = _bfs_shortest_path_length(
+                                    start_col,
+                                    start_row,
+                                    dest_col,
+                                    dest_row,
+                                    move_range,
+                                    wall_hexes,
+                                    occupied_positions,
+                                    enemy_adjacent_hexes
+                                )
+                                if shortest_steps is None:
+                                    stats['move_path_blocked']['move'][player] += 1
+                                    if stats['first_error_lines']['move_path_blocked']['move'][player] is None:
+                                        stats['first_error_lines']['move_path_blocked']['move'][player] = {
+                                            'episode': current_episode_num,
+                                            'line': line.strip()
+                                        }
+                                elif shortest_steps > move_range:
+                                    stats['move_distance_over_limit']['move'][player] += 1
+                                    if stats['first_error_lines']['move_distance_over_limit']['move'][player] is None:
+                                        stats['first_error_lines']['move_distance_over_limit']['move'][player] = {
+                                            'episode': current_episode_num,
+                                            'line': line.strip()
+                                        }
                                 
                                 # RULE: Position collision
                                 # CRITICAL: Check for collisions BEFORE updating position
@@ -2210,6 +2637,36 @@ def parse_step_log(filepath: str) -> Dict:
                                         )
                                         continue
                                     positions_for_adjacency_check_filtered[uid] = pos
+
+                                positions_at_movement_filtered = {}
+                                for uid, hp_value in unit_hp_at_movement.items():
+                                    if hp_value <= 0:
+                                        continue
+                                    pos = positions_at_movement.get(uid)
+                                    if pos is None:
+                                        _debug_log(
+                                            f"[ANALYZER DEBUG] Move adjacency (before) missing position snapshot for unit_id: {uid} "
+                                            f"(episode={current_episode_num}, turn={turn}, phase={phase})"
+                                        )
+                                        continue
+                                    positions_at_movement_filtered[uid] = pos
+                                adjacent_before = get_adjacent_enemies(
+                                    start_col,
+                                    start_row,
+                                    unit_player,
+                                    positions_at_movement_filtered,
+                                    unit_hp_at_movement,
+                                    unit_types,
+                                    player
+                                )
+                                if adjacent_before:
+                                    stats['move_adjacent_before_non_flee'][player] += 1
+                                    if stats['first_error_lines']['move_adjacent_before_non_flee'][player] is None:
+                                        stats['first_error_lines']['move_adjacent_before_non_flee'][player] = {
+                                            'episode': current_episode_num,
+                                            'line': line.strip(),
+                                            'adjacent_before': adjacent_before
+                                        }
                                 
                                 # Check if destination is adjacent to enemy using positions at movement time
                                 # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
@@ -2224,23 +2681,6 @@ def parse_step_log(filepath: str) -> Dict:
                                 # Only report violation if unit was NOT adjacent before move (flee is allowed)
                                 # If unit was already adjacent, moving to another adjacent hex is a flee (not a violation)
                                 if dest_adjacent:
-                                    # CRITICAL FIX: Filter out dead units from positions_at_movement for "before" check
-                                    # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
-                                    positions_at_movement_filtered = {}
-                                    for uid, hp_value in unit_hp_at_movement.items():
-                                        if hp_value <= 0:
-                                            continue
-                                        pos = positions_at_movement.get(uid)
-                                        if pos is None:
-                                            _debug_log(
-                                                f"[ANALYZER DEBUG] Move adjacency (before) missing position snapshot for unit_id: {uid} "
-                                                f"(episode={current_episode_num}, turn={turn}, phase={phase})"
-                                            )
-                                            continue
-                                        positions_at_movement_filtered[uid] = pos
-                                    # Use positions_at_movement (before this unit moved) for "before" check
-                                    # Use unit_hp_at_movement (snapshot at movement time) instead of current unit_hp
-                                    adjacent_before = get_adjacent_enemies(start_col, start_row, unit_player, positions_at_movement_filtered, unit_hp_at_movement, unit_types, player)
                                     # Only report violation if unit was NOT adjacent before move
                                     if not adjacent_before:
                                         stats['move_to_adjacent_enemy'][player] += 1
@@ -2289,6 +2729,40 @@ def parse_step_log(filepath: str) -> Dict:
                             target_id = fight_match.group(4)
                             target_col = int(fight_match.group(5))
                             target_row = int(fight_match.group(6))
+                            _track_action_phase_accuracy(stats, "fight", phase, current_episode_num, line)
+                            attacker_player = require_key(unit_player, fighter_id)
+                            fight_attacks_by_unit = require_key(stats, 'fight_attacks_by_unit')
+                            fight_attacks_by_player = require_key(fight_attacks_by_unit, attacker_player)
+                            fight_over_by_unit = require_key(stats, 'fight_over_cc_nb_by_unit')
+                            fight_over_by_player = require_key(fight_over_by_unit, attacker_player)
+                            if fighter_id not in fight_attacks_by_player:
+                                fight_attacks_by_player[fighter_id] = 0
+                            if fighter_id not in fight_over_by_player:
+                                fight_over_by_player[fighter_id] = 0
+                            fight_attacks_by_player[fighter_id] = fight_attacks_by_player[fighter_id] + 1
+                            if fighter_id in charged_units_current_fight:
+                                charged_units_fought.add(fighter_id)
+                            else:
+                                eligible_charged_units = []
+                                for charged_id in charged_units_current_fight:
+                                    if charged_id in charged_units_fought:
+                                        continue
+                                    if charged_id not in unit_positions:
+                                        continue
+                                    if charged_id not in unit_hp or require_key(unit_hp, charged_id) <= 0:
+                                        continue
+                                    charged_pos = unit_positions[charged_id]
+                                    charged_player = require_key(unit_player, charged_id)
+                                    if is_adjacent_to_enemy(charged_pos[0], charged_pos[1], unit_player, unit_positions, unit_hp, charged_player):
+                                        eligible_charged_units.append(charged_id)
+                                if eligible_charged_units:
+                                    stats['fight_alternation_violations'][attacker_player] += 1
+                                    if stats['first_error_lines']['fight_alternation_violations'][attacker_player] is None:
+                                        stats['first_error_lines']['fight_alternation_violations'][attacker_player] = {
+                                            'episode': current_episode_num,
+                                            'line': line.strip(),
+                                            'eligible_charged_units': eligible_charged_units
+                                        }
 
                             weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
                             if weapon_match:
@@ -2321,6 +2795,11 @@ def parse_step_log(filepath: str) -> Dict:
                                         if fight_sequence_counts[seq_key] > cc_nb:
                                             attacker_player = require_key(unit_player, fighter_id)
                                             stats['fight_over_cc_nb'][attacker_player] += 1
+                                            fight_over_by_unit = require_key(stats, 'fight_over_cc_nb_by_unit')
+                                            fight_over_by_player = require_key(fight_over_by_unit, attacker_player)
+                                            if fighter_id not in fight_over_by_player:
+                                                raise KeyError(f"Missing fight_over_cc_nb_by_unit for fighter_id={fighter_id}, player={attacker_player}")
+                                            fight_over_by_player[fighter_id] = fight_over_by_player[fighter_id] + 1
                                             if stats['first_error_lines']['fight_over_cc_nb'][attacker_player] is None:
                                                 stats['first_error_lines']['fight_over_cc_nb'][attacker_player] = {'episode': current_episode_num, 'line': line.strip()}
                             else:
@@ -2754,7 +3233,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         9: "PARSE ERRORS (Non-standard log format)",
         10: "EPISODES WITHOUT EPISODE END (INCOMPLETE EPISODES)",
         11: "EPISODES WITHOUT WIN_METHOD (BUG DETECTED)",
-        12: "SAMPLE ACTIONS"
+        12: "SAMPLE ACTIONS",
+        13: "ACTION PHASE ACCURACY"
     }
     if debug_section_filter is not None and debug_section_filter not in debug_sections:
         valid_sections = ", ".join(str(k) for k in sorted(debug_sections))
@@ -3235,6 +3715,36 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
     bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
     log_print(f"Non-PISTOL shots (adjacent):   {agent_non_pistol_adj:6d}           {bot_non_pistol_adj:6d}")
+
+    log_print("\n" + "-" * 80)
+    log_print("SHOOTING VALIDITY")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
+    agent_invalid_total = (
+        stats['shoot_invalid'][1]['no_los'] +
+        stats['shoot_invalid'][1]['out_of_range'] +
+        stats['shoot_invalid'][1]['adjacent_non_pistol']
+    )
+    bot_invalid_total = (
+        stats['shoot_invalid'][2]['no_los'] +
+        stats['shoot_invalid'][2]['out_of_range'] +
+        stats['shoot_invalid'][2]['adjacent_non_pistol']
+    )
+    agent_shot_total = stats['shoot_invalid'][1]['total']
+    bot_shot_total = stats['shoot_invalid'][2]['total']
+    agent_invalid_pct = (agent_invalid_total / agent_shot_total * 100) if agent_shot_total > 0 else 0
+    bot_invalid_pct = (bot_invalid_total / bot_shot_total * 100) if bot_shot_total > 0 else 0
+    log_print(f"Invalid shots total:           {agent_invalid_total:6d} ({agent_invalid_pct:5.1f}%)  {bot_invalid_total:6d} ({bot_invalid_pct:5.1f}%)")
+    log_print(f"No LoS:                        {stats['shoot_invalid'][1]['no_los']:6d}           {stats['shoot_invalid'][2]['no_los']:6d}")
+    log_print(f"Out of range:                  {stats['shoot_invalid'][1]['out_of_range']:6d}           {stats['shoot_invalid'][2]['out_of_range']:6d}")
+    log_print(f"Adjacent non-pistol:           {stats['shoot_invalid'][1]['adjacent_non_pistol']:6d}           {stats['shoot_invalid'][2]['adjacent_non_pistol']:6d}")
+    if stats['first_error_lines']['shoot_invalid'][1]:
+        first_err = stats['first_error_lines']['shoot_invalid'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if stats['first_error_lines']['shoot_invalid'][2]:
+        first_err = stats['first_error_lines']['shoot_invalid'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # WAIT BEHAVIOR
     log_print("\n" + "-" * 80)
@@ -3311,6 +3821,57 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("DEBUGGING")
     log_print("=" * 80)
 
+    log_print("\n" + "-" * 80)
+    log_print("POSITION / LOG COHERENCE")
+    log_print("-" * 80)
+    for action_key in ("move", "advance", "charge"):
+        total = stats['position_log_mismatch'][action_key]['total']
+        mismatch = stats['position_log_mismatch'][action_key]['mismatch']
+        missing = stats['position_log_mismatch'][action_key]['missing']
+        pct = (mismatch / total * 100.0) if total > 0 else 0.0
+        log_print(
+            f"{action_key.upper():8s} total={total:6d} mismatch={mismatch:6d} "
+            f"missing={missing:6d} mismatch_pct={pct:6.2f}%"
+        )
+        first_err = stats['first_error_lines']['position_log_mismatch'].get(action_key)
+        if first_err:
+            log_print(f"  First occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    log_print("")
+    dmg_missing_p1 = stats['damage_missing_unit_hp'][1]
+    dmg_missing_p2 = stats['damage_missing_unit_hp'][2]
+    log_print("DAMAGE WITHOUT unit_hp (missing unit init / parse)")
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"Missing unit_hp on damage:   {dmg_missing_p1:6d}           {dmg_missing_p2:6d}")
+    if dmg_missing_p1 > 0 and stats['first_error_lines']['damage_missing_unit_hp'][1]:
+        first_err = stats['first_error_lines']['damage_missing_unit_hp'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if dmg_missing_p2 > 0 and stats['first_error_lines']['damage_missing_unit_hp'][2]:
+        first_err = stats['first_error_lines']['damage_missing_unit_hp'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+
+    log_print("\n" + "-" * 80)
+    log_print("HP / DEATHS CONSISTENCY")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    dmg_over_p1 = stats['damage_exceeds_hp'][1]
+    dmg_over_p2 = stats['damage_exceeds_hp'][2]
+    log_print(f"Dmg > HP_CUR (overkill):     {dmg_over_p1:6d}           {dmg_over_p2:6d}")
+    if dmg_over_p1 > 0 and stats['first_error_lines']['damage_exceeds_hp'][1]:
+        first_err = stats['first_error_lines']['damage_exceeds_hp'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if dmg_over_p2 > 0 and stats['first_error_lines']['damage_exceeds_hp'][2]:
+        first_err = stats['first_error_lines']['damage_exceeds_hp'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    revived_p1 = stats['unit_revived'][1]
+    revived_p2 = stats['unit_revived'][2]
+    log_print(f"Unités revenues:             {revived_p1:6d}           {revived_p2:6d}")
+    if revived_p1 > 0 and stats['first_error_lines']['unit_revived'][1]:
+        first_err = stats['first_error_lines']['unit_revived'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if revived_p2 > 0 and stats['first_error_lines']['unit_revived'][2]:
+        first_err = stats['first_error_lines']['unit_revived'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+
     # MOVEMENT ERRORS
     if True:
         active_debug_section = 1
@@ -3356,7 +3917,70 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if bot_dead_move > 0 and stats['first_error_lines']['dead_unit_moving'][2]:
             first_err = stats['first_error_lines']['dead_unit_moving'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    
+        agent_adj_before_move = stats['move_adjacent_before_non_flee'][1]
+        bot_adj_before_move = stats['move_adjacent_before_non_flee'][2]
+        log_print(f"Move with adjacent_before:   {agent_adj_before_move:6d}           {bot_adj_before_move:6d}")
+        if agent_adj_before_move > 0 and stats['first_error_lines']['move_adjacent_before_non_flee'][1]:
+            first_err = stats['first_error_lines']['move_adjacent_before_non_flee'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_adj_before_move > 0 and stats['first_error_lines']['move_adjacent_before_non_flee'][2]:
+            first_err = stats['first_error_lines']['move_adjacent_before_non_flee'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        agent_move_over = stats['move_distance_over_limit']['move'][1]
+        bot_move_over = stats['move_distance_over_limit']['move'][2]
+        log_print(f"Move distance > MOVE:        {agent_move_over:6d}           {bot_move_over:6d}")
+        if agent_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][1]:
+            first_err = stats['first_error_lines']['move_distance_over_limit']['move'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][2]:
+            first_err = stats['first_error_lines']['move_distance_over_limit']['move'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        agent_adv_over = stats['move_distance_over_limit']['advance'][1]
+        bot_adv_over = stats['move_distance_over_limit']['advance'][2]
+        log_print(f"Advance distance > roll:     {agent_adv_over:6d}           {bot_adv_over:6d}")
+        if agent_adv_over > 0 and stats['first_error_lines']['move_distance_over_limit']['advance'][1]:
+            first_err = stats['first_error_lines']['move_distance_over_limit']['advance'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_adv_over > 0 and stats['first_error_lines']['move_distance_over_limit']['advance'][2]:
+            first_err = stats['first_error_lines']['move_distance_over_limit']['advance'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        agent_move_blocked = stats['move_path_blocked']['move'][1]
+        bot_move_blocked = stats['move_path_blocked']['move'][2]
+        log_print(f"Move path blocked (BFS):     {agent_move_blocked:6d}           {bot_move_blocked:6d}")
+        if agent_move_blocked > 0 and stats['first_error_lines']['move_path_blocked']['move'][1]:
+            first_err = stats['first_error_lines']['move_path_blocked']['move'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_move_blocked > 0 and stats['first_error_lines']['move_path_blocked']['move'][2]:
+            first_err = stats['first_error_lines']['move_path_blocked']['move'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        agent_adv_blocked = stats['move_path_blocked']['advance'][1]
+        bot_adv_blocked = stats['move_path_blocked']['advance'][2]
+        log_print(f"Advance path blocked (BFS):  {agent_adv_blocked:6d}           {bot_adv_blocked:6d}")
+        if agent_adv_blocked > 0 and stats['first_error_lines']['move_path_blocked']['advance'][1]:
+            first_err = stats['first_error_lines']['move_path_blocked']['advance'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_adv_blocked > 0 and stats['first_error_lines']['move_path_blocked']['advance'][2]:
+            first_err = stats['first_error_lines']['move_path_blocked']['advance'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+
+    # ACTION PHASE ACCURACY
+    active_debug_section = 13
+    log_print("\n" + "-" * 80)
+    log_print(f"13. {debug_sections[13]}")
+    log_print("-" * 80)
+    log_print(f"{'Action':<12} {'Total':>8} {'Wrong':>8} {'Accuracy':>10}")
+    log_print("-" * 80)
+    action_phase_accuracy = require_key(stats, "action_phase_accuracy")
+    for action_key in ("move", "fled", "shoot", "advance", "charge", "fight"):
+        counts = require_key(action_phase_accuracy, action_key)
+        total = require_key(counts, "total")
+        wrong = require_key(counts, "wrong")
+        accuracy = ((total - wrong) / total * 100.0) if total > 0 else 100.0
+        log_print(f"{action_key.upper():<12} {total:8d} {wrong:8d} {accuracy:9.1f}%")
+        mismatch = require_key(stats, "first_error_lines")["action_phase_mismatch"].get(action_key)
+        if mismatch:
+            log_print(f"  First occurrence (Episode {mismatch['episode']}): {mismatch['line']}")
+
     # SHOOTING ERRORS
     active_debug_section = 2
     log_print("\n" + "-" * 80)
@@ -3544,6 +4168,35 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_charge_dead > 0 and stats['first_error_lines']['charge_dead_unit'][2]:
         first_err = stats['first_error_lines']['charge_dead_unit'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+
+    log_print("\n" + "-" * 80)
+    log_print("CHARGE VALIDITY")
+    log_print("-" * 80)
+    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print("-" * 80)
+    agent_charge_total = stats['charge_invalid'][1]['total']
+    bot_charge_total = stats['charge_invalid'][2]['total']
+    agent_charge_over = stats['charge_invalid'][1]['distance_over_roll']
+    bot_charge_over = stats['charge_invalid'][2]['distance_over_roll']
+    agent_charge_adv = stats['charge_invalid'][1]['advanced']
+    bot_charge_adv = stats['charge_invalid'][2]['advanced']
+    agent_charge_fled = stats['charge_invalid'][1]['fled']
+    bot_charge_fled = stats['charge_invalid'][2]['fled']
+    agent_charge_over_pct = (agent_charge_over / agent_charge_total * 100) if agent_charge_total > 0 else 0
+    bot_charge_over_pct = (bot_charge_over / bot_charge_total * 100) if bot_charge_total > 0 else 0
+    agent_charge_adv_pct = (agent_charge_adv / agent_charge_total * 100) if agent_charge_total > 0 else 0
+    bot_charge_adv_pct = (bot_charge_adv / bot_charge_total * 100) if bot_charge_total > 0 else 0
+    agent_charge_fled_pct = (agent_charge_fled / agent_charge_total * 100) if agent_charge_total > 0 else 0
+    bot_charge_fled_pct = (bot_charge_fled / bot_charge_total * 100) if bot_charge_total > 0 else 0
+    log_print(f"Distance > roll:              {agent_charge_over:6d} ({agent_charge_over_pct:5.1f}%)  {bot_charge_over:6d} ({bot_charge_over_pct:5.1f}%)")
+    log_print(f"Charged after advance:        {agent_charge_adv:6d} ({agent_charge_adv_pct:5.1f}%)  {bot_charge_adv:6d} ({bot_charge_adv_pct:5.1f}%)")
+    log_print(f"Charged after fled:           {agent_charge_fled:6d} ({agent_charge_fled_pct:5.1f}%)  {bot_charge_fled:6d} ({bot_charge_fled_pct:5.1f}%)")
+    if stats['first_error_lines']['charge_invalid'][1]:
+        first_err = stats['first_error_lines']['charge_invalid'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if stats['first_error_lines']['charge_invalid'][2]:
+        first_err = stats['first_error_lines']['charge_invalid'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     
     # FIGHT ERRORS
     active_debug_section = 6
@@ -3597,6 +4250,35 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_fight_over_cc > 0 and stats['first_error_lines']['fight_over_cc_nb'][2]:
         first_err = stats['first_error_lines']['fight_over_cc_nb'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_fight_alt = stats['fight_alternation_violations'][1]
+    bot_fight_alt = stats['fight_alternation_violations'][2]
+    log_print(f"Fight alternation violations: {agent_fight_alt:6d}           {bot_fight_alt:6d}")
+    if agent_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][1]:
+        first_err = stats['first_error_lines']['fight_alternation_violations'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][2]:
+        first_err = stats['first_error_lines']['fight_alternation_violations'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+
+    log_print("\nPer-unit CC_NB overuse ratios")
+    for player_label, player_id in (("Agent (P1)", 1), ("Bot (P2)", 2)):
+        unit_totals = stats['fight_attacks_by_unit'][player_id]
+        unit_over = stats['fight_over_cc_nb_by_unit'][player_id]
+        if not unit_totals:
+            log_print(f"{player_label}: No fight attacks logged")
+            continue
+        ratios = []
+        for uid, total_count in unit_totals.items():
+            over_count = require_key(unit_over, uid)
+            ratio = (over_count / total_count) if total_count > 0 else 0
+            ratios.append((ratio, uid, over_count, total_count))
+        ratios.sort(reverse=True)
+        log_print(f"{player_label}:")
+        for ratio, uid, over_count, total_count in ratios:
+            if total_count <= 0:
+                continue
+            ratio_pct = ratio * 100.0
+            log_print(f"  Unit {uid}: {over_count}/{total_count} ({ratio_pct:5.1f}%)")
     
     # POSITION COLLISIONS
     active_debug_section = 7
@@ -3811,6 +4493,47 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 5)
     log_print(f"{summary_icon(dead_unit_interactions_total > 0)} Interactions d'une unité morte : {dead_unit_interactions_total}")
     log_print(f"{summary_icon(unit_collisions > 0)} Collisions d'unités : {unit_collisions}")
+    log_print(f"{summary_icon(stats['damage_missing_unit_hp'][1] + stats['damage_missing_unit_hp'][2] > 0)} Dmg sans unit_hp (init/parse) : {stats['damage_missing_unit_hp'][1] + stats['damage_missing_unit_hp'][2]}")
+    log_print(f"{summary_icon(stats['damage_exceeds_hp'][1] + stats['damage_exceeds_hp'][2] > 0)} Dmg > HP_CUR (overkill) : {stats['damage_exceeds_hp'][1] + stats['damage_exceeds_hp'][2]}")
+    log_print(f"{summary_icon(stats['unit_revived'][1] + stats['unit_revived'][2] > 0)} Unités revenues après mort : {stats['unit_revived'][1] + stats['unit_revived'][2]}")
+    pos_mismatch_total = (
+        stats['position_log_mismatch']['move']['mismatch'] +
+        stats['position_log_mismatch']['advance']['mismatch'] +
+        stats['position_log_mismatch']['charge']['mismatch']
+    )
+    log_print(f"{summary_icon(pos_mismatch_total > 0)} Positions/logs incohérents : {pos_mismatch_total}")
+    shoot_invalid_total = (
+        stats['shoot_invalid'][1]['no_los'] + stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['adjacent_non_pistol'] +
+        stats['shoot_invalid'][2]['no_los'] + stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['adjacent_non_pistol']
+    )
+    log_print(f"{summary_icon(shoot_invalid_total > 0)} Tirs invalides (LoS/portée/adjacent non-pistol) : {shoot_invalid_total}")
+    fight_alternation_total = stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
+    fight_over_cc_units = (
+        sum(1 for _, count in stats['fight_over_cc_nb_by_unit'][1].items() if count > 0) +
+        sum(1 for _, count in stats['fight_over_cc_nb_by_unit'][2].items() if count > 0)
+    )
+    log_print(f"{summary_icon(fight_alternation_total > 0)} Alternance fight invalide : {fight_alternation_total}")
+    log_print(f"{summary_icon(fight_over_cc_units > 0)} Unités dépassant CC_NB : {fight_over_cc_units}")
+    charge_invalid_total = (
+        stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][1]['fled'] +
+        stats['charge_invalid'][2]['distance_over_roll'] + stats['charge_invalid'][2]['advanced'] + stats['charge_invalid'][2]['fled']
+    )
+    log_print(f"{summary_icon(charge_invalid_total > 0)} Charges invalides (roll/advanced/fled) : {charge_invalid_total}")
+    move_adjacent_before_total = stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2]
+    log_print(f"{summary_icon(move_adjacent_before_total > 0)} Move avec adjacent_before : {move_adjacent_before_total}")
+    move_distance_total = (
+        stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
+        stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2]
+    )
+    move_path_blocked_total = (
+        stats['move_path_blocked']['move'][1] + stats['move_path_blocked']['move'][2] +
+        stats['move_path_blocked']['advance'][1] + stats['move_path_blocked']['advance'][2]
+    )
+    log_print(f"{summary_icon(move_distance_total > 0)} Distances > MOVE/roll : {move_distance_total}")
+    log_print(f"{summary_icon(move_path_blocked_total > 0)} Move path blocked (BFS) : {move_path_blocked_total}")
+    action_phase_accuracy = require_key(stats, "action_phase_accuracy")
+    wrong_phase_total = sum(require_key(action_phase_accuracy[key], "wrong") for key in action_phase_accuracy)
+    log_print(f"{summary_icon(wrong_phase_total > 0)} Actions occuring in the wrong phase : {wrong_phase_total}")
     log_print("-" * 5)
     log_print(f"{summary_icon(len(stats['parse_errors']) > 0)} Erreurs de parsing : {len(stats['parse_errors'])}")
     log_print(f"{summary_icon(len(stats['episodes_without_end']) > 0)} Episodes sans fin : {len(stats['episodes_without_end'])}")

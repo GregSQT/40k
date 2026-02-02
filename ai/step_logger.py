@@ -141,8 +141,8 @@ class StepLogger:
         # PERFORMANCE: Flush any remaining buffered logs before episode start
         self._flush_buffer()
 
-        self._episode_start_wall = time.time()
-        self._last_step_wall = time.time()  # First step duration = time since episode start
+        self._episode_start_wall = time.perf_counter()
+        self._last_step_wall = time.perf_counter()  # First step duration = time since episode start
 
         # Increment episode number
         self.episode_number += 1
@@ -615,7 +615,7 @@ class StepLogger:
         self._flush_buffer()
 
         try:
-            duration_s = time.time() - getattr(self, '_episode_start_wall', time.time())
+            duration_s = time.perf_counter() - getattr(self, '_episode_start_wall', time.perf_counter())
             with open(self.output_file, 'a') as f:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
                 method_str = f", Method={win_method}" if win_method else ""

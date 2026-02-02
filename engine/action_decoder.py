@@ -96,7 +96,8 @@ class ActionDecoder:
                 if can_advance:
                     # Check if unit has NOT already advanced this turn
                     units_advanced = require_key(game_state, "units_advanced")
-                    if active_unit["id"] not in units_advanced:
+                    unit_id_str = str(active_unit["id"])
+                    if unit_id_str not in units_advanced:
                         mask[12] = True  # Advance action
 
             mask[11] = True  # Wait always valid (can choose not to shoot)
