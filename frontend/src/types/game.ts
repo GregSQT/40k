@@ -21,6 +21,7 @@ export interface Position {
 
 export interface Weapon {
   display_name: string;
+  COMBI_WEAPON?: string;
   RNG?: number;
   NB: number;
   ATK: number;

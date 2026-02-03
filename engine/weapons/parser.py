@@ -91,6 +91,11 @@ class ArmoryParser:
             display_name_match = re.search(r'display_name:\s*["\']([^"\']+)["\']', weapon_body)
             if display_name_match:
                 weapon['display_name'] = display_name_match.group(1)
+
+            # Optional COMBI_WEAPON group key
+            combi_match = re.search(r'COMBI_WEAPON:\s*["\']([^"\']+)["\']', weapon_body)
+            if combi_match:
+                weapon['COMBI_WEAPON'] = combi_match.group(1)
             
             # Numeric properties: RNG, NB, ATK, STR, AP, DMG
             for prop in ['RNG', 'NB', 'ATK', 'STR', 'AP', 'DMG']:

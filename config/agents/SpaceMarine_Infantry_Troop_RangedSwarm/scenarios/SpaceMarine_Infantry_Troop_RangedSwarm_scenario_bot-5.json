@@ -1,7 +1,7 @@
 {
   "units": [
-    {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 18, "row": 12},
-    {"id": 2, "unit_type": "Intercessor", "player": 1, "col": 7, "row": 14},
+    {"id": 1, "unit_type": "IntercessorSergeant", "player": 1, "col": 18, "row": 12},
+    {"id": 2, "unit_type": "IntercessorGrenadeLauncher", "player": 1, "col": 7, "row": 14},
     {"id": 3, "unit_type": "Intercessor", "player": 1, "col": 14, "row": 16},
     {"id": 4, "unit_type": "Intercessor", "player": 1, "col": 1, "row": 13},
     {"id": 5, "unit_type": "Intercessor", "player": 2, "col": 16, "row": 5},

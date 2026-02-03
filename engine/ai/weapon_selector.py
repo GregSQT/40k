@@ -116,6 +116,11 @@ def select_best_ranged_weapon(unit: Dict[str, Any], target: Dict[str, Any],
     hp_cur = require_hp_from_cache(target_id, game_state)
 
     for weapon_index, weapon in enumerate(rng_weapons):
+        combi_key = weapon.get("COMBI_WEAPON")
+        if combi_key:
+            combi_choice = unit.get("_combi_weapon_choice")
+            if combi_choice and combi_key in combi_choice and combi_choice[combi_key] != weapon_index:
+                continue
         # Check cache first
         cached_prob = _get_kill_prob_from_cache(cache, unit_id, weapon_index, target_id, hp_cur)
         

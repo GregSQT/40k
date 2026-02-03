@@ -91,6 +91,50 @@ def _weapon_has_pistol_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
+def _get_combi_weapon_key(weapon: Dict[str, Any]) -> Optional[str]:
+    """Return COMBI_WEAPON key if present."""
+    if not weapon:
+        return None
+    return weapon.get("COMBI_WEAPON")
+
+
+def _is_combi_profile_blocked(unit: Dict[str, Any], weapon: Dict[str, Any], weapon_index: int) -> bool:
+    """Check if weapon is blocked by an existing COMBI_WEAPON choice."""
+    combi_key = _get_combi_weapon_key(weapon)
+    if not combi_key:
+        return False
+    if "_combi_weapon_choice" not in unit or unit["_combi_weapon_choice"] is None:
+        return False
+    combi_choice = unit["_combi_weapon_choice"]
+    return combi_key in combi_choice and combi_choice[combi_key] != weapon_index
+
+
+def _set_combi_weapon_choice(game_state: Dict[str, Any], unit: Dict[str, Any], weapon_index: int) -> None:
+    """Record COMBI_WEAPON profile choice for this activation."""
+    rng_weapons = require_key(unit, "RNG_WEAPONS")
+    if weapon_index < 0 or weapon_index >= len(rng_weapons):
+        raise IndexError(f"Invalid ranged weapon index {weapon_index} for unit {unit['id']}")
+    weapon = rng_weapons[weapon_index]
+    combi_key = _get_combi_weapon_key(weapon)
+    if not combi_key:
+        return
+    if "_combi_weapon_choice" not in unit or unit["_combi_weapon_choice"] is None:
+        unit["_combi_weapon_choice"] = {}
+    combi_choice = unit["_combi_weapon_choice"]
+    if combi_key in combi_choice and combi_choice[combi_key] != weapon_index:
+        raise ValueError(
+            f"COMBI_WEAPON profile already selected for '{combi_key}': "
+            f"existing_index={combi_choice[combi_key]} new_index={weapon_index} unit_id={unit['id']}"
+        )
+    combi_choice[combi_key] = weapon_index
+    from engine.game_utils import add_debug_log
+    weapon_name = weapon.get("display_name", f"weapon_{weapon_index}")
+    add_debug_log(
+        game_state,
+        f"[COMBI_WEAPON] Unit {unit.get('id')} locked weapon {weapon_index} ({weapon_name}) combi_key={combi_key}"
+    )
+
+
 def weapon_availability_check(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -157,6 +201,19 @@ def weapon_availability_check(
                 # ❌ Weapon CANNOT be selectable (skip weapon)
                 can_use = False
                 reason = "Weapon already used (weapon.shot = 1)"
+
+        # Check COMBI_WEAPON profile lock
+        if can_use and _is_combi_profile_blocked(unit, weapon, idx):
+            can_use = False
+            reason = "COMBI_WEAPON profile already selected"
+            from engine.game_utils import add_debug_log
+            combi_key = _get_combi_weapon_key(weapon)
+            combi_choice = require_key(unit, "_combi_weapon_choice")
+            add_debug_log(
+                game_state,
+                f"[COMBI_WEAPON] Unit {unit.get('id')} blocked weapon {idx} ({weapon_name}) "
+                f"combi_key={combi_key} chosen_index={combi_choice[combi_key]}"
+            )
         
         # Check PISTOL category mixing restriction
         # If unit has already fired with a weapon, can only use weapons of the same category
@@ -1106,6 +1163,8 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     rng_weapons = require_key(unit, "RNG_WEAPONS")
     for weapon in rng_weapons:
         weapon["shot"] = 0
+    # Reset COMBI_WEAPON choice for this activation
+    unit["_combi_weapon_choice"] = {}
     if game_state.get("debug_mode", False):
         from engine.game_utils import add_debug_file_log
         episode = game_state.get("episode_number", "?")
@@ -2279,6 +2338,8 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             for idx, weapon in enumerate(rng_weapons):
                 if idx == current_weapon_index:
                     continue  # Skip current weapon
+                if _is_combi_profile_blocked(unit, weapon, idx):
+                    continue
                 weapon_rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
                 is_pistol = "PISTOL" in weapon_rules
                 if current_weapon_is_pistol and is_pistol:
@@ -3117,6 +3178,46 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 selected_weapon = get_selected_ranged_weapon(unit)
                 if not selected_weapon:
                     return False, {"error": "no_weapons_available", "unitId": unit_id}
+                # If auto-select is enabled and unit hasn't fired yet, pick the best weapon now
+                if (auto_select and not _unit_has_shot_with_any_weapon(unit)
+                        and current_shoot_left == require_key(selected_weapon, "NB")):
+                    if "weapon_rule" not in game_state:
+                        raise KeyError("game_state missing required 'weapon_rule' field")
+                    weapon_rule = game_state["weapon_rule"]
+                    unit_id_str = str(unit["id"])
+                    has_advanced = unit_id_str in require_key(game_state, "units_advanced")
+                    is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+                    advance_status = 1 if has_advanced else 0
+                    adjacent_status = 1 if is_adjacent else 0
+
+                    try:
+                        weapon_available_pool = weapon_availability_check(
+                            game_state, unit, weapon_rule, advance_status, adjacent_status
+                        )
+                        usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+                        available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in usable_weapons]
+                    except Exception as e:
+                        return False, {"error": "no_weapons_available", "unitId": unit_id}
+
+                    usable_weapons = [w for w in available_weapons if w["can_use"]]
+                    if not usable_weapons:
+                        return False, {"error": "no_weapons_available", "unitId": unit_id}
+
+                    from engine.ai.weapon_selector import select_best_ranged_weapon
+                    filtered_weapons = [w["weapon"] for w in usable_weapons]
+                    filtered_indices = [w["index"] for w in usable_weapons]
+                    temp_unit = unit.copy()
+                    temp_unit["RNG_WEAPONS"] = filtered_weapons
+                    best_weapon_idx_in_filtered = select_best_ranged_weapon(temp_unit, target, game_state)
+
+                    if best_weapon_idx_in_filtered >= 0:
+                        best_weapon_idx = filtered_indices[best_weapon_idx_in_filtered]
+                        unit["selectedRngWeaponIndex"] = best_weapon_idx
+                        weapon = unit["RNG_WEAPONS"][best_weapon_idx]
+                        unit["SHOOT_LEFT"] = weapon["NB"]
+                        selected_weapon = weapon
+                    else:
+                        return False, {"error": "no_weapons_available", "unitId": unit_id}
                 # Use already selected weapon, no re-selection needed
             elif auto_select:
                 # SHOOT_LEFT == 0, need to select a new weapon (same category if current weapon was used)
@@ -3304,6 +3405,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         # CRITICAL: Add attack result to shoot_attack_results for logging
         # This ensures all attacks are logged even if waiting_for_player=True
+        # Do NOT reset here; the list is cleared at activation start and after logging.
         if "shoot_attack_results" not in game_state:
             game_state["shoot_attack_results"] = []
         # CRITICAL: Extract nested attack_result from wrapper (shooting_attack_controller returns wrapper)
@@ -3326,6 +3428,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         current_weapon_index = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
         rng_weapons = require_key(unit, "RNG_WEAPONS")
         if current_weapon_index < len(rng_weapons):
+            _set_combi_weapon_choice(game_state, unit, current_weapon_index)
             weapon = rng_weapons[current_weapon_index]
             weapon_rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
             weapon_name = weapon.get("display_name", f"weapon_{current_weapon_index}")
