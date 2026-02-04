@@ -16,60 +16,15 @@ import type { DiceValue, Weapon } from '../../types/game';
 
 const D3: DiceValue = "D3";
 const D6: DiceValue = "D6";
-
-// ============================================================================
-// RANGED WEAPONS
-// ============================================================================
-
 export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
-  // #########################################################################################
-  // #################################### Debug Weapons ######################################
-  // #########################################################################################
-  SM_RNG_killer: {
-    display_name: "SM_RNG_killer",
-    RNG: 24,
-    NB: 1,
-    ATK: 3,
-    STR: 5,
-    AP: -3,
-    DMG: 2,
-    WEAPON_RULES: [],
-  },
-  Termagant_RNG_killer: {
-    display_name: "Termagant_RNG_killer",
-    RNG: 24,
-    NB: 5,
-    ATK: 3,
-    STR: 3,
-    AP: 0,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  SM_CC_killer: {
-    display_name: "SM_CC_killer",
-    NB: 1,
-    ATK: 3,
-    STR: 5,
-    AP: -3,
-    DMG: D6,
-    WEAPON_RULES: [],
-  },
-  Termagant_CC_killer: {
-    display_name: "Termagant_CC_killer",
-    NB: 5,
-    ATK: 3,
-    STR: 3,
-    AP: 0,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
+
   // #########################################################################################
   // #################################### Range Weapons ######################################
   // #########################################################################################
   bolt_rifle: {
     display_name: "Bolt Rifle",
     RNG: 24,
-    NB: 2,
+    NB: 4,
     ATK: 3,
     STR: 4,
     AP: -1,
@@ -234,6 +189,47 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 8,
     AP: -2,
     DMG: 2,
+    WEAPON_RULES: [],
+  },
+    // #########################################################################################
+  // #################################### Debug Weapons ######################################
+  // #########################################################################################
+  SM_RNG_killer: {
+    display_name: "SM_RNG_killer",
+    RNG: 24,
+    NB: 1,
+    ATK: 3,
+    STR: 5,
+    AP: -3,
+    DMG: 2,
+    WEAPON_RULES: [],
+  },
+  Termagant_RNG_killer: {
+    display_name: "Termagant_RNG_killer",
+    RNG: 24,
+    NB: 5,
+    ATK: 3,
+    STR: 3,
+    AP: 0,
+    DMG: 1,
+    WEAPON_RULES: [],
+  },
+  SM_CC_killer: {
+    display_name: "SM_CC_killer",
+    NB: 1,
+    ATK: 3,
+    STR: 5,
+    AP: -3,
+    DMG: D6,
+    WEAPON_RULES: [],
+  },
+  Termagant_CC_killer: {
+    display_name: "Termagant_CC_killer",
+    NB: 5,
+    ATK: 3,
+    STR: 3,
+    AP: 0,
+    DMG: 1,
     WEAPON_RULES: [],
   },
 };
