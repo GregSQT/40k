@@ -12,7 +12,10 @@
  * - No duplicate Python armory needed - parsed at runtime
  */
 
-import type { Weapon } from '../../types/game';
+import type { DiceValue, Weapon } from '../../types/game';
+
+const D3: DiceValue = "D3";
+const D6: DiceValue = "D6";
 
 // ============================================================================
 // RANGED WEAPONS
@@ -48,7 +51,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     ATK: 3,
     STR: 5,
     AP: -3,
-    DMG: 2,
+    DMG: D6,
     WEAPON_RULES: [],
   },
   Termagant_CC_killer: {
@@ -117,7 +120,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     display_name: "Astartes Grenade Launcher (Frag)",
     COMBI_WEAPON: "astartes_grenade_launcher",
     RNG: 24,
-    NB: 2,
+    NB: D3,
     ATK: 3,
     STR: 4,
     AP: 0,
@@ -132,7 +135,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     ATK: 3,
     STR: 9,
     AP: -2,
-    DMG: 2,
+    DMG: D3,
     WEAPON_RULES: [],
   },
   plasma_pistol_standard: {
@@ -181,11 +184,11 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   },
   intercessor_sergeant_power_fist: {
     display_name: "Power Fist",
-    NB: 3,
+    NB: D3,
     ATK: 3,
     STR: 8,
     AP: -2,
-    DMG: 2,
+    DMG: D3,
     WEAPON_RULES: [],
   },
   intercessor_sergeant_power_weapon: {

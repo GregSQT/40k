@@ -6,7 +6,7 @@ game_state.py - Game state initialization and management
 from typing import Dict, List, Any, Optional, Tuple
 import json
 from shared.data_validation import require_key
-from engine.combat_utils import normalize_coordinates, get_unit_coordinates
+from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
 
 class GameStateManager:
@@ -49,12 +49,18 @@ class GameStateManager:
         shoot_left = 0
         if rng_weapons and selected_rng_weapon_index is not None:
             selected_weapon = rng_weapons[selected_rng_weapon_index]
-            shoot_left = require_key(selected_weapon, "NB")
+            shoot_left = resolve_dice_value(
+                require_key(selected_weapon, "NB"),
+                "game_state_init_shoot_left",
+            )
         
         attack_left = 0
         if cc_weapons and selected_cc_weapon_index is not None:
             selected_weapon = cc_weapons[selected_cc_weapon_index]
-            attack_left = require_key(selected_weapon, "NB")
+            attack_left = resolve_dice_value(
+                require_key(selected_weapon, "NB"),
+                "game_state_init_attack_left",
+            )
         
         return {
             # Identity
@@ -175,7 +181,10 @@ class GameStateManager:
                 if rng_weapons and selected_rng_weapon_index is not None:
                     selected_weapon = rng_weapons[selected_rng_weapon_index]
                     if isinstance(selected_weapon, dict):
-                        shoot_left = require_key(selected_weapon, "NB")
+                        shoot_left = resolve_dice_value(
+                            require_key(selected_weapon, "NB"),
+                            "scenario_init_shoot_left",
+                        )
                     else:
                         raise TypeError(f"Unit {unit_type}: RNG_WEAPONS[{selected_rng_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
                 
@@ -183,7 +192,10 @@ class GameStateManager:
                 if cc_weapons and selected_cc_weapon_index is not None:
                     selected_weapon = cc_weapons[selected_cc_weapon_index]
                     if isinstance(selected_weapon, dict):
-                        attack_left = require_key(selected_weapon, "NB")
+                        attack_left = resolve_dice_value(
+                            require_key(selected_weapon, "NB"),
+                            "scenario_init_attack_left",
+                        )
                     else:
                         raise TypeError(f"Unit {unit_type}: CC_WEAPONS[{selected_cc_weapon_index}] is {type(selected_weapon).__name__}, expected dict. Value: {selected_weapon}")
                 

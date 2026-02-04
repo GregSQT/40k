@@ -6,6 +6,7 @@ using existing parameter unitTypes from rewards_config.json
 
 from typing import Dict, List, Any, Tuple
 from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage, get_selected_ranged_weapon, get_selected_melee_weapon
+from engine.combat_utils import expected_dice_value
 from engine.phase_handlers.shared_utils import get_hp_from_cache
 from shared.data_validation import require_key
 
@@ -43,12 +44,18 @@ class RewardMapper:
             weapon = get_selected_ranged_weapon(unit)
             if not weapon:
                 return False
-            max_damage = require_key(weapon, "NB") * require_key(weapon, "DMG")
+            max_damage = (
+                expected_dice_value(require_key(weapon, "NB"), "reward_mapper_rng_nb") *
+                expected_dice_value(require_key(weapon, "DMG"), "reward_mapper_rng_dmg")
+            )
         else:
             weapon = get_selected_melee_weapon(unit)
             if not weapon:
                 return False
-            max_damage = require_key(weapon, "NB") * require_key(weapon, "DMG")
+            max_damage = (
+                expected_dice_value(require_key(weapon, "NB"), "reward_mapper_cc_nb") *
+                expected_dice_value(require_key(weapon, "DMG"), "reward_mapper_cc_dmg")
+            )
         
         return target_hp <= max_damage
     
@@ -139,7 +146,10 @@ class RewardMapper:
             melee_weapon = get_selected_melee_weapon(unit)
             if not melee_weapon:
                 raise ValueError("Selected melee weapon is required for melee charge priority calculation")
-            unit_melee_dmg = require_key(melee_weapon, "NB") * require_key(melee_weapon, "DMG")
+            unit_melee_dmg = (
+                expected_dice_value(require_key(melee_weapon, "NB"), "reward_mapper_melee_nb") *
+                expected_dice_value(require_key(melee_weapon, "DMG"), "reward_mapper_melee_dmg")
+            )
             target_hp = self._get_target_hp(target, game_state)
             if (target_hp >= unit_melee_dmg and
                 self._is_highest_threat_in_range(target, all_targets) and

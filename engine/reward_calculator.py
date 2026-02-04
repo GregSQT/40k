@@ -4,7 +4,12 @@ reward_calculator.py - Reward calculation system
 """
 
 from typing import Dict, List, Any, Tuple, Optional
-from engine.combat_utils import calculate_wound_target, calculate_hex_distance, calculate_pathfinding_distance
+from engine.combat_utils import (
+    calculate_wound_target,
+    calculate_hex_distance,
+    calculate_pathfinding_distance,
+    expected_dice_value,
+)
 from engine.phase_handlers.shooting_handlers import _calculate_save_target
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
@@ -769,14 +774,14 @@ class RewardCalculator:
         rng_weapons = require_key(unit, "RNG_WEAPONS")
         for weapon in rng_weapons:
             expected = self._calculate_expected_damage(
-                num_attacks=require_key(weapon, "NB"),
+                num_attacks=expected_dice_value(require_key(weapon, "NB"), "combat_mix_rng_nb"),
                 to_hit_stat=require_key(weapon, "ATK"),
                 strength=require_key(weapon, "STR"),
                 target_toughness=target_T,
                 ap=require_key(weapon, "AP"),
                 target_save=target_save,
                 target_invul=target_invul,
-                damage_per_wound=require_key(weapon, "DMG")
+                damage_per_wound=expected_dice_value(require_key(weapon, "DMG"), "combat_mix_rng_dmg")
             )
             ranged_expected_list.append(expected)
         
@@ -787,14 +792,14 @@ class RewardCalculator:
         cc_weapons = unit["CC_WEAPONS"] if "CC_WEAPONS" in unit else []
         for weapon in cc_weapons:
             expected = self._calculate_expected_damage(
-                num_attacks=require_key(weapon, "NB"),
+                num_attacks=expected_dice_value(require_key(weapon, "NB"), "combat_mix_cc_nb"),
                 to_hit_stat=require_key(weapon, "ATK"),
                 strength=require_key(weapon, "STR"),
                 target_toughness=target_T,
                 ap=require_key(weapon, "AP"),
                 target_save=target_save,
                 target_invul=target_invul,
-                damage_per_wound=require_key(weapon, "DMG")
+                damage_per_wound=expected_dice_value(require_key(weapon, "DMG"), "combat_mix_cc_dmg")
             )
             melee_expected_list.append(expected)
         
@@ -809,10 +814,10 @@ class RewardCalculator:
         raw_ratio = ranged_expected / total_expected
         return 0.1 + (raw_ratio * 0.8)
     
-    def _calculate_expected_damage(self, num_attacks: int, to_hit_stat: int, 
-                                   strength: int, target_toughness: int, ap: int, 
-                                   target_save: int, target_invul: int, 
-                                   damage_per_wound: int) -> float:
+    def _calculate_expected_damage(self, num_attacks: float, to_hit_stat: int,
+                                   strength: int, target_toughness: int, ap: int,
+                                   target_save: int, target_invul: int,
+                                   damage_per_wound: float) -> float:
         """
         Calculate expected damage using W40K dice mechanics with invulnerable saves.
         
@@ -911,8 +916,8 @@ class RewardCalculator:
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
-            damage = weapon["DMG"]
-            num_attacks = weapon["NB"]
+            damage = expected_dice_value(require_key(weapon, "DMG"), "kill_prob_rng_dmg")
+            num_attacks = expected_dice_value(require_key(weapon, "NB"), "kill_prob_rng_nb")
             ap = weapon["AP"]
         else:
             # Get best weapon for this target
@@ -926,8 +931,8 @@ class RewardCalculator:
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
-            damage = weapon["DMG"]
-            num_attacks = weapon["NB"]
+            damage = expected_dice_value(require_key(weapon, "DMG"), "kill_prob_cc_dmg")
+            num_attacks = expected_dice_value(require_key(weapon, "NB"), "kill_prob_cc_nb")
             ap = weapon["AP"]
         
         p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
@@ -1024,8 +1029,8 @@ class RewardCalculator:
         
         hit_target = require_key(weapon, "ATK")
         strength = require_key(weapon, "STR")
-        damage = require_key(weapon, "DMG")
-        num_attacks = require_key(weapon, "NB")
+        damage = expected_dice_value(require_key(weapon, "DMG"), "danger_dmg")
+        num_attacks = expected_dice_value(require_key(weapon, "NB"), "danger_nb")
         ap = require_key(weapon, "AP")
         
         if num_attacks == 0:
@@ -1225,8 +1230,14 @@ class RewardCalculator:
         rng_weapons = require_key(unit, "RNG_WEAPONS")
         cc_weapons = require_key(unit, "CC_WEAPONS")
         
-        rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
-        cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
+        rng_dmg = max(
+            (expected_dice_value(require_key(w, "DMG"), "enrich_rng_dmg") for w in rng_weapons),
+            default=0.0,
+        )
+        cc_dmg = max(
+            (expected_dice_value(require_key(w, "DMG"), "enrich_cc_dmg") for w in cc_weapons),
+            default=0.0,
+        )
         
         # Map UPPERCASE fields to lowercase for reward_mapper compatibility
         enriched["name"] = unit["unitType"]
@@ -1305,14 +1316,14 @@ class RewardCalculator:
             if not weapon:
                 raise ValueError(f"No selected ranged weapon for attacker {attacker.get('id')}")
         
-        num_attacks = weapon["NB"]
+        num_attacks = expected_dice_value(require_key(weapon, "NB"), "expected_damage_nb")
         if num_attacks == 0:
             return 0.0
 
         to_hit = weapon["ATK"]
         strength = weapon["STR"]
         ap = weapon["AP"]
-        damage = weapon["DMG"]
+        damage = expected_dice_value(require_key(weapon, "DMG"), "expected_damage_dmg")
 
         # Validate required defender stats
         if "T" not in defender:

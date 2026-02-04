@@ -19,15 +19,17 @@ export interface Position {
   row: number;
 }
 
+export type DiceValue = number | "D3" | "D6";
+
 export interface Weapon {
   display_name: string;
   COMBI_WEAPON?: string;
   RNG?: number;
-  NB: number;
+  NB: DiceValue;
   ATK: number;
   STR: number;
   AP: number;
-  DMG: number;
+  DMG: DiceValue;
   WEAPON_RULES?: string[];
 }
 

@@ -98,10 +98,20 @@ class ArmoryParser:
                 weapon['COMBI_WEAPON'] = combi_match.group(1)
             
             # Numeric properties: RNG, NB, ATK, STR, AP, DMG
+            # NB/DMG can be dice expressions (D3, D6) in addition to ints
             for prop in ['RNG', 'NB', 'ATK', 'STR', 'AP', 'DMG']:
-                prop_match = re.search(rf'{prop}:\s*(-?\d+)', weapon_body)
-                if prop_match:
-                    weapon[prop] = int(prop_match.group(1))
+                if prop in ['NB', 'DMG']:
+                    prop_match = re.search(rf'{prop}:\s*(D[36]|-?\d+)', weapon_body)
+                    if prop_match:
+                        raw_value = prop_match.group(1)
+                        if raw_value in ['D3', 'D6']:
+                            weapon[prop] = raw_value
+                        else:
+                            weapon[prop] = int(raw_value)
+                else:
+                    prop_match = re.search(rf'{prop}:\s*(-?\d+)', weapon_body)
+                    if prop_match:
+                        weapon[prop] = int(prop_match.group(1))
             
             # WEAPON_RULES array: ["RAPID_FIRE:1", "ASSAULT"]
             # Pattern: WEAPON_RULES: ["rule1", "rule2", ...]

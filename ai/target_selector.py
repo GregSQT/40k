@@ -7,7 +7,7 @@ Used by PvE AI to select targets using tactical heuristics, not rewards.
 """
 
 from typing import Dict, List, Any
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, expected_dice_value
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     require_unit_position,
@@ -94,8 +94,14 @@ class TargetSelector:
         rng_weapons = target["RNG_WEAPONS"] if "RNG_WEAPONS" in target else []
         cc_weapons = target["CC_WEAPONS"] if "CC_WEAPONS" in target else []
         
-        max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
-        max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
+        max_rng_dmg = max(
+            (expected_dice_value(require_key(w, "DMG"), "target_selector_rng_dmg") for w in rng_weapons),
+            default=0.0,
+        )
+        max_cc_dmg = max(
+            (expected_dice_value(require_key(w, "DMG"), "target_selector_cc_dmg") for w in cc_weapons),
+            default=0.0,
+        )
         threat = max(max_rng_dmg, max_cc_dmg) / 5.0
         score += self.weights.get("threat_level", 1.5) * threat
         
@@ -144,8 +150,8 @@ class TargetSelector:
             p_wound = 3/6
 
         # Expected damage
-        num_attacks = shooter["RNG_NB"]
-        damage_per_hit = shooter["RNG_DMG"]
+        num_attacks = expected_dice_value(shooter["RNG_NB"], "target_selector_rng_nb")
+        damage_per_hit = expected_dice_value(shooter["RNG_DMG"], "target_selector_rng_dmg")
         expected_damage = num_attacks * p_hit * p_wound * damage_per_hit
 
         # Kill probability
@@ -164,8 +170,14 @@ class TargetSelector:
         rng_weapons = target["RNG_WEAPONS"] if "RNG_WEAPONS" in target else []
         cc_weapons = target["CC_WEAPONS"] if "CC_WEAPONS" in target else []
         
-        max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
-        max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
+        max_rng_dmg = max(
+            (expected_dice_value(require_key(w, "DMG"), "target_selector_army_rng_dmg") for w in rng_weapons),
+            default=0.0,
+        )
+        max_cc_dmg = max(
+            (expected_dice_value(require_key(w, "DMG"), "target_selector_army_cc_dmg") for w in cc_weapons),
+            default=0.0,
+        )
 
         my_player = game_state["current_player"]
         friendly_units = [u for u in game_state["units"]

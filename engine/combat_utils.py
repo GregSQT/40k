@@ -3,11 +3,60 @@
 combat_utils.py - Pure utility functions for combat calculations
 """
 
-from typing import Dict, List, Tuple, Any, Optional, Set
+from typing import Dict, List, Tuple, Any, Optional, Set, Union
 
 # NOTE: Do not import is_unit_alive at top level — causes circular import
 # (combat_utils → shared_utils → phase_handlers → generic_handlers → combat_utils).
 # Use lazy import inside functions that need it.
+
+# ============================================================================
+# DICE UTILITIES
+# ============================================================================
+
+DiceValue = Union[int, str]
+EXPECTED_D3 = 2.0
+EXPECTED_D6 = 3.5
+
+
+def resolve_dice_value(value: DiceValue, roll_context: str) -> int:
+    """
+    Resolve a dice expression or integer into a concrete roll.
+
+    Supported dice strings: "D3", "D6".
+    - D3: roll a D6, divide by 2 and round up (1-3).
+    - D6: roll a D6 (1-6).
+    """
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        raise TypeError(f"Invalid dice value type for {roll_context}: {type(value).__name__}")
+    if value not in {"D3", "D6"}:
+        raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
+
+    import random
+    d6_roll = random.randint(1, 6)
+    if value == "D6":
+        return d6_roll
+    return (d6_roll + 1) // 2
+
+
+def expected_dice_value(value: DiceValue, roll_context: str) -> float:
+    """
+    Resolve a dice expression or integer into its expected value (no RNG).
+
+    Supported dice strings: "D3", "D6".
+    - D3 expected value: 2.0
+    - D6 expected value: 3.5
+    """
+    if isinstance(value, int):
+        return float(value)
+    if not isinstance(value, str):
+        raise TypeError(f"Invalid dice value type for {roll_context}: {type(value).__name__}")
+    if value == "D3":
+        return EXPECTED_D3
+    if value == "D6":
+        return EXPECTED_D6
+    raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
 
 # ============================================================================
 # UNIT UTILITIES

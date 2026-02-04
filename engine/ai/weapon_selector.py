@@ -6,7 +6,7 @@ MULTIPLE_WEAPONS_IMPLEMENTATION.md: Automatic weapon selection for AI
 
 from typing import Dict, List, Any, Tuple, Optional
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, expected_dice_value
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     require_unit_position,
@@ -24,8 +24,8 @@ def calculate_kill_probability(unit: Dict[str, Any], weapon: Dict[str, Any],
     # Extraire stats de l'arme - NO DEFAULT, raise error si manquant
     hit_target = require_key(weapon, "ATK")
     strength = require_key(weapon, "STR")
-    damage = require_key(weapon, "DMG")
-    num_attacks = require_key(weapon, "NB")
+    damage = expected_dice_value(require_key(weapon, "DMG"), "kill_prob_damage")
+    num_attacks = expected_dice_value(require_key(weapon, "NB"), "kill_prob_nb")
     ap = require_key(weapon, "AP")
     
     # Calculs W40K standard
@@ -403,8 +403,8 @@ def calculate_ttk_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any],
     # Calculer expected_damage avec cette arme
     hit_target = require_key(weapon, "ATK")
     strength = require_key(weapon, "STR")
-    damage = require_key(weapon, "DMG")
-    num_attacks = require_key(weapon, "NB")
+    damage = expected_dice_value(require_key(weapon, "DMG"), "ttk_damage")
+    num_attacks = expected_dice_value(require_key(weapon, "NB"), "ttk_nb")
     ap = require_key(weapon, "AP")
     
     # Calculs W40K standard

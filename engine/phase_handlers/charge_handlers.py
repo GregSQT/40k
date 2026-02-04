@@ -14,7 +14,8 @@ from engine.game_utils import add_console_log, safe_print
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
-    get_hex_neighbors
+    get_hex_neighbors,
+    expected_dice_value
 )
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
@@ -393,14 +394,14 @@ def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any
         if t.get("CC_WEAPONS"):
             # Calculate max threat from all melee weapons
             for weapon in t["CC_WEAPONS"]:
-                threat = require_key(weapon, "STR") * require_key(weapon, "NB")
+                threat = require_key(weapon, "STR") * expected_dice_value(require_key(weapon, "NB"), "charge_melee_nb")
                 melee_threat = max(melee_threat, threat)
         
         ranged_threat = 0.0
         if t.get("RNG_WEAPONS"):
             # Calculate max threat from all ranged weapons
             for weapon in t["RNG_WEAPONS"]:
-                threat = require_key(weapon, "STR") * require_key(weapon, "NB")
+                threat = require_key(weapon, "STR") * expected_dice_value(require_key(weapon, "NB"), "charge_ranged_nb")
                 ranged_threat = max(ranged_threat, threat)
         
         threat = max(melee_threat, ranged_threat)

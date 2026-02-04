@@ -17,8 +17,31 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Import utility functions from engine
-from engine.combat_utils import calculate_hex_distance, get_hex_line, get_hex_neighbors
+from engine.combat_utils import (
+    calculate_hex_distance,
+    get_hex_line,
+    get_hex_neighbors,
+)
 from shared.data_validation import require_key
+
+MAX_D3 = 3
+MAX_D6 = 6
+DICE_MAX_VALUES = {"D3": MAX_D3, "D6": MAX_D6}
+
+
+def max_dice_value(value: Any, context: str) -> int:
+    """
+    Resolve a dice value to its maximum possible roll (no RNG).
+
+    Supported dice strings: "D3", "D6".
+    """
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        raise TypeError(f"Invalid dice value type for {context}: {type(value).__name__}")
+    if value not in DICE_MAX_VALUES:
+        raise ValueError(f"Unsupported dice expression for {context}: {value}")
+    return DICE_MAX_VALUES[value]
 
 # Global variable for debug log file
 _debug_log_file = None
@@ -547,7 +570,10 @@ def parse_step_log(filepath: str) -> Dict:
         for weapon in rng_weapons:
             if isinstance(weapon, dict):
                 weapon_name = require_key(weapon, "display_name")
-                rng_nb_by_weapon[weapon_name] = require_key(weapon, "NB")
+                rng_nb_by_weapon[weapon_name] = max_dice_value(
+                    require_key(weapon, "NB"),
+                    "analyzer_rng_nb",
+                )
                 combi_key = weapon.get("COMBI_WEAPON")
                 if combi_key is not None:
                     combi_by_weapon[weapon_name] = combi_key
@@ -555,7 +581,10 @@ def parse_step_log(filepath: str) -> Dict:
         for weapon in cc_weapons:
             if isinstance(weapon, dict):
                 weapon_name = require_key(weapon, "display_name")
-                cc_nb_by_weapon[weapon_name] = require_key(weapon, "NB")
+                cc_nb_by_weapon[weapon_name] = max_dice_value(
+                    require_key(weapon, "NB"),
+                    "analyzer_cc_nb",
+                )
         unit_attack_limits[unit_type] = {
             'rng_nb_by_weapon': rng_nb_by_weapon,
             'cc_nb_by_weapon': cc_nb_by_weapon

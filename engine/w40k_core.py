@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 
 # Import shared utilities
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance, normalize_coordinates
+from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value
 
 # Phase handlers (existing - keep these)
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers
@@ -496,18 +496,30 @@ class W40KEngine(gym.Env):
             # Initialize SHOOT_LEFT from selected ranged weapon
             selected_rng_weapon = get_selected_ranged_weapon(unit)
             if selected_rng_weapon:
-                unit["SHOOT_LEFT"] = selected_rng_weapon["NB"]
+                unit["SHOOT_LEFT"] = resolve_dice_value(
+                    require_key(selected_rng_weapon, "NB"),
+                    "reset_shoot_left",
+                )
             elif unit.get("RNG_WEAPONS") and len(unit["RNG_WEAPONS"]) > 0:
-                unit["SHOOT_LEFT"] = unit["RNG_WEAPONS"][0]["NB"]
+                unit["SHOOT_LEFT"] = resolve_dice_value(
+                    require_key(unit["RNG_WEAPONS"][0], "NB"),
+                    "reset_shoot_left_fallback",
+                )
             else:
                 unit["SHOOT_LEFT"] = 0
             
             # Initialize ATTACK_LEFT from selected melee weapon
             selected_cc_weapon = get_selected_melee_weapon(unit)
             if selected_cc_weapon:
-                unit["ATTACK_LEFT"] = selected_cc_weapon["NB"]
+                unit["ATTACK_LEFT"] = resolve_dice_value(
+                    require_key(selected_cc_weapon, "NB"),
+                    "reset_attack_left",
+                )
             elif unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
-                unit["ATTACK_LEFT"] = unit["CC_WEAPONS"][0]["NB"]
+                unit["ATTACK_LEFT"] = resolve_dice_value(
+                    require_key(unit["CC_WEAPONS"][0], "NB"),
+                    "reset_attack_left_fallback",
+                )
             else:
                 unit["ATTACK_LEFT"] = 0
 

@@ -18,7 +18,8 @@ from engine.combat_utils import (
     normalize_coordinates,
     calculate_hex_distance,
     get_unit_by_id,
-    get_unit_coordinates
+    get_unit_coordinates,
+    resolve_dice_value
 )
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
@@ -851,7 +852,9 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         if selected_idx < 0 or selected_idx >= len(cc_weapons):
             raise IndexError(f"Invalid selectedCcWeaponIndex {selected_idx} for unit {unit['id']}")
         weapon = cc_weapons[selected_idx]
-        unit["ATTACK_LEFT"] = weapon["NB"]
+        nb_roll = resolve_dice_value(require_key(weapon, "NB"), "fight_nb_init")
+        unit["ATTACK_LEFT"] = nb_roll
+        unit["_current_fight_nb"] = nb_roll
     else:
         unit["ATTACK_LEFT"] = 0  # Pas d'armes melee
 
@@ -1149,7 +1152,9 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         # This prevents infinite loops where ATTACK_LEFT is reset after being decremented
         far = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
         if current_attack_left == 0 and not far:
-            unit["ATTACK_LEFT"] = weapon["NB"]
+            nb_roll = resolve_dice_value(require_key(weapon, "NB"), "fight_nb_auto_select")
+            unit["ATTACK_LEFT"] = nb_roll
+            unit["_current_fight_nb"] = nb_roll
     else:
         # Pas d'armes disponibles
         unit["ATTACK_LEFT"] = 0
@@ -1194,7 +1199,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
     from engine.utils.weapon_helpers import get_selected_melee_weapon
     selected_weapon = get_selected_melee_weapon(unit)
-    total_attacks = require_key(selected_weapon, "NB") if selected_weapon else 0
+    total_attacks = require_key(unit, "_current_fight_nb") if selected_weapon else 0
     
     attack_result["attackerId"] = unit_id
     attack_result["targetId"] = target_id
@@ -1622,7 +1627,7 @@ def _handle_fight_postpone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
     if not selected_weapon:
         return False, {"error": "no_melee_weapon", "unitId": unit["id"], "action": "combat"}
     
-    if unit["ATTACK_LEFT"] == selected_weapon["NB"]:
+    if unit["ATTACK_LEFT"] == require_key(unit, "_current_fight_nb"):
         # YES -> Postpone allowed
         # Do NOT call end_activation - just return postpone signal
         # Unit stays in pool for later activation
@@ -1654,7 +1659,7 @@ def _handle_fight_unit_switch(game_state: Dict[str, Any], current_unit: Dict[str
     if not selected_weapon:
         postpone_allowed = False
     else:
-        postpone_allowed = (current_unit["ATTACK_LEFT"] == selected_weapon["NB"])
+        postpone_allowed = (current_unit["ATTACK_LEFT"] == require_key(current_unit, "_current_fight_nb"))
 
     if postpone_allowed:
         # Switch to new unit
@@ -1734,7 +1739,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                 attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) : SAVED !"
             else:
                 # DAMAGE case - apply damage. HP_CUR single write path: update_units_cache_hp only (Phase 2: from cache)
-                damage_dealt = weapon["DMG"]
+                damage_dealt = resolve_dice_value(require_key(weapon, "DMG"), "fight_damage")
                 target_hp = require_hp_from_cache(str(target["id"]), game_state)
                 new_hp = max(0, target_hp - damage_dealt)
                 update_units_cache_hp(game_state, str(target["id"]), new_hp)

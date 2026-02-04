@@ -8,7 +8,13 @@ from typing import Dict, List, Tuple, Set, Optional, Any, Union
 import inspect
 
 from shared.data_validation import require_key
-from engine.combat_utils import get_unit_coordinates, normalize_coordinates, calculate_hex_distance, get_hex_neighbors
+from engine.combat_utils import (
+    get_unit_coordinates,
+    normalize_coordinates,
+    calculate_hex_distance,
+    get_hex_neighbors,
+    expected_dice_value
+)
 
 # end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
 ACTION = "ACTION"
@@ -410,7 +416,7 @@ def check_if_melee_can_charge(target: Dict[str, Any], game_state: Dict[str, Any]
             has_melee = False
             if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
                 melee_weapon = get_selected_melee_weapon(unit)
-                if melee_weapon and require_key(melee_weapon, "DMG") > 0:
+                if melee_weapon and expected_dice_value(require_key(melee_weapon, "DMG"), "melee_charge_dmg") > 0:
                     has_melee = True
             if has_melee:  # Has melee capability
                 unit_pos = get_unit_position(unit, game_state)
@@ -442,13 +448,19 @@ def calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any]
     # Calculate max threat from target's weapons
     target_rng_weapon = get_selected_ranged_weapon(target)
     target_cc_weapon = get_selected_melee_weapon(target)
-    target_rng_dmg = require_key(target_rng_weapon, "DMG") if target_rng_weapon else 0
-    target_cc_dmg = require_key(target_cc_weapon, "DMG") if target_cc_weapon else 0
+    target_rng_dmg = expected_dice_value(require_key(target_rng_weapon, "DMG"), "target_rng_dmg") if target_rng_weapon else 0
+    target_cc_dmg = expected_dice_value(require_key(target_cc_weapon, "DMG"), "target_cc_dmg") if target_cc_weapon else 0
     # Also check all weapons for max threat
     if target.get("RNG_WEAPONS"):
-        target_rng_dmg = max(target_rng_dmg, max(require_key(w, "DMG") for w in target["RNG_WEAPONS"]))
+        target_rng_dmg = max(
+            target_rng_dmg,
+            max(expected_dice_value(require_key(w, "DMG"), "target_rng_dmg_pool") for w in target["RNG_WEAPONS"])
+        )
     if target.get("CC_WEAPONS"):
-        target_cc_dmg = max(target_cc_dmg, max(require_key(w, "DMG") for w in target["CC_WEAPONS"]))
+        target_cc_dmg = max(
+            target_cc_dmg,
+            max(expected_dice_value(require_key(w, "DMG"), "target_cc_dmg_pool") for w in target["CC_WEAPONS"])
+        )
     
     threat_level = max(target_rng_dmg, target_cc_dmg)
     
@@ -459,7 +471,7 @@ def calculate_target_priority_score(unit: Dict[str, Any], target: Dict[str, Any]
     unit_rng_weapon = get_selected_ranged_weapon(unit)
     if not unit_rng_weapon and unit.get("RNG_WEAPONS"):
         unit_rng_weapon = unit["RNG_WEAPONS"][0]
-    unit_rng_dmg = require_key(unit_rng_weapon, "DMG") if unit_rng_weapon else 0
+    unit_rng_dmg = expected_dice_value(require_key(unit_rng_weapon, "DMG"), "unit_rng_dmg") if unit_rng_weapon else 0
     can_kill_1_phase = target_hp <= unit_rng_dmg
     
     # Priority 1: High threat that melee can charge but won't kill (score: 1000)
@@ -514,13 +526,19 @@ def enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, An
     # Get max DMG from weapons
     unit_rng_weapon = get_selected_ranged_weapon(unit)
     unit_cc_weapon = get_selected_melee_weapon(unit)
-    rng_dmg = require_key(unit_rng_weapon, "DMG") if unit_rng_weapon else 0
-    cc_dmg = require_key(unit_cc_weapon, "DMG") if unit_cc_weapon else 0
+    rng_dmg = expected_dice_value(require_key(unit_rng_weapon, "DMG"), "enrich_rng_dmg") if unit_rng_weapon else 0
+    cc_dmg = expected_dice_value(require_key(unit_cc_weapon, "DMG"), "enrich_cc_dmg") if unit_cc_weapon else 0
     # Also check all weapons for max DMG
     if unit.get("RNG_WEAPONS"):
-        rng_dmg = max(rng_dmg, max(require_key(w, "DMG") for w in unit["RNG_WEAPONS"]))
+        rng_dmg = max(
+            rng_dmg,
+            max(expected_dice_value(require_key(w, "DMG"), "enrich_rng_dmg_pool") for w in unit["RNG_WEAPONS"])
+        )
     if unit.get("CC_WEAPONS"):
-        cc_dmg = max(cc_dmg, max(require_key(w, "DMG") for w in unit["CC_WEAPONS"]))
+        cc_dmg = max(
+            cc_dmg,
+            max(expected_dice_value(require_key(w, "DMG"), "enrich_cc_dmg_pool") for w in unit["CC_WEAPONS"])
+        )
     
     enriched.update({
         "controlled_agent": controlled_agent,

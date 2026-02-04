@@ -8,7 +8,12 @@ import time
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, has_line_of_sight
+from engine.combat_utils import (
+    calculate_hex_distance,
+    calculate_pathfinding_distance,
+    has_line_of_sight,
+    expected_dice_value,
+)
 from engine.game_utils import get_unit_by_id
 from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target
 from engine.phase_handlers.shared_utils import (
@@ -92,14 +97,14 @@ class ObservationBuilder:
         if unit.get("RNG_WEAPONS"):
             for weapon in unit["RNG_WEAPONS"]:
                 weapon_expected = self._calculate_expected_damage(
-                    num_attacks=require_key(weapon, "NB"),
+                    num_attacks=expected_dice_value(require_key(weapon, "NB"), "combat_mix_rng_nb"),
                     to_hit_stat=require_key(weapon, "ATK"),
                     strength=require_key(weapon, "STR"),
                     target_toughness=target_T,
                     ap=require_key(weapon, "AP"),
                     target_save=target_save,
                     target_invul=target_invul,
-                    damage_per_wound=require_key(weapon, "DMG")
+                    damage_per_wound=expected_dice_value(require_key(weapon, "DMG"), "combat_mix_rng_dmg")
                 )
                 ranged_expected = max(ranged_expected, weapon_expected)
         
@@ -108,14 +113,14 @@ class ObservationBuilder:
         if unit.get("CC_WEAPONS"):
             for weapon in unit["CC_WEAPONS"]:
                 weapon_expected = self._calculate_expected_damage(
-                    num_attacks=require_key(weapon, "NB"),
+                    num_attacks=expected_dice_value(require_key(weapon, "NB"), "combat_mix_cc_nb"),
                     to_hit_stat=require_key(weapon, "ATK"),
                     strength=require_key(weapon, "STR"),
                     target_toughness=target_T,
                     ap=require_key(weapon, "AP"),
                     target_save=target_save,
                     target_invul=target_invul,
-                    damage_per_wound=require_key(weapon, "DMG")
+                    damage_per_wound=expected_dice_value(require_key(weapon, "DMG"), "combat_mix_cc_dmg")
                 )
                 melee_expected = max(melee_expected, weapon_expected)
         
@@ -128,10 +133,10 @@ class ObservationBuilder:
         raw_ratio = ranged_expected / total_expected
         return 0.1 + (raw_ratio * 0.8)
     
-    def _calculate_expected_damage(self, num_attacks: int, to_hit_stat: int, 
-                                   strength: int, target_toughness: int, ap: int, 
-                                   target_save: int, target_invul: int, 
-                                   damage_per_wound: int) -> float:
+    def _calculate_expected_damage(self, num_attacks: float, to_hit_stat: int,
+                                   strength: int, target_toughness: int, ap: int,
+                                   target_save: int, target_invul: int,
+                                   damage_per_wound: float) -> float:
         """
         Calculate expected damage using W40K dice mechanics with invulnerable saves.
         
@@ -360,8 +365,8 @@ class ObservationBuilder:
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
-            damage = weapon["DMG"]
-            num_attacks = weapon["NB"]
+            damage = expected_dice_value(require_key(weapon, "DMG"), "kill_prob_rng_dmg")
+            num_attacks = expected_dice_value(require_key(weapon, "NB"), "kill_prob_rng_nb")
             ap = weapon["AP"]
         else:
             # Get best weapon for this target
@@ -373,8 +378,8 @@ class ObservationBuilder:
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
-            damage = weapon["DMG"]
-            num_attacks = weapon["NB"]
+            damage = expected_dice_value(require_key(weapon, "DMG"), "kill_prob_cc_dmg")
+            num_attacks = expected_dice_value(require_key(weapon, "NB"), "kill_prob_cc_nb")
             ap = weapon["AP"]
         
         p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
@@ -455,8 +460,8 @@ class ObservationBuilder:
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
-            damage = weapon["DMG"]
-            num_attacks = weapon["NB"]
+            damage = expected_dice_value(require_key(weapon, "DMG"), "danger_rng_dmg")
+            num_attacks = expected_dice_value(require_key(weapon, "NB"), "danger_rng_nb")
             ap = weapon["AP"]
         else:
             # Use best melee weapon (or if both available, prefer melee if in range)
@@ -468,8 +473,8 @@ class ObservationBuilder:
             
             hit_target = weapon["ATK"]
             strength = weapon["STR"]
-            damage = weapon["DMG"]
-            num_attacks = weapon["NB"]
+            damage = expected_dice_value(require_key(weapon, "DMG"), "danger_cc_dmg")
+            num_attacks = expected_dice_value(require_key(weapon, "NB"), "danger_cc_nb")
             ap = weapon["AP"]
         
         if num_attacks == 0:
@@ -612,7 +617,10 @@ class ObservationBuilder:
             has_melee = False
             if unit.get("CC_WEAPONS") and len(unit["CC_WEAPONS"]) > 0:
                 # Check if any melee weapon has DMG > 0 (DMG required per unit definitions)
-                has_melee = any(require_key(w, "DMG") > 0 for w in unit["CC_WEAPONS"])
+                has_melee = any(
+                    expected_dice_value(require_key(w, "DMG"), "melee_charge_dmg") > 0
+                    for w in unit["CC_WEAPONS"]
+                )
             
             if (unit["player"] == current_player and
                 is_unit_alive(str(unit["id"]), game_state) and
@@ -715,45 +723,45 @@ class ObservationBuilder:
         rng_weapons = require_key(active_unit, "RNG_WEAPONS")
         if len(rng_weapons) > 0:
             obs[17] = require_key(rng_weapons[0], "RNG") / 24.0
-            obs[18] = require_key(rng_weapons[0], "DMG") / 5.0
-            obs[19] = require_key(rng_weapons[0], "NB") / 10.0
+            obs[18] = expected_dice_value(require_key(rng_weapons[0], "DMG"), "obs_rng0_dmg") / 5.0
+            obs[19] = expected_dice_value(require_key(rng_weapons[0], "NB"), "obs_rng0_nb") / 10.0
         else:
             obs[17] = obs[18] = obs[19] = 0.0
 
         # RNG_WEAPONS[1] (3 floats)
         if len(rng_weapons) > 1:
             obs[20] = require_key(rng_weapons[1], "RNG") / 24.0
-            obs[21] = require_key(rng_weapons[1], "DMG") / 5.0
-            obs[22] = require_key(rng_weapons[1], "NB") / 10.0
+            obs[21] = expected_dice_value(require_key(rng_weapons[1], "DMG"), "obs_rng1_dmg") / 5.0
+            obs[22] = expected_dice_value(require_key(rng_weapons[1], "NB"), "obs_rng1_nb") / 10.0
         else:
             obs[20] = obs[21] = obs[22] = 0.0
 
         # RNG_WEAPONS[2] (3 floats)
         if len(rng_weapons) > 2:
             obs[23] = require_key(rng_weapons[2], "RNG") / 24.0
-            obs[24] = require_key(rng_weapons[2], "DMG") / 5.0
-            obs[25] = require_key(rng_weapons[2], "NB") / 10.0
+            obs[24] = expected_dice_value(require_key(rng_weapons[2], "DMG"), "obs_rng2_dmg") / 5.0
+            obs[25] = expected_dice_value(require_key(rng_weapons[2], "NB"), "obs_rng2_nb") / 10.0
         else:
             obs[23] = obs[24] = obs[25] = 0.0
 
         # CC_WEAPONS[0] (5 floats: NB, ATK, STR, AP, DMG)
         cc_weapons = require_key(active_unit, "CC_WEAPONS")
         if len(cc_weapons) > 0:
-            obs[26] = require_key(cc_weapons[0], "NB") / 10.0
+            obs[26] = expected_dice_value(require_key(cc_weapons[0], "NB"), "obs_cc0_nb") / 10.0
             obs[27] = require_key(cc_weapons[0], "ATK") / 6.0
             obs[28] = require_key(cc_weapons[0], "STR") / 10.0
             obs[29] = require_key(cc_weapons[0], "AP") / 6.0
-            obs[30] = require_key(cc_weapons[0], "DMG") / 5.0
+            obs[30] = expected_dice_value(require_key(cc_weapons[0], "DMG"), "obs_cc0_dmg") / 5.0
         else:
             obs[26] = obs[27] = obs[28] = obs[29] = obs[30] = 0.0
 
         # CC_WEAPONS[1] (5 floats)
         if len(cc_weapons) > 1:
-            obs[31] = require_key(cc_weapons[1], "NB") / 10.0
+            obs[31] = expected_dice_value(require_key(cc_weapons[1], "NB"), "obs_cc1_nb") / 10.0
             obs[32] = require_key(cc_weapons[1], "ATK") / 6.0
             obs[33] = require_key(cc_weapons[1], "STR") / 10.0
             obs[34] = require_key(cc_weapons[1], "AP") / 6.0
-            obs[35] = require_key(cc_weapons[1], "DMG") / 5.0
+            obs[35] = expected_dice_value(require_key(cc_weapons[1], "DMG"), "obs_cc1_dmg") / 5.0
         else:
             obs[31] = obs[32] = obs[33] = obs[34] = obs[35] = 0.0
 
@@ -1360,8 +1368,14 @@ class ObservationBuilder:
                 rng_weapons = require_key(unit, "RNG_WEAPONS")
                 cc_weapons = require_key(unit, "CC_WEAPONS")
                 
-                max_rng_dmg = max((require_key(w, "DMG") for w in rng_weapons), default=0.0)
-                max_cc_dmg = max((require_key(w, "DMG") for w in cc_weapons), default=0.0)
+                max_rng_dmg = max(
+                    (expected_dice_value(require_key(w, "DMG"), "nearby_rng_dmg") for w in rng_weapons),
+                    default=0.0,
+                )
+                max_cc_dmg = max(
+                    (expected_dice_value(require_key(w, "DMG"), "nearby_cc_dmg") for w in cc_weapons),
+                    default=0.0,
+                )
                 
                 if is_enemy > 0.5:
                     threat = max(max_rng_dmg, max_cc_dmg) / 5.0
@@ -1563,11 +1577,11 @@ class ObservationBuilder:
                 weapon = active_unit["RNG_WEAPONS"][0]
             else:
                 return (0.0, distance)
-        unit_attacks = weapon["NB"]
+        unit_attacks = expected_dice_value(require_key(weapon, "NB"), "target_priority_nb")
         unit_bs = weapon["ATK"]
         unit_s = weapon["STR"]
         unit_ap = weapon["AP"]
-        unit_dmg = weapon["DMG"]
+        unit_dmg = expected_dice_value(require_key(weapon, "DMG"), "target_priority_dmg")
         if "T" not in target or "ARMOR_SAVE" not in target:
             raise KeyError(f"Target missing required T/ARMOR_SAVE: {target}")
         target_t = target["T"]

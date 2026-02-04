@@ -5,7 +5,12 @@ Only pool building functionality - foundation for complete handler autonomy
 """
 
 from typing import Dict, List, Tuple, Set, Optional, Any
-from engine.combat_utils import normalize_coordinates, get_unit_by_id
+from engine.combat_utils import (
+    normalize_coordinates,
+    get_unit_by_id,
+    resolve_dice_value,
+    expected_dice_value,
+)
 from shared.data_validation import require_key
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
@@ -511,14 +516,20 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
                     selected_idx = first_weapon["index"]
                     unit["selectedRngWeaponIndex"] = selected_idx
                     weapon = rng_weapons[selected_idx]
-                    unit["SHOOT_LEFT"] = weapon["NB"]
+                    unit["SHOOT_LEFT"] = resolve_dice_value(
+                        require_key(weapon, "NB"),
+                        "shooting_phase_start_nb",
+                    )
                 else:
                     # No usable weapons, default to first weapon (will be validated later)
                     selected_idx = unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0
                     if selected_idx < 0 or selected_idx >= len(rng_weapons):
                         selected_idx = 0
                     weapon = rng_weapons[selected_idx]
-                    unit["SHOOT_LEFT"] = weapon["NB"]
+                    unit["SHOOT_LEFT"] = resolve_dice_value(
+                        require_key(weapon, "NB"),
+                        "shooting_phase_start_nb_fallback",
+                    )
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
@@ -1237,6 +1248,26 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # AI_TURN.md STEP 3: Pre-select first available weapon
     # If unit is adjacent to enemy, prioritize PISTOL weapons
     usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+    if not usable_weapons:
+        # No usable weapons under current rules -> treat as no valid actions
+        can_advance = unit.get("_can_advance", False)
+        if can_advance:
+            unit["valid_target_pool"] = []
+            return {
+                "success": True,
+                "unitId": unit_id,
+                "empty_target_pool": True,
+                "can_advance": True,
+                "allow_advance": True,
+                "waiting_for_player": True,
+                "action": "empty_target_advance_available",
+                "available_weapons": []
+            }
+        _success, result = _handle_shooting_end_activation(
+            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+        )
+        result["skip_reason"] = "no_usable_weapons"
+        return result
     if usable_weapons:
         if unit_is_adjacent:
             # Prioritize PISTOL weapons when adjacent to enemy
@@ -1261,7 +1292,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         first_weapon_idx = first_weapon["index"]
         unit["selectedRngWeaponIndex"] = first_weapon_idx
         selected_weapon = unit["RNG_WEAPONS"][first_weapon_idx]
-        unit["SHOOT_LEFT"] = selected_weapon["NB"]
+        nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_init")
+        unit["SHOOT_LEFT"] = nb_roll
+        unit["_current_shoot_nb"] = nb_roll
     else:
         unit["SHOOT_LEFT"] = 0
     
@@ -1706,7 +1739,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     
     unit_t = unit["T"]
     unit_save = unit["ARMOR_SAVE"]
-    unit_attacks = selected_weapon["NB"] if selected_weapon else 0
+    unit_attacks = (
+        expected_dice_value(require_key(selected_weapon, "NB"), "shoot_priority_unit_nb")
+        if selected_weapon else 0
+    )
     unit_bs = selected_weapon["ATK"] if selected_weapon else 0
     unit_s = selected_weapon["STR"] if selected_weapon else 0
     unit_ap = selected_weapon["AP"] if selected_weapon else 0
@@ -1780,7 +1816,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             target_s = 0
             target_ap = 0
         else:
-            target_attacks = require_key(target_rng_weapon, "NB")
+            target_attacks = expected_dice_value(
+                require_key(target_rng_weapon, "NB"),
+                "shoot_priority_target_nb",
+            )
             target_bs = require_key(target_rng_weapon, "ATK")
             target_s = require_key(target_rng_weapon, "STR")
             target_ap = require_key(target_rng_weapon, "AP")
@@ -2200,6 +2239,8 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["activation_position"]
     if "_shooting_with_pistol" in unit:
         del unit["_shooting_with_pistol"]
+    if "_shoot_activation_started" in unit:
+        del unit["_shoot_activation_started"]
     unit["SHOOT_LEFT"] = 0
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
@@ -2479,13 +2520,16 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             if temp_valid_targets:
                 # Found targets for this weapon, switch to it
                 unit["selectedRngWeaponIndex"] = weapon_info["index"]
-                unit["SHOOT_LEFT"] = weapon["NB"]
+                nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_switch")
+                unit["SHOOT_LEFT"] = nb_roll
+                unit["_current_shoot_nb"] = nb_roll
                 valid_targets = temp_valid_targets
                 break
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if SHOOT_LEFT equals selected weapon NB
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
+        current_weapon_nb = require_key(unit, "_current_shoot_nb") if selected_weapon else None
         
         # CLEAN FLAG DETECTION: Use config parameter
         unit_check = _get_unit_by_id(game_state, unit_id)
@@ -2495,7 +2539,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         
         # For AI/gym/bots: end activation as before
         if is_pve_ai or is_gym_training or is_bot:
-            if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
+            if selected_weapon and unit["SHOOT_LEFT"] == current_weapon_nb:
                 # No targets at activation
                 return _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1)
             else:
@@ -2503,7 +2547,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                 return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         
         # For human players: allow advance mode instead of ending activation
-        if selected_weapon and unit["SHOOT_LEFT"] == selected_weapon["NB"]:
+        if selected_weapon and unit["SHOOT_LEFT"] == current_weapon_nb:
             # No targets at activation - return signal to allow advance mode
             return True, {
                 "waiting_for_player": True,
@@ -2612,7 +2656,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # Handler self-initialization (aligned with MOVE phase)
     game_state_phase = game_state["phase"] if "phase" in game_state else None
-    shoot_pool_exists = bool(game_state.get("shoot_activation_pool"))
+    shoot_pool_exists = "shoot_activation_pool" in game_state
     if game_state_phase == "shoot" and not shoot_pool_exists and action_type == "advance_phase":
         game_state["_shooting_phase_initialized"] = False
         return True, _shooting_phase_complete(game_state)
@@ -2676,31 +2720,27 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     current_player = require_key(game_state, "current_player")
     is_learning_agent_turn = current_player == 1
     
-    # Auto-activate unit if not already activated and action requires activation
-    # CRITICAL: Do this BEFORE validation to ensure unit is activated before action routing
-    # CRITICAL: "wait" and "skip" are end-of-activation actions, not actions that require activation
-    # They should only be called when unit is already activated
-    if not active_shooting_unit and action_type in ["shoot", "advance"] and is_gym_training and is_learning_agent_turn:
-        # Verify unit is still in pool before activation (defense in depth)
+    # STRICT AI_TURN: shoot/advance must ALWAYS follow activation start
+    # No shooting/advance allowed for a different unit while one is active
+    if action_type in ["shoot", "advance"]:
         unit_id_str = str(unit_id)
-        pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
-        if unit_id_str in pool_ids:
-            from engine.game_utils import add_debug_log
-            episode = game_state.get("episode_number", "?")
-            turn = game_state.get("turn", "?")
-            add_debug_log(game_state, f"[AUTO_ACTIVATION DEBUG] E{episode} T{turn} execute_action: Auto-activating unit {unit_id_str} for action {action_type}")
+        active_unit_id = str(active_shooting_unit) if active_shooting_unit is not None else None
+        if active_unit_id and active_unit_id != unit_id_str:
+            raise ValueError(
+                f"shoot/advance called for non-active unit: active_shooting_unit={active_unit_id} unit_id={unit_id_str}"
+            )
+        if not unit.get("_shoot_activation_started", False):
+            # Verify unit is still in pool before activation (defense in depth)
+            pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
+            if unit_id_str not in pool_ids:
+                return False, {"error": "unit_not_eligible", "unitId": unit_id}
             activation_result = shooting_unit_activation_start(game_state, unit_id)
             if activation_result.get("error"):
-                # Activation failed - return error
-                from engine.game_utils import add_debug_log
-                add_debug_log(game_state, f"[AUTO_ACTIVATION ERROR] E{episode} T{turn} execute_action: Auto-activation failed: {activation_result.get('error')}")
                 return False, activation_result
-
-    # Ensure activation start ran before shoot/advance actions (defense in depth)
-    if action_type in ["shoot", "advance"] and not unit.get("_shoot_activation_started", False):
-        activation_result = shooting_unit_activation_start(game_state, unit_id)
-        if activation_result.get("error"):
-            return False, activation_result
+            if (activation_result.get("empty_target_pool")
+                    or activation_result.get("action") == "empty_target_advance_available"
+                    or activation_result.get("skip_reason")):
+                return True, activation_result
     
     # CRITICAL FIX: Validate unit is current player's unit to prevent self-targeting
     # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
@@ -2759,7 +2799,28 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if SHOOT_LEFT equals selected weapon NB
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
-        if selected_weapon and (active_shooting_unit != unit_id and unit["SHOOT_LEFT"] == selected_weapon["NB"]):
+        if selected_weapon and "_current_shoot_nb" not in unit:
+            if unit.get("_shoot_activation_started", False):
+                valid_targets = unit.get("valid_target_pool")
+                if valid_targets:
+                    raise KeyError(
+                        f"Unit missing required '_current_shoot_nb' after activation start: unit_id={unit.get('id')}"
+                    )
+            activation_result = shooting_unit_activation_start(game_state, unit_id)
+            if activation_result.get("error"):
+                return False, activation_result
+            if "_current_shoot_nb" not in unit and unit.get("valid_target_pool"):
+                raise KeyError(
+                    f"Unit missing required '_current_shoot_nb' after activation start: unit_id={unit.get('id')}"
+                )
+        current_weapon_nb = require_key(unit, "_current_shoot_nb") if selected_weapon else None
+        if selected_weapon and (active_shooting_unit != unit_id and unit["SHOOT_LEFT"] == current_weapon_nb):
+            if unit.get("_shoot_activation_started", False):
+                raise ValueError(
+                    f"Attempted to re-activate shooting unit already activated: "
+                    f"unit_id={unit_id}, active_shooting_unit={active_shooting_unit}, "
+                    f"shoot_left={unit['SHOOT_LEFT']} current_weapon_nb={current_weapon_nb}"
+                )
             # Only initialize if unit hasn't started shooting yet
             activation_result = shooting_unit_activation_start(game_state, unit_id)
         
@@ -2817,7 +2878,9 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is in pool, it's alive (no need to check)
         # Update SHOOT_LEFT with the new weapon's NB
         weapon = rng_weapons[weapon_index]
-        unit["SHOOT_LEFT"] = weapon["NB"]
+        nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_select_weapon")
+        unit["SHOOT_LEFT"] = nb_roll
+        unit["_current_shoot_nb"] = nb_roll
         
         # AI_TURN.md COMPLIANCE: Unit must already be in pool (pool is built once at phase start)
         # If unit is not in pool, it was removed via end_activation and cannot be reactivated
@@ -3109,6 +3172,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         current_weapon_is_pistol = False
         if selected_weapon:
             current_weapon_is_pistol = _weapon_has_pistol_rule(selected_weapon)
+            weapon_name = require_key(selected_weapon, "display_name")
+            if require_key(selected_weapon, "shot") == 1:
+                return False, {"error": "weapon_already_used", "unitId": unit_id, "weapon": weapon_name}
         else:
             return False, {"error": "no_weapons_available", "unitId": unit_id}
         
@@ -3180,7 +3246,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     return False, {"error": "no_weapons_available", "unitId": unit_id}
                 # If auto-select is enabled and unit hasn't fired yet, pick the best weapon now
                 if (auto_select and not _unit_has_shot_with_any_weapon(unit)
-                        and current_shoot_left == require_key(selected_weapon, "NB")):
+                        and current_shoot_left == require_key(unit, "_current_shoot_nb")):
                     if "weapon_rule" not in game_state:
                         raise KeyError("game_state missing required 'weapon_rule' field")
                     weapon_rule = game_state["weapon_rule"]
@@ -3214,7 +3280,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         best_weapon_idx = filtered_indices[best_weapon_idx_in_filtered]
                         unit["selectedRngWeaponIndex"] = best_weapon_idx
                         weapon = unit["RNG_WEAPONS"][best_weapon_idx]
-                        unit["SHOOT_LEFT"] = weapon["NB"]
+                        nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_auto_select")
+                        unit["SHOOT_LEFT"] = nb_roll
+                        unit["_current_shoot_nb"] = nb_roll
                         selected_weapon = weapon
                     else:
                         return False, {"error": "no_weapons_available", "unitId": unit_id}
@@ -3272,7 +3340,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     best_weapon_idx = filtered_indices[best_weapon_idx_in_filtered]
                     unit["selectedRngWeaponIndex"] = best_weapon_idx
                     weapon = unit["RNG_WEAPONS"][best_weapon_idx]
-                    unit["SHOOT_LEFT"] = weapon["NB"]
+                    nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_auto_select_category")
+                    unit["SHOOT_LEFT"] = nb_roll
+                    unit["_current_shoot_nb"] = nb_roll
                     
                     # PISTOL RULE VALIDATION: Re-validate after weapon selection
                     # This ensures the newly selected weapon is valid for current context
@@ -3294,7 +3364,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     # Check if unit has started shooting (has active_shooting_unit set)
                     if current_shoot_left == 0 and active_shooting_unit != unit_id:
                         # Unit hasn't started shooting yet, initialize SHOOT_LEFT
-                        unit["SHOOT_LEFT"] = selected_weapon["NB"]
+                        nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_manual_init")
+                        unit["SHOOT_LEFT"] = nb_roll
+                        unit["_current_shoot_nb"] = nb_roll
                     elif current_shoot_left == 0 and active_shooting_unit == unit_id:
                         # Unit has already shot and SHOOT_LEFT is 0
                         # Need to select another weapon of the same category (PISTOL or non-PISTOL)
@@ -3349,7 +3421,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                                 best_weapon_idx = filtered_indices[best_weapon_idx_in_filtered]
                                 unit["selectedRngWeaponIndex"] = best_weapon_idx
                                 weapon = unit["RNG_WEAPONS"][best_weapon_idx]
-                                unit["SHOOT_LEFT"] = weapon["NB"]
+                                nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_manual_continue")
+                                unit["SHOOT_LEFT"] = nb_roll
+                                unit["_current_shoot_nb"] = nb_roll
                                 # Continue with shooting
                             else:
                                 return False, {"error": "no_weapons_available", "unitId": unit_id}
@@ -3465,7 +3539,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 # For now, auto-select first usable weapon
                 next_weapon = usable_weapons[0]
                 unit["selectedRngWeaponIndex"] = next_weapon["index"]
-                unit["SHOOT_LEFT"] = require_key(require_key(next_weapon, "weapon"), "NB")
+                nb_roll = resolve_dice_value(require_key(require_key(next_weapon, "weapon"), "NB"), "shooting_nb_next_weapon")
+                unit["SHOOT_LEFT"] = nb_roll
+                unit["_current_shoot_nb"] = nb_roll
                 
                 # CRITICAL: Rebuild target pool using shooting_build_valid_target_pool for consistency
                 # This wrapper automatically determines context (advance_status, adjacent_status)
@@ -4044,7 +4120,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         }
     
     # FAIL -> Continue to damage (Phase 2: HP from cache)
-    damage_dealt = weapon["DMG"]
+    damage_dealt = resolve_dice_value(require_key(weapon, "DMG"), "shooting_damage")
     target_hp = require_hp_from_cache(str(target["id"]), game_state)
     new_hp = max(0, target_hp - damage_dealt)
     
@@ -4543,7 +4619,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             first_weapon = usable_weapons[0]
             unit["selectedRngWeaponIndex"] = first_weapon["index"]
             selected_weapon = require_key(first_weapon, "weapon")
-            unit["SHOOT_LEFT"] = require_key(selected_weapon, "NB")
+            nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_post_advance")
+            unit["SHOOT_LEFT"] = nb_roll
+            unit["_current_shoot_nb"] = nb_roll
         else:
             unit["SHOOT_LEFT"] = 0
         

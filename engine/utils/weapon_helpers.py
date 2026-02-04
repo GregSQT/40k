@@ -6,6 +6,7 @@ MULTIPLE_WEAPONS_IMPLEMENTATION.md: Helper functions for accessing weapon data
 
 from typing import Dict, Optional, Any
 from shared.data_validation import require_key
+from engine.combat_utils import expected_dice_value
 
 
 def get_selected_ranged_weapon(unit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -57,7 +58,9 @@ def get_max_ranged_damage(unit: Dict[str, Any]) -> float:
     rng_weapons = require_key(unit, "RNG_WEAPONS")
     if not rng_weapons:
         return 0.0
-    return max((require_key(w, "NB") * require_key(w, "DMG")) for w in rng_weapons)
+    return max((expected_dice_value(require_key(w, "NB"), "max_ranged_nb") *
+                expected_dice_value(require_key(w, "DMG"), "max_ranged_dmg"))
+               for w in rng_weapons)
 
 
 def get_max_melee_damage(unit: Dict[str, Any]) -> float:
@@ -70,4 +73,6 @@ def get_max_melee_damage(unit: Dict[str, Any]) -> float:
     cc_weapons = require_key(unit, "CC_WEAPONS")
     if not cc_weapons:
         return 0.0
-    return max((require_key(w, "NB") * require_key(w, "DMG")) for w in cc_weapons)
+    return max((expected_dice_value(require_key(w, "NB"), "max_melee_nb") *
+                expected_dice_value(require_key(w, "DMG"), "max_melee_dmg"))
+               for w in cc_weapons)
