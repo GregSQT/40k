@@ -557,9 +557,14 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             del game_state["active_shooting_unit"]
         return shooting_phase_end(game_state)
     
-    # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+    # Invariant: AI/gym can auto-activate; human should choose the unit manually.
     # Required for convert_gym_action, get_action_mask, and any reader (e.g. debug log).
-    game_state["active_shooting_unit"] = eligible_units[0]
+    is_pve = game_state.get("pve_mode", False) or game_state.get("is_pve_mode", False)
+    if is_pve and current_player != 2:
+        if "active_shooting_unit" in game_state:
+            del game_state["active_shooting_unit"]
+    else:
+        game_state["active_shooting_unit"] = eligible_units[0]
     
     # Silent pool building - no console logs during normal operation
     if "console_logs" not in game_state:
@@ -1213,6 +1218,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             # YES -> Only action available is advance
             # Return signal to allow advance action (handled by frontend/action handler)
             unit["valid_target_pool"] = []
+            unit["_current_shoot_nb"] = require_key(unit, "SHOOT_LEFT")
             return {
                 "success": True,
                 "unitId": unit_id,
@@ -1253,6 +1259,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         can_advance = unit.get("_can_advance", False)
         if can_advance:
             unit["valid_target_pool"] = []
+            unit["_current_shoot_nb"] = require_key(unit, "SHOOT_LEFT")
             return {
                 "success": True,
                 "unitId": unit_id,
@@ -1297,6 +1304,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         unit["_current_shoot_nb"] = nb_roll
     else:
         unit["SHOOT_LEFT"] = 0
+        unit["_current_shoot_nb"] = unit["SHOOT_LEFT"]
     
     unit["selected_target_id"] = None  # For two-click confirmation
 

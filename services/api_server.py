@@ -186,6 +186,7 @@ def initialize_engine():
         config["rewards_configs"] = all_rewards_configs  # Multi-agent support
         config["training_configs"] = all_training_configs  # Multi-agent support
         config["agent_keys"] = list(agent_keys)  # Track which agents are active
+        config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
         
         # CRITICAL FIX: Add observation_params from training_config "default" phase
         obs_params = training_config_default.get("observation_params", {})
