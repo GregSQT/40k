@@ -28,7 +28,7 @@ export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
   static TARGET_TYPE = "Elite";         // MeleeElite specialist - hunt elite targets
 
   static ICON = "/icons/Terminator.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.8;     // Size of the icon
+  static ICON_SCALE = 2.0;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Terminator.HP_MAX, startPos);

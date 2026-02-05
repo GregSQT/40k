@@ -27,7 +27,7 @@ export class IntercessorGrenadeLauncher extends SpaceMarineInfantryTroopRangedSw
   static TARGET_TYPE = "Swarm";        // RangedSwarm specialist - bolt rifles vs hordes
 
   static ICON = "/icons/IntercessorGrenadeLauncher.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.6;     // Size of the icon
+  static ICON_SCALE = 1.7;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, IntercessorGrenadeLauncher.HP_MAX, startPos);

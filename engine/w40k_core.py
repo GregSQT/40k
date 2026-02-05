@@ -663,7 +663,8 @@ class W40KEngine(gym.Env):
                 
                 # Log episode end if step_logger is enabled
                 if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method)
+                    objective_control = self.state_manager.calculate_objective_control(self.game_state)
+                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
                 
                 return observation, 0.0, True, False, info
 
@@ -731,7 +732,8 @@ class W40KEngine(gym.Env):
                 
                 # Log episode end if step_logger is enabled
                 if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method)
+                    objective_control = self.state_manager.calculate_objective_control(self.game_state)
+                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
             return observation, 0.0, terminated, False, info
         
@@ -1041,7 +1043,8 @@ class W40KEngine(gym.Env):
             
             # Log episode end with final stats and win method
             if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method)
+                objective_control = self.state_manager.calculate_objective_control(self.game_state)
+                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
         else:
             info["winner"] = None
         

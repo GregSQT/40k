@@ -37,10 +37,25 @@ Règles :
 - `default_model` : fallback **explicite** (erreur si absent)
 
 ## Observation (macro → micro)
-Ajouter un canal d’observation pour transmettre une **intention stratégique** :
-- exemple : `macro_intent` (id entier ou one‑hot)
-- injecté dans l’observation de l’unité active
-- mise à jour de `obs_size` dans les configs
+### Infos globales (validées)
+- `turn`, `phase`, `current_player`
+- objectifs contrôlés (par joueur)
+- diff de valeur d’armée vivante (sum VALUE P1 − P2)
+
+### Infos par unité (validées)
+- `unitType` (ex: `IntercessorGrenadeLauncher`, `Hormagaunt`)
+- position (col/row)
+- HP / HP_MAX
+- `VALUE` (importance relative)
+- distance aux objectifs
+
+### Pool éligible
+- masque des unités activables (obligatoire)
+
+### Intention stratégique (extension)
+- champ `macro_intent` (id entier ou one‑hot)
+- prévu, **non utilisé** dans la version initiale
+- mise à jour de `obs_size` quand activé
 
 ## Mode strict recommandé
 Pour éviter un routage silencieux via `default_model`, activer un mode strict en production :
@@ -126,16 +141,21 @@ Au démarrage PvE, charger **tous** les modèles requis :
 - Optionnel : menaces / objectifs prioritaires
 
 ### Action macro
-- Choisir **une unité du pool**
+- Choisir **une unité du pool** (version initiale)
 - Optionnel : choisir une **intention** (focus objectif, focus unité, tempo)
 
 ### Reward macro
 - Reward global : victoire/défaite, objectifs capturés
-- Optionnel : bonus de progression vers objectif
+- Bonus intermédiaire léger :
+  - progression vers objectifs
+  - dégâts nets (infligés − subis)
 
 ### Stratégie d’entraînement
 1) **Séparé (recommandé)** : micro agents fixes, macro apprend à orchestrer
 2) **Simultané** : macro + micro apprennent ensemble (plus instable)
+
+### Micro agents (validé)
+- modèles **pré‑entraînés et figés**
 
 ## Ordre d’implémentation
 1) Ajouter config meta‑controller

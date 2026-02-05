@@ -27,7 +27,7 @@ export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeTroop {
   static TARGET_TYPE = "Troop";        // MeleeTroop specialist - backbone melee
 
   static ICON = "/icons/AssaultIntercessor.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.6;     // Size of the icon
+  static ICON_SCALE = 1.7;     // Size of the icon
  
   constructor(name: string, startPos: [number, number]) {
     super(name, AssaultIntercessor.HP_MAX, startPos);

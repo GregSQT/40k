@@ -463,9 +463,84 @@ export const BoardReplay: React.FC = () => {
   // Update game log when action index changes
   useEffect(() => {
     if (!currentEpisode) return;
+    if (!unitRegistryReady) return;
 
     // Clear and rebuild log up to current action
     gameLog.clearLog();
+
+    // Track persistent objective control and log changes (replay mode)
+    const objectiveControllers: Record<string, number | null> = {};
+    const logObjectiveControlChanges = (
+      units: Unit[],
+      objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>,
+      turnNumber: number
+    ) => {
+      for (const obj of objectives) {
+        const hexSet = new Set(obj.hexes.map((h) => `${h.col},${h.row}`));
+        let p1_oc = 0;
+        let p2_oc = 0;
+
+        for (const unit of units) {
+          if (unit.id < 0) {
+            continue;
+          }
+          if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) {
+            continue;
+          }
+          const unitHex = `${unit.col},${unit.row}`;
+          if (hexSet.has(unitHex)) {
+            if (unit.OC === undefined || unit.OC === null) {
+              throw new Error(`Unit ${unit.id} missing required OC for objective control`);
+            }
+            if (unit.player === 1) {
+              p1_oc += unit.OC;
+            } else {
+              p2_oc += unit.OC;
+            }
+          }
+        }
+
+        const prevController = objectiveControllers[obj.name] ?? null;
+        let newController = prevController;
+        if (p1_oc > p2_oc) {
+          newController = 1;
+        } else if (p2_oc > p1_oc) {
+          newController = 2;
+        }
+
+        if (newController !== prevController) {
+          if (newController === 1) {
+            gameLog.addEvent({
+              type: 'phase_change',
+              message: `P1 controls objective ${obj.name} (OC ${p1_oc} vs ${p2_oc})`,
+              turnNumber: turnNumber,
+              phase: 'command',
+              player: 1,
+              action_name: 'objective_control'
+            });
+          } else if (newController === 2) {
+            gameLog.addEvent({
+              type: 'phase_change',
+              message: `P2 controls objective ${obj.name} (OC ${p1_oc} vs ${p2_oc})`,
+              turnNumber: turnNumber,
+              phase: 'command',
+              player: 2,
+              action_name: 'objective_control'
+            });
+          } else {
+            gameLog.addEvent({
+              type: 'phase_change',
+              message: `Objective ${obj.name} contested (OC ${p1_oc} vs ${p2_oc})`,
+              turnNumber: turnNumber,
+              phase: 'command',
+              action_name: 'objective_control'
+            });
+          }
+        }
+
+        objectiveControllers[obj.name] = newController;
+      }
+    };
 
     for (let i = 0; i < currentActionIndex; i++) {
       const action = currentEpisode.actions[i];
@@ -747,9 +822,16 @@ export const BoardReplay: React.FC = () => {
           });
         }
       }
+
+      const stateAfterAction = currentEpisode.states[i];
+      const objectives = stateAfterAction?.objectives || currentEpisode.initial_state.objectives || [];
+      if (objectives.length > 0 && stateAfterAction?.units) {
+        const enrichedObjectiveUnits = enrichUnitsWithStats(stateAfterAction.units as Unit[]);
+        logObjectiveControlChanges(enrichedObjectiveUnits, objectives, turnNumber);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActionIndex, currentEpisode]);
+  }, [currentActionIndex, currentEpisode, unitRegistryReady]);
 
   // Playback control component (inserted between TurnPhaseTracker and UnitStatusTable)
   const PlaybackControls = () => {
@@ -1165,6 +1247,7 @@ export const BoardReplay: React.FC = () => {
       phase={currentState.phase || 'move'}
       onShoot={() => {}}
       gameState={currentState as GameState}
+      replayActionIndex={currentActionIndex}
       getChargeDestinations={(unitId: number) => {
         // Calculate ALL valid charge destinations for replay mode using BFS
         if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id === unitId) {

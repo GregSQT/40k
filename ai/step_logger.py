@@ -600,13 +600,14 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
     
-    def log_episode_end(self, total_episodes_steps, winner, win_method=None):
+    def log_episode_end(self, total_episodes_steps, winner, win_method, objective_control):
         """Log episode completion summary using replay-style format
 
         Args:
             total_episodes_steps: Total steps across all episodes
             winner: 0, 1, or -1 (draw)
             win_method: "elimination", "objectives", "value_tiebreaker", or "draw"
+            objective_control: Dict of objective_id -> control data (OC totals + controller)
         """
         if not self.enabled:
             return
@@ -620,6 +621,16 @@ class StepLogger:
                 timestamp = time.strftime("%H:%M:%S", time.localtime())
                 method_str = f", Method={win_method}" if win_method else ""
                 f.write(f"[{timestamp}] EPISODE END: Winner={winner}{method_str}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}, Duration={duration_s:.3f}s\n")
+                if objective_control:
+                    objective_entries = []
+                    for obj_id, data in objective_control.items():
+                        player_0_oc = require_key(data, "player_0_oc")
+                        player_1_oc = require_key(data, "player_1_oc")
+                        controller = require_key(data, "controller")
+                        objective_entries.append(
+                            f"Obj{obj_id}:P0_OC={player_0_oc},P1_OC={player_1_oc},Ctrl={controller}"
+                        )
+                    f.write(f"[{timestamp}] OBJECTIVE CONTROL: {' | '.join(objective_entries)}\n")
                 f.write("=" * 80 + "\n")
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")

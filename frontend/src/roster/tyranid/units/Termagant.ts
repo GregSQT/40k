@@ -27,7 +27,7 @@ export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static TARGET_TYPE = "Swarm";        // RangedSwarm specialist - anti-infantry
 
   static ICON = "/icons/Termagant.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.4;     // Size of the icon
+  static ICON_SCALE = 1.2;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Termagant.HP_MAX, startPos);

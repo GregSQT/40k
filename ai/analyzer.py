@@ -21,12 +21,15 @@ from engine.combat_utils import (
     calculate_hex_distance,
     get_hex_line,
     get_hex_neighbors,
+    normalize_coordinates,
 )
 from shared.data_validation import require_key
 
 MAX_D3 = 3
 MAX_D6 = 6
 DICE_MAX_VALUES = {"D3": MAX_D3, "D6": MAX_D6}
+PLAYER_ONE_ID = 1
+PLAYER_TWO_ID = 2
 
 
 def max_dice_value(value: Any, context: str) -> int:
@@ -542,6 +545,57 @@ def _position_cache_remove(cache: Dict[str, Tuple[int, int]], unit_id: str) -> N
         del cache[unit_id]
 
 
+def _calculate_objective_control_snapshot(
+    objective_hexes: Dict[int, Set[Tuple[int, int]]],
+    objective_controllers: Dict[int, Optional[int]],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_player: Dict[str, int],
+    unit_types: Dict[str, str],
+    unit_registry: Any,
+) -> Dict[int, Dict[str, Any]]:
+    """
+    Calculate persistent objective control snapshot for analyzer history.
+    """
+    snapshot: Dict[int, Dict[str, Any]] = {}
+    for obj_id, hexes in objective_hexes.items():
+        player_1_oc = 0
+        player_2_oc = 0
+        for unit_id, unit_pos in unit_positions.items():
+            normalized_pos = normalize_coordinates(unit_pos[0], unit_pos[1])
+            if normalized_pos in hexes:
+                unit_type = require_key(unit_types, unit_id)
+                unit_data = require_key(unit_registry.units, unit_type)
+                oc = require_key(unit_data, "OC")
+                unit_player_id = require_key(unit_player, unit_id)
+                unit_player_int = int(unit_player_id)
+                if unit_player_int == PLAYER_ONE_ID:
+                    player_1_oc += oc
+                elif unit_player_int == PLAYER_TWO_ID:
+                    player_2_oc += oc
+                else:
+                    raise ValueError(
+                        f"Unexpected unit player id {unit_player_id} for unit {unit_id}"
+                    )
+
+        if obj_id not in objective_controllers:
+            objective_controllers[obj_id] = None
+        current_controller = objective_controllers[obj_id]
+        new_controller = current_controller
+        if player_1_oc > player_2_oc:
+            new_controller = PLAYER_ONE_ID
+        elif player_2_oc > player_1_oc:
+            new_controller = PLAYER_TWO_ID
+        objective_controllers[obj_id] = new_controller
+
+        snapshot[obj_id] = {
+            "player_1_oc": player_1_oc,
+            "player_2_oc": player_2_oc,
+            "controller": new_controller,
+        }
+
+    return snapshot
+
+
 def parse_step_log(filepath: str) -> Dict:
     """Parse step.log and extract statistics with rule validation."""
     
@@ -769,6 +823,7 @@ def parse_step_log(filepath: str) -> Dict:
         'episodes_without_end': [],
         'episodes_without_method': [],
         'episode_durations': [],  # List of (episode_num, duration_seconds) tuples
+        'objective_control_history': {},
         'sample_actions': {
             'move': None,
             'shoot': None,
@@ -797,6 +852,8 @@ def parse_step_log(filepath: str) -> Dict:
     unit_types = {}
     unit_move = {}
     wall_hexes = set()
+    objective_hexes: Dict[int, Set[Tuple[int, int]]] = {}
+    objective_controllers: Dict[int, Optional[int]] = {}
     
     # Track unit deaths with line numbers for chronological order checking
     unit_deaths = []  # List of (turn, phase, unit_id, line_num) tuples
@@ -828,6 +885,7 @@ def parse_step_log(filepath: str) -> Dict:
     last_player = None  # Track last player to detect phase MOVE start for each player
     last_phase = None
     fight_phase_seq_id = 0
+    episode_step_index = 0
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -854,6 +912,7 @@ def parse_step_log(filepath: str) -> Dict:
                 current_episode_num = stats['total_episodes']
                 episode_turn = 0
                 episode_actions = 0
+                episode_step_index = 0
                 # Capture episode start timestamp for duration calculation
                 episode_start_time = parse_timestamp_to_seconds(line)
                 stats['current_episode_deaths'] = []
@@ -864,6 +923,8 @@ def parse_step_log(filepath: str) -> Dict:
                 unit_types = {}
                 unit_move = {}
                 wall_hexes = set()
+                objective_hexes = {}
+                objective_controllers = {}
                 positions_at_turn_start = {}
                 positions_at_move_phase_start = {}
                 dead_units_current_episode = set()
@@ -884,6 +945,7 @@ def parse_step_log(filepath: str) -> Dict:
                 combi_profile_usage = {}
                 combi_conflicts_seen = set()
                 unit_deaths = []  # Reset deaths tracking for new episode
+                stats['objective_control_history'][current_episode_num] = []
                 continue
 
             # Skip header lines
@@ -905,6 +967,62 @@ def parse_step_log(filepath: str) -> Dict:
                     for coord_match in re.finditer(r'\((\d+),(\d+)\)', wall_str):
                         col, row = int(coord_match.group(1)), int(coord_match.group(2))
                         wall_hexes.add((col, row))
+                continue
+
+            # Parse objectives
+            objectives_match = re.search(r'Objectives:\s*(.+)$', line)
+            if objectives_match:
+                objectives_payload = objectives_match.group(1).strip()
+                if not objectives_payload:
+                    raise ValueError(
+                        f"Objectives line missing payload in episode {current_episode_num}: {line.strip()[:200]}"
+                    )
+                objective_hexes = {}
+                for entry in objectives_payload.split('|'):
+                    entry = entry.strip()
+                    if not entry:
+                        raise ValueError(
+                            f"Objectives line contains empty entry in episode {current_episode_num}: {line.strip()[:200]}"
+                        )
+                    if ':' not in entry:
+                        raise ValueError(
+                            f"Objectives entry missing ':' in episode {current_episode_num}: {entry}"
+                        )
+                    name_part, hex_part = entry.split(':', 1)
+                    name_part = name_part.strip()
+                    obj_id_match = re.match(r'Obj(\d+)$', name_part)
+                    if not obj_id_match:
+                        raise ValueError(
+                            f"Invalid objective name '{name_part}' in episode {current_episode_num} "
+                            f"(expected Obj<id>)"
+                        )
+                    obj_id = int(obj_id_match.group(1))
+                    if obj_id in objective_hexes:
+                        raise ValueError(
+                            f"Duplicate objective id {obj_id} in episode {current_episode_num}"
+                        )
+                    hexes: List[Tuple[int, int]] = []
+                    for hex_str in hex_part.split(';'):
+                        hex_str = hex_str.strip()
+                        if not hex_str:
+                            raise ValueError(
+                                f"Empty objective hex in episode {current_episode_num}: {entry}"
+                            )
+                        coord_match = re.match(r'\((\d+),\s*(\d+)\)', hex_str)
+                        if not coord_match:
+                            raise ValueError(
+                                f"Invalid objective hex '{hex_str}' in episode {current_episode_num}"
+                            )
+                        col, row = normalize_coordinates(
+                            int(coord_match.group(1)),
+                            int(coord_match.group(2)),
+                        )
+                        hexes.append((col, row))
+                    if not hexes:
+                        raise ValueError(
+                            f"Objective {obj_id} has no hexes in episode {current_episode_num}"
+                        )
+                    objective_hexes[obj_id] = set(hexes)
                 continue
 
             # Parse unit starting positions
@@ -3000,6 +3118,26 @@ def parse_step_log(filepath: str) -> Dict:
                             })
                 else:
                     action_type = 'other'
+
+                if step_inc:
+                    if not objective_hexes:
+                        raise ValueError(
+                            f"Objectives not parsed before step action in episode {current_episode_num}: "
+                            f"{line.strip()[:200]}"
+                        )
+                    episode_step_index += 1
+                    snapshot = _calculate_objective_control_snapshot(
+                        objective_hexes,
+                        objective_controllers,
+                        unit_positions,
+                        unit_player,
+                        unit_types,
+                        unit_registry,
+                    )
+                    stats['objective_control_history'][current_episode_num].append({
+                        "step_index": episode_step_index,
+                        "control": snapshot,
+                    })
 
                 stats['actions_by_type'][action_type] += 1
                 stats['actions_by_player'][player][action_type] += 1

@@ -1235,6 +1235,21 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.05);
 }
 
+.game-log-entry--objective-control-p1 {
+  background: rgba(29, 78, 216, 0.25);
+  border-left-color: var(--hp-bar-player1);
+}
+
+.game-log-entry--objective-control-p2 {
+  background: rgba(255, 77, 77, 0.25);
+  border-left-color: var(--hp-bar-player2);
+}
+
+.game-log-entry--objective-control-neutral {
+  background: rgba(255, 153, 0, 0.2);
+  border-left-color: var(--color-warning);
+}
+
 .game-log-entry__single-line {
   display: flex;
   align-items: center;

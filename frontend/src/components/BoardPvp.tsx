@@ -186,6 +186,7 @@ type BoardProps = {
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
+  replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
 };
 
@@ -256,6 +257,7 @@ export default function Board({
   wallHexesOverride,
   availableCellsOverride,
   objectivesOverride,
+  replayActionIndex,
   autoSelectWeapon,
 }: BoardProps) {
   React.useEffect(() => {
@@ -271,6 +273,7 @@ export default function Board({
   const objectiveControllersRef = useRef<ObjectiveControllers>({});
   // Track last turn to detect episode reset
   const lastTurnRef = useRef<number | null>(null);
+  const lastReplayActionIndexRef = useRef<number | null>(null);
   
   // Persistent container for UI elements (target logos, charge badges) that should never be cleaned up
   const uiElementsContainerRef = useRef<PIXI.Container | null>(null);
@@ -1162,6 +1165,16 @@ export default function Board({
         objectiveControllersRef.current = {};
       }
       lastTurnRef.current = currentTurn;
+
+      if (replayActionIndex !== undefined) {
+        if (
+          lastReplayActionIndexRef.current !== null &&
+          replayActionIndex < lastReplayActionIndexRef.current
+        ) {
+          objectiveControllersRef.current = {};
+        }
+        lastReplayActionIndexRef.current = replayActionIndex;
+      }
 
       // Calculate objective control based on unit positions with PERSISTENT control
       const { controlMap: objectiveControl, updatedControllers } = calculateObjectiveControl(

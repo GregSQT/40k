@@ -85,6 +85,14 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
 
               const isWaitAction = hasWaitActionName || isWaitType || hasWaitMessage;
               const waitClass = isWaitAction ? 'game-log-entry--wait' : '';
+              const isObjectiveControl = actionName === 'objective_control';
+              const objectiveControlClass = isObjectiveControl
+                ? (event.player === 1
+                    ? 'game-log-entry--objective-control-p1'
+                    : event.player === 2
+                      ? 'game-log-entry--objective-control-p2'
+                      : 'game-log-entry--objective-control-neutral')
+                : '';
 
               // Shooting / combat outcome badge (MISS / SAVED / DMG)
               let outcomeLabel: string | null = null;
@@ -114,7 +122,7 @@ export const GameLog: React.FC<GameLogProps> = ({ events, getElapsedTime, availa
               return (
               <div 
                 key={event.id} 
-                className={`game-log-entry ${getEventTypeClass(event)} ${waitClass}`}
+                className={`game-log-entry ${getEventTypeClass(event)} ${waitClass} ${objectiveControlClass}`}
               >
                 <div className="game-log-entry__single-line">
                   <span className={`game-log-entry__icon game-log-entry__icon--${event.type}`}>

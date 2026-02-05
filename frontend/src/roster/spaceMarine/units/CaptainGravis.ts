@@ -28,7 +28,7 @@ export class CaptainGravis extends SpaceMarineInfantryLeaderEliteMeleeElite {
   static TARGET_TYPE = "Elite";         // MeleeElite specialist - hunt elite targets
 
   static ICON = "/icons/CaptainGravis.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.8;     // Size of the icon
+  static ICON_SCALE = 1.9;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, CaptainGravis.HP_MAX, startPos);

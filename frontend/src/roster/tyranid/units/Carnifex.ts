@@ -27,7 +27,7 @@ export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static TARGET_TYPE = "Elite";        // MeleeElite specialist - monster vs elite
 
   static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
-  static ICON_SCALE = 2.5;     // Size of the icon
+  static ICON_SCALE = 2.6;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Carnifex.HP_MAX, startPos);

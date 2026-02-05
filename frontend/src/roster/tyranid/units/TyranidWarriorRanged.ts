@@ -27,7 +27,7 @@ export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
   static TARGET_TYPE = "Troop";        // RangedTroop specialist - anti-infantry
 
   static ICON = "/icons/WarriorRanged.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.8;     // Size of the icon
+  static ICON_SCALE = 2.2;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, TyranidWarriorRanged.HP_MAX, startPos);

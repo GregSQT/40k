@@ -27,7 +27,7 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static TARGET_TYPE = "Swarm";        // MeleeSwarm specialist - mob assault
 
   static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
-  static ICON_SCALE = 1.4;     // Size of the icon
+  static ICON_SCALE = 1.2;     // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
     super(name, Hormagaunt.HP_MAX, startPos);
