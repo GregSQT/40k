@@ -72,6 +72,7 @@ interface ReplayEpisode {
   episode_num: number;
   scenario: string;
   bot_name: string;
+  win_method?: string | null;
   initial_state: ReplayGameState;
   actions: ReplayAction[];
   states: ReplayGameState[];
@@ -1032,7 +1033,7 @@ export const BoardReplay: React.FC = () => {
                 }
                 return (
                   <option key={ep.episode_num} value={ep.episode_num}>
-                    Episode {ep.episode_num} - {scenarioId || 'Unknown'} - {ep.bot_name || 'Unknown'} - {ep.final_result || 'Unknown'}
+                    Episode {ep.episode_num} - {scenarioId || 'Unknown'} - {ep.bot_name || 'Unknown'} - {ep.final_result || 'Unknown'}{ep.win_method ? ` (${ep.win_method})` : ''}
                   </option>
                 );
               })}
@@ -1055,6 +1056,7 @@ export const BoardReplay: React.FC = () => {
               clickedUnitId={null}
               onSelectUnit={() => {}}
               gameMode="training"
+              isReplay={true}
               onCollapseChange={() => {}}
             />
           </ErrorBoundary>
@@ -1067,6 +1069,7 @@ export const BoardReplay: React.FC = () => {
               clickedUnitId={null}
               onSelectUnit={() => {}}
               gameMode="training"
+              isReplay={true}
               onCollapseChange={() => {}}
             />
           </ErrorBoundary>

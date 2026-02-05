@@ -127,6 +127,7 @@ class GameStateManager:
             
             import json
             import os
+            import random
             
             if not os.path.exists(scenario_file):
                 raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
@@ -146,6 +147,77 @@ class GameStateManager:
             
             if not basic_units:
                 raise ValueError(f"Scenario file {scenario_file} contains no units")
+
+            deployment_zone = None
+            deployment_type = "fixed"
+            if isinstance(scenario_data, dict):
+                has_deployment_zone = "deployment_zone" in scenario_data
+                has_deployment_type = "deployment_type" in scenario_data
+                if has_deployment_zone or has_deployment_type:
+                    if not has_deployment_zone or not has_deployment_type:
+                        raise KeyError(
+                            f"Scenario file {scenario_file} requires both 'deployment_zone' and 'deployment_type'"
+                        )
+                    deployment_zone = require_key(scenario_data, "deployment_zone")
+                    deployment_type = require_key(scenario_data, "deployment_type")
+                if deployment_type not in ("random", "fixed"):
+                    raise ValueError(
+                        f"Invalid deployment_type '{deployment_type}' in {scenario_file} (expected 'random' or 'fixed')"
+                    )
+            
+            wall_hex_set = set()
+            if isinstance(scenario_data, dict) and "wall_hexes" in scenario_data:
+                wall_hexes = require_key(scenario_data, "wall_hexes")
+                wall_hex_set = {(int(col), int(row)) for col, row in wall_hexes}
+            
+            deploy_pools = {}
+            if deployment_zone:
+                if deployment_zone != "hammer":
+                    raise ValueError(
+                        f"Unsupported deployment_zone '{deployment_zone}' in {scenario_file}"
+                    )
+                project_root = os.path.dirname(os.path.dirname(__file__))
+                deployment_path = os.path.join(project_root, "config", "deployment", "hammer.json")
+                if not os.path.exists(deployment_path):
+                    raise FileNotFoundError(f"Deployment file not found: {deployment_path}")
+                try:
+                    with open(deployment_path, "r") as f:
+                        deployment_data = json.load(f)
+                except Exception as e:
+                    raise ValueError(f"Failed to parse deployment file {deployment_path}: {e}")
+                if "p1" not in deployment_data or "p2" not in deployment_data:
+                    raise KeyError(f"Deployment file {deployment_path} missing required p1/p2 zones")
+                
+                def _build_deploy_pool(zone: Dict[str, Any]) -> set[tuple[int, int]]:
+                    col_min = require_key(zone, "col_min")
+                    col_max = require_key(zone, "col_max")
+                    row_min = require_key(zone, "row_min")
+                    row_max = require_key(zone, "row_max")
+                    if col_min > col_max or row_min > row_max:
+                        raise ValueError(
+                            f"Invalid deploy bounds: col=({col_min},{col_max}) row=({row_min},{row_max})"
+                        )
+                    pool = {
+                        (col, row)
+                        for col in range(col_min, col_max + 1)
+                        for row in range(row_min, row_max + 1)
+                    }
+                    return pool
+                
+                deploy_pools = {
+                    1: _build_deploy_pool(deployment_data["p1"]),
+                    2: _build_deploy_pool(deployment_data["p2"]),
+                }
+                if deployment_type == "random":
+                    if not wall_hex_set:
+                        raise KeyError(
+                            f"Scenario file {scenario_file} missing required 'wall_hexes' for random deployment"
+                        )
+                    deploy_pools = {
+                        1: deploy_pools[1] - wall_hex_set,
+                        2: deploy_pools[2] - wall_hex_set,
+                    }
+            used_hexes = set()
             
             enhanced_units = []
             for unit_data in basic_units:
@@ -153,13 +225,48 @@ class GameStateManager:
                     raise KeyError(f"Unit missing required 'unit_type' field: {unit_data}")
                 
                 unit_type = unit_data["unit_type"]
+                unit_player = require_key(unit_data, "player")
+                if deployment_type == "random":
+                    if unit_player not in deploy_pools:
+                        raise ValueError(f"Invalid unit player for deployment: {unit_player}")
+                    available_hexes = list(deploy_pools[unit_player] - used_hexes)
+                    if not available_hexes:
+                        raise ValueError(
+                            f"No available deployment hexes for player {unit_player} "
+                            f"(units={len([u for u in basic_units if require_key(u, 'player') == unit_player])})"
+                        )
+                    chosen_col, chosen_row = random.choice(available_hexes)
+                    used_hexes.add((chosen_col, chosen_row))
+                else:
+                    required_fields = ["id", "player", "col", "row"]
+                    for field in required_fields:
+                        if field not in unit_data:
+                            raise KeyError(f"Unit missing required field '{field}': {unit_data}")
+                    chosen_col, chosen_row = normalize_coordinates(unit_data["col"], unit_data["row"])
+                    if deployment_zone:
+                        if unit_player not in deploy_pools:
+                            raise ValueError(f"Invalid unit player for deployment: {unit_player}")
+                        if (chosen_col, chosen_row) not in deploy_pools[unit_player]:
+                            raise ValueError(
+                                f"Unit {unit_data.get('id')} outside deployment zone '{deployment_zone}' "
+                                f"for player {unit_player}: ({chosen_col},{chosen_row})"
+                            )
+                    if wall_hex_set and (chosen_col, chosen_row) in wall_hex_set:
+                        raise ValueError(
+                            f"Unit {unit_data.get('id')} placed on wall hex: ({chosen_col},{chosen_row})"
+                        )
+                    if (chosen_col, chosen_row) in used_hexes:
+                        raise ValueError(
+                            f"Duplicate unit position: ({chosen_col},{chosen_row})"
+                        )
+                    used_hexes.add((chosen_col, chosen_row))
                 
                 try:
                     full_unit_data = unit_registry.get_unit_data(unit_type)
                 except Exception as e:
                     raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
                 
-                required_fields = ["id", "player", "col", "row"]
+                required_fields = ["id", "player"]
                 for field in required_fields:
                     if field not in unit_data:
                         raise KeyError(f"Unit missing required field '{field}': {unit_data}")
@@ -201,10 +308,10 @@ class GameStateManager:
                 
                 enhanced_unit = {
                     "id": str(unit_data["id"]),
-                    "player": unit_data["player"],
+                    "player": unit_player,
                     "unitType": unit_type,
-                    "col": normalize_coordinates(unit_data["col"], unit_data["row"])[0],
-                    "row": normalize_coordinates(unit_data["col"], unit_data["row"])[1],
+                    "col": normalize_coordinates(chosen_col, chosen_row)[0],
+                    "row": normalize_coordinates(chosen_col, chosen_row)[1],
                     "HP_CUR": full_unit_data["HP_MAX"],
                     "HP_MAX": full_unit_data["HP_MAX"],
                     "MOVE": full_unit_data["MOVE"],

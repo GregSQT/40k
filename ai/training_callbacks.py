@@ -473,10 +473,6 @@ class MetricsCollectionCallback(BaseCallback):
     def print_final_training_summary(self, model=None, training_config=None, training_config_name=None, rewards_config_name=None):
         """Print comprehensive training summary with final bot evaluation"""
         
-        print("\n" + "="*80)
-        print("🎯 TRAINING COMPLETE - RUNNING FINAL EVALUATION")
-        print("="*80)
-        
         if EVALUATION_BOTS_AVAILABLE and model and training_config and training_config_name and rewards_config_name:
             # Extract n_episodes from config
             if 'callback_params' not in training_config:
@@ -484,8 +480,17 @@ class MetricsCollectionCallback(BaseCallback):
             if 'bot_eval_final' not in training_config['callback_params']:
                 raise KeyError("training_config['callback_params'] missing required 'bot_eval_final' field")
             n_final = training_config['callback_params']['bot_eval_final']
-            
-            bot_results = self._run_final_bot_eval(model, training_config, training_config_name, rewards_config_name)
+            if n_final <= 0:
+                print("\n" + "="*80)
+                print("🎯 TRAINING COMPLETE - FINAL EVALUATION SKIPPED")
+                print("="*80)
+                print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
+                bot_results = None
+            else:
+                print("\n" + "="*80)
+                print("🎯 TRAINING COMPLETE - RUNNING FINAL EVALUATION")
+                print("="*80)
+                bot_results = self._run_final_bot_eval(model, training_config, training_config_name, rewards_config_name)
             
             if bot_results:
                 # Log to metrics_tracker for TensorBoard

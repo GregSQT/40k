@@ -332,6 +332,15 @@ class W40KEngine(gym.Env):
         from config_loader import get_config_loader
         config_loader = get_config_loader()
         reward_configs = {}
+        controlled_agent = self.config.get("controlled_agent")
+        if controlled_agent:
+            base_agent_key = controlled_agent
+            for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+                if controlled_agent.endswith(phase_suffix):
+                    base_agent_key = controlled_agent[:-len(phase_suffix)]
+                    break
+            agent_rewards = config_loader.load_agent_rewards_config(base_agent_key)
+            reward_configs[controlled_agent] = require_key(agent_rewards, base_agent_key)
         units = require_key(self.game_state, "units")
         for unit in units:
             unit_type = require_key(unit, "unitType")

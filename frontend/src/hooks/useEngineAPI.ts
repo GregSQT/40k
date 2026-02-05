@@ -227,6 +227,12 @@ export const useEngineAPI = () => {
       setAdvanceDestinations([]);
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
+      if (gameState.phase === "shoot") {
+        console.log("🔎 SHOOT PHASE ENTER:", {
+          active_shooting_unit: gameState.active_shooting_unit,
+          selectedUnitId
+        });
+      }
     }
   }, [gameState?.phase]);
 
@@ -299,7 +305,14 @@ export const useEngineAPI = () => {
       
       // DEBUG: Log full response structure to understand blinking data location
       
-        if (data.success) {
+      if (data.success) {
+        if (data.game_state?.phase === "shoot") {
+          console.log("🔎 SHOOT RESPONSE:", {
+            active_shooting_unit: data.game_state.active_shooting_unit,
+            result_unitId: data.result?.unitId,
+            allow_advance: data.result?.allow_advance
+          });
+        }
           // CRITICAL: Handle empty activation pools before other processing
           if (data.game_state?.phase === "shoot" && 
               Array.isArray(data.game_state.shoot_activation_pool) && 

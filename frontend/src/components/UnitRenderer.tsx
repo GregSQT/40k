@@ -1127,10 +1127,9 @@ export class UnitRenderer {
     if (unit.player !== currentPlayer) return;
     if (canAdvance === false) return;
     
-    // Only show icon when unit is actively activated (active_shooting_unit or selectedUnitId)
+    // Only show icon when unit is actively activated (backend source of truth)
     const isActiveShooting = (gameState?.active_shooting_unit && 
-      parseInt(gameState.active_shooting_unit) === unit.id) ||
-      (selectedUnitId !== null && selectedUnitId === unit.id);
+      parseInt(gameState.active_shooting_unit) === unit.id);
     if (!isActiveShooting) return;
     
     // Position: above HP bar (same calculation as renderHPBar)

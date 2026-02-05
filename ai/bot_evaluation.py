@@ -89,17 +89,20 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             raise FileNotFoundError(f"No scenarios found for agent '{base_agent_key}'. "
                                     f"Expected bot scenarios at config/agents/{base_agent_key}/scenarios/")
 
-    # Calculate episodes per scenario (distribute evenly)
-    episodes_per_scenario = max(1, n_episodes // len(scenario_list))
+    if n_episodes <= 0:
+        raise ValueError("n_episodes must be > 0 for bot evaluation")
+    # Calculate episodes per scenario (distribute exactly, remainder goes to first scenarios)
+    episodes_per_scenario = n_episodes // len(scenario_list)
+    extra_episodes = n_episodes % len(scenario_list)
 
     unit_registry = UnitRegistry()
 
     # Progress tracking
-    total_episodes = episodes_per_scenario * len(scenario_list) * len(bots)
+    total_episodes = n_episodes * len(bots)
     completed_episodes = 0
     start_time = time.time() if show_progress else None
 
-    total_expected_episodes = len(bots) * len(scenario_list) * episodes_per_scenario
+    total_expected_episodes = len(bots) * n_episodes
     total_failed_episodes = 0
 
     for bot_name, bot in bots.items():
@@ -108,8 +111,11 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         draws = 0
 
         # MULTI-SCENARIO: Iterate through all scenarios
-        for scenario_file in scenario_list:
+        for scenario_index, scenario_file in enumerate(scenario_list):
             scenario_name = os.path.basename(scenario_file).replace(f"{base_agent_key}_scenario_", "").replace(".json", "") if base_agent_key else "default"
+            episodes_for_scenario = episodes_per_scenario + (1 if scenario_index < extra_episodes else 0)
+            if episodes_for_scenario == 0:
+                continue
 
             # PERFORMANCE: Create environment ONCE per scenario and reuse for all episodes
             # This avoids expensive re-initialization (loading configs, creating wrappers, etc.)
@@ -141,7 +147,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
             # Run all episodes for this bot/scenario using the same environment
             try:
-                for episode_num in range(episodes_per_scenario):
+                for episode_num in range(episodes_for_scenario):
                     completed_episodes += 1
 
                     # Progress bar (only if show_progress=True)
@@ -310,7 +316,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 bot_env.close()
 
         # Calculate win rate across ALL scenarios
-        total_games = episodes_per_scenario * len(scenario_list)
+        total_games = n_episodes
         win_rate = wins / total_games if total_games > 0 else 0.0
         results[bot_name] = win_rate
         results[f'{bot_name}_wins'] = wins

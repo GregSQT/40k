@@ -53,6 +53,7 @@ interface ReplayEpisodeDuringParsing {
   episode_num: number;
   scenario: string;
   bot_name: string;
+  win_method?: string | null;
   actions: ReplayAction[];
   units: Record<number, { id: number; player: number; col: number; row: number; HP_CUR: number; HP_MAX: number; type?: string; [key: string]: unknown }>;
   initial_positions: Record<number, { col: number; row: number }>;
@@ -66,6 +67,7 @@ interface ReplayEpisode {
   episode_num: number;
   scenario: string;
   bot_name: string;
+  win_method?: string | null;
   initial_state: ReplayGameState;
   actions: ReplayAction[];
   states: ReplayGameState[];
@@ -97,6 +99,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         units: {},
         initial_positions: {},
         final_result: null,
+        win_method: null,
         scenario: 'Unknown',
         bot_name: 'Unknown',
         walls: [],
@@ -586,11 +589,21 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Parse EPISODE END line
-    const episodeEndMatch = trimmed.match(/EPISODE END: Winner=(-?\d+)/);
+    const episodeEndMatch = trimmed.match(/EPISODE END: Winner=(-?\d+)(?:, Method=([a-zA-Z_]+))?/);
     if (episodeEndMatch) {
       const winner = parseInt(episodeEndMatch[1]);
+      const winMethod = episodeEndMatch[2] || null;
       if (currentEpisode) {
-        currentEpisode.final_result = winner === -1 ? 'Draw' : winner === 0 ? 'Agent Win' : 'Bot Win';
+        if (winner === -1) {
+          currentEpisode.final_result = 'Draw';
+        } else if (winner === 1) {
+          currentEpisode.final_result = 'Agent Win';
+        } else if (winner === 2) {
+          currentEpisode.final_result = 'Bot Win';
+        } else {
+          throw new Error(`Unknown winner value in step.log: ${winner}`);
+        }
+        currentEpisode.win_method = winMethod;
       }
       continue;
     }
@@ -768,6 +781,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       episode_num: episode.episode_num,
       scenario: episode.scenario,
       bot_name: episode.bot_name || 'Unknown',
+      win_method: episode.win_method,
       initial_state: initialState,
       actions: episode.actions,
       states: states,

@@ -1164,18 +1164,15 @@ export default function Board({
       lastTurnRef.current = currentTurn;
 
       // Calculate objective control based on unit positions with PERSISTENT control
-      // In replay mode (when objectivesOverride is provided), don't use persistent state
       const { controlMap: objectiveControl, updatedControllers } = calculateObjectiveControl(
         units,
         objectivesOverride,
         effectiveObjectiveHexes,
         objectiveControllersRef.current,
-        !objectivesOverride  // Use persistent state only if not in replay mode
+        true  // Always use persistent state (including replay)
       );
-      // Update persistent state only if using persistent state
-      if (!objectivesOverride) {
-        objectiveControllersRef.current = updatedControllers;
-      }
+      // Update persistent state
+      objectiveControllersRef.current = updatedControllers;
 
       // Map "command" phase to "move" for drawBoard and UnitRenderer (they don't support "command")
       const effectivePhase = phase === "command" ? "move" : phase;

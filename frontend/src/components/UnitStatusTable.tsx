@@ -9,6 +9,7 @@ interface UnitStatusTableProps {
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
   gameMode?: 'pvp' | 'pve' | 'training';
+  isReplay?: boolean;
   onCollapseChange?: (collapsed: boolean) => void;
 }
 
@@ -403,6 +404,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   clickedUnitId,
   onSelectUnit,
   gameMode = 'pvp',
+  isReplay = false,
   onCollapseChange
 }) => {
   // Collapse/expand state for entire table
@@ -482,6 +484,9 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
 
   const getPlayerTypeLabel = (playerNumber: 1 | 2): string => {
     if (gameMode === 'training') {
+      if (isReplay) {
+        return playerNumber === 2 ? 'Player 2 - Bot' : 'Player 1 - AI';
+      }
       return playerNumber === 2 ? 'Player 1 - AI' : 'Player 2 - Bot';
     } else if (gameMode === 'pve') {
       return playerNumber === 1 ? 'Player 1 - Human' : 'Player 2 - AI';

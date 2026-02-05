@@ -655,9 +655,19 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     if len(scenario_list) > 1:
         print(f"🎲 RANDOM MODE: Each episode randomly selects one of the {len(scenario_list)} scenarios")
     print(f"{'='*80}\n")
+
+    # Check GPU availability (match single-scenario training output)
+    gpu_available = check_gpu_availability()
     
     # Load agent-specific training config to get model parameters
     training_config = config.load_agent_training_config(agent_key, training_config_name)
+
+    # Require n_envs for consistency with single-scenario training
+    n_envs = require_key(training_config, "n_envs")
+    if n_envs != 1:
+        raise ValueError(
+            f"train_with_scenario_rotation requires n_envs=1 (got {n_envs})"
+        )
 
     # Raise error if required fields missing - NO FALLBACKS
     if "max_turns_per_episode" not in training_config:
@@ -715,6 +725,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         gym_training_mode=True,
         debug_mode=debug_mode
     )
+
+    # Connect step logger after environment creation - compliant engine compatibility
+    if step_logger:
+        # Connect StepLogger directly to compliant W40KEngine
+        base_env.step_logger = step_logger
+        print("✅ StepLogger connected to compliant W40KEngine")
 
     # Wrap environment
     def mask_fn(env):
@@ -958,7 +974,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             print("⚠️  Warning: 'bot_eval_final' not found in callback_params. Skipping final evaluation.")
         else:
             n_final = training_config['callback_params']['bot_eval_final']
-            if n_final > 0:
+            if n_final <= 0:
+                print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
+            else:
                 print(f"\n{'='*80}")
                 print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
                 print(f"{'='*80}\n")
