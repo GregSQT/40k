@@ -1075,6 +1075,7 @@ Result: Avoid a shooting unit to be stuck because it has no more "Valid target" 
 **Post-Advance Restrictions:**
 - **Shooting**: ❌ Forbidden unless weapon has "Assault" rule
 - **Charging**: ❌ Forbidden (unit marked in `units_advanced` set)
+  - ✅ Exception: Units with rule id `charge_after_advance` in `UNIT_RULES` may charge after advance
 - **Fighting**: ✅ Allowed normally
 
 **Example:**

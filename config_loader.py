@@ -290,6 +290,36 @@ class ConfigLoader:
         raise KeyError(
             f"Primary objective id '{objective_id}' not found in {primary_objective_dir}"
         )
+
+    def load_unit_rules_config(self) -> Dict[str, Any]:
+        """Load unit rules configuration with strict validation."""
+        cache_key = "unit_rules"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        unit_rules_path = self.config_dir / "unit_rules.json"
+        if not unit_rules_path.exists():
+            raise FileNotFoundError(f"Unit rules config not found: {unit_rules_path}")
+
+        try:
+            with open(unit_rules_path, "r", encoding="utf-8-sig") as f:
+                unit_rules = json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {unit_rules_path}: {e}")
+
+        if not isinstance(unit_rules, dict):
+            raise ValueError(f"unit_rules.json must be a dict mapping rule_id to rule config")
+
+        for rule_id, rule_data in unit_rules.items():
+            if not isinstance(rule_data, dict):
+                raise ValueError(f"Rule '{rule_id}' must be an object, got {type(rule_data).__name__}")
+            if "id" not in rule_data:
+                raise KeyError(f"Rule '{rule_id}' missing required 'id' field")
+            if str(rule_data["id"]) != str(rule_id):
+                raise ValueError(f"Rule id mismatch: key '{rule_id}' != rule.id '{rule_data['id']}'")
+
+        self._cache[cache_key] = unit_rules
+        return unit_rules
     
     def load_agent_scenario(self, agent_key: str, scenario_name: str) -> Dict[str, Any]:
         """Load agent-specific scenario file.

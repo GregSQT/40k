@@ -52,6 +52,11 @@ interface ReplayAction {
   save_result?: string;
   // Weapon info
   weapon_name?: string;
+  // Fight phase metadata (AI_TURN.md compliance)
+  fight_subphase?: string;
+  charging_activation_pool?: number[];
+  active_alternating_activation_pool?: number[];
+  non_active_alternating_activation_pool?: number[];
   // Charge action fields
   charge_roll?: number;
   charge_success?: boolean;

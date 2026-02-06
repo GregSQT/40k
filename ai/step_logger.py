@@ -510,6 +510,26 @@ class StepLogger:
             if reward is not None:
                 detail_msg += f" [R:{reward:+.1f}]"
 
+            fight_subphase = require_key(details, "fight_subphase")
+            if fight_subphase is None:
+                raise ValueError(f"fight_subphase is None in combat log details for unit {unit_id}")
+            charging_pool = require_key(details, "charging_activation_pool")
+            active_pool = require_key(details, "active_alternating_activation_pool")
+            non_active_pool = require_key(details, "non_active_alternating_activation_pool")
+            if not isinstance(charging_pool, list):
+                raise ValueError(f"charging_activation_pool must be a list in combat log details for unit {unit_id}")
+            if not isinstance(active_pool, list):
+                raise ValueError(f"active_alternating_activation_pool must be a list in combat log details for unit {unit_id}")
+            if not isinstance(non_active_pool, list):
+                raise ValueError(f"non_active_alternating_activation_pool must be a list in combat log details for unit {unit_id}")
+            charging_pool_str = ",".join(str(uid) for uid in charging_pool)
+            active_pool_str = ",".join(str(uid) for uid in active_pool)
+            non_active_pool_str = ",".join(str(uid) for uid in non_active_pool)
+            detail_msg += (
+                f" [FIGHT_SUBPHASE:{fight_subphase}]"
+                f" [FIGHT_POOLS:charging={charging_pool_str};active={active_pool_str};non_active={non_active_pool_str}]"
+            )
+
             return base_msg + detail_msg
 
         elif action_type == "wait":

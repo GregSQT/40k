@@ -1388,6 +1388,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
                     "valid_targets": valid_targets_after,
                     "waiting_for_player": True,
                     "action": "combat",  # CRITICAL: Must be "combat" for step_logger
+                    "fight_subphase": require_key(game_state, "fight_subphase"),
                     "all_attack_results": list(all_attack_results) if all_attack_results else []  # Copie explicite pour sécurité
                 }
         # No more targets or no valid target selected - fall through to end activation
@@ -1427,6 +1428,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["attack_result"] = attack_result
         result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False  # For metrics tracking
         result["reason"] = "no_more_targets"
+        result["fight_subphase"] = require_key(game_state, "fight_subphase")
 
         # Include ALL attack results from this activation for step logging
         # CRITICAL: Always use fight_attack_results - it should contain ALL attacks from this activation
@@ -1530,6 +1532,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         result["attack_result"] = attack_result
         result["target_died"] = attack_result.get("target_died", False)  # For metrics tracking
         result["reason"] = "attacks_complete"
+        result["fight_subphase"] = require_key(game_state, "fight_subphase")
 
         # Include ALL attack results from this activation for step logging
         # CRITICAL: fight_attack_results MUST contain all attacks from this activation

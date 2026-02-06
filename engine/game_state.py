@@ -62,6 +62,7 @@ class GameStateManager:
                 "game_state_init_attack_left",
             )
         
+        unit_rules = config["UNIT_RULES"] if "UNIT_RULES" in config else []
         return {
             # Identity
             "id": config["id"],
@@ -92,6 +93,7 @@ class GameStateManager:
             "VALUE": config["VALUE"],
             "ICON": config["ICON"],
             "ICON_SCALE": config["ICON_SCALE"],
+            "UNIT_RULES": unit_rules,
             
             # AI_TURN.md action tracking fields
             "SHOOT_LEFT": shoot_left,
@@ -104,7 +106,7 @@ class GameStateManager:
         required_uppercase = {
             "HP_CUR", "HP_MAX", "MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE",
             "RNG_WEAPONS", "CC_WEAPONS",
-            "LD", "OC", "VALUE", "ICON", "ICON_SCALE",
+            "LD", "OC", "VALUE", "ICON", "ICON_SCALE", "UNIT_RULES",
             "SHOOT_LEFT", "ATTACK_LEFT"
         }
         
@@ -328,6 +330,7 @@ class GameStateManager:
                     "VALUE": full_unit_data["VALUE"],
                     "ICON": full_unit_data["ICON"],
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
+                    "UNIT_RULES": require_key(full_unit_data, "UNIT_RULES"),
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left
                 }

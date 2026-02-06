@@ -1252,6 +1252,29 @@ export default function Board({
             
             return result;
           }
+          if (phase === "fight") {
+            if (!gameState) {
+              throw new Error("Missing gameState during fight eligibility calculation");
+            }
+            const fightSubPhase = gameState.fight_subphase;
+            if (!fightSubPhase) {
+              throw new Error("Missing fight_subphase during fight eligibility calculation");
+            }
+            let fightPool: Array<number | string> | undefined;
+            if (fightSubPhase === "charging") {
+              fightPool = gameState.charging_activation_pool;
+            } else if (fightSubPhase === "alternating_non_active" || fightSubPhase === "cleanup_non_active") {
+              fightPool = gameState.non_active_alternating_activation_pool;
+            } else if (fightSubPhase === "alternating_active" || fightSubPhase === "cleanup_active") {
+              fightPool = gameState.active_alternating_activation_pool;
+            } else {
+              throw new Error(`Unknown fight_subphase: ${fightSubPhase}`);
+            }
+            if (!fightPool) {
+              throw new Error(`Missing fight activation pool for subphase: ${fightSubPhase}`);
+            }
+            return fightPool.some(id => String(id) === String(unit.id));
+          }
           // All other phases: use standard eligibility
           return eligibleUnitIds.includes(typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string));
         })();

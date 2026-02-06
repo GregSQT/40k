@@ -31,6 +31,11 @@ interface ReplayAction {
   save_result?: string;
   // Weapon info
   weapon_name?: string;
+  // Fight phase metadata (AI_TURN.md compliance)
+  fight_subphase?: string;
+  charging_activation_pool?: number[];
+  active_alternating_activation_pool?: number[];
+  non_active_alternating_activation_pool?: number[];
   // Charge action fields
   charge_roll?: number;
   charge_success?: boolean;
@@ -82,6 +87,20 @@ interface ReplayData {
 
 export function parse_log_file_from_text(text: string): ReplayData {
   const lines = text.split('\n');
+  const parsePoolList = (value: string, label: string): number[] => {
+    if (value === '') {
+      return [];
+    }
+    const rawIds = value.split(',');
+    const parsedIds = rawIds.map((raw) => {
+      const parsed = parseInt(raw, 10);
+      if (Number.isNaN(parsed)) {
+        throw new Error(`Invalid ${label} pool id value in step.log: "${raw}"`);
+      }
+      return parsed;
+    });
+    return parsedIds;
+  };
   const episodes: ReplayEpisodeDuringParsing[] = [];
   let currentEpisode: ReplayEpisodeDuringParsing | null = null;
 
@@ -532,6 +551,15 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)\((SUCCESS|WOUND|FAIL)\)/);
       const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)\((FAIL|SAVED?)\)/);
       const dmgMatch = trimmed.match(/Dmg:(\d+)HP/);
+      const fightSubphaseMatch = trimmed.match(/\[FIGHT_SUBPHASE:([^\]]+)\]/);
+      const fightPoolsMatch = trimmed.match(/\[FIGHT_POOLS:charging=([^;\]]*);active=([^;\]]*);non_active=([^\]]*)\]/);
+      if (!fightSubphaseMatch || !fightPoolsMatch) {
+        throw new Error(`Missing fight metadata in step.log line: ${trimmed}`);
+      }
+      const fightSubphase = fightSubphaseMatch[1];
+      const chargingPool = parsePoolList(fightPoolsMatch[1], 'charging');
+      const activePool = parsePoolList(fightPoolsMatch[2], 'active');
+      const nonActivePool = parsePoolList(fightPoolsMatch[3], 'non_active');
 
       const action: ReplayAction = {
         type: 'fight',
@@ -542,7 +570,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
         attacker_pos: { col: attackerCol, row: attackerRow },
         target_id: targetId,
         weapon_name: weaponName,  // Add weapon name for display
-        damage: 0  // Will be calculated below based on combat results
+        damage: 0,  // Will be calculated below based on combat results
+        fight_subphase: fightSubphase,
+        charging_activation_pool: chargingPool,
+        active_alternating_activation_pool: activePool,
+        non_active_alternating_activation_pool: nonActivePool
       };
 
       // Add detailed combat rolls if available
@@ -756,6 +788,13 @@ export function parse_log_file_from_text(text: string): ReplayData {
         phase = 'fight';
       }
 
+      const fightStateFields = action.type.includes('fight') ? {
+        fight_subphase: action.fight_subphase,
+        charging_activation_pool: action.charging_activation_pool,
+        active_alternating_activation_pool: action.active_alternating_activation_pool,
+        non_active_alternating_activation_pool: action.non_active_alternating_activation_pool
+      } : {};
+
       // Create state with current units (including just-killed units with flag preserved)
       const stateUnits = Object.values(currentUnits).map(u => {
         const unitCopy = { ...u };
@@ -773,7 +812,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
         currentTurn: 1,
         currentPlayer: action.player,
         phase,
-        action
+        action,
+        ...fightStateFields
       });
     }
 

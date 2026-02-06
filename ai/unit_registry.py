@@ -33,10 +33,17 @@ class UnitRegistry:
         self.roles: Set[str] = set()
         self.faction_role_combinations: Set[Tuple[str, str]] = set()
         self.faction_role_matrix: Dict[str, List[str]] = {}
+        self._unit_rules = self._load_unit_rules()
         
         # Initialize the registry
         self._discover_all_units(verbose=False)
         self._build_faction_role_matrix()
+
+    def _load_unit_rules(self) -> Dict[str, Dict]:
+        """Load unit rules config for validation."""
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        return config_loader.load_unit_rules_config()
     
     def _discover_all_units(self, verbose: bool = False):
         """Scan TypeScript files and extract all unit definitions dynamically."""
@@ -179,13 +186,41 @@ class UnitRegistry:
         except ImportError:
             weapons_available = False
         
-        # Pattern 1: Static properties simples (HP_MAX, MOVE, etc.)
+        # Pattern 1: UNIT_RULES (optional)
+        unit_rules_match = re.search(
+            r'static\s+UNIT_RULES(?:\s*:\s*[^=]+)?\s*=\s*\[([\s\S]*?)\]\s*;',
+            content,
+            re.MULTILINE
+        )
+        if unit_rules_match:
+            rules_block = unit_rules_match.group(1).strip()
+            rule_entries = re.findall(
+                r'\{\s*ruleId\s*:\s*["\']([^"\']+)["\']\s*,\s*displayName\s*:\s*["\']([^"\']+)["\']\s*\}',
+                rules_block
+            )
+            if not rule_entries and rules_block:
+                raise ValueError("UNIT_RULES must contain objects with ruleId and displayName")
+            unit_rules = []
+            for rule_id, display_name in rule_entries:
+                if rule_id not in self._unit_rules:
+                    raise KeyError(f"Unknown unit rule id '{rule_id}' (missing in config/unit_rules.json)")
+                if not display_name or not display_name.strip():
+                    raise ValueError(f"Unit rule '{rule_id}' missing displayName")
+                unit_rules.append({
+                    "ruleId": rule_id,
+                    "displayName": display_name
+                })
+            properties["UNIT_RULES"] = unit_rules
+        else:
+            properties["UNIT_RULES"] = []
+
+        # Pattern 2: Static properties simples (HP_MAX, MOVE, etc.)
         static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
         matches = re.findall(static_pattern, content)
         
         for prop_name, prop_value in matches:
-            # Skip RNG_WEAPONS and CC_WEAPONS - they are processed separately from RNG_WEAPON_CODES/CC_WEAPON_CODES
-            if prop_name in ["RNG_WEAPONS", "CC_WEAPONS"]:
+            # Skip RNG_WEAPONS/CC_WEAPONS and UNIT_RULES (handled separately)
+            if prop_name in ["RNG_WEAPONS", "CC_WEAPONS", "UNIT_RULES"]:
                 continue
             
             # Clean up the value
@@ -204,7 +239,7 @@ class UnitRegistry:
             else:
                 properties[prop_name] = prop_value
         
-        # Pattern 2: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
+        # Pattern 3: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
         # Only process weapons if import succeeded
         if not weapons_available:
             raise ImportError("engine.weapons.get_weapons is required to load RNG_WEAPONS/CC_WEAPONS")
@@ -235,7 +270,7 @@ class UnitRegistry:
         
         properties["RNG_WEAPONS"] = get_weapons(faction, codes)
         
-        # Pattern 3: CC_WEAPON_CODES (même logique)
+        # Pattern 4: CC_WEAPON_CODES (même logique)
         cc_codes_match = re.search(
             r'static\s+CC_WEAPON_CODES(?:\s*:\s*[^=]+)?\s*=\s*\[([^\]]*)\];',
             content,

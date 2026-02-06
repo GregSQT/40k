@@ -1694,6 +1694,20 @@ class W40KEngine(gym.Env):
                                         "weapon_name": attack_result["weapon_name"],
                                         "reward": step_reward if i == 0 else 0.0
                                     }
+                                    if action_type == "combat":
+                                        fight_subphase = require_key(result, "fight_subphase")
+                                        if fight_subphase is None:
+                                            raise ValueError(
+                                                f"fight_subphase is None during combat logging: "
+                                                f"unit_id={unit_id}, turn={pre_action_turn}"
+                                            )
+                                        charging_pool = require_key(self.game_state, "charging_activation_pool")
+                                        active_pool = require_key(self.game_state, "active_alternating_activation_pool")
+                                        non_active_pool = require_key(self.game_state, "non_active_alternating_activation_pool")
+                                        attack_details["fight_subphase"] = fight_subphase
+                                        attack_details["charging_activation_pool"] = list(charging_pool)
+                                        attack_details["active_alternating_activation_pool"] = list(active_pool)
+                                        attack_details["non_active_alternating_activation_pool"] = list(non_active_pool)
                                     
                                     # Déterminer step_increment selon le type d'action et success
                                     # Pour combat/shoot, step_increment seulement pour la première attaque ET si success

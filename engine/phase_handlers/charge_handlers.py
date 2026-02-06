@@ -23,6 +23,13 @@ from .shared_utils import (
     get_unit_position, require_unit_position,
 )
 
+def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
+    """Check if unit has a specific rule by ruleId."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        if require_key(rule, "ruleId") == rule_id:
+            return True
+    return False
 
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -140,7 +147,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
         units_advanced = require_key(game_state, "units_advanced")
         if unit_id_str in units_advanced:
-            continue  # Advanced units cannot charge
+            if not _unit_has_rule(unit, "charge_after_advance"):
+                continue  # Advanced units cannot charge without rule
 
         # "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)

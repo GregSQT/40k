@@ -743,6 +743,7 @@ def parse_step_log(filepath: str) -> Dict:
     unit_weapons_cache = {}  # unit_type -> list of weapons with {display_name, RNG, WEAPON_RULES, is_pistol}
     unit_attack_limits = {}  # unit_type -> {'rng_nb_by_weapon': Dict[str, int], 'cc_nb_by_weapon': Dict[str, int]}
     unit_combi_by_weapon = {}  # unit_type -> {weapon_display_name: combi_key}
+    unit_rules_by_type = {}  # unit_type -> set(ruleId)
     
     # Load weapons for each unit type
     for unit_type, unit_data in unit_registry.units.items():
@@ -784,6 +785,8 @@ def parse_step_log(filepath: str) -> Dict:
                 })
         unit_weapons_cache[unit_type] = weapons_info
         unit_combi_by_weapon[unit_type] = combi_by_weapon
+        unit_rules = require_key(unit_data, "UNIT_RULES")
+        unit_rules_by_type[unit_type] = {require_key(rule, "ruleId") for rule in unit_rules}
 
     # Statistics structure
     stats = {
@@ -869,6 +872,7 @@ def parse_step_log(filepath: str) -> Dict:
             1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
             2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0}
         },
+        'charge_after_advance_used': {1: 0, 2: 0},
         'move_adjacent_before_non_flee': {1: 0, 2: 0},
         'move_distance_over_limit': {
             'move': {1: 0, 2: 0},
@@ -2217,9 +2221,14 @@ def parse_step_log(filepath: str) -> Dict:
                             _track_action_phase_accuracy(stats, "charge", phase, current_episode_num, line)
                             stats['charge_invalid'][player]['total'] += 1
                             if charge_unit_id in units_advanced:
-                                stats['charge_invalid'][player]['advanced'] += 1
-                                if stats['first_error_lines']['charge_invalid'][player] is None:
-                                    stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                                charge_unit_type = require_key(unit_types, charge_unit_id)
+                                unit_rules = require_key(unit_rules_by_type, charge_unit_type)
+                                if "charge_after_advance" in unit_rules:
+                                    stats['charge_after_advance_used'][player] += 1
+                                else:
+                                    stats['charge_invalid'][player]['advanced'] += 1
+                                    if stats['first_error_lines']['charge_invalid'][player] is None:
+                                        stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             if charge_unit_id in units_fled:
                                 stats['charge_invalid'][player]['fled'] += 1
                                 if stats['first_error_lines']['charge_invalid'][player] is None:
@@ -4487,6 +4496,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_charge_fled = stats['charge_invalid'][1]['fled']
     bot_charge_fled = stats['charge_invalid'][2]['fled']
     log_print(f"Charges after fled:           {agent_charge_fled:6d}           {bot_charge_fled:6d}")
+    agent_charge_adv_used = stats['charge_after_advance_used'][1]
+    bot_charge_adv_used = stats['charge_after_advance_used'][2]
+    log_print(f"Charge after advance (rule):  {agent_charge_adv_used:6d}           {bot_charge_adv_used:6d}")
     agent_charge_adv = stats['charge_invalid'][1]['advanced']
     bot_charge_adv = stats['charge_invalid'][2]['advanced']
     log_print(f"Charges after advance:        {agent_charge_adv:6d}           {bot_charge_adv:6d}")
