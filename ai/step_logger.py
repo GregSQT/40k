@@ -10,6 +10,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 
 import time
 import builtins
+import json
 
 from shared.data_validation import require_key
 
@@ -133,7 +134,7 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None):
         """Log episode start with all unit starting positions, walls, and objectives"""
         if not self.enabled:
             return
@@ -200,6 +201,11 @@ class StepLogger:
                     f.write(f"[{timestamp}] Objectives: {'|'.join(obj_strs)}\n")
                 else:
                     f.write(f"[{timestamp}] Objectives: none\n")
+
+                rules_payload = {
+                    "primary_objective": primary_objective_config
+                }
+                f.write(f"[{timestamp}] Rules: {json.dumps(rules_payload, separators=(',', ':'))}\n")
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:

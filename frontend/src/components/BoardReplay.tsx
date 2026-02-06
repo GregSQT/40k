@@ -64,6 +64,30 @@ interface ReplayAction {
   advance_roll?: number;
 }
 
+interface PrimaryObjectiveRule {
+  id: string;
+  name?: string;
+  identifier?: string;
+  description?: string;
+  scoring: {
+    start_turn: number;
+    max_points_per_turn: number;
+    rules: Array<{ id: string; points: number; condition: string }>;
+  };
+  timing: {
+    default_phase: string;
+    round5_second_player_phase: string;
+  };
+  control: {
+    method: string;
+    tie_behavior: string;
+  };
+}
+
+interface ReplayRules {
+  primary_objective: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
+}
+
 // Extended GameState for replay mode (with additional properties from parser)
 interface ReplayGameState extends Omit<GameState, 'episode_steps'> {
   episode_steps?: number; // Optional in replay mode
@@ -71,6 +95,7 @@ interface ReplayGameState extends Omit<GameState, 'episode_steps'> {
   board_rows?: number;
   walls?: Array<{ col: number; row: number }>;
   objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
+  rules?: ReplayRules;
 }
 
 interface ReplayEpisode {
@@ -475,11 +500,52 @@ export const BoardReplay: React.FC = () => {
 
     // Track persistent objective control and log changes (replay mode)
     const objectiveControllers: Record<string, number | null> = {};
+    const rules = currentEpisode.initial_state.rules;
     const logObjectiveControlChanges = (
       units: Unit[],
       objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>,
-      turnNumber: number
+      turnNumber: number,
+      actionPhase: string,
+      actionPlayer: number
     ) => {
+      if (!rules) {
+        throw new Error('Replay rules missing: cannot apply primary objective logic');
+      }
+      const primaryObjective = rules.primary_objective;
+      const primaryObjectiveConfig = Array.isArray(primaryObjective)
+        ? (() => {
+            if (primaryObjective.length !== 1) {
+              throw new Error('Replay rules primary_objective must contain exactly one config');
+            }
+            return primaryObjective[0];
+          })()
+        : primaryObjective;
+      if (!primaryObjectiveConfig) {
+        throw new Error('Replay rules primary_objective is null');
+      }
+      if (!primaryObjectiveConfig.scoring || primaryObjectiveConfig.scoring.start_turn === undefined || primaryObjectiveConfig.scoring.start_turn === null) {
+        throw new Error('Replay rules primary_objective.scoring.start_turn is missing');
+      }
+      if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.method || !primaryObjectiveConfig.control.tie_behavior) {
+        throw new Error('Replay rules primary_objective.control is missing required fields');
+      }
+      if (!primaryObjectiveConfig.timing || !primaryObjectiveConfig.timing.default_phase || !primaryObjectiveConfig.timing.round5_second_player_phase) {
+        throw new Error('Replay rules primary_objective.timing is missing required fields');
+      }
+      if (primaryObjectiveConfig.control.method !== 'oc_sum_greater') {
+        throw new Error(`Unsupported objective control method: ${primaryObjectiveConfig.control.method}`);
+      }
+      if (turnNumber < primaryObjectiveConfig.scoring.start_turn) {
+        return;
+      }
+      if (
+        turnNumber === 5 &&
+        actionPlayer === 2 &&
+        primaryObjectiveConfig.timing.round5_second_player_phase === 'fight' &&
+        actionPhase !== 'fight'
+      ) {
+        return;
+      }
       for (const obj of objectives) {
         const hexSet = new Set(obj.hexes.map((h) => `${h.col},${h.row}`));
         let p1_oc = 0;
@@ -511,6 +577,10 @@ export const BoardReplay: React.FC = () => {
           newController = 1;
         } else if (p2_oc > p1_oc) {
           newController = 2;
+        } else if (primaryObjectiveConfig.control.tie_behavior === 'no_control') {
+          newController = null;
+        } else {
+          throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
         }
 
         if (newController !== prevController) {
@@ -550,6 +620,13 @@ export const BoardReplay: React.FC = () => {
     for (let i = 0; i < currentActionIndex; i++) {
       const action = currentEpisode.actions[i];
       const turnNumber = parseInt(action.turn.replace('T', ''));
+      const actionPhase = action.type.includes('fight')
+        ? 'fight'
+        : action.type.includes('charge')
+          ? 'charge'
+          : action.type.includes('shoot') || action.type === 'advance'
+            ? 'shoot'
+            : 'move';
 
       if (action.type === 'move' && action.from && action.to) {
         gameLog.logMoveAction(
@@ -832,7 +909,7 @@ export const BoardReplay: React.FC = () => {
       const objectives = stateAfterAction?.objectives || currentEpisode.initial_state.objectives || [];
       if (objectives.length > 0 && stateAfterAction?.units) {
         const enrichedObjectiveUnits = enrichUnitsWithStats(stateAfterAction.units as Unit[]);
-        logObjectiveControlChanges(enrichedObjectiveUnits, objectives, turnNumber);
+        logObjectiveControlChanges(enrichedObjectiveUnits, objectives, turnNumber, actionPhase, action.player);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

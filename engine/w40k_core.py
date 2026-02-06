@@ -653,7 +653,14 @@ class W40KEngine(gym.Env):
                     "player": entry["player"],
                     "unitType": unit_type,
                 })
-            self.step_logger.log_episode_start(episode_units, scenario_name, bot_name=bot_name, walls=walls, objectives=objectives)
+            self.step_logger.log_episode_start(
+                episode_units,
+                scenario_name,
+                bot_name=bot_name,
+                walls=walls,
+                objectives=objectives,
+                primary_objective_config=self._scenario_primary_objective
+            )
             
             # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number
             # This ensures debug.log uses the same episode number as step.log

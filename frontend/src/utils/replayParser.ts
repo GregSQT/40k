@@ -44,6 +44,30 @@ interface ReplayAction {
   advance_roll?: number;
 }
 
+interface PrimaryObjectiveRule {
+  id: string;
+  name?: string;
+  identifier?: string;
+  description?: string;
+  scoring: {
+    start_turn: number;
+    max_points_per_turn: number;
+    rules: Array<{ id: string; points: number; condition: string }>;
+  };
+  timing: {
+    default_phase: string;
+    round5_second_player_phase: string;
+  };
+  control: {
+    method: string;
+    tie_behavior: string;
+  };
+}
+
+interface ReplayRules {
+  primary_objective: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
+}
+
 interface ReplayGameState {
   [key: string]: unknown;
   episode_steps?: number;
@@ -51,6 +75,7 @@ interface ReplayGameState {
   board_rows?: number;
   walls?: Array<{ col: number; row: number }>;
   objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
+  rules?: ReplayRules;
 }
 
 // Temporary interface for parsing (has additional properties)
@@ -64,6 +89,7 @@ interface ReplayEpisodeDuringParsing {
   initial_positions: Record<number, { col: number; row: number }>;
   walls: Array<{ col: number; row: number }>;
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
+  rules?: ReplayRules;
   final_result: string | null;
 }
 
@@ -159,6 +185,18 @@ export function parse_log_file_from_text(text: string): ReplayData {
             });
           }
         }
+      }
+      continue;
+    }
+
+    const rulesMatch = trimmed.match(/Rules: (.+)/);
+    if (rulesMatch) {
+      const rulesStr = rulesMatch[1];
+      try {
+        currentEpisode.rules = JSON.parse(rulesStr);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Invalid Rules JSON in step.log: ${message}`);
       }
       continue;
     }
@@ -648,6 +686,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
   // Convert to replay format
   const replayEpisodes = episodes.map(episode => {
+    if (!episode.rules) {
+      throw new Error(`Missing Rules block for episode ${episode.episode_num}`);
+    }
     // Build initial units with starting positions (episode.units has been mutated by move parsing)
     const initialUnits = [];
     for (const uid in episode.units) {
@@ -668,6 +709,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       units: initialUnits,
       walls: episode.walls || [],
       objectives: episode.objectives || [],
+      rules: episode.rules,
       currentTurn: 1,
       currentPlayer: 1,
       phase: 'move'
@@ -805,11 +847,16 @@ export function parse_log_file_from_text(text: string): ReplayData {
         return unitCopy;
       });
 
+      const turnNumber = parseInt(action.turn.replace('T', ''), 10);
+      if (Number.isNaN(turnNumber)) {
+        throw new Error(`Invalid turn value in step.log action: ${action.turn}`);
+      }
       states.push({
         units: stateUnits,
         walls: episode.walls || [],
         objectives: episode.objectives || [],
-        currentTurn: 1,
+        rules: episode.rules,
+        currentTurn: turnNumber,
         currentPlayer: action.player,
         phase,
         action,

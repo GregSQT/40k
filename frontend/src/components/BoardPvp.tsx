@@ -17,6 +17,30 @@ import { WeaponDropdown } from './WeaponDropdown';
 // Objective control map type - tracks which player controls each objective
 type ObjectiveControllers = { [objectiveName: string]: number | null };
 
+interface PrimaryObjectiveRule {
+  id: string;
+  name?: string;
+  identifier?: string;
+  description?: string;
+  scoring: {
+    start_turn: number;
+    max_points_per_turn: number;
+    rules: Array<{ id: string; points: number; condition: string }>;
+  };
+  timing: {
+    default_phase: string;
+    round5_second_player_phase: string;
+  };
+  control: {
+    method: string;
+    tie_behavior: string;
+  };
+}
+
+interface ReplayRules {
+  primary_objective: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
+}
+
 // Calculate objective control with PERSISTENT control rules
 // Once a player controls an objective, they keep it until opponent gets strictly higher OC
 // Returns a map of "col,row" -> controller (0, 1, or null for contested/uncontrolled)
@@ -25,7 +49,8 @@ function calculateObjectiveControl(
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }> | undefined,
   flatObjectiveHexes: [number, number][] | undefined,
   currentControllers: ObjectiveControllers,  // Persistent control state
-  usePersistentState: boolean = true  // If false, recalculate control based only on current state
+  usePersistentState: boolean = true,  // If false, recalculate control based only on current state
+  tieBehavior?: string
 ): { controlMap: { [hexKey: string]: number | null }, updatedControllers: ObjectiveControllers } {
   const controlMap: { [hexKey: string]: number | null } = {};
   const updatedControllers: ObjectiveControllers = usePersistentState ? { ...currentControllers } : {};
@@ -92,8 +117,9 @@ function calculateObjectiveControl(
     } else if (p2_oc > p1_oc) {
       // P2 has more OC - P2 captures/keeps
       newController = 2;
-    } else if (!usePersistentState) {
+    } else if (tieBehavior === "no_control" || !usePersistentState) {
       // If equal OC and not using persistent state: no control
+      // If tie_behavior=no_control: neutral control even with persistent state
       newController = null;
     }
     // If equal OC and using persistent state: current controller keeps control (no change)
@@ -1176,14 +1202,62 @@ export default function Board({
         lastReplayActionIndexRef.current = replayActionIndex;
       }
 
-      // Calculate objective control based on unit positions with PERSISTENT control
-      const { controlMap: objectiveControl, updatedControllers } = calculateObjectiveControl(
-        units,
-        objectivesOverride,
-        effectiveObjectiveHexes,
-        objectiveControllersRef.current,
-        true  // Always use persistent state (including replay)
-      );
+      const replayRules = (gameState as { rules?: ReplayRules } | null)?.rules;
+      let shouldApplyObjectiveControl = true;
+      let tieBehavior: string | undefined;
+      if (replayActionIndex !== undefined && replayRules) {
+        const primaryObjective = replayRules.primary_objective;
+        const primaryObjectiveConfig = Array.isArray(primaryObjective)
+          ? (() => {
+              if (primaryObjective.length !== 1) {
+                throw new Error("Replay rules primary_objective must contain exactly one config");
+              }
+              return primaryObjective[0];
+            })()
+          : primaryObjective;
+        if (!primaryObjectiveConfig) {
+          throw new Error("Replay rules primary_objective is null");
+        }
+        if (!primaryObjectiveConfig.scoring || primaryObjectiveConfig.scoring.start_turn === undefined || primaryObjectiveConfig.scoring.start_turn === null) {
+          throw new Error("Replay rules primary_objective.scoring.start_turn is missing");
+        }
+        if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.method || !primaryObjectiveConfig.control.tie_behavior) {
+          throw new Error("Replay rules primary_objective.control is missing required fields");
+        }
+        if (!primaryObjectiveConfig.timing || !primaryObjectiveConfig.timing.default_phase || !primaryObjectiveConfig.timing.round5_second_player_phase) {
+          throw new Error("Replay rules primary_objective.timing is missing required fields");
+        }
+        if (primaryObjectiveConfig.control.method !== "oc_sum_greater") {
+          throw new Error(`Unsupported objective control method: ${primaryObjectiveConfig.control.method}`);
+        }
+        if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
+          throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
+        }
+        const startTurn = primaryObjectiveConfig.scoring.start_turn;
+        if (currentTurn < startTurn) {
+          shouldApplyObjectiveControl = false;
+        }
+        if (
+          currentTurn === 5 &&
+          currentPlayer === 2 &&
+          primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
+          phase !== "fight"
+        ) {
+          shouldApplyObjectiveControl = false;
+        }
+        tieBehavior = primaryObjectiveConfig.control.tie_behavior;
+      }
+
+      const { controlMap: objectiveControl, updatedControllers } = shouldApplyObjectiveControl
+        ? calculateObjectiveControl(
+            units,
+            objectivesOverride,
+            effectiveObjectiveHexes,
+            objectiveControllersRef.current,
+            true,
+            tieBehavior
+          )
+        : { controlMap: {}, updatedControllers: objectiveControllersRef.current };
       // Update persistent state
       objectiveControllersRef.current = updatedControllers;
 
