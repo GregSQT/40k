@@ -187,6 +187,7 @@ def initialize_engine():
         config["training_configs"] = all_training_configs  # Multi-agent support
         config["agent_keys"] = list(agent_keys)  # Track which agents are active
         config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
+        config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
         
         # CRITICAL FIX: Add observation_params from training_config "default" phase
         obs_params = training_config_default.get("observation_params", {})
@@ -206,7 +207,7 @@ def initialize_engine():
             config=config,
             rewards_config="default",
             training_config_name="default",
-            controlled_agent=None,
+            controlled_agent=first_agent,
             active_agents=None,
             scenario_file=scenario_file,
             unit_registry=unit_registry,
@@ -302,6 +303,7 @@ def initialize_pve_engine():
         config["rewards_configs"] = all_rewards_configs  # Multi-agent support
         config["training_configs"] = all_training_configs  # Multi-agent support
         config["agent_keys"] = list(agent_keys)  # Track which agents are active
+        config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
         
         # CRITICAL FIX: Add observation_params from training_config "default" phase
         obs_params = training_config_default.get("observation_params", {})
@@ -320,7 +322,7 @@ def initialize_pve_engine():
             config=config,
             rewards_config="default",
             training_config_name="default",
-            controlled_agent="SpaceMarine_Infantry_Troop_RangedSwarm",  # Player 2 AI agent
+            controlled_agent=first_agent,
             active_agents=None,
             scenario_file=scenario_file,
             unit_registry=unit_registry,

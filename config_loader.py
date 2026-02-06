@@ -246,6 +246,50 @@ class ConfigLoader:
                 return json.load(f)
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON in {agent_config_path}: {e}")
+
+    def load_primary_objective_config(self, objective_id: str) -> Dict[str, Any]:
+        """Load primary objective configuration by ID.
+
+        Args:
+            objective_id: Primary objective identifier (e.g., "objectives_control")
+
+        Returns:
+            Primary objective configuration dictionary
+
+        Raises:
+            FileNotFoundError: If primary objective directory is missing
+            KeyError: If no config matches the requested objective_id
+            RuntimeError: If JSON is invalid
+        """
+        if not objective_id:
+            raise ValueError("objective_id is required to load primary objective config")
+        cache_key = f"primary_objective:{objective_id}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        primary_objective_dir = self.config_dir / "primary_objective"
+        if not primary_objective_dir.exists():
+            raise FileNotFoundError(
+                f"Primary objective config directory not found: {primary_objective_dir}"
+            )
+
+        for config_file in primary_objective_dir.glob("*.json"):
+            try:
+                with open(config_file, "r", encoding="utf-8-sig") as f:
+                    config = json.load(f)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"Invalid JSON in {config_file}: {e}")
+
+            config_id = config.get("id")
+            if config_id is None:
+                raise KeyError(f"Primary objective config missing required 'id': {config_file}")
+            if str(config_id) == str(objective_id):
+                self._cache[cache_key] = config
+                return config
+
+        raise KeyError(
+            f"Primary objective id '{objective_id}' not found in {primary_objective_dir}"
+        )
     
     def load_agent_scenario(self, agent_key: str, scenario_name: str) -> Dict[str, Any]:
         """Load agent-specific scenario file.

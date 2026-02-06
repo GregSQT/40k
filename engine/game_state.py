@@ -338,6 +338,7 @@ class GameStateManager:
             # If present in scenario, use it; otherwise return None for board config selection
             scenario_walls = None
             scenario_objectives = None
+            scenario_primary_objective = None
 
             if isinstance(scenario_data, dict):
                 if "wall_hexes" in scenario_data:
@@ -348,12 +349,29 @@ class GameStateManager:
                 # Legacy flat list support (deprecated)
                 elif "objective_hexes" in scenario_data:
                     scenario_objectives = scenario_data["objective_hexes"]
+                if "primary_objectives" in scenario_data:
+                    scenario_primary_objective = scenario_data["primary_objectives"]
+                elif "primary_objective" in scenario_data:
+                    scenario_primary_objective = scenario_data["primary_objective"]
+
+            scenario_primary_objectives = (
+                scenario_primary_objective
+                if isinstance(scenario_primary_objective, list)
+                else None
+            )
+            scenario_primary_objective_single = (
+                scenario_primary_objective
+                if scenario_primary_objective is not None and not isinstance(scenario_primary_objective, list)
+                else None
+            )
 
             # Return dict with units and optional terrain
             return {
                 "units": enhanced_units,
                 "wall_hexes": scenario_walls,
-                "objectives": scenario_objectives
+                "objectives": scenario_objectives,
+                "primary_objectives": scenario_primary_objectives,
+                "primary_objective": scenario_primary_objective_single
             }
     
     # ============================================================================
@@ -471,14 +489,160 @@ class GameStateManager:
 
         return counts
 
+    def _calculate_primary_objective_control_counts(
+        self,
+        game_state: Dict[str, Any],
+        primary_objective: Dict[str, Any]
+    ) -> Dict[int, int]:
+        """
+        Calculate objective control counts for primary objective scoring.
+
+        Uses primary objective control rules (method + tie behavior) to count
+        objectives controlled by each player for scoring purposes.
+        """
+        objectives = require_key(game_state, "objectives")
+        if not objectives:
+            return {1: 0, 2: 0}
+
+        control_cfg = require_key(primary_objective, "control")
+        method = require_key(control_cfg, "method")
+        tie_behavior = require_key(control_cfg, "tie_behavior")
+
+        if method != "oc_sum_greater":
+            raise ValueError(f"Unsupported primary objective control method: {method}")
+        if tie_behavior != "no_control":
+            raise ValueError(f"Unsupported primary objective tie_behavior: {tie_behavior}")
+
+        units_cache = require_key(game_state, "units_cache")
+        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+
+        counts = {1: 0, 2: 0}
+
+        for objective in objectives:
+            obj_hexes = require_key(objective, "hexes")
+            hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
+            player_1_oc = 0
+            player_2_oc = 0
+
+            for unit_id, entry in units_cache.items():
+                unit = unit_by_id.get(str(unit_id))
+                if not unit:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                unit_pos = normalize_coordinates(entry["col"], entry["row"])
+                if unit_pos in hex_set:
+                    oc = require_key(unit, "OC")
+                    unit_player = require_key(entry, "player")
+                    unit_player_int = int(unit_player)
+                    if unit_player_int == 1:
+                        player_1_oc += oc
+                    elif unit_player_int == 2:
+                        player_2_oc += oc
+                    else:
+                        raise ValueError(f"Unexpected unit player id: {unit_player}")
+
+            controller = None
+            if player_1_oc > player_2_oc:
+                controller = 1
+            elif player_2_oc > player_1_oc:
+                controller = 2
+
+            if controller is not None:
+                counts[controller] += 1
+
+        return counts
+
+    def apply_primary_objective_scoring(self, game_state: Dict[str, Any], scoring_phase: str) -> None:
+        """
+        Apply primary objective scoring for the current turn and player.
+        
+        scoring_phase: "command" or "fight"
+        """
+        primary_objective = game_state.get("primary_objective")
+        if primary_objective is None:
+            return
+        if isinstance(primary_objective, list):
+            for objective in primary_objective:
+                if not isinstance(objective, dict):
+                    raise TypeError(f"primary_objective list entry is {type(objective).__name__}, expected dict")
+                self._apply_primary_objective_scoring_single(game_state, scoring_phase, objective)
+            return
+        if not isinstance(primary_objective, dict):
+            raise TypeError(f"primary_objective is {type(primary_objective).__name__}, expected dict")
+        self._apply_primary_objective_scoring_single(game_state, scoring_phase, primary_objective)
+
+    def _apply_primary_objective_scoring_single(
+        self,
+        game_state: Dict[str, Any],
+        scoring_phase: str,
+        primary_objective: Dict[str, Any]
+    ) -> None:
+        """
+        Apply primary objective scoring for a single objective config.
+        """
+
+        scoring_cfg = require_key(primary_objective, "scoring")
+        timing_cfg = require_key(primary_objective, "timing")
+        start_turn = require_key(scoring_cfg, "start_turn")
+        max_points_per_turn = require_key(scoring_cfg, "max_points_per_turn")
+        rules = require_key(scoring_cfg, "rules")
+        default_phase = require_key(timing_cfg, "default_phase")
+        round5_second_player_phase = require_key(timing_cfg, "round5_second_player_phase")
+
+        current_turn = require_key(game_state, "turn")
+        current_player = require_key(game_state, "current_player")
+        current_player_int = int(current_player)
+
+        if current_turn < start_turn:
+            return
+
+        if current_turn == 5 and current_player_int == 2:
+            expected_phase = round5_second_player_phase
+        else:
+            expected_phase = default_phase
+
+        if scoring_phase != expected_phase:
+            return
+
+        objective_id = require_key(primary_objective, "id")
+        scored_turns = require_key(game_state, "primary_objective_scored_turns")
+        score_key = (objective_id, current_turn, current_player_int)
+        if score_key in scored_turns:
+            return
+
+        counts = self._calculate_primary_objective_control_counts(game_state, primary_objective)
+        opponent_player = 1 if current_player_int == 2 else 2
+
+        total_points = 0
+        for rule in rules:
+            condition = require_key(rule, "condition")
+            points = require_key(rule, "points")
+            if condition == "control_at_least_one":
+                if counts[current_player_int] >= 1:
+                    total_points += points
+            elif condition == "control_at_least_two":
+                if counts[current_player_int] >= 2:
+                    total_points += points
+            elif condition == "control_more_than_opponent":
+                if counts[current_player_int] > counts[opponent_player]:
+                    total_points += points
+            else:
+                raise ValueError(f"Unsupported primary objective condition: {condition}")
+
+        if total_points > max_points_per_turn:
+            total_points = max_points_per_turn
+
+        victory_points = require_key(game_state, "victory_points")
+        if current_player_int not in victory_points:
+            raise KeyError(f"victory_points missing player {current_player_int}")
+        victory_points[current_player_int] += total_points
+        scored_turns.add(score_key)
+
     def check_game_over(self, game_state: Dict[str, Any]) -> bool:
         """
         Check if game is over.
 
         Game ends when:
-        1. Turn 5 completes (objective-based victory)
-        2. One player has no living units (elimination victory)
-        3. Turn limit reached (training config override)
+        1. Turn limit reached (training config override)
         """
         # Check training turn limit (for RL training - may differ from standard 5 turns)
         if hasattr(self, 'training_config'):
@@ -486,131 +650,59 @@ class GameStateManager:
             if max_turns and game_state["turn"] > max_turns:
                 return True
 
-        # Standard W40K: Game ends after turn 5
-        # Check if we've completed turn 5 (turn counter goes to 6)
-        if game_state["turn"] > 5:
+        if require_key(game_state, "turn_limit_reached"):
             return True
 
-        # Check unit elimination - game over if any player has no living units
-        living_units_by_player = {}
-        dead_units_by_player = {}
-
-        units_cache = require_key(game_state, "units_cache")
-        for _unit_id, entry in units_cache.items():
-            player = entry["player"]
-            if player not in living_units_by_player:
-                living_units_by_player[player] = 0
-            living_units_by_player[player] += 1
-
-        # Check if any player has no living units (elimination condition)
-        players_with_no_living_units = [pid for pid, count in living_units_by_player.items() if count == 0]
-        game_over_by_elimination = len(players_with_no_living_units) > 0
-
-        # Game is over if any player has no living units
-        return game_over_by_elimination
+        return False
     
     def determine_winner(self, game_state: Dict[str, Any]) -> Optional[int]:
         """
-        Determine winner based on objective control or elimination.
+        Determine winner based on primary objective victory points.
 
-        Victory conditions (in order of priority):
-        1. Elimination: If one player has no living units, opponent wins
-        2. Objective control: At end of turn 5, player controlling more objectives wins
-        3. Tiebreaker: If equal objectives, player with more cumulated VALUE wins
-        4. Draw: If still tied, return -1
+        Victory conditions:
+        1. More victory points at end of game
+        2. Tiebreaker: More total VALUE of living units
+        3. Draw if still tied
 
         Returns:
-            0 = Player 0 wins
             1 = Player 1 wins
+            2 = Player 2 wins
             -1 = Draw
             None = Game still ongoing
         """
-        living_units_by_player = {}
+        if not require_key(game_state, "turn_limit_reached"):
+            return None
+
+        victory_points = require_key(game_state, "victory_points")
+        p1_points = require_key(victory_points, 1)
+        p2_points = require_key(victory_points, 2)
+
+        if p1_points > p2_points:
+            return 1
+        if p2_points > p1_points:
+            return 2
+
         units_cache = require_key(game_state, "units_cache")
-        for _unit_id, entry in units_cache.items():
-            player = entry["player"]
-            if player not in living_units_by_player:
-                living_units_by_player[player] = 0
-            living_units_by_player[player] += 1
-
-        current_turn = game_state["turn"]
-        max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else 5
-
-        if not self.quiet:
-            print(f"\n🔍 WINNER DETERMINATION DEBUG:")
-            print(f"   Current turn: {current_turn}")
-            print(f"   Max turns: {max_turns}")
-            print(f"   Living units: {living_units_by_player}")
-
-        # Check elimination first (immediate win condition)
-        living_players = list(living_units_by_player.keys())
-        if len(living_players) == 1:
-            winner = living_players[0]
-            if not self.quiet:
-                print(f"   -> Winner: Player {winner} (elimination)")
-            return winner
-        elif len(living_players) == 0:
-            if not self.quiet:
-                print(f"   -> Draw: No survivors")
-            return -1
-
-        # Check if game ended due to turn limit (turn 5 end or training config)
-        game_ended_by_turns = False
-        if hasattr(self, 'training_config') and max_turns:
-            game_ended_by_turns = current_turn > max_turns
-        else:
-            game_ended_by_turns = current_turn > 5
-
-        if game_ended_by_turns:
-            # OBJECTIVE-BASED VICTORY at turn limit
-            obj_counts = self.count_controlled_objectives(game_state)
-
-            if not self.quiet:
-                print(f"   Objective control: P0={obj_counts[0]}, P1={obj_counts[1]}")
-
-            if obj_counts[0] > obj_counts[1]:
-                if not self.quiet:
-                    print(f"   -> Winner: Player 0 ({obj_counts[0]} > {obj_counts[1]} objectives)")
-                return 0
-            elif obj_counts[1] > obj_counts[0]:
-                if not self.quiet:
-                    print(f"   -> Winner: Player 1 ({obj_counts[1]} > {obj_counts[0]} objectives)")
-                return 1
+        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+        p1_value = 0
+        p2_value = 0
+        for unit_id, entry in units_cache.items():
+            unit = unit_by_id.get(str(unit_id))
+            if not unit:
+                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            unit_value = require_key(unit, "VALUE")
+            if entry["player"] == 1:
+                p1_value += unit_value
+            elif entry["player"] == 2:
+                p2_value += unit_value
             else:
-                # Tiebreaker: More cumulated VALUE of living units wins
-                units_cache = require_key(game_state, "units_cache")
-                unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-                p0_value = 0
-                p1_value = 0
-                for unit_id, entry in units_cache.items():
-                    unit = unit_by_id.get(str(unit_id))
-                    if not unit:
-                        raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                    unit_value = unit.get("VALUE", 10)
-                    if entry["player"] == 0:
-                        p0_value += unit_value
-                    else:
-                        p1_value += unit_value
-                if not self.quiet:
-                    print(f"   Equal objectives ({obj_counts[0]}), tiebreaker by VALUE: P0={p0_value}, P1={p1_value}")
+                raise ValueError(f"Unexpected unit player id: {entry['player']}")
 
-                if p0_value > p1_value:
-                    if not self.quiet:
-                        print(f"   -> Winner: Player 0 (tiebreaker: {p0_value} > {p1_value} VALUE)")
-                    return 0
-                elif p1_value > p0_value:
-                    if not self.quiet:
-                        print(f"   -> Winner: Player 1 (tiebreaker: {p1_value} > {p0_value} VALUE)")
-                    return 1
-                else:
-                    if not self.quiet:
-                        print(f"   -> Draw: Equal objectives and VALUE")
-                    return -1
-
-        # Game still ongoing
-        if not self.quiet:
-            print(f"   -> Game ongoing: turn {current_turn}, both players have units")
-        return None
+        if p1_value > p2_value:
+            return 1
+        if p2_value > p1_value:
+            return 2
+        return -1
 
     def determine_winner_with_method(self, game_state: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
         """
@@ -618,78 +710,39 @@ class GameStateManager:
 
         Returns:
             Tuple of (winner, win_method):
-            - winner: 0, 1, -1 (draw), or None (ongoing)
-            - win_method: "elimination", "objectives", "value_tiebreaker", "draw", or None
+            - winner: 1, 2, -1 (draw), or None (ongoing)
+            - win_method: "objectives", "value_tiebreaker", "draw", or None
         """
-        living_units_by_player = {}
-        units_cache = require_key(game_state, "units_cache")
-        for _unit_id, entry in units_cache.items():
-            player = entry["player"]
-            if player not in living_units_by_player:
-                living_units_by_player[player] = 0
-            living_units_by_player[player] += 1
-
-        current_turn = game_state["turn"]
-        max_turns = self.training_config.get("max_turns_per_episode") if hasattr(self, 'training_config') else 5
-
-        # Check elimination first (immediate win condition)
-        living_players = list(living_units_by_player.keys())
-        if len(living_players) == 1:
-            return living_players[0], "elimination"
-        elif len(living_players) == 0:
-            return -1, "draw"
-
-        # Check if game ended due to turn limit
-        # CRITICAL: Only check objectives if game ended by turn limit (not elimination)
-        # This happens when P1 completes turn 5 and turn_limit_reached flag is set
-        game_ended_by_turns = False
-        if len(living_players) == 2:  # Both players still alive
-            # Check if turn_limit_reached flag is set (set by fight_handlers when P1 completes turn 5)
-            if require_key(game_state, "turn_limit_reached"):
-                game_ended_by_turns = True
-            # Note: We don't check turn number; only when flag is explicitly set
-
-        if game_ended_by_turns:
-            # OBJECTIVE-BASED VICTORY at turn limit
-            obj_counts = self.count_controlled_objectives(game_state)
-
-            if obj_counts[0] > obj_counts[1]:
-                return 0, "objectives"
-            elif obj_counts[1] > obj_counts[0]:
-                return 1, "objectives"
-            else:
-                # Tiebreaker: More cumulated VALUE of living units wins
-                units_cache = require_key(game_state, "units_cache")
-                unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-                p0_value = 0
-                p1_value = 0
-                for unit_id, entry in units_cache.items():
-                    unit = unit_by_id.get(str(unit_id))
-                    if not unit:
-                        raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                    unit_value = require_key(unit, "VALUE")
-                    if entry["player"] == 0:
-                        p0_value += unit_value
-                    else:
-                        p1_value += unit_value
-
-                if p0_value > p1_value:
-                    return 0, "value_tiebreaker"
-                elif p1_value > p0_value:
-                    return 1, "value_tiebreaker"
-                else:
-                    return -1, "draw"
-
-        # Game still ongoing
-        # CRITICAL: If game_over is True, we should never reach here
-        # This indicates a bug - log it but return None to indicate the issue
-        if require_key(game_state, "game_over"):
-            # BUG: Game is over but no winner determined
-            # This should not happen - log error but don't crash
-            import warnings
-            warnings.warn(f"BUG: game_over=True but no winner determined. Turn={current_turn}, Living players={living_players}")
-            # Return draw to prevent None win_method
-            return -1, "draw"
-        else:
-            # Game still ongoing - this is normal
+        if not require_key(game_state, "turn_limit_reached"):
             return None, None
+
+        victory_points = require_key(game_state, "victory_points")
+        p1_points = require_key(victory_points, 1)
+        p2_points = require_key(victory_points, 2)
+
+        if p1_points > p2_points:
+            return 1, "objectives"
+        if p2_points > p1_points:
+            return 2, "objectives"
+
+        units_cache = require_key(game_state, "units_cache")
+        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+        p1_value = 0
+        p2_value = 0
+        for unit_id, entry in units_cache.items():
+            unit = unit_by_id.get(str(unit_id))
+            if not unit:
+                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            unit_value = require_key(unit, "VALUE")
+            if entry["player"] == 1:
+                p1_value += unit_value
+            elif entry["player"] == 2:
+                p2_value += unit_value
+            else:
+                raise ValueError(f"Unexpected unit player id: {entry['player']}")
+
+        if p1_value > p2_value:
+            return 1, "value_tiebreaker"
+        if p2_value > p1_value:
+            return 2, "value_tiebreaker"
+        return -1, "draw"

@@ -559,7 +559,8 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Invariant: AI/gym can auto-activate; human should choose the unit manually.
     # Required for convert_gym_action, get_action_mask, and any reader (e.g. debug log).
-    is_pve = game_state.get("pve_mode", False) or game_state.get("is_pve_mode", False)
+    cfg = require_key(game_state, "config")
+    is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
     if is_pve and current_player != 2:
         if "active_shooting_unit" in game_state:
             del game_state["active_shooting_unit"]
@@ -2171,42 +2172,23 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_attack_preview": True
         }
     elif game_state["current_player"] == 2:
-        # Player 2 complete -> Check if incrementing turn would exceed limit
-        cfg = game_state["config"] if "config" in game_state else None
-        tc = cfg["training_config"] if cfg and "training_config" in cfg else None
-        max_turns = tc["max_turns_per_episode"] if tc and "max_turns_per_episode" in tc else None
-        if max_turns and (game_state["turn"] + 1) > max_turns:
-            # Incrementing would exceed turn limit - end game without incrementing
-            game_state["game_over"] = True
-            return {
-                **base_result,
-                "phase_complete": True,
-                "game_over": True,
-                "turn_limit_reached": True,
-                "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
-                "clear_blinking_gentle": True,
-                "reset_mode": "select",
-                "clear_selected_unit": True,
-                "clear_attack_preview": True
-            }
-        else:
-            # AI_TURN.md Line 105: P2 Move -> P2 Shoot -> P2 Charge -> P2 Fight
-            # Player stays 2, advance to charge phase
-            # Turn increment happens at P2 Fight end (fight_handlers.py:797)
-            return {
-                **base_result,
-                "phase_complete": True,
-                "phase_transition": True,
-                "next_phase": "charge",
-                "current_player": 2,
-                # Direct field access
-                "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
-                # Add missing frontend cleanup signals
-                "clear_blinking_gentle": True,
-                "reset_mode": "select",
-                "clear_selected_unit": True,
-                "clear_attack_preview": True
-            }
+        # AI_TURN.md Line 105: P2 Move -> P2 Shoot -> P2 Charge -> P2 Fight
+        # Player stays 2, advance to charge phase
+        # Turn increment happens at P2 Fight end (fight_handlers.py:797)
+        return {
+            **base_result,
+            "phase_complete": True,
+            "phase_transition": True,
+            "next_phase": "charge",
+            "current_player": 2,
+            # Direct field access
+            "units_processed": len(game_state["units_shot"] if "units_shot" in game_state else set()),
+            # Add missing frontend cleanup signals
+            "clear_blinking_gentle": True,
+            "reset_mode": "select",
+            "clear_selected_unit": True,
+            "clear_attack_preview": True
+        }
 
 def shooting_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Legacy function - redirects to new complete function"""

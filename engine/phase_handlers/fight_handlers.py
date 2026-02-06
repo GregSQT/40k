@@ -21,6 +21,7 @@ from engine.combat_utils import (
     get_unit_coordinates,
     resolve_dice_value
 )
+from engine.game_state import GameStateManager
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
     ACTION, PASS, ERROR, FIGHT,
@@ -389,7 +390,11 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         tc = cfg["training_config"] if cfg and "training_config" in cfg else None
         max_turns = tc["max_turns_per_episode"] if tc and "max_turns_per_episode" in tc else None
         if max_turns and (game_state["turn"] + 1) > max_turns:
+            # Primary objective scoring for P2 on round 5 (fight phase)
+            state_manager = GameStateManager(require_key(game_state, "config"))
+            state_manager.apply_primary_objective_scoring(game_state, "fight")
             # Incrementing would exceed turn limit - end game without incrementing
+            game_state["turn_limit_reached"] = True
             game_state["game_over"] = True
             return {
                 "phase_complete": True,

@@ -8,6 +8,7 @@ import sys
 import os
 import re
 import math
+import json
 from collections import defaultdict, Counter
 from typing import Dict, List, Tuple, Set, Optional, Any
 
@@ -48,6 +49,8 @@ def max_dice_value(value: Any, context: str) -> int:
 
 # Global variable for debug log file
 _debug_log_file = None
+_scenario_objective_name_to_id_cache: Dict[str, Dict[str, int]] = {}
+_scenario_primary_objective_ids_cache: Dict[str, List[str]] = {}
 
 
 def _debug_log(message: str) -> None:
@@ -56,6 +59,130 @@ def _debug_log(message: str) -> None:
     if _debug_log_file:
         _debug_log_file.write(message + "\n")
         _debug_log_file.flush()
+
+
+def _resolve_scenario_path(scenario_name: str) -> str:
+    """Resolve scenario path from scenario name (no fallbacks)."""
+    if not scenario_name or scenario_name == "Unknown":
+        raise ValueError("Scenario name is missing or unknown; cannot resolve objectives mapping")
+    candidate_names = [scenario_name]
+    if not scenario_name.endswith(".json"):
+        candidate_names.append(f"{scenario_name}.json")
+    candidate_paths = []
+    for name in candidate_names:
+        candidate_paths.append(os.path.join(project_root, name))
+        candidate_paths.append(os.path.join(project_root, "config", name))
+    existing_paths = [path for path in candidate_paths if os.path.exists(path)]
+    if len(existing_paths) == 1:
+        return existing_paths[0]
+    if len(existing_paths) > 1:
+        raise ValueError(f"Ambiguous scenario path for '{scenario_name}': {existing_paths}")
+    scenarios_root = os.path.join(project_root, "config", "agents")
+    if os.path.exists(scenarios_root):
+        matches = []
+        for root, _, files in os.walk(scenarios_root):
+            if os.path.basename(root) != "scenarios":
+                continue
+            for name in candidate_names:
+                if name in files:
+                    matches.append(os.path.join(root, name))
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous scenario path for '{scenario_name}': {matches}")
+    raise FileNotFoundError(f"Scenario file not found for '{scenario_name}'")
+
+
+def _get_objective_name_to_id_map(scenario_name: str) -> Dict[str, int]:
+    """Load objective name->id mapping from scenario file."""
+    scenario_path = _resolve_scenario_path(scenario_name)
+    if scenario_path in _scenario_objective_name_to_id_cache:
+        return _scenario_objective_name_to_id_cache[scenario_path]
+    with open(scenario_path, "r", encoding="utf-8-sig") as f:
+        scenario_data = json.load(f)
+    objectives = scenario_data.get("objectives")
+    if not isinstance(objectives, list) or not objectives:
+        raise ValueError(f"Scenario '{scenario_name}' missing objectives list: {scenario_path}")
+    mapping: Dict[str, int] = {}
+    for entry in objectives:
+        if "id" not in entry or "name" not in entry:
+            raise KeyError(f"Objective entry missing id or name in {scenario_path}: {entry}")
+        name = str(entry["name"]).strip()
+        if not name:
+            raise ValueError(f"Objective entry has empty name in {scenario_path}: {entry}")
+        if name in mapping:
+            raise ValueError(f"Duplicate objective name '{name}' in {scenario_path}")
+        mapping[name] = int(entry["id"])
+    _scenario_objective_name_to_id_cache[scenario_path] = mapping
+    return mapping
+
+
+def _get_primary_objective_ids_for_scenario(scenario_name: str) -> List[str]:
+    """Load primary objective ids list from scenario file (no fallbacks)."""
+    scenario_path = _resolve_scenario_path(scenario_name)
+    if scenario_path in _scenario_primary_objective_ids_cache:
+        return list(_scenario_primary_objective_ids_cache[scenario_path])
+    with open(scenario_path, "r", encoding="utf-8-sig") as f:
+        scenario_data = json.load(f)
+    if "primary_objectives" in scenario_data:
+        primary_ids = scenario_data["primary_objectives"]
+    elif "primary_objective" in scenario_data:
+        primary_ids = [scenario_data["primary_objective"]]
+    else:
+        raise KeyError(
+            f"Scenario '{scenario_name}' missing primary_objectives (or primary_objective): {scenario_path}"
+        )
+    if not isinstance(primary_ids, list) or not primary_ids:
+        raise ValueError(
+            f"Scenario '{scenario_name}' has invalid primary_objectives: {primary_ids!r}"
+        )
+    normalized_ids = []
+    for obj_id in primary_ids:
+        if not obj_id:
+            raise ValueError(
+                f"Scenario '{scenario_name}' has empty primary objective id: {primary_ids!r}"
+            )
+        normalized_ids.append(str(obj_id))
+    _scenario_primary_objective_ids_cache[scenario_path] = normalized_ids
+    return list(normalized_ids)
+
+
+def _calculate_primary_objective_points(
+    control_snapshot: Dict[int, Dict[str, Any]],
+    primary_objective_cfg: Dict[str, Any],
+    player_id: int
+) -> int:
+    """Calculate primary objective points for a player from control snapshot."""
+    scoring_cfg = require_key(primary_objective_cfg, "scoring")
+    max_points_per_turn = require_key(scoring_cfg, "max_points_per_turn")
+    rules = require_key(scoring_cfg, "rules")
+
+    counts = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
+    for _, data in control_snapshot.items():
+        controller = require_key(data, "controller")
+        if controller in counts:
+            counts[controller] += 1
+
+    opponent_id = PLAYER_ONE_ID if player_id == PLAYER_TWO_ID else PLAYER_TWO_ID
+    total_points = 0
+    for rule in rules:
+        condition = require_key(rule, "condition")
+        points = require_key(rule, "points")
+        if condition == "control_at_least_one":
+            if counts[player_id] >= 1:
+                total_points += points
+        elif condition == "control_at_least_two":
+            if counts[player_id] >= 2:
+                total_points += points
+        elif condition == "control_more_than_opponent":
+            if counts[player_id] > counts[opponent_id]:
+                total_points += points
+        else:
+            raise ValueError(f"Unsupported primary objective condition: {condition}")
+
+    if total_points > max_points_per_turn:
+        total_points = max_points_per_turn
+    return total_points
 
 
 def _get_unit_hp_value(
@@ -609,8 +736,10 @@ def parse_step_log(filepath: str) -> Dict:
     
     # Load unit weapons at script start
     from ai.unit_registry import UnitRegistry
+    from config_loader import get_config_loader
     
     unit_registry = UnitRegistry()
+    config_loader = get_config_loader()
     unit_weapons_cache = {}  # unit_type -> list of weapons with {display_name, RNG, WEAPON_RULES, is_pistol}
     unit_attack_limits = {}  # unit_type -> {'rng_nb_by_weapon': Dict[str, int], 'cc_nb_by_weapon': Dict[str, int]}
     unit_combi_by_weapon = {}  # unit_type -> {weapon_display_name: combi_key}
@@ -671,6 +800,8 @@ def parse_step_log(filepath: str) -> Dict:
             -1: {'draw': 0}
         },
         'wins_by_scenario': defaultdict(lambda: {'p1': 0, 'p2': 0, 'draws': 0}),
+        'victory_points_by_episode': {},
+        'victory_points_values': {1: [], 2: []},
         'shoot_vs_wait': {
             'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0
         },
@@ -886,6 +1017,11 @@ def parse_step_log(filepath: str) -> Dict:
     last_phase = None
     fight_phase_seq_id = 0
     episode_step_index = 0
+    last_objective_snapshot = None
+    seen_turn_player: Set[Tuple[int, int]] = set()
+    episode_victory_points = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
+    scored_turns: Set[Tuple[str, int, int]] = set()
+    primary_objective_configs: List[Dict[str, Any]] = []
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -946,6 +1082,11 @@ def parse_step_log(filepath: str) -> Dict:
                 combi_conflicts_seen = set()
                 unit_deaths = []  # Reset deaths tracking for new episode
                 stats['objective_control_history'][current_episode_num] = []
+                last_objective_snapshot = None
+                seen_turn_player = set()
+                episode_victory_points = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
+                scored_turns = set()
+                primary_objective_configs = []
                 continue
 
             # Skip header lines
@@ -957,6 +1098,11 @@ def parse_step_log(filepath: str) -> Dict:
             scenario_match = re.search(r'Scenario: (.+)$', line)
             if scenario_match:
                 current_scenario = scenario_match.group(1).strip()
+                primary_objective_ids = _get_primary_objective_ids_for_scenario(current_scenario)
+                primary_objective_configs = [
+                    config_loader.load_primary_objective_config(obj_id)
+                    for obj_id in primary_objective_ids
+                ]
                 continue
 
             # Parse walls
@@ -991,12 +1137,16 @@ def parse_step_log(filepath: str) -> Dict:
                     name_part, hex_part = entry.split(':', 1)
                     name_part = name_part.strip()
                     obj_id_match = re.match(r'Obj(\d+)$', name_part)
-                    if not obj_id_match:
-                        raise ValueError(
-                            f"Invalid objective name '{name_part}' in episode {current_episode_num} "
-                            f"(expected Obj<id>)"
-                        )
-                    obj_id = int(obj_id_match.group(1))
+                    if obj_id_match:
+                        obj_id = int(obj_id_match.group(1))
+                    else:
+                        objective_name_map = _get_objective_name_to_id_map(current_scenario)
+                        if name_part not in objective_name_map:
+                            raise ValueError(
+                                f"Invalid objective name '{name_part}' in episode {current_episode_num} "
+                                f"(no mapping found in scenario '{current_scenario}')"
+                            )
+                        obj_id = objective_name_map[name_part]
                     if obj_id in objective_hexes:
                         raise ValueError(
                             f"Duplicate objective id {obj_id} in episode {current_episode_num}"
@@ -1096,6 +1246,35 @@ def parse_step_log(filepath: str) -> Dict:
                             'winner': winner,
                             'line': line.strip()[:100]
                         })
+
+                if primary_objective_configs:
+                    if last_objective_snapshot is None:
+                        raise ValueError(
+                            f"Missing objective control snapshot at episode end {current_episode_num}"
+                        )
+                    if last_turn == 5 and last_player == PLAYER_TWO_ID:
+                        for cfg in primary_objective_configs:
+                            objective_id = require_key(cfg, "id")
+                            score_key = (objective_id, last_turn, PLAYER_TWO_ID)
+                            if score_key in scored_turns:
+                                continue
+                            points = _calculate_primary_objective_points(
+                                last_objective_snapshot,
+                                cfg,
+                                PLAYER_TWO_ID
+                            )
+                            episode_victory_points[PLAYER_TWO_ID] += points
+                            scored_turns.add(score_key)
+                    stats['victory_points_by_episode'][current_episode_num] = {
+                        PLAYER_ONE_ID: episode_victory_points[PLAYER_ONE_ID],
+                        PLAYER_TWO_ID: episode_victory_points[PLAYER_TWO_ID],
+                    }
+                    stats['victory_points_values'][PLAYER_ONE_ID].append(
+                        episode_victory_points[PLAYER_ONE_ID]
+                    )
+                    stats['victory_points_values'][PLAYER_TWO_ID].append(
+                        episode_victory_points[PLAYER_TWO_ID]
+                    )
 
                 stats['current_episode_deaths'] = []
                 stats['wounded_enemies'] = {1: set(), 2: set()}
@@ -3138,6 +3317,34 @@ def parse_step_log(filepath: str) -> Dict:
                         "step_index": episode_step_index,
                         "control": snapshot,
                     })
+                    if not primary_objective_configs:
+                        raise ValueError(
+                            f"Primary objectives not loaded before step action in episode {current_episode_num}"
+                        )
+                    turn_player_key = (turn, player)
+                    if turn >= 2 and turn_player_key not in seen_turn_player:
+                        if turn == 5 and player == PLAYER_TWO_ID:
+                            seen_turn_player.add(turn_player_key)
+                        else:
+                            if last_objective_snapshot is None:
+                                raise ValueError(
+                                    f"Missing objective control snapshot before scoring "
+                                    f"(episode {current_episode_num}, turn {turn}, player {player})"
+                                )
+                            for cfg in primary_objective_configs:
+                                objective_id = require_key(cfg, "id")
+                                score_key = (objective_id, turn, player)
+                                if score_key in scored_turns:
+                                    continue
+                                points = _calculate_primary_objective_points(
+                                    last_objective_snapshot,
+                                    cfg,
+                                    player
+                                )
+                                episode_victory_points[player] += points
+                                scored_turns.add(score_key)
+                            seen_turn_player.add(turn_player_key)
+                    last_objective_snapshot = snapshot
 
                 stats['actions_by_type'][action_type] += 1
                 stats['actions_by_player'][player][action_type] += 1
@@ -3430,7 +3637,7 @@ def parse_step_breakdowns_from_debug(debug_log_path: str) -> Optional[List[Tuple
     return result if result else None
 
 
-def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tuple[int, int, float, Optional[int]]]] = None, predict_timings: Optional[List[Tuple[int, int, float]]] = None, get_mask_timings: Optional[List[Tuple[int, int, float]]] = None, console_log_write_timings: Optional[List[Tuple[int, int, float, int]]] = None, cascade_timings: Optional[List[Tuple[int, int, str, str, float]]] = None, step_breakdowns: Optional[List[Tuple[int, int, float, float, float, float, float, float, float]]] = None, between_step_timings: Optional[List[Tuple[int, int, float]]] = None, reset_timings: Optional[List[Tuple[int, float]]] = None, post_step_timings: Optional[List[Tuple[int, int, float]]] = None, pre_step_timings: Optional[List[Tuple[int, int, float]]] = None, wrapper_step_timings: Optional[List[Tuple[int, int, float]]] = None, after_step_increment_timings: Optional[List[Tuple[int, int, float]]] = None, debug_section_filter: Optional[str] = None):
+def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tuple[int, int, float, Optional[int]]]] = None, predict_timings: Optional[List[Tuple[int, int, float]]] = None, get_mask_timings: Optional[List[Tuple[int, int, float]]] = None, console_log_write_timings: Optional[List[Tuple[int, int, float, int]]] = None, cascade_timings: Optional[List[Tuple[int, int, str, str, float]]] = None, step_breakdowns: Optional[List[Tuple[int, int, float, float, float, float, float, float, float]]] = None, between_step_timings: Optional[List[Tuple[int, int, float]]] = None, reset_timings: Optional[List[Tuple[int, float]]] = None, post_step_timings: Optional[List[Tuple[int, int, float]]] = None, pre_step_timings: Optional[List[Tuple[int, int, float]]] = None, wrapper_step_timings: Optional[List[Tuple[int, int, float]]] = None, after_step_increment_timings: Optional[List[Tuple[int, int, float]]] = None, debug_section_filter: Optional[str] = None, output_lines: Optional[List[str]] = None, emit_console: bool = True):
     """Print formatted statistics."""
     active_debug_section: Optional[str] = None
 
@@ -3439,7 +3646,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if debug_section_filter is not None and active_debug_section is not None:
             if active_debug_section != debug_section_filter:
                 return
-        print(*args, **kwargs)
+        if emit_console:
+            print(*args, **kwargs)
+        if output_lines is not None:
+            sep = kwargs.get("sep", " ")
+            message = sep.join(str(a) for a in args)
+            output_lines.append(message)
         if output_f:
             print(*args, file=output_f, **kwargs)
             output_f.flush()
@@ -3783,6 +3995,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 '''
 
     # RÉSULTATS DES PARTIES
+    log_print("\n" + "=" * 80)
+    log_print("📊 BOT EVALUATION RESULTS")
+    log_print("=" * 80)
     log_print("\n" + "-" * 80)
     log_print("WIN METHODS")
     log_print("-" * 80)
@@ -3809,6 +4024,25 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{'TOTAL WINS':<20} {p1_total:6d} ({p1_pct:5.1f}%)   {p2_total:6d} ({p2_pct:5.1f}%)")
     log_print(f"{'DRAWS':<20} {draws:6d} ({draw_pct:5.1f}%)")
     
+    # VICTORY POINTS (OBJECTIVES)
+    log_print("\n" + "-" * 80)
+    log_print("VICTORY POINTS (OBJECTIVES)")
+    log_print("-" * 80)
+    vp_p1 = stats['victory_points_values'][PLAYER_ONE_ID]
+    vp_p2 = stats['victory_points_values'][PLAYER_TWO_ID]
+    if vp_p1 and vp_p2:
+        vp_p1_min = min(vp_p1)
+        vp_p1_max = max(vp_p1)
+        vp_p1_avg = sum(vp_p1) / len(vp_p1)
+        vp_p2_min = min(vp_p2)
+        vp_p2_max = max(vp_p2)
+        vp_p2_avg = sum(vp_p2) / len(vp_p2)
+        log_print(f"{'Player':<10} {'Min':>8} {'Avg':>8} {'Max':>8}")
+        log_print(f"{'P1':<10} {vp_p1_min:8.2f} {vp_p1_avg:8.2f} {vp_p1_max:8.2f}")
+        log_print(f"{'P2':<10} {vp_p2_min:8.2f} {vp_p2_avg:8.2f} {vp_p2_max:8.2f}")
+    else:
+        log_print("No victory point data recorded (check primary_objectives in scenarios).")
+
     # WINS BY SCENARIO
     if stats['wins_by_scenario']:
         log_print("\n" + "-" * 80)
@@ -4618,26 +4852,58 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 if __name__ == "__main__":
     import datetime
     import os
+    import argparse
     
-    if len(sys.argv) not in (2, 3):
-        print("Usage: python ai/analyzer.py step.log [debug_section]")
-        print("Valid debug sections: see DEBUGGING headers in output")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Analyze step.log and validate game rules compliance")
+    parser.add_argument("log_file", help="Path to step.log")
+    parser.add_argument("debug_section", nargs="?", default=None, help="Filter DEBUGGING section (see output headers)")
+    parser.add_argument("--d", action="store_true", help="Show only details section at end")
+    parser.add_argument("--b", action="store_true", help="Show only debugging section at end")
+    parser.add_argument("--s", action="store_true", help="Show only summary section at end")
+    parser.add_argument("--n", action="store_true", help="Show only final status line")
+    args = parser.parse_args()
 
-    log_file = sys.argv[1]
-    debug_section_filter = None
-    if len(sys.argv) == 3:
-        debug_section_filter = sys.argv[2]
+    log_file = args.log_file
+    debug_section_filter = args.debug_section
     
     # Open output file for writing
     output_file = 'analyzer.log'
     output_f = open(output_file, 'w', encoding='utf-8')
     
+    emit_console = not (args.d or args.b or args.s or args.n)
+
     def log_print(*args, **kwargs):
-        """Print to both console and file"""
-        print(*args, **kwargs)
+        """Print to console (optional) and file"""
+        if emit_console:
+            print(*args, **kwargs)
         print(*args, file=output_f, **kwargs)
         output_f.flush()
+
+    def _extract_section(
+        lines: List[str],
+        start_token: str,
+        end_token: str,
+        start_startswith: bool = False,
+        end_startswith: bool = False
+    ) -> List[str]:
+        start_index = None
+        end_index = None
+        for idx, line in enumerate(lines):
+            if start_index is None:
+                if start_startswith and line.startswith(start_token):
+                    start_index = idx
+                elif not start_startswith and start_token in line:
+                    start_index = idx
+            if start_index is not None:
+                if end_startswith and line.startswith(end_token):
+                    end_index = idx
+                    break
+                if not end_startswith and end_token in line:
+                    end_index = idx
+                    break
+        if start_index is None or end_index is None:
+            return []
+        return lines[start_index:end_index + 1]
     
     try:
         log_print(f"Analyzing {log_file}...")
@@ -4658,7 +4924,8 @@ if __name__ == "__main__":
         pre_step_timings = parse_pre_step_timings_from_debug(debug_log_path)
         wrapper_step_timings = parse_wrapper_step_timings_from_debug(debug_log_path)
         after_step_increment_timings = parse_after_step_increment_timings_from_debug(debug_log_path)
-        print_statistics(stats, output_f, step_timings=step_timings, predict_timings=predict_timings, get_mask_timings=get_mask_timings, console_log_write_timings=console_log_write_timings, cascade_timings=cascade_timings, step_breakdowns=step_breakdowns, between_step_timings=between_step_timings, reset_timings=reset_timings, post_step_timings=post_step_timings, pre_step_timings=pre_step_timings, wrapper_step_timings=wrapper_step_timings, after_step_increment_timings=after_step_increment_timings, debug_section_filter=debug_section_filter)
+        collected_lines: List[str] = []
+        print_statistics(stats, output_f, step_timings=step_timings, predict_timings=predict_timings, get_mask_timings=get_mask_timings, console_log_write_timings=console_log_write_timings, cascade_timings=cascade_timings, step_breakdowns=step_breakdowns, between_step_timings=between_step_timings, reset_timings=reset_timings, post_step_timings=post_step_timings, pre_step_timings=pre_step_timings, wrapper_step_timings=wrapper_step_timings, after_step_increment_timings=after_step_increment_timings, debug_section_filter=debug_section_filter, output_lines=collected_lines, emit_console=emit_console)
         
         # Calculate total errors (all error counts between MOVEMENT ERRORS and SAMPLE ACTIONS)
         shoot_invalid_total = (
@@ -4744,6 +5011,46 @@ if __name__ == "__main__":
             log_print(f"⚠️  {total_errors} erreur(s) détectée(s)   -   Output : {output_file}")
         else:
             log_print(f"✅ Aucune erreur détectée   -   Output : {output_file}")
+
+        def _print_section_lines(lines: List[str]) -> None:
+            for line in lines:
+                print(line)
+                print(line, file=output_f)
+            output_f.flush()
+
+        if args.d and not args.n:
+            details_lines = _extract_section(
+                collected_lines,
+                "📊 BOT EVALUATION RESULTS",
+                "Bot (P2) kills:"
+            )
+            if details_lines:
+                _print_section_lines(details_lines)
+        if args.b and not args.n:
+            bug_lines = _extract_section(
+                collected_lines,
+                "DEBUGGING",
+                "2.7 CORE ISSUES",
+                start_startswith=True,
+                end_startswith=True
+            )
+            if bug_lines:
+                _print_section_lines(bug_lines)
+        if args.s and not args.n:
+            summary_lines = _extract_section(
+                collected_lines,
+                "SUMMARY",
+                "✅ 2.7 Core issue",
+                start_startswith=True,
+                end_startswith=True
+            )
+            if summary_lines:
+                _print_section_lines(summary_lines)
+
+        if total_errors > 0:
+            _print_section_lines([f"⚠️  {total_errors} erreur(s) détectée(s)   -   Output : {output_file}"])
+        else:
+            _print_section_lines([f"✅ Aucune erreur détectée   -   Output : {output_file}"])
 
     except Exception as e:
         log_print(f"Error: {e}")

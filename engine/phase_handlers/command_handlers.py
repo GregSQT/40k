@@ -9,6 +9,7 @@ before the movement phase. It auto-advances to the movement phase.
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
+from engine.game_state import GameStateManager
 
 
 def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -59,6 +60,10 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Console log
     from engine.game_utils import add_console_log
     add_console_log(game_state, "COMMAND PHASE START")
+
+    # Primary objective scoring (command phase)
+    state_manager = GameStateManager(require_key(game_state, "config"))
+    state_manager.apply_primary_objective_scoring(game_state, "command")
     
     # Auto-advance: transition directly to move (pool is empty)
     return command_phase_end(game_state)

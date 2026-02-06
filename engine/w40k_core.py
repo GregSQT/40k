@@ -134,6 +134,26 @@ class W40KEngine(gym.Env):
             # Load scenario data (units + optional terrain)
             scenario_result = self._load_units_from_scenario(scenario_file, unit_registry)
             scenario_units = scenario_result["units"]
+            scenario_primary_objective_ids = scenario_result.get("primary_objectives")
+            scenario_primary_objective_id = None
+            if scenario_primary_objective_ids is None:
+                scenario_primary_objective_id = scenario_result.get("primary_objective")
+
+            if scenario_primary_objective_ids is not None:
+                if not isinstance(scenario_primary_objective_ids, list):
+                    raise TypeError("primary_objectives must be a list of objective IDs")
+                if not scenario_primary_objective_ids:
+                    raise ValueError("primary_objectives list cannot be empty")
+                primary_objective_config = [
+                    config_loader.load_primary_objective_config(obj_id)
+                    for obj_id in scenario_primary_objective_ids
+                ]
+            elif scenario_primary_objective_id is not None:
+                primary_objective_config = config_loader.load_primary_objective_config(
+                    scenario_primary_objective_id
+                )
+            else:
+                primary_objective_config = None
 
             # Determine wall_hexes: use scenario if provided, otherwise use board config
             if scenario_result.get("wall_hexes") is not None:
@@ -161,6 +181,7 @@ class W40KEngine(gym.Env):
             # Store scenario terrain for game_state initialization
             self._scenario_wall_hexes = scenario_wall_hexes
             self._scenario_objectives = scenario_objectives
+            self._scenario_primary_objective = primary_objective_config
 
             # Extract scenario name from file path for logging
             scenario_name = scenario_file if scenario_file else "Unknown Scenario"
@@ -184,7 +205,8 @@ class W40KEngine(gym.Env):
                 "gym_training_mode": gym_training_mode,  # CRITICAL: Pass flag to handlers
                 "debug_mode": debug_mode,  # CRITICAL: Pass debug flag to handlers
                 "pve_mode": pve_mode_value,  # CRITICAL: Add PvE mode for handler detection
-                "controlled_player": 1  # FIXED: Agent controls player 1 (matches scenario setup)
+                "controlled_player": 1,  # FIXED: Agent controls player 1 (matches scenario setup)
+                "primary_objective": primary_objective_config
             }
         else:
             # Use provided config directly and add gym_training_mode
@@ -232,6 +254,7 @@ class W40KEngine(gym.Env):
             # No scenario loaded - use board config for terrain (set to None for selection logic)
             self._scenario_wall_hexes = None
             self._scenario_objectives = None
+            self._scenario_primary_objective = self.config.get("primary_objective")
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -266,6 +289,9 @@ class W40KEngine(gym.Env):
             "episode_steps": 0,
             "game_over": False,
             "winner": None,
+            "victory_points": {1: 0, 2: 0},
+            "primary_objective": self._scenario_primary_objective,
+            "primary_objective_scored_turns": set(),
             
             # AI_TURN.md required tracking sets
             "units_moved": set(),
@@ -471,6 +497,9 @@ class W40KEngine(gym.Env):
             "game_over": False,
             "turn_limit_reached": False,
             "winner": None,
+            "victory_points": {1: 0, 2: 0},
+            "primary_objective": self._scenario_primary_objective,
+            "primary_objective_scored_turns": set(),
             "units_moved": set(),
             "units_fled": set(),
             "units_shot": set(),
@@ -1198,6 +1227,12 @@ class W40KEngine(gym.Env):
                     result["phase_complete"] = True
                 if "reason" not in result:
                     result["reason"] = "pool_empty"
+            elif from_phase == "fight":
+                result = fight_handlers.fight_phase_end(self.game_state)
+                if "phase_complete" not in result:
+                    result["phase_complete"] = True
+                if "reason" not in result:
+                    result["reason"] = "pool_empty"
             else:
                 result = {"phase_complete": True, "reason": "pool_empty"}
 
@@ -1206,8 +1241,6 @@ class W40KEngine(gym.Env):
                     result["next_phase"] = "shoot"
                 elif from_phase == "charge":
                     result["next_phase"] = "fight"
-                elif from_phase == "fight":
-                    result["next_phase"] = "command"
                 elif from_phase == "command":
                     result["next_phase"] = "move"
                 else:
@@ -2040,30 +2073,17 @@ class W40KEngine(gym.Env):
     
     
     def _check_game_over(self) -> bool:
-        """Check if game is over - unit elimination OR turn limit reached."""
+        """Check if game is over - turn limit reached."""
         # Check turn limit first
         if hasattr(self, 'training_config'):
             max_turns = self.training_config.get("max_turns_per_episode")
             if max_turns and self.game_state["turn"] > max_turns:
+                # CRITICAL: Flag turn limit reached for winner determination
+                self.game_state["turn_limit_reached"] = True
                 return True
-        
-        # Check unit elimination
-        living_units_by_player = {}
-        dead_units_by_player = {}
-        
-        units_cache = require_key(self.game_state, "units_cache")
-        for _unit_id, entry in units_cache.items():
-            player = entry["player"]
-            if player not in living_units_by_player:
-                living_units_by_player[player] = 0
-            living_units_by_player[player] += 1
-        
-        # Check if any player has no living units (elimination condition)
-        players_with_no_living_units = [pid for pid, count in living_units_by_player.items() if count == 0]
-        game_over_by_elimination = len(players_with_no_living_units) > 0
-        
-        # Game is over if any player has no living units
-        return game_over_by_elimination
+        if require_key(self.game_state, "turn_limit_reached"):
+            return True
+        return False
     
     
     def _determine_winner(self) -> Optional[int]:
@@ -2181,6 +2201,26 @@ class W40KEngine(gym.Env):
         # Load scenario data (units + optional terrain)
         scenario_result = self._load_units_from_scenario(scenario_file, self.unit_registry)
         scenario_units = scenario_result["units"]
+        scenario_primary_objective_ids = scenario_result.get("primary_objectives")
+        scenario_primary_objective_id = None
+        if scenario_primary_objective_ids is None:
+            scenario_primary_objective_id = scenario_result.get("primary_objective")
+
+        if scenario_primary_objective_ids is not None:
+            if not isinstance(scenario_primary_objective_ids, list):
+                raise TypeError("primary_objectives must be a list of objective IDs")
+            if not scenario_primary_objective_ids:
+                raise ValueError("primary_objectives list cannot be empty")
+            primary_objective_config = [
+                config_loader.load_primary_objective_config(obj_id)
+                for obj_id in scenario_primary_objective_ids
+            ]
+        elif scenario_primary_objective_id is not None:
+            primary_objective_config = config_loader.load_primary_objective_config(
+                scenario_primary_objective_id
+            )
+        else:
+            primary_objective_config = None
 
         # Determine wall_hexes: use scenario if provided, otherwise use board config
         if scenario_result.get("wall_hexes") is not None:
@@ -2201,6 +2241,7 @@ class W40KEngine(gym.Env):
                 self._scenario_objectives = d["objectives"] if "objectives" in d else (d["objective_hexes"] if "objective_hexes" in d else [])
             else:
                 self._scenario_objectives = board_config["objectives"] if "objectives" in board_config else (board_config["objective_hexes"] if "objective_hexes" in board_config else [])
+        self._scenario_primary_objective = primary_objective_config
 
         # Extract scenario name from file path for logging
         scenario_name = scenario_file
@@ -2214,6 +2255,7 @@ class W40KEngine(gym.Env):
         # This prevents position corruption when game_state units are modified during gameplay
         self.config["units"] = copy.deepcopy(scenario_units)
         self.config["name"] = scenario_name
+        self.config["primary_objective"] = primary_objective_config
 
         # Reinitialize game_state units with a SEPARATE deepcopy
         # This ensures game_state["units"] is independent from config["units"]
@@ -2224,6 +2266,8 @@ class W40KEngine(gym.Env):
             self.game_state["wall_hexes"] = self._scenario_wall_hexes
         if "objectives" in self.game_state:
             self.game_state["objectives"] = self._scenario_objectives
+        if "primary_objective" in self.game_state:
+            self.game_state["primary_objective"] = self._scenario_primary_objective
 
 
 # ============================================================================
