@@ -2,7 +2,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { Unit, PlayerId, GameMode } from '../types';
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
-import { getMeleeRange, getSelectedRangedWeapon } from '../utils/weaponHelpers';
+import { getMeleeRange } from '../utils/weaponHelpers';
+import { getPreferredRangedWeaponAgainstTarget } from '../utils/probabilityCalculator';
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -138,6 +139,7 @@ export const useEngineAPI = () => {
   
   // State for multi-unit HP bar blinking
   const [blinkingUnits, setBlinkingUnits] = useState<{unitIds: number[], blinkTimer: number | null, attackerId?: number | null}>({unitIds: [], blinkTimer: null, attackerId: null});
+  const [blinkVersion, setBlinkVersion] = useState(0);
   
   // State for failed charge roll display
   const [failedChargeRoll, setFailedChargeRoll] = useState<{unitId: number, roll: number, targetId?: number} | null>(null);
@@ -207,7 +209,58 @@ export const useEngineAPI = () => {
       }
       const { gameState: newGameState } = (e as CustomEvent<WeaponSelectedEventDetail>).detail;
       if (newGameState) {
+        if (newGameState.units && newGameState.active_shooting_unit) {
+          const activeId = newGameState.active_shooting_unit.toString();
+          const updatedUnits = [...newGameState.units];
+          const unitIndex = updatedUnits.findIndex((u: { id: string | number }) => u.id.toString() === activeId);
+          if (unitIndex >= 0) {
+            updatedUnits[unitIndex] = {
+              ...updatedUnits[unitIndex],
+              manualWeaponSelected: true
+            };
+            newGameState.units = updatedUnits;
+          }
+        }
         setGameState(newGameState);
+        setBlinkVersion(prev => prev + 1);
+        if (newGameState.phase === "shoot" && targetPreview) {
+          const shooter = newGameState.units.find(u => {
+            const unitId = typeof u.id === 'string' ? parseInt(u.id) : u.id;
+            return unitId === targetPreview.shooterId;
+          });
+          const target = newGameState.units.find(u => {
+            const unitId = typeof u.id === 'string' ? parseInt(u.id) : u.id;
+            return unitId === targetPreview.targetId;
+          });
+          if (!shooter || !target) {
+            throw new Error("Missing shooter or target when updating target preview after weapon selection");
+          }
+          const shooterUnit: Unit = {
+            ...shooter,
+            id: typeof shooter.id === 'string' ? parseInt(shooter.id) : shooter.id,
+            player: shooter.player as PlayerId
+          };
+          const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, target as Unit);
+          if (!preferred) {
+            throw new Error(`No ranged weapon available for unit ${shooterUnit.id} after weapon selection`);
+          }
+          if (blinkingUnits.blinkTimer) {
+            clearInterval(blinkingUnits.blinkTimer);
+          }
+          setBlinkingUnits({unitIds: [], blinkTimer: null, attackerId: null});
+          setTargetPreview(prevPreview => {
+            if (!prevPreview) return null;
+            return {
+              ...prevPreview,
+              hitProbability: preferred.hitProbability,
+              woundProbability: preferred.woundProbability,
+              saveProbability: preferred.saveProbability,
+              overallProbability: preferred.overallProbability,
+              potentialDamage: preferred.potentialDamage,
+              expectedDamage: preferred.expectedDamage
+            };
+          });
+        }
       }
     };
 
@@ -215,7 +268,7 @@ export const useEngineAPI = () => {
     return () => {
       window.removeEventListener('weaponSelected', weaponSelectedHandler);
     };
-  }, []);
+  }, [targetPreview, blinkingUnits.blinkTimer, blinkingUnits.unitIds, blinkingUnits.attackerId]);
 
   // Reset mode to "select" when phase changes
   useEffect(() => {
@@ -383,6 +436,34 @@ export const useEngineAPI = () => {
             }
             setTargetPreview(null);
           }
+
+          if (lastActionRef.current?.phase === "shoot" && (data.result?.activation_ended || data.result?.phase_complete)) {
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+            setBlinkingUnits({unitIds: [], blinkTimer: null, attackerId: null});
+            
+            if (targetPreview?.blinkTimer) {
+              clearInterval(targetPreview.blinkTimer);
+            }
+            setTargetPreview(null);
+            if (data.game_state?.units && lastActionRef.current?.unitId) {
+              const unitIndex = data.game_state.units.findIndex((u: { id: string | number }) =>
+                u.id.toString() === lastActionRef.current?.unitId
+              );
+              if (unitIndex >= 0) {
+                const updatedUnits = [...data.game_state.units];
+                updatedUnits[unitIndex] = {
+                  ...updatedUnits[unitIndex],
+                  manualWeaponSelected: false
+                };
+                data.game_state = {
+                  ...data.game_state,
+                  units: updatedUnits
+                };
+              }
+            }
+          }
           
           if (data.result?.reset_mode) {
             setMode("select");
@@ -473,6 +554,7 @@ export const useEngineAPI = () => {
                 // Also update selectedRngWeaponIndex if provided in result
                 if (data.result.selectedRngWeaponIndex !== undefined) {
                   updatedUnits[unitIndex].selectedRngWeaponIndex = data.result.selectedRngWeaponIndex;
+                  updatedUnits[unitIndex].manualWeaponSelected = true;
                 }
                 data.game_state = {
                   ...data.game_state,
@@ -500,7 +582,8 @@ export const useEngineAPI = () => {
                 const updatedUnits = [...data.game_state.units];
                 updatedUnits[unitIndex] = {
                   ...updatedUnits[unitIndex],
-                  selectedRngWeaponIndex: data.result.selectedRngWeaponIndex
+                  selectedRngWeaponIndex: data.result.selectedRngWeaponIndex,
+                  manualWeaponSelected: true
                 };
                 data.game_state = {
                   ...data.game_state,
@@ -664,6 +747,11 @@ export const useEngineAPI = () => {
           setChargeDestinations([]);
           setSelectedUnitId(null);
           setMode("select");
+          // Clear blinking from charge preview to avoid stale attacker stats
+          if (blinkingUnits.blinkTimer) {
+            clearInterval(blinkingUnits.blinkTimer);
+          }
+          setBlinkingUnits({unitIds: [], blinkTimer: null, attackerId: null});
           // Clear failedChargeRoll after delay to show badge
           setTimeout(() => {
             setFailedChargeRoll(null); // Clear after display
@@ -687,6 +775,11 @@ export const useEngineAPI = () => {
           setChargeDestinations([]);
           setSelectedUnitId(null);
           setMode("select");
+          // Clear blinking from charge preview when charge resolves
+          if (blinkingUnits.blinkTimer) {
+            clearInterval(blinkingUnits.blinkTimer);
+          }
+          setBlinkingUnits({unitIds: [], blinkTimer: null, attackerId: null});
         }
         // Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
         else if (data.game_state?.phase === "fight" && data.result?.waiting_for_player && data.result?.valid_targets) {
@@ -707,16 +800,25 @@ export const useEngineAPI = () => {
             setAttackPreview({ unitId, col: unit.col, row: unit.row });
           }
 
-          // Start blinking for valid fight targets if not already blinking
-          if (data.result.valid_targets.length > 0 && !blinkingUnits.blinkTimer) {
+          // Start/update blinking for valid fight targets (keep attacker in sync)
+          if (data.result.valid_targets.length > 0) {
             const unitIds = data.result.valid_targets.map((id: string) => parseInt(id));
-            // Note: Actual blinking animation is handled locally in UnitRenderer
-            // We only track which units should blink, not the blink state itself
-            const timer = window.setInterval(() => {
-              // Empty interval - blinking is handled locally in UnitRenderer
-              // This timer is kept for cleanup purposes only
-            }, 500);
-            setBlinkingUnits({unitIds, blinkTimer: timer, attackerId: null});
+            const attackerId = unitId;
+            const unitIdsChanged = unitIds.length !== blinkingUnits.unitIds.length ||
+              !unitIds.every((id: number) => blinkingUnits.unitIds.includes(id));
+            const attackerIdChanged = attackerId !== blinkingUnits.attackerId;
+            let timer = blinkingUnits.blinkTimer;
+            if (!timer) {
+              // Note: Actual blinking animation is handled locally in UnitRenderer
+              // We only track which units should blink, not the blink state itself
+              timer = window.setInterval(() => {
+                // Empty interval - blinking is handled locally in UnitRenderer
+                // This timer is kept for cleanup purposes only
+              }, 500);
+            }
+            if (unitIdsChanged || attackerIdChanged || !blinkingUnits.blinkTimer) {
+              setBlinkingUnits({unitIds, blinkTimer: timer, attackerId});
+            }
           }
         }
         // Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
@@ -812,6 +914,7 @@ export const useEngineAPI = () => {
         CC_WEAPONS: unit.CC_WEAPONS,
         selectedRngWeaponIndex: unit.selectedRngWeaponIndex,
         selectedCcWeaponIndex: unit.selectedCcWeaponIndex,
+        manualWeaponSelected: unit.manualWeaponSelected,
         ICON: unit.ICON,
         ICON_SCALE: unit.ICON_SCALE,
         SHOOT_LEFT: unit.SHOOT_LEFT,
@@ -1325,42 +1428,22 @@ export const useEngineAPI = () => {
     let potentialDamage = 0;
     
     if (shooter && target) {
-      // Get selected ranged weapon
+      // Get best ranged weapon for this target
       // Convert shooter to proper Unit type (id as number, player as PlayerId)
       const shooterUnit: Unit = {
         ...shooter,
         id: typeof shooter.id === 'string' ? parseInt(shooter.id) : shooter.id,
         player: shooter.player as PlayerId
       };
-      const weapon = getSelectedRangedWeapon(shooterUnit);
-      if (!weapon) {
-        // No ranged weapon selected, use defaults
+      const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, target as Unit);
+      if (!preferred) {
         return;
       }
       
-      // Calculate hit probability (need 7 - ATK or higher on d6)
-      const hitTarget = 7 - weapon.ATK;
-      hitProbability = Math.max(0, (7 - hitTarget) / 6);
-      
-      // Calculate wound probability based on STR vs T
-      const strength = weapon.STR;
-      const toughness = target.T;
-      let woundTarget = 4; // Default
-      
-      if (strength >= toughness * 2) woundTarget = 2;
-      else if (strength > toughness) woundTarget = 3;
-      else if (strength === toughness) woundTarget = 4;
-      else if (strength * 2 <= toughness) woundTarget = 6;
-      else woundTarget = 5;
-      
-      woundProbability = Math.max(0, (7 - woundTarget) / 6);
-      
-      // Calculate save probability (save succeeds if roll >= save target)
-      const saveTarget = Math.max(2, Math.min(target.ARMOR_SAVE - weapon.AP, target.INVUL_SAVE));
-      saveProbability = Math.max(0, (saveTarget - 1) / 6);
-      
-      // Potential damage per shot
-      potentialDamage = weapon.DMG;
+      hitProbability = preferred.hitProbability;
+      woundProbability = preferred.woundProbability;
+      saveProbability = preferred.saveProbability;
+      potentialDamage = preferred.potentialDamage;
     }
     
     const overallProbability = hitProbability * woundProbability * (1 - saveProbability);
@@ -1631,6 +1714,7 @@ export const useEngineAPI = () => {
         blinkingUnits: [],
         blinkingAttackerId: null,
         isBlinkingActive: false,
+        blinkVersion: 0,
         // blinkState removed - blinking is handled locally in UnitRenderer
         fightSubPhase: null,
         executeAITurn: async () => {},
@@ -1693,6 +1777,7 @@ export const useEngineAPI = () => {
     blinkingUnits: blinkingUnitsIds,
     blinkingAttackerId: blinkingUnits.attackerId ?? null,
     isBlinkingActive: isBlinkingActiveMemo,
+    blinkVersion,
     // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display
     chargingUnitId: failedChargeRoll ? failedChargeRoll.unitId : null,

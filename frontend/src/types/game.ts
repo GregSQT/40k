@@ -74,6 +74,7 @@ export interface Unit {
   CC_WEAPONS: Weapon[];             // Armes de mêlée (max 2)
   selectedRngWeaponIndex?: number;  // Index de l'arme ranged sélectionnée
   selectedCcWeaponIndex?: number;   // Index de l'arme melee sélectionnée
+  manualWeaponSelected?: boolean;   // True when user explicitly selected a weapon
   
   // Display properties
   ICON: string;

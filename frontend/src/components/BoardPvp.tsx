@@ -173,6 +173,7 @@ type BoardProps = {
   blinkingUnits?: number[];
   blinkingAttackerId?: number | null;
   isBlinkingActive?: boolean;
+  blinkVersion?: number;
   blinkState?: boolean;
   onSelectUnit: (id: number | string | null) => void;
   onSkipUnit?: (unitId: number | string) => void;
@@ -249,6 +250,7 @@ export default function Board({
   blinkingUnits,
   blinkingAttackerId,
   isBlinkingActive,
+  blinkVersion,
   onSelectUnit,
   onSkipUnit,
   onStartMovePreview,
@@ -1480,6 +1482,7 @@ export default function Board({
           onConfirmMove, parseColor,
           // Pass blinking state
           blinkingUnits: stableBlinkingUnits, blinkingAttackerId, isBlinkingActive,
+          blinkVersion,
           // Pass shooting indicators
           shootingTargetId,
           shootingUnitId,

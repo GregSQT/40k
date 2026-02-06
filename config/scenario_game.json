@@ -3,14 +3,14 @@
   "units": [
     {
       "id": 1,
-      "unit_type": "Intercessor",
+      "unit_type": "IntercessorSergeant",
       "player": 1,
       "col": 14,
       "row": 14
     },
     {
       "id": 2,
-      "unit_type": "Intercessor",
+      "unit_type": "IntercessorGrenadeLauncher",
       "player": 1,
       "col": 20,
       "row": 7

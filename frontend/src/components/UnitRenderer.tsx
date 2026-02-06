@@ -3,7 +3,8 @@ import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState } from "../types/game";
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
 import { getSelectedRangedWeapon, getSelectedMeleeWeapon, getMeleeRange } from '../utils/weaponHelpers';
-import { createBlinkingHPBar, type HPBlinkContainer } from '../utils/blinkingHPBar';
+import { getPreferredRangedWeaponAgainstTarget } from '../utils/probabilityCalculator';
+import { buildWeaponSignature, createBlinkingHPBar, type HPBlinkContainer } from '../utils/blinkingHPBar';
 
 interface UnitRendererProps {
   unit: Unit;
@@ -20,6 +21,7 @@ interface UnitRendererProps {
   blinkingUnits?: number[];
   blinkingAttackerId?: number | null;
   isBlinkingActive?: boolean;
+  blinkVersion?: number;
   blinkState?: boolean;
 
   // Shooting target (for replay mode explosion icon)
@@ -113,6 +115,7 @@ interface UnitRendererProps {
 
 export class UnitRenderer {
   private props: UnitRendererProps;
+  private lastBlinkVersion: number | null = null;
   
   constructor(props: UnitRendererProps) {
     this.props = props;
@@ -137,18 +140,50 @@ export class UnitRenderer {
   
   private cleanupExistingBlinkIntervals(): void {
     // Find any existing blink containers and clean them up
-    interface BlinkContainer extends PIXI.Container {
-      unitId?: number;
-      cleanupBlink?: () => void;
-      blinkTicker?: () => void;
-    }
-    
     // Check if this unit should still be blinking
     const shouldBlink = this.props.isBlinkingActive && this.props.blinkingUnits?.includes(this.props.unit.id);
     const isTargetPreviewed = (this.props.mode === "targetPreview" || this.props.mode === "attackPreview") && 
                                this.props.targetPreview && 
                                this.props.targetPreview.targetId === this.props.unit.id;
     const shouldStillBlink = shouldBlink || isTargetPreviewed;
+    const forceRebuild = this.props.blinkVersion !== undefined && this.props.blinkVersion !== this.lastBlinkVersion;
+    if (this.props.blinkVersion !== undefined) {
+      this.lastBlinkVersion = this.props.blinkVersion;
+    }
+
+    const unitIdNum = typeof this.props.unit.id === 'string' ? parseInt(this.props.unit.id) : this.props.unit.id;
+    let expectedWeaponSignature: string | null = null;
+    let attackerIdNum: number | null = null;
+    let attacker: Unit | null = null;
+    if (shouldStillBlink) {
+      const attackerId = this.props.blinkingAttackerId
+        || this.props.gameState?.active_shooting_unit
+        || this.props.gameState?.active_fight_unit
+        || this.props.gameState?.active_charge_unit
+        || this.props.selectedUnitId;
+      attackerIdNum = attackerId
+        ? (typeof attackerId === 'string' ? parseInt(attackerId) : attackerId)
+        : null;
+      attacker = attackerIdNum
+        ? this.props.units.find(u => {
+            const idNum = typeof u.id === 'string' ? parseInt(u.id) : u.id;
+            return idNum === attackerIdNum;
+          }) || null
+        : null;
+      if (attacker && this.props.phase === "shoot") {
+        const preferred = getPreferredRangedWeaponAgainstTarget(attacker, this.props.unit);
+        if (preferred) {
+          expectedWeaponSignature = buildWeaponSignature(preferred.weapon);
+        }
+      }
+      if (attacker && this.props.phase !== "shoot") {
+        const weapon = getSelectedMeleeWeapon(attacker);
+        if (weapon) {
+          expectedWeaponSignature = buildWeaponSignature(weapon);
+        }
+      }
+    }
+    
     
     const existingBlinkContainers = this.props.app.stage.children.filter(
       child => child.name === 'hp-blink-container'
@@ -156,11 +191,14 @@ export class UnitRenderer {
     
     existingBlinkContainers.forEach((container) => {
       // Only cleanup OLD containers that belong to current unit (prevent duplicates)
-      const blinkContainer = container as BlinkContainer;
-      if (blinkContainer.unitId && blinkContainer.unitId === this.props.unit.id) {
+      const blinkContainer = container as HPBlinkContainer;
+      const containerUnitId = blinkContainer.unitId;
+      const containerUnitIdNum = typeof containerUnitId === 'string' ? parseInt(containerUnitId) : containerUnitId;
+      if (containerUnitIdNum && containerUnitIdNum === unitIdNum) {
         // CRITICAL: Only destroy if unit should NO LONGER blink
         // If unit should still blink, keep the container and its animation running
-        if (!shouldStillBlink) {
+        const weaponChanged = shouldStillBlink && expectedWeaponSignature !== null && blinkContainer.weaponSignature !== expectedWeaponSignature;
+        if (!shouldStillBlink || weaponChanged || forceRebuild) {
           if (blinkContainer.cleanupBlink) {
             blinkContainer.cleanupBlink();
           }
@@ -974,9 +1012,9 @@ export class UnitRenderer {
               totalDamage = targetPreview.currentBlinkStep * weapon.DMG;
             }
           } else {
-            const weapon = getSelectedRangedWeapon(shooter);
-            if (weapon) {
-              totalDamage = targetPreview.currentBlinkStep * weapon.DMG;
+            const preferred = getPreferredRangedWeaponAgainstTarget(shooter, unit);
+            if (preferred) {
+              totalDamage = targetPreview.currentBlinkStep * preferred.potentialDamage;
             }
           }
           displayHP = Math.max(0, currentHP - totalDamage);
@@ -1275,6 +1313,9 @@ export class UnitRenderer {
       }
 
       if (!shouldShowIfEligible || !isEligible) return;
+      if (unit.ATTACK_LEFT === undefined || unit.ATTACK_LEFT <= 0) {
+        return;
+      }
     }
     
     // NEW: Only show attack counter for units that have enemies in melee range

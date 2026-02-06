@@ -1,7 +1,7 @@
 // frontend/src/utils/probabilityCalculator.ts
 
-import type { Unit } from '../types/game';
-import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from './weaponHelpers';
+import type { Unit, Weapon } from '../types/game';
+import { getDiceAverage, getSelectedRangedWeapon, getSelectedMeleeWeapon } from './weaponHelpers';
 
 export function calculateHitProbability(shooter: Unit): number {
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get ATK from selected weapon
@@ -52,6 +52,111 @@ export function calculateOverallProbability(shooter: Unit, target: Unit, inCover
   const saveFailProb = calculateSaveProbability(shooter, target, inCover);
   
   return (hitProb / 100) * (woundProb / 100) * (saveFailProb / 100) * 100;
+}
+
+export interface RangedWeaponEffectiveness {
+  weapon: Weapon;
+  index: number;
+  hitProbability: number;
+  woundProbability: number;
+  saveProbability: number;
+  overallProbability: number;
+  expectedDamage: number;
+  potentialDamage: number;
+}
+
+function calculateRangedEffectiveness(
+  weapon: Weapon,
+  index: number,
+  target: Unit,
+  inCover: boolean = false
+): Omit<RangedWeaponEffectiveness, "weapon" | "index"> {
+  const hitProbability = Math.max(0, (7 - weapon.ATK) / 6);
+  const strength = weapon.STR;
+  const toughness = target.T || 4;
+  
+  let woundTarget: number;
+  if (strength >= toughness * 2) woundTarget = 2;
+  else if (strength > toughness) woundTarget = 3;
+  else if (strength === toughness) woundTarget = 4;
+  else if (strength < toughness) woundTarget = 5;
+  else woundTarget = 6;
+  
+  const woundProbability = Math.max(0, (7 - woundTarget) / 6);
+  
+  let armorSave = target.ARMOR_SAVE || 5;
+  const invulSave = target.INVUL_SAVE || 0;
+  const armorPenetration = weapon.AP;
+  
+  if (inCover) {
+    armorSave = Math.max(2, armorSave - 1);
+  }
+  
+  const modifiedArmor = armorSave + armorPenetration;
+  const saveTarget = Math.max(
+    2,
+    (invulSave > 0 && invulSave < modifiedArmor) ? invulSave : modifiedArmor
+  );
+  const saveSuccess = Math.max(0, (7 - saveTarget) / 6);
+  const saveProbability = saveSuccess;
+  const saveFailProbability = 1 - saveSuccess;
+  
+  const potentialDamage = getDiceAverage(weapon.DMG);
+  const overallProbability = hitProbability * woundProbability * saveFailProbability;
+  const expectedDamage = overallProbability * potentialDamage;
+  
+  return {
+    hitProbability,
+    woundProbability,
+    saveProbability,
+    overallProbability,
+    expectedDamage,
+    potentialDamage
+  };
+}
+
+export function getBestRangedWeaponAgainstTarget(
+  shooter: Unit,
+  target: Unit,
+  inCover: boolean = false
+): RangedWeaponEffectiveness | null {
+  if (!shooter.RNG_WEAPONS || shooter.RNG_WEAPONS.length === 0) {
+    return null;
+  }
+  
+  let best: RangedWeaponEffectiveness | null = null;
+  shooter.RNG_WEAPONS.forEach((weapon, index) => {
+    const effectiveness = calculateRangedEffectiveness(weapon, index, target, inCover);
+    if (!best || effectiveness.expectedDamage > best.expectedDamage) {
+      best = { weapon, index, ...effectiveness };
+    }
+  });
+  
+  return best;
+}
+
+export function getPreferredRangedWeaponAgainstTarget(
+  shooter: Unit,
+  target: Unit,
+  inCover: boolean = false
+): RangedWeaponEffectiveness | null {
+  const best = getBestRangedWeaponAgainstTarget(shooter, target, inCover);
+  if (!best) {
+    return null;
+  }
+  
+  const selectedIndex = shooter.selectedRngWeaponIndex;
+  const manualSelected = shooter.manualWeaponSelected === true;
+  if (!manualSelected || selectedIndex === undefined || selectedIndex === null) {
+    return best;
+  }
+  if (selectedIndex < 0 || selectedIndex >= shooter.RNG_WEAPONS.length) {
+    throw new Error(`Invalid selectedRngWeaponIndex ${selectedIndex} for unit ${shooter.id}`);
+  }
+  
+  const selectedWeapon = shooter.RNG_WEAPONS[selectedIndex];
+  const effectiveness = calculateRangedEffectiveness(selectedWeapon, selectedIndex, target, inCover);
+  return { weapon: selectedWeapon, index: selectedIndex, ...effectiveness };
 }
 
 // ✅ NEW: Combat-specific probability calculation functions

@@ -41,27 +41,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     DMG: 1,
     WEAPON_RULES: ["PISTOL"],
   },
-  testor: {
-    display_name: "Testor",
-    RNG: 6,
-    NB: 3,
-    ATK: 4,
-    STR: 3,
-    AP: 0,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  pistor: {
-    display_name: "Pistor",
-    RNG: 6,
-    NB: 3,
-    ATK: 4,
-    STR: 3,
-    AP: 1,
-    DMG: 1,
-    WEAPON_RULES: ["PISTOL"],
-  },
-  storm_bolter: {
+    storm_bolter: {
     display_name: "Storm Bolter",
     RNG: 24,
     NB: 2,
@@ -139,11 +119,11 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   },
   intercessor_sergeant_power_fist: {
     display_name: "Power Fist",
-    NB: D3,
+    NB: 3,
     ATK: 3,
     STR: 8,
     AP: -2,
-    DMG: D3,
+    DMG: 2,
     WEAPON_RULES: [],
   },
   intercessor_sergeant_power_weapon: {

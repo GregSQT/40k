@@ -1955,7 +1955,8 @@ textarea:focus {
 
 .weapon-table th:first-child {
   text-align: left;
-  width: 50%;
+  width: auto;
+  white-space: nowrap;
 }
 
 .weapon-table tbody tr {
@@ -1982,6 +1983,7 @@ textarea:focus {
 .weapon-table td:first-child {
   text-align: left;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .rule-badge {
@@ -1992,9 +1994,62 @@ textarea:focus {
   border: 1px solid #4caf50;
   border-radius: 3px;
   font-size: 0.75em;
-  color: #4caf50;
+  color: #e6ffed;
   cursor: help;
   font-weight: normal;
+}
+
+.rule-badge-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.rule-tooltip {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 2px solid #4caf50;
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.98);
+  color: #e6ffed;
+  font-size: 0.9em;
+  width: max-content;
+  max-width: 600px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  z-index: 1100;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  pointer-events: none;
+}
+
+.rule-badge-wrapper:hover .rule-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.combi-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border: 1px solid #4caf50;
+  border-radius: 50%;
+  font-size: 0.7em;
+  font-weight: 700;
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.1);
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
 }
 
 .rule-badge:hover {

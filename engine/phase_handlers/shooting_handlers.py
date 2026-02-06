@@ -2229,6 +2229,8 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["activation_position"]
     if "_shooting_with_pistol" in unit:
         del unit["_shooting_with_pistol"]
+    if "_manual_weapon_selected" in unit:
+        del unit["_manual_weapon_selected"]
     if "_shoot_activation_started" in unit:
         del unit["_shoot_activation_started"]
     unit["SHOOT_LEFT"] = 0
@@ -2860,6 +2862,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return False, {"error": "invalid_weapon_index", "weaponIndex": weapon_index}
 
         unit["selectedRngWeaponIndex"] = weapon_index
+        unit["_manual_weapon_selected"] = True
 
         # CRITICAL FIX: Invalidate target pool cache after weapon change
         # Cache key doesn't include selectedRngWeaponIndex, so we must clear matching entries
@@ -3243,6 +3246,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             cfg = game_state["config"] if "config" in game_state else None
             gs = cfg["game_settings"] if cfg and "game_settings" in cfg else None
             auto_select = gs["autoSelectWeapon"] if gs and "autoSelectWeapon" in gs else True
+            if "_manual_weapon_selected" in unit and unit["_manual_weapon_selected"] is True:
+                auto_select = False
             
             # If SHOOT_LEFT > 0, weapon is already selected and has remaining shots
             # Don't re-select weapon, just use the already selected one

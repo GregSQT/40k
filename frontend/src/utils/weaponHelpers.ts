@@ -4,7 +4,7 @@
  * MULTIPLE_WEAPONS_IMPLEMENTATION.md: Helper functions for accessing weapon data
  */
 
-import type { Unit, Weapon } from '../types/game';
+import type { DiceValue, Unit, Weapon } from '../types/game';
 
 /**
  * Get currently selected ranged weapon.
@@ -51,6 +51,25 @@ export function getSelectedMeleeWeapon(unit: Unit): Weapon | null {
  */
 export function getMeleeRange(): number {
   return 1;
+}
+
+/**
+ * Get average value for dice-based stats.
+ *
+ * @param value Dice value or number
+ * @returns Average numeric value
+ */
+export function getDiceAverage(value: DiceValue): number {
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (value === 'D3') {
+    return 2;
+  }
+  if (value === 'D6') {
+    return 3.5;
+  }
+  throw new Error(`Unsupported dice value: ${value}`);
 }
 
 /**

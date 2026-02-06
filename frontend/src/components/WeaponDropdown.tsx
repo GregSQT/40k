@@ -67,14 +67,20 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                 title={isDisabled ? weaponOption.reason : undefined}
               >
                 <td>
+                  {weapon.COMBI_WEAPON && (
+                    <span className="combi-badge" title="Combi weapon">
+                      C
+                    </span>
+                  )}
                   {weapon.display_name}
                   {weapon.WEAPON_RULES?.map(rule => (
-                    <span 
-                      key={rule}
-                      className="rule-badge" 
-                      title={weaponRules[rule as keyof typeof weaponRules]?.description || rule}
-                    >
-                      [{weaponRules[rule as keyof typeof weaponRules]?.name || rule}]
+                    <span key={rule} className="rule-badge-wrapper">
+                      <span className="rule-badge">
+                        [{weaponRules[rule as keyof typeof weaponRules]?.name || rule}]
+                      </span>
+                      <span className="rule-tooltip">
+                        {weaponRules[rule as keyof typeof weaponRules]?.description || rule}
+                      </span>
                     </span>
                   ))}
                 </td>

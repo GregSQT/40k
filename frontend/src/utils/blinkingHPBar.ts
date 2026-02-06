@@ -1,7 +1,8 @@
 // /home/greg/projects/40k/frontend/src/utils/blinkingHPBar.ts
 
 import * as PIXI from 'pixi.js';
-import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from './weaponHelpers';
+import { getSelectedMeleeWeapon, getDiceAverage } from './weaponHelpers';
+import { getPreferredRangedWeaponAgainstTarget } from './probabilityCalculator';
 import type { Unit } from '../types/game';
 
 // Types
@@ -21,6 +22,8 @@ export interface BlinkingHPBarConfig {
 
 export interface HPBlinkContainer extends PIXI.Container {
   unitId?: number;
+  attackerId?: number | null;
+  weaponSignature?: string | null;
   cleanupBlink?: () => void;
   blinkTicker?: () => void;
   background?: PIXI.Graphics;
@@ -37,20 +40,16 @@ export function calculateWoundProbability(
   target: Unit,
   phase: "shoot" | "fight" | "charge"
 ): number {
-  // For charge phase, use melee weapon (charge leads to fight)
-  let weapon;
-  if (phase === "shoot") {
-    weapon = getSelectedRangedWeapon(attacker);
-  } else {
-    weapon = getSelectedMeleeWeapon(attacker);
+    if (phase === "shoot") {
+    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target);
+    return preferred ? preferred.overallProbability : 0;
   }
 
+  // For charge/fight, use melee weapon
+  const weapon = getSelectedMeleeWeapon(attacker);
   if (!weapon) return 0;
 
-  // Hit probability
   const hitProb = Math.max(0, (7 - (weapon.ATK || 4)) / 6);
-
-  // Wound probability
   const strength = weapon.STR || 4;
   const toughness = target.T || 4;
   let woundTarget = 4;
@@ -61,7 +60,6 @@ export function calculateWoundProbability(
   else woundTarget = 6;
   const woundProb = Math.max(0, (7 - woundTarget) / 6);
 
-  // Save fail probability
   const saveTarget = Math.max(
     2,
     Math.min(
@@ -77,16 +75,28 @@ export function calculateWoundProbability(
 // Calculate damage per attack
 export function calculateDamagePerAttack(
   attacker: Unit,
+  target: Unit,
   phase: "shoot" | "fight" | "charge"
 ): number {
-  // For charge phase, use melee weapon (charge leads to fight)
-  let weapon;
-  if (phase === "shoot") {
-    weapon = getSelectedRangedWeapon(attacker);
-  } else {
-    weapon = getSelectedMeleeWeapon(attacker);
+    if (phase === "shoot") {
+    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target);
+    return preferred ? preferred.potentialDamage : 0;
   }
-  return weapon?.DMG || 0;
+  
+  const weapon = getSelectedMeleeWeapon(attacker);
+  if (!weapon) return 0;
+  return getDiceAverage(weapon.DMG);
+}
+
+export function buildWeaponSignature(weapon: { display_name: string; ATK: number; STR: number; AP: number; DMG: number | "D3" | "D6"; NB: number | "D3" | "D6" }): string {
+  return [
+    weapon.display_name,
+    weapon.ATK,
+    weapon.STR,
+    weapon.AP,
+    weapon.DMG,
+    weapon.NB
+  ].join("|");
 }
 
 // Create blinking HP bar container with animation
@@ -110,6 +120,25 @@ export function createBlinkingHPBar(
   // Normalize unit.id to number
   const unitIdNum = typeof unit.id === 'string' ? parseInt(unit.id) : unit.id;
 
+  const attackerIdNum = attacker
+    ? (typeof attacker.id === 'string' ? parseInt(attacker.id) : attacker.id)
+    : null;
+
+  let weaponSignature: string | null = null;
+  if (attacker) {
+    if (phase === "shoot") {
+      const preferred = getPreferredRangedWeaponAgainstTarget(attacker, unit);
+      if (preferred) {
+        weaponSignature = buildWeaponSignature(preferred.weapon);
+      }
+    } else {
+      const weapon = getSelectedMeleeWeapon(attacker);
+      if (weapon) {
+        weaponSignature = buildWeaponSignature(weapon);
+      }
+    }
+  }
+
   // Check if container already exists
   const existingContainer = app.stage.children.find(
     child => {
@@ -123,24 +152,29 @@ export function createBlinkingHPBar(
     }
   ) as HPBlinkContainer | undefined;
 
-  // If container exists and is still blinking, reuse it
-      if (existingContainer && existingContainer.blinkTicker) {
-        return {
-          container: existingContainer,
-          cleanup: existingContainer.cleanupBlink || (() => {})
-        };
-      }
+  // If container exists and matches attacker/weapon, reuse it and update probability
+  if (existingContainer && existingContainer.blinkTicker) {
+    const attackerMatches = existingContainer.attackerId === attackerIdNum;
+    const weaponMatches = existingContainer.weaponSignature === weaponSignature;
+    if (attackerMatches && weaponMatches) {
+      updateProbabilityDisplay(existingContainer, attacker, unit, phase);
+      return {
+        container: existingContainer,
+        cleanup: existingContainer.cleanupBlink || (() => {})
+      };
+    }
+  }
 
-      // If container exists but ticker was removed, clean it up and create a new one
-      if (existingContainer && !existingContainer.blinkTicker) {
-        if (existingContainer.cleanupBlink) {
-          existingContainer.cleanupBlink();
-        }
-        if (existingContainer.parent) {
-          existingContainer.parent.removeChild(existingContainer);
-        }
-        existingContainer.destroy({ children: true });
-      }
+  // If container exists but ticker was removed or mismatch, clean it up and create a new one
+  if (existingContainer) {
+    if (existingContainer.cleanupBlink) {
+      existingContainer.cleanupBlink();
+    }
+    if (existingContainer.parent) {
+      existingContainer.parent.removeChild(existingContainer);
+    }
+    existingContainer.destroy({ children: true });
+  }
 
   // Create container
   const hpContainer = new PIXI.Container() as HPBlinkContainer;
@@ -148,6 +182,8 @@ export function createBlinkingHPBar(
   hpContainer.zIndex = 350;
   hpContainer.sortableChildren = true;
   hpContainer.unitId = unitIdNum;
+  hpContainer.attackerId = attackerIdNum;
+  hpContainer.weaponSignature = weaponSignature;
 
   // Create background
   const barBg = new PIXI.Graphics();
@@ -160,7 +196,7 @@ export function createBlinkingHPBar(
 
   // Calculate damage
   const shooterDamage = attacker 
-    ? calculateDamagePerAttack(attacker, phase)
+    ? calculateDamagePerAttack(attacker, unit, phase)
     : 0;
 
   // Current HP
@@ -276,7 +312,7 @@ export function createBlinkingHPBar(
 
   const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
     fontSize: 12,
-    fill: 0x00ff00,
+    fill: 0xE6FFED,
     align: "center",
     fontWeight: "bold"
   });
