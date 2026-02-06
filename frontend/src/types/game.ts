@@ -182,6 +182,7 @@ export interface GameState {
   charging_activation_pool?: string[];
   active_alternating_activation_pool?: string[];
   non_active_alternating_activation_pool?: string[];
+  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number }>;
   
   // Frontend specific
   mode?: GameMode;
@@ -195,6 +196,8 @@ export interface GameState {
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
   active_charge_unit?: string; // Active unit ID in charge phase
+  victory_points?: Record<string, number>;
+  primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
 }
 
 export interface SemanticAction {

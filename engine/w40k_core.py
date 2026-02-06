@@ -1070,9 +1070,9 @@ class W40KEngine(gym.Env):
             # Store turn number for metrics filtering (e.g., objectives only on turn 5+)
             self.episode_tactical_data['final_turn'] = self.game_state["turn"]
 
-            # Count controlled objectives for Player 0 (learning agent)
+            # Count controlled objectives for Player 1 (learning agent)
             obj_counts = self.state_manager.count_controlled_objectives(self.game_state)
-            self.episode_tactical_data['controlled_objectives'] = obj_counts[0] if 0 in obj_counts else 0
+            self.episode_tactical_data['controlled_objectives'] = obj_counts[1]
 
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()
@@ -1928,9 +1928,16 @@ class W40KEngine(gym.Env):
         if result.get("phase_complete"):
             self._movement_phase_initialized = False
             self._shooting_phase_initialized = False
-            self._shooting_phase_init()
-            result["phase_transition"] = True
-            result["next_phase"] = "shoot"
+            init_result = self._shooting_phase_init()
+            if init_result.get("phase_complete"):
+                if "next_phase" not in init_result:
+                    raise KeyError("shooting_phase_start returned phase_complete without next_phase")
+                result.update(init_result)
+                result["phase_transition"] = True
+                result["next_phase"] = init_result["next_phase"]
+            else:
+                result["phase_transition"] = True
+                result["next_phase"] = "shoot"
         
         return success, result
     
@@ -2026,6 +2033,7 @@ class W40KEngine(gym.Env):
         """AI_SHOOT.md EXACT: Pure delegation to handler"""
         # Handler manages everything including phase setting and pool building
         result = shooting_handlers.shooting_phase_start(self.game_state)
+        return result
     
     
     def _charge_phase_init(self):
@@ -2064,7 +2072,19 @@ class W40KEngine(gym.Env):
         self._shooting_phase_initialized = False
         # Phase progression logic - simplified to move -> shoot -> move
         if self.game_state["phase"] == "move":
-            self._shooting_phase_init()
+            init_result = self._shooting_phase_init()
+            if init_result and init_result.get("phase_complete"):
+                next_phase = init_result.get("next_phase")
+                if not next_phase:
+                    raise KeyError("shooting_phase_start returned phase_complete without next_phase")
+                if next_phase == "charge":
+                    self._charge_phase_init()
+                elif next_phase == "fight":
+                    self._fight_phase_init()
+                elif next_phase == "command":
+                    command_handlers.command_phase_start(self.game_state)
+                elif next_phase == "move":
+                    self._movement_phase_init()
         elif self.game_state["phase"] == "shoot":
             self._movement_phase_init()
         elif self.game_state["phase"] == "charge":

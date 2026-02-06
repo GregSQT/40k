@@ -148,6 +148,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             # Run all episodes for this bot/scenario using the same environment
             try:
                 for episode_num in range(episodes_for_scenario):
+                    current_episode_num = episode_num
                     completed_episodes += 1
 
                     # Progress bar (only if show_progress=True)
@@ -310,6 +311,33 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 total_failed_episodes += 1
                 if show_progress:
                     print(f"\n❌ Bot evaluation failed for {bot_name} on scenario {scenario_name}: {e}")
+                error_type = type(e).__name__
+                try:
+                    game_state = bot_env.engine.game_state
+                    episode = game_state.get("episode_number")
+                    turn = game_state.get("turn")
+                    phase = game_state.get("phase")
+                    current_player = game_state.get("current_player")
+                    fight_subphase = game_state.get("fight_subphase")
+                except Exception as state_error:
+                    episode = None
+                    turn = None
+                    phase = None
+                    current_player = None
+                    fight_subphase = None
+                    if show_progress:
+                        print(f"⚠️ Failed to read game_state after bot error: {state_error}")
+                if show_progress:
+                    print(
+                        f"❌ Bot evaluation error details: type={error_type} "
+                        f"episode_index={current_episode_num if 'current_episode_num' in locals() else 'unknown'} "
+                        f"episode_number={episode} turn={turn} phase={phase} "
+                        f"player={current_player} fight_subphase={fight_subphase}"
+                    )
+                import traceback
+                traceback_str = traceback.format_exc()
+                if show_progress:
+                    print(f"❌ Bot evaluation traceback:\n{traceback_str}")
                 # Do not treat this as valid games; skip win/loss counting
             finally:
                 # Close environment after all episodes for this scenario are done

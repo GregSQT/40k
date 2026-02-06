@@ -23,6 +23,7 @@ sys.path.insert(0, engine_dir)
 
 from engine.w40k_core import W40KEngine
 from main import load_config
+from shared.data_validation import require_key
 
 
 def make_json_serializable(obj):
@@ -54,6 +55,23 @@ def make_json_serializable(obj):
         return make_json_serializable(obj.__dict__)
     else:
         return obj
+
+def _sync_units_hp_from_cache(serializable_state: Dict[str, Any], game_state: Dict[str, Any]) -> None:
+    """
+    Ensure HP_CUR in serialized units reflects units_cache (single source of truth).
+    
+    Dead units are absent from units_cache and must appear with HP_CUR=0 in the response.
+    """
+    units_cache = require_key(game_state, "units_cache")
+    units = require_key(serializable_state, "units")
+    
+    for unit in units:
+        unit_id = str(require_key(unit, "id"))
+        cache_entry = units_cache.get(unit_id)
+        if cache_entry is None:
+            unit["HP_CUR"] = 0
+            continue
+        unit["HP_CUR"] = require_key(cache_entry, "HP_CUR")
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -419,6 +437,7 @@ def start_game():
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
+        _sync_units_hp_from_cache(serializable_state, engine.game_state)
 
         # Add max_turns from game config
         from config_loader import get_config_loader
@@ -472,6 +491,7 @@ def execute_action():
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
+        _sync_units_hp_from_cache(serializable_state, engine.game_state)
 
         # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
         # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
@@ -518,6 +538,7 @@ def get_game_state():
     
     # Convert game state to JSON-serializable format
     serializable_state = make_json_serializable(dict(engine.game_state))
+    _sync_units_hp_from_cache(serializable_state, engine.game_state)
     
     return jsonify({
         "success": True,
@@ -641,6 +662,7 @@ def execute_ai_turn():
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
+        _sync_units_hp_from_cache(serializable_state, engine.game_state)
         
         # Extract action logs for this specific AI action
         action_logs = serializable_state.get("action_logs", [])

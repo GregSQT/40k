@@ -10,6 +10,7 @@ interface UnitStatusTableProps {
   onSelectUnit: (unitId: UnitId) => void;
   gameMode?: 'pvp' | 'pve' | 'training';
   isReplay?: boolean;
+  victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;
 }
 
@@ -405,6 +406,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
   onSelectUnit,
   gameMode = 'pvp',
   isReplay = false,
+  victoryPoints,
   onCollapseChange
 }) => {
   // Collapse/expand state for entire table
@@ -520,40 +522,45 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
             marginBottom: '4px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              onClick={() => {
-                const newCollapsed = !isCollapsed;
-                setIsCollapsed(newCollapsed);
-                onCollapseChange?.(newCollapsed);
-              }}
-              style={{
-                background: 'rgba(0, 0, 0, 0.2)',
-                border: '1px solid rgba(0, 0, 0, 0.3)',
-                color: 'inherit',
-                fontSize: '16px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                padding: '4px 8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minWidth: '24px',
-                minHeight: '24px',
-                borderRadius: '4px',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.2)';
-              }}
-              aria-label={isCollapsed ? 'Expand table' : 'Collapse table'}
-            >
-              {isCollapsed ? '+' : '−'}
-            </button>
-            <span style={{ fontSize: '16px' }}>{getPlayerTypeLabel(player)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                onClick={() => {
+                  const newCollapsed = !isCollapsed;
+                  setIsCollapsed(newCollapsed);
+                  onCollapseChange?.(newCollapsed);
+                }}
+                style={{
+                  background: 'rgba(0, 0, 0, 0.2)',
+                  border: '1px solid rgba(0, 0, 0, 0.3)',
+                  color: 'inherit',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: '24px',
+                  minHeight: '24px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.2)';
+                }}
+                aria-label={isCollapsed ? 'Expand table' : 'Collapse table'}
+              >
+                {isCollapsed ? '+' : '−'}
+              </button>
+              <span style={{ fontSize: '16px' }}>{getPlayerTypeLabel(player)}</span>
+            </div>
+            {victoryPoints !== undefined && (
+              <span style={{ fontSize: '14px' }}>{`VP : ${victoryPoints}`}</span>
+            )}
           </div>
         </div>
 

@@ -1,4 +1,5 @@
 {
+  "primary_objective": "objectives_control",
   "units": [
     {
       "id": 1,

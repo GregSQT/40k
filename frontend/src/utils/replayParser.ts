@@ -60,6 +60,7 @@ interface PrimaryObjectiveRule {
   };
   control: {
     method: string;
+    control_method: string;
     tie_behavior: string;
   };
 }
@@ -67,6 +68,29 @@ interface PrimaryObjectiveRule {
 interface ReplayRules {
   primary_objective: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
 }
+
+const validateReplayRules = (rules: ReplayRules, episodeNumber: number): void => {
+  const primaryObjective = rules.primary_objective;
+  const primaryObjectiveConfig = Array.isArray(primaryObjective)
+    ? (() => {
+        if (primaryObjective.length !== 1) {
+          throw new Error(`Replay rules primary_objective must contain exactly one config (episode ${episodeNumber})`);
+        }
+        return primaryObjective[0];
+      })()
+    : primaryObjective;
+
+  if (!primaryObjectiveConfig) {
+    throw new Error(`Replay rules primary_objective is missing (episode ${episodeNumber})`);
+  }
+
+  if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.control_method) {
+    throw new Error(
+      `Replay rules primary_objective.control.control_method is missing (episode ${episodeNumber}). ` +
+      `Regenerate step.log after updating primary objective config.`
+    );
+  }
+};
 
 interface ReplayGameState {
   [key: string]: unknown;
@@ -194,6 +218,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const rulesStr = rulesMatch[1];
       try {
         currentEpisode.rules = JSON.parse(rulesStr);
+        validateReplayRules(currentEpisode.rules, currentEpisode.episode_num);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Invalid Rules JSON in step.log: ${message}`);

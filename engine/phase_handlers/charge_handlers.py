@@ -195,8 +195,19 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         action_type = action["action"]
         unit_id = action["unitId"]
 
-    # For gym training, if no unitId specified, use first eligible unit
+    # For gym training or PvE AI, if no unitId specified, use first eligible unit
     if not unit_id:
+        config_gym_mode = config["gym_training_mode"] if "gym_training_mode" in config else False
+        state_gym_mode = game_state["gym_training_mode"] if "gym_training_mode" in game_state else False
+        is_gym_training = config_gym_mode or state_gym_mode
+        current_player = require_key(game_state, "current_player")
+        is_pve_ai = config.get("pve_mode", False) and current_player == 2
+        if not is_gym_training and not is_pve_ai:
+            return False, {
+                "error": "unit_id_required",
+                "action": action_type,
+                "message": "unitId is required for human-controlled charge activation"
+            }
         if game_state["charge_activation_pool"]:
             unit_id = game_state["charge_activation_pool"][0]
         else:

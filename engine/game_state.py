@@ -397,24 +397,57 @@ class GameStateManager:
 
     def calculate_objective_control(self, game_state: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
         """
-        Calculate objective control for each objective with PERSISTENT control.
+        Calculate objective control for each objective with configured control method.
 
         Win condition: Control more objectives than opponent at end of turn 5.
         Control rules:
         - To CAPTURE an objective: Your OC sum must be > opponent's OC sum
-        - Once controlled, you KEEP control until opponent captures it
-        - Equal OC = current controller keeps control (or stays neutral if uncontrolled)
+        - control_method == "sticky": keep control until opponent captures
+        - control_method == "occupy": control only if currently occupied with greater OC
+        - Equal OC = current controller keeps control (sticky) or stays neutral (occupy)
 
         Returns:
             Dict[objective_id, {
-                'player_0_oc': int,  # Total OC for player 0
                 'player_1_oc': int,  # Total OC for player 1
-                'controller': int|None  # 0, 1, or None (contested/uncontrolled)
+                'player_2_oc': int,  # Total OC for player 2
+                'controller': int|None  # 1, 2, or None (contested/uncontrolled)
             }]
         """
         objectives = require_key(game_state, "objectives")
         if not objectives:
             return {}
+
+        primary_objective = require_key(game_state, "primary_objective")
+        if primary_objective is None:
+            raise ValueError("primary_objective is required to calculate objective control")
+        if isinstance(primary_objective, list):
+            if not primary_objective:
+                raise ValueError("primary_objective list cannot be empty for objective control")
+            primary_configs = primary_objective
+        else:
+            primary_configs = [primary_objective]
+
+        control_method: Optional[str] = None
+        for objective_cfg in primary_configs:
+            if not isinstance(objective_cfg, dict):
+                raise TypeError("primary_objective entry must be a dict for objective control")
+            control_cfg = require_key(objective_cfg, "control")
+            method = require_key(control_cfg, "method")
+            if method != "oc_sum_greater":
+                raise ValueError(f"Unsupported primary objective control method: {method}")
+            current_control_method = require_key(control_cfg, "control_method")
+            if current_control_method not in ("sticky", "occupy"):
+                raise ValueError(f"Unsupported control_method: {current_control_method}")
+            tie_behavior = require_key(control_cfg, "tie_behavior")
+            if tie_behavior != "no_control":
+                raise ValueError(f"Unsupported primary objective tie_behavior: {tie_behavior}")
+            if control_method is None:
+                control_method = current_control_method
+            elif control_method != current_control_method:
+                raise ValueError("primary_objective control_method must be consistent across configs")
+
+        if control_method is None:
+            raise ValueError("control_method is required to calculate objective control")
 
         # Get persistent control state (initialize if not present)
         if "objective_controllers" not in game_state:
@@ -425,13 +458,14 @@ class GameStateManager:
         for objective in objectives:
             obj_id = objective["id"]
             obj_hexes = objective["hexes"]
+            obj_id_key = str(obj_id)
 
             # Convert hex list to set of tuples for fast lookup
             hex_set = set(tuple(h) for h in obj_hexes)
 
             # Calculate OC per player
-            player_0_oc = 0
             player_1_oc = 0
+            player_2_oc = 0
 
             units_cache = require_key(game_state, "units_cache")
             unit_by_id = {str(u["id"]): u for u in game_state["units"]}
@@ -443,34 +477,46 @@ class GameStateManager:
                 unit_pos = normalize_coordinates(entry["col"], entry["row"])
                 if unit_pos in hex_set:
                     oc = require_key(unit, "OC")
-                    if unit["player"] == 0:
-                        player_0_oc += oc
-                    else:
+                    unit_player = require_key(unit, "player")
+                    if unit_player == 1:
                         player_1_oc += oc
+                    elif unit_player == 2:
+                        player_2_oc += oc
+                    else:
+                        raise ValueError(f"Unexpected unit player id: {unit_player}")
 
             # Get current controller from persistent state; explicit init when first seeing this objective
-            if str(obj_id) not in game_state["objective_controllers"]:
-                game_state["objective_controllers"][str(obj_id)] = None
-            current_controller = game_state["objective_controllers"][str(obj_id)]
+            if obj_id_key not in game_state["objective_controllers"]:
+                game_state["objective_controllers"][obj_id_key] = None
+            current_controller = game_state["objective_controllers"][obj_id_key]
 
-            # Determine new controller with PERSISTENT control rules
-            new_controller = current_controller  # Default: keep current control
+            if control_method == "sticky":
+                # Determine new controller with PERSISTENT control rules
+                new_controller = current_controller  # Default: keep current control
 
-            if player_0_oc > player_1_oc:
-                # P0 has more OC - P0 captures/keeps
-                new_controller = 0
-            elif player_1_oc > player_0_oc:
-                # P1 has more OC - P1 captures/keeps
-                new_controller = 1
-            # If equal OC: current controller keeps control (no change)
-            # This includes 0-0 case where objective stays in its current state
+                if player_1_oc > player_2_oc:
+                    # P1 has more OC - P1 captures/keeps
+                    new_controller = 1
+                elif player_2_oc > player_1_oc:
+                    # P2 has more OC - P2 captures/keeps
+                    new_controller = 2
+                # If equal OC: current controller keeps control (no change)
+                # This includes 0-0 case where objective stays in its current state
+            elif control_method == "occupy":
+                new_controller = None
+                if player_1_oc > player_2_oc:
+                    new_controller = 1
+                elif player_2_oc > player_1_oc:
+                    new_controller = 2
+            else:
+                raise ValueError(f"Unsupported control_method: {control_method}")
 
             # Update persistent state
-            game_state["objective_controllers"][obj_id] = new_controller
+            game_state["objective_controllers"][obj_id_key] = new_controller
 
             result[obj_id] = {
-                "player_0_oc": player_0_oc,
                 "player_1_oc": player_1_oc,
+                "player_2_oc": player_2_oc,
                 "controller": new_controller
             }
 
@@ -481,14 +527,17 @@ class GameStateManager:
         Count objectives controlled by each player.
 
         Returns:
-            {0: count_for_player_0, 1: count_for_player_1}
+            {1: count_for_player_1, 2: count_for_player_2}
         """
         control_data = self.calculate_objective_control(game_state)
 
-        counts = {0: 0, 1: 0}
+        counts = {1: 0, 2: 0}
         for obj_id, data in control_data.items():
             if data["controller"] is not None:
-                counts[data["controller"]] += 1
+                controller = data["controller"]
+                if controller not in counts:
+                    raise ValueError(f"Unexpected objective controller: {controller}")
+                counts[controller] += 1
 
         return counts
 
@@ -507,12 +556,17 @@ class GameStateManager:
         if not objectives:
             return {1: 0, 2: 0}
 
+        objective_controllers = require_key(game_state, "objective_controllers")
+
         control_cfg = require_key(primary_objective, "control")
         method = require_key(control_cfg, "method")
+        control_method = require_key(control_cfg, "control_method")
         tie_behavior = require_key(control_cfg, "tie_behavior")
 
         if method != "oc_sum_greater":
             raise ValueError(f"Unsupported primary objective control method: {method}")
+        if control_method not in ("sticky", "occupy"):
+            raise ValueError(f"Unsupported control_method: {control_method}")
         if tie_behavior != "no_control":
             raise ValueError(f"Unsupported primary objective tie_behavior: {tie_behavior}")
 
@@ -522,6 +576,8 @@ class GameStateManager:
         counts = {1: 0, 2: 0}
 
         for objective in objectives:
+            obj_id = require_key(objective, "id")
+            obj_id_key = str(obj_id)
             obj_hexes = require_key(objective, "hexes")
             hex_set = {normalize_coordinates(h[0], h[1]) for h in obj_hexes}
             player_1_oc = 0
@@ -543,14 +599,28 @@ class GameStateManager:
                     else:
                         raise ValueError(f"Unexpected unit player id: {unit_player}")
 
-            controller = None
-            if player_1_oc > player_2_oc:
-                controller = 1
-            elif player_2_oc > player_1_oc:
-                controller = 2
+            if obj_id_key not in objective_controllers:
+                objective_controllers[obj_id_key] = None
+            current_controller = objective_controllers[obj_id_key]
+            if control_method == "sticky":
+                new_controller = current_controller
+                if player_1_oc > player_2_oc:
+                    new_controller = 1
+                elif player_2_oc > player_1_oc:
+                    new_controller = 2
+                # If equal OC: current controller keeps control (sticky)
+            elif control_method == "occupy":
+                new_controller = None
+                if player_1_oc > player_2_oc:
+                    new_controller = 1
+                elif player_2_oc > player_1_oc:
+                    new_controller = 2
+            else:
+                raise ValueError(f"Unsupported control_method: {control_method}")
 
-            if controller is not None:
-                counts[controller] += 1
+            objective_controllers[obj_id_key] = new_controller
+            if new_controller is not None:
+                counts[new_controller] += 1
 
         return counts
 

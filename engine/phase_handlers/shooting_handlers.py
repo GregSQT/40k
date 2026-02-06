@@ -2277,9 +2277,17 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     
     # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
     # Must hold after every end_activation (shoot/advance/wait/execution_loop), not only wait/skip.
+    # Exception: PvE human player must manually select the next unit.
     pool = require_key(game_state, "shoot_activation_pool")
     if pool:
-        game_state["active_shooting_unit"] = pool[0]
+        cfg = require_key(game_state, "config")
+        is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
+        current_player = require_key(game_state, "current_player")
+        if is_pve and current_player != 2:
+            if "active_shooting_unit" in game_state:
+                del game_state["active_shooting_unit"]
+        else:
+            game_state["active_shooting_unit"] = pool[0]
     
     # CRITICAL: Pool empty detection is handled in execute_action (like MOVE phase)
     # This prevents double call to _shooting_phase_complete (once here, once in _process_shooting_phase)
@@ -3078,9 +3086,14 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
             # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+            # Exception: PvE human player must manually select the next unit.
             pool = require_key(game_state, "shoot_activation_pool")
             if pool:
-                game_state["active_shooting_unit"] = pool[0]
+                cfg = require_key(game_state, "config")
+                is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
+                current_player = require_key(game_state, "current_player")
+                if not (is_pve and current_player != 2):
+                    game_state["active_shooting_unit"] = pool[0]
             return True, {
                 "action": "postpone",
                 "unitId": unit_id,
@@ -3103,9 +3116,14 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
             # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
+            # Exception: PvE human player must manually select the next unit.
             pool = require_key(game_state, "shoot_activation_pool")
             if pool:
-                game_state["active_shooting_unit"] = pool[0]
+                cfg = require_key(game_state, "config")
+                is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
+                current_player = require_key(game_state, "current_player")
+                if not (is_pve and current_player != 2):
+                    game_state["active_shooting_unit"] = pool[0]
             # Return to UNIT_ACTIVABLE_CHECK step (by returning activation_ended=False)
             return True, {
                 "action": "postpone",
@@ -4620,6 +4638,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             # YES -> SHOOTING ACTIONS AVAILABLE (post-advance) -> Go to STEP 5: ADVANCED_SHOOTING_ACTION_SELECTION
             # Mark unit as currently active (required for frontend to show weapon icon)
             game_state["active_shooting_unit"] = unit_id
+            available_weapons = [
+                {"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")}
+                for w in weapon_available_pool
+            ]
             # Return advance action so it gets logged as its own step
             return True, {
                 "action": "advance",
@@ -4629,7 +4651,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "toCol": dest_col,
                 "toRow": dest_row,
                 "advance_range": advance_range,
-                "actually_moved": actually_moved
+                "actually_moved": actually_moved,
+                "blinking_units": valid_target_pool,
+                "start_blinking": True,
+                "available_weapons": available_weapons
             }
         else:
             # NO -> Unit advanced but no valid targets -> end_activation(ACTION, 1, ADVANCE, SHOOTING, 1)

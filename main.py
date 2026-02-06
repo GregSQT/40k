@@ -68,8 +68,49 @@ def load_config(scenario_path=None):
     unit_definitions = load_unit_definitions_from_ts(unit_registry)
 
     config["units"] = load_scenario_units(unit_definitions, scenario_path)
+    config["primary_objective"] = load_primary_objective_from_scenario(scenario_path)
 
     return config
+
+
+def load_primary_objective_from_scenario(scenario_path=None):
+    """Load primary objective config from scenario file.
+
+    Args:
+        scenario_path: Path to scenario file. If None, defaults to config/scenario.json
+
+    Returns:
+        Primary objective config dict, list of configs, or None if not defined.
+    """
+    if scenario_path is None:
+        scenario_path = "config/scenario.json"
+
+    if not os.path.exists(scenario_path):
+        print(f"Warning: Scenario file not found: {scenario_path}, no primary objective loaded")
+        return None
+
+    with open(scenario_path, 'r', encoding='utf-8') as f:
+        scenario_data = json.load(f)
+
+    if "primary_objectives" in scenario_data:
+        scenario_primary_objective = scenario_data["primary_objectives"]
+    elif "primary_objective" in scenario_data:
+        scenario_primary_objective = scenario_data["primary_objective"]
+    else:
+        return None
+
+    from config_loader import get_config_loader
+    config_loader = get_config_loader()
+
+    if isinstance(scenario_primary_objective, list):
+        if not scenario_primary_objective:
+            raise ValueError("primary_objectives list cannot be empty")
+        return [
+            config_loader.load_primary_objective_config(obj_id)
+            for obj_id in scenario_primary_objective
+        ]
+
+    return config_loader.load_primary_objective_config(scenario_primary_objective)
 
 
 def load_unit_definitions_from_ts(unit_registry):

@@ -24,6 +24,7 @@ export const BoardWithAPI: React.FC = () => {
                    location.pathname.includes('/replay') ? 'training' :
                    (location.pathname === '/game' && location.search.includes('mode=pve')) ? 'pve' : 'pvp';
   const isPvE = gameMode === 'pve' || window.location.search.includes('mode=pve') || apiProps.gameState?.pve_mode === true;
+  const victoryPoints = apiProps.gameState?.victory_points;
   
   // Get board configuration for line of sight calculations
   const { gameConfig } = useGameConfig();
@@ -34,6 +35,24 @@ export const BoardWithAPI: React.FC = () => {
   // Track UnitStatusTable collapse states
   const [player1Collapsed, setPlayer1Collapsed] = useState(false);
   const [player2Collapsed, setPlayer2Collapsed] = useState(false);
+
+  const getVictoryPointsForPlayer = (player: 1 | 2): number | undefined => {
+    if (!apiProps.gameState) {
+      return undefined;
+    }
+    if (!victoryPoints) {
+      throw new Error('victory_points missing from game_state');
+    }
+    const numericValue = victoryPoints[player];
+    if (numericValue !== undefined) {
+      return numericValue;
+    }
+    const stringValue = victoryPoints[String(player)];
+    if (stringValue === undefined) {
+      throw new Error(`victory_points missing for player ${player}`);
+    }
+    return stringValue;
+  };
   
   // Settings menu state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -440,6 +459,7 @@ export const BoardWithAPI: React.FC = () => {
             setClickedUnitId(null);
           }}
           gameMode={gameMode}
+          victoryPoints={getVictoryPointsForPlayer(1)}
           onCollapseChange={setPlayer1Collapsed}
         />
       </ErrorBoundary>
@@ -455,6 +475,7 @@ export const BoardWithAPI: React.FC = () => {
             setClickedUnitId(null);
           }}
           gameMode={gameMode}
+          victoryPoints={getVictoryPointsForPlayer(2)}
           onCollapseChange={setPlayer2Collapsed}
         />
       </ErrorBoundary>

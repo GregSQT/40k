@@ -30,6 +30,7 @@
   },
   "control": {
     "method": "oc_sum_greater",
+    "control_method": "sticky",
     "tie_behavior": "no_control"
   }
 }

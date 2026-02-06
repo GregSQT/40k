@@ -97,10 +97,13 @@ interface APIGameState {
   active_alternating_activation_pool: string[];
   non_active_alternating_activation_pool: string[];
   fight_subphase: string | null;
+  units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number }>;
   active_movement_unit?: string;
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
+  victory_points?: Record<string, number>;
+  primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
 }
 
 export const useEngineAPI = () => {
@@ -1559,6 +1562,9 @@ export const useEngineAPI = () => {
       active_movement_unit: gameState.active_movement_unit,
       active_shooting_unit: gameState.active_shooting_unit,
       active_fight_unit: gameState.active_fight_unit,
+      units_cache: gameState.units_cache,
+      victory_points: gameState.victory_points,
+      primary_objective: gameState.primary_objective,
     };
   }, [
     gameState,
@@ -1971,6 +1977,43 @@ export const useEngineAPI = () => {
           
           console.log(`🤖 AI Sequential Step ${iteration}: Activating next AI unit (phase=${gameState?.phase}, current_player=${gameState?.current_player})`);
           
+          const canCallAiTurn = (() => {
+            if (!gameState) {
+              throw new Error("Missing gameState during AI turn check");
+            }
+            if (gameState.current_player === undefined || gameState.current_player === null) {
+              throw new Error("Missing current_player in gameState during AI turn check");
+            }
+            if (gameState.phase === 'fight') {
+              const fightSubphase = gameState.fight_subphase;
+              if (!fightSubphase) {
+                throw new Error("Missing fight_subphase in gameState during AI turn check");
+              }
+              let pool: Array<string | number> | undefined;
+              if (fightSubphase === 'charging') {
+                pool = gameState.charging_activation_pool;
+              } else if (fightSubphase === 'alternating_non_active' || fightSubphase === 'cleanup_non_active') {
+                pool = gameState.non_active_alternating_activation_pool;
+              } else if (fightSubphase === 'alternating_active' || fightSubphase === 'cleanup_active') {
+                pool = gameState.active_alternating_activation_pool;
+              } else {
+                throw new Error(`Unknown fight_subphase during AI turn check: ${fightSubphase}`);
+              }
+              if (!pool) {
+                throw new Error(`Missing fight activation pool for subphase: ${fightSubphase}`);
+              }
+              const aiUnitIds = new Set(
+                gameState.units.filter(u => u.player === 2).map(u => u.id.toString())
+              );
+              return pool.some(id => aiUnitIds.has(id.toString()));
+            }
+            return gameState.current_player === 2;
+          })();
+
+          if (!canCallAiTurn) {
+            break;
+          }
+
           // Step 1: Call backend to activate next AI unit
           const aiResponse = await fetch(`${API_BASE}/game/ai-turn`, {
             method: 'POST',

@@ -650,11 +650,11 @@ class StepLogger:
                 if objective_control:
                     objective_entries = []
                     for obj_id, data in objective_control.items():
-                        player_0_oc = require_key(data, "player_0_oc")
                         player_1_oc = require_key(data, "player_1_oc")
+                        player_2_oc = require_key(data, "player_2_oc")
                         controller = require_key(data, "controller")
                         objective_entries.append(
-                            f"Obj{obj_id}:P0_OC={player_0_oc},P1_OC={player_1_oc},Ctrl={controller}"
+                            f"Obj{obj_id}:P1_OC={player_1_oc},P2_OC={player_2_oc},Ctrl={controller}"
                         )
                     f.write(f"[{timestamp}] OBJECTIVE CONTROL: {' | '.join(objective_entries)}\n")
                 f.write("=" * 80 + "\n")

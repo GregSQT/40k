@@ -565,6 +565,13 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # Extract unit if not provided
     if unit is None:
         if "unitId" not in action:
+            is_gym_training = config.get("gym_training_mode", False)
+            if not is_gym_training:
+                return False, {
+                    "error": "unit_id_required",
+                    "action": action_type,
+                    "message": "unitId is required for human-controlled fight activation"
+                }
             # Auto-select first unit from current pool for gym training
             # CRITICAL: Filter out dead units from pool before selection
             alive_units_in_pool = []
@@ -601,7 +608,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
     # Check for gym training mode and PvE AI mode
     is_gym_training = config.get("gym_training_mode", False)
-    is_pve_ai = config.get("pve_mode", False)
+    is_pve_ai = config.get("pve_mode", False) and unit and unit.get("player") == 2
 
     # GYM TRAINING / PvE AI: Auto-activate unit if not already active
     active_fight_unit = game_state.get("active_fight_unit")

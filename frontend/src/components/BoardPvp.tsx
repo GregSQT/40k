@@ -33,6 +33,7 @@ interface PrimaryObjectiveRule {
   };
   control: {
     method: string;
+    control_method: string;
     tie_behavior: string;
   };
 }
@@ -50,10 +51,12 @@ function calculateObjectiveControl(
   flatObjectiveHexes: [number, number][] | undefined,
   currentControllers: ObjectiveControllers,  // Persistent control state
   usePersistentState: boolean = true,  // If false, recalculate control based only on current state
-  tieBehavior?: string
+  tieBehavior?: string,
+  controlMethod?: string
 ): { controlMap: { [hexKey: string]: number | null }, updatedControllers: ObjectiveControllers } {
   const controlMap: { [hexKey: string]: number | null } = {};
-  const updatedControllers: ObjectiveControllers = usePersistentState ? { ...currentControllers } : {};
+  const shouldUseSticky = usePersistentState && controlMethod === "sticky";
+  const updatedControllers: ObjectiveControllers = shouldUseSticky ? { ...currentControllers } : {};
 
   // Build a map of hex -> objective for grouped objectives
   const hexToObjective = new Map<string, string>();
@@ -105,11 +108,11 @@ function calculateObjectiveControl(
       }
     }
 
-    // Get current controller from persistent state (only if using persistent state)
-    const currentController = usePersistentState ? (currentControllers[objName] ?? null) : null;
+    // Get current controller from persistent state (only if using sticky control)
+    const currentController = shouldUseSticky ? (currentControllers[objName] ?? null) : null;
 
     // Determine new controller with PERSISTENT control rules (or instant calculation if not using persistent state)
-    let newController: number | null = usePersistentState ? currentController : null;  // Default: keep current if persistent, otherwise null
+    let newController: number | null = shouldUseSticky ? currentController : null;  // Default: keep current if sticky, otherwise null
 
     if (p1_oc > p2_oc) {
       // P1 has more OC - P1 captures/keeps
@@ -117,12 +120,17 @@ function calculateObjectiveControl(
     } else if (p2_oc > p1_oc) {
       // P2 has more OC - P2 captures/keeps
       newController = 2;
-    } else if (tieBehavior === "no_control" || !usePersistentState) {
+    } else if (!shouldUseSticky) {
       // If equal OC and not using persistent state: no control
-      // If tie_behavior=no_control: neutral control even with persistent state
       newController = null;
+    } else if (currentController === null) {
+      if (tieBehavior === "no_control") {
+        newController = null;
+      } else {
+        throw new Error(`Unsupported objective tie behavior: ${tieBehavior}`);
+      }
     }
-    // If equal OC and using persistent state: current controller keeps control (no change)
+    // If equal OC and using persistent state with existing controller: keep control
 
     // Update persistent state
     updatedControllers[objName] = newController;
@@ -778,6 +786,15 @@ export default function Board({
         if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
           throw new Error(`Unit ${selectedUnit.id} (${selectedUnit.type || 'unknown'}) is missing required MOVE property for movement preview`);
         }
+        if (!gameState) {
+          throw new Error("Missing gameState during movement preview calculation");
+        }
+        if (!gameState.units_cache) {
+          throw new Error("Missing units_cache in gameState during movement preview calculation");
+        }
+
+        const aliveUnitIds = new Set(Object.keys(gameState.units_cache).map(id => id.toString()));
+        const aliveUnits = units.filter(u => aliveUnitIds.has(u.id.toString()));
 
         const centerCol = selectedUnit.col;
         const centerRow = selectedUnit.row;
@@ -797,7 +814,7 @@ export default function Board({
         );
         wallHexSet.forEach(wallHex => forbiddenSet.add(wallHex));
         
-        for (const enemy of units) {
+        for (const enemy of aliveUnits) {
           if (enemy.player === selectedUnit.player) continue;
 
           // Add enemy position itself
@@ -845,7 +862,7 @@ export default function Board({
             continue;
           }
 
-          const blocked = units.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
+        const blocked = aliveUnits.some(u => u.col === col && u.row === row && u.id !== selectedUnit.id);
 
           if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
             availableCells.push({ col, row });
@@ -877,7 +894,7 @@ export default function Board({
               nextSteps <= selectedUnit.MOVE &&
               !forbiddenSet.has(nkey)
             ) {
-              const nblocked = units.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
+              const nblocked = aliveUnits.some(u => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id);
               
               if (
                 !nblocked &&
@@ -1205,6 +1222,10 @@ export default function Board({
       const replayRules = (gameState as { rules?: ReplayRules } | null)?.rules;
       let shouldApplyObjectiveControl = true;
       let tieBehavior: string | undefined;
+      let controlMethod: string | undefined;
+      if (replayActionIndex !== undefined && !replayRules) {
+        throw new Error("Replay rules missing: objective control cannot be computed");
+      }
       if (replayActionIndex !== undefined && replayRules) {
         const primaryObjective = replayRules.primary_objective;
         const primaryObjectiveConfig = Array.isArray(primaryObjective)
@@ -1224,11 +1245,17 @@ export default function Board({
         if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.method || !primaryObjectiveConfig.control.tie_behavior) {
           throw new Error("Replay rules primary_objective.control is missing required fields");
         }
+        if (!primaryObjectiveConfig.control.control_method) {
+          throw new Error("Replay rules primary_objective.control.control_method is missing");
+        }
         if (!primaryObjectiveConfig.timing || !primaryObjectiveConfig.timing.default_phase || !primaryObjectiveConfig.timing.round5_second_player_phase) {
           throw new Error("Replay rules primary_objective.timing is missing required fields");
         }
         if (primaryObjectiveConfig.control.method !== "oc_sum_greater") {
           throw new Error(`Unsupported objective control method: ${primaryObjectiveConfig.control.method}`);
+        }
+        if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+          throw new Error(`Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`);
         }
         if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
           throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
@@ -1246,6 +1273,59 @@ export default function Board({
           shouldApplyObjectiveControl = false;
         }
         tieBehavior = primaryObjectiveConfig.control.tie_behavior;
+        controlMethod = primaryObjectiveConfig.control.control_method;
+      }
+      if (replayActionIndex === undefined) {
+        const livePrimaryObjective = gameState?.primary_objective;
+        if (!livePrimaryObjective) {
+          throw new Error("primary_objective missing from game_state");
+        }
+        const primaryObjectiveConfig = Array.isArray(livePrimaryObjective)
+          ? (() => {
+              if (livePrimaryObjective.length !== 1) {
+                throw new Error("primary_objective must contain exactly one config");
+              }
+              return livePrimaryObjective[0];
+            })()
+          : livePrimaryObjective;
+        if (!primaryObjectiveConfig) {
+          throw new Error("primary_objective is null");
+        }
+        if (!primaryObjectiveConfig.scoring || primaryObjectiveConfig.scoring.start_turn === undefined || primaryObjectiveConfig.scoring.start_turn === null) {
+          throw new Error("primary_objective.scoring.start_turn is missing");
+        }
+        if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.method || !primaryObjectiveConfig.control.tie_behavior) {
+          throw new Error("primary_objective.control is missing required fields");
+        }
+        if (!primaryObjectiveConfig.control.control_method) {
+          throw new Error("primary_objective.control.control_method is missing");
+        }
+        if (!primaryObjectiveConfig.timing || !primaryObjectiveConfig.timing.default_phase || !primaryObjectiveConfig.timing.round5_second_player_phase) {
+          throw new Error("primary_objective.timing is missing required fields");
+        }
+        if (primaryObjectiveConfig.control.method !== "oc_sum_greater") {
+          throw new Error(`Unsupported objective control method: ${primaryObjectiveConfig.control.method}`);
+        }
+        if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+          throw new Error(`Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`);
+        }
+        if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
+          throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
+        }
+        const startTurn = primaryObjectiveConfig.scoring.start_turn;
+        if (currentTurn < startTurn) {
+          shouldApplyObjectiveControl = false;
+        }
+        if (
+          currentTurn === 5 &&
+          currentPlayer === 2 &&
+          primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
+          phase !== "fight"
+        ) {
+          shouldApplyObjectiveControl = false;
+        }
+        tieBehavior = primaryObjectiveConfig.control.tie_behavior;
+        controlMethod = primaryObjectiveConfig.control.control_method;
       }
 
       const { controlMap: objectiveControl, updatedControllers } = shouldApplyObjectiveControl
@@ -1255,7 +1335,8 @@ export default function Board({
             effectiveObjectiveHexes,
             objectiveControllersRef.current,
             true,
-            tieBehavior
+            tieBehavior,
+            controlMethod
           )
         : { controlMap: {}, updatedControllers: objectiveControllersRef.current };
       // Update persistent state
