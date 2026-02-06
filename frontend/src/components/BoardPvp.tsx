@@ -302,6 +302,7 @@ export default function Board({
 
   // ✅ HOOK 1: useRef - ALWAYS called first
   const containerRef = useRef<HTMLDivElement>(null);
+  const appRef = useRef<PIXI.Application | null>(null);
 
   // Persistent objective control state - survives re-renders within an episode
   const objectiveControllersRef = useRef<ObjectiveControllers>({});
@@ -476,7 +477,10 @@ export default function Board({
       return;
     }
 
-    containerRef.current.innerHTML = "";
+    const isNewApp = !appRef.current;
+    if (isNewApp) {
+      containerRef.current.innerHTML = "";
+    }
 
     // ✅ AGGRESSIVE TEXTURE CACHE CLEARING for movePreview units
     if (mode === "movePreview" && movePreview) {
@@ -605,8 +609,11 @@ export default function Board({
       throw new Error('Missing required PIXI configuration values: antialias, autoDensity, or resolution');
     }
 
-    const app = new PIXI.Application(pixiConfig);
-    app.stage.sortableChildren = true;
+    const app = appRef.current || new PIXI.Application(pixiConfig);
+    if (!appRef.current) {
+      appRef.current = app;
+      app.stage.sortableChildren = true;
+    }
 
     // ✅ CREATE PERSISTENT UI CONTAINER for target logos, charge badges, etc.
     // This container is NEVER cleaned up by drawBoard()
@@ -631,8 +638,10 @@ export default function Board({
     canvas.style.border = displayConfig?.canvas_border ?? '1px solid #333';
     
     // Clear container and append canvas - EXACT BOARDREPLAY MATCH
-    containerRef.current.innerHTML = '';
-    containerRef.current.appendChild(canvas);
+    if (isNewApp) {
+      containerRef.current.innerHTML = '';
+      containerRef.current.appendChild(canvas);
+    }
 
     // Set up board click handler IMMEDIATELY after canvas creation
     setupBoardClickHandler({
@@ -676,20 +685,21 @@ export default function Board({
     window.addEventListener('boardAdvanceClick', advanceClickHandler);
 
     // Right click cancels move/attack preview
-    if (app.view && app.view.addEventListener) {
-      app.view.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        
-        if (phase === "shoot") {
-          // During shooting phase, only cancel target preview if one exists
-          if (targetPreview) {
-            onCancelTargetPreview?.();
-          }
-          // If no target preview, do nothing (don't cancel the whole shooting)
-        } else if (mode === "movePreview" || mode === "attackPreview") {
-          onCancelMove?.();
+    const contextMenuHandler = (e: Event) => {
+      e.preventDefault();
+      
+      if (phase === "shoot") {
+        // During shooting phase, only cancel target preview if one exists
+        if (targetPreview) {
+          onCancelTargetPreview?.();
         }
-      });
+        // If no target preview, do nothing (don't cancel the whole shooting)
+      } else if (mode === "movePreview" || mode === "attackPreview") {
+        onCancelMove?.();
+      }
+    };
+    if (app.view && app.view.addEventListener) {
+      app.view.addEventListener("contextmenu", contextMenuHandler);
     }
 
     // ✅ RESTRUCTURED: Calculate ALL highlight data BEFORE any drawBoard calls
@@ -1123,7 +1133,7 @@ export default function Board({
         }
 
 
-      // ✅ DRAW BOARD ONCE with populated availableCells
+    // ✅ DRAW BOARD ONCE with populated availableCells
       // Override wall_hexes if wallHexesOverride is provided (for replay mode)
       // Override objective_hexes if objectivesOverride is provided (for replay mode)
       // Convert grouped objectives format to flat hex list for BoardDisplay
@@ -1345,6 +1355,9 @@ export default function Board({
       // Map "command" phase to "move" for drawBoard and UnitRenderer (they don't support "command")
       const effectivePhase = phase === "command" ? "move" : phase;
       
+      if (app.stage) {
+        app.stage.removeChildren();
+      }
       drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
         availableCells: effectiveAvailableCells,
         attackCells,
@@ -1783,19 +1796,9 @@ export default function Board({
         // Cleanup board interactions
         // cleanupBoardInteractions is now a stub - no longer needed
         
-        if (app && app.stage) {
-          // Destroy all sprites but preserve textures in cache to prevent black flashing
-          // Textures will be reused from cache on next render
-          app.stage.children.forEach(child => {
-            if (child.destroy) {
-              // Don't destroy textures - they should remain in cache for reuse
-              child.destroy({ children: true, texture: false, baseTexture: false });
-            }
-          });
-          app.stage.removeChildren();
+        if (app.view && app.view.removeEventListener) {
+          app.view.removeEventListener("contextmenu", contextMenuHandler);
         }
-        // Don't destroy textures when destroying app - preserve cache
-        app.destroy(true, { children: true, texture: false, baseTexture: false });
       };
 
     }, [
