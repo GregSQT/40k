@@ -9,9 +9,10 @@ This document describes all configuration files used in the W40K game engine.
 ## Table of Contents
 
 1. [Weapon Rules](#weapon-rules-configweapon_rulesjson)
-2. [Training Configuration](#training-configuration)
-3. [Scenario Files](#scenario-files)
-4. [Armory Files](#armory-files)
+2. [Game Config](#game-config-configgame_configjson)
+3. [Training Configuration](#training-configuration)
+4. [Scenario Files](#scenario-files)
+5. [Armory Files](#armory-files)
 
 ---
 
@@ -129,6 +130,41 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 - If `has_parameter=true`, parameter `:X` must be provided
 - If `has_parameter=false`, parameter must NOT be provided
 - Parameter must be positive integer if provided
+
+---
+
+## Game Config (`config/game_config.json`)
+
+**Location**: `/config/game_config.json`
+
+**Purpose**: Core gameplay rules and global parameters.
+
+### Key Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `game_rules.max_turns` | integer | Maximum number of turns per episode |
+| `game_rules.turn_limit_penalty` | number | Penalty when turn limit reached |
+| `game_rules.charge_max_distance` | integer | Maximum charge distance |
+| `game_rules.advance_distance_range` | integer | Advance roll range (D6 => 6) |
+| `game_rules.avg_charge_roll` | integer | Average charge distance used for heuristics |
+| `game_rules.macro_max_unit_value` | integer | Normalization constant for macro unit value |
+| `game_rules.macro_target_weights` | object | Target type weights for macro scoring |
+
+### Example
+
+```json
+{
+  "game_rules": {
+    "macro_max_unit_value": 200,
+    "macro_target_weights": {
+      "swarm": 1.0,
+      "troop": 1.5,
+      "elite": 2.0
+    }
+  }
+}
+```
 
 ---
 

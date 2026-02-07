@@ -161,6 +161,9 @@ Au démarrage PvE, charger **tous** les modèles requis :
 ### Observation macro (spécification détaillée)
 Pour chaque unité, on calcule un **profil offensif** séparé tir/mêlée, sans hypothèse
 de “cible favorite” fixée dans le type d’unité.
+Voir `Documentation/CONFIG_FILES.md` pour la définition de
+`game_rules.macro_target_weights` et `game_rules.macro_max_unit_value`.
+Les valeurs utilisées doivent provenir de `config/game_config.json` (section `game_rules`).
 
 **1) Scores offensifs par mode (tir et mêlée)**
 - Pour chaque arme de tir, calculer un score offensif contre **chaque type d’ennemi**
@@ -189,6 +192,87 @@ de “cible favorite” fixée dans le type d’unité.
 - `pos_col_norm`, `pos_row_norm` (coordonnées normalisées)
 - `dist_obj_norm = dist_min_objectif / max_range`
 
+### Spécifications complètes (implémentation)
+**Score offensif attendu (par arme, par type cible)**
+- Utiliser les **mêmes règles que la résolution de combat** (hit/wound/save/AP/invuln).
+- Calcul en **espérance** (pas de RNG) :
+  - `nb_attacks = expected_dice_value(NB)`
+  - `p_hit = P(hit | ATK)` avec `hit_target = ATK` et `p_hit = clamp((7 - hit_target) / 6)`
+  - `p_wound = P(wound | STR, T_cible)` (table des blessures)
+  - `p_unsaved = 1 - P(save | ARMOR_SAVE, INVUL_SAVE, AP)`
+  - `expected_damage = nb_attacks * p_hit * p_wound * p_unsaved * expected_dice_value(DMG)`
+- Les probabilites **doivent reproduire la logique moteur** (pas de formule divergente).
+
+**Details exacts (moteur)**
+- `expected_dice_value("D3") = 2.0`, `expected_dice_value("D6") = 3.5`.
+- `wound_target = _calculate_wound_target(STR, T)` :
+  - `STR >= 2*T` -> 2+, `STR > T` -> 3+, `STR == T` -> 4+, `STR*2 <= T` -> 6+, sinon 5+.
+- `save_target = _calculate_save_target(target, AP)` :
+  - `modified_armor_save = ARMOR_SAVE - AP` (AP negatif degrade la save)
+  - `effective_invul = INVUL_SAVE` si > 0, sinon 7 (impossible)
+  - `best_save = min(modified_armor_save, effective_invul)`
+  - `save_target = clamp(best_save, min=2, max=6)`
+- Probabilites d6 :
+  - `p = clamp((7 - target) / 6)` avec `target in [2..6]`
+Sources moteur :
+- `engine/phase_handlers/shooting_handlers.py`: `_calculate_wound_target`, `_calculate_save_target`
+- `engine/phase_handlers/fight_handlers.py`: `_calculate_wound_target`, `_calculate_save_target`
+
+**Exemple chiffre (ranged)**
+- Arme : `NB=2`, `ATK=3+`, `STR=4`, `AP=-1`, `DMG=1`
+- Cible : `T=4`, `ARMOR_SAVE=3+`, `INVUL_SAVE=0`
+- `nb_attacks=2`, `p_hit=(7-3)/6=4/6`
+- `wound_target=4+` (STR == T) donc `p_wound=3/6`
+- `save_target`: `modified_armor_save=3-(-1)=4`, `effective_invul=7`, `best_save=4`
+  -> `p_unsaved=1-(7-4)/6=1-3/6=3/6`
+- `expected_damage = 2 * (4/6) * (3/6) * (3/6) * 1 = 2 * 36/216 = 0.333...`
+La mêlée suit **exactement la même méthode** (NB/ATK/STR/AP/DMG identiques dans le calcul).
+
+**Types cibles de reference**
+- `Swarm`: `T=3`, `SV=6+`, `HP_MAX=1`, pas d’invuln
+- `Troop`: `T=4`, `SV=3+`, `HP_MAX=2`, pas d’invuln
+- `Elite`: `T=5`, `SV=2+`, `HP_MAX=3`, `INVUL_SAVE=4+`
+
+**Ponderations**
+- Pondérer par `game_rules.macro_target_weights`.
+- Si la cle est absente → **erreur explicite**.
+
+**Meilleur score et tie-break**
+- Si plusieurs types ont le meme score pondéré, choisir l’ordre
+  deterministe : `Swarm` > `Troop` > `Elite`.
+- Si aucune arme pour un mode (tir ou melee) :
+  - score = 0
+  - one‑hot = `[0,0,0]`
+
+**Ratio tir/melee**
+- Si `best_melee_score + best_ranged_score == 0` → **erreur explicite**.
+- Sinon calculer `attack_mode_ratio` comme defini plus haut.
+
+**Definition de max_range**
+- `max_range` est la **distance hex maximale** possible sur la carte courante,
+  calculee une fois au chargement du scenario.
+- Elle doit etre disponible dans le `game_state` (ou equivalente) ;
+  sinon → **erreur explicite**.
+
+**Format/ordre des features (par unite)**
+- `best_ranged_target_onehot` (3)
+- `best_melee_target_onehot` (3)
+- `attack_mode_ratio` (1)
+- `hp_ratio` (1)
+- `value_norm` (1)
+- `pos_col_norm`, `pos_row_norm` (2)
+- `dist_obj_norm` (1)
+
+**Performance**
+- Calculer les scores une seule fois par activation si possible.
+- Mettre en cache par unite/arme/type cible si l’etat n’a pas change
+  (positions, PV, armes).
+
+**Tests minimaux**
+- Intercessor : `best_ranged_score > best_melee_score`.
+- Hormagaunt : `best_melee_score > best_ranged_score`.
+- TyranidWarriorRanged : ratio proche du tir (ranged > melee).
+
 ### Action macro
 - Choisir **une unité du pool** (version initiale)
 - Optionnel : choisir une **intention** (focus objectif, focus unité, tempo)
@@ -208,6 +292,10 @@ de “cible favorite” fixée dans le type d’unité.
    ennemies du scénario (plus adaptatif, mais plus bruité).
 2) **Top‑k armes** : utiliser la moyenne des 2 meilleures armes au lieu d’un seul max
    (robustesse accrue, mais ajoute un hyper‑paramètre `k`).
+3) **Portée/LoS** : intégrer la portée réelle et la ligne de vue dans le score offensif.
+4) **Règles d’armes** : inclure ASSAULT/PISTOL/RAPID/MELTA si besoin macro.
+5) **Disponibilité d’arme** : ne scorer que les armes réellement sélectionnables
+   selon l’état (adjacent, avancé, etc.).
 
 ### Micro agents (validé)
 - modèles **pré‑entraînés et figés**

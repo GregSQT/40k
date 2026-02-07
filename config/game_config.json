@@ -4,7 +4,13 @@
     "turn_limit_penalty": -1,
     "charge_max_distance": 13,
     "advance_distance_range": 6,
-    "avg_charge_roll": 7
+    "avg_charge_roll": 7,
+    "macro_max_unit_value": 200,
+    "macro_target_weights": {
+      "swarm": 1.0,
+      "troop": 1.5,
+      "elite": 2.0
+    }
   },
   "gameplay": {
     "phase_order": ["move", "shoot", "charge", "fight"],
