@@ -66,6 +66,7 @@ import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 
 # Environment wrappers (extracted to ai/env_wrappers.py)
 from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper
+from ai.macro_training_env import MacroTrainingWrapper, MacroVsBotWrapper
 
 # Step logger (extracted to ai/step_logger.py)
 from ai.step_logger import StepLogger
@@ -624,6 +625,230 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             model = MaskablePPO(env=env, **model_params_copy)
     
     return model, env, training_config, model_path
+
+
+def create_macro_controller_model(config, training_config_name, rewards_config_name,
+                                  agent_key, new_model=False, append_training=False,
+                                  scenario_override=None, debug_mode=False):
+    """Create or load PPO model for MacroController with macro training wrapper."""
+    gpu_available = check_gpu_availability()
+
+    training_config = config.load_agent_training_config(agent_key, training_config_name)
+    print(
+        f"✅ Loaded agent-specific training config: "
+        f"config/agents/{agent_key}/{agent_key}_training_config.json [{training_config_name}]"
+    )
+
+    model_params = training_config["model_params"]
+
+    # Handle entropy coefficient scheduling if configured
+    if "ent_coef" in model_params and isinstance(model_params["ent_coef"], dict):
+        ent_config = model_params["ent_coef"]
+        start_val = float(ent_config["start"])
+        end_val = float(ent_config["end"])
+        model_params["ent_coef"] = start_val
+        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
+
+    W40KEngine, register_environment = setup_imports()
+    register_environment()
+
+    cfg = get_config_loader()
+
+    scenario_file = None
+    if scenario_override:
+        if os.path.isfile(scenario_override):
+            scenario_file = scenario_override
+        else:
+            scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
+    else:
+        scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
+
+    print(f"✅ Using scenario: {scenario_file}")
+
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+
+    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
+
+    n_envs = require_key(training_config, "n_envs")
+    if n_envs != 1:
+        raise ValueError(f"MacroController training requires n_envs=1 (got {n_envs})")
+
+    base_env = W40KEngine(
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=effective_agent_key,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=True,
+        gym_training_mode=True,
+        debug_mode=debug_mode
+    )
+
+    if step_logger:
+        base_env.step_logger = step_logger
+        print("✅ StepLogger connected to compliant W40KEngine")
+
+    macro_player = require_key(training_config, "macro_player")
+
+    model_path_template = config.get_model_path()
+    if not model_path_template.endswith(".zip"):
+        raise ValueError(f"Invalid model_file path for macro training: {model_path_template}")
+    model_path_template = model_path_template.replace(".zip", "_{model_key}.zip")
+
+    macro_env = MacroTrainingWrapper(
+        base_env=base_env,
+        unit_registry=unit_registry,
+        scenario_files=[scenario_file],
+        model_path_template=model_path_template,
+        macro_player=macro_player,
+        debug_mode=debug_mode
+    )
+
+    def mask_fn(env):
+        return env.get_action_mask()
+
+    masked_env = ActionMasker(macro_env, mask_fn)
+    env = Monitor(masked_env)
+
+    model_path = config.get_model_path().replace(".zip", f"_{agent_key}.zip")
+
+    policy_kwargs = require_key(model_params, "policy_kwargs")
+    net_arch = require_key(policy_kwargs, "net_arch")
+    total_params = sum(net_arch) if isinstance(net_arch, list) else 512
+    use_gpu = gpu_available and (total_params > 2000)
+    device = "cuda" if use_gpu else "cpu"
+    model_params["device"] = device
+
+    if not use_gpu and gpu_available:
+        print(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
+
+    if new_model or not os.path.exists(model_path):
+        print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
+        tb_log_name = f"{training_config_name}_{agent_key}"
+        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+        os.makedirs(specific_log_dir, exist_ok=True)
+        model_params_copy = model_params.copy()
+        model_params_copy["tensorboard_log"] = specific_log_dir
+        model = MaskablePPO(env=env, **model_params_copy)
+    else:
+        print(f"📁 Loading existing model: {model_path}")
+        try:
+            model = MaskablePPO.load(model_path, env=env, device=device)
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+            os.makedirs(specific_log_dir, exist_ok=True)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            model = MaskablePPO(env=env, **model_params_copy)
+
+    return model, env, training_config, model_path
+
+
+def _build_macro_eval_env(config, training_config_name, rewards_config_name, agent_key,
+                          scenario_override, debug_mode, bot=None):
+    W40KEngine, register_environment = setup_imports()
+    register_environment()
+    cfg = get_config_loader()
+    scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    effective_agent_key = rewards_config_name if rewards_config_name else agent_key
+    base_env = W40KEngine(
+        rewards_config=rewards_config_name,
+        training_config_name=training_config_name,
+        controlled_agent=effective_agent_key,
+        active_agents=None,
+        scenario_file=scenario_file,
+        unit_registry=unit_registry,
+        quiet=True,
+        gym_training_mode=True,
+        debug_mode=debug_mode
+    )
+    if step_logger and step_logger.enabled:
+        base_env.step_logger = step_logger
+    training_config = config.load_agent_training_config(agent_key, training_config_name)
+    macro_player = require_key(training_config, "macro_player")
+    model_path_template = config.get_model_path().replace(".zip", "_{model_key}.zip")
+    if bot is None:
+        return MacroTrainingWrapper(
+            base_env=base_env,
+            unit_registry=unit_registry,
+            scenario_files=[scenario_file],
+            model_path_template=model_path_template,
+            macro_player=macro_player,
+            debug_mode=debug_mode
+        )
+    return MacroVsBotWrapper(
+        base_env=base_env,
+        unit_registry=unit_registry,
+        scenario_files=[scenario_file],
+        model_path_template=model_path_template,
+        macro_player=macro_player,
+        bot=bot,
+        debug_mode=debug_mode
+    )
+
+
+def _print_eval_progress(completed, total, start_time, label):
+    progress_pct = (completed / total) * 100
+    bar_length = 50
+    filled = int(bar_length * completed / total)
+    bar = '█' * filled + '░' * (bar_length - filled)
+
+    elapsed = time.time() - start_time
+    avg_time = elapsed / completed if completed > 0 else 0
+    remaining = total - completed
+    eta = avg_time * remaining
+
+    def format_time(seconds):
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
+
+    elapsed_str = format_time(elapsed)
+    eta_str = format_time(eta)
+    speed = completed / elapsed if elapsed > 0 else 0
+    speed_str = f"{speed:.2f}ep/s" if speed >= 0.01 else f"{speed * 60:.1f}ep/m"
+
+    sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed}/{total} {label} [{elapsed_str}<{eta_str}, {speed_str}]")
+    sys.stdout.flush()
+
+
+def _evaluate_macro_model(model, env, n_episodes, macro_player, deterministic=True, progress_state=None, label=""):
+    wins = 0
+    losses = 0
+    draws = 0
+    for _ in range(n_episodes):
+        obs, _info = env.reset()
+        done = False
+        while not done:
+            action_masks = env.get_action_mask()
+            action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
+            obs, _reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+        winner = None
+        if isinstance(info, dict):
+            winner = info.get("winner")
+        if winner is None:
+            winner, _win_method = env.engine._determine_winner_with_method()
+        if winner == macro_player:
+            wins += 1
+        elif winner in (1, 2):
+            losses += 1
+        else:
+            draws += 1
+        if progress_state is not None:
+            progress_state["completed"] += 1
+            _print_eval_progress(progress_state["completed"], progress_state["total"], progress_state["start_time"], label)
+    return wins, losses, draws
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, total_episodes,
@@ -1424,6 +1649,8 @@ def main():
                        help="Scenario template name from scenario_templates.json for replay generation")
     parser.add_argument("--scenario", type=str, default=None,
                        help="Specific scenario to use (e.g., 'phase2-3') or 'all' for rotation through all scenarios")
+    parser.add_argument("--macro-eval-mode", type=str, choices=["micro", "bot"], default="micro",
+                       help="MacroController evaluation mode: micro (vs trained agents) or bot (vs evaluation bots)")
     parser.add_argument("--debug", action="store_true",
                        help="Enable debug console output (verbose logging)")
     
@@ -1524,6 +1751,110 @@ def main():
         elif args.test_only:
             if not args.agent:
                 raise ValueError("--agent parameter required for --test-only mode")
+
+            if args.agent == "MacroController":
+                if args.scenario in ("all", "self", "bot"):
+                    raise ValueError("MacroController test-only does not support scenario rotation modes")
+
+                model_path = config.get_model_path()
+                model_path = model_path.replace('.zip', f'_{args.agent}.zip')
+                if not os.path.exists(model_path):
+                    print(f"❌ Model not found: {model_path}")
+                    return 1
+                model = MaskablePPO.load(model_path)
+
+                training_config = config.load_agent_training_config(args.agent, args.training_config)
+                macro_player = require_key(training_config, "macro_player")
+                episodes_per_bot = args.test_episodes if args.test_episodes else 50
+
+                if args.macro_eval_mode == "bot":
+                    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+                    bots = {
+                        "random": RandomBot(),
+                        "greedy": GreedyBot(randomness=0.15),
+                        "defensive": DefensiveBot(randomness=0.15)
+                    }
+                    results = {}
+                    total_episodes = episodes_per_bot * len(bots)
+                    progress_state = {
+                        "completed": 0,
+                        "total": total_episodes,
+                        "start_time": time.time()
+                    }
+                    print("\n" + "="*80)
+                    print("🎯 RUNNING BOT EVALUATION")
+                    print(f"Episodes per bot: {episodes_per_bot} (Total: {total_episodes})")
+                    print("="*80)
+                    for bot_name, bot in bots.items():
+                        env = _build_macro_eval_env(
+                            config,
+                            args.training_config,
+                            args.rewards_config,
+                            agent_key=args.agent,
+                            scenario_override=args.scenario,
+                            debug_mode=args.debug,
+                            bot=bot
+                        )
+                        if step_logger and step_logger.enabled:
+                            step_logger.current_bot_name = bot_name
+                        wins, losses, draws = _evaluate_macro_model(
+                            model,
+                            env,
+                            episodes_per_bot,
+                            macro_player,
+                            deterministic=True,
+                            progress_state=progress_state,
+                            label=f"vs {bot_name.capitalize()}Bot [macro]"
+                        )
+                        results[bot_name] = wins / max(1, (wins + losses + draws))
+                        results[f"{bot_name}_wins"] = wins
+                        results[f"{bot_name}_losses"] = losses
+                        results[f"{bot_name}_draws"] = draws
+                    combined = (results["random"] + results["greedy"] + results["defensive"]) / 3
+                    results["combined"] = combined
+                    sys.stdout.write("\n")
+
+                    print("\n" + "="*80)
+                    print("📊 BOT EVALUATION RESULTS")
+                    print("="*80)
+                    print(f"vs RandomBot:     {results['random']:.2f} (W:{results['random_wins']} L:{results['random_losses']} D:{results['random_draws']})")
+                    print(f"vs GreedyBot:     {results['greedy']:.2f} (W:{results['greedy_wins']} L:{results['greedy_losses']} D:{results['greedy_draws']})")
+                    print(f"vs DefensiveBot:  {results['defensive']:.2f} (W:{results['defensive_wins']} L:{results['defensive_losses']} D:{results['defensive_draws']})")
+                    print(f"\nCombined Score:   {results['combined']:.2f}")
+                    print("="*80 + "\n")
+                    return 0
+
+                env = _build_macro_eval_env(
+                    config,
+                    args.training_config,
+                    args.rewards_config,
+                    agent_key=args.agent,
+                    scenario_override=args.scenario,
+                    debug_mode=args.debug,
+                    bot=None
+                )
+                progress_state = {
+                    "completed": 0,
+                    "total": episodes_per_bot,
+                    "start_time": time.time()
+                }
+                wins, losses, draws = _evaluate_macro_model(
+                    model,
+                    env,
+                    episodes_per_bot,
+                    macro_player,
+                    deterministic=True,
+                    progress_state=progress_state,
+                    label="macro-vs-micro"
+                )
+                sys.stdout.write("\n")
+                print("\n" + "="*80)
+                print("📊 MACRO vs MICRO RESULTS")
+                print("="*80)
+                total = wins + losses + draws
+                print(f"W:{wins} L:{losses} D:{draws} (Total: {total})")
+                print("="*80 + "\n")
+                return 0
             
             # Load existing model
             model_path = config.get_model_path()
@@ -1623,6 +1954,44 @@ def main():
 
         # Single agent training mode
         elif args.agent:
+            if args.agent == "MacroController":
+                if args.scenario in ("all", "self", "bot"):
+                    raise ValueError("MacroController training does not support scenario rotation modes")
+
+                model, env, training_config, model_path = create_macro_controller_model(
+                    config,
+                    args.training_config,
+                    args.rewards_config,
+                    agent_key=args.agent,
+                    new_model=args.new,
+                    append_training=args.append,
+                    scenario_override=args.scenario,
+                    debug_mode=args.debug
+                )
+
+                callbacks = setup_callbacks(
+                    config, model_path, training_config, args.training_config,
+                    agent=args.agent, rewards_config_name=args.rewards_config
+                )
+
+                success = train_model(
+                    model,
+                    training_config,
+                    callbacks,
+                    model_path,
+                    args.training_config,
+                    args.rewards_config,
+                    controlled_agent=args.rewards_config
+                )
+
+                if success:
+                    if args.test_episodes > 0:
+                        test_trained_model(model, args.test_episodes, args.training_config, debug_mode=args.debug)
+                    else:
+                        print("📊 Skipping testing (--test-episodes 0)")
+                    return 0
+                return 1
+
             # Check if scenario rotation is requested
             if args.scenario == "all" or args.scenario == "self" or args.scenario == "bot":
                 # Get list of scenarios based on type

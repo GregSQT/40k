@@ -1,4 +1,4 @@
-﻿// frontend/src/pages/HomePage.tsx
+// frontend/src/pages/HomePage.tsx
 import React from "react";
 import { Link } from "react-router-dom";
 
@@ -14,10 +14,10 @@ export default function HomePage() {
           PvP Game
         </Link>
         <Link 
-          to="/game?mode=pve" 
+          to="/game?mode=debug" 
           className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-500 inline-block"
         >
-          PvE Game
+          Debug Game
         </Link>
         <Link 
           to="/replay" 

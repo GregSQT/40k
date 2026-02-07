@@ -11,6 +11,7 @@
     "rewards": "config/rewards_config.json",
     "training": "config/training_config.json",
     "game_config": "config/game_config.json",
+    "macro_controller_config": "config/agents/MacroController/pve_macro_controller.json",
     "tensorboard": "./tensorboard/"
   },
   "defaults": {

@@ -6,9 +6,12 @@ pve_controller.py - PvE mode AI opponent
 import torch
 import numpy as np
 import os
+import json
+from pathlib import Path
 from typing import Dict, Any, Tuple, List
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance
 from engine.phase_handlers.shared_utils import is_unit_alive
+from shared.data_validation import require_key
 
 class PvEController:
     """Controls AI opponent in PvE mode."""
@@ -16,6 +19,9 @@ class PvEController:
     def __init__(self, config: Dict[str, Any], unit_registry=None):
         self.config = config
         self.ai_model = None
+        self.macro_model = None
+        self.micro_models = {}
+        self.macro_model_key = None
         self.unit_registry = unit_registry
         self.quiet = config.get("quiet", True)
     
@@ -38,47 +44,60 @@ class PvEController:
             if debug_mode:
                 print(f"DEBUG: MaskablePPO import successful")
             
-            # Get AI model key from unit registry
-            ai_model_key = "SpaceMarine_Infantry_Troop_RangedSwarm"  # Default
+            macro_config = self._load_macro_controller_config()
+            self.macro_model_key = require_key(macro_config, "macro_model_key")
+            micro_only_mode = require_key(macro_config, "micro_only_mode")
+            if not isinstance(micro_only_mode, bool):
+                raise ValueError(f"micro_only_mode must be boolean (got {type(micro_only_mode).__name__})")
+            macro_model_path = f"ai/models/current/model_{self.macro_model_key}.zip"
             if debug_mode:
-                print(f"DEBUG: Default AI model key: {ai_model_key}")
+                print(f"DEBUG: Macro model path: {macro_model_path}")
+                print(f"DEBUG: Macro model exists: {os.path.exists(macro_model_path)}")
+            if not micro_only_mode:
+                if not os.path.exists(macro_model_path):
+                    raise FileNotFoundError(f"Macro model required for PvE mode not found: {macro_model_path}")
+                self.macro_model = MaskablePPO.load(macro_model_path)
+                self.ai_model = self.macro_model
+                engine._ai_model = self.macro_model
+            else:
+                self.macro_model = None
+                self.ai_model = None
+                if not self.quiet:
+                    print("PvE: Macro disabled by config (micro_only_mode=true)")
             
-            if self.unit_registry:
-                if "units_cache" not in game_state:
-                    raise KeyError("game_state missing required 'units_cache' field")
-                unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-                player2_unit = None
-                for unit_id, entry in game_state["units_cache"].items():
-                    if entry["player"] == 2:
-                        player2_unit = unit_by_id.get(str(unit_id))
-                        if not player2_unit:
-                            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                        break
-                if player2_unit:
-                    unit_type = player2_unit["unitType"]
-                    ai_model_key = self.unit_registry.get_model_key(unit_type)
-            
-            model_path = f"ai/models/current/model_{ai_model_key}.zip"
-            if debug_mode:
-                print(f"DEBUG: Model path: {model_path}")
-                print(f"DEBUG: Model exists: {os.path.exists(model_path)}")
-            
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"AI model required for PvE mode not found: {model_path}")
-            
-            # Wrap self with ActionMasker for MaskablePPO compatibility
+            # Wrap engine with ActionMasker for micro models (action space = 13)
             def mask_fn(env):
                 return env.get_action_mask()
-            
             masked_env = ActionMasker(engine, mask_fn)
             
-            # Load model with masked environment
-            self.ai_model = MaskablePPO.load(model_path, env=masked_env)
-            # CRITICAL: Set model on engine for execute_ai_turn() check
-            engine._ai_model = self.ai_model
-            print(f"DEBUG: AI model loaded successfully and set on engine")
+            # Load micro models for all Player 2 unit types
+            if not self.unit_registry:
+                raise ValueError("unit_registry is required to load micro models for PvE")
+            if "units_cache" not in game_state:
+                raise KeyError("game_state missing required 'units_cache' field")
+            unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+            micro_model_keys = set()
+            for unit_id, entry in game_state["units_cache"].items():
+                if entry["player"] == 2:
+                    unit = unit_by_id.get(str(unit_id))
+                    if not unit:
+                        raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                    unit_type = require_key(unit, "unitType")
+                    micro_model_keys.add(self.unit_registry.get_model_key(unit_type))
+            
+            self.micro_models = {}
+            for model_key in micro_model_keys:
+                model_path = f"ai/models/current/model_{model_key}.zip"
+                if debug_mode:
+                    print(f"DEBUG: Micro model path: {model_path}")
+                    print(f"DEBUG: Micro model exists: {os.path.exists(model_path)}")
+                if not os.path.exists(model_path):
+                    raise FileNotFoundError(f"Micro model required for PvE mode not found: {model_path}")
+                self.micro_models[model_key] = MaskablePPO.load(model_path, env=masked_env)
+            
             if not self.quiet:
-                print(f"PvE: Loaded AI model: {ai_model_key}")
+                print(f"PvE: Loaded macro model: {self.macro_model_key}")
+                print(f"PvE: Loaded micro models: {sorted(self.micro_models.keys())}")
                 
         except Exception as e:
             print(f"DEBUG: _load_ai_model_for_pve exception: {e}")
@@ -96,11 +115,54 @@ class PvEController:
         AI decision logic - replaces human clicks with model predictions.
         Uses SAME handler paths as humans after decision is made.
         """
-        # Get observation for AI model from engine
-        obs = engine._build_observation()
-        
-        # Get AI model prediction
-        prediction_result = self.ai_model.predict(obs, deterministic=True)
+        if not self.micro_models:
+            raise RuntimeError("Micro models not loaded for PvE")
+
+        if self.macro_model is None:
+            action_mask, eligible_units = engine.action_decoder.get_action_mask_and_eligible_units(game_state)
+            if not eligible_units:
+                raise RuntimeError("No eligible units for PvE decision (macro disabled)")
+            active_shooting_unit = game_state.get("active_shooting_unit")
+            if active_shooting_unit is not None:
+                selected_unit_id = str(active_shooting_unit)
+            else:
+                selected_unit_id = str(require_key(eligible_units[0], "id"))
+            micro_model = self._get_micro_model_for_unit_id(selected_unit_id, game_state)
+            micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
+            micro_prediction = micro_model.predict(micro_obs, action_masks=action_mask, deterministic=True)
+        else:
+            macro_obs = engine.build_macro_observation()
+            eligible_mask = np.array(require_key(macro_obs, "eligible_mask"), dtype=bool)
+            if not np.any(eligible_mask):
+                raise RuntimeError("Macro eligible_mask is empty - no eligible units to act")
+            
+            macro_prediction = self.macro_model.predict(macro_obs, action_masks=eligible_mask, deterministic=True)
+            if isinstance(macro_prediction, tuple) and len(macro_prediction) >= 1:
+                macro_action = macro_prediction[0]
+            elif hasattr(macro_prediction, 'item'):
+                macro_action = macro_prediction.item()
+            else:
+                macro_action = int(macro_prediction)
+            macro_action_int = int(macro_action)
+            
+            units_list = require_key(macro_obs, "units")
+            if macro_action_int < 0 or macro_action_int >= len(units_list):
+                raise ValueError(f"Macro action out of range: {macro_action_int} (units={len(units_list)})")
+            if not eligible_mask[macro_action_int]:
+                raise ValueError(f"Macro action selected ineligible unit index: {macro_action_int}")
+            
+            selected_unit_id = require_key(units_list[macro_action_int], "id")
+            micro_model = self._get_micro_model_for_unit_id(selected_unit_id, game_state)
+            micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
+            
+            action_mask, eligible_units = engine.action_decoder.get_action_mask_for_unit(game_state, str(selected_unit_id))
+            micro_prediction = micro_model.predict(micro_obs, action_masks=action_mask, deterministic=True)
+        if isinstance(micro_prediction, tuple) and len(micro_prediction) >= 1:
+            predicted_action = micro_prediction[0]
+        elif hasattr(micro_prediction, 'item'):
+            predicted_action = micro_prediction.item()
+        else:
+            predicted_action = int(micro_prediction)
         
         if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
             predicted_action = prediction_result[0]
@@ -110,7 +172,6 @@ class PvEController:
             predicted_action = int(prediction_result)
         
         # Apply action mask like in training - force valid action if predicted action is invalid
-        action_mask = engine.action_decoder.get_action_mask(game_state)
         if game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
             episode = game_state.get("episode_number", "?")
@@ -124,21 +185,21 @@ class PvEController:
                 f"mask_true_indices={mask_indices}"
             )
         if not action_mask[predicted_action]:
-            # Find first valid action in mask (same logic as training)
             valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
             if valid_actions:
                 action_int = valid_actions[0]
             else:
-                # No valid actions - this indicates a phase/flow bug
                 raise RuntimeError(
-                    "PvEController encountered an empty action mask. "
+                    "PvEController encountered an empty action mask for selected unit. "
                     "Engine must advance phase/turn instead of exposing empty masks."
                 )
         else:
             action_int = predicted_action
         
         # Convert to semantic action using engine's method
-        semantic_action = engine.action_decoder.convert_gym_action(action_int, game_state)
+        semantic_action = engine.action_decoder.convert_gym_action(
+            action_int, game_state, action_mask=action_mask, eligible_units=eligible_units
+        )
         if game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
             episode = game_state.get("episode_number", "?")
@@ -151,88 +212,46 @@ class PvEController:
         
         # Ensure AI player context
         current_player = game_state["current_player"]
-        if current_player == 2:  # AI player
-            # Get eligible units from current phase pool
-            current_phase = game_state["phase"]
-            if current_phase == "move":
-                if "move_activation_pool" not in game_state:
-                    raise KeyError("game_state missing required 'move_activation_pool' field")
-                eligible_pool = game_state["move_activation_pool"]
-            elif current_phase == "shoot":
-                if "shoot_activation_pool" not in game_state:
-                    raise KeyError("game_state missing required 'shoot_activation_pool' field")
-                # PRINCIPLE: "Le Pool DOIT gérer les morts" - Pool should never contain dead units
-                eligible_pool = game_state["shoot_activation_pool"]
-            elif current_phase == "fight":
-                # Fight phase has 3 sub-phases with different pools
-                fight_subphase = game_state.get("fight_subphase")
-                
-                if fight_subphase == "charging":
-                    # Sub-Phase 1: Charging units (current player's charged units)
-                    if "charging_activation_pool" not in game_state:
-                        raise KeyError("game_state missing required 'charging_activation_pool' field")
-                    eligible_pool = game_state["charging_activation_pool"]
-                elif fight_subphase == "alternating_active":
-                    # Sub-Phase 2: Active player's turn in alternating
-                    if "active_alternating_activation_pool" not in game_state:
-                        raise KeyError("game_state missing required 'active_alternating_activation_pool' field")
-                    eligible_pool = game_state["active_alternating_activation_pool"]
-                elif fight_subphase == "alternating_non_active":
-                    # Sub-Phase 2: Non-active player's turn in alternating
-                    if "non_active_alternating_activation_pool" not in game_state:
-                        raise KeyError("game_state missing required 'non_active_alternating_activation_pool' field")
-                    eligible_pool = game_state["non_active_alternating_activation_pool"]
-                elif fight_subphase == "cleanup_active":
-                    # Sub-Phase 3: Cleanup - only active pool has units left
-                    if "active_alternating_activation_pool" not in game_state:
-                        raise KeyError("game_state missing required 'active_alternating_activation_pool' field")
-                    eligible_pool = game_state["active_alternating_activation_pool"]
-                elif fight_subphase == "cleanup_non_active":
-                    # Sub-Phase 3: Cleanup - only non-active pool has units left
-                    if "non_active_alternating_activation_pool" not in game_state:
-                        raise KeyError("game_state missing required 'non_active_alternating_activation_pool' field")
-                    eligible_pool = game_state["non_active_alternating_activation_pool"]
-                else:
-                    # No subphase set or unknown subphase - no eligible units
-                    eligible_pool = []
-            elif current_phase == "charge":
-                # Charge phase
-                if "charge_activation_pool" not in game_state:
-                    raise KeyError("game_state missing required 'charge_activation_pool' field")
-                eligible_pool = game_state["charge_activation_pool"]
-            elif current_phase == "command":
-                # Command phase: empty pool for now, ready for future
-                if "command_activation_pool" not in game_state:
-                    eligible_pool = []
-                else:
-                    eligible_pool = game_state["command_activation_pool"]
-            else:
-                eligible_pool = []
-            
-            # Find AI unit in pool
-            ai_unit_id = None
-            for unit_id in eligible_pool:
-                unit = engine._get_unit_by_id(str(unit_id))
-                if unit and unit["player"] == 2:
-                    ai_unit_id = str(unit_id)
-                    break
-            
-            if ai_unit_id:
-                semantic_action["unitId"] = ai_unit_id
-                if game_state.get("debug_mode", False):
-                    from engine.game_utils import add_debug_file_log
-                    episode = game_state.get("episode_number", "?")
-                    turn = game_state.get("turn", "?")
-                    add_debug_file_log(
-                        game_state,
-                        f"[AI_DECISION DEBUG] E{episode} T{turn} P2 make_ai_decision: "
-                        f"assigned_unitId={ai_unit_id} eligible_pool={eligible_pool}"
-                    )
-            else:
-                print(f"⚠️ [AI_DECISION] No AI unit found in eligible pool: {eligible_pool}")
-            
+        if current_player == 2:
+            semantic_action["unitId"] = str(selected_unit_id)
+            if game_state.get("debug_mode", False):
+                from engine.game_utils import add_debug_file_log
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                add_debug_file_log(
+                    game_state,
+                    f"[AI_DECISION DEBUG] E{episode} T{turn} P2 make_ai_decision: "
+                    f"macro_unitId={selected_unit_id} action_int={action_int}"
+                )
             print(f"🔍 [AI_DECISION] Final semantic_action: {semantic_action}")
         return semantic_action
+
+    def _load_macro_controller_config(self) -> Dict[str, Any]:
+        """Load macro controller config from config paths."""
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        core_config = config_loader.load_config("config", force_reload=False)
+        paths = require_key(core_config, "paths")
+        macro_config_path = require_key(paths, "macro_controller_config")
+        full_path = Path(config_loader.root_path) / macro_config_path
+        if not full_path.exists():
+            raise FileNotFoundError(f"Macro controller config not found: {full_path}")
+        with open(full_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def _get_micro_model_for_unit_id(self, unit_id: str, game_state: Dict[str, Any]):
+        """Get micro model for a specific unit id."""
+        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+        unit = unit_by_id.get(str(unit_id))
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        if not self.unit_registry:
+            raise ValueError("unit_registry is required to resolve micro model key")
+        unit_type = require_key(unit, "unitType")
+        model_key = self.unit_registry.get_model_key(unit_type)
+        if model_key not in self.micro_models:
+            raise KeyError(f"Micro model not loaded for model_key={model_key}")
+        return self.micro_models[model_key]
     
     def ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
         """AI selects which unit to activate - NO MODEL CALLS to prevent recursion."""

@@ -18,16 +18,16 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
   const location = useLocation();
   
   const getButtonClass = (path: string) => {
-    const isPvEMode = location.pathname === '/game' && location.search.includes('mode=pve');
+    const isDebugMode = location.pathname === '/game' && location.search.includes('mode=debug');
     
-    // Handle PvE mode detection via query parameter
-    if (path === '/game?mode=pve') {
-      return `nav-button ${isPvEMode ? 'nav-button--active' : 'nav-button--inactive'}`;
+    // Handle Debug mode detection via query parameter
+    if (path === '/game?mode=debug') {
+      return `nav-button ${isDebugMode ? 'nav-button--active' : 'nav-button--inactive'}`;
     }
     
-    // Handle PvP mode - only active when on /game WITHOUT PvE mode
+    // Handle PvP mode - only active when on /game WITHOUT Debug mode
     if (path === '/game') {
-      const isPvPMode = location.pathname === '/game' && !isPvEMode;
+      const isPvPMode = location.pathname === '/game' && !isDebugMode;
       return `nav-button ${isPvPMode ? 'nav-button--active' : 'nav-button--inactive'}`;
     }
     
@@ -39,7 +39,7 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
       <nav className="navigation">
         <button onClick={() => window.location.href = '/game'} className={getButtonClass('/game')}>PvP</button>
-        <button onClick={() => window.location.href = '/game?mode=pve'} className={getButtonClass('/game?mode=pve')}>PvE</button>
+        <button onClick={() => window.location.href = '/game?mode=debug'} className={getButtonClass('/game?mode=debug')}>Debug</button>
         <button onClick={() => window.location.href = '/replay'} className={getButtonClass('/replay')}>Replay</button>
         </nav>
       

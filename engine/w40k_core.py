@@ -275,6 +275,10 @@ class W40KEngine(gym.Env):
         # CRITICAL FIX: Update config with actual PvE mode value
         self.config["pve_mode"] = self.is_pve_mode
         self._ai_model = None
+
+        board_cols = self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"]
+        board_rows = self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"]
+        max_range = self._calculate_board_max_range(board_cols, board_rows)
         
         # CRITICAL: Initialize game_state FIRST before any other operations
         self.game_state = {
@@ -333,8 +337,9 @@ class W40KEngine(gym.Env):
             "config": self.config,
             
             # Board state - handle both config formats
-            "board_cols": self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"],
-            "board_rows": self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"],
+            "board_cols": board_cols,
+            "board_rows": board_rows,
+            "max_range": max_range,
             # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": set(map(tuple, self._scenario_wall_hexes)) if self._scenario_wall_hexes is not None else set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else (self.config["board"]["wall_hexes"] if "wall_hexes" in self.config["board"] else []))),
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
@@ -2206,6 +2211,36 @@ class W40KEngine(gym.Env):
                     raise KeyError("obs_builder missing required 'obs_size' field")
                 return np.zeros(self.obs_builder.obs_size, dtype=np.float32)
         return self.obs_builder.build_observation(self.game_state)
+
+    def build_macro_observation(self) -> Dict[str, Any]:
+        """Build macro observation - delegates to observation_builder."""
+        return self.obs_builder.build_macro_observation(self.game_state)
+
+    def build_observation_for_unit(self, unit_id: str) -> np.ndarray:
+        """Build observation for a specific unit without reordering pools."""
+        return self.obs_builder.build_observation_for_unit(self.game_state, unit_id)
+
+    def _calculate_board_max_range(self, board_cols: int, board_rows: int) -> int:
+        """
+        Calculate maximum hex distance across the board based on board dimensions.
+        """
+        if board_cols <= 0 or board_rows <= 0:
+            raise ValueError(f"Invalid board dimensions: cols={board_cols}, rows={board_rows}")
+        corners = [
+            (0, 0),
+            (0, board_rows - 1),
+            (board_cols - 1, 0),
+            (board_cols - 1, board_rows - 1),
+        ]
+        max_distance = 0
+        for i in range(len(corners)):
+            for j in range(i + 1, len(corners)):
+                c1 = corners[i]
+                c2 = corners[j]
+                distance = calculate_hex_distance(c1[0], c1[1], c2[0], c2[1])
+                if distance > max_distance:
+                    max_distance = distance
+        return max_distance
     
     
     def _calculate_reward(self, success: bool, result: Dict[str, Any]) -> float:

@@ -20,10 +20,9 @@ export const BoardWithAPI: React.FC = () => {
   
   // Detect game mode from URL
   const location = useLocation();
-  const gameMode = location.pathname.includes('/pve') ? 'pve' : 
-                   location.pathname.includes('/replay') ? 'training' :
-                   (location.pathname === '/game' && location.search.includes('mode=pve')) ? 'pve' : 'pvp';
-  const isPvE = gameMode === 'pve' || window.location.search.includes('mode=pve') || apiProps.gameState?.pve_mode === true;
+  const gameMode = location.pathname.includes('/replay') ? 'training' :
+                   (location.pathname === '/game' && location.search.includes('mode=debug')) ? 'debug' : 'pvp';
+  const isDebugMode = gameMode === 'debug' || window.location.search.includes('mode=debug') || apiProps.gameState?.pve_mode === true;
   const victoryPoints = apiProps.gameState?.victory_points;
   
   // Get board configuration for line of sight calculations
@@ -108,8 +107,8 @@ export const BoardWithAPI: React.FC = () => {
   useEffect(() => {
     if (!apiProps.gameState) return;
     
-    // Check if in PvE mode
-    const isPvEMode = apiProps.gameState.pve_mode || isPvE;
+    // Check if in Debug mode
+    const isDebugEnabled = apiProps.gameState.pve_mode || isDebugMode;
     
     // Check if game is over by examining unit health
     const player1Alive = apiProps.gameState.units.some(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
@@ -213,7 +212,7 @@ export const BoardWithAPI: React.FC = () => {
     // Allow multiple AI activations in same phase if there are still eligible units
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
-    const shouldTriggerAI = isPvEMode && 
+    const shouldTriggerAI = isDebugEnabled && 
                            isAITurn && 
                            !isAIProcessingRef.current && 
                            gameNotOver && 
@@ -286,9 +285,9 @@ export const BoardWithAPI: React.FC = () => {
           isAIProcessingRef.current = false;
         }
       }, 1500);
-    } else if (isPvEMode && isAITurn && !hasEligibleAIUnits) {
+    } else if (isDebugEnabled && isAITurn && !hasEligibleAIUnits) {
       // AI turn skipped - no eligible units
-    } else if (isPvEMode && !shouldTriggerAI && hasChanged) {
+    } else if (isDebugEnabled && !shouldTriggerAI && hasChanged) {
       // Only log when values change, and only in debug scenarios
       // Suppress the "NOT triggered" warning to reduce console noise
       // Uncomment below if you need to debug AI triggering issues
@@ -303,7 +302,7 @@ export const BoardWithAPI: React.FC = () => {
       //   turnKeyMatches: lastProcessedTurn === turnKey
       // });
     }
-  }, [isPvE, apiProps, lastProcessedTurn]);
+  }, [isDebugMode, apiProps, lastProcessedTurn]);
   
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
@@ -436,7 +435,7 @@ export const BoardWithAPI: React.FC = () => {
       )}
       
       {/* AI Status Display */}
-      {isPvE && (
+      {isDebugMode && (
         <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
           apiProps.gameState?.current_player === 2 
             ? isAIProcessingRef.current 

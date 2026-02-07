@@ -167,16 +167,16 @@ export const useEngineAPI = () => {
         gameInitialized.current = true;
         setLoading(true);
         
-        // Detect PvE mode from URL
+        // Detect Debug mode from URL
         const urlParams = new URLSearchParams(window.location.search);
-        const isPvE = urlParams.get('mode') === 'pve' || window.location.pathname.includes('/pve');
+        const isDebugMode = urlParams.get('mode') === 'debug';
         
-        console.log(`Starting game in ${isPvE ? 'PvE' : 'PvP'} mode`);
+        console.log(`Starting game in ${isDebugMode ? 'Debug' : 'PvP'} mode`);
         
         const response = await fetch(`${API_BASE}/game/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pve_mode: isPvE })
+          body: JSON.stringify({ pve_mode: isDebugMode })
         });
         
         if (!response.ok) {
@@ -186,7 +186,7 @@ export const useEngineAPI = () => {
         const data = await response.json();
         if (data.success) {
           setGameState(data.game_state);
-          console.log(`Game started successfully in ${data.game_state.pve_mode ? 'PvE' : 'PvP'} mode`);
+          console.log(`Game started successfully in ${data.game_state.pve_mode ? 'Debug' : 'PvP'} mode`);
         } else {
           throw new Error(data.error || 'Failed to start game');
         }
@@ -1796,12 +1796,12 @@ export const useEngineAPI = () => {
       aiTurnInProgress = true;
       
       const urlParams = new URLSearchParams(window.location.search);
-      const isPvEFromURL = urlParams.get('mode') === 'pve' || window.location.pathname.includes('/pve');
+      const isDebugFromURL = urlParams.get('mode') === 'debug';
       
       // Check if AI has eligible units in current phase FIRST
       const phaseCheck = gameState.phase;
       
-      if (!gameState || (!gameState.pve_mode && !isPvEFromURL)) {
+      if (!gameState || (!gameState.pve_mode && !isDebugFromURL)) {
         aiTurnInProgress = false;
         return;
       }

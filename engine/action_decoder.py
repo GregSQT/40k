@@ -25,41 +25,50 @@ class ActionDecoder:
     
     def get_action_mask_and_eligible_units(self, game_state: Dict[str, Any]) -> tuple:
         """Return (mask, eligible_units). PERF: avoids recomputing eligible_units when both are needed."""
-        mask = np.zeros(13, dtype=bool)  # ADVANCE_IMPLEMENTATION: 13 actions (0-12)
+        eligible_units = self._get_eligible_units_for_current_phase(game_state)
+        mask = self._build_mask_for_units(game_state["phase"], eligible_units, game_state)
+        return mask, eligible_units
+
+    def get_action_mask_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> tuple:
+        """Return (mask, [unit]) for a specific unit without reordering pools."""
         current_phase = game_state["phase"]
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
+        selected_unit = None
+        for unit in eligible_units:
+            if str(unit.get("id")) == str(unit_id):
+                selected_unit = unit
+                break
+        if selected_unit is None:
+            raise ValueError(f"Unit {unit_id} is not eligible in phase '{current_phase}'")
+        mask = self._build_mask_for_units(current_phase, [selected_unit], game_state)
+        return mask, [selected_unit]
 
+    def _build_mask_for_units(
+        self,
+        current_phase: str,
+        eligible_units: List[Dict[str, Any]],
+        game_state: Dict[str, Any],
+    ) -> np.ndarray:
+        """Build action mask for provided eligible_units list."""
+        mask = np.zeros(13, dtype=bool)  # ADVANCE_IMPLEMENTATION: 13 actions (0-12)
         if not eligible_units:
             # No units can act - phase should auto-advance
             # CRITICAL: Fight phase has no wait action - return all False mask
             # to trigger auto-advance in w40k_core.step()
             if current_phase == "fight":
-                # Fight phase with empty pools - return all False mask
-                # This triggers auto-advance in step() function
-                return mask, eligible_units  # All False
+                return mask
             # For other phases, enable WAIT action to allow phase processing
-            mask[11] = True  # WAIT triggers phase transition when pool is empty
-            return mask, eligible_units
+            mask[11] = True
+            return mask
 
         if current_phase == "command":
-            # Command phase: auto-advances, but enable WAIT for consistency
-            mask[11] = True  # WAIT action
-            return mask, eligible_units
+            mask[11] = True
+            return mask
         elif current_phase == "move":
-            # Movement phase: actions 0-3 (movement strategies) + 11 (wait)
-            # Actions 0-3 now map to strategic heuristics:
-            # 0 = aggressive (toward enemies)
-            # 1 = tactical (shooting position)
-            # 2 = defensive (away from enemies)
-            # 3 = random (exploration)
             mask[[0, 1, 2, 3]] = True
-            mask[11] = True  # Wait always valid
+            mask[11] = True
         elif current_phase == "shoot":
-            # Shooting phase: actions 4-8 (target slots 0-4) + 11 (wait) + 12 (advance)
-            # ALIGNED WITH MOVE PHASE: Use eligible_units[0] directly, no special active_shooting_unit logic
-            # Auto-activation is handled in execute_action (like MOVE phase)
             active_unit = eligible_units[0] if eligible_units else None
-            
             if active_unit:
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
@@ -75,7 +84,6 @@ class ActionDecoder:
                         f"valid_target_pool={active_unit.get('valid_target_pool')} "
                         f"shoot_activation_pool={shoot_pool}"
                     )
-                # Ensure valid_target_pool is built before masking (activation may not have run yet)
                 if "valid_target_pool" not in active_unit or active_unit.get("valid_target_pool") is None:
                     if active_unit.get("_shoot_activation_started", False):
                         raise ValueError(
@@ -84,65 +92,45 @@ class ActionDecoder:
                         )
                     from engine.phase_handlers.shooting_handlers import shooting_build_valid_target_pool
                     shooting_build_valid_target_pool(game_state, str(active_unit.get("id")))
-                # Enable shoot actions only when pool already exists (built during activation)
                 valid_targets = active_unit.get("valid_target_pool")
                 if valid_targets is not None:
-                    # Enable only valid target slots (up to 5)
                     num_targets = len(valid_targets)
                     if num_targets > 0:
                         for i in range(min(5, num_targets)):
                             mask[4 + i] = True
-                
-                # ADVANCE_IMPLEMENTATION: Enable advance action if unit can advance
-                # CAN_ADVANCE = alive AND not fled AND not adjacent to enemy (already checked in eligibility)
-                can_advance = active_unit.get("_can_advance", True)  # Default True if flag not set
+                can_advance = active_unit.get("_can_advance", True)
                 if can_advance:
-                    # Check if unit has NOT already advanced this turn
                     units_advanced = require_key(game_state, "units_advanced")
                     unit_id_str = str(active_unit["id"])
                     if unit_id_str not in units_advanced:
-                        mask[12] = True  # Advance action
-
-            mask[11] = True  # Wait always valid (can choose not to shoot)
+                        mask[12] = True
+            mask[11] = True
         elif current_phase == "charge":
-            # Charge phase: Check if unit is activated and has targets waiting
             active_unit = eligible_units[0] if eligible_units else None
             if active_unit:
                 active_charge_unit = game_state.get("active_charge_unit")
                 if active_charge_unit == active_unit["id"]:
-                    # Unit is activated - check if waiting for target selection
                     if "pending_charge_targets" in game_state:
                         valid_targets = game_state["pending_charge_targets"]
                         num_targets = len(valid_targets)
                         if num_targets > 0:
-                            # Enable target slots (actions 4-8) for available targets
                             for i in range(min(5, num_targets)):
                                 mask[4 + i] = True
-                    # Check if waiting for destination selection (after target selected and roll)
                     elif "valid_charge_destinations_pool" in game_state and game_state.get("valid_charge_destinations_pool"):
-                        # After target selection and roll, destinations are available
-                        # Enable destination slots (actions 4-8) for available destinations
                         valid_destinations = require_key(game_state, "valid_charge_destinations_pool")
                         num_destinations = len(valid_destinations)
                         if num_destinations > 0:
-                            # Enable destination actions for available destinations (up to 5 slots)
                             for i in range(min(5, num_destinations)):
                                 mask[4 + i] = True
                     else:
-                        # Unit activated but no targets/destinations - should not happen
                         mask[9] = True
                 else:
-                    # Unit not activated yet - action 9 activates it
                     mask[9] = True
-            mask[11] = True  # Wait always valid
+            mask[11] = True
         elif current_phase == "fight":
-            # Fight phase: action 10 (fight) only - no wait in fight
-            # CRITICAL FIX: Only enable fight action if there are eligible units
             if eligible_units:
                 mask[10] = True
-            # If no eligible units, action mask will be all False - handler will end phase
-
-        return mask, eligible_units
+        return mask
 
     def get_action_mask(self, game_state: Dict[str, Any]) -> np.ndarray:
         """Return action mask with dynamic target slot masking - True = valid action."""

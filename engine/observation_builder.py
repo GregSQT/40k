@@ -13,9 +13,10 @@ from engine.combat_utils import (
     calculate_pathfinding_distance,
     has_line_of_sight,
     expected_dice_value,
+    normalize_coordinates,
 )
 from engine.game_utils import get_unit_by_id
-from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target
+from engine.phase_handlers.shooting_handlers import _calculate_save_target, _calculate_wound_target as _calculate_wound_target_engine
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
@@ -55,6 +56,321 @@ class ObservationBuilder:
     # ============================================================================
     # MAIN OBSERVATION
     # ============================================================================
+    
+    def build_macro_observation(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build macro-level observation for super-agent orchestration.
+        
+        Returns a structured dict with global context, per-unit features, and eligible mask.
+        """
+        game_rules = require_key(self.config, "game_rules")
+        macro_max_unit_value = require_key(game_rules, "macro_max_unit_value")
+        macro_target_weights = self._get_macro_target_weights(game_rules)
+        target_profiles = self._get_macro_target_profiles()
+        
+        current_player = require_key(game_state, "current_player")
+        turn = require_key(game_state, "turn")
+        phase = require_key(game_state, "phase")
+        units_cache = require_key(game_state, "units_cache")
+        objectives = require_key(game_state, "objectives")
+        board_cols = require_key(game_state, "board_cols")
+        board_rows = require_key(game_state, "board_rows")
+        max_range = require_key(game_state, "max_range")
+        
+        if board_cols <= 1 or board_rows <= 1:
+            raise ValueError(f"Invalid board size for normalization: cols={board_cols}, rows={board_rows}")
+        if macro_max_unit_value <= 0:
+            raise ValueError(f"Invalid macro_max_unit_value for macro observation: {macro_max_unit_value}")
+        if max_range <= 0:
+            raise ValueError(f"Invalid max_range for macro observation: {max_range}")
+        
+        objectives_controlled = self._calculate_objectives_controlled(objectives, game_state)
+        army_value_diff = self._calculate_army_value_diff(units_cache, game_state)
+        eligible_ids = self._get_macro_eligible_unit_ids(game_state)
+        
+        unit_entries = []
+        eligible_mask = []
+        
+        for unit_id in sorted(units_cache.keys(), key=lambda x: str(x)):
+            unit = get_unit_by_id(str(unit_id), game_state)
+            if unit is None:
+                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            
+            unit_entry = self._build_macro_unit_entry(
+                unit=unit,
+                macro_max_unit_value=macro_max_unit_value,
+                macro_target_weights=macro_target_weights,
+                target_profiles=target_profiles,
+                objectives=objectives,
+                board_cols=board_cols,
+                board_rows=board_rows,
+                max_range=max_range,
+                game_state=game_state,
+            )
+            unit_entries.append(unit_entry)
+            eligible_mask.append(1 if str(unit_id) in eligible_ids else 0)
+        
+        return {
+            "global": {
+                "turn": turn,
+                "phase": phase,
+                "current_player": current_player,
+                "objectives_controlled": objectives_controlled,
+                "army_value_diff": army_value_diff,
+            },
+            "units": unit_entries,
+            "eligible_mask": eligible_mask,
+        }
+    
+    def _get_macro_target_weights(self, game_rules: Dict[str, Any]) -> Dict[str, float]:
+        """Get macro target weights with strict validation."""
+        weights = require_key(game_rules, "macro_target_weights")
+        for key in ("swarm", "troop", "elite"):
+            if key not in weights:
+                raise KeyError(f"macro_target_weights missing required key '{key}'")
+        return {
+            "swarm": float(weights["swarm"]),
+            "troop": float(weights["troop"]),
+            "elite": float(weights["elite"]),
+        }
+    
+    def _get_macro_target_profiles(self) -> Dict[str, Dict[str, int]]:
+        """Return reference target profiles for macro scoring."""
+        return {
+            "swarm": {"T": 3, "ARMOR_SAVE": 6, "INVUL_SAVE": 0, "HP_MAX": 1},
+            "troop": {"T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 0, "HP_MAX": 2},
+            "elite": {"T": 5, "ARMOR_SAVE": 2, "INVUL_SAVE": 4, "HP_MAX": 3},
+        }
+    
+    def _get_macro_eligible_unit_ids(self, game_state: Dict[str, Any]) -> set:
+        """Get eligible unit ids for current phase (macro selection)."""
+        current_phase = require_key(game_state, "phase")
+        
+        if current_phase == "move":
+            pool = require_key(game_state, "move_activation_pool")
+        elif current_phase == "shoot":
+            pool = require_key(game_state, "shoot_activation_pool")
+        elif current_phase == "charge":
+            pool = require_key(game_state, "charge_activation_pool")
+        elif current_phase == "fight":
+            fight_subphase = require_key(game_state, "fight_subphase")
+            if fight_subphase == "charging":
+                pool = require_key(game_state, "charging_activation_pool")
+            elif fight_subphase in ("alternating_active", "cleanup_active"):
+                pool = require_key(game_state, "active_alternating_activation_pool")
+            elif fight_subphase in ("alternating_non_active", "cleanup_non_active"):
+                pool = require_key(game_state, "non_active_alternating_activation_pool")
+            elif fight_subphase is None:
+                charging_pool = require_key(game_state, "charging_activation_pool")
+                active_pool = require_key(game_state, "active_alternating_activation_pool")
+                non_active_pool = require_key(game_state, "non_active_alternating_activation_pool")
+                if charging_pool or active_pool or non_active_pool:
+                    raise ValueError(
+                        "fight_subphase is None but fight pools are not empty: "
+                        f"charging={len(charging_pool)} active={len(active_pool)} non_active={len(non_active_pool)}"
+                    )
+                return set()
+            else:
+                raise KeyError(f"Unknown fight_subphase for macro eligibility: {fight_subphase}")
+        else:
+            raise KeyError(f"Unsupported phase for macro eligibility: {current_phase}")
+        
+        return {str(uid) for uid in pool}
+    
+    def _calculate_objectives_controlled(self, objectives: List[Dict[str, Any]], game_state: Dict[str, Any]) -> Dict[str, int]:
+        """Count objectives controlled by each player."""
+        units_cache = require_key(game_state, "units_cache")
+        p1_count = 0
+        p2_count = 0
+        
+        for objective in objectives:
+            obj_hexes = require_key(objective, "hexes")
+            hex_set = set(tuple(normalize_coordinates(h[0], h[1])) for h in obj_hexes)
+            p1_oc = 0
+            p2_oc = 0
+            for unit_id, cache_entry in units_cache.items():
+                unit = get_unit_by_id(str(unit_id), game_state)
+                if unit is None:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                unit_pos = require_unit_position(unit, game_state)
+                if unit_pos in hex_set:
+                    oc = require_key(unit, "OC")
+                    if cache_entry["player"] == 1:
+                        p1_oc += oc
+                    elif cache_entry["player"] == 2:
+                        p2_oc += oc
+            
+            if p1_oc > p2_oc:
+                p1_count += 1
+            elif p2_oc > p1_oc:
+                p2_count += 1
+        
+        return {"p1": p1_count, "p2": p2_count}
+    
+    def _calculate_army_value_diff(self, units_cache: Dict[str, Any], game_state: Dict[str, Any]) -> int:
+        """Compute sum(VALUE) alive for P1 minus P2."""
+        p1_value = 0
+        p2_value = 0
+        for unit_id, cache_entry in units_cache.items():
+            unit = get_unit_by_id(str(unit_id), game_state)
+            if unit is None:
+                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            unit_value = require_key(unit, "VALUE")
+            if cache_entry["player"] == 1:
+                p1_value += unit_value
+            elif cache_entry["player"] == 2:
+                p2_value += unit_value
+        return p1_value - p2_value
+    
+    def _build_macro_unit_entry(
+        self,
+        unit: Dict[str, Any],
+        macro_max_unit_value: float,
+        macro_target_weights: Dict[str, float],
+        target_profiles: Dict[str, Dict[str, int]],
+        objectives: List[Dict[str, Any]],
+        board_cols: int,
+        board_rows: int,
+        max_range: int,
+        game_state: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build per-unit macro features."""
+        unit_id = require_key(unit, "id")
+        unit_type = require_key(unit, "unitType")
+        unit_col, unit_row = require_unit_position(unit, game_state)
+        hp_cur = require_hp_from_cache(str(unit_id), game_state)
+        hp_max = require_key(unit, "HP_MAX")
+        unit_value = require_key(unit, "VALUE")
+        if hp_max <= 0:
+            raise ValueError(f"Invalid HP_MAX for macro observation: unit_id={unit_id} HP_MAX={hp_max}")
+        
+        best_ranged_score, best_ranged_target = self._calculate_best_weighted_score(
+            require_key(unit, "RNG_WEAPONS"),
+            target_profiles,
+            macro_target_weights,
+            "macro_rng",
+        )
+        best_melee_score, best_melee_target = self._calculate_best_weighted_score(
+            require_key(unit, "CC_WEAPONS"),
+            target_profiles,
+            macro_target_weights,
+            "macro_cc",
+        )
+        
+        total_score = best_ranged_score + best_melee_score
+        if total_score == 0:
+            raise ValueError(f"Macro score sum is zero for unit_id={unit_id}")
+        attack_mode_ratio = best_melee_score / total_score
+        
+        best_ranged_onehot = self._target_onehot(best_ranged_target)
+        best_melee_onehot = self._target_onehot(best_melee_target)
+        
+        dist_obj = self._min_distance_to_objective((unit_col, unit_row), objectives)
+        dist_obj_norm = dist_obj / max_range
+        
+        return {
+            "id": str(unit_id),
+            "unitType": unit_type,
+            "col": unit_col,
+            "row": unit_row,
+            "hp": hp_cur,
+            "hp_max": hp_max,
+            "value": unit_value,
+            "dist_obj": dist_obj,
+            "best_ranged_target_onehot": best_ranged_onehot,
+            "best_melee_target_onehot": best_melee_onehot,
+            "attack_mode_ratio": attack_mode_ratio,
+            "hp_ratio": hp_cur / hp_max,
+            "value_norm": unit_value / macro_max_unit_value,
+            "pos_col_norm": unit_col / (board_cols - 1),
+            "pos_row_norm": unit_row / (board_rows - 1),
+            "dist_obj_norm": dist_obj_norm,
+        }
+    
+    def _calculate_best_weighted_score(
+        self,
+        weapons: List[Dict[str, Any]],
+        target_profiles: Dict[str, Dict[str, int]],
+        macro_target_weights: Dict[str, float],
+        roll_context_prefix: str,
+    ) -> Tuple[float, Optional[str]]:
+        """Calculate best weighted score across weapons and target profiles."""
+        best_score = 0.0
+        best_target = None
+        target_order = ["swarm", "troop", "elite"]
+        
+        for weapon in weapons:
+            for target_key in target_order:
+                profile = require_key(target_profiles, target_key)
+                weight = require_key(macro_target_weights, target_key)
+                score = self._calculate_expected_damage_against_profile(
+                    weapon=weapon,
+                    target_profile=profile,
+                    roll_context_prefix=roll_context_prefix,
+                ) * weight
+                
+                if score > best_score:
+                    best_score = score
+                    best_target = target_key
+                elif score == best_score and best_score > 0 and best_target is not None:
+                    if target_order.index(target_key) < target_order.index(best_target):
+                        best_target = target_key
+        
+        return best_score, best_target
+    
+    def _calculate_expected_damage_against_profile(
+        self,
+        weapon: Dict[str, Any],
+        target_profile: Dict[str, int],
+        roll_context_prefix: str,
+    ) -> float:
+        """Expected damage against a reference target profile (no RNG)."""
+        num_attacks = expected_dice_value(require_key(weapon, "NB"), f"{roll_context_prefix}_nb")
+        hit_target = require_key(weapon, "ATK")
+        strength = require_key(weapon, "STR")
+        ap = require_key(weapon, "AP")
+        damage = expected_dice_value(require_key(weapon, "DMG"), f"{roll_context_prefix}_dmg")
+        
+        p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
+        wound_target = _calculate_wound_target_engine(strength, require_key(target_profile, "T"))
+        p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
+        
+        save_target = _calculate_save_target(
+            {
+                "ARMOR_SAVE": require_key(target_profile, "ARMOR_SAVE"),
+                "INVUL_SAVE": require_key(target_profile, "INVUL_SAVE"),
+            },
+            ap,
+        )
+        p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
+        
+        return num_attacks * p_hit * p_wound * p_fail_save * damage
+    
+    def _target_onehot(self, target_key: Optional[str]) -> List[float]:
+        """Return one-hot encoding for swarm/troop/elite."""
+        if target_key is None:
+            return [0.0, 0.0, 0.0]
+        if target_key == "swarm":
+            return [1.0, 0.0, 0.0]
+        if target_key == "troop":
+            return [0.0, 1.0, 0.0]
+        if target_key == "elite":
+            return [0.0, 0.0, 1.0]
+        raise ValueError(f"Unknown target key for onehot: {target_key}")
+    
+    def _min_distance_to_objective(self, unit_pos: Tuple[int, int], objectives: List[Dict[str, Any]]) -> int:
+        """Compute minimum hex distance to any objective hex."""
+        min_dist = None
+        for objective in objectives:
+            obj_hexes = require_key(objective, "hexes")
+            for h in obj_hexes:
+                col, row = normalize_coordinates(h[0], h[1])
+                dist = calculate_hex_distance(unit_pos[0], unit_pos[1], col, row)
+                if min_dist is None or dist < min_dist:
+                    min_dist = dist
+        if min_dist is None:
+            raise ValueError("No objective hexes found for dist_obj calculation")
+        return min_dist
     
     def _calculate_combat_mix_score(self, unit: Dict[str, Any]) -> float:
         """
@@ -652,7 +968,7 @@ class ObservationBuilder:
     # ============================================================================
 
     
-    def build_observation(self, game_state: Dict[str, Any]) -> np.ndarray:
+    def build_observation(self, game_state: Dict[str, Any], active_unit_override: Optional[Dict[str, Any]] = None) -> np.ndarray:
         """
         Build asymmetric egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
@@ -674,10 +990,12 @@ class ObservationBuilder:
         obs = np.zeros(self.obs_size, dtype=np.float32)
         
         # Get active unit (agent's current unit); pool building ensures only alive units.
-        active_unit = self._get_active_unit_for_observation(game_state)
+        active_unit = active_unit_override if active_unit_override is not None else self._get_active_unit_for_observation(game_state)
         if not active_unit:
             # No active unit - return zero observation
             return obs
+        if not is_unit_alive(str(active_unit["id"]), game_state):
+            raise ValueError(f"Active unit for observation is not alive: unit_id={active_unit.get('id')}")
         
         # Build los_cache explicitly for observation (single source of truth)
         from engine.phase_handlers.shooting_handlers import build_unit_los_cache
@@ -793,6 +1111,20 @@ class ObservationBuilder:
             valid_targets=valid_targets, six_enemies=six_enemies
         )
         return obs
+
+    def build_observation_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> np.ndarray:
+        """
+        Build observation for a specific unit without reordering activation pools.
+        """
+        unit = get_unit_by_id(str(unit_id), game_state)
+        if unit is None:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        if not is_unit_alive(str(unit["id"]), game_state):
+            raise ValueError(f"Unit {unit_id} is not alive for observation")
+        units_cache = require_key(game_state, "units_cache")
+        if str(unit_id) not in units_cache:
+            raise KeyError(f"Unit {unit_id} missing from units_cache for observation")
+        return self.build_observation(game_state, active_unit_override=unit)
     
     # ============================================================================
     # HELPER METHODS
