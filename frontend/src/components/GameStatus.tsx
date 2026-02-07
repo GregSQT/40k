@@ -3,7 +3,7 @@ import { memo } from 'react';
 import type { GameState, Unit, UnitId } from '../types';
 
 interface GameStatusProps {
-  currentPlayer: GameState['currentPlayer'];
+  current_player: GameState['current_player'];
   phase: GameState['phase'];
   units: Unit[];
   unitsMoved: UnitId[];
@@ -26,7 +26,7 @@ const PLAYER_LABELS = {
 } as const;
 
 export const GameStatus = memo<GameStatusProps>(({
-  currentPlayer,
+  current_player,
   phase,
   units,
   unitsMoved,
@@ -37,7 +37,7 @@ export const GameStatus = memo<GameStatusProps>(({
 }) => {
   // Get current player's units that have acted
   // Note: unitsFled.length could be used for future statistics
-  const currentPlayerUnits = units.filter(u => u.player === currentPlayer);
+  const currentPlayerUnits = units.filter(u => u.player === current_player);
   
   const getActedUnits = () => {
     switch (phase) {
@@ -68,7 +68,7 @@ export const GameStatus = memo<GameStatusProps>(({
       <div className="game-status__row">
         <span className="game-status__label">Current Player:</span>{' '}
         <span className="game-status__value">
-          {currentPlayer !== undefined ? PLAYER_LABELS[currentPlayer] : 'Unknown Player'}
+          {current_player !== undefined ? PLAYER_LABELS[current_player] : 'Unknown Player'}
         </span>
       </div>
       

@@ -332,14 +332,26 @@ export const BoardReplay: React.FC = () => {
     if (!selectedEpisode || !replayData) return null;
     const episode = replayData.episodes[selectedEpisode - 1];
 
+    const buildUnitsCache = (units: Unit[]): Record<string, { col: number; row: number; HP_CUR: number; player: number }> => {
+      const cache: Record<string, { col: number; row: number; HP_CUR: number; player: number }> = {};
+      units.forEach(unit => {
+        if (unit.HP_CUR > 0) {
+          cache[unit.id.toString()] = { col: unit.col, row: unit.row, HP_CUR: unit.HP_CUR, player: unit.player };
+        }
+      });
+      return cache;
+    };
+
     // Action index 0 = initial state (before any actions)
     // Action index 1 = state after first action (states[0])
     // Action index N = state after Nth action (states[N-1])
     if (currentActionIndex === 0) {
       // Enrich initial state units with stats
+      const enrichedUnits = enrichUnitsWithStats(episode.initial_state.units || []);
       return {
         ...episode.initial_state,
-        units: enrichUnitsWithStats(episode.initial_state.units || []),
+        units: enrichedUnits,
+        units_cache: buildUnitsCache(enrichedUnits),
         episode_steps: episode.initial_state.episode_steps || 0
       } as ReplayGameState;
     } else {
@@ -350,7 +362,8 @@ export const BoardReplay: React.FC = () => {
 
       return {
         ...state,
-        units: enrichedUnits
+        units: enrichedUnits,
+        units_cache: buildUnitsCache(enrichedUnits)
       };
     }
   };
@@ -1277,7 +1290,7 @@ export const BoardReplay: React.FC = () => {
             currentTurn={currentActionIndex > 0 ? parseInt(currentEpisode.actions[currentActionIndex - 1].turn.replace('T', '')) : 1}
             currentPhase={currentState.phase || 'move'}
             phases={["command", "move", "shoot", "charge", "fight"]}
-            currentPlayer={currentState.currentPlayer}
+            current_player={currentState.current_player}
             maxTurns={gameConfig.game_rules.max_turns}
             className=""
             onTurnClick={(turn) => {
@@ -1347,12 +1360,12 @@ export const BoardReplay: React.FC = () => {
               const actionTypes = phaseToActionTypes[phase] || [phase];
               
               // Get the current player from the state
-              const currentPlayer = currentState.currentPlayer;
+              const current_player = currentState.current_player;
               
               // Find the first action of the selected phase in the current turn for the current player
               const firstPhaseActionArrayIndex = currentEpisode.actions.findIndex(action => {
                 return action.turn === currentTurn && 
-                       action.player === currentPlayer &&
+                       action.player === current_player &&
                        actionTypes.includes(action.type);
               });
               
@@ -1571,7 +1584,7 @@ export const BoardReplay: React.FC = () => {
       onStartAttackPreview={() => {}}
       onConfirmMove={() => {}}
       onCancelMove={() => {}}
-      currentPlayer={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 1 | 2) : (currentState.currentPlayer || 1)}
+      current_player={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 1 | 2) : (currentState.current_player || 1)}
       unitsMoved={[]}
       phase={currentState.phase || 'move'}
       onShoot={() => {}}

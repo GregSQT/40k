@@ -487,9 +487,9 @@ export function isValidMove(
 }
 
 // Debugging utilities
-export function logGameState(units: Unit[], phase: string, currentPlayer: number): void {
+export function logGameState(units: Unit[], phase: string, current_player: number): void {
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    console.group(`Game State - Phase: ${phase}, Player: ${currentPlayer}`);
+    console.group(`Game State - Phase: ${phase}, Player: ${current_player}`);
     units.forEach(unit => {
       const hp = unit.HP_CUR ?? unit.HP_MAX;
       console.log(`${unit.name} (P${unit.player}): ${hp}/${unit.HP_MAX} HP at (${unit.col}, ${unit.row})`);

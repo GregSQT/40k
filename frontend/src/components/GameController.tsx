@@ -229,14 +229,14 @@ export const GameController: React.FC<GameControllerProps> = ({
   React.useEffect(() => {
     const currentTurn = gameState.currentTurn ?? 1;
     if (currentTurn >= 1) {
-      const currentPhaseKey = `${currentTurn}-${gameState.phase}-${gameState.currentPlayer}`;
+      const currentPhaseKey = `${currentTurn}-${gameState.phase}-${gameState.current_player}`;
       
       if (currentPhaseKey !== lastLoggedPhase.current) {
-        gameLog.logPhaseChange(gameState.phase, gameState.currentPlayer ?? 1, currentTurn);
+        gameLog.logPhaseChange(gameState.phase, gameState.current_player ?? 1, currentTurn);
         lastLoggedPhase.current = currentPhaseKey;
       }
     }
-  }, [gameState.phase, gameState.currentPlayer, gameState.currentTurn, gameLog]);
+  }, [gameState.phase, gameState.current_player, gameState.currentTurn, gameLog]);
 
   // Track unit deaths
   React.useEffect(() => {
@@ -274,7 +274,7 @@ export const GameController: React.FC<GameControllerProps> = ({
             currentTurn={gameState.currentTurn ?? 1} 
             currentPhase={gameState.phase}
             phases={["command", "move", "shoot", "charge", "fight"]}
-            currentPlayer={gameState.currentPlayer}
+            current_player={gameState.current_player}
             maxTurns={(() => {
             if (!gameConfig?.game_rules?.max_turns) {
               throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
@@ -363,7 +363,7 @@ export const GameController: React.FC<GameControllerProps> = ({
         showHexCoordinates={showHexCoordinates}
         movePreview={movePreview}
         attackPreview={attackPreview}
-        currentPlayer={gameState.currentPlayer}
+        current_player={gameState.current_player}
         unitsMoved={gameState.unitsMoved ?? []}
         unitsCharged={gameState.unitsCharged ?? []}
         unitsAttacked={gameState.unitsAttacked ?? []}

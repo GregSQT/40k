@@ -1,7 +1,7 @@
 // frontend/src/components/BoardPvp.tsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import * as PIXI from "pixi.js-legacy";
-import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState, WeaponOption, ShootingPhaseState, Weapon } from "../types/game";
+import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState, WeaponOption, ShootingPhaseState, Weapon, PrimaryObjectiveRule } from "../types/game";
 import { useGameConfig } from '../hooks/useGameConfig';
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from '../utils/boardClickHandler';
@@ -16,27 +16,6 @@ import { WeaponDropdown } from './WeaponDropdown';
 
 // Objective control map type - tracks which player controls each objective
 type ObjectiveControllers = { [objectiveName: string]: number | null };
-
-interface PrimaryObjectiveRule {
-  id: string;
-  name?: string;
-  identifier?: string;
-  description?: string;
-  scoring: {
-    start_turn: number;
-    max_points_per_turn: number;
-    rules: Array<{ id: string; points: number; condition: string }>;
-  };
-  timing: {
-    default_phase: string;
-    round5_second_player_phase: string;
-  };
-  control: {
-    method: string;
-    control_method: string;
-    tie_behavior: string;
-  };
-}
 
 interface ReplayRules {
   primary_objective: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
@@ -187,7 +166,7 @@ type BoardProps = {
   onShoot: (shooterId: number, targetId: number) => void;
   onFightAttack?: (attackerId: number, targetId: number | null) => void;
   onActivateFight?: (fighterId: number) => void;
-  currentPlayer: 1 | 2;
+  current_player: 1 | 2;
   unitsMoved: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
@@ -258,7 +237,7 @@ export default function Board({
   onStartAttackPreview,
   onConfirmMove,
   onCancelMove,
-  currentPlayer,
+  current_player,
   unitsMoved,
   phase,
   onShoot,
@@ -771,9 +750,6 @@ export default function Board({
             u.row === dest.row && 
             u.HP_CUR > 0
           );
-          if (isOccupied) {
-            console.log(`🛡️ CHARGE FIX: Filtered out occupied hex at (${dest.col}, ${dest.row})`);
-          }
           return !isOccupied;  // Only include if NOT occupied
         });
 
@@ -932,7 +908,7 @@ export default function Board({
         const eligibleUnit = units.find(u => u.id === unitId);
         // Don't add green highlight for selected unit - it will show orange charge destinations instead
         // CRITICAL: Also check that unit belongs to current player to avoid highlighting enemy units
-        if (eligibleUnit && eligibleUnit.id !== selectedUnitId && eligibleUnit.player === currentPlayer) {
+        if (eligibleUnit && eligibleUnit.id !== selectedUnitId && eligibleUnit.player === current_player) {
           availableCells.push({ col: eligibleUnit.col, row: eligibleUnit.row });
         }
       });
@@ -1278,7 +1254,7 @@ export default function Board({
         }
         if (
           currentTurn === 5 &&
-          currentPlayer === 2 &&
+          current_player === 2 &&
           primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
           phase !== "fight"
         ) {
@@ -1288,11 +1264,11 @@ export default function Board({
         controlMethod = primaryObjectiveConfig.control.control_method;
       }
       if (replayActionIndex === undefined) {
-        const livePrimaryObjective = gameState?.primary_objective;
+        const livePrimaryObjective = gameState?.primary_objective as PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
         if (!livePrimaryObjective) {
           throw new Error("primary_objective missing from game_state");
         }
-        const primaryObjectiveConfig = Array.isArray(livePrimaryObjective)
+        const primaryObjectiveConfig: PrimaryObjectiveRule = Array.isArray(livePrimaryObjective)
           ? (() => {
               if (livePrimaryObjective.length !== 1) {
                 throw new Error("primary_objective must contain exactly one config");
@@ -1330,7 +1306,7 @@ export default function Board({
         }
         if (
           currentTurn === 5 &&
-          currentPlayer === 2 &&
+          current_player === 2 &&
           primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
           phase !== "fight"
         ) {
@@ -1397,7 +1373,7 @@ export default function Board({
         // - Replay mode: blinkingUnits is undefined -> skip greying
         // - PvP mode before backend responds: blinkingUnits is [] -> skip greying (prevents grey flash)
         // - PvP mode with targets: blinkingUnits has IDs -> apply greying
-        if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && stableBlinkingUnits && stableBlinkingUnits.length > 0) {
+        if (phase === "shoot" && unit.player !== current_player && selectedUnitId !== null && stableBlinkingUnits && stableBlinkingUnits.length > 0) {
           // Only grey out units that are NOT in the blinkingUnits list
           isShootable = stableBlinkingUnits.includes(unit.id);
         }
@@ -1475,7 +1451,7 @@ export default function Board({
           boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
           HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
           SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-          phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+          phase: effectivePhase, mode, current_player, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
           fightSubPhase, fightActivePlayer,
           gameState,
           units, chargeTargets, fightTargets, targetPreview,
@@ -1495,9 +1471,6 @@ export default function Board({
           // CRITICAL: chargeTargetId from props takes precedence as it comes from actual charge result
           chargeTargetId: (() => {
             const finalTargetId = chargeTargetId ?? (chargeTargets.length > 0 ? chargeTargets[0].id : null);
-            if (finalTargetId) {
-              console.log("🎯 BoardPvp: Passing chargeTargetId to UnitRenderer:", finalTargetId, "for unit:", unitToRender.id);
-            }
             return finalTargetId;
           })(),
           // Pass fight indicators
@@ -1515,7 +1488,7 @@ export default function Board({
             // AI_TURN.md STEP 1: ELIGIBILITY CHECK (lignes 583-599)
             // CAN_ADVANCE = true if unit is NOT adjacent to enemy AND not already advanced
             if (phase !== 'shoot') return false;
-            if (unit.player !== currentPlayer) return false;
+            if (unit.player !== current_player) return false;
             if (unitsFled?.includes(unit.id)) return false;
             
             // Check if unit has already advanced (AI_TURN.md ligne 671: After advance, CAN_ADVANCE = false)
@@ -1553,7 +1526,7 @@ export default function Board({
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-            phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            phase: effectivePhase, mode, current_player, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor,
@@ -1577,7 +1550,7 @@ export default function Board({
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-            phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            phase: effectivePhase, mode, current_player, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor,
@@ -1604,7 +1577,7 @@ export default function Board({
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
             HP_BAR_WIDTH_RATIO, HP_BAR_HEIGHT, UNIT_CIRCLE_RADIUS_RATIO, UNIT_TEXT_SIZE,
             SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-            phase: effectivePhase, mode, currentPlayer, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
+            phase: effectivePhase, mode, current_player, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked, unitsFled,
             fightSubPhase, fightActivePlayer,
             units, chargeTargets, fightTargets, targetPreview,
             onConfirmMove, parseColor,
@@ -1830,7 +1803,7 @@ export default function Board({
         chargeSuccess,
         chargeTargetId,
         chargingUnitId,
-        currentPlayer,
+        current_player,
         eligibleUnitIds,
         fightActivePlayer,
         fightSubPhase,

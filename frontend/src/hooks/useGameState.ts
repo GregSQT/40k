@@ -49,7 +49,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   // Single source of truth - one game_state object
   const [gameState, setGameState] = useState<GameState>({
     units: [],
-    currentPlayer: 1,
+    current_player: 1,
     phase: "command",
     mode: "select",
     selectedUnitId: null,
@@ -187,7 +187,7 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
   }, []);
 
   const setCurrentPlayer = useCallback((player: PlayerId) => {
-    setGameState(prev => ({ ...prev, currentPlayer: player }));
+    setGameState(prev => ({ ...prev, current_player: player }));
   }, []);
 
   const setPhase = useCallback((phase: GamePhase) => {

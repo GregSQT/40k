@@ -736,7 +736,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       objectives: episode.objectives || [],
       rules: episode.rules,
       currentTurn: 1,
-      currentPlayer: 1,
+      current_player: 1,
       phase: 'move'
     };
 
@@ -882,7 +882,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         objectives: episode.objectives || [],
         rules: episode.rules,
         currentTurn: turnNumber,
-        currentPlayer: action.player,
+        current_player: action.player,
         phase,
         action,
         ...fightStateFields

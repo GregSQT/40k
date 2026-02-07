@@ -21,6 +21,27 @@ export interface Position {
 
 export type DiceValue = number | "D3" | "D6";
 
+export interface PrimaryObjectiveRule {
+  id: string;
+  name?: string;
+  identifier?: string;
+  description?: string;
+  scoring: {
+    start_turn: number;
+    max_points_per_turn: number;
+    rules: Array<{ id: string; points: number; condition: string }>;
+  };
+  timing: {
+    default_phase: string;
+    round5_second_player_phase: string;
+  };
+  control: {
+    method: string;
+    control_method: string;
+    tie_behavior: string;
+  };
+}
+
 export interface Weapon {
   display_name: string;
   COMBI_WEAPON?: string;
@@ -155,7 +176,6 @@ export interface GameState {
   episode_steps: number;
   units: Unit[];
   current_player?: number; // Engine format
-  currentPlayer?: PlayerId; // Frontend format
   phase: GamePhase;
   turn?: number; // Engine format
   currentTurn?: number; // Frontend format
@@ -198,7 +218,7 @@ export interface GameState {
   active_fight_unit?: string; // Active unit ID in fight phase
   active_charge_unit?: string; // Active unit ID in charge phase
   victory_points?: Record<string, number>;
-  primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  primary_objective?: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
 }
 
 export interface SemanticAction {

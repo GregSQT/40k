@@ -84,7 +84,7 @@ interface UnitRendererProps {
   // Game state
   phase: "move" | "shoot" | "charge" | "fight";
   mode: string;
-  currentPlayer: 1 | 2;
+  current_player: 1 | 2;
   selectedUnitId: number | null;
   unitsMoved: number[];
   unitsCharged?: number[];
@@ -269,7 +269,7 @@ export class UnitRenderer {
   }
   
   private calculateEligibilityCompliant(): boolean {
-    const { unit, phase, currentPlayer, unitsMoved, unitsFled } = this.props;
+    const { unit, phase, current_player, unitsMoved, unitsFled } = this.props;
 
     // Basic eligibility checks
     // Allow just-killed units to be rendered as grey ghosts
@@ -280,7 +280,7 @@ export class UnitRenderer {
     const unitWithFlags = unit as UnitWithFlags;
     const isJustKilled = unitWithFlags.isJustKilled === true;
     if (unit.HP_CUR === undefined || (unit.HP_CUR <= 0 && !isJustKilled)) return false;
-    if (phase !== "fight" && unit.player !== currentPlayer) return false;
+    if (phase !== "fight" && unit.player !== current_player) return false;
     
     switch (phase) {
       case "move":
@@ -313,7 +313,7 @@ export class UnitRenderer {
     const { unit, centerX, centerY, app, isPreview, selectedUnitId, unitsMoved, unitsCharged, unitsAttacked,
              chargeTargets, fightTargets, boardConfig, HEX_RADIUS, UNIT_CIRCLE_RADIUS_RATIO,
              SELECTED_BORDER_WIDTH, CHARGE_TARGET_BORDER_WIDTH, DEFAULT_BORDER_WIDTH,
-             phase, mode, currentPlayer, units, parseColor } = this.props;
+             phase, mode, current_player, units, parseColor } = this.props;
     
     if (isPreview) return;
     
@@ -322,7 +322,7 @@ export class UnitRenderer {
     // - Replay mode: blinkingUnits is undefined -> skip greying
     // - PvP mode before backend responds: blinkingUnits is [] or undefined -> skip greying
     // - PvP mode with targets: blinkingUnits has IDs -> apply greying
-    if (phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
+    if (phase === "shoot" && unit.player !== current_player && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
       const isShootable = this.props.isShootable !== undefined 
         ? this.props.isShootable 
         : (this.props.blinkingUnits.includes(unit.id));
@@ -442,21 +442,21 @@ export class UnitRenderer {
 
       // Block enemy clicks when no unit is selected (prevents stuck preview)
       // EXCEPT during fight phase where eligible units must be clickable
-      if (unit.player !== currentPlayer && selectedUnitId === null && !isFightPhaseActive) {
+      if (unit.player !== current_player && selectedUnitId === null && !isFightPhaseActive) {
         addClickHandler = false;
       }
       
       // CRITICAL FIX: Block enemy unit clicks during movement phase
       // In movement phase, only destinations are clickable, NOT units
       // In charge phase, block enemy clicks except in chargePreview mode where enemy units are clickable
-      if (phase === "move" && unit.player !== currentPlayer) {
+      if (phase === "move" && unit.player !== current_player) {
         addClickHandler = false;
       }
-      if (phase === "charge" && unit.player !== currentPlayer && this.props.mode !== "chargePreview") {
+      if (phase === "charge" && unit.player !== current_player && this.props.mode !== "chargePreview") {
         addClickHandler = false;
       }
       
-      if (phase === "shoot" && mode === "attackPreview" && unit.player !== currentPlayer && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
+      if (phase === "shoot" && mode === "attackPreview" && unit.player !== current_player && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
         const selectedUnit = units.find(u => u.id === selectedUnitId);
         if (selectedUnit && !this.props.isShootable) {
           addClickHandler = false;
@@ -466,7 +466,7 @@ export class UnitRenderer {
         // Check if unit is shootable during shooting phase (only in PvP mode with actual targets)
         const isShootableUnit = this.props.isShootable !== false;
         
-        if (phase === "shoot" && unit.player !== currentPlayer && !isShootableUnit && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
+        if (phase === "shoot" && unit.player !== current_player && !isShootableUnit && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
           // Unit is blocked by LoS in PvP mode - no click handler, no hand cursor
           unitCircle.eventMode = 'none';
           unitCircle.cursor = "default";
@@ -523,7 +523,7 @@ export class UnitRenderer {
   
   private renderUnitIcon(iconZIndex: number): void {
     const { unit, centerX, centerY, app, isPreview, previewType, HEX_RADIUS,
-             ICON_SCALE, phase, currentPlayer, onConfirmMove, selectedUnitId } = this.props;
+             ICON_SCALE, phase, current_player, onConfirmMove, selectedUnitId } = this.props;
     
     const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
     
@@ -577,7 +577,7 @@ export class UnitRenderer {
         }
         // Grey-out enemies that are NOT valid shooting targets during shooting phase
         // ONLY apply when we have actual blinking data (prevents grey flash during loading)
-        if (!isPreview && phase === "shoot" && unit.player !== currentPlayer && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
+        if (!isPreview && phase === "shoot" && unit.player !== current_player && selectedUnitId !== null && this.props.blinkingUnits && this.props.blinkingUnits.length > 0) {
           const isShootable = this.props.isShootable !== undefined 
             ? this.props.isShootable 
             : (this.props.blinkingUnits.includes(unit.id));
@@ -1122,9 +1122,9 @@ export class UnitRenderer {
   }
   
   private renderShootingCounter(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, isEligible } = this.props;
+    const { unit, centerX, centerY, app, phase, current_player, HEX_RADIUS, unitsFled, isEligible } = this.props;
     
-    if (phase !== 'shoot' || unit.player !== currentPlayer) return;
+    if (phase !== 'shoot' || unit.player !== current_player) return;
     
     // NEW RULE: Hide shooting counter for units that fled
     if (unitsFled && unitsFled.includes(unit.id)) {
@@ -1157,12 +1157,12 @@ export class UnitRenderer {
   }
   
   private renderAdvanceButton(unitIconScale: number, iconZIndex: number): void {
-    const { unit, phase, currentPlayer, app, centerX, centerY, HEX_RADIUS, 
+    const { unit, phase, current_player, app, centerX, centerY, HEX_RADIUS, 
             canAdvance, onAdvance, gameState, selectedUnitId } = this.props;
     
     // Show only during shoot phase for active unit of current player
     if (phase !== 'shoot') return;
-    if (unit.player !== currentPlayer) return;
+    if (unit.player !== current_player) return;
     if (canAdvance === false) return;
     
     // Only show icon when unit is actively activated (backend source of truth)
@@ -1206,14 +1206,14 @@ export class UnitRenderer {
   }
   
   private renderWeaponSelectionIcon(unitIconScale: number, iconZIndex: number): void {
-    const { unit, phase, currentPlayer, app, centerX, centerY, HEX_RADIUS, gameState } = this.props;
+    const { unit, phase, current_player, app, centerX, centerY, HEX_RADIUS, gameState } = this.props;
     
     // AI_TURN.md ligne 694: Human only: Display weapon selection icon (if CAN_SHOOT)
     // Show only during shoot phase for active unit with multiple weapons
     if (phase !== 'shoot') {
       return;
     }
-    if (unit.player !== currentPlayer) {
+    if (unit.player !== current_player) {
       return;
     }
     
@@ -1287,7 +1287,7 @@ export class UnitRenderer {
   }
 
   private renderAttackCounter(unitIconScale: number): void {
-    const { unit, centerX, centerY, app, phase, currentPlayer, HEX_RADIUS, unitsFled, units, mode, selectedUnitId, fightSubPhase, isEligible } = this.props;
+    const { unit, centerX, centerY, app, phase, current_player, HEX_RADIUS, unitsFled, units, mode, selectedUnitId, fightSubPhase, isEligible } = this.props;
 
     // Attack counter shows for actively fighting units in fight phase
     if (phase !== 'fight') return;
@@ -1305,11 +1305,11 @@ export class UnitRenderer {
       if (!fightSubPhase) {
         shouldShowIfEligible = true;
       } else if (fightSubPhase === "charging") {
-        shouldShowIfEligible = unit.player === currentPlayer;
+        shouldShowIfEligible = unit.player === current_player;
       } else if (fightSubPhase === "alternating_non_active" || fightSubPhase === "cleanup_non_active") {
-        shouldShowIfEligible = unit.player !== currentPlayer;
+        shouldShowIfEligible = unit.player !== current_player;
       } else if (fightSubPhase === "alternating_active" || fightSubPhase === "cleanup_active") {
-        shouldShowIfEligible = unit.player === currentPlayer;
+        shouldShowIfEligible = unit.player === current_player;
       }
 
       if (!shouldShowIfEligible || !isEligible) return;

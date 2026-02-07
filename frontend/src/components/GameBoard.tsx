@@ -17,7 +17,7 @@ interface GameBoardProps {
   mode: GameState['mode'];
   movePreview: MovePreview | null;
   attackPreview: AttackPreview | null;
-  currentPlayer: GameState['currentPlayer'];
+  current_player: GameState['current_player'];
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
@@ -103,7 +103,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         mode={props.mode || "select"}
         movePreview={props.movePreview}
         attackPreview={props.attackPreview}
-        currentPlayer={props.currentPlayer || 0}
+        current_player={props.current_player || 0}
         unitsMoved={props.unitsMoved}
         unitsCharged={props.unitsCharged}
         unitsAttacked={props.unitsAttacked}

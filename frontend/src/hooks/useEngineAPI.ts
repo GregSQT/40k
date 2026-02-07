@@ -936,10 +936,10 @@ export const useEngineAPI = () => {
     const unit = gameState.units.find((u: UnitWithId) => parseInt(u.id.toString()) === unitId);
     if (!unit) return "elsewhere";
     
-    const currentPlayer = gameState.current_player;
+    const current_player = gameState.current_player;
     const activeShooterId = gameState.active_shooting_unit ? parseInt(gameState.active_shooting_unit) : null;
     
-    if (unit.player === currentPlayer) {
+    if (unit.player === current_player) {
       if (unitId === activeShooterId) {
         return "active_unit";
       } else {
@@ -1621,7 +1621,7 @@ export const useEngineAPI = () => {
     return {
       episode_steps: gameState.episode_steps,
       units: memoizedUnits,
-      currentPlayer: gameState.current_player as PlayerId,
+      current_player: gameState.current_player as PlayerId,
       phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
       mode,
       selectedUnitId,
@@ -1673,7 +1673,7 @@ export const useEngineAPI = () => {
         movePreview: null,
         attackPreview: null,
         targetPreview: null,
-        currentPlayer: null,
+        current_player: null,
         maxTurns: null,
         unitsMoved: [],
         unitsCharged: [],
@@ -1732,7 +1732,7 @@ export const useEngineAPI = () => {
     movePreview,
     attackPreview,
     targetPreview,
-    currentPlayer: gameState.current_player as PlayerId,
+    current_player: gameState.current_player as PlayerId,
     maxTurns: maxTurnsFromConfig,
     unitsMoved: memoizedUnitsMoved,
     unitsCharged: memoizedUnitsCharged,
@@ -2110,9 +2110,8 @@ export const useEngineAPI = () => {
             const errorData = await aiResponse.json().catch(() => ({}));
             const errorInfo = errorData.error || errorData;
             
-            // Handle expected errors gracefully (no eligible AI units = phase complete for AI)
-            if (errorInfo.error === 'not_ai_player_turn' && 
-                errorInfo.reason === 'no_eligible_ai_units_in_pool') {
+            // Handle expected errors gracefully (AI not eligible or turn already advanced)
+            if (errorInfo.error === 'not_ai_player_turn') {
               // No more eligible AI units - fetch current game state and exit gracefully
               try {
                 const stateResponse = await fetch(`${API_BASE}/game/state`);

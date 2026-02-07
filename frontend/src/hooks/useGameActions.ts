@@ -53,11 +53,11 @@ interface UseGameActionsParams {
     
   // Single source of truth eligibility function
   const isUnitEligible = useCallback((unit: Unit): boolean => {
-    const { phase, currentPlayer, unitsMoved = [], unitsCharged = [], unitsAttacked = [], unitsFled = [] } = gameState;
+    const { phase, current_player, unitsMoved = [], unitsCharged = [], unitsAttacked = [], unitsFled = [] } = gameState;
     
     // Universal eligibility checks
     if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) return false;
-    if (unit.player !== currentPlayer) return false;
+    if (unit.player !== current_player) return false;
     
     switch (phase) {
       case "move":
@@ -106,10 +106,10 @@ interface UseGameActionsParams {
        gameState.fight_subphase === "cleanup_non_active" ||
        gameState.fight_subphase === "cleanup_active");
 
-    const playerCheck = isFightPhaseAlternating ? true : (unit?.player === gameState.currentPlayer);
+    const playerCheck = isFightPhaseAlternating ? true : (unit?.player === gameState.current_player);
 
     if (!unit || !playerCheck || !isUnitEligible(unit)) {
-      console.log(`[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, currentPlayer=${gameState.currentPlayer}, eligible=${unit ? isUnitEligible(unit) : false}, fight_subphase=${gameState.fight_subphase}`);
+      console.log(`[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, current_player=${gameState.current_player}, eligible=${unit ? isUnitEligible(unit) : false}, fight_subphase=${gameState.fight_subphase}`);
       return;
     }
 

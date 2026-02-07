@@ -855,6 +855,9 @@ def parse_step_log(filepath: str) -> Dict:
         'fight_dead_unit_attacker': {1: 0, 2: 0},
         'fight_dead_unit_target': {1: 0, 2: 0},
         'fight_over_cc_nb': {1: 0, 2: 0},
+        'double_activation_by_phase': {
+            'MOVE': 0, 'SHOOT': 0, 'CHARGE': 0, 'FIGHT': 0
+        },
         'advance_after_shoot': {1: 0, 2: 0},
         'position_log_mismatch': {
             'move': {'total': 0, 'mismatch': 0, 'missing': 0},
@@ -919,6 +922,9 @@ def parse_step_log(filepath: str) -> Dict:
             'fight_dead_unit_attacker': {1: None, 2: None},
             'fight_dead_unit_target': {1: None, 2: None},
             'fight_over_cc_nb': {1: None, 2: None},
+            'double_activation_by_phase': {
+                'MOVE': None, 'SHOOT': None, 'CHARGE': None, 'FIGHT': None
+            },
             'advance_after_shoot': {1: None, 2: None},
             'damage_missing_unit_hp': {1: None, 2: None},
             'damage_exceeds_hp': {1: None, 2: None},
@@ -1019,6 +1025,7 @@ def parse_step_log(filepath: str) -> Dict:
     positions_at_move_phase_start = {}  # Track positions at start of MOVE phase to detect fled
     last_player = None  # Track last player to detect phase MOVE start for each player
     last_phase = None
+    phase_activation_seen: Dict[Tuple[int, str, int], Set[str]] = {}
     fight_phase_seq_id = 0
     episode_step_index = 0
     last_objective_snapshot = None
@@ -1346,6 +1353,20 @@ def parse_step_log(filepath: str) -> Dict:
                         current_episode_num,
                         line
                     )
+                    if phase in ('MOVE', 'SHOOT', 'CHARGE', 'FIGHT'):
+                        if player is None:
+                            raise ValueError("player is required for double-activation check")
+                        phase_key = (turn, phase, int(player))
+                        seen_units = phase_activation_seen.setdefault(phase_key, set())
+                        if actor_id in seen_units:
+                            double_activation_by_phase = require_key(stats, "double_activation_by_phase")
+                            double_activation_by_phase[phase] += 1
+                            first_errors = require_key(stats, "first_error_lines")
+                            double_activation_first = require_key(first_errors, "double_activation_by_phase")
+                            if double_activation_first[phase] is None:
+                                double_activation_first[phase] = {'episode': current_episode_num, 'line': line.strip()}
+                        else:
+                            seen_units.add(actor_id)
 
                 # Reset markers when turn changes
                 if turn != last_turn:
@@ -4834,6 +4855,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     action_phase_accuracy = require_key(stats, "action_phase_accuracy")
     wrong_phase_total = sum(require_key(action_phase_accuracy[key], "wrong") for key in action_phase_accuracy)
     log_print(f"{summary_icon(wrong_phase_total > 0)} 1.5 Actions occuring in the wrong phase : {wrong_phase_total}")
+    double_activation_by_phase = require_key(stats, "double_activation_by_phase")
+    double_activation_total = sum(double_activation_by_phase.values())
+    log_print(f"{summary_icon(double_activation_total > 0)} 1.6 Double-activation par phase : {double_activation_total}")
     dmg_issues_total = (
         stats['damage_missing_unit_hp'][1] + stats['damage_missing_unit_hp'][2] +
         stats['damage_exceeds_hp'][1] + stats['damage_exceeds_hp'][2]
@@ -4846,13 +4870,17 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{summary_icon(pos_mismatch_total > 0)} 2.2 Positions/logs incohérents : {pos_mismatch_total}")
     log_print(f"{summary_icon(dmg_issues_total > 0)} 2.3 DMG issues : {dmg_issues_total}")
     if max_duration_episode is not None and avg_duration is not None:
-        log_print(f"{summary_icon(long_episode_warn)} 2.4 Longest episode (average duration): Episode {max_duration_episode} - {max_duration:.2f}s (avg {avg_duration:.2f}s)")
+        durations_list = require_key(stats, 'episode_durations')
+        min_duration_episode, min_duration = min(durations_list, key=lambda x: x[1])
+        log_print(f"{summary_icon(long_episode_warn)} 2.4 Episodes duration : Min: {min_duration:.2f}s (E{min_duration_episode}) - Avg: {avg_duration:.2f}s - Max: {max_duration:.2f}s (E{max_duration_episode})")
     else:
-        log_print(f"{summary_icon(False)} 2.4 Longest episode (average duration): N/A")
+        log_print(f"{summary_icon(False)} 2.4 Episodes duration : N/A")
     if max_length_episode is not None and avg_length is not None:
-        log_print(f"{summary_icon(actions_episode_warn)} 2.41 Episode with most actions (average action number): Episode {max_length_episode} - {max_length} actions (avg {avg_length:.1f})")
+        lengths_list = require_key(stats, 'episode_lengths')
+        min_length_episode, min_length = min(lengths_list, key=lambda x: x[1])
+        log_print(f"{summary_icon(actions_episode_warn)} 2.41 Episodes actions : Min: {min_length} (E{min_length_episode}) - Avg: {avg_length:.1f} - Max: {max_length} (E{max_length_episode})")
     else:
-        log_print(f"{summary_icon(False)} 2.41 Episode with most actions (average action number): N/A")
+        log_print(f"{summary_icon(False)} 2.41 Episodes actions : N/A")
     episodes_ending_total = len(stats['episodes_without_end']) + len(stats['episodes_without_method'])
     log_print(f"{summary_icon(episodes_ending_total > 0)} 2.5 Episode ending : {episodes_ending_total}")
     log_print(f"{summary_icon(len(missing_samples) > 0)} 2.6 Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")
@@ -5019,10 +5047,11 @@ if __name__ == "__main__":
             len(missing_samples)
         )
 
-        if total_errors > 0:
-            log_print(f"⚠️  {total_errors} erreur(s) détectée(s)   -   Output : {output_file}")
-        else:
-            log_print(f"✅ Aucune erreur détectée   -   Output : {output_file}")
+        status_line = (
+            f"⚠️  {total_errors} erreur(s) détectée(s)   -   Output : {output_file}"
+            if total_errors > 0
+            else f"✅ Aucune erreur détectée   -   Output : {output_file}"
+        )
 
         def _print_section_lines(lines: List[str]) -> None:
             for line in lines:

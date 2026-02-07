@@ -33,10 +33,10 @@ export const usePhaseTransition = ({
   // Phase completion by eligibility (NOT step counts)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const shouldTransitionPhase = useCallback((_phase: string): boolean => {
-    const playerUnits = gameState.units.filter(u => u.player === gameState.currentPlayer);
+    const playerUnits = gameState.units.filter(u => u.player === gameState.current_player);
     const eligibleUnits = playerUnits.filter(unit => isUnitEligible(unit));
     return eligibleUnits.length === 0;
-  }, [gameState.units, gameState.currentPlayer, isUnitEligible]);
+  }, [gameState.units, gameState.current_player, isUnitEligible]);
 
   // Eligibility-based phase transitions (core principle)
   useEffect(() => {
@@ -58,7 +58,7 @@ export const usePhaseTransition = ({
             break;
           case "fight": {
             // End turn - transition to command phase (not move)
-            const newPlayer = gameState.currentPlayer === 1 ? 2 : 1;
+            const newPlayer = gameState.current_player === 1 ? 2 : 1;
             actions.setCurrentPlayer(newPlayer);
             actions.setPhase("command");  // Au lieu de "move"
             // Note: Turn increment is handled by backend in fight_handlers
@@ -67,7 +67,7 @@ export const usePhaseTransition = ({
         }
       }, 300);
     }
-  }, [gameState.phase, gameState.currentPlayer, gameState.currentTurn, shouldTransitionPhase, actions]);
+  }, [gameState.phase, gameState.current_player, gameState.currentTurn, shouldTransitionPhase, actions]);
 
   return {
     shouldTransitionPhase

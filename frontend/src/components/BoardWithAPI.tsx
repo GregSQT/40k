@@ -96,7 +96,7 @@ export const BoardWithAPI: React.FC = () => {
   // Track previous values to prevent console flooding during animations
   const prevAICheckRef = useRef<{
     currentPhase: string;
-    currentPlayer: number;
+    current_player: number;
     isAITurn: boolean;
     shouldTriggerAI: boolean;
     turnKey: string;
@@ -171,30 +171,30 @@ export const BoardWithAPI: React.FC = () => {
       });
     }
     
-    // CRITICAL: In fight phase, currentPlayer stays 1, but AI can still act in alternating phase
+    // CRITICAL: In fight phase, current_player stays 1, but AI can still act in alternating phase
     const fightSubphaseForCheck = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase;
-    const currentPlayer = apiProps.gameState?.currentPlayer;
+    const current_player = apiProps.gameState?.current_player;
     const isAITurn = currentPhase === 'fight' 
       ? hasEligibleAIUnits && (
-          // Charging subphase: AI turn if currentPlayer is 2
-          (fightSubphaseForCheck === 'charging' && currentPlayer === 2) ||
-          // Alternating active: AI turn if currentPlayer is 2 (active pool = current player's units)
-          (fightSubphaseForCheck === 'alternating_active' && currentPlayer === 2) ||
-          // Alternating non-active: AI turn if currentPlayer is 1 (non-active = opposite of current player)
-          // When currentPlayer is 2, non-active pool contains P1 units, so it's NOT AI turn
-          // When currentPlayer is 1, non-active pool contains P2 units, so it IS AI turn
-          (fightSubphaseForCheck === 'alternating_non_active' && currentPlayer === 1) ||
-          // Cleanup active: AI turn if currentPlayer is 2
-          (fightSubphaseForCheck === 'cleanup_active' && currentPlayer === 2) ||
-          // Cleanup non-active: AI turn if currentPlayer is 1
-          (fightSubphaseForCheck === 'cleanup_non_active' && currentPlayer === 1)
+          // Charging subphase: AI turn if current_player is 2
+          (fightSubphaseForCheck === 'charging' && current_player === 2) ||
+          // Alternating active: AI turn if current_player is 2 (active pool = current player's units)
+          (fightSubphaseForCheck === 'alternating_active' && current_player === 2) ||
+          // Alternating non-active: AI turn if current_player is 1 (non-active = opposite of current player)
+          // When current_player is 2, non-active pool contains P1 units, so it's NOT AI turn
+          // When current_player is 1, non-active pool contains P2 units, so it IS AI turn
+          (fightSubphaseForCheck === 'alternating_non_active' && current_player === 1) ||
+          // Cleanup active: AI turn if current_player is 2
+          (fightSubphaseForCheck === 'cleanup_active' && current_player === 2) ||
+          // Cleanup non-active: AI turn if current_player is 1
+          (fightSubphaseForCheck === 'cleanup_non_active' && current_player === 1)
         )
-      : currentPlayer === 2;
+      : current_player === 2;
     
     // Removed duplicate log - now handled below with change detection
     
     const fightSubphaseForKey = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase || '';
-    const turnKey = `${apiProps.gameState?.currentPlayer}-${currentPhase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
+    const turnKey = `${apiProps.gameState?.current_player}-${currentPhase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
     
     // Reset lastProcessedTurn if turn/phase has changed (prevents blocking on failed AI turns)
     // Extract turn/phase from lastProcessedTurn to compare
@@ -222,7 +222,7 @@ export const BoardWithAPI: React.FC = () => {
     // Only log when values actually change (prevents console flooding during animations)
     const currentAICheck = {
       currentPhase,
-      currentPlayer: apiProps.gameState.currentPlayer,
+      current_player: apiProps.gameState.current_player,
       isAITurn,
       shouldTriggerAI,
       turnKey
@@ -231,7 +231,7 @@ export const BoardWithAPI: React.FC = () => {
     const prevCheck = prevAICheckRef.current;
     const hasChanged = !prevCheck || 
       prevCheck.currentPhase !== currentAICheck.currentPhase ||
-      prevCheck.currentPlayer !== currentAICheck.currentPlayer ||
+      prevCheck.current_player !== currentAICheck.current_player ||
       prevCheck.isAITurn !== currentAICheck.isAITurn ||
       prevCheck.shouldTriggerAI !== currentAICheck.shouldTriggerAI ||
       prevCheck.turnKey !== currentAICheck.turnKey;
@@ -247,6 +247,30 @@ export const BoardWithAPI: React.FC = () => {
       // Small delay to ensure UI updates are complete
       setTimeout(async () => {
         try {
+          const latestState = apiProps.gameState;
+          if (!latestState) {
+            throw new Error('Missing gameState before AI turn');
+          }
+          const latestPhase = latestState.phase;
+          const latestPlayer = latestState.current_player;
+          if (latestPlayer === undefined || latestPlayer === null) {
+            throw new Error('Missing current_player before AI turn');
+          }
+          if (latestPhase !== 'fight' && latestPlayer !== 2) {
+            return;
+          }
+          if (latestPhase === 'fight') {
+            const latestFightSubphase = apiProps.fightSubPhase || latestState.fight_subphase;
+            const isAITurnNow =
+              (latestFightSubphase === 'charging' && latestPlayer === 2) ||
+              (latestFightSubphase === 'alternating_active' && latestPlayer === 2) ||
+              (latestFightSubphase === 'alternating_non_active' && latestPlayer === 1) ||
+              (latestFightSubphase === 'cleanup_active' && latestPlayer === 2) ||
+              (latestFightSubphase === 'cleanup_non_active' && latestPlayer === 1);
+            if (!isAITurnNow) {
+              return;
+            }
+          }
           if (apiProps.executeAITurn) {
             await apiProps.executeAITurn();
             // Don't set lastProcessedTurn here - allow multiple activations in same phase
@@ -285,7 +309,7 @@ export const BoardWithAPI: React.FC = () => {
   useEffect(() => {
     if (!apiProps.gameState) return;
     const fightSubphaseForKey = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase || '';
-    const currentTurnKey = `${apiProps.gameState?.currentPlayer}-${apiProps.gameState?.phase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
+    const currentTurnKey = `${apiProps.gameState?.current_player}-${apiProps.gameState?.phase}-${fightSubphaseForKey}-${apiProps.gameState?.currentTurn || 1}`;
     
     // Only update if phase/turn actually changed (not just on every render)
     if (lastProcessedTurn && lastProcessedTurn !== currentTurnKey) {
@@ -397,7 +421,7 @@ export const BoardWithAPI: React.FC = () => {
           currentTurn={apiProps.gameState?.currentTurn ?? 1} 
           currentPhase={apiProps.gameState?.phase ?? 'move'}
           phases={["move", "shoot", "charge", "fight"]}
-          currentPlayer={apiProps.gameState?.currentPlayer}
+          current_player={apiProps.gameState?.current_player}
           maxTurns={(() => {
           if (!gameConfig?.game_rules?.max_turns) {
             throw new Error(`max_turns not found in game configuration. Config structure: ${JSON.stringify(Object.keys(gameConfig || {}))}. Expected: gameConfig.game_rules.max_turns`);
@@ -414,16 +438,16 @@ export const BoardWithAPI: React.FC = () => {
       {/* AI Status Display */}
       {isPvE && (
         <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
-          apiProps.gameState?.currentPlayer === 2 
+          apiProps.gameState?.current_player === 2 
             ? isAIProcessingRef.current 
               ? 'bg-purple-900 border border-purple-700' 
               : 'bg-purple-800 border border-purple-600'
             : 'bg-gray-800 border border-gray-600'
         }`}>
           <span className="text-sm font-medium text-white">
-            {apiProps.gameState?.currentPlayer === 2 ? '🤖 AI Turn' : '👤 Your Turn'}
+            {apiProps.gameState?.current_player === 2 ? '🤖 AI Turn' : '👤 Your Turn'}
           </span>
-          {apiProps.gameState?.currentPlayer === 2 && isAIProcessingRef.current && (
+          {apiProps.gameState?.current_player === 2 && isAIProcessingRef.current && (
             <>
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
               <span className="text-purple-200 text-sm">AI thinking...</span>
@@ -539,7 +563,7 @@ export const BoardWithAPI: React.FC = () => {
         }}
         onFightAttack={apiProps.onFightAttack}
         onActivateFight={apiProps.onActivateFight}
-        currentPlayer={apiProps.currentPlayer as PlayerId}
+        current_player={apiProps.current_player as PlayerId}
         unitsMoved={apiProps.unitsMoved}
         unitsCharged={apiProps.unitsCharged}
         unitsAttacked={apiProps.unitsAttacked}
