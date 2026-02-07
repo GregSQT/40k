@@ -251,9 +251,9 @@ class W40KEngine(gym.Env):
                 else:
                     self.training_config = None
 
-            # No scenario loaded - use board config for terrain (set to None for selection logic)
-            self._scenario_wall_hexes = None
-            self._scenario_objectives = None
+            # Scenario provided via config (API path) - use if present, else fall back to board config
+            self._scenario_wall_hexes = self.config.get("scenario_wall_hexes")
+            self._scenario_objectives = self.config.get("scenario_objectives")
             self._scenario_primary_objective = self.config.get("primary_objective")
         
         # Store training system compatibility parameters
@@ -296,6 +296,7 @@ class W40KEngine(gym.Env):
             "victory_points": {1: 0, 2: 0},
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
+            "objective_rewarded_turns": set(),
             
             # AI_TURN.md required tracking sets
             "units_moved": set(),

@@ -14,6 +14,12 @@ export default function HomePage() {
           PvP Game
         </Link>
         <Link 
+          to="/game?mode=pve" 
+          className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 inline-block"
+        >
+          PvE Game
+        </Link>
+        <Link 
           to="/game?mode=debug" 
           className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-500 inline-block"
         >

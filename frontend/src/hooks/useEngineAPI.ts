@@ -105,6 +105,7 @@ interface APIGameState {
   pve_mode?: boolean;
   victory_points?: Record<string, number>;
   primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number } | [number, number]> }>;
 }
 
 export const useEngineAPI = () => {
@@ -167,16 +168,27 @@ export const useEngineAPI = () => {
         gameInitialized.current = true;
         setLoading(true);
         
-        // Detect Debug mode from URL
+        // Detect Debug/PvE mode from URL
         const urlParams = new URLSearchParams(window.location.search);
-        const isDebugMode = urlParams.get('mode') === 'debug';
+        const mode = urlParams.get('mode');
+        const isDebugMode = mode === 'debug';
+        const isPvEMode = mode === 'pve';
+        const isAiMode = isDebugMode || isPvEMode;
         
-        console.log(`Starting game in ${isDebugMode ? 'Debug' : 'PvP'} mode`);
+        console.log(`Starting game in ${isDebugMode ? 'Debug' : isPvEMode ? 'PvE' : 'PvP'} mode`);
+        
+        const requestPayload: Record<string, unknown> = {
+          pve_mode: isAiMode,
+          debug_mode: isDebugMode
+        };
+        if (isPvEMode) {
+          requestPayload.scenario_file = "config/scenario_pve.json";
+        }
         
         const response = await fetch(`${API_BASE}/game/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pve_mode: isDebugMode })
+          body: JSON.stringify(requestPayload)
         });
         
         if (!response.ok) {
@@ -186,7 +198,8 @@ export const useEngineAPI = () => {
         const data = await response.json();
         if (data.success) {
           setGameState(data.game_state);
-          console.log(`Game started successfully in ${data.game_state.pve_mode ? 'Debug' : 'PvP'} mode`);
+          const startedMode = data.game_state.debug_mode ? 'Debug' : (data.game_state.pve_mode ? 'PvE' : 'PvP');
+          console.log(`Game started successfully in ${startedMode} mode`);
         } else {
           throw new Error(data.error || 'Failed to start game');
         }
@@ -1648,6 +1661,7 @@ export const useEngineAPI = () => {
       units_cache: gameState.units_cache,
       victory_points: gameState.victory_points,
       primary_objective: gameState.primary_objective,
+      objectives: gameState.objectives,
     };
   }, [
     gameState,
@@ -1796,12 +1810,13 @@ export const useEngineAPI = () => {
       aiTurnInProgress = true;
       
       const urlParams = new URLSearchParams(window.location.search);
-      const isDebugFromURL = urlParams.get('mode') === 'debug';
+      const mode = urlParams.get('mode');
+      const isAiFromURL = mode === 'debug' || mode === 'pve';
       
       // Check if AI has eligible units in current phase FIRST
       const phaseCheck = gameState.phase;
       
-      if (!gameState || (!gameState.pve_mode && !isDebugFromURL)) {
+      if (!gameState || (!gameState.pve_mode && !isAiFromURL)) {
         aiTurnInProgress = false;
         return;
       }

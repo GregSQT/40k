@@ -1353,7 +1353,16 @@ def parse_step_log(filepath: str) -> Dict:
                         current_episode_num,
                         line
                     )
-                    if phase in ('MOVE', 'SHOOT', 'CHARGE', 'FIGHT'):
+                    action_desc_upper = action_desc.upper()
+                    is_activation_marker = (
+                        " MOVED " in action_desc_upper
+                        or " ADVANCED " in action_desc_upper
+                        or " CHARGED " in action_desc_upper
+                        or " FAILED CHARGE " in action_desc_upper
+                        or " FLED " in action_desc_upper
+                    )
+                    # Double-activation should only count unit activations, not per-shot/per-attack logs.
+                    if phase in ('MOVE', 'SHOOT', 'CHARGE') and is_activation_marker:
                         if player is None:
                             raise ValueError("player is required for double-activation check")
                         phase_key = (turn, phase, int(player))

@@ -154,7 +154,7 @@ def load_unit_definitions_from_ts(unit_registry):
             
             # Pattern 2: RNG_WEAPON_CODES = ["code1", "code2"] ou [] (robuste)
             rng_codes_match = re.search(
-                r'static\s+RNG_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+                r'static\s+RNG_WEAPON_CODES(?:\s*:\s*[^=]+)?\s*=\s*\[([^\]]*)\];',
                 content,
                 re.MULTILINE | re.DOTALL  # Support multi-lignes
             )
@@ -178,7 +178,7 @@ def load_unit_definitions_from_ts(unit_registry):
             
             # Pattern 3: CC_WEAPON_CODES (même logique)
             cc_codes_match = re.search(
-                r'static\s+CC_WEAPON_CODES\s*=\s*\[([^\]]*)\];',
+                r'static\s+CC_WEAPON_CODES(?:\s*:\s*[^=]+)?\s*=\s*\[([^\]]*)\];',
                 content,
                 re.MULTILINE | re.DOTALL
             )

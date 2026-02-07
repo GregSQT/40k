@@ -8,7 +8,7 @@ interface UnitStatusTableProps {
   selectedUnitId: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
-  gameMode?: 'pvp' | 'debug' | 'training';
+  gameMode?: 'pvp' | 'debug' | 'pve' | 'training';
   isReplay?: boolean;
   victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;
@@ -490,7 +490,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(({
         return playerNumber === 2 ? 'Player 2 - Bot' : 'Player 1 - AI';
       }
       return playerNumber === 2 ? 'Player 1 - AI' : 'Player 2 - Bot';
-    } else if (gameMode === 'debug') {
+    } else if (gameMode === 'debug' || gameMode === 'pve') {
       return playerNumber === 1 ? 'Player 1 - Human' : 'Player 2 - AI';
     } else { // pvp
       return playerNumber === 1 ? 'Player 1 - Human' : 'Player 2 - Human';

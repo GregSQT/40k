@@ -129,6 +129,10 @@ class RewardCalculator:
         if not acting_unit:
             raise ValueError(f"Acting unit not found: {acting_unit_id}")
 
+        objective_turn_reward = self._calculate_objective_reward_per_turn(game_state, result)
+        if objective_turn_reward:
+            reward_breakdown['tactical_bonuses'] += objective_turn_reward
+
         # CRITICAL: Only give rewards to the controlled player (P1 during training)
         # Player 2's actions are part of the environment, not the learning agent
         controlled_player = self.config.get("controlled_player", 1)
@@ -143,9 +147,9 @@ class RewardCalculator:
                 return situational_reward
 
             # Game not over - no reward for opponent's actions
-            reward_breakdown['total'] = 0.0
+            reward_breakdown['total'] = objective_turn_reward
             game_state['last_reward_breakdown'] = reward_breakdown
-            return 0.0
+            return reward_breakdown['total']
 
         # CRITICAL: No fallbacks - require explicit action in result
         if not isinstance(result, dict):
@@ -623,6 +627,78 @@ class RewardCalculator:
                 print(f"⚠️  WARNING: Failed to calculate situational reward: {e}")
             return 0.0
     
+    def _get_primary_objective_config(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Return primary objective config if present, else None."""
+        primary_objective = game_state.get("primary_objective")
+        if primary_objective is None:
+            return None
+        if isinstance(primary_objective, list):
+            if len(primary_objective) != 1:
+                raise ValueError("primary_objective must contain exactly one config for rewards")
+            primary_objective = primary_objective[0]
+        if not isinstance(primary_objective, dict):
+            raise TypeError(f"primary_objective is {type(primary_objective).__name__}, expected dict")
+        return primary_objective
+
+    def _get_controlled_player_unit(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Return one unit for the controlled player (if any)."""
+        controlled_player = self.config.get("controlled_player", 1)
+        units_cache = require_key(game_state, "units_cache")
+        for unit_id, cache_entry in units_cache.items():
+            if int(cache_entry["player"]) == int(controlled_player):
+                unit = get_unit_by_id(str(unit_id), game_state)
+                if not unit:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                return unit
+        return None
+
+    def _calculate_objective_reward_per_turn(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
+        """
+        Reward controlled player based on objectives controlled at turn start.
+        Applied once per turn when transitioning into move phase.
+        """
+        if not result.get("phase_transition") or result.get("next_phase") != "move":
+            return 0.0
+
+        primary_objective = self._get_primary_objective_config(game_state)
+        if primary_objective is None:
+            return 0.0
+
+        scoring_cfg = require_key(primary_objective, "scoring")
+        start_turn = require_key(scoring_cfg, "start_turn")
+        current_turn = require_key(game_state, "turn")
+        if current_turn < start_turn:
+            return 0.0
+
+        objective_rewarded_turns = require_key(game_state, "objective_rewarded_turns")
+        controlled_player = int(self.config.get("controlled_player", 1))
+        reward_key = (current_turn, controlled_player)
+        if reward_key in objective_rewarded_turns:
+            return 0.0
+
+        if not self.state_manager:
+            return 0.0
+
+        acting_unit = self._get_controlled_player_unit(game_state)
+        if not acting_unit:
+            return 0.0
+
+        unit_rewards = self._get_unit_reward_config(acting_unit)
+        if "objective_rewards" not in unit_rewards:
+            raise KeyError("Unit rewards missing required 'objective_rewards' section")
+        objective_rewards = unit_rewards["objective_rewards"]
+        if "reward_per_objective" not in objective_rewards:
+            raise KeyError("Objective rewards missing required 'reward_per_objective' value")
+
+        obj_counts = self.state_manager.count_controlled_objectives(game_state)
+        controlled_objectives = obj_counts.get(controlled_player, 0)
+        reward_per_objective = objective_rewards["reward_per_objective"]
+        total_reward = reward_per_objective * controlled_objectives
+
+        objective_rewarded_turns.add(reward_key)
+
+        return total_reward
+
     def _calculate_objective_reward_turn5(self, game_state: Dict[str, Any], unit_rewards: Dict[str, Any]) -> float:
         """
         Calculate reward for objective control at end of turn 5.
@@ -667,7 +743,8 @@ class RewardCalculator:
             return 0.0
         
         obj_counts = self.state_manager.count_controlled_objectives(game_state)
-        p0_objectives = obj_counts[0] if 0 in obj_counts else 0
+        controlled_player = int(self.config.get("controlled_player", 1))
+        controlled_objectives = obj_counts.get(controlled_player, 0)
         
         # Get reward per objective from config (REQUIRED - raise error if missing)
         if "objective_rewards" not in unit_rewards:
@@ -679,7 +756,7 @@ class RewardCalculator:
         
         reward_per_objective = objective_rewards["reward_per_objective_turn5"]
         
-        total_reward = reward_per_objective * p0_objectives
+        total_reward = reward_per_objective * controlled_objectives
         
         return total_reward
     

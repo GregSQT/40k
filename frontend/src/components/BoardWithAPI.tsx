@@ -21,9 +21,44 @@ export const BoardWithAPI: React.FC = () => {
   // Detect game mode from URL
   const location = useLocation();
   const gameMode = location.pathname.includes('/replay') ? 'training' :
-                   (location.pathname === '/game' && location.search.includes('mode=debug')) ? 'debug' : 'pvp';
-  const isDebugMode = gameMode === 'debug' || window.location.search.includes('mode=debug') || apiProps.gameState?.pve_mode === true;
+                   (location.pathname === '/game' && location.search.includes('mode=debug')) ? 'debug' :
+                   (location.pathname === '/game' && location.search.includes('mode=pve')) ? 'pve' : 'pvp';
+  const isDebugMode = gameMode === 'debug' || window.location.search.includes('mode=debug');
+  const isPvEMode = gameMode === 'pve' || window.location.search.includes('mode=pve');
+  const isAiMode = isDebugMode || isPvEMode || apiProps.gameState?.pve_mode === true;
   const victoryPoints = apiProps.gameState?.victory_points;
+  const objectivesOverride = (() => {
+    const objectives = apiProps.gameState?.objectives as
+      | Array<{ name: string; hexes: Array<{ col: number; row: number } | [number, number]> }>
+      | undefined;
+    if (!objectives) {
+      return undefined;
+    }
+    return objectives.map((objective) => {
+      if (!objective || !objective.name) {
+        throw new Error("Objective missing required name field");
+      }
+      if (!objective.hexes) {
+        throw new Error(`Objective ${objective.name} missing required hexes`);
+      }
+      const normalizedHexes = objective.hexes.map((hex) => {
+        if (Array.isArray(hex)) {
+          if (hex.length !== 2) {
+            throw new Error(`Objective ${objective.name} has invalid hex tuple: ${JSON.stringify(hex)}`);
+          }
+          return { col: hex[0], row: hex[1] };
+        }
+        if (typeof hex === "object" && hex !== null && "col" in hex && "row" in hex) {
+          return { col: (hex as { col: number }).col, row: (hex as { row: number }).row };
+        }
+        throw new Error(`Objective ${objective.name} has invalid hex format: ${JSON.stringify(hex)}`);
+      });
+      return {
+        name: objective.name,
+        hexes: normalizedHexes
+      };
+    });
+  })();
   
   // Get board configuration for line of sight calculations
   const { gameConfig } = useGameConfig();
@@ -107,8 +142,8 @@ export const BoardWithAPI: React.FC = () => {
   useEffect(() => {
     if (!apiProps.gameState) return;
     
-    // Check if in Debug mode
-    const isDebugEnabled = apiProps.gameState.pve_mode || isDebugMode;
+    // Check if in PvE/Debug mode
+    const isAiEnabled = isAiMode;
     
     // Check if game is over by examining unit health
     const player1Alive = apiProps.gameState.units.some(u => u.player === 1 && (u.HP_CUR ?? u.HP_MAX) > 0);
@@ -212,7 +247,7 @@ export const BoardWithAPI: React.FC = () => {
     // Allow multiple AI activations in same phase if there are still eligible units
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
-    const shouldTriggerAI = isDebugEnabled && 
+    const shouldTriggerAI = isAiEnabled && 
                            isAITurn && 
                            !isAIProcessingRef.current && 
                            gameNotOver && 
@@ -285,9 +320,9 @@ export const BoardWithAPI: React.FC = () => {
           isAIProcessingRef.current = false;
         }
       }, 1500);
-    } else if (isDebugEnabled && isAITurn && !hasEligibleAIUnits) {
+    } else if (isAiEnabled && isAITurn && !hasEligibleAIUnits) {
       // AI turn skipped - no eligible units
-    } else if (isDebugEnabled && !shouldTriggerAI && hasChanged) {
+    } else if (isAiEnabled && !shouldTriggerAI && hasChanged) {
       // Only log when values change, and only in debug scenarios
       // Suppress the "NOT triggered" warning to reduce console noise
       // Uncomment below if you need to debug AI triggering issues
@@ -302,7 +337,7 @@ export const BoardWithAPI: React.FC = () => {
       //   turnKeyMatches: lastProcessedTurn === turnKey
       // });
     }
-  }, [isDebugMode, apiProps, lastProcessedTurn]);
+  }, [isAiMode, apiProps, lastProcessedTurn]);
   
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
@@ -435,7 +470,7 @@ export const BoardWithAPI: React.FC = () => {
       )}
       
       {/* AI Status Display */}
-      {isDebugMode && (
+      {isAiMode && (
         <div className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
           apiProps.gameState?.current_player === 2 
             ? isAIProcessingRef.current 
@@ -590,6 +625,7 @@ export const BoardWithAPI: React.FC = () => {
         onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
         showAdvanceWarningPopup={settings.showAdvanceWarning}
         autoSelectWeapon={settings.autoSelectWeapon}
+        objectivesOverride={objectivesOverride}
         />
         <SettingsMenu
           isOpen={isSettingsOpen}

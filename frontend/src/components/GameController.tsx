@@ -32,7 +32,8 @@ export const GameController: React.FC<GameControllerProps> = ({
   // Detect game mode from URL
   const location = useLocation();
   const gameMode = location.pathname.includes('/replay') ? 'training' :
-                   (location.pathname === '/game' && location.search.includes('mode=debug')) ? 'debug' : 'pvp';
+                   (location.pathname === '/game' && location.search.includes('mode=debug')) ? 'debug' :
+                   (location.pathname === '/game' && location.search.includes('mode=pve')) ? 'pve' : 'pvp';
   const isDebugMode = gameMode === 'debug';
                    
   // Track UnitStatusTable collapse states

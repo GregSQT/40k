@@ -152,9 +152,6 @@ def initialize_engine():
                 f"Training scenarios are in config/agents/<agent>/scenarios/"
             )
 
-        # Load configuration with game scenario
-        config = load_config(scenario_path=scenario_file)
-        
         # Initialize unit registry
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
@@ -162,6 +159,42 @@ def initialize_engine():
         # Load agent-specific configs based on scenario units
         from config_loader import get_config_loader
         config_loader = get_config_loader()
+        board_config = config_loader.get_board_config()
+        game_config = config_loader.get_game_config()
+        
+        from engine.game_state import GameStateManager
+        scenario_manager = GameStateManager({"board": {}}, unit_registry)
+        scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
+        scenario_units = require_key(scenario_result, "units")
+        scenario_primary_objective_ids = scenario_result.get("primary_objectives")
+        scenario_primary_objective_id = scenario_result.get("primary_objective")
+        scenario_wall_hexes = scenario_result.get("wall_hexes")
+        scenario_objectives = scenario_result.get("objectives")
+        
+        if scenario_primary_objective_ids is not None:
+            if not isinstance(scenario_primary_objective_ids, list):
+                raise TypeError("primary_objectives must be a list of objective IDs")
+            if not scenario_primary_objective_ids:
+                raise ValueError("primary_objectives list cannot be empty")
+            primary_objective_config = [
+                config_loader.load_primary_objective_config(obj_id)
+                for obj_id in scenario_primary_objective_ids
+            ]
+        elif scenario_primary_objective_id is not None:
+            primary_objective_config = config_loader.load_primary_objective_config(
+                scenario_primary_objective_id
+            )
+        else:
+            primary_objective_config = None
+        
+        config = {
+            "board": board_config,
+            "game_rules": require_key(game_config, "game_rules"),
+            "units": scenario_units,
+            "primary_objective": primary_objective_config,
+            "scenario_wall_hexes": scenario_wall_hexes,
+            "scenario_objectives": scenario_objectives
+        }
         
         # Determine which agents are in the scenario
         agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
@@ -251,7 +284,7 @@ def initialize_engine():
         print(f"❌ Full traceback: {traceback.format_exc()}")
         return False
 
-def initialize_pve_engine():
+def initialize_pve_engine(scenario_file: str = None, debug_mode: bool = False):
     """Initialize the W40K engine for PvE mode with AI Player 2."""
     global engine
     try:
@@ -260,8 +293,11 @@ def initialize_pve_engine():
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
         
-        # Define scenario file path for game/API mode
-        scenario_file = os.path.join("config", "scenario_game.json")
+        # Define scenario file path for game/API mode (default if not provided)
+        if scenario_file is None:
+            scenario_file = os.path.join("config", "scenario_game.json")
+        elif not isinstance(scenario_file, str):
+            raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 
         # Verify scenario file exists - no fallback
         if not os.path.exists(scenario_file):
@@ -271,16 +307,48 @@ def initialize_pve_engine():
                 f"Training scenarios are in config/agents/<agent>/scenarios/"
             )
 
-        # Load configuration with game scenario
-        config = load_config(scenario_path=scenario_file)
-        
         # Initialize unit registry
         from ai.unit_registry import UnitRegistry
         unit_registry = UnitRegistry()
         
-        # Load agent-specific configs based on scenario units
         from config_loader import get_config_loader
         config_loader = get_config_loader()
+        board_config = config_loader.get_board_config()
+        game_config = config_loader.get_game_config()
+        
+        from engine.game_state import GameStateManager
+        scenario_manager = GameStateManager({"board": {}}, unit_registry)
+        scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
+        scenario_units = require_key(scenario_result, "units")
+        scenario_primary_objective_ids = scenario_result.get("primary_objectives")
+        scenario_primary_objective_id = scenario_result.get("primary_objective")
+        scenario_wall_hexes = scenario_result.get("wall_hexes")
+        scenario_objectives = scenario_result.get("objectives")
+        
+        if scenario_primary_objective_ids is not None:
+            if not isinstance(scenario_primary_objective_ids, list):
+                raise TypeError("primary_objectives must be a list of objective IDs")
+            if not scenario_primary_objective_ids:
+                raise ValueError("primary_objectives list cannot be empty")
+            primary_objective_config = [
+                config_loader.load_primary_objective_config(obj_id)
+                for obj_id in scenario_primary_objective_ids
+            ]
+        elif scenario_primary_objective_id is not None:
+            primary_objective_config = config_loader.load_primary_objective_config(
+                scenario_primary_objective_id
+            )
+        else:
+            primary_objective_config = None
+        
+        config = {
+            "board": board_config,
+            "game_rules": require_key(game_config, "game_rules"),
+            "units": scenario_units,
+            "primary_objective": primary_objective_config,
+            "scenario_wall_hexes": scenario_wall_hexes,
+            "scenario_objectives": scenario_objectives
+        }
         
         # Determine which agents are in the scenario
         agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
@@ -344,7 +412,8 @@ def initialize_pve_engine():
             active_agents=None,
             scenario_file=scenario_file,
             unit_registry=unit_registry,
-            quiet=True
+            quiet=True,
+            debug_mode=debug_mode
         )
         
         # CRITICAL FIX: Add rewards_configs to game_state after engine creation
@@ -409,12 +478,20 @@ def start_game():
     try:
         # Check for PvE mode in request
         data = request.get_json() or {}
+        if "pve_mode" in data and not isinstance(data["pve_mode"], bool):
+            raise ValueError(f"pve_mode must be boolean (got {type(data['pve_mode']).__name__})")
+        if "debug_mode" in data and not isinstance(data["debug_mode"], bool):
+            raise ValueError(f"debug_mode must be boolean (got {type(data['debug_mode']).__name__})")
+        if "scenario_file" in data and data["scenario_file"] is not None and not isinstance(data["scenario_file"], str):
+            raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
         pve_mode = data.get('pve_mode', False)
+        debug_mode = data.get('debug_mode', False)
+        scenario_file = data.get('scenario_file', None)
         
         # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
         if pve_mode:
             print("DEBUG: Initializing engine for PvE mode")
-            if not initialize_pve_engine():
+            if not initialize_pve_engine(scenario_file=scenario_file, debug_mode=debug_mode):
                 return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
         else:
             print("DEBUG: Initializing engine for PvP mode")
@@ -447,10 +524,13 @@ def start_game():
         # Add PvE mode flag to response
         serializable_state["pve_mode"] = getattr(engine, 'is_pve_mode', False)
 
+        mode_label = "PvE"
+        if pve_mode and debug_mode:
+            mode_label = "Debug"
         return jsonify({
             "success": True,
             "game_state": serializable_state,
-            "message": f"Game started successfully ({'PvE' if pve_mode else 'PvP'} mode)"
+            "message": f"Game started successfully ({mode_label if pve_mode else 'PvP'} mode)"
         })
     
     except Exception as e:

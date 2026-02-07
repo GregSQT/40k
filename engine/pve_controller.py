@@ -31,9 +31,9 @@ class PvEController:
     
     def load_ai_model_for_pve(self, game_state: Dict[str, Any], engine):
         """Load trained AI model for PvE Player 2 - with diagnostic logging."""
-        # Only show debug output in debug training mode
-        debug_mode = hasattr(self, 'training_config') and self.training_config and \
-                     self.config.get('training_config_name') == 'debug'
+        debug_mode = require_key(game_state, "debug_mode")
+        if not isinstance(debug_mode, bool):
+            raise ValueError(f"debug_mode must be boolean (got {type(debug_mode).__name__})")
         
         if debug_mode:
             print(f"DEBUG: _load_ai_model_for_pve called")
@@ -53,7 +53,8 @@ class PvEController:
             if debug_mode:
                 print(f"DEBUG: Macro model path: {macro_model_path}")
                 print(f"DEBUG: Macro model exists: {os.path.exists(macro_model_path)}")
-            if not micro_only_mode:
+            macro_disabled = micro_only_mode and debug_mode
+            if not macro_disabled:
                 if not os.path.exists(macro_model_path):
                     raise FileNotFoundError(f"Macro model required for PvE mode not found: {macro_model_path}")
                 self.macro_model = MaskablePPO.load(macro_model_path)
@@ -63,7 +64,7 @@ class PvEController:
                 self.macro_model = None
                 self.ai_model = None
                 if not self.quiet:
-                    print("PvE: Macro disabled by config (micro_only_mode=true)")
+                    print("PvE: Macro disabled for Debug mode (micro_only_mode=true)")
             
             # Wrap engine with ActionMasker for micro models (action space = 13)
             def mask_fn(env):
@@ -135,8 +136,9 @@ class PvEController:
             eligible_mask = np.array(require_key(macro_obs, "eligible_mask"), dtype=bool)
             if not np.any(eligible_mask):
                 raise RuntimeError("Macro eligible_mask is empty - no eligible units to act")
-            
-            macro_prediction = self.macro_model.predict(macro_obs, action_masks=eligible_mask, deterministic=True)
+            macro_vector, max_units = self._build_macro_vector(macro_obs)
+            macro_action_mask = self._build_macro_action_mask(macro_obs, max_units, engine)
+            macro_prediction = self.macro_model.predict(macro_vector, action_masks=macro_action_mask, deterministic=True)
             if isinstance(macro_prediction, tuple) and len(macro_prediction) >= 1:
                 macro_action = macro_prediction[0]
             elif hasattr(macro_prediction, 'item'):
@@ -163,13 +165,6 @@ class PvEController:
             predicted_action = micro_prediction.item()
         else:
             predicted_action = int(micro_prediction)
-        
-        if isinstance(prediction_result, tuple) and len(prediction_result) >= 1:
-            predicted_action = prediction_result[0]
-        elif hasattr(prediction_result, 'item'):
-            predicted_action = prediction_result.item()
-        else:
-            predicted_action = int(prediction_result)
         
         # Apply action mask like in training - force valid action if predicted action is invalid
         if game_state.get("debug_mode", False):
@@ -225,6 +220,143 @@ class PvEController:
                 )
             print(f"🔍 [AI_DECISION] Final semantic_action: {semantic_action}")
         return semantic_action
+
+    def _build_macro_vector(self, macro_obs: Dict[str, Any]) -> Tuple[np.ndarray, int]:
+        """
+        Build macro observation vector compatible with MacroTrainingWrapper.
+        Returns (obs_vector, max_units).
+        """
+        global_info = require_key(macro_obs, "global")
+        units = require_key(macro_obs, "units")
+
+        turn = float(require_key(global_info, "turn"))
+        current_player = int(require_key(global_info, "current_player"))
+        phase = require_key(global_info, "phase")
+        objectives_controlled = require_key(global_info, "objectives_controlled")
+        army_value_diff = float(require_key(global_info, "army_value_diff"))
+
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        game_config = config_loader.get_game_config()
+        game_rules = require_key(game_config, "game_rules")
+        gameplay = require_key(game_config, "gameplay")
+
+        max_turns = require_key(game_rules, "max_turns")
+        phase_order = require_key(gameplay, "phase_order")
+        if not phase_order:
+            raise ValueError("gameplay.phase_order cannot be empty for macro observation")
+        if max_turns <= 0:
+            raise ValueError(f"Invalid max_turns for macro observation: {max_turns}")
+
+        turn_norm = turn / float(max_turns)
+
+        if phase not in phase_order:
+            raise ValueError(f"Unknown phase for macro observation: {phase}")
+        phase_onehot = [1.0 if phase == p else 0.0 for p in phase_order]
+
+        if current_player == 1:
+            player_onehot = [1.0, 0.0]
+        elif current_player == 2:
+            player_onehot = [0.0, 1.0]
+        else:
+            raise ValueError(f"Invalid current_player for macro observation: {current_player}")
+
+        p1_obj = float(require_key(objectives_controlled, "p1"))
+        p2_obj = float(require_key(objectives_controlled, "p2"))
+
+        global_vec = [turn_norm] + phase_onehot + player_onehot + [p1_obj, p2_obj, army_value_diff]
+        global_feature_size = len(global_vec)
+
+        obs_size = self.macro_model.observation_space.shape[0]
+        unit_feature_size = 12
+        max_units = (obs_size - global_feature_size) // unit_feature_size
+        if obs_size != global_feature_size + (unit_feature_size * max_units):
+            raise ValueError(
+                f"Macro observation size mismatch: obs_size={obs_size}, "
+                f"global_feature_size={global_feature_size}, unit_feature_size={unit_feature_size}"
+            )
+
+        if len(units) > max_units:
+            raise ValueError(
+                f"Scenario units exceed macro max_units: units={len(units)} max_units={max_units}"
+            )
+
+        unit_vecs: List[float] = []
+        for unit in units:
+            best_ranged = require_key(unit, "best_ranged_target_onehot")
+            best_melee = require_key(unit, "best_melee_target_onehot")
+            if len(best_ranged) != 3 or len(best_melee) != 3:
+                raise ValueError("best_*_target_onehot must be length 3 for macro observation")
+
+            unit_vec = [
+                float(best_ranged[0]),
+                float(best_ranged[1]),
+                float(best_ranged[2]),
+                float(best_melee[0]),
+                float(best_melee[1]),
+                float(best_melee[2]),
+                float(require_key(unit, "attack_mode_ratio")),
+                float(require_key(unit, "hp_ratio")),
+                float(require_key(unit, "value_norm")),
+                float(require_key(unit, "pos_col_norm")),
+                float(require_key(unit, "pos_row_norm")),
+                float(require_key(unit, "dist_obj_norm")),
+            ]
+            if len(unit_vec) != unit_feature_size:
+                raise ValueError(
+                    f"unit feature size mismatch: expected={unit_feature_size} got={len(unit_vec)}"
+                )
+            unit_vecs.extend(unit_vec)
+
+        missing_units = max_units - len(units)
+        if missing_units > 0:
+            unit_vecs.extend([0.0] * (missing_units * unit_feature_size))
+
+        obs = np.array(global_vec + unit_vecs, dtype=np.float32)
+        if obs.shape[0] != obs_size:
+            raise ValueError(
+                f"Macro observation size mismatch: expected={obs_size} got={obs.shape[0]}"
+            )
+
+        return obs, max_units
+
+    def _build_macro_action_mask(self, macro_obs: Dict[str, Any], max_units: int, engine) -> np.ndarray:
+        """Build macro action mask compatible with MacroTrainingWrapper."""
+        eligible_mask = require_key(macro_obs, "eligible_mask")
+        units = require_key(macro_obs, "units")
+        if len(eligible_mask) != len(units):
+            raise ValueError(
+                f"eligible_mask length mismatch: mask={len(eligible_mask)} units={len(units)}"
+            )
+        if len(units) > max_units:
+            raise ValueError(
+                f"Scenario units exceed macro max_units: units={len(units)} max_units={max_units}"
+            )
+
+        active_shooting_unit = engine.game_state.get("active_shooting_unit")
+        if active_shooting_unit is not None:
+            active_id = str(active_shooting_unit)
+            active_index = None
+            for i, unit in enumerate(units):
+                if str(require_key(unit, "id")) == active_id:
+                    active_index = i
+                    break
+            if active_index is None:
+                raise KeyError(f"Active shooting unit {active_id} missing from macro units list")
+            if not eligible_mask[active_index]:
+                raise ValueError(
+                    f"Active shooting unit {active_id} not eligible in macro mask"
+                )
+            mask = np.zeros(max_units, dtype=bool)
+            mask[active_index] = True
+            return mask
+
+        mask = np.zeros(max_units, dtype=bool)
+        for i, flag in enumerate(eligible_mask):
+            if i >= max_units:
+                break
+            mask[i] = bool(flag)
+        return mask
 
     def _load_macro_controller_config(self) -> Dict[str, Any]:
         """Load macro controller config from config paths."""
