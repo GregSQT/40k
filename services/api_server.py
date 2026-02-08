@@ -170,6 +170,9 @@ def initialize_engine():
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_objectives = scenario_result.get("objectives")
+        scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_zone = scenario_result.get("deployment_zone")
+        scenario_deployment_pools = scenario_result.get("deployment_pools")
         
         if scenario_primary_objective_ids is not None:
             if not isinstance(scenario_primary_objective_ids, list):
@@ -193,7 +196,10 @@ def initialize_engine():
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
-            "scenario_objectives": scenario_objectives
+            "scenario_objectives": scenario_objectives,
+            "deployment_type": scenario_deployment_type,
+            "deployment_zone": scenario_deployment_zone,
+            "deployment_pools": scenario_deployment_pools
         }
         
         # Determine which agents are in the scenario
@@ -324,6 +330,9 @@ def initialize_pve_engine(scenario_file: str = None, debug_mode: bool = False):
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_objectives = scenario_result.get("objectives")
+        scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_zone = scenario_result.get("deployment_zone")
+        scenario_deployment_pools = scenario_result.get("deployment_pools")
         
         if scenario_primary_objective_ids is not None:
             if not isinstance(scenario_primary_objective_ids, list):
@@ -347,7 +356,10 @@ def initialize_pve_engine(scenario_file: str = None, debug_mode: bool = False):
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
-            "scenario_objectives": scenario_objectives
+            "scenario_objectives": scenario_objectives,
+            "deployment_type": scenario_deployment_type,
+            "deployment_zone": scenario_deployment_zone,
+            "deployment_pools": scenario_deployment_pools
         }
         
         # Determine which agents are in the scenario
@@ -475,6 +487,14 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_objectives = scenario_result.get("objectives")
+        scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_zone = scenario_result.get("deployment_zone")
+        scenario_deployment_pools = scenario_result.get("deployment_pools")
+        print(
+            f"DEBUG: Test deployment_type={scenario_deployment_type} "
+            f"deployment_zone={scenario_deployment_zone} "
+            f"deployment_pools={'set' if scenario_deployment_pools is not None else 'none'}"
+        )
         
         if scenario_primary_objective_ids is not None:
             if not isinstance(scenario_primary_objective_ids, list):
@@ -498,7 +518,10 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
-            "scenario_objectives": scenario_objectives
+            "scenario_objectives": scenario_objectives,
+            "deployment_type": scenario_deployment_type,
+            "deployment_zone": scenario_deployment_zone,
+            "deployment_pools": scenario_deployment_pools
         }
         
         # Determine which agents are in the scenario
@@ -684,6 +707,15 @@ def start_game():
         # Add mode flags to response
         serializable_state["pve_mode"] = getattr(engine, 'is_pve_mode', False)
         serializable_state["test_mode"] = getattr(engine, 'is_test_mode', False)
+        print(
+            "DEBUG: start_game response phase",
+            {
+                "phase": serializable_state.get("phase"),
+                "deployment_type": serializable_state.get("deployment_type"),
+                "deployment_state": "set" if serializable_state.get("deployment_state") is not None else "none",
+                "current_player": serializable_state.get("current_player"),
+            },
+        )
 
         mode_label = "PvE"
         if test_mode:

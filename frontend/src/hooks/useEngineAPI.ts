@@ -104,6 +104,14 @@ interface APIGameState {
   active_fight_unit?: string;
   pve_mode?: boolean;
   test_mode?: boolean;
+  deployment_type?: "random" | "fixed" | "active";
+  deployment_state?: {
+    current_deployer: number;
+    deployable_units: Record<string, string[]>;
+    deployed_units: string[];
+    deployment_pools: Record<string, Array<[number, number] | { col: number; row: number }>>;
+    deployment_complete: boolean;
+  };
   victory_points?: Record<string, number>;
   primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number } | [number, number]> }>;
@@ -204,6 +212,12 @@ export const useEngineAPI = () => {
           setGameState(data.game_state);
           const startedMode = data.game_state.debug_mode ? 'Debug' : (data.game_state.test_mode ? 'Test' : (data.game_state.pve_mode ? 'PvE' : 'PvP'));
           console.log(`Game started successfully in ${startedMode} mode`);
+          console.log("DEBUG: start_game game_state", {
+            phase: data.game_state.phase,
+            deployment_type: data.game_state.deployment_type,
+            deployment_state: data.game_state.deployment_state ? "set" : "none",
+            current_player: data.game_state.current_player,
+          });
         } else {
           throw new Error(data.error || 'Failed to start game');
         }
@@ -1129,6 +1143,25 @@ export const useEngineAPI = () => {
     }
   }, [executeAction]);
 
+  const handleDeployUnit = useCallback(async (unitId: number | string, col: number | string, row: number | string) => {
+    if (!gameState || gameState.phase !== "deployment") {
+      return;
+    }
+    const action = {
+      action: "deploy_unit",
+      unitId: typeof unitId === 'string' ? unitId : unitId.toString(),
+      destCol: typeof col === 'string' ? parseInt(col) : col,
+      destRow: typeof row === 'string' ? parseInt(row) : row,
+    };
+    try {
+      await executeAction(action);
+      setSelectedUnitId(null);
+      setMode("select");
+    } catch (error) {
+      console.error("❌ DEPLOY FAILED:", error);
+    }
+  }, [executeAction, gameState]);
+
   const handleConfirmMove = useCallback(async () => {
     if (movePreview) {
       await handleDirectMove(movePreview.unitId, movePreview.destCol, movePreview.destRow);
@@ -1513,7 +1546,17 @@ export const useEngineAPI = () => {
       throw new Error(`API ERROR: gameState is null when getting eligible units`);
     }
 
-    if (gameState.phase === 'command') {
+    if (gameState.phase === 'deployment') {
+      if (!gameState.deployment_state) {
+        throw new Error(`API ERROR: Missing deployment_state in deployment phase`);
+      }
+      const currentDeployer = gameState.deployment_state.current_deployer;
+      const pool = gameState.deployment_state.deployable_units[String(currentDeployer)];
+      if (!pool) {
+        return [];
+      }
+      return pool.map(id => parseInt(id)).filter(id => !isNaN(id));
+    } else if (gameState.phase === 'command') {
       // Command phase: empty pool for now, ready for future
       return [];
     } else if (gameState.phase === 'move') {
@@ -1653,6 +1696,8 @@ export const useEngineAPI = () => {
       unitChargeRolls: {},
       pve_mode: gameState.pve_mode,
       test_mode: gameState.test_mode,
+      deployment_type: gameState.deployment_type,
+      deployment_state: gameState.deployment_state,
       move_activation_pool: gameState.move_activation_pool,
       shoot_activation_pool: gameState.shoot_activation_pool,
       charge_activation_pool: gameState.charge_activation_pool,
@@ -1711,6 +1756,7 @@ export const useEngineAPI = () => {
         onAdvanceMove: async () => {},
         onShoot: () => {},
         onSkipShoot: () => {},
+        onDeployUnit: async () => {},
         onStartTargetPreview: () => {},
         onFightAttack: () => {},
         onActivateFight: () => {},
@@ -1757,7 +1803,7 @@ export const useEngineAPI = () => {
     unitsCharged: memoizedUnitsCharged,
     unitsAttacked: memoizedUnitsAttacked,
     unitsFled: memoizedUnitsFled,
-    phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
+    phase: gameState.phase as "deployment" | "move" | "shoot" | "charge" | "fight",
     // Expose fight_subphase for UnitRenderer click handling
     fightSubPhase: gameState.fight_subphase as "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null,
     gameState: memoizedGameState,
@@ -1770,6 +1816,7 @@ export const useEngineAPI = () => {
     onCancelMove: handleCancelMove,
     onShoot: handleShoot,
     onSkipShoot: handleSkipShoot,
+    onDeployUnit: handleDeployUnit,
     onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: handleFightAttack,
     onActivateFight: handleActivateFight,
@@ -1834,7 +1881,16 @@ export const useEngineAPI = () => {
       }
       let eligibleAICount = 0;
       
-      if (phaseCheck === 'shoot' && gameState.shoot_activation_pool) {
+      if (phaseCheck === 'deployment') {
+        const deploymentState = gameState.deployment_state;
+        if (!deploymentState) {
+          aiTurnInProgress = false;
+          return;
+        }
+        const deployer = deploymentState.current_deployer;
+        const pool = deploymentState.deployable_units?.[String(deployer)] || [];
+        aiEligibleUnits = deployer === 2 ? pool.length : 0;
+      } else if (phaseCheck === 'shoot' && gameState.shoot_activation_pool) {
         const shootPool = gameState.shoot_activation_pool || [];
         eligibleAICount = shootPool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number

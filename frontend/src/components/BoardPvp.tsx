@@ -164,6 +164,7 @@ type BoardProps = {
   onConfirmMove: () => void;
   onCancelMove: () => void;
   onShoot: (shooterId: number, targetId: number) => void;
+  onDeployUnit?: (unitId: number | string, destCol: number, destRow: number) => void;
   onFightAttack?: (attackerId: number, targetId: number | null) => void;
   onActivateFight?: (fighterId: number) => void;
   current_player: 1 | 2;
@@ -173,7 +174,7 @@ type BoardProps = {
   unitsFled?: number[];
   fightSubPhase?: FightSubPhase; // NEW
   fightActivePlayer?: PlayerId; // NEW
-  phase: "command" | "move" | "shoot" | "charge" | "fight";
+  phase: "deployment" | "command" | "move" | "shoot" | "charge" | "fight";
   onCharge?: (chargerId: number, targetId: number) => void;
   onActivateCharge?: (chargerId: number) => void;
   onChargeEnemyUnit?: (chargerId: number, enemyUnitId: number) => void;
@@ -199,6 +200,7 @@ type BoardProps = {
   showAdvanceWarningPopup?: boolean; // If false, skip advance warning popup
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
+  deploymentState?: GameState["deployment_state"];
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
@@ -241,6 +243,7 @@ export default function Board({
   unitsMoved,
   phase,
   onShoot,
+  onDeployUnit,
   onFightAttack,
   onActivateFight,
   onCharge,
@@ -271,6 +274,7 @@ export default function Board({
   showAdvanceWarningPopup = false,
   wallHexesOverride,
   availableCellsOverride,
+  deploymentState,
   objectivesOverride,
   replayActionIndex,
   autoSelectWeapon,
@@ -307,6 +311,7 @@ export default function Board({
     onConfirmMove: () => void;
     onCancelMove: () => void;
     onShoot: (shooterId: number, targetId: number) => void;
+    onDeployUnit?: (unitId: number | string, destCol: number, destRow: number) => void;
     onFightAttack?: (attackerId: number, targetId: number | null) => void;
     onActivateFight?: (fighterId: number) => void;
     onCharge?: (chargerId: number, targetId: number) => void;
@@ -326,6 +331,7 @@ export default function Board({
     onConfirmMove,
     onCancelMove,
     onShoot,
+    onDeployUnit,
     onFightAttack,
     onCharge,
     onActivateCharge,
@@ -348,6 +354,7 @@ export default function Board({
     onConfirmMove,
     onCancelMove,
     onShoot,
+    onDeployUnit,
     onFightAttack,
     onActivateFight,
     onCharge,
@@ -673,6 +680,7 @@ export default function Board({
       onConfirmMove: stableCallbacks.current.onConfirmMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onCancelAdvance: stableCallbacks.current.onCancelAdvance,
+      onDeployUnit: stableCallbacks.current.onDeployUnit,
       onActivateCharge: stableCallbacks.current.onActivateCharge,
       onActivateFight: stableCallbacks.current.onActivateFight,
       onMoveCharger: stableCallbacks.current.onMoveCharger,
@@ -715,6 +723,32 @@ export default function Board({
     // ✅ RESTRUCTURED: Calculate ALL highlight data BEFORE any drawBoard calls
     const availableCells: { col: number; row: number }[] = [];
     const selectedUnit = units.find(u => u.id === selectedUnitId);
+
+    if (phase === "deployment" && deploymentState) {
+      const deployer = deploymentState.current_deployer ?? current_player;
+      const pool =
+        deploymentState.deployment_pools[String(deployer)] ||
+        deploymentState.deployment_pools[deployer as unknown as keyof typeof deploymentState.deployment_pools];
+      if (pool) {
+        pool.forEach((hex) => {
+          if (Array.isArray(hex)) {
+            availableCells.push({ col: Number(hex[0]), row: Number(hex[1]) });
+          } else if (hex && typeof hex === "object" && "col" in hex && "row" in hex) {
+            availableCells.push({
+              col: Number((hex as { col: number }).col),
+              row: Number((hex as { row: number }).row),
+            });
+          }
+        });
+      }
+      console.log("DEPLOYMENT DEBUG", {
+        phase,
+        current_player,
+        current_deployer: deploymentState.current_deployer,
+        pool_size: pool ? pool.length : 0,
+        availableCells: availableCells.length,
+      });
+    }
 
     // Charge preview: chargeCells & targets
     let chargeCells: { col: number; row: number }[] = [];

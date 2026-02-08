@@ -199,6 +199,8 @@ class ObservationBuilder:
                 return set()
             else:
                 raise KeyError(f"Unknown fight_subphase for macro eligibility: {fight_subphase}")
+        elif current_phase == "deployment":
+            return set()
         else:
             raise KeyError(f"Unsupported phase for macro eligibility: {current_phase}")
         
@@ -1111,7 +1113,7 @@ class ObservationBuilder:
                 build_unit_los_cache(game_state, str(ally_id))
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
-        phase_encoding = {"command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
+        phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
         if game_state["phase"] not in phase_encoding:
             raise KeyError(f"Unknown phase for observation: {game_state['phase']}")
         obs[1] = phase_encoding[game_state["phase"]]
@@ -1434,8 +1436,10 @@ class ObservationBuilder:
         elif current_phase == "command":
             # Command phase has no "active unit" for observation; return None so build_observation returns zeros
             return None
+        elif current_phase == "deployment":
+            return None
         else:
-            raise KeyError(f"game_state phase must be move/shoot/charge/fight/command, got: {current_phase}")
+            raise KeyError(f"game_state phase must be move/shoot/charge/fight/command/deployment, got: {current_phase}")
         
         # Get first unit from pool that belongs to current player (pool contains only alive units)
         for unit_id in pool:

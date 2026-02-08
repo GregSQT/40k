@@ -24,6 +24,7 @@ export function setupBoardClickHandler(callbacks: {
   onDirectMove?(unitId: UnitId, col: number, row: number): void;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
+  onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
 }) {
 
   // Remove existing unit click handler
@@ -187,6 +188,10 @@ export function setupBoardClickHandler(callbacks: {
     if (mode === 'chargePreview' && selectedUnitId !== null) {
     if (callbacks.onMoveCharger) {
       callbacks.onMoveCharger(selectedUnitId, col, row);
+    }
+  } else if (mode === 'select' && selectedUnitId !== null && phase === 'deployment') {
+    if (callbacks.onDeployUnit) {
+      callbacks.onDeployUnit(selectedUnitId, col, row);
     }
   } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
     // In Movement Phase, clicking green hex should directly move the unit      

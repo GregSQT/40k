@@ -157,7 +157,16 @@ export const BoardWithAPI: React.FC = () => {
     const currentPhase = apiProps.gameState.phase;
     let hasEligibleAIUnits = false;
     
-    if (currentPhase === 'move') {
+    if (currentPhase === 'deployment') {
+      const deploymentState = apiProps.gameState?.deployment_state;
+      if (!deploymentState) {
+        hasEligibleAIUnits = false;
+      } else {
+        const deployer = deploymentState.current_deployer;
+        const pool = deploymentState.deployable_units?.[String(deployer)] || [];
+        hasEligibleAIUnits = deployer === 2 && pool.length > 0;
+      }
+    } else if (currentPhase === 'move') {
       // Move phase: Check move activation pool for AI eligibility
       if (apiProps.gameState.move_activation_pool) {
         hasEligibleAIUnits = apiProps.gameState.move_activation_pool.some(unitId => {
@@ -456,7 +465,9 @@ export const BoardWithAPI: React.FC = () => {
         <TurnPhaseTracker 
           currentTurn={apiProps.gameState?.currentTurn ?? 1} 
           currentPhase={apiProps.gameState?.phase ?? 'move'}
-          phases={["move", "shoot", "charge", "fight"]}
+          phases={apiProps.gameState?.deployment_type === "active"
+            ? ["deployment", "move", "shoot", "charge", "fight"]
+            : ["move", "shoot", "charge", "fight"]}
           current_player={apiProps.gameState?.current_player}
           maxTurns={(() => {
           if (!gameConfig?.game_rules?.max_turns) {
@@ -585,6 +596,7 @@ export const BoardWithAPI: React.FC = () => {
         onStartMovePreview={apiProps.onStartMovePreview}
         onDirectMove={apiProps.onDirectMove}
         onStartAttackPreview={apiProps.onStartAttackPreview}
+        onDeployUnit={apiProps.onDeployUnit}
         onConfirmMove={apiProps.onConfirmMove}
         onCancelMove={apiProps.onCancelMove}
         onShoot={apiProps.onShoot}
@@ -604,7 +616,7 @@ export const BoardWithAPI: React.FC = () => {
         unitsCharged={apiProps.unitsCharged}
         unitsAttacked={apiProps.unitsAttacked}
         unitsFled={apiProps.unitsFled}
-        phase={apiProps.phase as "move" | "shoot" | "charge" | "fight"}
+        phase={apiProps.phase as "deployment" | "move" | "shoot" | "charge" | "fight"}
         fightSubPhase={apiProps.fightSubPhase}
         onCharge={apiProps.onCharge}
         onActivateCharge={apiProps.onActivateCharge}
@@ -627,6 +639,7 @@ export const BoardWithAPI: React.FC = () => {
         onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
         showAdvanceWarningPopup={settings.showAdvanceWarning}
         autoSelectWeapon={settings.autoSelectWeapon}
+        deploymentState={apiProps.gameState?.deployment_state}
         objectivesOverride={objectivesOverride}
         />
         <SettingsMenu

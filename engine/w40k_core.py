@@ -19,7 +19,7 @@ from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value
 
 # Phase handlers (existing - keep these)
-from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers
+from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
 
 # units_cache helpers (single source of truth for position/HP of living units)
 from engine.phase_handlers.shared_utils import build_units_cache, is_unit_alive, require_unit_position
@@ -136,6 +136,9 @@ class W40KEngine(gym.Env):
             scenario_result = self._load_units_from_scenario(scenario_file, unit_registry)
             scenario_units = scenario_result["units"]
             scenario_primary_objective_ids = scenario_result.get("primary_objectives")
+            scenario_deployment_type = scenario_result.get("deployment_type")
+            scenario_deployment_zone = scenario_result.get("deployment_zone")
+            scenario_deployment_pools = scenario_result.get("deployment_pools")
             scenario_primary_objective_id = None
             if scenario_primary_objective_ids is None:
                 scenario_primary_objective_id = scenario_result.get("primary_objective")
@@ -207,7 +210,10 @@ class W40KEngine(gym.Env):
                 "debug_mode": debug_mode,  # CRITICAL: Pass debug flag to handlers
                 "pve_mode": pve_mode_value,  # CRITICAL: Add PvE mode for handler detection
                 "controlled_player": 1,  # FIXED: Agent controls player 1 (matches scenario setup)
-                "primary_objective": primary_objective_config
+                "primary_objective": primary_objective_config,
+                "deployment_type": scenario_deployment_type,
+                "deployment_zone": scenario_deployment_zone,
+                "deployment_pools": scenario_deployment_pools
             }
         else:
             # Use provided config directly and add gym_training_mode
@@ -556,6 +562,8 @@ class W40KEngine(gym.Env):
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
             "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
+        self.game_state["deployment_type"] = self.config.get("deployment_type")
+        self.game_state["deployment_zone"] = self.config.get("deployment_zone")
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
             raise ValueError("objectives are required for macro target reset")
@@ -632,12 +640,37 @@ class W40KEngine(gym.Env):
         # Load AI model for PvE mode after units_cache is built
         if self.is_pve_mode and self.pve_controller.ai_model is None:
             self.pve_controller.load_ai_model_for_pve(self.game_state, self)
-        
-        # Initialize command phase for game start using handler delegation
-        # CRITICAL: reset() is not in the cascade loop, so we need to handle initialization differently
-        # Call command_phase_start() to do the resets, then call movement_phase_start() directly
-        command_handlers.command_phase_start(self.game_state)  # Does the resets
-        movement_handlers.movement_phase_start(self.game_state)  # Initializes the move phase
+
+        deployment_type = self.config.get("deployment_type")
+        if deployment_type == "active":
+            deployment_pools = self.config.get("deployment_pools")
+            if deployment_pools is None:
+                raise KeyError("deployment_pools is required for active deployment")
+            deployable_units = {1: [], 2: []}
+            for unit in self.game_state["units"]:
+                unit_player = require_key(unit, "player")
+                if int(unit_player) == 1:
+                    deployable_units[1].append(str(unit["id"]))
+                elif int(unit_player) == 2:
+                    deployable_units[2].append(str(unit["id"]))
+                else:
+                    raise ValueError(f"Invalid unit player for deployment: {unit_player}")
+            self.game_state["deployment_type"] = deployment_type
+            self.game_state["deployment_zone"] = self.config.get("deployment_zone")
+            self.game_state["deployment_state"] = {
+                "current_deployer": 1,
+                "deployable_units": deployable_units,
+                "deployed_units": set(),
+                "deployment_pools": deployment_pools,
+                "deployment_complete": False
+            }
+            deployment_handlers.deployment_phase_start(self.game_state)
+        else:
+            # Initialize command phase for game start using handler delegation
+            # CRITICAL: reset() is not in the cascade loop, so we need to handle initialization differently
+            # Call command_phase_start() to do the resets, then call movement_phase_start() directly
+            command_handlers.command_phase_start(self.game_state)  # Does the resets
+            movement_handlers.movement_phase_start(self.game_state)  # Initializes the move phase
         self.episode_tactical_data = {
             'shots_fired': 0,
             'hits': 0,
@@ -712,6 +745,8 @@ class W40KEngine(gym.Env):
             # step_logger.episode_number was incremented in log_episode_start()
             self.game_state["episode_number"] = self.step_logger.episode_number
         
+        if self.config.get("deployment_type") == "active":
+            self.game_state["phase"] = "deployment"
         observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
         
@@ -1029,7 +1064,9 @@ class W40KEngine(gym.Env):
                     if next_phase == current_phase:
                         break
                     
-                    if next_phase == "command":
+                    if next_phase == "deployment":
+                        phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
+                    elif next_phase == "command":
                         phase_init_result = command_handlers.command_phase_start(self.game_state)
                     elif next_phase == "shoot":
                         phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
@@ -1193,6 +1230,11 @@ class W40KEngine(gym.Env):
         current_player = self.game_state["current_player"]
         current_phase = self.game_state["phase"]
         
+        if current_phase == "deployment":
+            if current_player != 2:
+                return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase}
+            return deployment_handlers.deployment_ai_step(self.game_state)
+
         # CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
         # Only check current_player for non-fight phases
         if current_phase != "fight" and current_player != 2:  # AI is player 2
@@ -1285,6 +1327,8 @@ class W40KEngine(gym.Env):
                     result["phase_complete"] = True
                 if "reason" not in result:
                     result["reason"] = "pool_empty"
+            elif from_phase == "deployment":
+                result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
             else:
                 result = {"phase_complete": True, "reason": "pool_empty"}
 
@@ -1304,6 +1348,8 @@ class W40KEngine(gym.Env):
             # Fall through to cascade loop below
 
         # Route to phase handlers with detailed logging (only if not advance_phase)
+        elif current_phase == "deployment":
+            success, result = deployment_handlers.execute_deployment_action(self.game_state, action)
         elif current_phase == "command":
             success, result = self._process_command_phase(action)
         elif current_phase == "move":
@@ -1887,7 +1933,9 @@ class W40KEngine(gym.Env):
             _cascade_t0 = None
             # Initialize next phase using phase handlers
             phase_init_result = None
-            if next_phase == "command":
+            if next_phase == "deployment":
+                phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
+            elif next_phase == "command":
                 phase_init_result = command_handlers.command_phase_start(self.game_state)
             elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
@@ -2126,6 +2174,8 @@ class W40KEngine(gym.Env):
                     self._charge_phase_init()
                 elif next_phase == "fight":
                     self._fight_phase_init()
+                elif next_phase == "deployment":
+                    deployment_handlers.deployment_phase_start(self.game_state)
                 elif next_phase == "command":
                     command_handlers.command_phase_start(self.game_state)
                 elif next_phase == "move":
@@ -2318,6 +2368,9 @@ class W40KEngine(gym.Env):
         scenario_result = self._load_units_from_scenario(scenario_file, self.unit_registry)
         scenario_units = scenario_result["units"]
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
+        scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_zone = scenario_result.get("deployment_zone")
+        scenario_deployment_pools = scenario_result.get("deployment_pools")
         scenario_primary_objective_id = None
         if scenario_primary_objective_ids is None:
             scenario_primary_objective_id = scenario_result.get("primary_objective")
@@ -2357,6 +2410,10 @@ class W40KEngine(gym.Env):
                 self._scenario_objectives = d["objectives"] if "objectives" in d else (d["objective_hexes"] if "objective_hexes" in d else [])
             else:
                 self._scenario_objectives = board_config["objectives"] if "objectives" in board_config else (board_config["objective_hexes"] if "objective_hexes" in board_config else [])
+
+        self.config["deployment_type"] = scenario_deployment_type
+        self.config["deployment_zone"] = scenario_deployment_zone
+        self.config["deployment_pools"] = scenario_deployment_pools
         self._scenario_primary_objective = primary_objective_config
 
         # Extract scenario name from file path for logging

@@ -162,9 +162,9 @@ class GameStateManager:
                         )
                     deployment_zone = require_key(scenario_data, "deployment_zone")
                     deployment_type = require_key(scenario_data, "deployment_type")
-                if deployment_type not in ("random", "fixed"):
+                if deployment_type not in ("random", "fixed", "active"):
                     raise ValueError(
-                        f"Invalid deployment_type '{deployment_type}' in {scenario_file} (expected 'random' or 'fixed')"
+                        f"Invalid deployment_type '{deployment_type}' in {scenario_file} (expected 'random', 'fixed', or 'active')"
                     )
             
             wall_hex_set = set()
@@ -227,10 +227,10 @@ class GameStateManager:
                     1: _build_deploy_pool(deployment_data["p1"]),
                     2: _build_deploy_pool(deployment_data["p2"]),
                 }
-                if deployment_type == "random":
+                if deployment_type in ("random", "active"):
                     if not wall_hex_set:
                         raise KeyError(
-                            f"Scenario file {scenario_file} missing required 'wall_hexes' for random deployment"
+                            f"Scenario file {scenario_file} missing required 'wall_hexes' for {deployment_type} deployment"
                         )
                     deploy_pools = {
                         1: deploy_pools[1] - wall_hex_set,
@@ -256,6 +256,8 @@ class GameStateManager:
                         )
                     chosen_col, chosen_row = random.choice(available_hexes)
                     used_hexes.add((chosen_col, chosen_row))
+                elif deployment_type == "active":
+                    chosen_col, chosen_row = -1, -1
                 else:
                     required_fields = ["id", "player", "col", "row"]
                     for field in required_fields:
@@ -389,13 +391,23 @@ class GameStateManager:
                 else None
             )
 
+            deployment_pools_serializable = None
+            if deploy_pools:
+                deployment_pools_serializable = {
+                    player: sorted(list(pool))
+                    for player, pool in deploy_pools.items()
+                }
+
             # Return dict with units and optional terrain
             return {
                 "units": enhanced_units,
                 "wall_hexes": scenario_walls,
                 "objectives": scenario_objectives,
                 "primary_objectives": scenario_primary_objectives,
-                "primary_objective": scenario_primary_objective_single
+                "primary_objective": scenario_primary_objective_single,
+                "deployment_zone": deployment_zone,
+                "deployment_type": deployment_type,
+                "deployment_pools": deployment_pools_serializable
             }
     
     # ============================================================================

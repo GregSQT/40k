@@ -2,7 +2,7 @@
 
 export type PlayerId = 1 | 2;
 export type UnitId = number;
-export type GamePhase = "command" | "move" | "shoot" | "charge" | "fight";
+export type GamePhase = "deployment" | "command" | "move" | "shoot" | "charge" | "fight";
 export type GameMode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview" | "advancePreview";
 // AI_TURN.md COMPLIANCE: Fight subphase names match backend exactly
 export type FightSubPhase = "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null;
@@ -67,6 +67,14 @@ export interface WeaponSelectionState {
   weapons: WeaponOption[];
   hasAdvanced: boolean;
   position?: { x: number; y: number };
+}
+
+export interface DeploymentState {
+  current_deployer: PlayerId;
+  deployable_units: Record<string, UnitId[]>;
+  deployed_units: UnitId[];
+  deployment_pools: Record<string, Array<[number, number] | { col: number; row: number }>>;
+  deployment_complete: boolean;
 }
 
 export interface Unit {
@@ -214,6 +222,8 @@ export interface GameState {
   unitChargeRolls?: Record<UnitId, number>;
   pve_mode?: boolean; // Add PvE mode flag
   test_mode?: boolean;
+  deployment_type?: "random" | "fixed" | "active";
+  deployment_state?: DeploymentState;
   active_movement_unit?: string; // Active unit ID in movement phase
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
