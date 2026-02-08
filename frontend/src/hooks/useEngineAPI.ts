@@ -103,6 +103,7 @@ interface APIGameState {
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
+  test_mode?: boolean;
   victory_points?: Record<string, number>;
   primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   objectives?: Array<{ name: string; hexes: Array<{ col: number; row: number } | [number, number]> }>;
@@ -173,15 +174,18 @@ export const useEngineAPI = () => {
         const mode = urlParams.get('mode');
         const isDebugMode = mode === 'debug';
         const isPvEMode = mode === 'pve';
-        const isAiMode = isDebugMode || isPvEMode;
+        const isTestMode = mode === 'test';
         
-        console.log(`Starting game in ${isDebugMode ? 'Debug' : isPvEMode ? 'PvE' : 'PvP'} mode`);
+        console.log(`Starting game in ${isDebugMode ? 'Debug' : isTestMode ? 'Test' : isPvEMode ? 'PvE' : 'PvP'} mode`);
         
         const requestPayload: Record<string, unknown> = {
-          pve_mode: isAiMode,
+          pve_mode: isPvEMode,
+          test_mode: isTestMode,
           debug_mode: isDebugMode
         };
-        if (isPvEMode) {
+        if (isTestMode) {
+          requestPayload.scenario_file = "config/scenario_test.json";
+        } else if (isPvEMode) {
           requestPayload.scenario_file = "config/scenario_pve.json";
         }
         
@@ -198,7 +202,7 @@ export const useEngineAPI = () => {
         const data = await response.json();
         if (data.success) {
           setGameState(data.game_state);
-          const startedMode = data.game_state.debug_mode ? 'Debug' : (data.game_state.pve_mode ? 'PvE' : 'PvP');
+          const startedMode = data.game_state.debug_mode ? 'Debug' : (data.game_state.test_mode ? 'Test' : (data.game_state.pve_mode ? 'PvE' : 'PvP'));
           console.log(`Game started successfully in ${startedMode} mode`);
         } else {
           throw new Error(data.error || 'Failed to start game');
@@ -1648,6 +1652,7 @@ export const useEngineAPI = () => {
       maxTurns: maxTurnsFromConfig,
       unitChargeRolls: {},
       pve_mode: gameState.pve_mode,
+      test_mode: gameState.test_mode,
       move_activation_pool: gameState.move_activation_pool,
       shoot_activation_pool: gameState.shoot_activation_pool,
       charge_activation_pool: gameState.charge_activation_pool,
@@ -1811,12 +1816,12 @@ export const useEngineAPI = () => {
       
       const urlParams = new URLSearchParams(window.location.search);
       const mode = urlParams.get('mode');
-      const isAiFromURL = mode === 'debug' || mode === 'pve';
+      const isAiFromURL = mode === 'debug' || mode === 'pve' || mode === 'test';
       
       // Check if AI has eligible units in current phase FIRST
       const phaseCheck = gameState.phase;
       
-      if (!gameState || (!gameState.pve_mode && !isAiFromURL)) {
+      if (!gameState || (!gameState.pve_mode && !gameState.test_mode && !isAiFromURL)) {
         aiTurnInProgress = false;
         return;
       }
@@ -1836,7 +1841,6 @@ export const useEngineAPI = () => {
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
           return unit && unit.player === 2;
         }).length;
-        console.log(`🎯 SHOOT PHASE AI CHECK: pool=${JSON.stringify(shootPool)}, eligibleAICount=${eligibleAICount}, current_player=${gameState.current_player}`);
       } else       if (phaseCheck === 'move' && gameState.move_activation_pool) {
         eligibleAICount = gameState.move_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
@@ -1874,7 +1878,6 @@ export const useEngineAPI = () => {
       }
       
       if (eligibleAICount === 0) {
-        console.log(`🤖 AI TURN SKIP: No eligible AI units in ${phaseCheck} phase (eligibleAICount=0)`);
         aiTurnInProgress = false;
         return;
       }
@@ -1896,7 +1899,6 @@ export const useEngineAPI = () => {
           const unit = gameState.units.find(u => String(u.id) === String(unitId));
           return unit && unit.player === 2;
         }).length;
-        console.log(`🎯 SHOOT PHASE AI ELIGIBLE: pool=${JSON.stringify(shootPool)}, aiEligibleUnits=${aiEligibleUnits}`);
       } else if (currentPhase === 'charge' && gameState.charge_activation_pool) {
         aiEligibleUnits = gameState.charge_activation_pool.filter(unitId => {
           // Normalize comparison: pools contain strings, unit.id might be number
@@ -1927,7 +1929,6 @@ export const useEngineAPI = () => {
       }
       
       if (aiEligibleUnits === 0) {
-        console.log(`🤖 AI TURN SKIP: No eligible AI units in ${currentPhase} phase (aiEligibleUnits=0)`);
         aiTurnInProgress = false;
         return;
       }
@@ -1955,7 +1956,6 @@ export const useEngineAPI = () => {
         // Find nearest enemy using fresh unit positions
         const currentUnit = currentGameState?.units.find((u) => u.id.toString() === unitId);
         if (!currentUnit) {
-          console.log(`AI DECISION ERROR: Unit ${unitId} not found in current game state`);
           const dest = validDestinations[0];
           return {
             action: 'move',
@@ -2075,8 +2075,6 @@ export const useEngineAPI = () => {
         while (iteration < maxIterations) {
           iteration++;
           
-          console.log(`🤖 AI Sequential Step ${iteration}: Activating next AI unit (phase=${gameState?.phase}, current_player=${gameState?.current_player})`);
-          
           const canCallAiTurn = (() => {
             if (!gameState) {
               throw new Error("Missing gameState during AI turn check");
@@ -2137,14 +2135,13 @@ export const useEngineAPI = () => {
                   }
                 }
               } catch (stateErr) {
-                console.warn('Failed to fetch game state after AI error:', stateErr);
+                void stateErr;
               }
               // Exit loop - no more AI units eligible
               break;
             }
             
             // For other errors, log and throw
-            console.error(`❌ [FRONTEND] AI activation failed: status=${aiResponse.status}, error=`, errorData);
             throw new Error(`AI activation failed: ${aiResponse.status} - ${JSON.stringify(errorData)}`);
           }
           
@@ -2199,8 +2196,6 @@ export const useEngineAPI = () => {
           }
           
           if (!activationData.success) {
-            console.error(`❌ AI activation failed:`, activationData);
-            console.error(`AI decision failed:`, activationData);
             break;
           }
           
@@ -2328,6 +2323,18 @@ export const useEngineAPI = () => {
                   }
                 }
               }
+            } else if (
+              activationData.result?.action === 'empty_target_advance_available' &&
+              activationData.result?.allow_advance
+            ) {
+              const advanceUnitId = activationData.result?.unitId ?? activationData.game_state?.active_shooting_unit;
+              if (!advanceUnitId) {
+                throw new Error('Missing unitId for empty_target_advance_available AI decision');
+              }
+              aiDecision = {
+                action: 'advance',
+                unitId: advanceUnitId
+              };
             } else if (activationData.result.valid_targets) {
               // Handle valid targets (uniformized to snake_case in backend)
               const targets = activationData.result.valid_targets;
@@ -2348,7 +2355,6 @@ export const useEngineAPI = () => {
                 );
               }
             } else {
-              console.error('Unknown preview type:', activationData.result);
               break;
             }
             
@@ -2424,7 +2430,6 @@ export const useEngineAPI = () => {
               }
               
             } else {
-              console.error('AI decision failed:', decisionData);
               break;
             }
             
@@ -2465,12 +2470,11 @@ export const useEngineAPI = () => {
                   }
                 }
               } catch (err) {
-                console.error('Failed to skip unit:', err);
+                void err;
                 break; // Exit loop on error
               }
             } else {
               // No unit ID available - exit loop to prevent infinite loop
-              console.warn('AI loop: No valid action and no unit ID - breaking');
               break;
             }
             
@@ -2507,7 +2511,6 @@ export const useEngineAPI = () => {
             if (currentPoolSize === lastPoolSize) {
               samePoolSizeCount++;
               if (samePoolSizeCount >= 3) {
-                console.warn(`AI Step ${iteration}: Pool size unchanged after ${samePoolSizeCount} skips - breaking to prevent infinite loop`);
                 break;
               }
             } else {
@@ -2554,7 +2557,6 @@ export const useEngineAPI = () => {
             
             // Safety: If we've processed many units without progress, break
             if (totalUnitsProcessed >= 5 && iteration >= 10) {
-              console.warn(`AI Step ${iteration}: Safety break - processed ${totalUnitsProcessed} units in ${iteration} steps without progress`);
               break;
             }
             
@@ -2570,12 +2572,7 @@ export const useEngineAPI = () => {
           await new Promise(resolve => setTimeout(resolve, 150));
         }
         
-        if (iteration >= maxIterations) {
-          console.warn(`AI reached maximum iterations (${maxIterations})`);
-        }
-        
       } catch (err) {
-        console.error('AI turn error:', err);
         setError(`AI turn failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
       } finally {
         aiTurnInProgress = false;

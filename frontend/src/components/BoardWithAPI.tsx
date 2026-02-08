@@ -22,10 +22,12 @@ export const BoardWithAPI: React.FC = () => {
   const location = useLocation();
   const gameMode = location.pathname.includes('/replay') ? 'training' :
                    (location.pathname === '/game' && location.search.includes('mode=debug')) ? 'debug' :
-                   (location.pathname === '/game' && (location.search.includes('mode=pve') || location.search.includes('mode=test'))) ? 'pve' : 'pvp';
+                   (location.pathname === '/game' && location.search.includes('mode=test')) ? 'test' :
+                   (location.pathname === '/game' && location.search.includes('mode=pve')) ? 'pve' : 'pvp';
   const isDebugMode = gameMode === 'debug' || window.location.search.includes('mode=debug');
-  const isPvEMode = gameMode === 'pve' || window.location.search.includes('mode=pve') || window.location.search.includes('mode=test');
-  const isAiMode = isDebugMode || isPvEMode || apiProps.gameState?.pve_mode === true;
+  const isTestMode = gameMode === 'test' || window.location.search.includes('mode=test');
+  const isPvEMode = gameMode === 'pve' || window.location.search.includes('mode=pve');
+  const isAiMode = isDebugMode || isPvEMode || isTestMode || apiProps.gameState?.pve_mode === true || apiProps.gameState?.test_mode === true;
   const victoryPoints = apiProps.gameState?.victory_points;
   const objectivesOverride = (() => {
     const objectives = apiProps.gameState?.objectives as

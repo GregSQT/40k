@@ -64,23 +64,18 @@ export function setupBoardClickHandler(callbacks: {
         callbacks.onSelectUnit(unitId);
       }
     } else if (phase === 'shoot' && mode === 'select') {
-      console.log("  🎯 SHOOT SELECT MODE:", { selectedUnitId, unitId, clickType, hasOnSkipShoot: !!callbacks.onSkipShoot });
       if (selectedUnitId === unitId) {
         if (clickType === 'right') {
-          console.log("    -> Right click on selected unit -> calling onSkipShoot");
           callbacks.onSkipShoot?.(unitId, 'action');
         } else {
-          console.log("    -> Left click on selected unit -> calling onSelectUnit(null)");
           callbacks.onSelectUnit(null);
         }
       } else if (clickType === 'right' && selectedUnitId === null) {
         // Handle right click on unit when nothing is selected
         // This allows canceling activation of a unit that was just activated but backend deselecte
         // (e.g., unit with no valid targets - backend responds and deselects before right click arrives)
-        console.log("    -> Right click on unit (no selection) -> calling onSkipShoot to cancel activation");
         callbacks.onSkipShoot?.(unitId, 'action');
       } else {
-        console.log("    -> Click on different unit -> calling onSelectUnit");
         callbacks.onSelectUnit(unitId);
       }
       // Don't call onStartAttackPreview here - wait for backend response
@@ -189,17 +184,9 @@ export function setupBoardClickHandler(callbacks: {
       selectedUnitId: number | null;
     }>).detail;
 
-    console.log("HEX CLICK HANDLER:", { col, row, phase, mode, selectedUnitId });
-
     if (mode === 'chargePreview' && selectedUnitId !== null) {
     if (callbacks.onMoveCharger) {
-      try {
-        callbacks.onMoveCharger(selectedUnitId, col, row);
-      } catch (error) {
-        console.error(`🟠 Error in onMoveCharger:`, error);
-      }
-    } else {
-      console.error(`🟠 onMoveCharger callback is missing!`);
+      callbacks.onMoveCharger(selectedUnitId, col, row);
     }
   } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
     // In Movement Phase, clicking green hex should directly move the unit      
@@ -209,9 +196,8 @@ export function setupBoardClickHandler(callbacks: {
       callbacks.onStartMovePreview(selectedUnitId, col, row);
       callbacks.onConfirmMove();
     }
-  } else if (mode === 'advancePreview' && selectedUnitId !== null && phase === 'shoot') {
+    } else if (mode === 'advancePreview' && selectedUnitId !== null && phase === 'shoot') {
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance mode - clicking orange hex moves the unit
-    console.log("  ✅ ADVANCE MOVE LOGIC -> calling onAdvanceMove");
     if (callbacks.onAdvanceMove) {
       callbacks.onAdvanceMove(selectedUnitId, col, row);
     }

@@ -205,9 +205,14 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                 turn = game_state.get("turn", "?")
                 add_debug_log(game_state, f"[END_ACTIVATION DEBUG] E{episode} T{turn} end_activation: Unit {unit_id_str} NOT removed from shoot_activation_pool. Pool={pool_before} (len={pool_before_len}), unit_id_str={unit_id_str}, unit_id={unit_id}, arg1={arg1}, arg4={arg4}, arg5={arg5}")
     elif arg4 == "CHARGE":
-        if "charge_activation_pool" in game_state and unit_id in game_state["charge_activation_pool"]:
-            game_state["charge_activation_pool"].remove(unit_id)
-            response["removed_from_charge_pool"] = True
+        if "charge_activation_pool" in game_state:
+            unit_id_str = str(unit_id)
+            pool_before = list(game_state["charge_activation_pool"])
+            game_state["charge_activation_pool"] = [
+                str(uid) for uid in game_state["charge_activation_pool"] if str(uid) != unit_id_str
+            ]
+            if len(pool_before) != len(game_state["charge_activation_pool"]):
+                response["removed_from_charge_pool"] = True
     elif arg4 == "FIGHT":
         # Fight phase has 3 sub-phase pools - check all 3
         # Units can only be in ONE pool at a time (verified via AI_TURN.md lines 717-718, 730-731)

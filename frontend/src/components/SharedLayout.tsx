@@ -19,6 +19,7 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
   
   const getButtonClass = (path: string) => {
     const isDebugMode = location.pathname === '/game' && location.search.includes('mode=debug');
+    const isTestMode = location.pathname === '/game' && location.search.includes('mode=test');
     const isPvEMode = location.pathname === '/game' && location.search.includes('mode=pve');
     
     // Handle PvE mode detection via query parameter
@@ -30,10 +31,15 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
     if (path === '/game?mode=debug') {
       return `nav-button ${isDebugMode ? 'nav-button--active' : 'nav-button--inactive'}`;
     }
+
+    // Handle Test mode detection via query parameter
+    if (path === '/game?mode=test') {
+      return `nav-button ${isTestMode ? 'nav-button--active' : 'nav-button--inactive'}`;
+    }
     
     // Handle PvP mode - only active when on /game WITHOUT Debug/PvE mode
     if (path === '/game') {
-      const isPvPMode = location.pathname === '/game' && !isDebugMode && !isPvEMode;
+      const isPvPMode = location.pathname === '/game' && !isDebugMode && !isTestMode && !isPvEMode;
       return `nav-button ${isPvPMode ? 'nav-button--active' : 'nav-button--inactive'}`;
     }
     
@@ -46,6 +52,7 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
       <nav className="navigation">
         <button onClick={() => window.location.href = '/game'} className={getButtonClass('/game')}>PvP</button>
         <button onClick={() => window.location.href = '/game?mode=pve'} className={getButtonClass('/game?mode=pve')}>PvE</button>
+        <button onClick={() => window.location.href = '/game?mode=test'} className={getButtonClass('/game?mode=test')}>Test</button>
         <button onClick={() => window.location.href = '/game?mode=debug'} className={getButtonClass('/game?mode=debug')}>Debug</button>
         <button onClick={() => window.location.href = '/replay'} className={getButtonClass('/replay')}>Replay</button>
         </nav>

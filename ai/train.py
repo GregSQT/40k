@@ -116,6 +116,31 @@ from ai.replay_converter import (
 # Global step logger instance
 step_logger = None
 
+def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_params: int) -> Tuple[str, bool]:
+    """
+    Resolve device selection for training.
+
+    Args:
+        device_mode: "CPU", "GPU", or None to auto-select.
+        gpu_available: Whether CUDA GPU is available.
+        total_params: Sum of network hidden units (heuristic for auto selection).
+
+    Returns:
+        Tuple of (device, use_gpu).
+    """
+    if device_mode is None:
+        use_gpu = gpu_available and (total_params > 2000)
+        return ("cuda" if use_gpu else "cpu"), use_gpu
+
+    mode = str(device_mode).upper()
+    if mode not in ["CPU", "GPU"]:
+        raise ValueError(f"Invalid --mode value: {device_mode}. Expected CPU or GPU.")
+    if mode == "GPU":
+        if not gpu_available:
+            raise ValueError("GPU mode requested but no CUDA GPU available")
+        return "cuda", True
+    return "cpu", False
+
 def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
     """Create or load PPO model with configuration following AI_INSTRUCTIONS.md."""
     
@@ -291,8 +316,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
-    use_gpu = gpu_available and (total_params > 2000)  # Removed obs_size check
-    device = "cuda" if use_gpu else "cpu"
+    device, use_gpu = resolve_device_mode(args.mode if args else None, gpu_available, total_params)
 
     model_params["device"] = device
     model_params["verbose"] = 0  # Disable verbose logging
@@ -401,7 +425,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     return model, env, training_config, model_path
 
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
-                            agent_key=None, new_model=False, append_training=False, scenario_override=None, debug_mode=False):
+                            agent_key=None, new_model=False, append_training=False, scenario_override=None,
+                            debug_mode=False, device_mode: Optional[str] = None):
     """Create or load PPO model for specific agent with configuration following AI_INSTRUCTIONS.md."""
     
     # Check GPU availability
@@ -533,8 +558,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
-    use_gpu = gpu_available and (total_params > 2000)  # Removed obs_size check
-    device = "cuda" if use_gpu else "cpu"
+    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
 
     model_params["device"] = device
 
@@ -639,7 +663,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 
 def create_macro_controller_model(config, training_config_name, rewards_config_name,
                                   agent_key, new_model=False, append_training=False,
-                                  scenario_override=None, debug_mode=False):
+                                  scenario_override=None, debug_mode=False, device_mode: Optional[str] = None):
     """Create or load PPO model for MacroController with macro training wrapper."""
     gpu_available = check_gpu_availability()
 
@@ -725,8 +749,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-    use_gpu = gpu_available and (total_params > 2000)
-    device = "cuda" if use_gpu else "cpu"
+    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
     model_params["device"] = device
 
     if not use_gpu and gpu_available:
@@ -861,7 +884,8 @@ def _evaluate_macro_model(model, env, n_episodes, macro_player, deterministic=Tr
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, total_episodes,
-                                 new_model=False, append_training=False, use_bots=False, debug_mode=False):
+                                 new_model=False, append_training=False, use_bots=False, debug_mode=False,
+                                 device_mode: Optional[str] = None):
     """Train model with random scenario selection per episode.
     
     Args:
@@ -1005,6 +1029,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
     os.makedirs(specific_log_dir, exist_ok=True)
 
+    policy_kwargs = require_key(model_params, "policy_kwargs")
+    net_arch = require_key(policy_kwargs, "net_arch")
+    total_params = sum(net_arch) if isinstance(net_arch, list) else 512
+    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
+    model_params["device"] = device
+
+    if not use_gpu and gpu_available:
+        print(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
+
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model: {model_path}")
         model_params_copy = model_params.copy()
@@ -1013,7 +1046,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
-            model = MaskablePPO.load(model_path, env=env)
+            model = MaskablePPO.load(model_path, env=env, device=device)
 
             # CURRICULUM LEARNING: Apply new phase hyperparameters to loaded model
             # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
@@ -1669,6 +1702,8 @@ def main():
                        help="Specific scenario to use (e.g., 'phase2-3') or 'all' for rotation through all scenarios")
     parser.add_argument("--macro-eval-mode", type=str, choices=["micro", "bot"], default="micro",
                        help="MacroController evaluation mode: micro (vs trained agents) or bot (vs evaluation bots)")
+    parser.add_argument("--mode", type=str, default=None,
+                       help="Force training device: CPU or GPU (case-insensitive). If omitted, auto-selects based on network size and GPU availability.")
     parser.add_argument("--debug", action="store_true",
                        help="Enable debug console output (verbose logging)")
     
@@ -1685,6 +1720,8 @@ def main():
     print(f"Orchestrate: {args.orchestrate}")
     print(f"Step logging: {args.step}")
     print(f"Debug mode: {args.debug}")
+    if args.mode:
+        print(f"Device mode: {args.mode}")
     if hasattr(args, 'convert_steplog') and args.convert_steplog:
         print(f"Convert steplog: {args.convert_steplog}")
     if hasattr(args, 'replay') and args.replay:
@@ -1984,7 +2021,8 @@ def main():
                     new_model=args.new,
                     append_training=args.append,
                     scenario_override=args.scenario,
-                    debug_mode=args.debug
+                    debug_mode=args.debug,
+                    device_mode=args.mode
                 )
 
                 callbacks = setup_callbacks(
@@ -2060,7 +2098,8 @@ def main():
                         new_model=args.new,
                         append_training=args.append,
                         debug_mode=args.debug,
-                        use_bots=(args.scenario == "bot")
+                        use_bots=(args.scenario == "bot"),
+                        device_mode=args.mode
                     )
                     
                     if success and args.test_episodes > 0:
@@ -2077,7 +2116,8 @@ def main():
                 new_model=args.new,
                 append_training=args.append,
                 scenario_override=args.scenario,
-                debug_mode=args.debug
+                debug_mode=args.debug,
+                device_mode=args.mode
             )
             
             # Setup callbacks with agent-specific model path

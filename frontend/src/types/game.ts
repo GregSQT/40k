@@ -213,6 +213,7 @@ export interface GameState {
   fightActivePlayer?: PlayerId;
   unitChargeRolls?: Record<UnitId, number>;
   pve_mode?: boolean; // Add PvE mode flag
+  test_mode?: boolean;
   active_movement_unit?: string; // Active unit ID in movement phase
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase

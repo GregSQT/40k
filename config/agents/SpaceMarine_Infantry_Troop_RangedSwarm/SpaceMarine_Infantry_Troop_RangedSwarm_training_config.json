@@ -89,7 +89,7 @@
       "ent_coef": 0.10,
       "vf_coef": 1.0,
       "max_grad_norm": 0.5,
-      "target_kl": null,
+      "target_kl": 0.01,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [320, 320]
