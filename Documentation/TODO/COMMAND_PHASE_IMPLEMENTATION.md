@@ -263,7 +263,7 @@ _fight_phase_complete()
 
 #### 8. `engine/reward_calculator.py` (À VÉRIFIER)
 - Lignes 327-328 : Dans `calculate_reward()`, la condition `if current_phase == "move"` détermine le type de WAIT reward
-  - **Comportement :** Si WAIT est fait en phase command (peu probable car auto-advance), il sera traité comme `"shoot_wait"` (else branch)
+  - **Comportement :** Si WAIT est fait en phase command (peu probable car auto-advance), il sera traité comme `"wait"` (else branch)
   - **Impact :** Probablement OK car la phase command auto-avance immédiatement, donc WAIT ne devrait jamais être fait en phase command
   - **Action :** Aucune modification nécessaire pour l'instant, mais à documenter dans le code
 - Lignes 1065-1071 : Vérifier si des conditions `phase == "move"` ou autres nécessitent d'inclure `"command"`
@@ -724,7 +724,7 @@ if (gameState.phase === "command") {
 7. **Pattern auto-advance :** `command_phase_end()` retourne SEULEMENT le dict, ne doit PAS appeler `movement_phase_start()` directement - le cascade loop gère la transition
 8. **Fichiers critiques :** `generic_handlers.py` et `pve_controller.py` doivent gérer le cas "command" pour éviter les erreurs
 9. **observation_builder.py :** Utiliser `.get()` avec fallback pour l'encodage one-hot de la phase (évite KeyError pour phases inconnues)
-10. **reward_calculator.py :** WAIT en phase command (peu probable) sera traité comme "shoot_wait" - OK car phase auto-advance
+10. **reward_calculator.py :** WAIT en phase command (peu probable) sera traité comme "wait" - OK car phase auto-advance
 11. **usePhaseTransition.ts :** Hook utilisé UNIQUEMENT dans mode local (GameController). Modes API gèrent transitions côté backend.
 12. **Rétrocompatibilité replays :** Les anciens replays n'auront pas la phase "command" → À gérer si nécessaire
 

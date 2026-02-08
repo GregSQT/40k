@@ -9,7 +9,7 @@
       "charge": 0.4,
       "charge_success": 0.4,
       "being_charged": 0.0,
-      "shoot_wait": -0.3
+      "wait": -0.3
     },
     "shoot_priority_1": 0.0,
     "shoot_priority_2": 0.0,

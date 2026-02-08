@@ -738,7 +738,7 @@ This forces continuous adaptation and prevents exploitation strategies.
 |---------|-----------|-----------|--------|
 | GreedyBot randomness | 0.0 | 0.15 | Unpredictable greedy play |
 | DefensiveBot randomness | 0.0 | 0.15 | Unpredictable defensive play |
-| Phase1 shoot_wait penalty | -30.0 | -10.0 | Less forced aggression |
+| Phase1 wait penalty | -30.0 | -10.0 | Less forced aggression |
 | RandomBot eval weight | 20% | 35% | Higher importance in model selection |
 | DefensiveBot eval weight | 50% | 35% | Balanced with random |
 

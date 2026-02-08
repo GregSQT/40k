@@ -360,7 +360,7 @@ class RewardCalculator:
             if current_phase == "move":
                 wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
             else:
-                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "shoot_wait"}, success, game_state)
+                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
             reward_breakdown['total'] = wait_reward
@@ -466,19 +466,19 @@ class RewardCalculator:
                     raise KeyError(f"Base actions missing required 'ranged_attack' reward")
                 base_reward = base_actions["ranged_attack"]
             else:
-                if "shoot_wait" not in base_actions:
-                    raise KeyError(f"Base actions missing required 'shoot_wait' reward")
-                base_reward = base_actions["shoot_wait"]
+                if "wait" not in base_actions:
+                    raise KeyError(f"Base actions missing required 'wait' reward")
+                base_reward = base_actions["wait"]
         elif action_type == "move":
             base_reward = 0.0
         elif action_type == "skip":
             base_reward = 0.0
         elif action_type == "move_wait":
             base_reward = 0.0
-        elif action_type == "shoot_wait":
-            if "shoot_wait" not in base_actions:
-                raise KeyError(f"Base actions missing required 'shoot_wait' reward")
-            base_reward = base_actions["shoot_wait"]
+        elif action_type == "wait":
+            if "wait" not in base_actions:
+                raise KeyError(f"Base actions missing required 'wait' reward")
+            base_reward = base_actions["wait"]
         else:
             base_reward = 0.0
         

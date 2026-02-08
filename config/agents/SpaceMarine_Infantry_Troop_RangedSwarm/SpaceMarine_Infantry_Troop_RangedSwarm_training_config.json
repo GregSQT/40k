@@ -22,15 +22,10 @@
     "max_valid_targets": 5,
     "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 314 floats = 16 global (added has_advanced) + 22 unit capabilities + 32 terrain + 72 ally + 132 enemy (6×22) + 40 targets (5×8) - ADVANCE_IMPLEMENTATION_PLAN.md"
   },
-  "exploration": {
-    "initial_epsilon": 0.3,
-    "final_epsilon": 0.05,
-    "exploration_fraction": 0.3 
-  },
   "step_log_buffer_size": 200,
   "model_params": {
     "policy": "MlpPolicy",
-    "learning_rate": 0.0004,
+    "learning_rate": 0.00045,
     "n_steps": 1536,
     "batch_size": 256,
     "n_epochs": 15,

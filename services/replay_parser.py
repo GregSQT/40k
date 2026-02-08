@@ -203,7 +203,7 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
 
                 elif action_type == "WAIT":
                     current_episode['actions'].append({
-                        'type': 'shoot_wait',
+                        'type': 'wait',
                         'timestamp': timestamp,
                         'turn': turn,
                         'player': player,

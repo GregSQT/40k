@@ -8,7 +8,7 @@
       "ranged_attack": 1.0,
       "melee_attack": 1.0,
       "charge_success": 1.0,
-      "shoot_wait": -2.0
+      "wait": -0.5
     },
     "shoot_priority_1": 0.0,
     "shoot_priority_2": 0.0,
@@ -24,8 +24,8 @@
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 100.0,
-      "lose": -100.0,
+      "win": 50.0,
+      "lose": -50.0,
       "draw": 0.0
     },
     "objective_rewards": {

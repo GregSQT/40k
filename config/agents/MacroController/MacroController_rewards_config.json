@@ -2,13 +2,13 @@
   "description": "config/agents/MacroController/MacroController_rewards_config.json",
 
   "MacroController": {
-    "Unit": "######################### MacroController ######################################################",
+    "Unit": "######################### MacroController ################################################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "base_actions": {
       "ranged_attack": 0.2,
       "melee_attack": 0.2,
-      "charge_success": 0.3,
-      "shoot_wait": -0.05
+      "charge_success": 0.1,
+      "wait": -0.05
     },
     "shoot_priority_1": 0.4,
     "shoot_priority_2": 0.25,
@@ -19,18 +19,20 @@
     "attack_priority_1": 0.4,
     "attack_priority_2": 0.2,
     "result_bonuses": {
-      "kill_target": 3.0,
+      "kill_target": 1.0,
       "target_lowest_hp": 0.2
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 80.0,
-      "lose": -80.0,
+      "win": 50.0,
+      "lose": -50.0,
       "draw": 0.0
     },
     "objective_rewards": {
       "reward_per_objective_turn5": 0.0,
-      "reward_per_objective": 5.0
+      "reward_per_objective": 10.0,
+      "use_objective_lead": true,
+      "reward_for_objective_lead": 10.0
     },
     "system_penalties": {
       "forbidden_action": -1.0,

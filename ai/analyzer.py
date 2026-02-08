@@ -819,8 +819,8 @@ def parse_step_log(filepath: str) -> Dict:
         },
         'non_pistol_adjacent_shots': {1: 0, 2: 0},
         'wait_by_phase': {
-            1: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0},
-            2: {'move_wait': 0, 'shoot_wait_with_los': 0, 'shoot_wait_no_los': 0}
+            1: {'move_wait': 0, 'wait_with_los': 0, 'wait_no_los': 0},
+            2: {'move_wait': 0, 'wait_with_los': 0, 'wait_no_los': 0}
         },
         'target_priority': {
             1: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0},
@@ -1928,13 +1928,13 @@ def parse_step_log(filepath: str) -> Dict:
                                             valid_targets.append(uid)
 
                                 if valid_targets:
-                                    stats['wait_by_phase'][player]['shoot_wait_with_los'] += 1
+                                    stats['wait_by_phase'][player]['wait_with_los'] += 1
                                     stats['shoot_vs_wait_by_player'][player]['wait_with_targets'] += 1
                                 else:
-                                    stats['wait_by_phase'][player]['shoot_wait_no_los'] += 1
+                                    stats['wait_by_phase'][player]['wait_no_los'] += 1
                                     stats['shoot_vs_wait_by_player'][player]['wait_no_targets'] += 1
                             else:
-                                stats['wait_by_phase'][player]['shoot_wait_no_los'] += 1
+                                stats['wait_by_phase'][player]['wait_no_los'] += 1
                                 stats['shoot_vs_wait_by_player'][player]['wait_no_targets'] += 1
                         elif phase == 'MOVE':
                             stats['wait_by_phase'][player]['move_wait'] += 1
@@ -4251,14 +4251,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     agent_move_wait = stats['wait_by_phase'][1]['move_wait']
     bot_move_wait = stats['wait_by_phase'][2]['move_wait']
-    agent_shoot_wait_los = stats['wait_by_phase'][1]['shoot_wait_with_los']
-    bot_shoot_wait_los = stats['wait_by_phase'][2]['shoot_wait_with_los']
-    agent_shoot_wait_no_los = stats['wait_by_phase'][1]['shoot_wait_no_los']
-    bot_shoot_wait_no_los = stats['wait_by_phase'][2]['shoot_wait_no_los']
+    agent_wait_los = stats['wait_by_phase'][1]['wait_with_los']
+    bot_wait_los = stats['wait_by_phase'][2]['wait_with_los']
+    agent_wait_no_los = stats['wait_by_phase'][1]['wait_no_los']
+    bot_wait_no_los = stats['wait_by_phase'][2]['wait_no_los']
     
     log_print(f"MOVE phase waits:             {agent_move_wait:6d}           {bot_move_wait:6d}")
-    log_print(f"SHOOT waits (enemies in LOS): {agent_shoot_wait_los:6d}           {bot_shoot_wait_los:6d}")
-    log_print(f"SHOOT waits (no LOS):         {agent_shoot_wait_no_los:6d}           {bot_shoot_wait_no_los:6d}")
+    log_print(f"SHOOT waits (enemies in LOS): {agent_wait_los:6d}           {bot_wait_los:6d}")
+    log_print(f"SHOOT waits (no LOS):         {agent_wait_no_los:6d}           {bot_wait_no_los:6d}")
     
     # TARGET PRIORITY
     log_print("\n" + "-" * 80)

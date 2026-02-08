@@ -450,7 +450,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         }
       } else if (actionType === 'WAIT') {
         currentEpisode.actions.push({
-          type: 'shoot_wait',
+          type: 'wait',
           timestamp,
           turn,
           player,

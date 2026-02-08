@@ -631,7 +631,7 @@ export const BoardReplay: React.FC = () => {
       let shootingPhaseStart = 0;
       for (let i = lastCompletedIndex; i >= 0; i--) {
         const action = currentEpisode.actions[i];
-        if (action.type !== 'shoot' && action.type !== 'shoot_wait') {
+        if (action.type !== 'shoot' && action.type !== 'wait') {
           shootingPhaseStart = i + 1;
           break;
         }
@@ -919,7 +919,7 @@ export const BoardReplay: React.FC = () => {
           turnNumber,
           action.player
         );
-      } else if (action.type === 'shoot_wait' && action.pos) {
+      } else if (action.type === 'wait' && action.pos) {
         gameLog.addEvent({
           type: 'shoot',
           message: `Unit ${action.unit_id} (${action.pos.col},${action.pos.row}) chose not to shoot`,
@@ -1352,7 +1352,7 @@ export const BoardReplay: React.FC = () => {
               // Map phase names to action types
               const phaseToActionTypes: Record<string, string[]> = {
                 'move': ['move', 'move_wait'],
-                'shoot': ['shoot', 'shoot_wait', 'advance'],
+                'shoot': ['shoot', 'wait', 'advance'],
                 'charge': ['charge', 'charge_wait', 'charge_fail'],
                 'fight': ['fight']
               };
