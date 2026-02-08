@@ -7,7 +7,7 @@ PROJET : Warhammer 40K Game Engine avec IA (Reinforcement Learning)
 - Structure : engine/ (moteur de jeu), ai/ (entraînement), config/ (configurations)
 
 CONVENTIONS IMPORTANTES :
-- Les modèles IA sont dans ai/models/current/model_<agent_key>.zip
+- Les modèles IA sont dans ai/models/<agent_key>/model_<agent_key>.zip
 - Les configs d'agents sont dans config/agents/<agent_name>/
 - Format de code : Python type hints, docstrings, respect AI_TURN.md
 - Ne jamais utiliser de fallbacks ou de workaround ou de valeur par défaut pour masquer des erreurs

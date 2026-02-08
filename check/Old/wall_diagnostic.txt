@@ -1,2 +1,0 @@
-W40KENGINE INIT: game_state['wall_hexes'] count = 72
-Sample walls: [(12, 4), (7, 17), (18, 17), (3, 4), (22, 5)]

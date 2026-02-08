@@ -32,6 +32,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import ActionDecoder
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import GameStateManager
+from engine.macro_intents import INTENT_TAKE_OBJECTIVE, DETAIL_OBJECTIVE
 from engine.pve_controller import PvEController
 
 # Global flag to ensure debug.log is cleared only once per training session
@@ -279,6 +280,26 @@ class W40KEngine(gym.Env):
         board_cols = self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"]
         board_rows = self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"]
         max_range = self._calculate_board_max_range(board_cols, board_rows)
+        base_wall_hexes = (
+            set(map(tuple, self._scenario_wall_hexes))
+            if self._scenario_wall_hexes is not None
+            else set(
+                map(
+                    tuple,
+                    self.config["board"]["default"]["wall_hexes"]
+                    if "default" in self.config["board"]
+                    else (
+                        self.config["board"]["wall_hexes"]
+                        if "wall_hexes" in self.config["board"]
+                        else []
+                    ),
+                )
+            )
+        )
+        bottom_row = board_rows - 1
+        for col in range(board_cols):
+            if col % 2 == 1:
+                base_wall_hexes.add((col, bottom_row))
         
         # CRITICAL: Initialize game_state FIRST before any other operations
         self.game_state = {
@@ -297,6 +318,10 @@ class W40KEngine(gym.Env):
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
+            "macro_intent_id": INTENT_TAKE_OBJECTIVE,
+            "macro_detail_type": DETAIL_OBJECTIVE,
+            "macro_detail_id": 0,
+            "macro_target_unit_id": None,
             
             # AI_TURN.md required tracking sets
             "units_moved": set(),
@@ -342,10 +367,15 @@ class W40KEngine(gym.Env):
             "board_rows": board_rows,
             "max_range": max_range,
             # Use scenario terrain if loaded, otherwise use board config
-            "wall_hexes": set(map(tuple, self._scenario_wall_hexes)) if self._scenario_wall_hexes is not None else set(map(tuple, self.config["board"]["default"]["wall_hexes"] if "default" in self.config["board"] else (self.config["board"]["wall_hexes"] if "wall_hexes" in self.config["board"] else []))),
+            "wall_hexes": base_wall_hexes,
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
             "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else []))
         }
+        objectives = require_key(self.game_state, "objectives")
+        if not objectives:
+            raise ValueError("objectives are required for macro target initialization")
+        self.game_state["macro_target_objective_index"] = 0
+        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id"))
 
         # CRITICAL: Instantiate all module managers BEFORE using them
         self.state_manager = GameStateManager(self.config, self.unit_registry)
@@ -506,6 +536,10 @@ class W40KEngine(gym.Env):
             "victory_points": {1: 0, 2: 0},
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
+            "macro_intent_id": INTENT_TAKE_OBJECTIVE,
+            "macro_detail_type": DETAIL_OBJECTIVE,
+            "macro_detail_id": 0,
+            "macro_target_unit_id": None,
             "units_moved": set(),
             "units_fled": set(),
             "units_shot": set(),
@@ -522,6 +556,11 @@ class W40KEngine(gym.Env):
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
             "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
+        objectives = require_key(self.game_state, "objectives")
+        if not objectives:
+            raise ValueError("objectives are required for macro target reset")
+        self.game_state["macro_target_objective_index"] = 0
+        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id"))
         self._episode_step_calls = 0  # Safety: reset for runaway truncation check in step()
         self._step_calls_since_increment = 0
 
@@ -2345,6 +2384,11 @@ class W40KEngine(gym.Env):
             self.game_state["objectives"] = self._scenario_objectives
         if "primary_objective" in self.game_state:
             self.game_state["primary_objective"] = self._scenario_primary_objective
+        objectives = require_key(self.game_state, "objectives")
+        if not objectives:
+            raise ValueError("objectives are required after scenario reload")
+        self.game_state["macro_target_objective_index"] = 0
+        self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id"))
 
 
 # ============================================================================

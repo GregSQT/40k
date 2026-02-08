@@ -466,6 +466,19 @@ class MetricsCollectionCallback(BaseCallback):
             model_stats = self.model.logger.name_to_value
 
             if len(model_stats) > 0:
+                # Calculate gradient norm from last update if gradients still exist
+                if hasattr(self.model, 'policy') and hasattr(self.model.policy, 'parameters'):
+                    total_norm = 0.0
+                    param_count = 0
+                    for p in self.model.policy.parameters():
+                        if p.grad is not None:
+                            param_norm = p.grad.data.norm(2)
+                            total_norm += param_norm.item() ** 2
+                            param_count += 1
+                    if param_count > 0:
+                        grad_norm = total_norm ** 0.5
+                        self.model.logger.record("train/gradient_norm", grad_norm)
+
                 # Pass complete model stats to metrics tracker
                 self.metrics_tracker.log_training_metrics(model_stats)
                 self.metrics_tracker.step_count = self.model.num_timesteps
@@ -788,8 +801,8 @@ class MetricsCollectionCallback(BaseCallback):
                 self.win_rate_window = deque(maxlen=100)
 
             if winner is not None:
-                # CRITICAL FIX: Learning agent is Player 0, not Player 1!
-                agent_won = 1.0 if winner == 0 else 0.0
+                # Training uses controlled player 1 (engine config)
+                agent_won = 1.0 if winner == 1 else 0.0
                 self.win_rate_window.append(agent_won)
 
                 if len(self.win_rate_window) >= 10:

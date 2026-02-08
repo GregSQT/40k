@@ -282,7 +282,8 @@ export default function Board({
   }, [phase, mode, selectedUnitId]);
 
   // ✅ HOOK 1: useRef - ALWAYS called first
-  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
 
   // Persistent objective control state - survives re-renders within an episode
@@ -387,7 +388,7 @@ export default function Board({
       if (!unit || !unit.RNG_WEAPONS || unit.RNG_WEAPONS.length <= 1) return;
 
       // Calculate position near the icon (top-right of unit)
-      const canvas = containerRef.current?.querySelector('canvas');
+      const canvas = canvasContainerRef.current?.querySelector('canvas');
       if (!canvas) return;
 
       // Calculate constants from boardConfig (same as in main useEffect)
@@ -441,26 +442,35 @@ export default function Board({
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
     // Early returns INSIDE useEffect to avoid hooks order violation
-    if (!containerRef.current) return;
+    if (!canvasContainerRef.current) return;
 
     if (loading) {
-      containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#1f2937;border-radius:8px;color:white;">Loading board configuration...</div>`;
+      canvasContainerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#1f2937;border-radius:8px;color:white;">Loading board configuration...</div>`;
+      if (overlayRef.current) {
+        overlayRef.current.innerHTML = '';
+      }
       return;
     }
 
     if (error) {
-      containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Configuration Error: ${error}</div>`;
+      canvasContainerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Configuration Error: ${error}</div>`;
+      if (overlayRef.current) {
+        overlayRef.current.innerHTML = '';
+      }
       return;
     }
 
     if (!boardConfig) {
-      containerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Board configuration not loaded</div>`;
+      canvasContainerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Board configuration not loaded</div>`;
+      if (overlayRef.current) {
+        overlayRef.current.innerHTML = '';
+      }
       return;
     }
 
     const isNewApp = !appRef.current;
     if (isNewApp) {
-      containerRef.current.innerHTML = "";
+      canvasContainerRef.current.innerHTML = "";
     }
 
     // ✅ AGGRESSIVE TEXTURE CACHE CLEARING for movePreview units
@@ -500,6 +510,19 @@ export default function Board({
     const effectiveWallHexes: [number, number][] = wallHexesOverride
       ? wallHexesOverride.map(w => [w.col, w.row] as [number, number])
       : (boardConfig.wall_hexes || []);
+    const bottomRow = BOARD_ROWS - 1;
+    const wallHexKeySet = new Set<string>(
+      effectiveWallHexes.map(([c, r]) => `${c},${r}`)
+    );
+    for (let col = 0; col < BOARD_COLS; col++) {
+      if (col % 2 === 1) {
+        const key = `${col},${bottomRow}`;
+        if (!wallHexKeySet.has(key)) {
+          wallHexKeySet.add(key);
+          effectiveWallHexes.push([col, bottomRow]);
+        }
+      }
+    }
 
     // ✅ ALL DISPLAY VALUES FROM CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     if (!boardConfig.display) {
@@ -570,8 +593,11 @@ export default function Board({
 
     const gridWidth = (BOARD_COLS - 1) * HEX_HORIZ_SPACING + HEX_WIDTH;
     const gridHeight = (BOARD_ROWS - 1) * HEX_VERT_SPACING + HEX_HEIGHT;
-    const canvasWidth = gridWidth + 2 * MARGIN;
-    const canvasHeight = gridHeight + 2 * MARGIN;
+    const canvasPaddingX = 0;
+    const canvasPaddingTop = 0;
+    const canvasPaddingBottom = 0;
+    const canvasWidth = gridWidth + 2 * MARGIN + (2 * canvasPaddingX);
+    const canvasHeight = gridHeight + 2 * MARGIN + canvasPaddingTop + canvasPaddingBottom;
 
     // ✅ OPTIMIZED PIXI CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     const pixiConfig = {
@@ -594,7 +620,10 @@ export default function Board({
     if (!appRef.current) {
       appRef.current = app;
       app.stage.sortableChildren = true;
+    } else {
+      app.renderer.resize(canvasWidth, canvasHeight);
     }
+    app.stage.position.set(canvasPaddingX, canvasPaddingTop);
 
     // ✅ CREATE PERSISTENT UI CONTAINER for target logos, charge badges, etc.
     // This container is NEVER cleaned up by drawBoard()
@@ -620,8 +649,8 @@ export default function Board({
     
     // Clear container and append canvas - EXACT BOARDREPLAY MATCH
     if (isNewApp) {
-      containerRef.current.innerHTML = '';
-      containerRef.current.appendChild(canvas);
+      canvasContainerRef.current.innerHTML = '';
+      canvasContainerRef.current.appendChild(canvas);
     }
 
     // Set up board click handler IMMEDIATELY after canvas creation
@@ -1445,6 +1474,7 @@ export default function Board({
         renderUnit({
           unit: unitToRender, centerX, centerY, app,
           uiElementsContainer: uiElementsContainerRef.current!, // Pass persistent UI container
+          useOverlayIcons: true,
           isPreview: false,
           isEligible: isEligibleForRendering || false,
           isShootable,
@@ -1521,6 +1551,7 @@ export default function Board({
           
           renderUnit({
             unit: previewUnit, centerX, centerY, app,
+            useOverlayIcons: true,
             isPreview: true, previewType: 'move',
             isEligible: false, // Preview units are not eligible
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
@@ -1545,6 +1576,7 @@ export default function Board({
           
           renderUnit({
             unit: previewUnit, centerX, centerY, app,
+            useOverlayIcons: true,
             isPreview: true, previewType: 'move',
             isEligible: false, // Preview units are not eligible
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
@@ -1572,6 +1604,7 @@ export default function Board({
           
           renderUnit({
             unit: previewUnit, centerX, centerY, app,
+            useOverlayIcons: true,
             isPreview: true, previewType: 'attack',
             isEligible: false, // Preview units are not eligible
             boardConfig: boardConfigForRender, HEX_RADIUS, ICON_SCALE, ELIGIBLE_OUTLINE_WIDTH, ELIGIBLE_COLOR, ELIGIBLE_OUTLINE_ALPHA,
@@ -1767,6 +1800,123 @@ export default function Board({
       
       // Wall rendering is now handled by drawBoard() in BoardDisplay.tsx
 
+      // Render overlay elements (icons + HP bars) above the canvas
+      if (overlayRef.current) {
+        const overlay = overlayRef.current;
+        overlay.innerHTML = '';
+        overlay.style.width = `${canvasWidth}px`;
+        overlay.style.height = `${canvasHeight}px`;
+        overlay.style.pointerEvents = 'none';
+        overlay.style.overflow = 'visible';
+
+        const getRequiredCssNumber = (variableName: string): number => {
+          const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+          if (value === '') {
+            throw new Error(`CSS variable ${variableName} not found or empty`);
+          }
+          const parsed = parseFloat(value);
+          if (Number.isNaN(parsed)) {
+            throw new Error(`CSS variable ${variableName} is not a number: ${value}`);
+          }
+          return parsed;
+        };
+
+        const addOverlayIcon = (
+          iconPath: string,
+          positionX: number,
+          positionY: number,
+          iconSize: number,
+          onClick: () => void,
+          name: string
+        ) => {
+          const globalPos = app.stage.toGlobal(new PIXI.Point(positionX, positionY));
+          const iconEl = document.createElement('img');
+          iconEl.src = iconPath;
+          iconEl.alt = name;
+          iconEl.style.position = 'absolute';
+          iconEl.style.left = `${globalPos.x - (iconSize / 2)}px`;
+          iconEl.style.top = `${globalPos.y - (iconSize / 2)}px`;
+          iconEl.style.width = `${iconSize}px`;
+          iconEl.style.height = `${iconSize}px`;
+          iconEl.style.pointerEvents = 'auto';
+          iconEl.style.cursor = 'pointer';
+          iconEl.draggable = false;
+          iconEl.addEventListener('pointerdown', (event) => {
+            if (event.button === 0) {
+              event.stopPropagation();
+              onClick();
+            }
+          });
+          overlay.appendChild(iconEl);
+        };
+
+        for (const unit of units) {
+          const unitIdNum = typeof unit.id === 'number' ? unit.id : parseInt(unit.id as string);
+          const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const centerY = unit.row * HEX_VERT_SPACING + ((unit.col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
+          const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
+          const scaledYOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
+          const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
+
+          // Icons: advance + weapon selection
+          const isActiveShooting = (gameState?.active_shooting_unit &&
+            parseInt(gameState.active_shooting_unit) === unitIdNum);
+          if (phase === 'shoot' && unit.player === current_player && isActiveShooting) {
+            const iconSize = getRequiredCssNumber('--icon-advance-size');
+            const iconScale = getRequiredCssNumber('--icon-square-icon-scale');
+            const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+            const squareSizeRatio = getRequiredCssNumber('--icon-square-standard-size');
+            const squareSize = HEX_RADIUS * squareSizeRatio;
+            const positionY = barY - squareSize / 2 - 5;
+
+            const canAdvance = (() => {
+              if (unitsFled?.includes(unitIdNum)) return false;
+              const unitsAdvanced = gameState?.unitsAdvanced || [];
+              if (unitsAdvanced.includes(unitIdNum)) return false;
+              const isAdjacentToEnemy = units.some((enemy: Unit) =>
+                enemy.player !== unit.player &&
+                enemy.HP_CUR > 0 &&
+                areUnitsAdjacent(unit, enemy)
+              );
+              return !isAdjacentToEnemy;
+            })();
+
+            if (canAdvance && onAdvance) {
+              addOverlayIcon(
+                '/icons/Action_Logo/3-5 - Advance.png',
+                centerX,
+                positionY,
+                iconDisplaySize,
+                () => onAdvance(unitIdNum),
+                `advance-${unitIdNum}`
+              );
+            }
+
+            interface UnitWithAvailableWeapons extends Unit {
+              available_weapons?: Array<{ can_use: boolean }>;
+            }
+            const unitWithWeapons = unit as UnitWithAvailableWeapons;
+            const availableWeapons = unitWithWeapons.available_weapons;
+            if (availableWeapons && availableWeapons.some(w => w.can_use)) {
+              const spacing = iconDisplaySize * 1.2;
+              addOverlayIcon(
+                '/icons/Action_Logo/3-1 - Gun_Choice.png',
+                centerX + spacing,
+                positionY,
+                iconDisplaySize,
+                () => {
+                  window.dispatchEvent(new CustomEvent('boardWeaponSelectionClick', {
+                    detail: { unitId: unitIdNum }
+                  }));
+                },
+                `weapon-${unitIdNum}`
+              );
+            }
+          }
+
+        }
+      }
+
       // Cleanup function
       return () => {
         // Cleanup board interactions
@@ -1916,7 +2066,23 @@ export default function Board({
       // Simple container return - loading/error handled inside useEffect
       return (
         <div>
-          <div ref={containerRef} style={{ display: 'inline-block', lineHeight: 0 }} />
+          <div
+            style={{ position: 'relative', display: 'inline-block', lineHeight: 0, overflow: 'visible' }}
+          >
+            <div ref={canvasContainerRef} />
+            <div
+              ref={overlayRef}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                overflow: 'visible'
+              }}
+            />
+          </div>
           {/* SingleShotDisplay temporarily disabled - missing component
           {shootingPhaseState?.singleShotState && (
             <SingleShotDisplay

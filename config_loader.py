@@ -86,6 +86,14 @@ class ConfigLoader:
         except (KeyError, FileNotFoundError):
             # AI_INSTRUCTIONS.md: No hardcoded fallbacks allowed
             raise FileNotFoundError("AI_INSTRUCTIONS.md violation: Model path not configured in config/config.json. Must define paths.model_file")
+
+    def get_models_root(self) -> str:
+        """Get the root directory for model files."""
+        try:
+            config = self.load_config("config", force_reload=False)
+            return config["paths"]["models_root"]
+        except (KeyError, FileNotFoundError):
+            raise FileNotFoundError("Model root path not configured in config/config.json. Must define paths.models_root")
     
     def get_phase_order(self) -> list[str]:
         """Get game phase order - raises error if missing."""

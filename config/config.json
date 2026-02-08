@@ -6,7 +6,8 @@
   },
   "paths": {
     "ai_models": "ai/",
-    "model_file": "ai/models/current/model.zip",
+    "models_root": "ai/models",
+    "model_file": "ai/models/{agent_key}/model_{agent_key}.zip",
     "scenarios": "config/scenarios.json",
     "rewards": "config/rewards_config.json",
     "training": "config/training_config.json",

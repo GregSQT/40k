@@ -164,10 +164,10 @@ class W40KMetricsTracker:
         self.all_episode_rewards.append(total_reward)
         
         # GAME CRITICAL: Win rate - Cumulative win rate (FULL DURATION)
-        # CRITICAL FIX: Learning agent is Player 0, not Player 1!
-        # winner == 0 means the learning agent won
+        # CRITICAL FIX: Learning agent is Player 1 in training configs
+        # winner == 1 means the learning agent won
         if winner is not None:
-            agent_won = 1.0 if winner == 0 else 0.0
+            agent_won = 1.0 if winner == 1 else 0.0
             self.all_episode_wins.append(agent_won)
             self.win_rate_window.append(agent_won)
             

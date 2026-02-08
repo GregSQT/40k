@@ -121,8 +121,6 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
       coverCells = [],
       chargeCells = [],
       advanceCells = [],  // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4
-      blockedTargets = new Set<string>(),
-      coverTargets = new Set<string>(),
       phase = "move",
       selectedUnitId = null,
       mode = "select",
@@ -166,6 +164,9 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
     // Draw grid cells with container batching - EXACT from Board.tsx
     for (let col = 0; col < BOARD_COLS; col++) {
       for (let row = 0; row < BOARD_ROWS; row++) {
+        if (row === BOARD_ROWS - 1 && col % 2 === 1) {
+          continue;
+        }
         const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
         const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
         const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
@@ -317,46 +318,6 @@ export const drawBoard = (app: PIXI.Application, boardConfig: BoardConfig, optio
     app.stage.addChild(baseHexContainer);
     app.stage.addChild(highlightContainer);
 
-    // ✅ RENDER LINE OF SIGHT INDICATORS - EXACT from Board.tsx
-    if (phase === "shoot" && (blockedTargets.size > 0 || coverTargets.size > 0)) {
-      const losContainer = new PIXI.Container();
-      losContainer.name = 'line-of-sight-indicators';
-      
-      // Show blocked targets with red X
-      blockedTargets.forEach(targetKey => {
-        const [col, row] = targetKey.split(',').map(Number);
-        const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-        
-        const blockedIndicator = new PIXI.Graphics();
-        blockedIndicator.lineStyle(3, 0xFF0000, 1.0);
-        // Draw X
-        blockedIndicator.moveTo(centerX - HEX_RADIUS/2, centerY - HEX_RADIUS/2);
-        blockedIndicator.lineTo(centerX + HEX_RADIUS/2, centerY + HEX_RADIUS/2);
-        blockedIndicator.moveTo(centerX + HEX_RADIUS/2, centerY - HEX_RADIUS/2);
-        blockedIndicator.lineTo(centerX - HEX_RADIUS/2, centerY + HEX_RADIUS/2);
-        
-        losContainer.addChild(blockedIndicator);
-      });
-      
-      // Show targets in cover with yellow shield icon
-      coverTargets.forEach(targetKey => {
-        const [col, row] = targetKey.split(',').map(Number);
-        const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY = row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING / 2) + HEX_HEIGHT / 2 + MARGIN;
-        
-        const coverIndicator = new PIXI.Graphics();
-        coverIndicator.lineStyle(2, 0xFFFF00, 1.0);
-        coverIndicator.beginFill(0xFFFF00, 0.3);
-        // Draw shield shape
-        coverIndicator.drawCircle(centerX, centerY - HEX_RADIUS/3, HEX_RADIUS/4);
-        coverIndicator.endFill();
-        
-        losContainer.addChild(coverIndicator);
-      });
-      
-      app.stage.addChild(losContainer);
-    }
     
     // ✅ RENDER WALLS - EXACT from Board.tsx
     if (boardConfig.walls && boardConfig.walls.length > 0) {

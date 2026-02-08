@@ -36,7 +36,7 @@
       "bot_eval_final": 50
     },
     "observation_params": {
-      "obs_size": 295,
+      "obs_size": 323,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -83,7 +83,7 @@
       "bot_eval_final": 50
     },
     "observation_params": {
-      "obs_size": 295,
+      "obs_size": 323,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -129,7 +129,7 @@
       "bot_eval_final": 50
     },
     "observation_params": {
-      "obs_size": 295,
+      "obs_size": 323,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -154,7 +154,7 @@
       "bot_eval_final": 50
     },
     "observation_params": {
-      "obs_size": 295,
+      "obs_size": 323,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
@@ -204,7 +204,7 @@
       "bot_eval_final": 20
     },
     "observation_params": {
-      "obs_size": 295,
+      "obs_size": 323,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,

@@ -21,6 +21,13 @@ from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
 )
+from engine.macro_intents import (
+    INTENT_COUNT,
+    DETAIL_OBJECTIVE,
+    DETAIL_ENEMY,
+    DETAIL_ALLY,
+    DETAIL_NONE,
+)
 
 class ObservationBuilder:
     """Builds observations for the agent."""
@@ -85,11 +92,15 @@ class ObservationBuilder:
             raise ValueError(f"Invalid max_range for macro observation: {max_range}")
         
         objectives_controlled = self._calculate_objectives_controlled(objectives, game_state)
+        objective_entries = self._build_macro_objective_entries(objectives, game_state, board_cols, board_rows)
+        game_state["macro_objectives"] = objective_entries
         army_value_diff = self._calculate_army_value_diff(units_cache, game_state)
         eligible_ids = self._get_macro_eligible_unit_ids(game_state)
         
         unit_entries = []
         eligible_mask = []
+        ally_ids = []
+        enemy_ids = []
         
         for unit_id in sorted(units_cache.keys(), key=lambda x: str(x)):
             unit = get_unit_by_id(str(unit_id), game_state)
@@ -109,7 +120,19 @@ class ObservationBuilder:
             )
             unit_entries.append(unit_entry)
             eligible_mask.append(1 if str(unit_id) in eligible_ids else 0)
+            if str(unit_id) in units_cache:
+                cache_entry = require_key(units_cache, str(unit_id))
+                unit_player = require_key(cache_entry, "player")
+                if unit_player == current_player:
+                    ally_ids.append(str(unit_id))
+                else:
+                    enemy_ids.append(str(unit_id))
         
+        game_state["macro_units"] = unit_entries
+        game_state["macro_objectives"] = objective_entries
+        attrition_index = len(objective_entries) - 1
+        game_state["macro_attrition_objective_index"] = attrition_index
+
         return {
             "global": {
                 "turn": turn,
@@ -119,6 +142,10 @@ class ObservationBuilder:
                 "army_value_diff": army_value_diff,
             },
             "units": unit_entries,
+            "objectives": objective_entries,
+            "ally_ids": ally_ids,
+            "enemy_ids": enemy_ids,
+            "attrition_objective_index": attrition_index,
             "eligible_mask": eligible_mask,
         }
     
@@ -206,6 +233,79 @@ class ObservationBuilder:
                 p2_count += 1
         
         return {"p1": p1_count, "p2": p2_count}
+
+    def _build_macro_objective_entries(
+        self,
+        objectives: List[Dict[str, Any]],
+        game_state: Dict[str, Any],
+        board_cols: int,
+        board_rows: int
+    ) -> List[Dict[str, Any]]:
+        """Build per-objective macro features."""
+        if board_cols <= 0 or board_rows <= 0:
+            raise ValueError(f"Invalid board size for macro objectives: cols={board_cols}, rows={board_rows}")
+
+        current_player = require_key(game_state, "current_player")
+        units_cache = require_key(game_state, "units_cache")
+
+        entries = []
+        for objective in objectives:
+            obj_id = require_key(objective, "id")
+            obj_hexes = require_key(objective, "hexes")
+            if not obj_hexes:
+                raise ValueError(f"Objective {obj_id} has no hexes")
+
+            sum_col = 0
+            sum_row = 0
+            hex_set = set()
+            for col, row in obj_hexes:
+                norm_col, norm_row = normalize_coordinates(col, row)
+                sum_col += norm_col
+                sum_row += norm_row
+                hex_set.add((norm_col, norm_row))
+            centroid_col = sum_col / float(len(obj_hexes))
+            centroid_row = sum_row / float(len(obj_hexes))
+
+            p1_oc = 0
+            p2_oc = 0
+            for unit_id, cache_entry in units_cache.items():
+                unit = get_unit_by_id(str(unit_id), game_state)
+                if unit is None:
+                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+                unit_pos = require_unit_position(unit, game_state)
+                if unit_pos in hex_set:
+                    oc = require_key(unit, "OC")
+                    if cache_entry["player"] == 1:
+                        p1_oc += oc
+                    elif cache_entry["player"] == 2:
+                        p2_oc += oc
+
+            if current_player == 1:
+                my_oc = p1_oc
+                enemy_oc = p2_oc
+            elif current_player == 2:
+                my_oc = p2_oc
+                enemy_oc = p1_oc
+            else:
+                raise ValueError(f"Invalid current_player for macro objectives: {current_player}")
+
+            if my_oc > enemy_oc:
+                control_state = 1.0
+            elif enemy_oc > my_oc:
+                control_state = -1.0
+            else:
+                control_state = 0.0
+
+            entries.append({
+                "id": str(obj_id),
+                "col": centroid_col,
+                "row": centroid_row,
+                "col_norm": centroid_col / float(board_cols),
+                "row_norm": centroid_row / float(board_rows),
+                "control_state": control_state,
+            })
+
+        return entries
     
     def _calculate_army_value_diff(self, units_cache: Dict[str, Any], game_state: Dict[str, Any]) -> int:
         """Compute sum(VALUE) alive for P1 minus P2."""
@@ -271,6 +371,7 @@ class ObservationBuilder:
         return {
             "id": str(unit_id),
             "unitType": unit_type,
+            "player": require_key(unit, "player"),
             "col": unit_col,
             "row": unit_row,
             "hp": hp_cur,
@@ -973,13 +1074,15 @@ class ObservationBuilder:
         Build asymmetric egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
 
-        Structure (313 floats):
+        Structure (323 floats):
         - [0:15]    Global context (15 floats) - includes objective control
         - [15:37]   Active unit capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md
         - [37:69]   Directional terrain (32 floats: 8 directions × 4 features)
         - [69:141]  Allied units (72 floats: 6 units × 12 features)
         - [141:273] Enemy units (132 floats: 6 units × 22 features) - OPTIMISÉ
         - [273:313] Valid targets (40 floats: 5 targets × 8 features)
+        - [314:318] Macro target (4 floats)
+        - [318:323] Macro intent (5 floats)
 
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
@@ -1110,6 +1213,10 @@ class ObservationBuilder:
             obs, active_unit, game_state, base_idx=274,
             valid_targets=valid_targets, six_enemies=six_enemies
         )
+        # === SECTION 7: Macro target + intent (9 floats) ===
+        if self.obs_size < 323:
+            raise ValueError(f"obs_size too small for macro target features: {self.obs_size}")
+        self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=314)
         return obs
 
     def build_observation_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> np.ndarray:
@@ -1179,6 +1286,120 @@ class ObservationBuilder:
                     obs[base_idx + i] = 0.0  # Contested/empty
             else:
                 obs[base_idx + i] = 0.0  # No objective in this slot
+
+    def _encode_macro_intent_context(
+        self,
+        obs: np.ndarray,
+        active_unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+        base_idx: int
+    ) -> None:
+        """
+        Encode macro intent context for the active unit.
+
+        Detail features (4 floats):
+        - target_col_norm
+        - target_row_norm
+        - target_signal (objective: control_state, unit: hp_ratio, none: 0.0)
+        - target_distance_norm (distance / max_range)
+        """
+        macro_intent_id = require_key(game_state, "macro_intent_id")
+        if macro_intent_id is None:
+            raise ValueError("macro_intent_id is required for macro intent encoding")
+        try:
+            macro_intent_id_int = int(macro_intent_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid macro_intent_id: {macro_intent_id}") from exc
+        if macro_intent_id_int < 0 or macro_intent_id_int >= INTENT_COUNT:
+            raise ValueError(f"macro_intent_id out of range: {macro_intent_id_int}")
+
+        detail_type = require_key(game_state, "macro_detail_type")
+        if detail_type is None:
+            raise ValueError("macro_detail_type is required for macro intent encoding")
+        try:
+            detail_type_int = int(detail_type)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid macro_detail_type: {detail_type}") from exc
+
+        detail_id = require_key(game_state, "macro_detail_id")
+        if detail_id is None:
+            raise ValueError("macro_detail_id is required for macro intent encoding")
+        try:
+            detail_id_int = int(detail_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid macro_detail_id: {detail_id}") from exc
+
+        board_cols = require_key(game_state, "board_cols")
+        board_rows = require_key(game_state, "board_rows")
+        if board_cols <= 0 or board_rows <= 0:
+            raise ValueError(f"Invalid board size for macro intent encoding: cols={board_cols}, rows={board_rows}")
+
+        unit_col, unit_row = require_unit_position(active_unit, game_state)
+        max_range = require_key(game_state, "max_range")
+
+        target_col_norm = 0.0
+        target_row_norm = 0.0
+        target_signal = 0.0
+        distance_norm = 0.0
+
+        if detail_type_int == DETAIL_OBJECTIVE:
+            if "macro_objectives" not in game_state:
+                objectives = require_key(game_state, "objectives")
+                macro_objectives = self._build_macro_objective_entries(
+                    objectives, game_state, board_cols, board_rows
+                )
+                game_state["macro_objectives"] = macro_objectives
+                game_state["macro_attrition_objective_index"] = len(macro_objectives) - 1
+            macro_objectives = require_key(game_state, "macro_objectives")
+            if not macro_objectives:
+                raise ValueError("macro_objectives is required for macro intent encoding")
+            if detail_id_int < 0 or detail_id_int >= len(macro_objectives):
+                raise ValueError(
+                    f"macro_detail_id out of range for objectives: {detail_id_int} "
+                    f"(objectives={len(macro_objectives)})"
+                )
+            objective = macro_objectives[detail_id_int]
+            centroid_col = require_key(objective, "col")
+            centroid_row = require_key(objective, "row")
+            target_col_norm = require_key(objective, "col_norm")
+            target_row_norm = require_key(objective, "row_norm")
+            target_signal = require_key(objective, "control_state")
+            distance = calculate_hex_distance(
+                unit_col,
+                unit_row,
+                int(round(centroid_col)),
+                int(round(centroid_row))
+            )
+            distance_norm = distance / float(max_range) if max_range > 0 else 0.0
+        elif detail_type_int in (DETAIL_ENEMY, DETAIL_ALLY):
+            unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+            target_unit = unit_by_id.get(str(detail_id_int))
+            if target_unit is None:
+                raise KeyError(f"macro_detail_id unit missing from game_state: {detail_id_int}")
+            target_col, target_row = require_unit_position(target_unit, game_state)
+            target_col_norm = target_col / float(board_cols - 1)
+            target_row_norm = target_row / float(board_rows - 1)
+            hp_cur = require_hp_from_cache(str(detail_id_int), game_state)
+            hp_max = require_key(target_unit, "HP_MAX")
+            target_signal = (hp_cur / hp_max) if hp_max > 0 else 0.0
+            distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
+            distance_norm = distance / float(max_range) if max_range > 0 else 0.0
+        elif detail_type_int == DETAIL_NONE:
+            target_col_norm = 0.0
+            target_row_norm = 0.0
+            target_signal = 0.0
+            distance_norm = 0.0
+        else:
+            raise ValueError(f"Unsupported macro_detail_type: {detail_type_int}")
+
+        obs[base_idx + 0] = target_col_norm
+        obs[base_idx + 1] = target_row_norm
+        obs[base_idx + 2] = target_signal
+        obs[base_idx + 3] = distance_norm
+
+        intent_base = base_idx + 4
+        for idx in range(INTENT_COUNT):
+            obs[intent_base + idx] = 1.0 if idx == macro_intent_id_int else 0.0
 
     def _get_active_unit_for_observation(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """

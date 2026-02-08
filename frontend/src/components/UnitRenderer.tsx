@@ -2,7 +2,7 @@
 import * as PIXI from "pixi.js-legacy";
 import type { Unit, TargetPreview, FightSubPhase, PlayerId, GameState } from "../types/game";
 import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
-import { getSelectedRangedWeapon, getSelectedMeleeWeapon, getMeleeRange } from '../utils/weaponHelpers';
+import { getSelectedRangedWeapon, getSelectedMeleeWeapon, getMeleeRange, getDiceAverage } from '../utils/weaponHelpers';
 import { getPreferredRangedWeaponAgainstTarget } from '../utils/probabilityCalculator';
 import { buildWeaponSignature, createBlinkingHPBar, type HPBlinkContainer } from '../utils/blinkingHPBar';
 
@@ -12,6 +12,7 @@ interface UnitRendererProps {
   centerY: number;
   app: PIXI.Application;
   uiElementsContainer?: PIXI.Container; // Persistent container for UI elements (target logos, badges) that should never be cleaned up
+  useOverlayIcons?: boolean; // Render advance/weapon icons in DOM overlay
   isPreview?: boolean;
   previewType?: 'move' | 'attack';
   isEligible?: boolean; // Add eligibility as a prop instead of calculating it
@@ -279,7 +280,11 @@ export class UnitRenderer {
     }
     const unitWithFlags = unit as UnitWithFlags;
     const isJustKilled = unitWithFlags.isJustKilled === true;
-    if (unit.HP_CUR === undefined || (unit.HP_CUR <= 0 && !isJustKilled)) return false;
+    const hpCurValue = Number(unit.HP_CUR ?? unit.HP_MAX ?? 0);
+    if (Number.isNaN(hpCurValue)) {
+      throw new Error(`Invalid HP_CUR value for unit ${unit.id}`);
+    }
+    if (unit.HP_CUR === undefined || (hpCurValue <= 0 && !isJustKilled)) return false;
     if (phase !== "fight" && unit.player !== current_player) return false;
     
     switch (phase) {
@@ -291,7 +296,12 @@ export class UnitRenderer {
         if (unitsFled && unitsFled.includes(unit.id)) return false;
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if unit has ranged weapons (imported at top)
         const selectedRngWeapon = getSelectedRangedWeapon(unit);
-        if (!selectedRngWeapon || selectedRngWeapon.NB <= 0) return false;
+        if (!selectedRngWeapon) return false;
+        if (selectedRngWeapon.NB === undefined) {
+          throw new Error(`Missing RNG weapon NB for unit ${unit.id}`);
+        }
+        const selectedRngWeaponNb = getDiceAverage(selectedRngWeapon.NB);
+        if (selectedRngWeaponNb <= 0) return false;
         // Simplified check - parent should provide queue membership
         return this.props.isEligible || false;
       }
@@ -1009,12 +1019,20 @@ export class UnitRenderer {
           if (this.props.phase === 'fight') {
             const weapon = getSelectedMeleeWeapon(shooter);
             if (weapon) {
-              totalDamage = targetPreview.currentBlinkStep * weapon.DMG;
+              if (weapon.DMG === undefined) {
+                throw new Error(`Missing melee weapon DMG for unit ${unit.id}`);
+              }
+              const weaponDamage = getDiceAverage(weapon.DMG);
+              totalDamage = targetPreview.currentBlinkStep * weaponDamage;
             }
           } else {
             const preferred = getPreferredRangedWeaponAgainstTarget(shooter, unit);
             if (preferred) {
-              totalDamage = targetPreview.currentBlinkStep * preferred.potentialDamage;
+              const potentialDamage = Number(preferred.potentialDamage);
+              if (Number.isNaN(potentialDamage)) {
+                throw new Error(`Invalid ranged potentialDamage for unit ${unit.id}`);
+              }
+              totalDamage = targetPreview.currentBlinkStep * potentialDamage;
             }
           }
           displayHP = Math.max(0, currentHP - totalDamage);
@@ -1137,11 +1155,26 @@ export class UnitRenderer {
 
     // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
     const selectedRngWeapon = getSelectedRangedWeapon(unit);
-    const totalShots = selectedRngWeapon?.NB || 0;
-    const shotsLeft = unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : totalShots;
+    if (!selectedRngWeapon) {
+      throw new Error(`Missing RNG weapon for unit ${unit.id}`);
+    }
+    if (selectedRngWeapon.NB === undefined) {
+      throw new Error(`Missing RNG weapon NB for unit ${unit.id}`);
+    }
+    if (unit.SHOOT_LEFT === undefined && typeof selectedRngWeapon.NB !== 'number') {
+      throw new Error(`Missing SHOOT_LEFT for dice-based RNG weapon on unit ${unit.id}`);
+    }
+    const totalShotsValue = getDiceAverage(selectedRngWeapon.NB);
+    const totalShotsLabel = typeof selectedRngWeapon.NB === 'number'
+      ? `${selectedRngWeapon.NB}`
+      : selectedRngWeapon.NB;
+    const shotsLeft = Number(unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : totalShotsValue);
+    if (Number.isNaN(shotsLeft)) {
+      throw new Error(`Invalid SHOOT_LEFT for unit ${unit.id}`);
+    }
     const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
     
-    const shootText = new PIXI.Text(`${shotsLeft}/${totalShots}`, {
+    const shootText = new PIXI.Text(`${shotsLeft}/${totalShotsLabel}`, {
       fontSize: 14,
       fill: shotsLeft > 0 ? 0xffff00 : 0x666666,
       align: "center",
@@ -1158,7 +1191,11 @@ export class UnitRenderer {
   
   private renderAdvanceButton(unitIconScale: number, iconZIndex: number): void {
     const { unit, phase, current_player, app, centerX, centerY, HEX_RADIUS, 
-            canAdvance, onAdvance, gameState, selectedUnitId } = this.props;
+            canAdvance, onAdvance, gameState } = this.props;
+    
+    if (this.props.useOverlayIcons) {
+      return;
+    }
     
     // Show only during shoot phase for active unit of current player
     if (phase !== 'shoot') return;
@@ -1207,6 +1244,10 @@ export class UnitRenderer {
   
   private renderWeaponSelectionIcon(unitIconScale: number, iconZIndex: number): void {
     const { unit, phase, current_player, app, centerX, centerY, HEX_RADIUS, gameState } = this.props;
+    
+    if (this.props.useOverlayIcons) {
+      return;
+    }
     
     // AI_TURN.md ligne 694: Human only: Display weapon selection icon (if CAN_SHOOT)
     // Show only during shoot phase for active unit with multiple weapons
@@ -1338,12 +1379,26 @@ export class UnitRenderer {
     
     // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
     const selectedCcWeapon = getSelectedMeleeWeapon(unit);
-    const totalAttacks = selectedCcWeapon?.NB || 0;
-    const attacksLeft = unit.ATTACK_LEFT !== undefined ? 
-      unit.ATTACK_LEFT : totalAttacks;
+    if (!selectedCcWeapon) {
+      throw new Error(`Missing CC weapon for unit ${unit.id}`);
+    }
+    if (selectedCcWeapon.NB === undefined) {
+      throw new Error(`Missing CC weapon NB for unit ${unit.id}`);
+    }
+    if (unit.ATTACK_LEFT === undefined && typeof selectedCcWeapon.NB !== 'number') {
+      throw new Error(`Missing ATTACK_LEFT for dice-based CC weapon on unit ${unit.id}`);
+    }
+    const totalAttacksValue = getDiceAverage(selectedCcWeapon.NB);
+    const totalAttacksLabel = typeof selectedCcWeapon.NB === 'number'
+      ? `${selectedCcWeapon.NB}`
+      : selectedCcWeapon.NB;
+    const attacksLeft = Number(unit.ATTACK_LEFT !== undefined ? unit.ATTACK_LEFT : totalAttacksValue);
+    if (Number.isNaN(attacksLeft)) {
+      throw new Error(`Invalid ATTACK_LEFT for unit ${unit.id}`);
+    }
     const scaledOffset = (HEX_RADIUS * unitIconScale) / 2 * (0.9 + 0.3 / unitIconScale);
     
-    const attackText = new PIXI.Text(`${attacksLeft}/${totalAttacks}`, {
+    const attackText = new PIXI.Text(`${attacksLeft}/${totalAttacksLabel}`, {
       fontSize: 14,
       fill: attacksLeft > 0 ? 0xffff00 : 0x666666,
       align: "center",

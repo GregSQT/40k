@@ -1,6 +1,8 @@
 {
   "game_rules": {
     "max_turns": 5,
+    "max_steps_per_turn": 200,
+    "max_steps_per_turn_detail": "nb units (20) * nb actions per turn (7) = 140 + marge",
     "turn_limit_penalty": -1,
     "charge_max_distance": 13,
     "advance_distance_range": 6,

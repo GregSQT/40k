@@ -691,9 +691,17 @@ class RewardCalculator:
             raise KeyError("Objective rewards missing required 'reward_per_objective' value")
 
         obj_counts = self.state_manager.count_controlled_objectives(game_state)
-        controlled_objectives = obj_counts.get(controlled_player, 0)
+        controlled_objectives = require_key(obj_counts, controlled_player)
         reward_per_objective = objective_rewards["reward_per_objective"]
         total_reward = reward_per_objective * controlled_objectives
+
+        if "use_objective_lead" in objective_rewards and objective_rewards["use_objective_lead"] is True:
+            if "reward_for_objective_lead" not in objective_rewards:
+                raise KeyError("Objective rewards missing required 'reward_for_objective_lead' value")
+            opponent_player = 2 if int(controlled_player) == 1 else 1
+            opponent_objectives = require_key(obj_counts, opponent_player)
+            lead = controlled_objectives - opponent_objectives
+            total_reward += float(objective_rewards["reward_for_objective_lead"]) * lead
 
         objective_rewarded_turns.add(reward_key)
 
@@ -744,7 +752,7 @@ class RewardCalculator:
         
         obj_counts = self.state_manager.count_controlled_objectives(game_state)
         controlled_player = int(self.config.get("controlled_player", 1))
-        controlled_objectives = obj_counts.get(controlled_player, 0)
+        controlled_objectives = require_key(obj_counts, controlled_player)
         
         # Get reward per objective from config (REQUIRED - raise error if missing)
         if "objective_rewards" not in unit_rewards:

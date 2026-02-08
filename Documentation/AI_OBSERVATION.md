@@ -3,7 +3,7 @@
 
 > **📍 File Location**: Save as `Documentation/AI_OBSERVATION.md`
 > **Status**: ✅ CANONICAL REFERENCE (January 2025)
-> **Version**: 2.1 - Asymmetric Observation System
+> **Version**: 2.3 - Asymmetric Observation System
 
 ---
 
@@ -18,7 +18,7 @@
 - ✅ Migration procedures
 
 **Version History:**
-- **v2.1 (January 2025)**: 313-float asymmetric observation (current) ⭐
+- **v2.3 (February 2026)**: 323-float asymmetric observation (current) ⭐
 - v2.0 (December 2024): 165-float pure RL (archived)
 - v1.0 (October 2024): 150-float egocentric (never deployed)
 
@@ -32,13 +32,13 @@
 
 ## 🎯 EXECUTIVE SUMMARY
 
-The **313-Float Asymmetric Observation System** provides agents with rich tactical information, with more complete intelligence about enemies than allies. This design philosophy ("Give more complete information about enemies than allies") enables superior threat assessment and target prioritization.
+The **323-Float Asymmetric Observation System** provides agents with rich tactical information, with more complete intelligence about enemies than allies. This design philosophy ("Give more complete information about enemies than allies") enables superior threat assessment and target prioritization.
 
 ### Key Metrics
 
-| Metric | v2.1 (313-float) | v2.0 (165-float) |
+| Metric | v2.3 (323-float) | v2.0 (165-float) |
 |--------|------------------|------------------|
-| **Observation Size** | 313 floats | 165 floats |
+| **Observation Size** | 323 floats | 165 floats |
 | **Allied Features** | 12 per unit | N/A (mixed) |
 | **Enemy Features** | 22 per unit | N/A (mixed) |
 | **Valid Target Features** | 8 per slot | 9 per slot |
@@ -59,13 +59,13 @@ The **313-Float Asymmetric Observation System** provides agents with rich tactic
 
 ---
 
-## 📊 OBSERVATION ARCHITECTURE v2.1
+## 📊 OBSERVATION ARCHITECTURE v2.3
 
-### Structure Overview (313 Floats)
+### Structure Overview (323 Floats)
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  OBSERVATION VECTOR (313 floats)                         │
+│  OBSERVATION VECTOR (323 floats)                         │
 ├──────────────────────────────────────────────────────────┤
 │  [0:15]    Global context         (15 floats)   +objectives │
 │  [15:37]   Active unit            (22 floats)   MULTIPLE_WEAPONS │
@@ -73,6 +73,8 @@ The **313-Float Asymmetric Observation System** provides agents with rich tactic
 │  [69:141]  Allied units           (72 floats)   NEW! 🆕 │
 │  [141:273] Enemy units            (132 floats)  NEW! 🆕 │
 │  [273:313] Valid targets          (40 floats)   UPDATED │
+│  [314:318] Macro intent target (4 floats)      UPDATED │
+│  [318:323] Macro intent one-hot (5 floats)     NEW     │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -195,6 +197,19 @@ obs[37] = ARMOR_SAVE / 6.0           # Armor save
 - Action 7 → obs[297:305] (target slot 3)
 - Action 8 → obs[305:313] (target slot 4)
 
+#### 7. Macro Intent Target [314:318] - 4 floats ✅ UPDATED
+- target_col_norm
+- target_row_norm
+- target_signal (objective: control_state, unit: hp_ratio, none: 0.0)
+- target_distance_norm (distance / max_range)
+
+#### 8. Macro Intent One-Hot [318:323] - 5 floats ✅ NEW
+- take_objective
+- hold_objective
+- focus_kill
+- screen
+- attrition
+
 **Features per target (8 floats):**
 ```python
 [target_base + 0] = is_valid                        # 1.0 = target exists
@@ -308,11 +323,11 @@ def _calculate_favorite_target(unit):
 
 ---
 
-## 📈 COMPARISON: v2.1 vs v2.0
+## 📈 COMPARISON: v2.3 vs v2.0
 
 ### Observation Size
 
-| Component | v2.1 (313) | v2.0 (165) | Change |
+| Component | v2.3 (323) | v2.0 (165) | Change |
 |-----------|------------|------------|--------|
 | Global context | 15 | 10 | ✅ +objectives |
 | Active unit | 22 | 8 | ✅ MULTIPLE_WEAPONS |
@@ -321,7 +336,7 @@ def _calculate_favorite_target(unit):
 | Enemy units | 132 | - | 🆕 New |
 | Nearby units | - | 70 | ❌ Removed |
 | Valid targets | 40 | 45 | ✅ Simplified |
-| **TOTAL** | **313** | **165** | **+148** |
+| **TOTAL** | **323** | **165** | **+158** |
 
 ### Key Improvements
 
@@ -375,10 +390,10 @@ model = MaskablePPO(
 )
 ```
 
-**Network Size:** 313 inputs → 320 → 320 → 12 outputs
+**Network Size:** 323 inputs → 320 → 320 → 12 outputs
 
 **Why 320×320?**
-- Input: 313 floats → 320 allows feature expansion
+- Input: 323 floats → 320 hidden layers (fixed width)
 - Compression ratio: 1.08x (efficient for learning)
 - Total params: ~100K (fast training, CPU optimal)
 - Proven effective for tactical games
@@ -410,10 +425,10 @@ model = MaskablePPO(
 
 ### Breaking Changes
 
-**Observation size:** 165 → 313 floats
+**Observation size:** 165 → 323 floats
 
 **Changes required:**
-1. ✅ Update `training_config.json` obs_size to 313 (all configs)
+1. ✅ Update `training_config.json` obs_size to 323 (all configs)
 2. ✅ Archive or delete old 165-float models
 3. ✅ Retrain all agents with `--new` flag
 4. ✅ Update network architecture to 320×320
@@ -422,7 +437,7 @@ model = MaskablePPO(
 ### Migration Checklist
 
 ```bash
-# 1. Verify 313-float observation system
+# 1. Verify 323-float observation system
 python -c "
 from engine.w40k_engine import W40KEngine
 from config_loader import get_config_loader
@@ -442,15 +457,15 @@ engine = W40KEngine(
 )
 
 obs, info = engine.reset()
-assert obs.shape == (313,), f'Shape mismatch: {obs.shape}'
-print('✅ 313-float asymmetric observation verified!')
+assert obs.shape == (323,), f'Shape mismatch: {obs.shape}'
+print('✅ 323-float asymmetric observation verified!')
 print(f'   Observation shape: {obs.shape}')
 print(f'   Non-zero features: {(obs != 0).sum()}')
 "
 
 # 2. Archive old models (optional)
 mkdir -p ai/models/archive_165float_v2.0
-cp ai/models/current/*.zip ai/models/archive_165float_v2.0/
+cp ai/models/*/model_*.zip ai/models/archive_165float_v2.0/
 
 # 3. Train new models
 python ai/train.py \
@@ -556,8 +571,8 @@ if "Swarm" in attack_pref:
 
 **Test Results:**
 ```
-✅ 313-float asymmetric observation verified!
-   Observation shape: (313,)
+✅ 323-float asymmetric observation verified!
+   Observation shape: (323,)
    Non-zero features: (varies)
 ```
 
@@ -582,7 +597,7 @@ engine = W40KEngine(
 )
 
 obs, info = engine.reset()
-assert obs.shape == (313,), f'Shape mismatch: {obs.shape}'
+assert obs.shape == (323,), f'Shape mismatch: {obs.shape}'
 print('✅ v2.1 implementation verified!')
 "
 ```
@@ -593,7 +608,7 @@ print('✅ v2.1 implementation verified!')
 
 **v2.1 Asymmetric Observation System** represents a significant evolution:
 
-- ✅ **Richer intelligence** - 313 floats vs 165
+- ✅ **Richer intelligence** - 323 floats vs 165
 - ✅ **Temporal awareness** - movement_direction feature
 - ✅ **Combat accuracy** - W40K dice mechanics
 - ✅ **Asymmetric design** - More enemy intel than ally
@@ -623,7 +638,7 @@ print('✅ v2.1 implementation verified!')
 - **Temporal in one float** — `movement_direction` replaces frame stacking and keeps the observation Markovian while still encoding recent behavior. Very efficient.
 - **Valid targets as action scaffolding** — Direct action–observation mapping (action 4 → slot 0) speeds up learning; removing it would likely cost hundreds of episodes.
 - **W40K semantics** — `combat_mix_score` and `favorite_target` encode domain knowledge (dice, unit types) instead of raw stats; the network gets actionable signals.
-- **Fixed layout** — 313 floats, fixed slots for allies/enemies/targets: simple for the policy, no variable-length handling.
+- **Fixed layout** — 323 floats, fixed slots for allies/enemies/targets: simple for the policy, no variable-length handling.
 
 **Trade-offs and limits:**
 - **Cost of rich enemy features** — Features 14–16 (visibility_to_allies, combined_friendly_threat, melee_charge_preference) are expensive (LoS, danger, pathfinding). The Observation_fix1.md pre-compute LoS plan addresses the main bottleneck; feature 16 can be capped or cached if needed.
@@ -648,7 +663,7 @@ print('✅ v2.1 implementation verified!')
 - Active unit: MULTIPLE_WEAPONS (RNG_WEAPONS[0..2], CC_WEAPONS[0..1])
 
 **Changed:**
-- Observation size: 165 → 313 floats
+- Observation size: 165 → 323 floats
 - Valid targets: 9 features → 8 features (simplified)
 - Network architecture: 256×256 → 320×320
 - Nearby units split into asymmetric ally/enemy sections

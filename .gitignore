@@ -76,6 +76,7 @@ ai/model.zip
 ai/models/
 ai/models/current/
 ai/models/backups/
+ai/models/**/
 model_backup_*.zip
 *.pkl
 *.h5

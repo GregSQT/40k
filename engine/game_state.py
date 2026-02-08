@@ -172,6 +172,22 @@ class GameStateManager:
                 wall_hexes = require_key(scenario_data, "wall_hexes")
                 wall_hex_set = {(int(col), int(row)) for col, row in wall_hexes}
             
+            from config_loader import get_config_loader
+            config_loader = get_config_loader()
+            board_config = config_loader.get_board_config()
+            board_spec = board_config["default"] if "default" in board_config else board_config
+            board_cols = require_key(board_spec, "cols")
+            board_rows = require_key(board_spec, "rows")
+            if board_cols <= 0 or board_rows <= 0:
+                raise ValueError(f"Invalid board dimensions: cols={board_cols}, rows={board_rows}")
+
+            def _is_valid_deploy_hex(col: int, row: int) -> bool:
+                if col < 0 or col >= board_cols or row < 0 or row >= board_rows:
+                    return False
+                if row == board_rows - 1 and (col % 2) == 1:
+                    return False
+                return True
+
             deploy_pools = {}
             if deployment_zone:
                 if deployment_zone != "hammer":
@@ -203,6 +219,7 @@ class GameStateManager:
                         (col, row)
                         for col in range(col_min, col_max + 1)
                         for row in range(row_min, row_max + 1)
+                        if _is_valid_deploy_hex(col, row)
                     }
                     return pool
                 
@@ -253,6 +270,10 @@ class GameStateManager:
                                 f"Unit {unit_data.get('id')} outside deployment zone '{deployment_zone}' "
                                 f"for player {unit_player}: ({chosen_col},{chosen_row})"
                             )
+                    if deployment_zone and not _is_valid_deploy_hex(chosen_col, chosen_row):
+                        raise ValueError(
+                            f"Unit {unit_data.get('id')} on invalid deploy hex: ({chosen_col},{chosen_row})"
+                        )
                     if wall_hex_set and (chosen_col, chosen_row) in wall_hex_set:
                         raise ValueError(
                             f"Unit {unit_data.get('id')} placed on wall hex: ({chosen_col},{chosen_row})"

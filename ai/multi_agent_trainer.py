@@ -1216,8 +1216,8 @@ class MultiAgentTrainer:
 
     def _get_agent_model_path(self, agent_key: str) -> str:
         """Get model file path for specific agent."""
-        base_path = self.config.get_model_path()
-        return base_path.replace('.zip', f'_{agent_key}.zip')
+        models_root = self.config.get_models_root()
+        return os.path.join(models_root, agent_key, f"model_{agent_key}.zip")
 
     def get_training_status(self) -> Dict[str, Any]:
         """Get current training status across all agents."""

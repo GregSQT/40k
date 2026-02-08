@@ -194,7 +194,7 @@ w40k-tactics/
 - **Frontend API Prefix**: Uses `/ai/` prefix for backend communication
 - **Config Centralization**: All configuration in `config/` directory
 - **Event Logging**: Training events in `ai/event_log/`
-- **Model Management**: Models accessed via `get_model_path()`
+- **Model Management**: Models stored in `ai/models/<agent_key>/model_<agent_key>.zip`
 - **Tensorboard Logs**: Training monitoring in `./tensorboard/`
 
 ### Code Quality Standards

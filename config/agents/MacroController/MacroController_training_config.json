@@ -1,10 +1,9 @@
 {
   "default": {
     "type": "################################################### Default ###################################################",
-    "total_episodes": 3000,
+    "total_episodes": 10000,
     "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
     "max_turns_per_episode": 5,
-    "max_steps_per_turn": 200,
     "n_envs": 1,
     "macro_player": 1,
     "callback_params": {
@@ -19,11 +18,11 @@
       "bot_eval_final": 0
     },
     "observation_params": {
-      "obs_size": 314,
+      "obs_size": 323,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Engine obs_size (micro) kept at 314 for W40KEngine.reset(); macro obs is handled by MacroTrainingWrapper."
+      "justification": "Engine obs_size (micro) kept at 323 for W40KEngine.reset(); macro obs is handled by MacroTrainingWrapper."
     },
     "exploration": {
       "initial_epsilon": 0.3,
@@ -54,43 +53,51 @@
     }
   },
   "debug": {
-    "type": "################################################### Debug ###################################################",
-    "total_episodes": 50,
+    "type": "################################################### Default ###################################################",
+    "total_episodes": 10,
+    "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
     "max_turns_per_episode": 5,
-    "max_steps_per_turn": 8,
     "n_envs": 1,
     "macro_player": 1,
     "callback_params": {
-      "checkpoint_save_freq": 5000,
-      "checkpoint_name_prefix": "ppo_debug_checkpoint",
+      "checkpoint_save_freq": 50000,
+      "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "n_eval_episodes": 2,
-      "bot_eval_freq": 20,
+      "n_eval_episodes": 5,
+      "bot_eval_freq": 100000,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 3,
-      "bot_eval_final": 20
+      "bot_eval_intermediate": 10,
+      "bot_eval_final": 0
     },
     "observation_params": {
-      "obs_size": 314,
+      "obs_size": 323,
       "perception_radius": 25,
       "max_nearby_units": 10,
       "max_valid_targets": 5,
-      "justification": "Engine obs_size (micro) kept at 314 for W40KEngine.reset(); macro obs is handled by MacroTrainingWrapper."
+      "justification": "Engine obs_size (micro) kept at 323 for W40KEngine.reset(); macro obs is handled by MacroTrainingWrapper."
+    },
+    "exploration": {
+      "initial_epsilon": 0.3,
+      "final_epsilon": 0.05,
+      "exploration_fraction": 0.3
     },
     "step_log_buffer_size": 200,
     "model_params": {
       "policy": "MlpPolicy",
       "learning_rate": 0.0001,
-      "n_steps": 64,
-      "batch_size": 64,
-      "n_epochs": 4,
+      "n_steps": 256,
+      "batch_size": 256,
+      "n_epochs": 10,
       "gamma": 0.95,
-      "gae_lambda": 0.9,
+      "gae_lambda": 0.95,
       "clip_range": 0.2,
-      "ent_coef": 0.1,
-      "vf_coef": 0.5,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": 0.10,
+      "vf_coef": 1.0,
       "max_grad_norm": 0.5,
+      "target_kl": null,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [320, 320]

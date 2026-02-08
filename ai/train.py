@@ -60,6 +60,10 @@ from ai.multi_agent_trainer import MultiAgentTrainer
 from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
+
+def build_agent_model_path(models_root: str, agent_key: str) -> str:
+    """Build model path from models root and agent key."""
+    return os.path.join(models_root, agent_key, f"model_{agent_key}.zip")
 import time  # Add time import for StepLogger timestamps
 from tqdm import tqdm  # For episode progress bar
 import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
@@ -67,6 +71,7 @@ import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
 # Environment wrappers (extracted to ai/env_wrappers.py)
 from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper
 from ai.macro_training_env import MacroTrainingWrapper, MacroVsBotWrapper
+
 
 # Step logger (extracted to ai/step_logger.py)
 from ai.step_logger import StepLogger
@@ -268,12 +273,13 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         print("⚠️ Action masking not available")
     
     # Use auto-detected agent key for model path
+    models_root = config.get_models_root()
     if controlled_agent_key:
-        model_path = config.get_model_path().replace('.zip', f'_{controlled_agent_key}.zip')
+        model_path = build_agent_model_path(models_root, controlled_agent_key)
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
         print(f"📝 Using agent-specific model path: {model_path}")
     else:
-        model_path = config.get_model_path()
-        print(f"📝 Using generic model path: {model_path}")
+        raise ValueError("controlled_agent_key is required to build model path")
     
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
@@ -511,7 +517,11 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             env = Monitor(selfplay_env)
     
     # Agent-specific model path
-    model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
+    models_root = config.get_models_root()
+    model_path = build_agent_model_path(models_root, agent_key)
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
     
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
@@ -692,10 +702,8 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
 
     macro_player = require_key(training_config, "macro_player")
 
-    model_path_template = config.get_model_path()
-    if not model_path_template.endswith(".zip"):
-        raise ValueError(f"Invalid model_file path for macro training: {model_path_template}")
-    model_path_template = model_path_template.replace(".zip", "_{model_key}.zip")
+    models_root = config.get_models_root()
+    model_path_template = os.path.join(models_root, "{model_key}", "model_{model_key}.zip")
 
     macro_env = MacroTrainingWrapper(
         base_env=base_env,
@@ -712,7 +720,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
     masked_env = ActionMasker(macro_env, mask_fn)
     env = Monitor(masked_env)
 
-    model_path = config.get_model_path().replace(".zip", f"_{agent_key}.zip")
+    model_path = build_agent_model_path(models_root, agent_key)
 
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
@@ -773,7 +781,8 @@ def _build_macro_eval_env(config, training_config_name, rewards_config_name, age
         base_env.step_logger = step_logger
     training_config = config.load_agent_training_config(agent_key, training_config_name)
     macro_player = require_key(training_config, "macro_player")
-    model_path_template = config.get_model_path().replace(".zip", "_{model_key}.zip")
+    models_root = config.get_models_root()
+    model_path_template = os.path.join(models_root, "{model_key}", "model_{model_key}.zip")
     if bot is None:
         return MacroTrainingWrapper(
             base_env=base_env,
@@ -918,7 +927,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
     
     # Get model path
-    model_path = config.get_model_path().replace('.zip', f'_{agent_key}.zip')
+    models_root = config.get_models_root()
+    model_path = build_agent_model_path(models_root, agent_key)
     
     # Create initial model with first scenario (or load if append_training)
     print(f"📦 {'Loading existing model' if append_training else 'Creating initial model'} with first scenario...")
@@ -1258,11 +1268,15 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             raise KeyError(f"{training_config_name} training config missing required 'total_episodes'")
         if "max_turns_per_episode" not in training_config:
             raise KeyError(f"{training_config_name} training config missing required 'max_turns_per_episode'")
-        if "max_steps_per_turn" not in training_config:
-            raise KeyError(f"{training_config_name} training config missing required 'max_steps_per_turn'")
-        
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        game_config = config_loader.get_game_config()
+        game_rules = require_key(game_config, "game_rules")
+        if "max_steps_per_turn" not in game_rules:
+            raise KeyError("game_config missing required 'game_rules.max_steps_per_turn'")
+
         max_episodes = training_config["total_episodes"]
-        max_steps_per_episode = training_config["max_turns_per_episode"] * training_config["max_steps_per_turn"]
+        max_steps_per_episode = training_config["max_turns_per_episode"] * require_key(game_rules, "max_steps_per_turn")
         expected_timesteps = max_episodes * max_steps_per_episode
         
         # Use overrides for rotation mode
@@ -1398,10 +1412,14 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             # Calculate timesteps based on required config values - NO DEFAULTS ALLOWED
             if "max_turns_per_episode" not in training_config:
                 raise KeyError(f"Training config missing required 'max_turns_per_episode' field")
-            if "max_steps_per_turn" not in training_config:
-                raise KeyError(f"Training config missing required 'max_steps_per_turn' field")
+            from config_loader import get_config_loader
+            config_loader = get_config_loader()
+            game_config = config_loader.get_game_config()
+            game_rules = require_key(game_config, "game_rules")
+            if "max_steps_per_turn" not in game_rules:
+                raise KeyError("game_config missing required 'game_rules.max_steps_per_turn'")
             max_turns_per_episode = training_config["max_turns_per_episode"]
-            max_steps_per_turn = training_config["max_steps_per_turn"]
+            max_steps_per_turn = require_key(game_rules, "max_steps_per_turn")
             
             # CRITICAL FIX: Episode count controlled by EpisodeTerminationCallback, not timesteps
             # Use 5x multiplier to ensure timestep limit never stops training early
@@ -1756,8 +1774,8 @@ def main():
                 if args.scenario in ("all", "self", "bot"):
                     raise ValueError("MacroController test-only does not support scenario rotation modes")
 
-                model_path = config.get_model_path()
-                model_path = model_path.replace('.zip', f'_{args.agent}.zip')
+                models_root = config.get_models_root()
+                model_path = build_agent_model_path(models_root, args.agent)
                 if not os.path.exists(model_path):
                     print(f"❌ Model not found: {model_path}")
                     return 1
@@ -1857,8 +1875,8 @@ def main():
                 return 0
             
             # Load existing model
-            model_path = config.get_model_path()
-            model_path = model_path.replace('.zip', f'_{args.agent}.zip')
+            models_root = config.get_models_root()
+            model_path = build_agent_model_path(models_root, args.agent)
             
             if not os.path.exists(model_path):
                 print(f"❌ Model not found: {model_path}")

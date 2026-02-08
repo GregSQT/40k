@@ -114,7 +114,8 @@ def generate_steplog_and_replay(config, args):
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Specified model not found: {model_path}")
         else:
-            model_path = config.get_model_path()
+            models_root = config.get_models_root()
+            model_path = os.path.join(models_root, args.agent, f"model_{args.agent}.zip")
             if not os.path.exists(model_path):
                 # List available models for user guidance
                 models_dir = os.path.dirname(model_path)

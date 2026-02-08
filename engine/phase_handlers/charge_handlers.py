@@ -351,9 +351,19 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
 
     is_gym_training = config_gym_mode or state_gym_mode
 
+    # Determine PvE AI context (non-gym) for auto charge execution
+    if "pve_mode" not in config:
+        config_pve_mode = False
+    else:
+        config_pve_mode = config["pve_mode"]
+    if not isinstance(config_pve_mode, bool):
+        raise ValueError(f"pve_mode must be boolean (got {type(config_pve_mode).__name__})")
+    current_player = require_key(game_state, "current_player")
+    is_pve_ai = config_pve_mode and current_player == 2
+
     # AI_TURN.md COMPLIANCE: In gym training, AI executes charge directly without waiting_for_player
-    # AI_TURN.md lines 1375-1402: AI selects target, builds destinations, selects destination, executes charge - all in one sequence
-    if is_gym_training and isinstance(execution_result, tuple) and execution_result[0]:
+    # PvE AI uses the same auto-execution path to avoid waiting for human input.
+    if (is_gym_training or is_pve_ai) and isinstance(execution_result, tuple) and execution_result[0]:
         # AI_TURN.md COMPLIANCE: Direct field access
         if "waiting_for_player" not in execution_result[1]:
             waiting_for_player = False
@@ -366,11 +376,23 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             valid_targets = execution_result[1]["valid_targets"]
 
             if valid_targets:
-                # AI_TURN.md: AI selects best target automatically and executes charge directly
+                # AI_TURN.md: AI selects target automatically and executes charge directly
                 # Do NOT return waiting_for_player=True - execute charge automatically
-                # Select best target (first target for now, can be improved with strategic selection)
-                selected_target = valid_targets[0]
+                if is_pve_ai:
+                    selected_target = _ai_select_charge_target_pve(game_state, unit, valid_targets)
+                else:
+                    selected_target = valid_targets[0]
+                if selected_target is None:
+                    return _handle_skip_action(game_state, unit, had_valid_destinations=False)
                 target_id = selected_target["id"]
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    add_debug_file_log(
+                        game_state,
+                        f"[PVE CHARGE AUTO] E{episode} T{turn} unit_id={unit['id']} target_id={target_id}"
+                    )
                 
                 # Execute target selection handler which will roll 2d6, build destinations, and execute charge
                 # This follows AI_TURN.md: roll → select target → build destinations → select destination → execute
