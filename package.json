@@ -14,12 +14,21 @@
     "pixi.js": "^8.0.0",
     "react-router-dom": "^6.8.0"
   },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.8"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "export:units": "ts-node scripts/exportUnits.ts > config/unit_definitions.json",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "check": "biome check .",
+    "check:fix": "biome check --write ."
   },
   "eslintConfig": {
     "extends": ["react-app", "react-app/jest"]

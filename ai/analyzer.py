@@ -788,8 +788,29 @@ def parse_step_log(filepath: str) -> Dict:
         unit_rules = require_key(unit_data, "UNIT_RULES")
         unit_rules_by_type[unit_type] = {require_key(rule, "ruleId") for rule in unit_rules}
 
+    # Build rule_id -> set of unit_types that have this rule (for validity check in output)
+    rule_to_units: Dict[str, Set[str]] = {}
+    for ut, rules in unit_rules_by_type.items():
+        for rid in rules:
+            rule_to_units.setdefault(rid, set()).add(ut)
+
+    # Build weapon_rule -> set of "weapon_name (unit_type)" that have this rule (for validity)
+    # Rule format in config: "ASSAULT", "PISTOL", "RAPID_FIRE:1" -> base = split(":")[0]
+    weapon_rule_to_weapons: Dict[str, Set[str]] = {}
+    for unit_type, weapons_list in unit_weapons_cache.items():
+        for winfo in weapons_list:
+            wname = require_key(winfo, "name")
+            rules_list = require_key(winfo, "rules")
+            weapon_key = f"{wname} ({unit_type})"
+            for r in rules_list:
+                rule_base = str(r).split(":")[0] if ":" in str(r) else str(r)
+                weapon_rule_to_weapons.setdefault(rule_base, set()).add(weapon_key)
+
     # Statistics structure
     stats = {
+        'rule_to_units': rule_to_units,  # rule_id -> set of unit_types (for validity)
+        'weapon_rule_to_weapons': weapon_rule_to_weapons,  # rule -> set of "weapon (unit)"
+        'weapon_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule, weapon_key) -> {1,2}
         'total_episodes': 0,
         'total_actions': 0,
         'episode_lengths': [],
@@ -875,7 +896,7 @@ def parse_step_log(filepath: str) -> Dict:
             1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
             2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0}
         },
-        'charge_after_advance_used': {1: 0, 2: 0},
+        'special_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule_id, unit_type) -> {1: count, 2: count}
         'move_adjacent_before_non_flee': {1: 0, 2: 0},
         'move_distance_over_limit': {
             'move': {1: 0, 2: 0},
@@ -1092,6 +1113,7 @@ def parse_step_log(filepath: str) -> Dict:
                 combi_profile_usage = {}
                 combi_conflicts_seen = set()
                 unit_deaths = []  # Reset deaths tracking for new episode
+                phase_activation_seen = {}  # Reset per-episode: (turn, phase, player) -> seen unit_ids
                 stats['objective_control_history'][current_episode_num] = []
                 last_objective_snapshot = None
                 seen_turn_player = set()
@@ -1557,6 +1579,7 @@ def parse_step_log(filepath: str) -> Dict:
                             shooter_unit_type = require_key(unit_types, shooter_id)
                             shooter_player_from_types = require_key(unit_player, shooter_id)
                             
+                            weapon_info_matched = None
                             if weapon_match:
                                 weapon_display_name = weapon_match.group(1)
                                 weapon_name_lower = weapon_display_name.lower()
@@ -1568,6 +1591,7 @@ def parse_step_log(filepath: str) -> Dict:
                                         is_pistol = weapon_info['is_pistol']
                                         weapon_range = weapon_info['range']
                                         weapon_found = True
+                                        weapon_info_matched = weapon_info
                                         break
                                 
                                 # CRITICAL: Detect unit ID/type mismatch
@@ -1770,6 +1794,20 @@ def parse_step_log(filepath: str) -> Dict:
                             # Track shots after advance
                             if shooter_id in units_advanced:
                                 stats['shots_after_advance'][player] += 1
+
+                            # Track weapon rule usage (ASSAULT, PISTOL)
+                            if weapon_found and weapon_info_matched and target_pos:
+                                weapon_rules_list = require_key(weapon_info_matched, "rules")
+                                weapon_key = f"{weapon_display_name} ({shooter_unit_type})"
+                                shooter_pl = require_key(unit_player, shooter_id)
+                                pl_int = int(shooter_pl) if shooter_pl is not None else player
+                                distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
+                                if shooter_id in units_advanced and "ASSAULT" in weapon_rules_list:
+                                    key = ("ASSAULT", weapon_key)
+                                    stats['weapon_rule_usage'][key][pl_int] += 1
+                                if distance == 1 and "PISTOL" in weapon_rules_list:
+                                    key = ("PISTOL", weapon_key)
+                                    stats['weapon_rule_usage'][key][pl_int] += 1
 
                             # Target priority analysis
                             stats['target_priority'][player]['total_shots'] += 1
@@ -2254,7 +2292,8 @@ def parse_step_log(filepath: str) -> Dict:
                                 charge_unit_type = require_key(unit_types, charge_unit_id)
                                 unit_rules = require_key(unit_rules_by_type, charge_unit_type)
                                 if "charge_after_advance" in unit_rules:
-                                    stats['charge_after_advance_used'][player] += 1
+                                    key = ("charge_after_advance", charge_unit_type)
+                                    stats['special_rule_usage'][key][player] += 1
                                 else:
                                     stats['charge_invalid'][player]['advanced'] += 1
                                     if stats['first_error_lines']['charge_invalid'][player] is None:
@@ -3701,6 +3740,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         "1.3": "CHARGE ERRORS",
         "1.4": "FIGHT ERRORS",
         "1.5": "ACTION PHASE ACCURACY",
+        "1.6": "DOUBLE-ACTIVATION PAR PHASE",
+        "1.7": "SPECIAL RULES USAGE",
+        "1.8": "WEAPONS RULES USAGE",
         "2.1": "DEAD UNITS INTERACTIONS",
         "2.2": "POSITION / LOG COHERENCE",
         "2.3": "DMG ISSUES",
@@ -4323,6 +4365,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("  1.3 CHARGE ERRORS")
     log_print("  1.4 FIGHT ERRORS")
     log_print("  1.5 ACTION PHASE ACCURACY")
+    log_print("  1.6 DOUBLE-ACTIVATION PAR PHASE")
+    log_print("  1.7 SPECIAL RULES USAGE")
+    log_print("  1.8 WEAPONS RULES USAGE")
     log_print("  2.1 DEAD UNITS INTERACTIONS")
     log_print("  2.2 POSITION / LOG COHERENCE")
     log_print("  2.3 DMG ISSUES")
@@ -4526,8 +4571,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_charge_fled = stats['charge_invalid'][1]['fled']
     bot_charge_fled = stats['charge_invalid'][2]['fled']
     log_print(f"Charges after fled:           {agent_charge_fled:6d}           {bot_charge_fled:6d}")
-    agent_charge_adv_used = stats['charge_after_advance_used'][1]
-    bot_charge_adv_used = stats['charge_after_advance_used'][2]
+    agent_charge_adv_used = sum(stats['special_rule_usage'][k][1] for k in stats['special_rule_usage'] if k[0] == "charge_after_advance")
+    bot_charge_adv_used = sum(stats['special_rule_usage'][k][2] for k in stats['special_rule_usage'] if k[0] == "charge_after_advance")
     log_print(f"Charge after advance (rule):  {agent_charge_adv_used:6d}           {bot_charge_adv_used:6d}")
     agent_charge_adv = stats['charge_invalid'][1]['advanced']
     bot_charge_adv = stats['charge_invalid'][2]['advanced']
@@ -4602,6 +4647,65 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         mismatch = require_key(stats, "first_error_lines")["action_phase_mismatch"].get(action_key)
         if mismatch:
             log_print(f"  First occurrence (Episode {mismatch['episode']}): {mismatch['line']}")
+
+    # 1.6 Double-activation par phase
+    active_debug_section = "1.6"
+    log_print("\n" + "-" * 80)
+    log_print(f"1.6 {debug_sections['1.6']}")
+    log_print("-" * 80)
+    double_activation_by_phase = require_key(stats, "double_activation_by_phase")
+    double_activation_total = sum(double_activation_by_phase.values())
+    if double_activation_total > 0:
+        log_print(f"{'Phase':<12} {'Count':>10}")
+        log_print("-" * 80)
+        for phase_key in ("MOVE", "SHOOT", "CHARGE", "FIGHT"):
+            count = double_activation_by_phase.get(phase_key, 0)
+            if count > 0:
+                log_print(f"{phase_key:<12} {count:10d}")
+                first_err = require_key(stats, "first_error_lines")["double_activation_by_phase"].get(phase_key)
+                if first_err:
+                    log_print(f"  First occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    else:
+        log_print("No double-activation detected.")
+
+    # SPECIAL RULES USAGE (by rule and unit type)
+    active_debug_section = "1.7"
+    log_print("\n" + "-" * 80)
+    log_print(f"1.7 SPECIAL RULES USAGE      {'Unit':<22} {'P1':>10} {'P2':>10} {'Validité':>10}")
+    log_print("-" * 80)
+    special_rule_usage = stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
+    rule_to_units = stats.get('rule_to_units', {})
+    usage_keys = sorted(special_rule_usage.keys())
+    if usage_keys:
+        for (rule_id, unit_type) in usage_keys:
+            counts = special_rule_usage[(rule_id, unit_type)]
+            p1 = counts.get(1, 0)
+            p2 = counts.get(2, 0)
+            has_rule = unit_type in rule_to_units.get(rule_id, set())
+            validite = "OK" if has_rule else "INVALID"
+            log_print(f"{rule_id:<28} {unit_type:<22} {p1:10d} {p2:10d} {validite:>10}")
+    else:
+        log_print("No special rule usage recorded.")
+
+    # WEAPONS RULES USAGE (by rule and weapon+unit)
+    active_debug_section = "1.8"
+    log_print("\n" + "-" * 80)
+    log_print(f"1.8 WEAPONS RULES USAGE      {'Weapon':<28} {'P1':>10} {'P2':>10} {'Validité':>10}")
+    log_print("-" * 80)
+    weapon_rule_usage = stats.get('weapon_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
+    weapon_rule_to_weapons = stats.get('weapon_rule_to_weapons', {})
+    wr_usage_keys = sorted(weapon_rule_usage.keys())
+    if wr_usage_keys:
+        for (rule_name, weapon_key) in wr_usage_keys:
+            counts = weapon_rule_usage[(rule_name, weapon_key)]
+            p1 = counts.get(1, 0)
+            p2 = counts.get(2, 0)
+            has_rule = weapon_key in weapon_rule_to_weapons.get(rule_name, set())
+            validite = "OK" if has_rule else "INVALID"
+            rule_display = rule_name.capitalize() if rule_name else rule_name
+            log_print(f"{rule_display:<28} {weapon_key:<28} {p1:10d} {p2:10d} {validite:>10}")
+    else:
+        log_print("No weapon rule usage recorded.")
 
     incomplete_p1 = 0
     incomplete_p2 = 0
@@ -4867,6 +4971,26 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     double_activation_by_phase = require_key(stats, "double_activation_by_phase")
     double_activation_total = sum(double_activation_by_phase.values())
     log_print(f"{summary_icon(double_activation_total > 0)} 1.6 Double-activation par phase : {double_activation_total}")
+    special_rule_usage_total = sum(
+        counts.get(1, 0) + counts.get(2, 0)
+        for counts in stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()
+    )
+    weapon_rule_usage_total = sum(
+        counts.get(1, 0) + counts.get(2, 0)
+        for counts in stats.get('weapon_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()
+    )
+    rule_to_units = stats.get('rule_to_units', {})
+    weapon_rule_to_weapons = stats.get('weapon_rule_to_weapons', {})
+    special_rules_invalid = sum(
+        1 for (rid, ut) in stats.get('special_rule_usage', {}).keys()
+        if ut not in rule_to_units.get(rid, set())
+    )
+    weapon_rules_invalid = sum(
+        1 for (rname, wkey) in stats.get('weapon_rule_usage', {}).keys()
+        if wkey not in weapon_rule_to_weapons.get(rname, set())
+    )
+    log_print(f"{summary_icon(special_rules_invalid > 0)} 1.7 Special rules usage : {special_rule_usage_total} utilisations" + (f" ({special_rules_invalid} invalid)" if special_rules_invalid > 0 else ""))
+    log_print(f"{summary_icon(weapon_rules_invalid > 0)} 1.8 Weapon rules usage : {weapon_rule_usage_total} utilisations" + (f" ({weapon_rules_invalid} invalid)" if weapon_rules_invalid > 0 else ""))
     dmg_issues_total = (
         stats['damage_missing_unit_hp'][1] + stats['damage_missing_unit_hp'][2] +
         stats['damage_exceeds_hp'][1] + stats['damage_exceeds_hp'][2]
@@ -4887,9 +5011,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if max_length_episode is not None and avg_length is not None:
         lengths_list = require_key(stats, 'episode_lengths')
         min_length_episode, min_length = min(lengths_list, key=lambda x: x[1])
-        log_print(f"{summary_icon(actions_episode_warn)} 2.41 Episodes actions : Min: {min_length} (E{min_length_episode}) - Avg: {avg_length:.1f} - Max: {max_length} (E{max_length_episode})")
+        log_print(f"{summary_icon(actions_episode_warn)} 2.4 Episodes actions : Min: {min_length} (E{min_length_episode}) - Avg: {avg_length:.1f} - Max: {max_length} (E{max_length_episode})")
     else:
-        log_print(f"{summary_icon(False)} 2.41 Episodes actions : N/A")
+        log_print(f"{summary_icon(False)} 2.4 Episodes actions : N/A")
     episodes_ending_total = len(stats['episodes_without_end']) + len(stats['episodes_without_method'])
     log_print(f"{summary_icon(episodes_ending_total > 0)} 2.5 Episode ending : {episodes_ending_total}")
     log_print(f"{summary_icon(len(missing_samples) > 0)} 2.6 Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")

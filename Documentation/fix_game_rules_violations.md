@@ -7,7 +7,7 @@
 
 2. Analyser les résultats dans cet ordre de priorité :
    - **FATAL ERRORS** (ValueError, exceptions) → STOP, fix immédiat
-   - **Résumé de `ai/analyzer.py`** : compter les violations de règles (par catégorie)
+   - **Résumé de `ai/analyzer.py`** : compter les violations de règles (par catégorie) — voir [ANALYZER.md](ANALYZER.md)
    - **Patterns récurrents** : si >50% des violations sont du même type → investiguer ce type en priorité
    - **Priorité des violations** :
      1. **UNIT POSITION COLLISIONS** (2+ unités sur même hex) → CRITIQUE
