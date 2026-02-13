@@ -35,6 +35,7 @@ class PvEController:
         self.ai_model = None
         self.macro_model = None
         self.micro_models = {}
+        self.micro_model_paths = {}
         self.macro_model_key = None
         self.unit_registry = unit_registry
         self.quiet = config.get("quiet", True)
@@ -107,6 +108,7 @@ class PvEController:
                     micro_model_keys.add(self.unit_registry.get_model_key(unit_type))
             
             self.micro_models = {}
+            self.micro_model_paths = {}
             for model_key in micro_model_keys:
                 model_path = os.path.join(
                     models_root,
@@ -119,6 +121,7 @@ class PvEController:
                 if not os.path.exists(model_path):
                     raise FileNotFoundError(f"Micro model required for PvE mode not found: {model_path}")
                 self.micro_models[model_key] = MaskablePPO.load(model_path, env=masked_env)
+                self.micro_model_paths[model_key] = model_path
             
             if not self.quiet:
                 print(f"PvE: Loaded macro model: {self.macro_model_key}")
@@ -157,8 +160,9 @@ class PvEController:
             self._set_macro_intent_target(
                 INTENT_ATTRITION, int(attrition_index), macro_obs, game_state
             )
-            micro_model = self._get_micro_model_for_unit_id(selected_unit_id, game_state)
+            micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(selected_unit_id, game_state)
             micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
+            micro_obs = self._normalize_obs_for_inference(micro_obs, micro_model_path)
             micro_prediction = micro_model.predict(micro_obs, action_masks=action_mask, deterministic=True)
         else:
             macro_obs = engine.build_macro_observation()
@@ -186,9 +190,9 @@ class PvEController:
                 macro_action_int, macro_obs, max_units, max_objectives, detail_max, eligible_mask, engine
             )
             self._set_macro_intent_target(intent_id, detail_index, macro_obs, game_state)
-            micro_model = self._get_micro_model_for_unit_id(selected_unit_id, game_state)
+            micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(selected_unit_id, game_state)
             micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
-            
+            micro_obs = self._normalize_obs_for_inference(micro_obs, micro_model_path)
             action_mask, eligible_units = engine.action_decoder.get_action_mask_for_unit(game_state, str(selected_unit_id))
             micro_prediction = micro_model.predict(micro_obs, action_masks=action_mask, deterministic=True)
         if isinstance(micro_prediction, tuple) and len(micro_prediction) >= 1:
@@ -732,6 +736,11 @@ class PvEController:
 
     def _get_micro_model_for_unit_id(self, unit_id: str, game_state: Dict[str, Any]):
         """Get micro model for a specific unit id."""
+        model, _ = self._get_micro_model_and_path_for_unit_id(unit_id, game_state)
+        return model
+
+    def _get_micro_model_and_path_for_unit_id(self, unit_id: str, game_state: Dict[str, Any]):
+        """Get micro model and its path for a specific unit id (for VecNormalize inference)."""
         unit_by_id = {str(u["id"]): u for u in game_state["units"]}
         unit = unit_by_id.get(str(unit_id))
         if not unit:
@@ -742,7 +751,18 @@ class PvEController:
         model_key = self.unit_registry.get_model_key(unit_type)
         if model_key not in self.micro_models:
             raise KeyError(f"Micro model not loaded for model_key={model_key}")
-        return self.micro_models[model_key]
+        model_path = self.micro_model_paths.get(model_key, "")
+        return self.micro_models[model_key], model_path
+
+    def _normalize_obs_for_inference(self, obs: np.ndarray, model_path: str) -> np.ndarray:
+        """Normalize observation for inference if model was trained with VecNormalize."""
+        if not model_path or not hasattr(self, "micro_model_paths"):
+            return obs
+        try:
+            from ai.vec_normalize_utils import normalize_observation_for_inference
+            return normalize_observation_for_inference(obs, model_path)
+        except Exception:
+            return obs
     
     def ai_select_unit(self, eligible_units: List[Dict[str, Any]], action_type: str) -> str:
         """AI selects which unit to activate - NO MODEL CALLS to prevent recursion."""

@@ -1,6 +1,5 @@
 {
   "description": "config/agents/SpaceMarine_Infantry_Troop_RangedSwarm/SpaceMarine_Infantry_Troop_RangedSwarm_rewards_config.json",
-
   "SpaceMarine_Infantry_Troop_RangedSwarm": {
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
@@ -24,8 +23,8 @@
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 50.0,
-      "lose": -50.0,
+      "win": 50,
+      "lose": -50,
       "draw": 0.0
     },
     "objective_rewards": {

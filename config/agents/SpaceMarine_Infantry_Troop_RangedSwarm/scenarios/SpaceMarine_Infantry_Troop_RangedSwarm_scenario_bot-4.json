@@ -10,7 +10,7 @@
       {"id": 6, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
       {"id": 7, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 7, "row": 14},
       {"id": 8, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 14, "row": 16},
-      {"id": 9, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 14, "row": 16}
+      {"id": 9, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 14, "row": 18}
       
     ],
     "wall_hexes": [

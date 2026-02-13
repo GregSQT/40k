@@ -52,8 +52,56 @@ MASKABLE_PPO_AVAILABLE = True
 
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback, CallbackList
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv  # ✓ CHANGE 1: Add vectorization support
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize
 from stable_baselines3.common.utils import get_schedule_fn  # Convert float hyperparameters to callable schedules
+
+
+def _build_training_bots_from_config(training_config):
+    """Build weighted bot list from training_config.bot_training.ratios.
+    
+    Config format:
+      bot_training:
+        ratios: {random: 0.4, greedy: 0.3, defensive: 0.3}  # must sum to 1
+        greedy_randomness: 0.10
+        defensive_randomness: 0.10
+    
+    Returns list of bot instances for random.choice() selection.
+    """
+    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+    
+    cfg = training_config.get("bot_training", {})
+    ratios = cfg.get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+    greedy_r = float(cfg.get("greedy_randomness", 0.10))
+    defensive_r = float(cfg.get("defensive_randomness", 0.10))
+    
+    total = 10
+    bots = []
+    for _ in range(max(1, round(ratios.get("random", 0.2) * total))):
+        bots.append(RandomBot())
+    for _ in range(max(1, round(ratios.get("greedy", 0.4) * total))):
+        bots.append(GreedyBot(randomness=greedy_r))
+    for _ in range(max(1, round(ratios.get("defensive", 0.4) * total))):
+        bots.append(DefensiveBot(randomness=defensive_r))
+    
+    return bots
+
+
+def _make_learning_rate_schedule(lr_config):
+    """Convert learning_rate config to callable for PPO. Supports:
+    - float: constant learning rate
+    - dict: {"initial": 0.00015, "final": 0.00005} for linear decay over training
+    SB3 uses progress_remaining: 1 at start, 0 at end."""
+    if isinstance(lr_config, (int, float)):
+        return get_schedule_fn(float(lr_config))
+    if isinstance(lr_config, dict):
+        initial = float(lr_config["initial"])
+        final = float(lr_config["final"])
+        def schedule(progress_remaining):
+            return initial + (final - initial) * (1 - progress_remaining)
+        return schedule
+    raise ValueError(f"learning_rate must be float or dict with initial/final, got {type(lr_config)}")
+
+
 # Multi-agent orchestration imports
 from ai.scenario_manager import ScenarioManager
 from ai.multi_agent_trainer import MultiAgentTrainer
@@ -97,6 +145,7 @@ from ai.training_utils import (
     get_scenario_list_for_phase,
     ensure_scenario
 )
+from ai.vec_normalize_utils import save_vec_normalize, load_vec_normalize, get_vec_normalize_path
 
 from shared.data_validation import require_key
 
@@ -283,7 +332,31 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
 
         # SB3 Required: Monitor wrapped environment
         env = Monitor(selfplay_env)
-    
+
+    # VecNormalize: observations and rewards normalization (optional, configurable)
+    vec_norm_cfg = training_config.get("vec_normalize", {})
+    vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
+    if vec_normalize_enabled:
+        if n_envs == 1:
+            env = DummyVecEnv([lambda: env])
+        model_path_for_vn = build_agent_model_path(config.get_models_root(), controlled_agent_key)
+        vec_norm_loaded = load_vec_normalize(env, model_path_for_vn)
+        if vec_norm_loaded is not None and not new_model:
+            env = vec_norm_loaded
+            env.training = True
+            env.norm_reward = vec_norm_cfg.get("norm_reward", True)
+            print("✅ VecNormalize: loaded stats from checkpoint")
+        else:
+            env = VecNormalize(
+                env,
+                norm_obs=vec_norm_cfg.get("norm_obs", True),
+                norm_reward=vec_norm_cfg.get("norm_reward", True),
+                clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
+                clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
+                gamma=vec_norm_cfg.get("gamma", 0.99),
+            )
+            print("✅ VecNormalize: enabled (obs + reward normalization)")
+
     # Check if action masking is available (works for both vectorized and single env)
     if n_envs == 1:
         if hasattr(base_env, 'get_action_mask'):
@@ -338,6 +411,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         # Update model_params to use specific directory
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
+        if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+            model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
 
         model = MaskablePPO(env=env, **model_params_copy)
         # Properly suppress rollout console output
@@ -359,8 +434,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
             # while preserving the neural network weights learned in Phase 1
             if "learning_rate" in model_params:
-                # Convert to callable schedule function (required by PPO)
-                model.learning_rate = get_schedule_fn(model_params["learning_rate"])
+                model.learning_rate = _make_learning_rate_schedule(model_params["learning_rate"])
             if "ent_coef" in model_params:
                 model.ent_coef = model_params["ent_coef"]
             if "clip_range" in model_params:
@@ -406,6 +480,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             # Use same specific directory as above
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
+            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
@@ -420,6 +496,8 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
             os.makedirs(specific_log_dir, exist_ok=True)
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
+            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
 
     return model, env, training_config, model_path
@@ -540,6 +618,30 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             # Without this, P1 never takes actions and the game is broken
             selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
             env = Monitor(selfplay_env)
+
+    # VecNormalize for create_multi_agent_model
+    vec_norm_cfg = training_config.get("vec_normalize", {})
+    vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
+    if vec_normalize_enabled:
+        if n_envs == 1:
+            env = DummyVecEnv([lambda: env])
+        model_path_for_vn = build_agent_model_path(config.get_models_root(), agent_key)
+        vec_norm_loaded = load_vec_normalize(env, model_path_for_vn)
+        if vec_norm_loaded is not None and not new_model:
+            env = vec_norm_loaded
+            env.training = True
+            env.norm_reward = vec_norm_cfg.get("norm_reward", True)
+            print("✅ VecNormalize: loaded stats from checkpoint")
+        else:
+            env = VecNormalize(
+                env,
+                norm_obs=vec_norm_cfg.get("norm_obs", True),
+                norm_reward=vec_norm_cfg.get("norm_reward", True),
+                clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
+                clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
+                gamma=vec_norm_cfg.get("gamma", 0.99),
+            )
+            print("✅ VecNormalize: enabled (obs + reward normalization)")
     
     # Agent-specific model path
     models_root = config.get_models_root()
@@ -577,11 +679,18 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         # Update model_params to use specific directory
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
+        if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+            model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
 
         model = MaskablePPO(env=env, **model_params_copy)
-        # Disable rollout logging for multi-agent models too
+        # Disable rollout logging for multi-agent models (suppress verbose rollout/ metrics)
         if hasattr(model, 'logger') and model.logger:
-            model.logger.record = lambda key, value, exclude=None: None if key.startswith('rollout/') else model.logger.record.__wrapped__(key, value, exclude)
+            _orig_record = model.logger.record
+            def _filtered_record(key, value, exclude=None):
+                if key.startswith('rollout/'):
+                    return
+                return _orig_record(key, value, exclude)
+            model.logger.record = _filtered_record
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:
@@ -595,8 +704,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
             # while preserving the neural network weights learned in Phase 1
             if "learning_rate" in model_params:
-                # Convert to callable schedule function (required by PPO)
-                model.learning_rate = get_schedule_fn(model_params["learning_rate"])
+                model.learning_rate = _make_learning_rate_schedule(model_params["learning_rate"])
             if "ent_coef" in model_params:
                 model.ent_coef = model_params["ent_coef"]
             if "clip_range" in model_params:
@@ -642,6 +750,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             # Use same specific directory as above
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
+            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"📁 Loading existing model: {model_path}")
@@ -656,6 +766,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             os.makedirs(specific_log_dir, exist_ok=True)
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
+            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     
     return model, env, training_config, model_path
@@ -775,6 +887,8 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
             os.makedirs(specific_log_dir, exist_ok=True)
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
+            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
 
     return model, env, training_config, model_path
@@ -997,20 +1111,46 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     masked_env = ActionMasker(base_env, mask_fn)
 
-    # Create initial bot for bot training mode (needed before model creation)
-    initial_bot = None
+    # Create bots for bot training mode (random selection per episode)
+    # Ratios from training_config.bot_training (default: 20/40/40)
+    training_bots = None
     if use_bots:
         if EVALUATION_BOTS_AVAILABLE:
-            initial_bot = GreedyBot(randomness=0.15)
+            training_bots = _build_training_bots_from_config(training_config)
+            ratios = training_config.get("bot_training", {}).get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+            r, g, d = ratios.get("random", 0.2) * 100, ratios.get("greedy", 0.4) * 100, ratios.get("defensive", 0.4) * 100
+            print(f"🤖 Bot training ratios: {r:.0f}% Random, {g:.0f}% Greedy, {d:.0f}% Defensive")
         else:
             raise ImportError("Evaluation bots not available but use_bots=True")
 
     # Wrap environment appropriately for bot or self-play training
-    if use_bots and initial_bot:
-        bot_env = BotControlledEnv(masked_env, initial_bot, unit_registry)
+    if use_bots and training_bots:
+        bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
         env = Monitor(bot_env)
     else:
         env = Monitor(masked_env)
+
+    # VecNormalize for scenario rotation
+    vec_norm_cfg = training_config.get("vec_normalize", {})
+    vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
+    if vec_normalize_enabled:
+        env = DummyVecEnv([lambda: env])
+        vec_norm_loaded = load_vec_normalize(env, model_path)
+        if vec_norm_loaded is not None and not new_model:
+            env = vec_norm_loaded
+            env.training = True
+            env.norm_reward = vec_norm_cfg.get("norm_reward", True)
+            print("✅ VecNormalize: loaded stats from checkpoint")
+        else:
+            env = VecNormalize(
+                env,
+                norm_obs=vec_norm_cfg.get("norm_obs", True),
+                norm_reward=vec_norm_cfg.get("norm_reward", True),
+                clip_obs=vec_norm_cfg.get("clip_obs", 10.0),
+                clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
+                gamma=vec_norm_cfg.get("gamma", 0.99),
+            )
+            print("✅ VecNormalize: enabled (obs + reward normalization)")
     
     # Create or load model
     model_params = training_config["model_params"]
@@ -1042,6 +1182,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         print(f"🆕 Creating new model: {model_path}")
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
+        if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+            lr_cfg = model_params_copy["learning_rate"]
+            model_params_copy["learning_rate"] = _make_learning_rate_schedule(lr_cfg)
+            print(f"✅ Learning rate schedule: {lr_cfg['initial']} → {lr_cfg['final']} (linear decay)")
         model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
@@ -1052,8 +1196,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
             # while preserving the neural network weights learned in Phase 1
             if "learning_rate" in model_params:
-                # Convert to callable schedule function (required by PPO)
-                model.learning_rate = get_schedule_fn(model_params["learning_rate"])
+                model.learning_rate = _make_learning_rate_schedule(model_params["learning_rate"])
             if "ent_coef" in model_params:
                 model.ent_coef = model_params["ent_coef"]
             if "clip_range" in model_params:
@@ -1088,11 +1231,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             print("🆕 Creating new model instead...")
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
+            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+                model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     else:
         print(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
+        if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+            model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
         model = MaskablePPO(env=env, **model_params_copy)
     
     # Import metrics tracker
@@ -1104,10 +1251,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     frozen_model_update_frequency = 100  # Episodes between frozen model updates
     last_frozen_model_update = 0
 
-    # Use the bot created earlier for training mode
-    training_bot = initial_bot
-    if use_bots and training_bot:
-        print(f"🤖 Using GreedyBot (randomness=0.15) for Player 1")
+    # Bot ratios printed when building training_bots
 
     # Determine tensorboard log name for continuous logging
     tb_log_name = f"{training_config_name}_{agent_key}"
@@ -1158,7 +1302,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # For bot training, use BotControlledEnv to handle Player 1's bot actions
     if use_bots:
-        bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
+        bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
         env = Monitor(bot_env)
     else:
         # CRITICAL: Update frozen model periodically for proper self-play
@@ -1177,7 +1321,25 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Wrap with SelfPlayWrapper for proper self-play training
         selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
         env = Monitor(selfplay_env)
-    
+
+    # Preserve VecNormalize when replacing env (self-play/bot loop uses fresh env)
+    if vec_normalize_enabled:
+        import tempfile
+        tmp_dir = tempfile.mkdtemp()
+        tmp_model_path = os.path.join(tmp_dir, "model.zip")
+        try:
+            if save_vec_normalize(model.get_env(), tmp_model_path):
+                venv = DummyVecEnv([lambda: env])
+                vec_norm = VecNormalize.load(get_vec_normalize_path(tmp_model_path), venv)
+                vec_norm.training = True
+                vec_norm.norm_reward = training_config.get("vec_normalize", {}).get("norm_reward", True)
+                env = vec_norm
+        finally:
+            if os.path.exists(tmp_dir):
+                for f in os.listdir(tmp_dir):
+                    os.unlink(os.path.join(tmp_dir, f))
+                os.rmdir(tmp_dir)
+
     # Update model's environment
     model.set_env(env)
     
@@ -1221,7 +1383,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             reset_num_timesteps=(metrics_tracker.episode_count == 0),
             tb_log_name=tb_log_name,  # Same name = continuous graph
             callback=enhanced_callbacks,
-            log_interval=chunk_timesteps + 1,
+            log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
             progress_bar=False  # Disabled - using episode-based progress
         )
 
@@ -1230,6 +1392,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Final save
     model.save(model_path)
+    if save_vec_normalize(model.get_env(), model_path):
+        print(f"   VecNormalize stats saved")
     print(f"\n{'='*80}")
     print(f"✅ TRAINING COMPLETE")
     print(f"   Total episodes trained: {episodes_trained}")
@@ -1490,7 +1654,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             total_timesteps=total_timesteps,
             tb_log_name=tb_log_name,
             callback=enhanced_callbacks,
-            log_interval=total_timesteps + 1,
+            log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
             progress_bar=False  # Disabled - scenario mode uses episode-based progress
         )
         
@@ -1500,6 +1664,8 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         # Save final model
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
+        if save_vec_normalize(model.get_env(), model_path):
+            print(f"   VecNormalize stats saved")
         
         # Clean up checkpoint files after successful training
         model_dir = os.path.dirname(model_path)
@@ -1533,6 +1699,8 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         # Save current progress
         interrupted_path = model_path.replace('.zip', '_interrupted.zip')
         model.save(interrupted_path)
+        if save_vec_normalize(model.get_env(), interrupted_path):
+            print("   VecNormalize stats saved")
         print(f"💾 Progress saved to: {interrupted_path}")
         return False
         

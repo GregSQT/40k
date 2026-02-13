@@ -579,9 +579,14 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         model_params_copy["tensorboard_log"] = specific_log_dir
 
         model = MaskablePPO(env=env, **model_params_copy)
-        # Disable rollout logging for multi-agent models too
+        # Disable rollout logging for multi-agent models (suppress verbose rollout/ metrics)
         if hasattr(model, 'logger') and model.logger:
-            model.logger.record = lambda key, value, exclude=None: None if key.startswith('rollout/') else model.logger.record.__wrapped__(key, value, exclude)
+            _orig_record = model.logger.record
+            def _filtered_record(key, value, exclude=None):
+                if key.startswith('rollout/'):
+                    return
+                return _orig_record(key, value, exclude)
+            model.logger.record = _filtered_record
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
         try:

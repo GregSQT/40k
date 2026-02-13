@@ -20,11 +20,27 @@ __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
 
 
 class BotControlledEnv(gym.Wrapper):
-    """Wrapper for bot-controlled Player 2 evaluation."""
+    """Wrapper for bot-controlled Player 2 evaluation.
 
-    def __init__(self, base_env, bot, unit_registry):
+    Accepts either:
+    - bot: single bot instance (for evaluation, deterministic opponent)
+    - bots: list of bot instances (for training, random selection per episode)
+    """
+
+    def __init__(self, base_env, bot=None, unit_registry=None, bots=None):
         super().__init__(base_env)
-        self.bot = bot
+        # Support: bots=[...] for random selection, or bot=X for single opponent
+        # Also accept legacy positional: BotControlledEnv(env, bot, unit_registry)
+        if bots is not None and len(bots) > 0:
+            self._bots = list(bots)
+            self.bot = self._bots[0]
+            self._use_random_bots = True
+        elif bot is not None and not isinstance(bot, (list, tuple)):
+            self._bots = None
+            self.bot = bot
+            self._use_random_bots = False
+        else:
+            raise ValueError("BotControlledEnv requires either 'bot' or 'bots' (non-empty list)")
         self.unit_registry = unit_registry
         self.episode_reward = 0.0
         self.episode_length = 0
@@ -64,6 +80,10 @@ class BotControlledEnv(gym.Wrapper):
                 pass
         self.episode_reward = 0.0
         self.episode_length = 0
+
+        # Random bot selection: pick a new opponent for this episode
+        if self._use_random_bots:
+            self.bot = random.choice(self._bots)
 
         # DIAGNOSTIC: Reset shoot tracking for new episode
         self.shoot_opportunities = 0

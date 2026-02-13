@@ -1,7 +1,7 @@
 {
   "default": {
   "type": "################################################### Default ###################################################",
-  "total_episodes": 100,
+  "total_episodes": 10000,
   "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
   "max_turns_per_episode": 5,
   "n_envs": 1,
@@ -10,10 +10,10 @@
     "checkpoint_name_prefix": "ppo_checkpoint",
     "eval_deterministic": false,
     "eval_render": false,
-    "bot_eval_freq": 200,
+    "bot_eval_freq": 100,
     "bot_eval_use_episodes": true,
-    "bot_eval_intermediate": 30,
-    "bot_eval_final": 1000
+    "bot_eval_intermediate": 20,
+    "bot_eval_final": 0
   },
     "observation_params": {
       "obs_size": 323,
@@ -25,17 +25,17 @@
   "step_log_buffer_size": 200,
   "model_params": {
     "policy": "MlpPolicy",
-    "learning_rate": 0.0001,
-    "n_steps": 10240,
+    "learning_rate": {"initial": 0.0001, "final": 0.00005},
+    "n_steps": 5120,
     "batch_size": 2048,
     "n_epochs": 20,
-    "gamma": 0.70,
+    "gamma": 0.95,
     "gae_lambda": 0.99,
     "clip_range": 0.2,
     "clip_range_vf": null,
     "normalize_advantage": true,
-    "ent_coef": 0.04,
-    "vf_coef": 0.15,
+    "ent_coef": 0.15,
+    "vf_coef": 0.25,
     "max_grad_norm": 0.5,
     "target_kl": 0.02,
     "tensorboard_log": "./tensorboard/",
@@ -43,6 +43,19 @@
       "net_arch": [320, 320]
     },
     "verbose": 0
+  },
+  "vec_normalize": {
+    "enabled": true,
+    "norm_obs": true,
+    "norm_reward": true,
+    "clip_obs": 10.0,
+    "clip_reward": 10.0,
+    "gamma": 0.99
+  },
+  "bot_training": {
+    "ratios": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
+    "greedy_randomness": 0.10,
+    "defensive_randomness": 0.10
   }
 },
   "debug": {
@@ -95,6 +108,14 @@
         "net_arch": [320, 320]
       },
       "verbose": 0
+    },
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
     }
   }
 }

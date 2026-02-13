@@ -3,7 +3,7 @@
 
 > **📍 Purpose**: Configure and monitor PPO training for W40K tactical AI
 >
-> **Status**: January 2025 - Configuration-focused edition (Updated: Added `0_critical/` dashboard, corrected metric namespaces)
+> **Status**: January 2025 - Configuration-focused edition (Updated: Weighted training bots 20/40/40, stronger Greedy/Defensive randomness=0.10)
 >
 > **⚠️ UPDATE**: Metrics section updated to reflect actual logged metrics:
 > - Added `0_critical/` dashboard documentation (primary monitoring interface)
@@ -47,6 +47,7 @@
   - [Solution 1: Bot Stochasticity](#solution-1-bot-stochasticity-prevent-pattern-exploitation)
   - [Solution 2: Balanced Reward Penalties](#solution-2-balanced-reward-penalties-reduce-over-aggression)
   - [Solution 3: Increased RandomBot Weight](#solution-3-increased-randombot-evaluation-weight)
+  - [Solution 4: Weighted Training Bots](#solution-4-weighted-training-bots-prevent-randombot-overfitting)
   - [Monitoring for Overfitting](#monitoring-for-overfitting)
   - [Troubleshooting Overfitting](#troubleshooting-overfitting)
 - [Hyperparameter Tuning Guide](#-hyperparameter-tuning-guide)
@@ -320,7 +321,10 @@ Training configs are per-agent at: `config/agents/<agent_name>/<agent_name>_trai
       "checkpoint_save_freq": 50000,     // Save model every N steps
       "checkpoint_name_prefix": "ppo_checkpoint",
       "n_eval_episodes": 5,              // Evaluation frequency
-      "bot_eval_freq": 100               // Bot eval every N episodes
+      "bot_eval_freq": 200,              // Bot eval every N episodes (100-200 recommended)
+      "bot_eval_use_episodes": true,     // true = freq in episodes, false = timesteps
+      "bot_eval_intermediate": 30,       // Episodes per bot per eval (30 = good precision/speed balance)
+      "bot_eval_final": 0                // Final eval episodes (0 = skip)
     },
 
     "observation_params": {
@@ -538,11 +542,13 @@ This comprehensive guide covers:
 
 ```bash
 # Automatic evaluation during training (configured in training_config.json)
-python ai/train.py --config default  # bot_eval_freq: 100 episodes
+python ai/train.py --config default  # bot_eval_freq: 200 episodes, 30 per bot
 
 # Manual evaluation after training
 python ai/evaluation.py --model ./models/ppo_checkpoint.zip --opponent tactical --episodes 20
 ```
+
+**Eval parameters** (`callback_params`): `bot_eval_freq` (how often), `bot_eval_intermediate` (episodes per bot — 30 recommended for stable estimates without long runs).
 
 ### Win Rate Benchmarks
 
@@ -572,7 +578,7 @@ python ai/evaluation.py --model ./models/ppo_checkpoint.zip --opponent tactical 
 
 **Location**: `ai/evaluation_bots.py`
 
-Both `GreedyBot` and `DefensiveBot` now accept a `randomness` parameter:
+Both `GreedyBot` and `DefensiveBot` accept a `randomness` parameter:
 
 ```python
 GreedyBot(randomness=0.15)    # 15% chance of random action
@@ -580,24 +586,20 @@ DefensiveBot(randomness=0.15) # 15% chance of random action
 ```
 
 **How it works**:
-- Bots make their normal strategic decision 85% of the time
-- 15% of the time they make a random valid action
+- Bots make their normal strategic decision (100 - randomness)% of the time
+- Randomness% of the time they make a random valid action
 - This prevents your agent from perfectly predicting and exploiting their behavior
 
 **Tuning recommendations**:
 - `0.0` = Pure bot (fully predictable) - use for testing specific strategies
-- `0.10-0.20` = **Recommended for training** (prevents overfitting)
+- `0.10` = **Training** - stronger, more consistent opponents (used in `ai/train.py`)
+- `0.15` = **Evaluation** - standard benchmark (used in `ai/bot_evaluation.py`)
+- `0.20-0.25` = More unpredictable - use if agent overfits to bot patterns
 - `0.30+` = Too random, defeats the purpose of strategic bots
 
-**Implementation** (in `ai/train.py`):
-```python
-# Create evaluation bots with randomness
-bots = {
-    'random': RandomBot(),
-    'greedy': GreedyBot(randomness=0.15),  # 15% random actions
-    'defensive': DefensiveBot(randomness=0.15)  # 15% random actions
-}
-```
+**Evaluation bots** (in `ai/bot_evaluation.py`): Equal weight, `randomness=0.15`
+
+**Training bots** (in `ai/train.py`): Weighted 20/40/40, `randomness=0.10` for Greedy/Defensive — see [Solution 4](#solution-4-weighted-training-bots-prevent-randombot-overfitting)
 
 ---
 
@@ -655,6 +657,31 @@ combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
 
 ---
 
+### Solution 4: Weighted Training Bots (Prevent RandomBot Overfitting)
+
+**Symptom**: `b_win_rate_100ep` (training) increases but `a_bot_eval_combined` decreases.
+
+**Root cause**: Agent overfits to RandomBot (easiest opponent) and regresses vs Greedy/Defensive.
+
+**Solution**: Configure bot ratios in `training_config.json` via `bot_training` section.
+
+**Configuration** (in `config/agents/<agent>/<agent>_training_config.json`):
+
+```json
+"bot_training": {
+  "ratios": {"random": 0.4, "greedy": 0.3, "defensive": 0.3},
+  "greedy_randomness": 0.10,
+  "defensive_randomness": 0.10
+}
+```
+
+- **ratios**: Must sum to 1.0. Example: 40% Random, 30% Greedy, 30% Defensive (more wins to learn from).
+- **greedy_randomness** / **defensive_randomness**: Lower = stronger bots. Default 0.10 (vs eval's 0.15).
+
+**Defaults** when `bot_training` is omitted: 20% Random, 40% Greedy, 40% Defensive.
+
+---
+
 ### How to Use Anti-Overfitting Changes
 
 #### Starting Fresh Training
@@ -692,12 +719,15 @@ Watch these metrics in TensorBoard:
 bot_eval/vs_random      - Should improve from -0.5 to 0.0+
 bot_eval/vs_greedy      - Should stay around 0.05-0.1
 bot_eval/vs_defensive   - Should stay around 0.1-0.15
-0_critical/combined     - Overall score should improve
+0_critical/a_bot_eval_combined  - Overall score (primary goal)
+0_critical/b_win_rate_100ep     - Training win rate
 ```
 
-**✅ Healthy performance**: All three bots within 0.2 reward range of each other
+**✅ Healthy performance**: All three bots within 0.2 reward range of each other; `bot_eval_combined` and `win_rate_100ep` trend together
 
-**⚠️ Overfitting symptom**: Large gap between random and others (>0.5 difference)
+**⚠️ Overfitting to predictable bots**: Agent beats Greedy/Defensive but fails vs Random — large gap between random and others (>0.5 difference)
+
+**⚠️ Overfitting to RandomBot**: `win_rate_100ep` ↑ but `bot_eval_combined` ↓ — agent exploits easy opponent. Fix: Apply [Solution 4](#solution-4-weighted-training-bots-prevent-randombot-overfitting) (weighted training bots)
 
 **Example healthy progression**:
 ```
@@ -734,13 +764,13 @@ This forces continuous adaptation and prevents exploitation strategies.
 
 ### Configuration Summary
 
-| Setting | Old Value | New Value | Impact |
-|---------|-----------|-----------|--------|
-| GreedyBot randomness | 0.0 | 0.15 | Unpredictable greedy play |
-| DefensiveBot randomness | 0.0 | 0.15 | Unpredictable defensive play |
-| Phase1 wait penalty | -30.0 | -10.0 | Less forced aggression |
-| RandomBot eval weight | 20% | 35% | Higher importance in model selection |
-| DefensiveBot eval weight | 50% | 35% | Balanced with random |
+| Setting | Value | Location | Impact |
+|--------|-------|----------|--------|
+| GreedyBot/DefensiveBot (eval) | randomness=0.15 | `ai/bot_evaluation.py` | Standard benchmark |
+| GreedyBot/DefensiveBot (training) | randomness=0.10 | `ai/train.py` | Stronger opponents during training |
+| Training bot ratios | Configurable via `bot_training.ratios` | `training_config.json` | Default 20/40/40; use 40/30/30 for more Random wins |
+| RandomBot eval weight | 35% | `ai/bot_evaluation.py` | Higher importance in combined score |
+| DefensiveBot eval weight | 35% | `ai/bot_evaluation.py` | Balanced with random |
 
 ---
 

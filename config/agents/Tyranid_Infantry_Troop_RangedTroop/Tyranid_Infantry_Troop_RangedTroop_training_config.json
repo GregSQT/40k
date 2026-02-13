@@ -10,56 +10,9 @@
     "checkpoint_name_prefix": "ppo_checkpoint",
     "eval_deterministic": false,
     "eval_render": false,
-    "bot_eval_freq": 200,
+    "bot_eval_freq": 100,
     "bot_eval_use_episodes": true,
-    "bot_eval_intermediate": 30,
-    "bot_eval_final": 1000
-  },
-    "observation_params": {
-      "obs_size": 323,
-    "perception_radius": 25,
-    "max_nearby_units": 10,
-    "max_valid_targets": 5,
-    "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 314 floats = 16 global (added has_advanced) + 22 unit capabilities + 32 terrain + 72 ally + 132 enemy (6×22) + 40 targets (5×8) - ADVANCE_IMPLEMENTATION_PLAN.md"
-  },
-  "step_log_buffer_size": 200,
-  "model_params": {
-    "policy": "MlpPolicy",
-    "learning_rate": 0.0001,
-    "n_steps": 8192,
-    "batch_size": 2048,
-    "n_epochs": 20,
-    "gamma": 0.85,
-    "gae_lambda": 0.99,
-    "clip_range": 0.2,
-    "clip_range_vf": null,
-    "normalize_advantage": true,
-    "ent_coef": 0.03,
-    "vf_coef": 0.1,
-    "max_grad_norm": 0.5,
-    "target_kl": 0.02,
-    "tensorboard_log": "./tensorboard/",
-    "policy_kwargs": {
-      "net_arch": [320, 320]
-    },
-    "verbose": 0
-  }
-},
-"debug": {
-  "type": "################################################### debug ###################################################",
-  "total_episodes": 10,
-  "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
-  "max_turns_per_episode": 5,
-    "n_envs": 1,
-  "callback_params": {
-    "checkpoint_save_freq": 50000,
-    "checkpoint_name_prefix": "ppo_checkpoint",
-    "eval_deterministic": true,
-    "eval_render": false,
-    "n_eval_episodes": 10,
-    "bot_eval_freq": 10000,
-    "bot_eval_use_episodes": true,
-    "bot_eval_intermediate": 10,
+    "bot_eval_intermediate": 20,
     "bot_eval_final": 0
   },
     "observation_params": {
@@ -69,32 +22,100 @@
     "max_valid_targets": 5,
     "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 314 floats = 16 global (added has_advanced) + 22 unit capabilities + 32 terrain + 72 ally + 132 enemy (6×22) + 40 targets (5×8) - ADVANCE_IMPLEMENTATION_PLAN.md"
   },
-  "exploration": {
-    "initial_epsilon": 0.3,
-    "final_epsilon": 0.05,
-    "exploration_fraction": 0.3 
-  },
   "step_log_buffer_size": 200,
   "model_params": {
     "policy": "MlpPolicy",
-    "learning_rate": 0.0003,
-    "n_steps": 1024,
-    "batch_size": 256,
-    "n_epochs": 10,
-    "gamma": 0.97,
-    "gae_lambda": 0.95,
+    "learning_rate": {"initial": 0.0001, "final": 0.00005},
+    "n_steps": 5120,
+    "batch_size": 2048,
+    "n_epochs": 20,
+    "gamma": 0.95,
+    "gae_lambda": 0.99,
     "clip_range": 0.2,
     "clip_range_vf": null,
     "normalize_advantage": true,
-    "ent_coef": 0.02,
-    "vf_coef": 1.0,
+    "ent_coef": 0.15,
+    "vf_coef": 0.15,
     "max_grad_norm": 0.5,
-    "target_kl": null,
+    "target_kl": 0.02,
     "tensorboard_log": "./tensorboard/",
     "policy_kwargs": {
       "net_arch": [320, 320]
     },
     "verbose": 0
+  },
+  "vec_normalize": {
+    "enabled": true,
+    "norm_obs": true,
+    "norm_reward": true,
+    "clip_obs": 10.0,
+    "clip_reward": 10.0,
+    "gamma": 0.99
+  },
+  "bot_training": {
+    "ratios": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
+    "greedy_randomness": 0.10,
+    "defensive_randomness": 0.10
   }
-}
+},
+  "debug": {
+    "type": "################################################### debug ###################################################",
+    "total_episodes": 10,
+    "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
+    "max_turns_per_episode": 5,
+    "n_envs": 1,
+    "callback_params": {
+      "checkpoint_save_freq": 50000,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "n_eval_episodes": 5,
+      "bot_eval_freq": 10000,
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 10,
+      "bot_eval_final": 0
+    },
+    "observation_params": {
+      "obs_size": 323,
+      "perception_radius": 25,
+      "max_nearby_units": 10,
+      "max_valid_targets": 5,
+      "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 314 floats = 16 global (added has_advanced) + 22 unit capabilities + 32 terrain + 72 ally + 132 enemy (6×22) + 40 targets (5×8) - ADVANCE_IMPLEMENTATION_PLAN.md"
+    },
+    "exploration": {
+      "initial_epsilon": 0.3,
+      "final_epsilon": 0.05,
+      "exploration_fraction": 0.3 
+    },
+    "step_log_buffer_size": 200,
+    "model_params": {
+      "policy": "MlpPolicy",
+      "learning_rate": 0.0001,
+      "n_steps": 256,
+      "batch_size": 256,
+      "n_epochs": 10,
+      "gamma": 0.95,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": 0.10,
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.01,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [320, 320]
+      },
+      "verbose": 0
+    },
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
+    }
+  }
 }

@@ -53,6 +53,9 @@ class W40KMetricsTracker:
         # Rolling window for win rate only (100 episodes)
         self.win_rate_window = deque(maxlen=100)
         
+        # Reward-victory correlation: (reward, winner) pairs for last N episodes
+        self.episode_reward_winner_pairs = deque(maxlen=200)
+        
         # FULL TRAINING DURATION TRACKING
         self.all_episode_rewards = []    # Complete reward history
         self.all_episode_wins = []       # Complete win/loss history
@@ -162,6 +165,9 @@ class W40KMetricsTracker:
         # GAME CRITICAL: Episode reward - Individual episode rewards
         self.writer.add_scalar('game_critical/episode_reward', total_reward, self.episode_count)
         self.all_episode_rewards.append(total_reward)
+        
+        # Reward-victory correlation tracking (for reward alignment diagnosis)
+        self.episode_reward_winner_pairs.append((total_reward, winner))
         
         # GAME CRITICAL: Win rate - Cumulative win rate (FULL DURATION)
         # CRITICAL FIX: Learning agent is Player 1 in training configs
@@ -699,7 +705,7 @@ class W40KMetricsTracker:
     
     def log_critical_dashboard(self):
         """
-        🎯 CRITICAL DASHBOARD - 9 Essential Hyperparameter Tuning Metrics
+        🎯 CRITICAL DASHBOARD - 11 Essential Hyperparameter Tuning Metrics
 
         This dashboard contains ONLY the metrics you need to tune PPO hyperparameters.
         All metrics are smoothed (20-episode rolling average) for clear trends.
@@ -716,9 +722,10 @@ class W40KMetricsTracker:
         - 0_critical/g_approx_kl           - <0.02 -> Policy stability
         - 0_critical/h_entropy_loss        - [0.5-2.0] -> Tune ent_coef
 
-        TECHNICAL HEALTH (2 metrics):
+        TECHNICAL HEALTH (3 metrics):
         - 0_critical/i_gradient_norm       - <10 -> No gradient explosion
         - 0_critical/j_immediate_reward_ratio - <0.9 -> Reward balance
+        - 0_critical/k_reward_victory_gap  - >20-30 -> Reward aligned with victory
 
         NOTE: position_score moved to combat/ category
         """
@@ -808,7 +815,21 @@ class W40KMetricsTracker:
                 immediate_ratio = abs(recent_base) / abs(recent_total)
                 self.writer.add_scalar('0_critical/j_immediate_reward_ratio', immediate_ratio, self.episode_count)
         
-        # 10. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
+        # 10. Reward-Victory Gap (reward alignment: mean reward when won vs lost)
+        # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory
+        if len(self.episode_reward_winner_pairs) >= 20:
+            recent = list(self.episode_reward_winner_pairs)[-100:]
+            rewards_when_won = [r for r, w in recent if w == 1]
+            rewards_when_lost = [r for r, w in recent if w == 2]
+            if len(rewards_when_won) >= 5 and len(rewards_when_lost) >= 5:
+                mean_won = float(np.mean(rewards_when_won))
+                mean_lost = float(np.mean(rewards_when_lost))
+                gap = mean_won - mean_lost
+                self.writer.add_scalar('game_critical/reward_when_won', mean_won, self.episode_count)
+                self.writer.add_scalar('game_critical/reward_when_lost', mean_lost, self.episode_count)
+                self.writer.add_scalar('0_critical/k_reward_victory_gap', gap, self.episode_count)
+        
+        # 11. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
         # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
         # Do not log here - let log_bot_evaluations() handle it
         

@@ -391,7 +391,13 @@ class EpisodeBasedEvalCallback(BaseCallback):
         if mean_reward > self.best_mean_reward:
             self.best_mean_reward = mean_reward
             if self.best_model_save_path:
-                self.model.save(f"{self.best_model_save_path}/best_model")
+                save_path = f"{self.best_model_save_path}/best_model"
+                self.model.save(save_path)
+                try:
+                    from ai.vec_normalize_utils import save_vec_normalize
+                    save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
+                except Exception:
+                    pass
         
         # if self.verbose > 0:
             # print(f"Episode {self.episode_count}: Eval mean reward: {mean_reward:.2f}")
@@ -449,39 +455,38 @@ class MetricsCollectionCallback(BaseCallback):
         self.max_q_value_history = 100  # Keep last 100 Q-value samples
     
     def _on_training_start(self) -> None:
-        """Called when training starts."""
-        # DO NOT redirect writer to SB3's directory!
-        # SB3 creates new subdirectories (_1, _2, etc.) on each learn() call
-        # This would fragment our metrics across multiple directories
-        # Keep using metrics_tracker's original directory for all metrics
-        pass
+        """Called when training starts.
+
+        CRITICAL: Wrap logger.dump to capture PPO metrics BEFORE SB3 clears name_to_value.
+        Also force log_interval=1 so dump_logs() runs every iteration (default ~1025 skips most).
+        """
+        if hasattr(self.model, 'logger') and self.model.logger and hasattr(self, 'metrics_tracker') and self.metrics_tracker:
+            _original_dump = self.model.logger.dump
+            _tracker = self.metrics_tracker
+            _model = self.model
+
+            def _dump_with_capture(step=0):
+                if hasattr(_model.logger, 'name_to_value') and len(_model.logger.name_to_value) > 0:
+                    model_stats = dict(_model.logger.name_to_value)
+                    if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
+                        total_norm = 0.0
+                        param_count = 0
+                        for p in _model.policy.parameters():
+                            if p.grad is not None:
+                                param_norm = p.grad.data.norm(2)
+                                total_norm += param_norm.item() ** 2
+                                param_count += 1
+                        if param_count > 0:
+                            model_stats['train/gradient_norm'] = total_norm ** 0.5
+                    _tracker.log_training_metrics(model_stats)
+                    _tracker.step_count = _model.num_timesteps
+                return _original_dump(step)
+
+            self.model.logger.dump = _dump_with_capture
 
     def _on_rollout_start(self) -> None:
-        """Called at start of rollout - capture training metrics from PREVIOUS policy update.
-
-        SB3 flow: rollout -> train() -> rollout -> train() -> ...
-        The train() metrics are available at the START of the next rollout.
-        """
-        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
-            model_stats = self.model.logger.name_to_value
-
-            if len(model_stats) > 0:
-                # Calculate gradient norm from last update if gradients still exist
-                if hasattr(self.model, 'policy') and hasattr(self.model.policy, 'parameters'):
-                    total_norm = 0.0
-                    param_count = 0
-                    for p in self.model.policy.parameters():
-                        if p.grad is not None:
-                            param_norm = p.grad.data.norm(2)
-                            total_norm += param_norm.item() ** 2
-                            param_count += 1
-                    if param_count > 0:
-                        grad_norm = total_norm ** 0.5
-                        self.model.logger.record("train/gradient_norm", grad_norm)
-
-                # Pass complete model stats to metrics tracker
-                self.metrics_tracker.log_training_metrics(model_stats)
-                self.metrics_tracker.step_count = self.model.num_timesteps
+        """Called at start of rollout. PPO metrics captured via logger.dump wrapper."""
+        pass
     
     def print_final_training_summary(self, model=None, training_config=None, training_config_name=None, rewards_config_name=None):
         """Print comprehensive training summary with final bot evaluation"""
@@ -971,6 +976,11 @@ class BotEvaluationCallback(BaseCallback):
                 if self.best_model_save_path:
                     save_path = f"{self.best_model_save_path}/best_model"
                     self.model.save(save_path)
+                    try:
+                        from ai.vec_normalize_utils import save_vec_normalize
+                        save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
+                    except Exception:
+                        pass
         return True
 
     def _evaluate_against_bots(self) -> Dict[str, float]:
