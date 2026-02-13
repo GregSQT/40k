@@ -1,36 +1,36 @@
 // frontend/src/types/index.ts
 // Game types
-export type {
-  PlayerId,
-  UnitId,
-  GamePhase,
-  GameMode,
-  FightSubPhase,
-  Position,
-  Unit,
-  SingleShotState,
-  SingleAttackState,
-  ShootingPhaseState,
-  FightPhaseState,
-  TargetPreview,
-  GameState,
-  MovePreview,
-  AttackPreview,
-  SemanticAction,
-  ActionResult,
-} from './game';
+
+// Type guards
+export { createPhaseValidator, isValidMode, isValidPlayerId } from "../constants/gameConfig";
 
 // API types
 export type {
-  APIResponse,
-  APIError,
   AIActionRequest,
   AIActionResponse,
+  APIError,
+  APIResponse,
   RequestConfig,
-} from './api';
-
-// Type guards
-export { isValidMode, isValidPlayerId, createPhaseValidator } from '../constants/gameConfig';
+} from "./api";
+export type {
+  ActionResult,
+  AttackPreview,
+  FightPhaseState,
+  FightSubPhase,
+  GameMode,
+  GamePhase,
+  GameState,
+  MovePreview,
+  PlayerId,
+  Position,
+  SemanticAction,
+  ShootingPhaseState,
+  SingleAttackState,
+  SingleShotState,
+  TargetPreview,
+  Unit,
+  UnitId,
+} from "./game";
 
 // Re-export commonly used types for easier imports
 export type GameConfig = {

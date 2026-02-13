@@ -10,7 +10,13 @@ export function formatShootingMessage(shooterId: number, targetId: number): stri
   return `Unit ${shooterId} SHOT at Unit ${targetId}`;
 }
 
-export function formatMoveMessage(unitId: number, startCol: number, startRow: number, endCol: number, endRow: number): string {
+export function formatMoveMessage(
+  unitId: number,
+  startCol: number,
+  startRow: number,
+  endCol: number,
+  endRow: number
+): string {
   const startHex = `(${startCol}, ${startRow})`;
   const endHex = `(${endCol}, ${endRow})`;
   return `Unit ${unitId} MOVED from ${startHex} to ${endHex}`;
@@ -24,7 +30,16 @@ export function formatCombatMessage(attackerId: number, targetId: number): strin
   return `Unit ${attackerId} FOUGHT unit ${targetId}`;
 }
 
-export function formatChargeMessage(unitName: string, unitId: number, targetName: string, targetId: number, startCol: number, startRow: number, endCol: number, endRow: number): string {
+export function formatChargeMessage(
+  unitName: string,
+  unitId: number,
+  targetName: string,
+  targetId: number,
+  startCol: number,
+  startRow: number,
+  endCol: number,
+  endRow: number
+): string {
   const startHex = `(${startCol}, ${startRow})`;
   const endHex = `(${endCol}, ${endRow})`;
   return `Unit ${unitName} ${unitId} CHARGED Unit ${targetName} ${targetId} from ${startHex} to ${endHex}`;

@@ -74,7 +74,9 @@ const validateReplayRules = (rules: ReplayRules, episodeNumber: number): void =>
   const primaryObjectiveConfig = Array.isArray(primaryObjective)
     ? (() => {
         if (primaryObjective.length !== 1) {
-          throw new Error(`Replay rules primary_objective must contain exactly one config (episode ${episodeNumber})`);
+          throw new Error(
+            `Replay rules primary_objective must contain exactly one config (episode ${episodeNumber})`
+          );
         }
         return primaryObjective[0];
       })()
@@ -87,7 +89,7 @@ const validateReplayRules = (rules: ReplayRules, episodeNumber: number): void =>
   if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.control_method) {
     throw new Error(
       `Replay rules primary_objective.control.control_method is missing (episode ${episodeNumber}). ` +
-      `Regenerate step.log after updating primary objective config.`
+        `Regenerate step.log after updating primary objective config.`
     );
   }
 };
@@ -109,7 +111,19 @@ interface ReplayEpisodeDuringParsing {
   bot_name: string;
   win_method?: string | null;
   actions: ReplayAction[];
-  units: Record<number, { id: number; player: number; col: number; row: number; HP_CUR: number; HP_MAX: number; type?: string; [key: string]: unknown }>;
+  units: Record<
+    number,
+    {
+      id: number;
+      player: number;
+      col: number;
+      row: number;
+      HP_CUR: number;
+      HP_MAX: number;
+      type?: string;
+      [key: string]: unknown;
+    }
+  >;
   initial_positions: Record<number, { col: number; row: number }>;
   walls: Array<{ col: number; row: number }>;
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
@@ -136,12 +150,12 @@ interface ReplayData {
 }
 
 export function parse_log_file_from_text(text: string): ReplayData {
-  const lines = text.split('\n');
+  const lines = text.split("\n");
   const parsePoolList = (value: string, label: string): number[] => {
-    if (value === '') {
+    if (value === "") {
       return [];
     }
-    const rawIds = value.split(',');
+    const rawIds = value.split(",");
     const parsedIds = rawIds.map((raw) => {
       const parsed = parseInt(raw, 10);
       if (Number.isNaN(parsed)) {
@@ -158,7 +172,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     const trimmed = line.trim();
 
     // Episode start - matches both "=== EPISODE START ===" and "=== EPISODE 1 START ==="
-    if (trimmed.includes('=== EPISODE') && trimmed.includes('START ===')) {
+    if (trimmed.includes("=== EPISODE") && trimmed.includes("START ===")) {
       if (currentEpisode) {
         episodes.push(currentEpisode);
       }
@@ -169,10 +183,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
         initial_positions: {},
         final_result: null,
         win_method: null,
-        scenario: 'Unknown',
-        bot_name: 'Unknown',
+        scenario: "Unknown",
+        bot_name: "Unknown",
         walls: [],
-        objectives: []
+        objectives: [],
       };
       continue;
     }
@@ -197,15 +211,15 @@ export function parse_log_file_from_text(text: string): ReplayData {
     const wallsMatch = trimmed.match(/Walls: (.+)/);
     if (wallsMatch) {
       const wallsStr = wallsMatch[1];
-      if (wallsStr !== 'none') {
+      if (wallsStr !== "none") {
         // Parse format: (col,row);(col,row);...
-        const wallCoords = wallsStr.split(';');
+        const wallCoords = wallsStr.split(";");
         for (const coord of wallCoords) {
           const match = coord.match(/\((\d+),(\d+)\)/);
           if (match) {
             currentEpisode.walls.push({
-              col: parseInt(match[1]),
-              row: parseInt(match[2])
+              col: parseInt(match[1], 10),
+              row: parseInt(match[2], 10),
             });
           }
         }
@@ -230,20 +244,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
     const objectivesMatch = trimmed.match(/Objectives: (.+)/);
     if (objectivesMatch) {
       const objectivesStr = objectivesMatch[1];
-      if (objectivesStr !== 'none') {
+      if (objectivesStr !== "none") {
         // Parse format: name:(col,row);(col,row)|name2:(col,row);...
-        const objectiveGroups = objectivesStr.split('|');
+        const objectiveGroups = objectivesStr.split("|");
         for (const group of objectiveGroups) {
-          const [name, hexesStr] = group.split(':');
+          const [name, hexesStr] = group.split(":");
           if (name && hexesStr) {
             const hexes: { col: number; row: number }[] = [];
-            const hexCoords = hexesStr.split(';');
+            const hexCoords = hexesStr.split(";");
             for (const coord of hexCoords) {
               const match = coord.match(/\((\d+),(\d+)\)/);
               if (match) {
                 hexes.push({
-                  col: parseInt(match[1]),
-                  row: parseInt(match[2])
+                  col: parseInt(match[1], 10),
+                  row: parseInt(match[2], 10),
                 });
               }
             }
@@ -255,16 +269,19 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Unit starting positions
-    const unitStart = trimmed.match(/Unit (\d+) \((.+?)\) P(\d+): Starting position \((\d+),\s*(\d+)\)/);
+    const unitStart = trimmed.match(
+      /Unit (\d+) \((.+?)\) P(\d+): Starting position \((\d+),\s*(\d+)\)/
+    );
     if (unitStart) {
-      const unitId = parseInt(unitStart[1]);
+      const unitId = parseInt(unitStart[1], 10);
       const unitType = unitStart[2];
-      const player = parseInt(unitStart[3]);
-      const col = parseInt(unitStart[4]);
-      const row = parseInt(unitStart[5]);
+      const player = parseInt(unitStart[3], 10);
+      const col = parseInt(unitStart[4], 10);
+      const row = parseInt(unitStart[5], 10);
 
       // Determine HP based on unit type
-      const unitHP = (unitType === 'Termagant' || unitType === 'Hormagaunt' || unitType === 'Genestealer') ? 1 : 2;
+      const unitHP =
+        unitType === "Termagant" || unitType === "Hormagaunt" || unitType === "Genestealer" ? 1 : 2;
 
       currentEpisode.units[unitId] = {
         id: unitId,
@@ -280,77 +297,81 @@ export function parse_log_file_from_text(text: string): ReplayData {
         T: 0,
         ARMOR_SAVE: 0,
         RNG_WEAPONS: [],
-        CC_WEAPONS: []
+        CC_WEAPONS: [],
       };
       currentEpisode.initial_positions[unitId] = { col, row };
       continue;
     }
 
     // Parse MOVE actions
-    const moveMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT|FLED)/);
+    const moveMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT|FLED)/
+    );
     if (moveMatch) {
       const timestamp = moveMatch[1];
       const turn = moveMatch[2];
-      const player = parseInt(moveMatch[3]);
-      const unitId = parseInt(moveMatch[4]);
-      const endCol = parseInt(moveMatch[5]);
-      const endRow = parseInt(moveMatch[6]);
+      const player = parseInt(moveMatch[3], 10);
+      const unitId = parseInt(moveMatch[4], 10);
+      const endCol = parseInt(moveMatch[5], 10);
+      const endRow = parseInt(moveMatch[6], 10);
       const actionType = moveMatch[7];
 
-      if (actionType === 'MOVED' || actionType === 'FLED') {
+      if (actionType === "MOVED" || actionType === "FLED") {
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         let fromCol = endCol;
         let fromRow = endRow;
         if (fromMatch) {
-          fromCol = parseInt(fromMatch[1]);
-          fromRow = parseInt(fromMatch[2]);
+          fromCol = parseInt(fromMatch[1], 10);
+          fromRow = parseInt(fromMatch[2], 10);
         } else if (currentEpisode.units[unitId]) {
           fromCol = currentEpisode.units[unitId].col;
           fromRow = currentEpisode.units[unitId].row;
         }
 
         currentEpisode.actions.push({
-          type: 'move',
+          type: "move",
           timestamp,
           turn,
           player,
           unit_id: unitId,
           from: { col: fromCol, row: fromRow },
-          to: { col: endCol, row: endRow }
+          to: { col: endCol, row: endRow },
         });
 
         if (currentEpisode.units[unitId]) {
           currentEpisode.units[unitId].col = endCol;
           currentEpisode.units[unitId].row = endRow;
         }
-      } else if (actionType === 'WAIT') {
+      } else if (actionType === "WAIT") {
         currentEpisode.actions.push({
-          type: 'move_wait',
+          type: "move_wait",
           timestamp,
           turn,
           player,
           unit_id: unitId,
-          pos: { col: endCol, row: endRow }
+          pos: { col: endCol, row: endRow },
         });
       }
       continue;
     }
 
     // Parse SHOOT actions
-    const shootMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) (SHOT at Unit|WAIT|ADVANCED)/);
+    const shootMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) (SHOT at Unit|WAIT|ADVANCED)/
+    );
     if (shootMatch) {
       // Removed verbose logging
       // console.log('Matched SHOOT line:', trimmed);
       const timestamp = shootMatch[1];
       const turn = shootMatch[2];
-      const player = parseInt(shootMatch[3]);
-      const shooterId = parseInt(shootMatch[4]);
-      const shooterCol = parseInt(shootMatch[5]);
-      const shooterRow = parseInt(shootMatch[6]);
+      const player = parseInt(shootMatch[3], 10);
+      const shooterId = parseInt(shootMatch[4], 10);
+      const shooterCol = parseInt(shootMatch[5], 10);
+      const shooterRow = parseInt(shootMatch[6], 10);
       const actionType = shootMatch[7];
       // console.log('Action type:', actionType);
 
-      if (actionType === 'ADVANCED') {
+      if (actionType === "ADVANCED") {
         // Parse advance action: Unit X(col, row) ADVANCED from (col1, row1) to (col2, row2) (Roll: X)
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         const toMatch = trimmed.match(/to \((\d+),(\d+)\)/);
@@ -359,20 +380,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
 
         if (fromMatch && toMatch) {
-          const fromCol = parseInt(fromMatch[1]);
-          const fromRow = parseInt(fromMatch[2]);
-          const toCol = parseInt(toMatch[1]);
-          const toRow = parseInt(toMatch[2]);
-          const advanceRoll = rollMatch ? parseInt(rollMatch[1]) : undefined;
+          const fromCol = parseInt(fromMatch[1], 10);
+          const fromRow = parseInt(fromMatch[2], 10);
+          const toCol = parseInt(toMatch[1], 10);
+          const toRow = parseInt(toMatch[2], 10);
+          const advanceRoll = rollMatch ? parseInt(rollMatch[1], 10) : undefined;
 
           const action: ReplayAction = {
-            type: 'advance',
+            type: "advance",
             timestamp,
             turn,
             player,
             unit_id: shooterId,
             from: { col: fromCol, row: fromRow },
-            to: { col: toCol, row: toRow }
+            to: { col: toCol, row: toRow },
           };
 
           if (advanceRoll !== undefined) {
@@ -390,7 +411,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             currentEpisode.units[shooterId].row = toRow;
           }
         }
-      } else if (actionType === 'SHOT at Unit') {
+      } else if (actionType === "SHOT at Unit") {
         const targetMatch = trimmed.match(/SHOT at Unit (\d+)\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
@@ -408,13 +429,13 @@ export function parse_log_file_from_text(text: string): ReplayData {
         // if (hitMatch) console.log('Found Hit - target:', hitMatch[1], 'roll:', hitMatch[2]);
 
         if (targetMatch) {
-          const targetId = parseInt(targetMatch[1]);
-          const targetCol = parseInt(targetMatch[2]);
-          const targetRow = parseInt(targetMatch[3]);
-          const damage = damageMatch ? parseInt(damageMatch[1]) : 0;
+          const targetId = parseInt(targetMatch[1], 10);
+          const targetCol = parseInt(targetMatch[2], 10);
+          const targetRow = parseInt(targetMatch[3], 10);
+          const damage = damageMatch ? parseInt(damageMatch[1], 10) : 0;
 
           const action: ReplayAction = {
-            type: 'shoot',
+            type: "shoot",
             timestamp,
             turn,
             player,
@@ -422,20 +443,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
             shooter_pos: { col: shooterCol, row: shooterRow },
             target_id: targetId,
             target_pos: { col: targetCol, row: targetRow },
-            damage
+            damage,
           };
 
           // Add detailed rolls if available (format: Hit:3+:6 means target 3+, rolled 6)
           if (hitMatch) {
-            action.hit_roll = parseInt(hitMatch[2]);  // The actual roll
-            action.save_target = parseInt(hitMatch[1]);  // Will be overridden by save target if present
+            action.hit_roll = parseInt(hitMatch[2], 10); // The actual roll
+            action.save_target = parseInt(hitMatch[1], 10); // Will be overridden by save target if present
           }
           if (woundMatch) {
-            action.wound_roll = parseInt(woundMatch[2]);  // The actual roll
+            action.wound_roll = parseInt(woundMatch[2], 10); // The actual roll
           }
           if (saveMatch) {
-            action.save_target = parseInt(saveMatch[1]);  // The target number
-            action.save_roll = parseInt(saveMatch[2]);  // The actual roll
+            action.save_target = parseInt(saveMatch[1], 10); // The target number
+            action.save_roll = parseInt(saveMatch[2], 10); // The actual roll
           }
           // Add reward if available
           if (rewardMatch) {
@@ -448,14 +469,14 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
           currentEpisode.actions.push(action);
         }
-      } else if (actionType === 'WAIT') {
+      } else if (actionType === "WAIT") {
         currentEpisode.actions.push({
-          type: 'wait',
+          type: "wait",
           timestamp,
           turn,
           player,
           unit_id: shooterId,
-          pos: { col: shooterCol, row: shooterRow }
+          pos: { col: shooterCol, row: shooterRow },
         });
       }
       continue;
@@ -466,17 +487,19 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Or: [timestamp] T1 P0 CHARGE : Unit 1(19, 15) WAIT [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED CHARGE Unit 7 from (23,6) to (a,b) [R:+0.0] [SUCCESS] [STEP: YES]
     // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED] (old format)
-    const chargeMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED Unit|WAIT|FAILED CHARGE Unit|FAILED charge to unit)/);
+    const chargeMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED Unit|WAIT|FAILED CHARGE Unit|FAILED charge to unit)/
+    );
     if (chargeMatch) {
       const timestamp = chargeMatch[1];
       const turn = chargeMatch[2];
-      const player = parseInt(chargeMatch[3]);
-      const unitId = parseInt(chargeMatch[4]);
-      const unitCol = parseInt(chargeMatch[5]);
-      const unitRow = parseInt(chargeMatch[6]);
+      const player = parseInt(chargeMatch[3], 10);
+      const unitId = parseInt(chargeMatch[4], 10);
+      const unitCol = parseInt(chargeMatch[5], 10);
+      const unitRow = parseInt(chargeMatch[6], 10);
       const actionType = chargeMatch[7];
 
-      if (actionType === 'CHARGED Unit') {
+      if (actionType === "CHARGED Unit") {
         // Parse target unit and positions
         const targetMatch = trimmed.match(/CHARGED Unit (\d+)\((\d+),(\d+)\)/);
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
@@ -485,18 +508,18 @@ export function parse_log_file_from_text(text: string): ReplayData {
         const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
 
         if (targetMatch && fromMatch && toMatch) {
-          const targetId = parseInt(targetMatch[1]);
-          const targetCol = parseInt(targetMatch[2]);
-          const targetRow = parseInt(targetMatch[3]);
-          const fromCol = parseInt(fromMatch[1]);
-          const fromRow = parseInt(fromMatch[2]);
-          const toCol = parseInt(toMatch[1]);
-          const toRow = parseInt(toMatch[2]);
+          const targetId = parseInt(targetMatch[1], 10);
+          const targetCol = parseInt(targetMatch[2], 10);
+          const targetRow = parseInt(targetMatch[3], 10);
+          const fromCol = parseInt(fromMatch[1], 10);
+          const fromRow = parseInt(fromMatch[2], 10);
+          const toCol = parseInt(toMatch[1], 10);
+          const toRow = parseInt(toMatch[2], 10);
 
           // Use actual roll if available, otherwise calculate distance as fallback
           let chargeRoll: number;
           if (rollMatch) {
-            chargeRoll = parseInt(rollMatch[1]);
+            chargeRoll = parseInt(rollMatch[1], 10);
           } else {
             // Fallback: Calculate charge distance (for old logs without roll)
             const offsetToCube = (col: number, row: number) => {
@@ -515,7 +538,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
 
           currentEpisode.actions.push({
-            type: 'charge',
+            type: "charge",
             timestamp,
             turn,
             player,
@@ -524,8 +547,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
             target_pos: { col: targetCol, row: targetRow },
             from: { col: fromCol, row: fromRow },
             to: { col: toCol, row: toRow },
-            charge_roll: chargeRoll,  // The actual 2d6 roll
-            charge_success: true
+            charge_roll: chargeRoll, // The actual 2d6 roll
+            charge_success: true,
           });
 
           // Update unit position after charge
@@ -534,59 +557,61 @@ export function parse_log_file_from_text(text: string): ReplayData {
             currentEpisode.units[unitId].row = toRow;
           }
         }
-      } else if (actionType === 'WAIT') {
+      } else if (actionType === "WAIT") {
         // WAIT means the charge roll was too low or unit chose not to charge
         // We don't know the exact roll, but we can indicate it failed
         currentEpisode.actions.push({
-          type: 'charge_wait',
+          type: "charge_wait",
           timestamp,
           turn,
           player,
           unit_id: unitId,
           pos: { col: unitCol, row: unitRow },
-          charge_roll: 0,  // Unknown roll, but too low
-          charge_success: false
+          charge_roll: 0, // Unknown roll, but too low
+          charge_success: false,
         });
-      } else if (actionType === 'FAILED CHARGE Unit' || actionType === 'FAILED charge to unit') {
+      } else if (actionType === "FAILED CHARGE Unit" || actionType === "FAILED charge to unit") {
         // FAILED charge - parse target and positions (new format) or roll (old format)
         let targetId: number | undefined;
         let chargeRoll: number = 0;
-        let failedReason: string = 'roll_too_low';
+        let failedReason: string = "roll_too_low";
         let fromPos: { col: number; row: number } | undefined;
         let toPos: { col: number; row: number } | undefined;
-        
+
         // Try new format first: "FAILED CHARGE Unit X from (x,y) to (a,b)"
-        const newFormatMatch = trimmed.match(/FAILED CHARGE Unit (\d+) from \((\d+),(\d+)\) to \((\d+),(\d+)\)/);
+        const newFormatMatch = trimmed.match(
+          /FAILED CHARGE Unit (\d+) from \((\d+),(\d+)\) to \((\d+),(\d+)\)/
+        );
         if (newFormatMatch) {
-          targetId = parseInt(newFormatMatch[1]);
-          fromPos = { col: parseInt(newFormatMatch[2]), row: parseInt(newFormatMatch[3]) };
-          toPos = { col: parseInt(newFormatMatch[4]), row: parseInt(newFormatMatch[5]) };
+          targetId = parseInt(newFormatMatch[1], 10);
+          fromPos = { col: parseInt(newFormatMatch[2], 10), row: parseInt(newFormatMatch[3], 10) };
+          toPos = { col: parseInt(newFormatMatch[4], 10), row: parseInt(newFormatMatch[5], 10) };
         } else {
           // Fallback to old format: "FAILED charge to unit X [Roll:Y] [FAILED: reason]"
           const targetMatch = trimmed.match(/FAILED charge to unit (\d+)/);
           const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
           const failedReasonMatch = trimmed.match(/\[FAILED: (.+?)\]/);
-          
-          targetId = targetMatch ? parseInt(targetMatch[1]) : undefined;
-          chargeRoll = rollMatch ? parseInt(rollMatch[1]) : 0;
-          failedReason = failedReasonMatch ? failedReasonMatch[1] : 'roll_too_low';
+
+          targetId = targetMatch ? parseInt(targetMatch[1], 10) : undefined;
+          chargeRoll = rollMatch ? parseInt(rollMatch[1], 10) : 0;
+          failedReason = failedReasonMatch ? failedReasonMatch[1] : "roll_too_low";
         }
-        
+
         currentEpisode.actions.push({
-          type: 'charge_fail',
+          type: "charge_fail",
           timestamp,
           turn,
           player,
           unit_id: unitId,
           target_id: targetId,
-          pos: { col: unitCol, row: unitRow },  // Position actuelle de l'unité (from regex match)
-          from: fromPos,  // Position de départ (new format)
-          to: toPos,  // Position de destination prévue (new format)
+          pos: { col: unitCol, row: unitRow }, // Position actuelle de l'unité (from regex match)
+          from: fromPos, // Position de départ (new format)
+          to: toPos, // Position de destination prévue (new format)
           charge_roll: chargeRoll,
           charge_success: false,
-          charge_failed_reason: failedReason
+          charge_failed_reason: failedReason,
         });
-        
+
         // CRITICAL: Unit position stays at unitCol/unitRow (from regex match) - no movement on failed charge
         // The unit position is already correct from the regex match, no need to update
       }
@@ -595,15 +620,17 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse FIGHT actions
     // Format: [timestamp] T1 P0 FIGHT : Unit 2(9, 6) ATTACKED Unit 8 with [weapon] - Hit:3+:2(MISS) [SUCCESS]
-    const fightMatch = trimmed.match(/\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED Unit (\d+)/);
+    const fightMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED Unit (\d+)/
+    );
     if (fightMatch) {
       const timestamp = fightMatch[1];
       const turn = fightMatch[2];
-      const player = parseInt(fightMatch[3]);
-      const attackerId = parseInt(fightMatch[4]);
-      const attackerCol = parseInt(fightMatch[5]);
-      const attackerRow = parseInt(fightMatch[6]);
-      const targetId = parseInt(fightMatch[7]);
+      const player = parseInt(fightMatch[3], 10);
+      const attackerId = parseInt(fightMatch[4], 10);
+      const attackerCol = parseInt(fightMatch[5], 10);
+      const attackerRow = parseInt(fightMatch[6], 10);
+      const targetId = parseInt(fightMatch[7], 10);
 
       // Parse weapon name if present (MULTIPLE_WEAPONS_IMPLEMENTATION.md)
       const weaponMatch = trimmed.match(/with \[([^\]]+)\]/);
@@ -615,45 +642,47 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)\((FAIL|SAVED?)\)/);
       const dmgMatch = trimmed.match(/Dmg:(\d+)HP/);
       const fightSubphaseMatch = trimmed.match(/\[FIGHT_SUBPHASE:([^\]]+)\]/);
-      const fightPoolsMatch = trimmed.match(/\[FIGHT_POOLS:charging=([^;\]]*);active=([^;\]]*);non_active=([^\]]*)\]/);
+      const fightPoolsMatch = trimmed.match(
+        /\[FIGHT_POOLS:charging=([^;\]]*);active=([^;\]]*);non_active=([^\]]*)\]/
+      );
       if (!fightSubphaseMatch || !fightPoolsMatch) {
         throw new Error(`Missing fight metadata in step.log line: ${trimmed}`);
       }
       const fightSubphase = fightSubphaseMatch[1];
-      const chargingPool = parsePoolList(fightPoolsMatch[1], 'charging');
-      const activePool = parsePoolList(fightPoolsMatch[2], 'active');
-      const nonActivePool = parsePoolList(fightPoolsMatch[3], 'non_active');
+      const chargingPool = parsePoolList(fightPoolsMatch[1], "charging");
+      const activePool = parsePoolList(fightPoolsMatch[2], "active");
+      const nonActivePool = parsePoolList(fightPoolsMatch[3], "non_active");
 
       const action: ReplayAction = {
-        type: 'fight',
+        type: "fight",
         timestamp,
         turn,
         player,
         attacker_id: attackerId,
         attacker_pos: { col: attackerCol, row: attackerRow },
         target_id: targetId,
-        weapon_name: weaponName,  // Add weapon name for display
-        damage: 0,  // Will be calculated below based on combat results
+        weapon_name: weaponName, // Add weapon name for display
+        damage: 0, // Will be calculated below based on combat results
         fight_subphase: fightSubphase,
         charging_activation_pool: chargingPool,
         active_alternating_activation_pool: activePool,
-        non_active_alternating_activation_pool: nonActivePool
+        non_active_alternating_activation_pool: nonActivePool,
       };
 
       // Add detailed combat rolls if available
       if (hitMatch) {
-        action.hit_target = parseInt(hitMatch[1]);
-        action.hit_roll = parseInt(hitMatch[2]);
+        action.hit_target = parseInt(hitMatch[1], 10);
+        action.hit_roll = parseInt(hitMatch[2], 10);
         action.hit_result = hitMatch[3];
       }
       if (woundMatch) {
-        action.wound_target = parseInt(woundMatch[1]);
-        action.wound_roll = parseInt(woundMatch[2]);
+        action.wound_target = parseInt(woundMatch[1], 10);
+        action.wound_roll = parseInt(woundMatch[2], 10);
         action.wound_result = woundMatch[3];
       }
       if (saveMatch) {
-        action.save_target = parseInt(saveMatch[1]);
-        action.save_roll = parseInt(saveMatch[2]);
+        action.save_target = parseInt(saveMatch[1], 10);
+        action.save_roll = parseInt(saveMatch[2], 10);
         action.save_result = saveMatch[3];
       }
 
@@ -661,10 +690,12 @@ export function parse_log_file_from_text(text: string): ReplayData {
       // Damage is dealt if: hit succeeded AND wound succeeded AND save failed
       if (dmgMatch) {
         // If Dmg:XHP is present, use it (future-proofing)
-        action.damage = parseInt(dmgMatch[1]);
-      } else if (action.hit_result === 'HIT' &&
-                 (action.wound_result === 'WOUND' || action.wound_result === 'SUCCESS') &&
-                 action.save_result === 'FAIL') {
+        action.damage = parseInt(dmgMatch[1], 10);
+      } else if (
+        action.hit_result === "HIT" &&
+        (action.wound_result === "WOUND" || action.wound_result === "SUCCESS") &&
+        action.save_result === "FAIL"
+      ) {
         // Infer damage: melee attacks typically deal 1 damage
         // Note: This assumes CC_DMG=1, which is standard for most units
         action.damage = 1;
@@ -686,21 +717,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Parse EPISODE END line
     const episodeEndMatch = trimmed.match(/EPISODE END: Winner=(-?\d+)(?:, Method=([a-zA-Z_]+))?/);
     if (episodeEndMatch) {
-      const winner = parseInt(episodeEndMatch[1]);
+      const winner = parseInt(episodeEndMatch[1], 10);
       const winMethod = episodeEndMatch[2] || null;
       if (currentEpisode) {
         if (winner === -1) {
-          currentEpisode.final_result = 'Draw';
+          currentEpisode.final_result = "Draw";
         } else if (winner === 1) {
-          currentEpisode.final_result = 'Agent Win';
+          currentEpisode.final_result = "Agent Win";
         } else if (winner === 2) {
-          currentEpisode.final_result = 'Bot Win';
+          currentEpisode.final_result = "Bot Win";
         } else {
           throw new Error(`Unknown winner value in step.log: ${winner}`);
         }
         currentEpisode.win_method = winMethod;
       }
-      continue;
     }
   }
 
@@ -710,7 +740,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
   }
 
   // Convert to replay format
-  const replayEpisodes = episodes.map(episode => {
+  const replayEpisodes = episodes.map((episode) => {
     if (!episode.rules) {
       throw new Error(`Missing Rules block for episode ${episode.episode_num}`);
     }
@@ -726,7 +756,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         col: startPos.col,
         row: startPos.row,
         HP_CUR: unitHP,
-        HP_MAX: unitHP
+        HP_MAX: unitHP,
       });
     }
 
@@ -737,7 +767,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       rules: episode.rules,
       currentTurn: 1,
       current_player: 1,
-      phase: 'move'
+      phase: "move",
     };
 
     // Build states
@@ -763,7 +793,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     for (const action of episode.actions) {
       // Clear isJustKilled flag and remove units that were killed in the previous action
-      unitsToRemove.forEach(unitId => {
+      unitsToRemove.forEach((unitId) => {
         if (currentUnits[unitId]) {
           // First clear the flag so the unit shows normally (if it somehow survived)
           delete currentUnits[unitId].isJustKilled;
@@ -773,27 +803,27 @@ export function parse_log_file_from_text(text: string): ReplayData {
       });
       unitsToRemove.clear();
 
-      if (action.type === 'move' && action.unit_id) {
+      if (action.type === "move" && action.unit_id) {
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
-      } else if (action.type === 'charge' && action.unit_id) {
+      } else if (action.type === "charge" && action.unit_id) {
         // Handle charge actions - update unit position
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
-      } else if (action.type === 'advance' && action.unit_id) {
+      } else if (action.type === "advance" && action.unit_id) {
         // Handle advance actions - update unit position
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
-      } else if (action.type === 'shoot' && action.target_id !== undefined) {
+      } else if (action.type === "shoot" && action.target_id !== undefined) {
         // Handle shoot actions (even if damage is 0)
         const targetId = action.target_id;
         const damage = action.damage || 0;
@@ -817,7 +847,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             unitsToRemove.add(targetId);
           }
         }
-      } else if (action.type === 'fight' && action.target_id !== undefined) {
+      } else if (action.type === "fight" && action.target_id !== undefined) {
         // Handle fight actions - same damage logic as shoot
         const targetId = action.target_id;
         const damage = action.damage || 0;
@@ -844,26 +874,28 @@ export function parse_log_file_from_text(text: string): ReplayData {
       }
 
       // Determine phase from action type
-      let phase = 'move';
-      if (action.type.includes('move')) {
-        phase = 'move';
-      } else if (action.type.includes('shoot') || action.type === 'advance') {
-        phase = 'shoot';
-      } else if (action.type.includes('charge')) {
-        phase = 'charge';
-      } else if (action.type.includes('fight')) {
-        phase = 'fight';
+      let phase = "move";
+      if (action.type.includes("move")) {
+        phase = "move";
+      } else if (action.type.includes("shoot") || action.type === "advance") {
+        phase = "shoot";
+      } else if (action.type.includes("charge")) {
+        phase = "charge";
+      } else if (action.type.includes("fight")) {
+        phase = "fight";
       }
 
-      const fightStateFields = action.type.includes('fight') ? {
-        fight_subphase: action.fight_subphase,
-        charging_activation_pool: action.charging_activation_pool,
-        active_alternating_activation_pool: action.active_alternating_activation_pool,
-        non_active_alternating_activation_pool: action.non_active_alternating_activation_pool
-      } : {};
+      const fightStateFields = action.type.includes("fight")
+        ? {
+            fight_subphase: action.fight_subphase,
+            charging_activation_pool: action.charging_activation_pool,
+            active_alternating_activation_pool: action.active_alternating_activation_pool,
+            non_active_alternating_activation_pool: action.non_active_alternating_activation_pool,
+          }
+        : {};
 
       // Create state with current units (including just-killed units with flag preserved)
-      const stateUnits = Object.values(currentUnits).map(u => {
+      const stateUnits = Object.values(currentUnits).map((u) => {
         const unitCopy = { ...u };
         // Preserve isJustKilled flag in the copy
         if (u.isJustKilled) {
@@ -872,7 +904,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         return unitCopy;
       });
 
-      const turnNumber = parseInt(action.turn.replace('T', ''), 10);
+      const turnNumber = parseInt(action.turn.replace("T", ""), 10);
       if (Number.isNaN(turnNumber)) {
         throw new Error(`Invalid turn value in step.log action: ${action.turn}`);
       }
@@ -885,25 +917,25 @@ export function parse_log_file_from_text(text: string): ReplayData {
         current_player: action.player,
         phase,
         action,
-        ...fightStateFields
+        ...fightStateFields,
       });
     }
 
     return {
       episode_num: episode.episode_num,
       scenario: episode.scenario,
-      bot_name: episode.bot_name || 'Unknown',
+      bot_name: episode.bot_name || "Unknown",
       win_method: episode.win_method,
       initial_state: initialState,
       actions: episode.actions,
       states: states,
       total_actions: episode.actions.length,
-      final_result: episode.final_result
+      final_result: episode.final_result,
     };
   });
 
   return {
     total_episodes: replayEpisodes.length,
-    episodes: replayEpisodes
+    episodes: replayEpisodes,
   };
 }

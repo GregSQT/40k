@@ -1,15 +1,14 @@
 {
-    "units": {
-        
-        "CaptainGravis": "spaceMarine/units/CaptainGravis",
-        "AssaultIntercessor": "spaceMarine/units/AssaultIntercessor",
-        "Intercessor": "spaceMarine/units/Intercessor",
-        "IntercessorSergeant": "spaceMarine/units/IntercessorSergeant",
-        "IntercessorGrenadeLauncher": "spaceMarine/units/IntercessorGrenadeLauncher",
-        "Carnifex": "tyranid/units/Carnifex",
-        "Genestealer": "tyranid/units/Genestealer",
-        "Hormagaunt": "tyranid/units/Hormagaunt",  
-        "Termagant": "tyranid/units/Termagant",
-        "TyranidWarriorRanged": "tyranid/units/TyranidWarriorRanged"
-    }  
+  "units": {
+    "CaptainGravis": "spaceMarine/units/CaptainGravis",
+    "AssaultIntercessor": "spaceMarine/units/AssaultIntercessor",
+    "Intercessor": "spaceMarine/units/Intercessor",
+    "IntercessorSergeant": "spaceMarine/units/IntercessorSergeant",
+    "IntercessorGrenadeLauncher": "spaceMarine/units/IntercessorGrenadeLauncher",
+    "Carnifex": "tyranid/units/Carnifex",
+    "Genestealer": "tyranid/units/Genestealer",
+    "Hormagaunt": "tyranid/units/Hormagaunt",
+    "Termagant": "tyranid/units/Termagant",
+    "TyranidWarriorRanged": "tyranid/units/TyranidWarriorRanged"
+  }
 }

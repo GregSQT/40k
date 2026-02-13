@@ -1,5 +1,5 @@
 // frontend/src/hooks/useGameConfig.ts
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from "react";
 
 interface DisplayConfig {
   resolution?: "auto" | number;
@@ -112,32 +112,36 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
         setError(null);
 
         const [boardResponse, gameResponse] = await Promise.all([
-          fetch('/config/board_config.json'),
-          fetch('/config/game_config.json')
+          fetch("/config/board_config.json"),
+          fetch("/config/game_config.json"),
         ]);
 
         if (!gameResponse.ok) {
-          throw new Error(`Game config missing: /config/game_config.json (HTTP ${gameResponse.status})`);
+          throw new Error(
+            `Game config missing: /config/game_config.json (HTTP ${gameResponse.status})`
+          );
         }
 
         if (!boardResponse.ok) {
-          throw new Error(`Board config missing: /config/board_config.json (HTTP ${boardResponse.status})`);
+          throw new Error(
+            `Board config missing: /config/board_config.json (HTTP ${boardResponse.status})`
+          );
         }
 
         const [boardResponseText, gameResponseText] = await Promise.all([
           boardResponse.text(),
-          gameResponse.text()
+          gameResponse.text(),
         ]);
 
         if (!boardResponseText.trim()) {
-          throw new Error('Board config file is empty');
+          throw new Error("Board config file is empty");
         }
 
         if (!gameResponseText.trim()) {
-          throw new Error('Game config file is empty');
+          throw new Error("Game config file is empty");
         }
 
-        let boardData, gameData;
+        let boardData: Record<string, unknown>, gameData: Record<string, unknown>;
         try {
           boardData = JSON.parse(boardResponseText);
           gameData = JSON.parse(gameResponseText);
@@ -146,7 +150,10 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
         }
 
         if (!boardData[boardConfigName]) {
-          console.warn(`Board config '${boardConfigName}' not found, available configs:`, Object.keys(boardData));
+          console.warn(
+            `Board config '${boardConfigName}' not found, available configs:`,
+            Object.keys(boardData)
+          );
           throw new Error(`Board config '${boardConfigName}' not found`);
         }
 
@@ -160,15 +167,13 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
 
         setBoardConfig(mergedBoardConfig);
         setGameConfig(gameData);
-
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load configuration';
+        const errorMessage = err instanceof Error ? err.message : "Failed to load configuration";
         setError(errorMessage);
-        console.error('Game config loading error:', err);
+        console.error("Game config loading error:", err);
 
         setBoardConfig(null);
         setGameConfig(null);
-
       } finally {
         setLoading(false);
       }
@@ -188,7 +193,7 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
     error,
     maxTurns,
     boardSize,
-    turnPenalty
+    turnPenalty,
   };
 };
 

@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from 'react';
-import type { WeaponOption } from '../types/game';
-import weaponRules from '../../../config/weapon_rules.json';
+import type React from "react";
+import { useEffect, useRef } from "react";
+import weaponRules from "../../../config/weapon_rules.json";
+import type { WeaponOption } from "../types/game";
 
 interface WeaponDropdownProps {
   weapons: WeaponOption[];
@@ -16,24 +17,24 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
   onClose,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
-  
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         onClose();
       }
     };
-    
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
-  
+
   return (
-    <div 
+    <div
       ref={dropdownRef}
       className="weapon-dropdown"
       style={{
-        position: 'absolute',
+        position: "absolute",
         left: `${position.x}px`,
         top: `${position.y}px`,
       }}
@@ -54,11 +55,11 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
           {weapons.map((weaponOption) => {
             const weapon = weaponOption.weapon;
             const isDisabled = !weaponOption.canUse;
-            
+
             return (
               <tr
                 key={weaponOption.index}
-                className={isDisabled ? 'disabled' : ''}
+                className={isDisabled ? "disabled" : ""}
                 onClick={() => {
                   if (!isDisabled) {
                     onSelectWeapon(weaponOption.index);
@@ -73,7 +74,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                     </span>
                   )}
                   {weapon.display_name}
-                  {weapon.WEAPON_RULES?.map(rule => (
+                  {weapon.WEAPON_RULES?.map((rule) => (
                     <span key={rule} className="rule-badge-wrapper">
                       <span className="rule-badge">
                         [{weaponRules[rule as keyof typeof weaponRules]?.name || rule}]
@@ -84,7 +85,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                     </span>
                   ))}
                 </td>
-                <td>{weapon.RNG ? `${weapon.RNG}"` : '-'}</td>
+                <td>{weapon.RNG ? `${weapon.RNG}"` : "-"}</td>
                 <td>{weapon.NB}</td>
                 <td>{weapon.ATK}+</td>
                 <td>{weapon.STR}</td>

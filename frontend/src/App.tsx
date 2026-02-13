@@ -1,7 +1,7 @@
-﻿import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import HomePage from "./pages/HomePage";
+﻿import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import GamePage from "./pages/GamePage";
-import './App.css'
+import HomePage from "./pages/HomePage";
+import "./App.css";
 
 function App() {
   return (
@@ -15,4 +15,4 @@ function App() {
   );
 }
 
-export default App
+export default App;

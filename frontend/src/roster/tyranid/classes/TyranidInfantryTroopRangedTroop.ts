@@ -2,12 +2,12 @@
 
 export class TyranidInfantryTroopRangedTroop {
   static FACTION = "Tyranid";
-  static TEAM_COLOR = 0x0078ff;     // Example: blue
+  static TEAM_COLOR = 0x0078ff; // Example: blue
 
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Troop";      // Troop: 2 wounds, 3+ save / 5+ Invu
-  static MOVE_TYPE = "Infantry";       // Fast infantry movement
-  static TARGET_TYPE = "Troop";        // MeleeTroop specialist - mob assault
+  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save / 5+ Invu
+  static MOVE_TYPE = "Infantry"; // Fast infantry movement
+  static TARGET_TYPE = "Troop"; // MeleeTroop specialist - mob assault
 
   name: string;
   hp: number;
@@ -21,12 +21,20 @@ export class TyranidInfantryTroopRangedTroop {
     this.alive = true;
   }
 
-  move(dx: number, dy: number, boardHeight: number, boardWidth: number, takenPositions: [number, number][]) {
+  move(
+    dx: number,
+    dy: number,
+    boardHeight: number,
+    boardWidth: number,
+    takenPositions: [number, number][]
+  ) {
     const newX = this.pos[0] + dx;
     const newY = this.pos[1] + dy;
     if (
-      newX >= 0 && newX < boardHeight &&
-      newY >= 0 && newY < boardWidth &&
+      newX >= 0 &&
+      newX < boardHeight &&
+      newY >= 0 &&
+      newY < boardWidth &&
       !takenPositions.some(([x, y]) => x === newX && y === newY)
     ) {
       this.pos = [newX, newY];

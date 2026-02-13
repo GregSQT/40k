@@ -1,7 +1,17 @@
 // frontend/src/hooks/useGameActions.ts - AI_TURN.md Compliant Version
-import { useCallback } from 'react';
-import type { GameState, UnitId, Unit, MovePreview, AttackPreview, ShootingPhaseState, TargetPreview, FightSubPhase, PlayerId } from '../types/game';
-import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
+import { useCallback } from "react";
+import type {
+  AttackPreview,
+  FightSubPhase,
+  GameState,
+  MovePreview,
+  PlayerId,
+  ShootingPhaseState,
+  TargetPreview,
+  Unit,
+  UnitId,
+} from "../types/game";
+import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 
 type BoardConfig = Record<string, unknown> | null | undefined;
 type GameLog = Record<string, unknown> | null | undefined;
@@ -14,7 +24,7 @@ interface UseGameActionsParams {
   boardConfig?: BoardConfig;
   gameLog?: GameLog;
   actions: {
-    setMode: (mode: GameState['mode']) => void;
+    setMode: (mode: GameState["mode"]) => void;
     setSelectedUnitId: (id: UnitId | null) => void;
     setMovePreview: (preview: MovePreview | null) => void;
     setAttackPreview: (preview: AttackPreview | null) => void;
@@ -37,129 +47,156 @@ interface UseGameActionsParams {
   };
 }
 
-  export const useGameActions = ({
-    gameState,
-    movePreview,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    attackPreview: _attackPreview,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    shootingPhaseState: _shootingPhaseState,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    boardConfig: _boardConfig,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    gameLog: _gameLog,
-    actions,
-  }: UseGameActionsParams) => {
-    
+export const useGameActions = ({
+  gameState,
+  movePreview,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  attackPreview: _attackPreview,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  shootingPhaseState: _shootingPhaseState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  boardConfig: _boardConfig,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  gameLog: _gameLog,
+  actions,
+}: UseGameActionsParams) => {
   // Single source of truth eligibility function
-  const isUnitEligible = useCallback((unit: Unit): boolean => {
-    const { phase, current_player, unitsMoved = [], unitsCharged = [], unitsAttacked = [], unitsFled = [] } = gameState;
-    
-    // Universal eligibility checks
-    if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) return false;
-    if (unit.player !== current_player) return false;
-    
-    switch (phase) {
-      case "move":
-        return !unitsMoved.includes(unit.id);
-      case "shoot": {
-        // Check basic eligibility first
-        if (unitsMoved.includes(unit.id) || unitsFled.includes(unit.id)) return false;
-        
-        // Units adjacent to enemies (melee range = 1) cannot shoot
-        // This matches backend logic in shooting_handlers.py _has_valid_shooting_targets
-        const hasAdjacentEnemy = gameState.units.some(enemy =>
-          enemy.player !== unit.player &&
-          (enemy.HP_CUR ?? enemy.HP_MAX) > 0 &&
-          cubeDistance(
-            offsetToCube(unit.col, unit.row), 
-            offsetToCube(enemy.col, enemy.row)
-          ) <= 1
-        );
-        
-        return !hasAdjacentEnemy;
+  const isUnitEligible = useCallback(
+    (unit: Unit): boolean => {
+      const {
+        phase,
+        current_player,
+        unitsMoved = [],
+        unitsCharged = [],
+        unitsAttacked = [],
+        unitsFled = [],
+      } = gameState;
+
+      // Universal eligibility checks
+      if ((unit.HP_CUR ?? unit.HP_MAX) <= 0) return false;
+      if (unit.player !== current_player) return false;
+
+      switch (phase) {
+        case "move":
+          return !unitsMoved.includes(unit.id);
+        case "shoot": {
+          // Check basic eligibility first
+          if (unitsMoved.includes(unit.id) || unitsFled.includes(unit.id)) return false;
+
+          // Units adjacent to enemies (melee range = 1) cannot shoot
+          // This matches backend logic in shooting_handlers.py _has_valid_shooting_targets
+          const hasAdjacentEnemy = gameState.units.some(
+            (enemy) =>
+              enemy.player !== unit.player &&
+              (enemy.HP_CUR ?? enemy.HP_MAX) > 0 &&
+              cubeDistance(offsetToCube(unit.col, unit.row), offsetToCube(enemy.col, enemy.row)) <=
+                1
+          );
+
+          return !hasAdjacentEnemy;
+        }
+        case "charge":
+          return !unitsCharged.includes(unit.id) && !unitsFled.includes(unit.id);
+        case "fight":
+          return !unitsAttacked.includes(unit.id);
+        default:
+          return false;
       }
-      case "charge":
-        return !unitsCharged.includes(unit.id) && !unitsFled.includes(unit.id);
-      case "fight":
-        return !unitsAttacked.includes(unit.id);
-      default:
-        return false;
-    }
-  }, [gameState]);
+    },
+    [gameState]
+  );
 
   // Simple unit selection with step counting
-  const selectUnit = useCallback((unitId: UnitId | null) => {
-    if (unitId === null) {
-      actions.setSelectedUnitId(null);
+  const selectUnit = useCallback(
+    (unitId: UnitId | null) => {
+      if (unitId === null) {
+        actions.setSelectedUnitId(null);
+        actions.setMode("select");
+        return;
+      }
+
+      const unit = gameState.units.find((u) => u.id === unitId);
+
+      // Player validation with fight phase exception
+      // Fight phase alternating allows non-active player units to be selected
+      const isFightPhaseAlternating =
+        gameState.phase === "fight" &&
+        (gameState.fight_subphase === "alternating_non_active" ||
+          gameState.fight_subphase === "alternating_active" ||
+          gameState.fight_subphase === "cleanup_non_active" ||
+          gameState.fight_subphase === "cleanup_active");
+
+      const playerCheck = isFightPhaseAlternating
+        ? true
+        : unit?.player === gameState.current_player;
+
+      if (!unit || !playerCheck || !isUnitEligible(unit)) {
+        console.log(
+          `[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, current_player=${gameState.current_player}, eligible=${unit ? isUnitEligible(unit) : false}, fight_subphase=${gameState.fight_subphase}`
+        );
+        return;
+      }
+
+      actions.setSelectedUnitId(unitId);
       actions.setMode("select");
-      return;
-    }
-
-    const unit = gameState.units.find(u => u.id === unitId);
-
-    // Player validation with fight phase exception
-    // Fight phase alternating allows non-active player units to be selected
-    const isFightPhaseAlternating = gameState.phase === "fight" &&
-      (gameState.fight_subphase === "alternating_non_active" ||
-       gameState.fight_subphase === "alternating_active" ||
-       gameState.fight_subphase === "cleanup_non_active" ||
-       gameState.fight_subphase === "cleanup_active");
-
-    const playerCheck = isFightPhaseAlternating ? true : (unit?.player === gameState.current_player);
-
-    if (!unit || !playerCheck || !isUnitEligible(unit)) {
-      console.log(`[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, current_player=${gameState.current_player}, eligible=${unit ? isUnitEligible(unit) : false}, fight_subphase=${gameState.fight_subphase}`);
-      return;
-    }
-
-    actions.setSelectedUnitId(unitId);
-    actions.setMode("select");
-  }, [gameState, isUnitEligible, actions]);
+    },
+    [gameState, isUnitEligible, actions]
+  );
 
   // Simple move with step counting
-  const directMove = useCallback((unitId: UnitId, col: number, row: number) => {
-    const unit = gameState.units.find(u => u.id === unitId);
-    if (!unit || !isUnitEligible(unit) || gameState.phase !== "move") return;
+  const directMove = useCallback(
+    (unitId: UnitId, col: number, row: number) => {
+      const unit = gameState.units.find((u) => u.id === unitId);
+      if (!unit || !isUnitEligible(unit) || gameState.phase !== "move") return;
 
-    actions.updateUnit(unitId, { col, row });
-    actions.addMovedUnit(unitId);
-    actions.setSelectedUnitId(null);
-    actions.setMode("select");
-  }, [gameState, isUnitEligible, actions]);
+      actions.updateUnit(unitId, { col, row });
+      actions.addMovedUnit(unitId);
+      actions.setSelectedUnitId(null);
+      actions.setMode("select");
+    },
+    [gameState, isUnitEligible, actions]
+  );
 
   // Movement preview
-  const startMovePreview = useCallback((unitId: UnitId, col: number, row: number) => {
-    const unit = gameState.units.find(u => u.id === unitId);
-    if (!unit || !isUnitEligible(unit)) return;
+  const startMovePreview = useCallback(
+    (unitId: UnitId, col: number, row: number) => {
+      const unit = gameState.units.find((u) => u.id === unitId);
+      if (!unit || !isUnitEligible(unit)) return;
 
-    actions.setMovePreview({ unitId, destCol: col, destRow: row });
-    actions.setMode("movePreview");
-  }, [gameState, isUnitEligible, actions]);
+      actions.setMovePreview({ unitId, destCol: col, destRow: row });
+      actions.setMode("movePreview");
+    },
+    [gameState, isUnitEligible, actions]
+  );
 
   const confirmMove = useCallback(() => {
     let movedUnitId: UnitId | null = null;
 
     if (gameState.mode === "movePreview" && movePreview) {
-      const unit = gameState.units.find(u => u.id === movePreview.unitId);
+      const unit = gameState.units.find((u) => u.id === movePreview.unitId);
       if (unit && gameState.phase === "move") {
         // Check for flee detection
-        const enemyUnits = gameState.units.filter(u => u.player !== unit.player);
-        const wasAdjacentToEnemy = enemyUnits.some(enemy => 
-          cubeDistance(offsetToCube(unit.col, unit.row), offsetToCube(enemy.col, enemy.row)) === 1
+        const enemyUnits = gameState.units.filter((u) => u.player !== unit.player);
+        const wasAdjacentToEnemy = enemyUnits.some(
+          (enemy) =>
+            cubeDistance(offsetToCube(unit.col, unit.row), offsetToCube(enemy.col, enemy.row)) === 1
         );
-        
+
         if (wasAdjacentToEnemy) {
-          const willBeAdjacentToEnemy = enemyUnits.some(enemy => 
-            cubeDistance(offsetToCube(movePreview.destCol, movePreview.destRow), offsetToCube(enemy.col, enemy.row)) === 1
+          const willBeAdjacentToEnemy = enemyUnits.some(
+            (enemy) =>
+              cubeDistance(
+                offsetToCube(movePreview.destCol, movePreview.destRow),
+                offsetToCube(enemy.col, enemy.row)
+              ) === 1
           );
-          
+
           if (!willBeAdjacentToEnemy) {
             actions.addFledUnit(movePreview.unitId);
           }
         }
       }
-      
+
       actions.updateUnit(movePreview.unitId, {
         col: movePreview.destCol,
         row: movePreview.destRow,
@@ -199,10 +236,13 @@ interface UseGameActionsParams {
     // AI_TURN.md compliant charge implementation
   }, []);
 
-  const startAttackPreview = useCallback((unitId: UnitId, col: number, row: number) => {
-    actions.setAttackPreview({ unitId, col, row });
-    actions.setMode("attackPreview");
-  }, [actions]);
+  const startAttackPreview = useCallback(
+    (unitId: UnitId, col: number, row: number) => {
+      actions.setAttackPreview({ unitId, col, row });
+      actions.setMode("attackPreview");
+    },
+    [actions]
+  );
 
   // Stub implementations for missing functions
   const handleActivateCharge = useCallback(() => {

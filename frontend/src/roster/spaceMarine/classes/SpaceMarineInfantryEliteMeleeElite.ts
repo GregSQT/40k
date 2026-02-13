@@ -2,12 +2,12 @@
 
 export class SpaceMarineInfantryEliteMeleeElite {
   static FACTION = "Space Marines";
-  static TEAM_COLOR = 0x0078ff;     // Example: blue
+  static TEAM_COLOR = 0x0078ff; // Example: blue
 
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
   static TANKING_LEVEL = "Elite"; // Elite: 3+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry";        // Standard infantry movement
-  static TARGET_TYPE = "Elite";         // MeleeElite specialist - hunt elite targets
+  static MOVE_TYPE = "Infantry"; // Standard infantry movement
+  static TARGET_TYPE = "Elite"; // MeleeElite specialist - hunt elite targets
 
   name: string;
   hp: number;
@@ -21,12 +21,20 @@ export class SpaceMarineInfantryEliteMeleeElite {
     this.alive = true;
   }
 
-  move(dx: number, dy: number, boardHeight: number, boardWidth: number, takenPositions: [number, number][]) {
+  move(
+    dx: number,
+    dy: number,
+    boardHeight: number,
+    boardWidth: number,
+    takenPositions: [number, number][]
+  ) {
     const newX = this.pos[0] + dx;
     const newY = this.pos[1] + dy;
     if (
-      newX >= 0 && newX < boardHeight &&
-      newY >= 0 && newY < boardWidth &&
+      newX >= 0 &&
+      newX < boardHeight &&
+      newY >= 0 &&
+      newY < boardWidth &&
       !takenPositions.some(([x, y]) => x === newX && y === newY)
     ) {
       this.pos = [newX, newY];

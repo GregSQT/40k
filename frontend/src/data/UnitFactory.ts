@@ -1,7 +1,7 @@
 // frontend/src/data/UnitFactory.ts
 // AI_TURN.md compliant dynamic unit factory - zero hardcoding
 
-import type { Unit, Weapon } from '../types/game';
+import type { Unit, Weapon } from "../types/game";
 
 // Dynamic unit registry - populated by directory scanning
 interface UnitClass {
@@ -26,60 +26,60 @@ let initialized = false;
 // Load units from config file (same approach as BoardReplay.tsx)
 async function initializeUnitRegistry(): Promise<void> {
   if (initialized) return;
-  
+
   try {
     // Clear existing registry
     unitClassMap = {};
     availableUnitTypes = [];
-    
+
     // Load unit registry from config file
-    const registryResponse = await fetch('/config/unit_registry.json');
-    
+    const registryResponse = await fetch("/config/unit_registry.json");
+
     if (!registryResponse.ok) {
       throw new Error(`Failed to load unit registry: ${registryResponse.statusText}`);
     }
-    
+
     const text = await registryResponse.text();
     const unitConfig = JSON.parse(text);
-    
+
     // Dynamically import each unit class using config paths
     for (const [unitType, unitPath] of Object.entries(unitConfig.units) as [string, string][]) {
       try {
         const module = await import(/* @vite-ignore */ `../roster/${unitPath}.ts`);
         const UnitClass = module[unitType] || module.default;
-        
+
         if (!UnitClass) {
           throw new Error(`Unit class ${unitType} not found in ${unitPath}`);
         }
-        
+
         // Validate required UPPERCASE properties
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required (RNG_WEAPONS or CC_WEAPONS)
-        const requiredProps = ['HP_MAX', 'MOVE', 'ICON'];
-        requiredProps.forEach(prop => {
+        const requiredProps = ["HP_MAX", "MOVE", "ICON"];
+        requiredProps.forEach((prop) => {
           if (UnitClass[prop] === undefined) {
             throw new Error(`Unit ${unitType} missing required UPPERCASE property: ${prop}`);
           }
         });
-        
+
         // Validate at least one weapon type exists
-        if ((!UnitClass.RNG_WEAPONS || UnitClass.RNG_WEAPONS.length === 0) &&
-            (!UnitClass.CC_WEAPONS || UnitClass.CC_WEAPONS.length === 0)) {
+        if (
+          (!UnitClass.RNG_WEAPONS || UnitClass.RNG_WEAPONS.length === 0) &&
+          (!UnitClass.CC_WEAPONS || UnitClass.CC_WEAPONS.length === 0)
+        ) {
           throw new Error(`Unit ${unitType} must have at least RNG_WEAPONS or CC_WEAPONS`);
         }
-        
+
         unitClassMap[unitType] = UnitClass;
         availableUnitTypes.push(unitType);
-        
       } catch (importError) {
         console.error(`❌ Failed to import unit ${unitType}:`, importError);
         throw importError;
       }
     }
-    
+
     initialized = true;
-    
   } catch (error) {
-    console.error('❌ Failed to initialize unit registry:', error);
+    console.error("❌ Failed to initialize unit registry:", error);
     throw error;
   }
 }
@@ -95,7 +95,7 @@ export function isValidUnitType(type: string): boolean {
 export function getUnitClass(type: string) {
   const UnitClass = unitClassMap[type];
   if (!UnitClass) {
-    throw new Error(`Unknown unit type: ${type}. Available: ${getAvailableUnitTypes().join(', ')}`);
+    throw new Error(`Unknown unit type: ${type}. Available: ${getAvailableUnitTypes().join(", ")}`);
   }
   return UnitClass;
 }
@@ -111,32 +111,32 @@ export function createUnit(params: {
   color: number;
 }): Unit {
   if (!initialized) {
-    throw new Error('Unit registry not initialized. Call await initializeUnitRegistry() first.');
+    throw new Error("Unit registry not initialized. Call await initializeUnitRegistry() first.");
   }
-  
+
   const UnitClass = getUnitClass(params.type);
-  
+
   // Validate all UPPERCASE fields exist
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: At least one weapon required
-  const requiredFields = ['HP_MAX', 'MOVE', 'ICON'];
+  const requiredFields = ["HP_MAX", "MOVE", "ICON"];
   for (const field of requiredFields) {
     if (UnitClass[field] === undefined) {
       throw new Error(`Unit class ${params.type} missing required UPPERCASE field: ${field}`);
     }
   }
-  
+
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
   const rngWeapons = UnitClass.RNG_WEAPONS || [];
   const ccWeapons = UnitClass.CC_WEAPONS || [];
-  
+
   if (rngWeapons.length === 0 && ccWeapons.length === 0) {
     throw new Error(`Unit class ${params.type} must have at least RNG_WEAPONS or CC_WEAPONS`);
   }
-  
+
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Initialize selected weapon indices
   const selectedRngWeaponIndex = rngWeapons.length > 0 ? 0 : undefined;
   const selectedCcWeaponIndex = ccWeapons.length > 0 ? 0 : undefined;
-  
+
   return {
     id: params.id,
     name: params.name,

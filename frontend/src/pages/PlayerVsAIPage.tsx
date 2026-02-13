@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { GameController } from "../components/GameController";
 import "../App.css";
-import { initializeUnitRegistry, createUnit } from "../data/UnitFactory";
+import { createUnit, initializeUnitRegistry } from "../data/UnitFactory";
 import type { Unit } from "../types/game";
 
 interface ScenarioUnit {
@@ -23,15 +23,15 @@ export default function PlayerVsAIPage() {
     const initRegistry = async () => {
       try {
         await initializeUnitRegistry();
-        
+
         // Load scenario data from JSON (same as GameController)
-        const response = await fetch('/config/scenario.json');
+        const response = await fetch("/config/scenario.json");
         const scenarioData = await response.json();
-        
+
         if (!scenarioData.units) {
-          throw new Error('No units found in scenario.json');
+          throw new Error("No units found in scenario.json");
         }
-        
+
         // Transform scenario data using UnitFactory.createUnit()
         const pveUnits = scenarioData.units.map((unit: ScenarioUnit) => {
           return createUnit({
@@ -41,18 +41,18 @@ export default function PlayerVsAIPage() {
             player: unit.player as 1 | 2,
             col: unit.col,
             row: unit.row,
-            color: unit.player === 1 ? 0x244488 : 0xff3333
+            color: unit.player === 1 ? 0x244488 : 0xff3333,
           });
         });
-        
+
         setInitialUnits(pveUnits);
         setRegistryInitialized(true);
       } catch (error) {
-        console.error('❌ Failed to initialize PvE unit registry:', error);
-        setInitError(error instanceof Error ? error.message : 'Unknown error');
+        console.error("❌ Failed to initialize PvE unit registry:", error);
+        setInitError(error instanceof Error ? error.message : "Unknown error");
       }
     };
-    
+
     initRegistry();
   }, []);
 
@@ -62,8 +62,9 @@ export default function PlayerVsAIPage() {
         <div className="text-red-500 text-center">
           <h1 className="text-2xl font-bold mb-4">Player vs AI Setup Error</h1>
           <p>{initError}</p>
-          <button 
-            onClick={() => window.location.reload()} 
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
             className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
           >
             Retry
@@ -91,20 +92,15 @@ export default function PlayerVsAIPage() {
         {/* Header indicating PvE mode */}
         <div className="bg-purple-900 border-b border-purple-700 px-4 py-2">
           <div className="flex items-center justify-between">
-            <h1 className="text-purple-100 font-bold">
-              🤖 Player vs AI Mode
-            </h1>
+            <h1 className="text-purple-100 font-bold">🤖 Player vs AI Mode</h1>
             <div className="text-purple-300 text-sm">
               You are Player 1 (Blue) • AI is Player 2 (Red)
             </div>
           </div>
         </div>
-        
+
         {/* Use existing GameController with PvE units */}
-        <GameController 
-          initialUnits={initialUnits}
-          className="pve-mode"
-        />
+        <GameController initialUnits={initialUnits} className="pve-mode" />
       </ErrorBoundary>
     </div>
   );

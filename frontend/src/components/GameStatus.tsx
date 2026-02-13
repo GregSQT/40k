@@ -1,117 +1,122 @@
 // components/GameStatus.tsx
-import { memo } from 'react';
-import type { GameState, Unit, UnitId } from '../types';
+import { memo } from "react";
+import type { GameState, Unit, UnitId } from "../types";
 
 interface GameStatusProps {
-  current_player: GameState['current_player'];
-  phase: GameState['phase'];
+  current_player: GameState["current_player"];
+  phase: GameState["phase"];
   units: Unit[];
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
-  unitsFled: UnitId[];  // ✅ ADD THIS LINE
+  unitsFled: UnitId[]; // ✅ ADD THIS LINE
 }
 
 const PHASE_LABELS = {
-  command: 'Command',
-  move: 'Movement',
-  shoot: 'Shooting',
-  charge: 'Charge',
-  fight: 'Fight',
+  command: "Command",
+  move: "Movement",
+  shoot: "Shooting",
+  charge: "Charge",
+  fight: "Fight",
 } as const;
 
 const PLAYER_LABELS = {
-  1: 'Player 1',
-  2: 'Player 2 (AI)',
+  1: "Player 1",
+  2: "Player 2 (AI)",
 } as const;
 
-export const GameStatus = memo<GameStatusProps>(({
-  current_player,
-  phase,
-  units,
-  unitsMoved,
-  unitsCharged,
-  unitsAttacked,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  unitsFled: _unitsFled,
-}) => {
-  // Get current player's units that have acted
-  // Note: unitsFled.length could be used for future statistics
-  const currentPlayerUnits = units.filter(u => u.player === current_player);
-  
-  const getActedUnits = () => {
-    switch (phase) {
-      case 'move':
-      case 'shoot':
-        return currentPlayerUnits.filter(u => unitsMoved.includes(u.id));
-      case 'charge':
-        return currentPlayerUnits.filter(u => unitsCharged.includes(u.id));
-      case 'fight':
-        return currentPlayerUnits.filter(u => unitsAttacked.includes(u.id));
-      default:
-        return [];
-    }
-  };
+export const GameStatus = memo<GameStatusProps>(
+  ({
+    current_player,
+    phase,
+    units,
+    unitsMoved,
+    unitsCharged,
+    unitsAttacked,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    unitsFled: _unitsFled,
+  }) => {
+    // Get current player's units that have acted
+    // Note: unitsFled.length could be used for future statistics
+    const currentPlayerUnits = units.filter((u) => u.player === current_player);
 
-  const actedUnits = getActedUnits();
-  const actedUnitNames = actedUnits.map(u => u.name).join(', ') || 'None';
+    const getActedUnits = () => {
+      switch (phase) {
+        case "move":
+        case "shoot":
+          return currentPlayerUnits.filter((u) => unitsMoved.includes(u.id));
+        case "charge":
+          return currentPlayerUnits.filter((u) => unitsCharged.includes(u.id));
+        case "fight":
+          return currentPlayerUnits.filter((u) => unitsAttacked.includes(u.id));
+        default:
+          return [];
+      }
+    };
 
-  // Calculate game statistics
-  const player1Units = units.filter(u => u.player === 1);
-  const player2Units = units.filter(u => u.player === 2);
-  
-  const player1HP = player1Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
-  const player2HP = player2Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
+    const actedUnits = getActedUnits();
+    const actedUnitNames = actedUnits.map((u) => u.name).join(", ") || "None";
 
-  return (
-    <div className="game-status">
-      <div className="game-status__row">
-        <span className="game-status__label">Current Player:</span>{' '}
-        <span className="game-status__value">
-          {current_player !== undefined ? PLAYER_LABELS[current_player] : 'Unknown Player'}
-        </span>
+    // Calculate game statistics
+    const player1Units = units.filter((u) => u.player === 1);
+    const player2Units = units.filter((u) => u.player === 2);
+
+    const player1HP = player1Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
+    const player2HP = player2Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
+
+    return (
+      <div className="game-status">
+        <div className="game-status__row">
+          <span className="game-status__label">Current Player:</span>{" "}
+          <span className="game-status__value">
+            {current_player !== undefined ? PLAYER_LABELS[current_player] : "Unknown Player"}
+          </span>
+        </div>
+
+        <div className="game-status__row">
+          <span className="game-status__label">Phase:</span>{" "}
+          <span className="game-status__value">{PHASE_LABELS[phase]}</span>
+        </div>
+
+        <div className="game-status__row">
+          <span className="game-status__label">
+            Units {phase === "fight" ? "attacked" : phase === "charge" ? "charged" : "acted"}:
+          </span>{" "}
+          <span
+            className={`game-status__value ${actedUnits.length === 0 ? "game-status__value--empty" : ""}`}
+          >
+            {actedUnitNames}
+          </span>
+        </div>
+
+        <div className="game-status__row">
+          <span className="game-status__label">Progress:</span>{" "}
+          <span className="game-status__value">
+            {actedUnits.length} / {currentPlayerUnits.length}
+          </span>
+        </div>
+
+        <div
+          className="game-status__divider"
+          style={{ margin: "12px 0", height: "1px", backgroundColor: "#444" }}
+        />
+
+        <div className="game-status__row">
+          <span className="game-status__label">Player 1 Units:</span>{" "}
+          <span className="game-status__value">
+            {player1Units.length} ({player1HP} HP)
+          </span>
+        </div>
+
+        <div className="game-status__row">
+          <span className="game-status__label">Player 2 Units:</span>{" "}
+          <span className="game-status__value">
+            {player2Units.length} ({player2HP} HP)
+          </span>
+        </div>
       </div>
-      
-      <div className="game-status__row">
-        <span className="game-status__label">Phase:</span>{' '}
-        <span className="game-status__value">
-          {PHASE_LABELS[phase]}
-        </span>
-      </div>
+    );
+  }
+);
 
-      <div className="game-status__row">
-        <span className="game-status__label">
-          Units {phase === 'fight' ? 'attacked' : phase === 'charge' ? 'charged' : 'acted'}:
-        </span>{' '}
-        <span className={`game-status__value ${actedUnits.length === 0 ? 'game-status__value--empty' : ''}`}>
-          {actedUnitNames}
-        </span>
-      </div>
-
-      <div className="game-status__row">
-        <span className="game-status__label">Progress:</span>{' '}
-        <span className="game-status__value">
-          {actedUnits.length} / {currentPlayerUnits.length}
-        </span>
-      </div>
-
-      <div className="game-status__divider" style={{ margin: '12px 0', height: '1px', backgroundColor: '#444' }} />
-
-      <div className="game-status__row">
-        <span className="game-status__label">Player 1 Units:</span>{' '}
-        <span className="game-status__value">
-          {player1Units.length} ({player1HP} HP)
-        </span>
-      </div>
-
-      <div className="game-status__row">
-        <span className="game-status__label">Player 2 Units:</span>{' '}
-        <span className="game-status__value">
-          {player2Units.length} ({player2HP} HP)
-        </span>
-      </div>
-    </div>
-  );
-});
-
-GameStatus.displayName = 'GameStatus';
+GameStatus.displayName = "GameStatus";

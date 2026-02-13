@@ -1,6 +1,6 @@
 // frontend/src/utils/boardClickHandler.ts
 
-import type { UnitId } from '../types/game';
+import type { UnitId } from "../types/game";
 
 let globalClickHandler: ((e: Event) => void) | null = null;
 let globalHexClickHandler: ((e: Event) => void) | null = null;
@@ -8,7 +8,7 @@ let globalHexClickHandler: ((e: Event) => void) | null = null;
 export function setupBoardClickHandler(callbacks: {
   onSelectUnit(unitId: number | null): void;
   onSkipUnit?(unitId: UnitId): void;
-  onSkipShoot?(unitId: UnitId, actionType?: 'wait' | 'action'): void;
+  onSkipShoot?(unitId: UnitId, actionType?: "wait" | "action"): void;
   onStartAttackPreview(shooterId: UnitId): void;
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
@@ -26,37 +26,38 @@ export function setupBoardClickHandler(callbacks: {
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
   onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
 }) {
-
   // Remove existing unit click handler
   if (globalClickHandler) {
-    window.removeEventListener('boardUnitClick', globalClickHandler);
+    window.removeEventListener("boardUnitClick", globalClickHandler);
   }
 
   // Remove existing hex click handler
   if (globalHexClickHandler) {
-    window.removeEventListener('boardHexClick', globalHexClickHandler);
+    window.removeEventListener("boardHexClick", globalHexClickHandler);
   }
 
   const unitClickHandler = (e: Event) => {
-    const { unitId, phase, mode, selectedUnitId, clickType } = (e as CustomEvent<{
-      unitId: number;
-      phase: string;
-      mode: string;
-      selectedUnitId: number | null;
-      clickType?: 'left' | 'right';
-    }>).detail;
+    const { unitId, phase, mode, selectedUnitId, clickType } = (
+      e as CustomEvent<{
+        unitId: number;
+        phase: string;
+        mode: string;
+        selectedUnitId: number | null;
+        clickType?: "left" | "right";
+      }>
+    ).detail;
 
     // Ignore unit clicks in advancePreview mode - hex clicks are handled by hex handler
-    if (mode === 'advancePreview') {
+    if (mode === "advancePreview") {
       return;
     }
 
     // Validate player context before processing clicks
     // Note: Actual player validation happens in useGameActions.selectUnit
-    
-    if (phase === 'move' && mode === 'select') {
+
+    if (phase === "move" && mode === "select") {
       if (selectedUnitId === unitId) {
-        if (clickType === 'right') {
+        if (clickType === "right") {
           callbacks.onSkipUnit?.(unitId);
         } else {
           callbacks.onSelectUnit(null);
@@ -64,29 +65,29 @@ export function setupBoardClickHandler(callbacks: {
       } else {
         callbacks.onSelectUnit(unitId);
       }
-    } else if (phase === 'shoot' && mode === 'select') {
+    } else if (phase === "shoot" && mode === "select") {
       if (selectedUnitId === unitId) {
-        if (clickType === 'right') {
-          callbacks.onSkipShoot?.(unitId, 'action');
+        if (clickType === "right") {
+          callbacks.onSkipShoot?.(unitId, "action");
         } else {
           callbacks.onSelectUnit(null);
         }
-      } else if (clickType === 'right' && selectedUnitId === null) {
+      } else if (clickType === "right" && selectedUnitId === null) {
         // Handle right click on unit when nothing is selected
         // This allows canceling activation of a unit that was just activated but backend deselecte
         // (e.g., unit with no valid targets - backend responds and deselects before right click arrives)
-        callbacks.onSkipShoot?.(unitId, 'action');
+        callbacks.onSkipShoot?.(unitId, "action");
       } else {
         callbacks.onSelectUnit(unitId);
       }
       // Don't call onStartAttackPreview here - wait for backend response
       // Backend will return blinking_units (attackPreview) or allow_advance (advancePreview)
-    } else if (phase === 'shoot' && mode === 'attackPreview' && selectedUnitId != null) {
+    } else if (phase === "shoot" && mode === "attackPreview" && selectedUnitId != null) {
       if (selectedUnitId === unitId) {
         // Click on active unit
-        if (clickType === 'right') {
+        if (clickType === "right") {
           // Right click: cancel shooting (skip)
-          callbacks.onSkipShoot?.(unitId, 'action');
+          callbacks.onSkipShoot?.(unitId, "action");
         } else {
           // Left click: postpone if hasn't shot, no effect if has shot
           callbacks.onSelectUnit(null);
@@ -96,8 +97,8 @@ export function setupBoardClickHandler(callbacks: {
         callbacks.onSelectUnit(unitId);
       }
       return;
-    } else if (phase === 'charge' && mode === 'select') {
-      if (selectedUnitId === unitId && clickType === 'right') {
+    } else if (phase === "charge" && mode === "select") {
+      if (selectedUnitId === unitId && clickType === "right") {
         callbacks.onSkipUnit?.(unitId);
       } else {
         if (callbacks.onActivateCharge) {
@@ -105,9 +106,9 @@ export function setupBoardClickHandler(callbacks: {
         }
       }
       return; // Prevent fallthrough to other handlers
-    } else if (phase === 'charge' && mode === 'chargePreview' && selectedUnitId !== null) {
+    } else if (phase === "charge" && mode === "chargePreview" && selectedUnitId !== null) {
       if (selectedUnitId === unitId) {
-        if (clickType === 'right') {
+        if (clickType === "right") {
           callbacks.onSkipUnit?.(unitId);
         } else {
           callbacks.onSelectUnit(null);
@@ -119,18 +120,23 @@ export function setupBoardClickHandler(callbacks: {
         }
       }
       return; // Prevent fallthrough to other handlers
-    } else if (mode === 'movePreview') {
+    } else if (mode === "movePreview") {
       callbacks.onConfirmMove();
-    } else if (phase === 'fight' && mode === 'select') {
+    } else if (phase === "fight" && mode === "select") {
       // Fight phase select mode - selecting a unit to activate
       callbacks.onSelectUnit(unitId);
       if (callbacks.onActivateFight) {
         callbacks.onActivateFight(unitId);
       }
-    } else if (phase === 'fight' && mode === 'attackPreview' && selectedUnitId != null && selectedUnitId !== unitId) {
+    } else if (
+      phase === "fight" &&
+      mode === "attackPreview" &&
+      selectedUnitId != null &&
+      selectedUnitId !== unitId
+    ) {
       // Fight phase attack preview - clicking on enemy to attack
       callbacks.onCombatAttack(selectedUnitId, unitId);
-    } else if (phase === 'fight' && mode === 'attackPreview' && selectedUnitId === unitId) {
+    } else if (phase === "fight" && mode === "attackPreview" && selectedUnitId === unitId) {
       // Fight phase attack preview - clicking on self (no-op or cancel)
       callbacks.onCombatAttack(selectedUnitId, null);
     } else {
@@ -139,79 +145,83 @@ export function setupBoardClickHandler(callbacks: {
   };
 
   globalClickHandler = unitClickHandler;
-  window.addEventListener('boardUnitClick', globalClickHandler);
-  
+  window.addEventListener("boardUnitClick", globalClickHandler);
+
   // Remove existing charge cancel handler before adding new one
-  const existingCancelHandler = (window as unknown as Record<string, unknown>).cancelChargeHandler as (() => void) | undefined;
+  const existingCancelHandler = (window as unknown as Record<string, unknown>)
+    .cancelChargeHandler as (() => void) | undefined;
   if (existingCancelHandler) {
-    window.removeEventListener('boardCancelCharge', existingCancelHandler);
+    window.removeEventListener("boardCancelCharge", existingCancelHandler);
   }
-  
+
   // Create new cancel handler and store reference
   const cancelChargeHandler = () => {
     callbacks.onCancelCharge?.();
   };
   (window as unknown as Record<string, unknown>).cancelChargeHandler = cancelChargeHandler;
-  
-  window.addEventListener('boardCancelCharge', cancelChargeHandler);
+
+  window.addEventListener("boardCancelCharge", cancelChargeHandler);
 
   // Remove existing advance cancel handler before adding new one
-  const existingCancelAdvanceHandler = (window as unknown as Record<string, unknown>).cancelAdvanceHandler as (() => void) | undefined;
+  const existingCancelAdvanceHandler = (window as unknown as Record<string, unknown>)
+    .cancelAdvanceHandler as (() => void) | undefined;
   if (existingCancelAdvanceHandler) {
-    window.removeEventListener('boardCancelAdvance', existingCancelAdvanceHandler);
+    window.removeEventListener("boardCancelAdvance", existingCancelAdvanceHandler);
   }
-  
+
   // Create new cancel advance handler and store reference
   const cancelAdvanceHandler = () => {
     callbacks.onCancelAdvance?.();
   };
   (window as unknown as Record<string, unknown>).cancelAdvanceHandler = cancelAdvanceHandler;
-  
-  window.addEventListener('boardCancelAdvance', cancelAdvanceHandler);
-  
+
+  window.addEventListener("boardCancelAdvance", cancelAdvanceHandler);
+
   const skipShootHandler = (e: Event) => {
     const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
     callbacks.onSkipShoot?.(unitId);
   };
-  
-  window.addEventListener('boardSkipShoot', skipShootHandler);
-  
-  globalHexClickHandler = (e: Event) => {
-    const { col, row, phase, mode, selectedUnitId } = (e as CustomEvent<{
-      col: number;
-      row: number;
-      phase: string;
-      mode: string;
-      selectedUnitId: number | null;
-    }>).detail;
 
-    if (mode === 'chargePreview' && selectedUnitId !== null) {
-    if (callbacks.onMoveCharger) {
-      callbacks.onMoveCharger(selectedUnitId, col, row);
-    }
-  } else if (mode === 'select' && selectedUnitId !== null && phase === 'deployment') {
-    if (callbacks.onDeployUnit) {
-      callbacks.onDeployUnit(selectedUnitId, col, row);
-    }
-  } else if (mode === 'select' && selectedUnitId !== null && phase === 'move') {
-    // In Movement Phase, clicking green hex should directly move the unit      
-    if (callbacks.onDirectMove) {
-      callbacks.onDirectMove(selectedUnitId, col, row);
-    } else if (callbacks.onStartMovePreview) {
-      callbacks.onStartMovePreview(selectedUnitId, col, row);
+  window.addEventListener("boardSkipShoot", skipShootHandler);
+
+  globalHexClickHandler = (e: Event) => {
+    const { col, row, phase, mode, selectedUnitId } = (
+      e as CustomEvent<{
+        col: number;
+        row: number;
+        phase: string;
+        mode: string;
+        selectedUnitId: number | null;
+      }>
+    ).detail;
+
+    if (mode === "chargePreview" && selectedUnitId !== null) {
+      if (callbacks.onMoveCharger) {
+        callbacks.onMoveCharger(selectedUnitId, col, row);
+      }
+    } else if (mode === "select" && selectedUnitId !== null && phase === "deployment") {
+      if (callbacks.onDeployUnit) {
+        callbacks.onDeployUnit(selectedUnitId, col, row);
+      }
+    } else if (mode === "select" && selectedUnitId !== null && phase === "move") {
+      // In Movement Phase, clicking green hex should directly move the unit
+      if (callbacks.onDirectMove) {
+        callbacks.onDirectMove(selectedUnitId, col, row);
+      } else if (callbacks.onStartMovePreview) {
+        callbacks.onStartMovePreview(selectedUnitId, col, row);
+        callbacks.onConfirmMove();
+      }
+    } else if (mode === "advancePreview" && selectedUnitId !== null && phase === "shoot") {
+      // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance mode - clicking orange hex moves the unit
+      if (callbacks.onAdvanceMove) {
+        callbacks.onAdvanceMove(selectedUnitId, col, row);
+      }
+    } else if (mode === "movePreview") {
       callbacks.onConfirmMove();
     }
-    } else if (mode === 'advancePreview' && selectedUnitId !== null && phase === 'shoot') {
-    // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance mode - clicking orange hex moves the unit
-    if (callbacks.onAdvanceMove) {
-      callbacks.onAdvanceMove(selectedUnitId, col, row);
-    }
-  } else if (mode === 'movePreview') {
-    callbacks.onConfirmMove();
-    }
   };
-  
-  window.addEventListener('boardHexClick', globalHexClickHandler);
+
+  window.addEventListener("boardHexClick", globalHexClickHandler);
 }
 
-;(window as unknown as Record<string, unknown>).setupBoardClickHandler = setupBoardClickHandler;
+(window as unknown as Record<string, unknown>).setupBoardClickHandler = setupBoardClickHandler;

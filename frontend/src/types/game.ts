@@ -3,9 +3,21 @@
 export type PlayerId = 1 | 2;
 export type UnitId = number;
 export type GamePhase = "deployment" | "command" | "move" | "shoot" | "charge" | "fight";
-export type GameMode = "select" | "movePreview" | "attackPreview" | "targetPreview" | "chargePreview" | "advancePreview";
+export type GameMode =
+  | "select"
+  | "movePreview"
+  | "attackPreview"
+  | "targetPreview"
+  | "chargePreview"
+  | "advancePreview";
 // AI_TURN.md COMPLIANCE: Fight subphase names match backend exactly
-export type FightSubPhase = "charging" | "alternating_non_active" | "alternating_active" | "cleanup_non_active" | "cleanup_active" | null;
+export type FightSubPhase =
+  | "charging"
+  | "alternating_non_active"
+  | "alternating_active"
+  | "cleanup_non_active"
+  | "cleanup_active"
+  | null;
 
 // NEW: Debug reward display fields
 export interface ActionReward {
@@ -86,7 +98,7 @@ export interface Unit {
   col: number;
   row: number;
   color?: number;
-  
+
   // Engine UPPERCASE fields (AI_TURN.md compliance)
   HP_CUR: number;
   HP_MAX?: number;
@@ -97,18 +109,18 @@ export interface Unit {
   LD?: number;
   OC?: number;
   VALUE?: number;
-  
+
   // Multiple weapons system (MULTIPLE_WEAPONS_IMPLEMENTATION.md)
-  RNG_WEAPONS: Weapon[];           // Armes à distance (max 3)
-  CC_WEAPONS: Weapon[];             // Armes de mêlée (max 2)
-  selectedRngWeaponIndex?: number;  // Index de l'arme ranged sélectionnée
-  selectedCcWeaponIndex?: number;   // Index de l'arme melee sélectionnée
-  manualWeaponSelected?: boolean;   // True when user explicitly selected a weapon
-  
+  RNG_WEAPONS: Weapon[]; // Armes à distance (max 3)
+  CC_WEAPONS: Weapon[]; // Armes de mêlée (max 2)
+  selectedRngWeaponIndex?: number; // Index de l'arme ranged sélectionnée
+  selectedCcWeaponIndex?: number; // Index de l'arme melee sélectionnée
+  manualWeaponSelected?: boolean; // True when user explicitly selected a weapon
+
   // Display properties
   ICON: string;
   ICON_SCALE?: number;
-  
+
   // Game state tracking
   SHOOT_LEFT?: number;
   ATTACK_LEFT?: number;
@@ -123,7 +135,13 @@ export interface SingleShotState {
   totalShots: number;
   shotsRemaining: number;
   isSelectingTarget: boolean;
-  currentStep: 'target_selection' | 'hit_roll' | 'wound_roll' | 'save_roll' | 'damage_application' | 'complete';
+  currentStep:
+    | "target_selection"
+    | "hit_roll"
+    | "wound_roll"
+    | "save_roll"
+    | "damage_application"
+    | "complete";
   stepResults: {
     hitRoll?: number;
     hitSuccess?: boolean;
@@ -143,7 +161,13 @@ export interface SingleAttackState {
   totalAttacks: number;
   attacksRemaining: number;
   isSelectingTarget: boolean;
-  currentStep: 'target_selection' | 'hit_roll' | 'wound_roll' | 'save_roll' | 'damage_application' | 'complete';
+  currentStep:
+    | "target_selection"
+    | "hit_roll"
+    | "wound_roll"
+    | "save_roll"
+    | "damage_application"
+    | "complete";
   stepResults: {
     hitRoll?: number;
     hitSuccess?: boolean;
@@ -189,7 +213,7 @@ export interface GameState {
   currentTurn?: number; // Frontend format
   game_over?: boolean;
   winner?: number | null;
-  
+
   // AI_TURN.md tracking sets (Frontend format - converted from Engine string[] to UnitId[])
   unitsMoved?: UnitId[];
   unitsFled?: UnitId[];
@@ -197,7 +221,7 @@ export interface GameState {
   unitsCharged?: UnitId[];
   unitsAttacked?: UnitId[];
   unitsAdvanced?: UnitId[];
-  
+
   // Engine specific
   move_activation_pool?: string[];
   shoot_activation_pool?: string[];
@@ -205,14 +229,14 @@ export interface GameState {
   board_width?: number;
   board_height?: number;
   wall_hexes?: number[][];
-  
+
   // Fight phase pools (AI_TURN.md)
   fight_subphase?: FightSubPhase;
   charging_activation_pool?: string[];
   active_alternating_activation_pool?: string[];
   non_active_alternating_activation_pool?: string[];
   units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number }>;
-  
+
   // Frontend specific
   mode?: GameMode;
   selectedUnitId?: UnitId | null;

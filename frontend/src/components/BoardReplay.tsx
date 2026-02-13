@@ -1,21 +1,22 @@
 // frontend/src/components/BoardReplay.tsx
 // Replay viewer that reuses existing BoardWithAPI structure
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import '../App.css';
-import BoardPvp from './BoardPvp';
-import { useGameConfig } from '../hooks/useGameConfig';
-import SharedLayout from './SharedLayout';
-import { ErrorBoundary } from './ErrorBoundary';
-import { UnitStatusTable } from './UnitStatusTable';
-import { GameLog } from './GameLog';
-import { TurnPhaseTracker } from './TurnPhaseTracker';
-import { useGameLog } from '../hooks/useGameLog';
-import { initializeUnitRegistry, getUnitClass } from '../data/UnitFactory';
-import { offsetToCube, cubeDistance } from '../utils/gameHelpers';
-import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
-import type { Unit, GameState, Weapon } from '../types/game';
-import { SettingsMenu } from './SettingsMenu';
+import type React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import "../App.css";
+import { getUnitClass, initializeUnitRegistry } from "../data/UnitFactory";
+import { useGameConfig } from "../hooks/useGameConfig";
+import { useGameLog } from "../hooks/useGameLog";
+import type { GameState, Unit, Weapon } from "../types/game";
+import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
+import { getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
+import BoardPvp from "./BoardPvp";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { GameLog } from "./GameLog";
+import { SettingsMenu } from "./SettingsMenu";
+import SharedLayout from "./SharedLayout";
+import { TurnPhaseTracker } from "./TurnPhaseTracker";
+import { UnitStatusTable } from "./UnitStatusTable";
 
 // Extended Unit type for replay mode (with ghost units)
 interface UnitWithGhost extends Unit {
@@ -90,7 +91,7 @@ interface ReplayRules {
 }
 
 // Extended GameState for replay mode (with additional properties from parser)
-interface ReplayGameState extends Omit<GameState, 'episode_steps'> {
+interface ReplayGameState extends Omit<GameState, "episode_steps"> {
   episode_steps?: number; // Optional in replay mode
   board_cols?: number;
   board_rows?: number;
@@ -123,33 +124,35 @@ export const BoardReplay: React.FC = () => {
   // Replay data
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState<string>('');
+  const [selectedFileName, setSelectedFileName] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [unitRegistryReady, setUnitRegistryReady] = useState<boolean>(false);
-  const [availableLogFiles, setAvailableLogFiles] = useState<Array<{name: string, size: number, modified: string}>>([]);
+  const [availableLogFiles, setAvailableLogFiles] = useState<
+    Array<{ name: string; size: number; modified: string }>
+  >([]);
 
   // Playback state
   const [currentActionIndex, setCurrentActionIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
-  
+
   // Settings menu state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const handleOpenSettings = () => setIsSettingsOpen(true);
-  
+
   // Settings preferences (from localStorage)
   const [settings, setSettings] = useState(() => {
-    const showDebugStr = localStorage.getItem('showDebug');
+    const showDebugStr = localStorage.getItem("showDebug");
     return {
       showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
     };
   });
-  
+
   const handleToggleDebug = (value: boolean) => {
-    setSettings(prev => ({ ...prev, showDebug: value }));
-    localStorage.setItem('showDebug', JSON.stringify(value));
+    setSettings((prev) => ({ ...prev, showDebug: value }));
+    localStorage.setItem("showDebug", JSON.stringify(value));
   };
-  
+
   // Debug mode - read from settings state
   const showHexCoordinates = settings.showDebug;
 
@@ -162,8 +165,8 @@ export const BoardReplay: React.FC = () => {
         await initializeUnitRegistry();
         setUnitRegistryReady(true);
       } catch (error) {
-        console.error('Failed to initialize unit registry:', error);
-        setLoadError('Failed to initialize unit registry');
+        console.error("Failed to initialize unit registry:", error);
+        setLoadError("Failed to initialize unit registry");
       }
     };
     initRegistry();
@@ -173,13 +176,13 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     const loadAvailableFiles = async () => {
       try {
-        const response = await fetch('http://localhost:5001/api/replay/list');
+        const response = await fetch("http://localhost:5001/api/replay/list");
         if (response.ok) {
           const data = await response.json();
           setAvailableLogFiles(data.logs || []);
         }
       } catch (error) {
-        console.error('Failed to load available log files:', error);
+        console.error("Failed to load available log files:", error);
       }
     };
 
@@ -190,23 +193,23 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     const loadDefaultLog = async () => {
       try {
-        const response = await fetch('http://localhost:5001/api/replay/default');
+        const response = await fetch("http://localhost:5001/api/replay/default");
         if (!response.ok) {
           // Silent fail - file might not exist, user can still browse manually
-          console.log('No default step.log found, user can browse manually');
+          console.log("No default step.log found, user can browse manually");
           return;
         }
 
         const text = await response.text();
 
         // Parse it directly on frontend
-        const { parse_log_file_from_text } = await import('../utils/replayParser');
+        const { parse_log_file_from_text } = await import("../utils/replayParser");
         const data = parse_log_file_from_text(text);
 
         // Type assertion with proper conversion
         const typedData = data as unknown as ReplayData;
         setReplayData(typedData);
-        setSelectedFileName('step.log');
+        setSelectedFileName("step.log");
         setSelectedEpisode(1);
         setCurrentActionIndex(0);
         setIsPlaying(false);
@@ -215,7 +218,7 @@ export const BoardReplay: React.FC = () => {
         console.log(`Auto-loaded step.log with ${data.total_episodes} episodes`);
       } catch (error) {
         // Silent fail - user can still browse manually
-        console.log('Could not auto-load step.log:', error);
+        console.log("Could not auto-load step.log:", error);
       }
     };
 
@@ -223,47 +226,52 @@ export const BoardReplay: React.FC = () => {
   }, []);
 
   // Enrich units with stats from UnitFactory
-  const enrichUnitsWithStats = (units: Unit[]): Unit[] => {
-    if (!unitRegistryReady) return units;
+  const enrichUnitsWithStats = useCallback(
+    (units: Unit[]): Unit[] => {
+      if (!unitRegistryReady) return units;
 
-    return units.map(unit => {
-      try {
-        const UnitClass = getUnitClass(unit.type || '');
+      return units.map((unit) => {
+        try {
+          const UnitClass = getUnitClass(unit.type || "");
 
-        // Merge UnitClass stats with unit data
-        // Fix HP: replayParser hardcodes HP_MAX=2, so if HP_CUR==HP_MAX==2, reset to correct values
-        // Otherwise preserve HP_CUR from parsed data (tracks damage taken during replay)
-        const correctHpMax = UnitClass.HP_MAX || 1;
-        let currentHp = unit.HP_CUR;
-        if (unit.HP_MAX === 2 && unit.HP_CUR === 2) {
-          // This is the hardcoded placeholder value, reset to correct HP_MAX
-          currentHp = correctHpMax;
+          // Merge UnitClass stats with unit data
+          // Fix HP: replayParser hardcodes HP_MAX=2, so if HP_CUR==HP_MAX==2, reset to correct values
+          // Otherwise preserve HP_CUR from parsed data (tracks damage taken during replay)
+          const correctHpMax = UnitClass.HP_MAX || 1;
+          let currentHp = unit.HP_CUR;
+          if (unit.HP_MAX === 2 && unit.HP_CUR === 2) {
+            // This is the hardcoded placeholder value, reset to correct HP_MAX
+            currentHp = correctHpMax;
+          }
+
+          return {
+            ...unit,
+            HP_MAX: correctHpMax,
+            HP_CUR: currentHp,
+            MOVE: UnitClass.MOVE || 0,
+            T: UnitClass.T || 0,
+            ARMOR_SAVE: UnitClass.ARMOR_SAVE || 0,
+            LD: UnitClass.LD || 0,
+            OC: UnitClass.OC || 0,
+            VALUE: UnitClass.VALUE || 0,
+            // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract from weapons arrays
+            RNG_WEAPONS: (UnitClass.RNG_WEAPONS || []) as unknown as Weapon[],
+            CC_WEAPONS: (UnitClass.CC_WEAPONS || []) as unknown as Weapon[],
+            selectedRngWeaponIndex:
+              UnitClass.RNG_WEAPONS && UnitClass.RNG_WEAPONS.length > 0 ? 0 : undefined,
+            selectedCcWeaponIndex:
+              UnitClass.CC_WEAPONS && UnitClass.CC_WEAPONS.length > 0 ? 0 : undefined,
+            ICON: UnitClass.ICON || "",
+            ICON_SCALE: UnitClass.ICON_SCALE || 1,
+          };
+        } catch (error) {
+          console.error(`❌ Failed to enrich unit ${unit.id} (${unit.type}):`, error);
+          return unit;
         }
-
-        return {
-          ...unit,
-          HP_MAX: correctHpMax,
-          HP_CUR: currentHp,
-          MOVE: UnitClass.MOVE || 0,
-          T: UnitClass.T || 0,
-          ARMOR_SAVE: UnitClass.ARMOR_SAVE || 0,
-          LD: UnitClass.LD || 0,
-          OC: UnitClass.OC || 0,
-          VALUE: UnitClass.VALUE || 0,
-          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract from weapons arrays
-          RNG_WEAPONS: (UnitClass.RNG_WEAPONS || []) as unknown as Weapon[],
-          CC_WEAPONS: (UnitClass.CC_WEAPONS || []) as unknown as Weapon[],
-          selectedRngWeaponIndex: UnitClass.RNG_WEAPONS && UnitClass.RNG_WEAPONS.length > 0 ? 0 : undefined,
-          selectedCcWeaponIndex: UnitClass.CC_WEAPONS && UnitClass.CC_WEAPONS.length > 0 ? 0 : undefined,
-          ICON: UnitClass.ICON || '',
-          ICON_SCALE: UnitClass.ICON_SCALE || 1
-        };
-      } catch (error) {
-        console.error(`❌ Failed to enrich unit ${unit.id} (${unit.type}):`, error);
-        return unit;
-      }
-    });
-  };
+      });
+    },
+    [unitRegistryReady]
+  );
 
   const handleFileSelectFromServer = async (filename: string) => {
     if (!filename) return;
@@ -273,7 +281,9 @@ export const BoardReplay: React.FC = () => {
 
     try {
       // Load file content from server
-      const response = await fetch(`http://localhost:5001/api/replay/file/${encodeURIComponent(filename)}`);
+      const response = await fetch(
+        `http://localhost:5001/api/replay/file/${encodeURIComponent(filename)}`
+      );
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`);
       }
@@ -281,7 +291,7 @@ export const BoardReplay: React.FC = () => {
       const text = await response.text();
 
       // Parse it directly on frontend
-      const { parse_log_file_from_text } = await import('../utils/replayParser');
+      const { parse_log_file_from_text } = await import("../utils/replayParser");
       const data = parse_log_file_from_text(text);
 
       // Type assertion - parser returns any types, we cast to ReplayData
@@ -291,10 +301,10 @@ export const BoardReplay: React.FC = () => {
       setIsPlaying(false);
       setLoadError(null);
     } catch (error: unknown) {
-      console.error('Failed to parse replay:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error("Failed to parse replay:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
       setLoadError(`Failed to load file: ${errorMessage}`);
-      setSelectedFileName('');
+      setSelectedFileName("");
     }
   };
 
@@ -309,10 +319,10 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     if (isPlaying && selectedEpisode !== null && replayData) {
       const episode = replayData.episodes[selectedEpisode - 1];
-      const interval = (500 / playbackSpeed);
+      const interval = 500 / playbackSpeed;
 
       playbackInterval.current = setInterval(() => {
-        setCurrentActionIndex(prev => {
+        setCurrentActionIndex((prev) => {
           if (prev >= episode.total_actions) {
             setIsPlaying(false);
             return prev;
@@ -332,11 +342,19 @@ export const BoardReplay: React.FC = () => {
     if (!selectedEpisode || !replayData) return null;
     const episode = replayData.episodes[selectedEpisode - 1];
 
-    const buildUnitsCache = (units: Unit[]): Record<string, { col: number; row: number; HP_CUR: number; player: number }> => {
-      const cache: Record<string, { col: number; row: number; HP_CUR: number; player: number }> = {};
-      units.forEach(unit => {
+    const buildUnitsCache = (
+      units: Unit[]
+    ): Record<string, { col: number; row: number; HP_CUR: number; player: number }> => {
+      const cache: Record<string, { col: number; row: number; HP_CUR: number; player: number }> =
+        {};
+      units.forEach((unit) => {
         if (unit.HP_CUR > 0) {
-          cache[unit.id.toString()] = { col: unit.col, row: unit.row, HP_CUR: unit.HP_CUR, player: unit.player };
+          cache[unit.id.toString()] = {
+            col: unit.col,
+            row: unit.row,
+            HP_CUR: unit.HP_CUR,
+            player: unit.player,
+          };
         }
       });
       return cache;
@@ -352,7 +370,7 @@ export const BoardReplay: React.FC = () => {
         ...episode.initial_state,
         units: enrichedUnits,
         units_cache: buildUnitsCache(enrichedUnits),
-        episode_steps: episode.initial_state.episode_steps || 0
+        episode_steps: episode.initial_state.episode_steps || 0,
       } as ReplayGameState;
     } else {
       const state = episode.states[currentActionIndex - 1];
@@ -363,15 +381,14 @@ export const BoardReplay: React.FC = () => {
       return {
         ...state,
         units: enrichedUnits,
-        units_cache: buildUnitsCache(enrichedUnits)
+        units_cache: buildUnitsCache(enrichedUnits),
       };
     }
   };
 
   const currentState = getCurrentGameState();
-  const currentEpisode = selectedEpisode !== null && replayData
-    ? replayData.episodes[selectedEpisode - 1]
-    : null;
+  const currentEpisode =
+    selectedEpisode !== null && replayData ? replayData.episodes[selectedEpisode - 1] : null;
 
   const replayVictoryPoints = useMemo(() => {
     if (!currentEpisode) {
@@ -383,7 +400,7 @@ export const BoardReplay: React.FC = () => {
 
     const rules = currentEpisode.initial_state.rules;
     if (!rules) {
-      throw new Error('Replay rules missing: victory points cannot be computed');
+      throw new Error("Replay rules missing: victory points cannot be computed");
     }
 
     const primaryObjectiveConfig = Array.isArray(rules.primary_objective)
@@ -391,51 +408,57 @@ export const BoardReplay: React.FC = () => {
       : rules.primary_objective;
 
     if (!primaryObjectiveConfig) {
-      throw new Error('primary_objective missing in replay rules');
+      throw new Error("primary_objective missing in replay rules");
     }
 
     if (!primaryObjectiveConfig.scoring || !Array.isArray(primaryObjectiveConfig.scoring.rules)) {
-      throw new Error('primary_objective.scoring.rules is required for victory points');
+      throw new Error("primary_objective.scoring.rules is required for victory points");
     }
 
     if (!primaryObjectiveConfig.timing) {
-      throw new Error('primary_objective.timing is required for victory points');
+      throw new Error("primary_objective.timing is required for victory points");
     }
 
     if (!primaryObjectiveConfig.control) {
-      throw new Error('primary_objective.control is required for victory points');
+      throw new Error("primary_objective.control is required for victory points");
     }
 
-    if (primaryObjectiveConfig.control.method !== 'oc_sum_greater') {
-      throw new Error(`Unsupported objective control method: ${primaryObjectiveConfig.control.method}`);
+    if (primaryObjectiveConfig.control.method !== "oc_sum_greater") {
+      throw new Error(
+        `Unsupported objective control method: ${primaryObjectiveConfig.control.method}`
+      );
     }
 
     if (!primaryObjectiveConfig.control.control_method) {
-      throw new Error('primary_objective.control.control_method is required for victory points');
+      throw new Error("primary_objective.control.control_method is required for victory points");
     }
 
-    if (!['sticky', 'occupy'].includes(primaryObjectiveConfig.control.control_method)) {
-      throw new Error(`Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`);
+    if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+      throw new Error(
+        `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
+      );
     }
 
-    if (primaryObjectiveConfig.control.tie_behavior !== 'no_control') {
-      throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
+    if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
+      throw new Error(
+        `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
+      );
     }
 
-    if (typeof primaryObjectiveConfig.scoring.start_turn !== 'number') {
-      throw new Error('primary_objective.scoring.start_turn must be a number');
+    if (typeof primaryObjectiveConfig.scoring.start_turn !== "number") {
+      throw new Error("primary_objective.scoring.start_turn must be a number");
     }
 
-    if (typeof primaryObjectiveConfig.scoring.max_points_per_turn !== 'number') {
-      throw new Error('primary_objective.scoring.max_points_per_turn must be a number');
+    if (typeof primaryObjectiveConfig.scoring.max_points_per_turn !== "number") {
+      throw new Error("primary_objective.scoring.max_points_per_turn must be a number");
     }
 
-    if (typeof primaryObjectiveConfig.timing.round5_second_player_phase !== 'string') {
-      throw new Error('primary_objective.timing.round5_second_player_phase must be a string');
+    if (typeof primaryObjectiveConfig.timing.round5_second_player_phase !== "string") {
+      throw new Error("primary_objective.timing.round5_second_player_phase must be a string");
     }
 
     const parseTurnValue = (turnValue: string): number => {
-      const parsed = parseInt(turnValue.replace('T', ''), 10);
+      const parsed = parseInt(turnValue.replace("T", ""), 10);
       if (Number.isNaN(parsed)) {
         throw new Error(`Invalid turn value in replay action: ${turnValue}`);
       }
@@ -448,7 +471,7 @@ export const BoardReplay: React.FC = () => {
     const computeControlCounts = (state: ReplayGameState): { p1: number; p2: number } => {
       const objectives = state.objectives ?? currentEpisode.initial_state.objectives;
       if (!objectives) {
-        throw new Error('Replay objectives missing: victory points cannot be computed');
+        throw new Error("Replay objectives missing: victory points cannot be computed");
       }
 
       const ocByPosition: Record<string, { p1: number; p2: number }> = {};
@@ -476,10 +499,10 @@ export const BoardReplay: React.FC = () => {
       let p2Control = 0;
       for (const objective of objectives) {
         if (!objective.hexes) {
-          throw new Error(`Objective ${objective.name || 'unknown'} missing hexes`);
+          throw new Error(`Objective ${objective.name || "unknown"} missing hexes`);
         }
         if (!objective.name) {
-          throw new Error('Objective name is required for control tracking');
+          throw new Error("Objective name is required for control tracking");
         }
         let p1Oc = 0;
         let p2Oc = 0;
@@ -491,20 +514,24 @@ export const BoardReplay: React.FC = () => {
           }
         }
         const prevController = objectiveControllers[objective.name] ?? null;
-        let newController = controlMethod === 'sticky' ? prevController : null;
+        let newController = controlMethod === "sticky" ? prevController : null;
         if (p1Oc > p2Oc) {
           newController = 1;
         } else if (p2Oc > p1Oc) {
           newController = 2;
-        } else if (controlMethod === 'sticky' && prevController === null) {
-          if (primaryObjectiveConfig.control.tie_behavior === 'no_control') {
+        } else if (controlMethod === "sticky" && prevController === null) {
+          if (primaryObjectiveConfig.control.tie_behavior === "no_control") {
             newController = null;
           } else {
-            throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
+            throw new Error(
+              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
+            );
           }
-        } else if (controlMethod === 'occupy') {
-          if (primaryObjectiveConfig.control.tie_behavior !== 'no_control') {
-            throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
+        } else if (controlMethod === "occupy") {
+          if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
+            throw new Error(
+              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
+            );
           }
         }
 
@@ -533,18 +560,18 @@ export const BoardReplay: React.FC = () => {
 
       let points = 0;
       for (const rule of primaryObjectiveConfig.scoring.rules) {
-        if (!rule || typeof rule.points !== 'number' || !rule.condition) {
-          throw new Error('Invalid scoring rule in primary_objective');
+        if (!rule || typeof rule.points !== "number" || !rule.condition) {
+          throw new Error("Invalid scoring rule in primary_objective");
         }
-        if (rule.condition === 'control_at_least_one') {
+        if (rule.condition === "control_at_least_one") {
           if (playerCount >= 1) {
             points += rule.points;
           }
-        } else if (rule.condition === 'control_at_least_two') {
+        } else if (rule.condition === "control_at_least_two") {
           if (playerCount >= 2) {
             points += rule.points;
           }
-        } else if (rule.condition === 'control_more_than_opponent') {
+        } else if (rule.condition === "control_more_than_opponent") {
           if (playerCount > opponentCount) {
             points += rule.points;
           }
@@ -565,7 +592,8 @@ export const BoardReplay: React.FC = () => {
       const action = currentEpisode.actions[i];
       const turn = parseTurnValue(action.turn);
       const player = action.player;
-      const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
+      const stateBeforeAction =
+        i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
       const stateAfterAction = currentEpisode.states[i];
       if (!stateAfterAction) {
         throw new Error(`Missing replay state for action index ${i}`);
@@ -577,7 +605,7 @@ export const BoardReplay: React.FC = () => {
       }
 
       if (player === 2 && !scoredTurns.has(`2-${turn}`)) {
-        if (turn === 5 && primaryObjectiveConfig.timing.round5_second_player_phase === 'fight') {
+        if (turn === 5 && primaryObjectiveConfig.timing.round5_second_player_phase === "fight") {
           lastTurn5StateForP2 = stateAfterAction as ReplayGameState;
         } else {
           victoryPoints[2] += computeScoreForTurn(stateBeforeAction as ReplayGameState, 2, turn);
@@ -591,105 +619,126 @@ export const BoardReplay: React.FC = () => {
     }
 
     if (
-      primaryObjectiveConfig.timing.round5_second_player_phase === 'fight' &&
-      !scoredTurns.has('2-5') &&
+      primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
+      !scoredTurns.has("2-5") &&
       lastTurn5StateForP2
     ) {
       victoryPoints[2] += computeScoreForTurn(lastTurn5StateForP2, 2, 5);
-      scoredTurns.add('2-5');
+      scoredTurns.add("2-5");
     }
 
     return victoryPoints;
-  }, [currentEpisode, currentActionIndex]);
+  }, [currentEpisode, currentActionIndex, enrichUnitsWithStats, unitRegistryReady]);
 
   // Get current action for move preview
-  const currentAction = currentEpisode && currentActionIndex > 0
-    ? currentEpisode.actions[currentActionIndex - 1]
-    : null;
+  const currentAction =
+    currentEpisode && currentActionIndex > 0
+      ? currentEpisode.actions[currentActionIndex - 1]
+      : null;
 
   // Add ghost unit at starting position for move actions
   // For shoot actions, compute SHOOT_LEFT for the active shooter exactly like PvP,
   // based on RNG_NB and the number of shots already fired in the current shooting phase.
-  const unitsWithGhost = currentState?.units ? [...currentState.units].map((u: Unit) => {
-    // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
-    // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
-    if (currentAction?.type === 'shoot' && currentEpisode && currentActionIndex > 0 && u.id === currentAction.shooter_id) {
-      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
-      const selectedRngWeapon = getSelectedRangedWeapon(u);
-      const rngNb = selectedRngWeapon?.NB || 0;
-      const shooterId = currentAction.shooter_id;
+  const unitsWithGhost = currentState?.units
+    ? [...currentState.units].map((u: Unit) => {
+        // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
+        // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
+        if (
+          currentAction?.type === "shoot" &&
+          currentEpisode &&
+          currentActionIndex > 0 &&
+          u.id === currentAction.shooter_id
+        ) {
+          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+          const selectedRngWeapon = getSelectedRangedWeapon(u);
+          const rngNb = selectedRngWeapon?.NB || 0;
+          const shooterId = currentAction.shooter_id;
 
-      // Index of the last *completed* action before the current one
-      const lastCompletedIndex = currentActionIndex - 2; // actions are 0-based, state index is +1
-      if (lastCompletedIndex < 0) {
-        // No previous actions in this phase: full shots available
-        return { ...u, SHOOT_LEFT: rngNb };
-      }
+          // Index of the last *completed* action before the current one
+          const lastCompletedIndex = currentActionIndex - 2; // actions are 0-based, state index is +1
+          if (lastCompletedIndex < 0) {
+            // No previous actions in this phase: full shots available
+            return { ...u, SHOOT_LEFT: rngNb };
+          }
 
-      // Find the start of the current shooting phase by scanning backwards
-      // from the last completed action until we hit a non-shoot action.
-      let shootingPhaseStart = 0;
-      for (let i = lastCompletedIndex; i >= 0; i--) {
-        const action = currentEpisode.actions[i];
-        if (action.type !== 'shoot' && action.type !== 'wait') {
-          shootingPhaseStart = i + 1;
-          break;
+          // Find the start of the current shooting phase by scanning backwards
+          // from the last completed action until we hit a non-shoot action.
+          let shootingPhaseStart = 0;
+          for (let i = lastCompletedIndex; i >= 0; i--) {
+            const action = currentEpisode.actions[i];
+            if (action.type !== "shoot" && action.type !== "wait") {
+              shootingPhaseStart = i + 1;
+              break;
+            }
+          }
+
+          // Count how many shots this unit has fired in the current shooting phase
+          let shotsFired = 0;
+          for (
+            let i = shootingPhaseStart;
+            i <= lastCompletedIndex && i < currentEpisode.actions.length;
+            i++
+          ) {
+            const action = currentEpisode.actions[i];
+            if (action.type === "shoot" && action.shooter_id === shooterId) {
+              shotsFired++;
+            }
+          }
+
+          // Counter shows remaining shots *before* current shot:
+          // first shot: RNG_NB, second: RNG_NB-1, etc.
+          const shootLeft = Math.max(0, rngNb - shotsFired);
+          return { ...u, SHOOT_LEFT: shootLeft };
         }
-      }
 
-      // Count how many shots this unit has fired in the current shooting phase
-      let shotsFired = 0;
-      for (let i = shootingPhaseStart; i <= lastCompletedIndex && i < currentEpisode.actions.length; i++) {
-        const action = currentEpisode.actions[i];
-        if (action.type === 'shoot' && action.shooter_id === shooterId) {
-          shotsFired++;
+        // During fight action, compute ATTACK_LEFT only for the active attacker,
+        // mirroring PvP: counter shows attacks remaining *before* current swing.
+        if (
+          currentAction?.type === "fight" &&
+          currentEpisode &&
+          currentActionIndex > 0 &&
+          u.id === currentAction.attacker_id
+        ) {
+          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+          const selectedCcWeapon = getSelectedMeleeWeapon(u);
+          const ccNb = selectedCcWeapon?.NB || 0;
+          const attackerId = currentAction.attacker_id;
+
+          const lastCompletedIndex = currentActionIndex - 2;
+          if (lastCompletedIndex < 0) {
+            return { ...u, ATTACK_LEFT: ccNb };
+          }
+
+          // Fight phase is delimited by non-fight actions
+          let fightPhaseStart = 0;
+          for (let i = lastCompletedIndex; i >= 0; i--) {
+            const action = currentEpisode.actions[i];
+            if (action.type !== "fight") {
+              fightPhaseStart = i + 1;
+              break;
+            }
+          }
+
+          let attacksUsed = 0;
+          for (
+            let i = fightPhaseStart;
+            i <= lastCompletedIndex && i < currentEpisode.actions.length;
+            i++
+          ) {
+            const action = currentEpisode.actions[i];
+            if (action.type === "fight" && action.attacker_id === attackerId) {
+              attacksUsed++;
+            }
+          }
+
+          const attacksLeft = Math.max(0, ccNb - attacksUsed);
+          return { ...u, ATTACK_LEFT: attacksLeft };
         }
-      }
 
-      // Counter shows remaining shots *before* current shot:
-      // first shot: RNG_NB, second: RNG_NB-1, etc.
-      const shootLeft = Math.max(0, rngNb - shotsFired);
-      return { ...u, SHOOT_LEFT: shootLeft };
-    }
-
-    // During fight action, compute ATTACK_LEFT only for the active attacker,
-    // mirroring PvP: counter shows attacks remaining *before* current swing.
-    if (currentAction?.type === 'fight' && currentEpisode && currentActionIndex > 0 && u.id === currentAction.attacker_id) {
-      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
-      const selectedCcWeapon = getSelectedMeleeWeapon(u);
-      const ccNb = selectedCcWeapon?.NB || 0;
-      const attackerId = currentAction.attacker_id;
-
-      const lastCompletedIndex = currentActionIndex - 2;
-      if (lastCompletedIndex < 0) {
-        return { ...u, ATTACK_LEFT: ccNb };
-      }
-
-      // Fight phase is delimited by non-fight actions
-      let fightPhaseStart = 0;
-      for (let i = lastCompletedIndex; i >= 0; i--) {
-        const action = currentEpisode.actions[i];
-        if (action.type !== 'fight') {
-          fightPhaseStart = i + 1;
-          break;
-        }
-      }
-
-      let attacksUsed = 0;
-      for (let i = fightPhaseStart; i <= lastCompletedIndex && i < currentEpisode.actions.length; i++) {
-        const action = currentEpisode.actions[i];
-        if (action.type === 'fight' && action.attacker_id === attackerId) {
-          attacksUsed++;
-        }
-      }
-
-      const attacksLeft = Math.max(0, ccNb - attacksUsed);
-      return { ...u, ATTACK_LEFT: attacksLeft };
-    }
-
-    return u;
-  }) : [];
-  if (currentAction?.type === 'move' && currentAction?.from && currentAction.unit_id) {
+        return u;
+      })
+    : [];
+  if (currentAction?.type === "move" && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
     const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
     if (originalUnit) {
@@ -698,13 +747,13 @@ export const BoardReplay: React.FC = () => {
         id: -1, // Special ID for ghost unit
         col: currentAction.from.col,
         row: currentAction.from.row,
-        isGhost: true // Mark as ghost for special rendering
+        isGhost: true, // Mark as ghost for special rendering
       } as UnitWithGhost);
     }
   }
 
   // Add ghost unit at starting position for charge actions (like move)
-  if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id) {
+  if (currentAction?.type === "charge" && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
     const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
     if (originalUnit) {
@@ -713,13 +762,13 @@ export const BoardReplay: React.FC = () => {
         id: -2, // Special ID for charge ghost unit (different from move ghost)
         col: currentAction.from.col,
         row: currentAction.from.row,
-        isGhost: true // Mark as ghost for special rendering
+        isGhost: true, // Mark as ghost for special rendering
       } as UnitWithGhost);
     }
   }
 
   // Add ghost unit at starting position for advance actions (like move)
-  if (currentAction?.type === 'advance' && currentAction?.from && currentAction.unit_id) {
+  if (currentAction?.type === "advance" && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
     const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
     if (originalUnit) {
@@ -728,7 +777,7 @@ export const BoardReplay: React.FC = () => {
         id: -3, // Special ID for advance ghost unit (different from move and charge)
         col: currentAction.from.col,
         row: currentAction.from.row,
-        isGhost: true // Mark as ghost for special rendering
+        isGhost: true, // Mark as ghost for special rendering
       } as UnitWithGhost);
     }
   }
@@ -752,37 +801,53 @@ export const BoardReplay: React.FC = () => {
       actionPlayer: number
     ) => {
       if (!rules) {
-        throw new Error('Replay rules missing: cannot apply primary objective logic');
+        throw new Error("Replay rules missing: cannot apply primary objective logic");
       }
       const primaryObjective = rules.primary_objective;
       const primaryObjectiveConfig = Array.isArray(primaryObjective)
         ? (() => {
             if (primaryObjective.length !== 1) {
-              throw new Error('Replay rules primary_objective must contain exactly one config');
+              throw new Error("Replay rules primary_objective must contain exactly one config");
             }
             return primaryObjective[0];
           })()
         : primaryObjective;
       if (!primaryObjectiveConfig) {
-        throw new Error('Replay rules primary_objective is null');
+        throw new Error("Replay rules primary_objective is null");
       }
-      if (!primaryObjectiveConfig.scoring || primaryObjectiveConfig.scoring.start_turn === undefined || primaryObjectiveConfig.scoring.start_turn === null) {
-        throw new Error('Replay rules primary_objective.scoring.start_turn is missing');
+      if (
+        !primaryObjectiveConfig.scoring ||
+        primaryObjectiveConfig.scoring.start_turn === undefined ||
+        primaryObjectiveConfig.scoring.start_turn === null
+      ) {
+        throw new Error("Replay rules primary_objective.scoring.start_turn is missing");
       }
-      if (!primaryObjectiveConfig.control || !primaryObjectiveConfig.control.method || !primaryObjectiveConfig.control.tie_behavior) {
-        throw new Error('Replay rules primary_objective.control is missing required fields');
+      if (
+        !primaryObjectiveConfig.control ||
+        !primaryObjectiveConfig.control.method ||
+        !primaryObjectiveConfig.control.tie_behavior
+      ) {
+        throw new Error("Replay rules primary_objective.control is missing required fields");
       }
       if (!primaryObjectiveConfig.control.control_method) {
-        throw new Error('Replay rules primary_objective.control.control_method is missing');
+        throw new Error("Replay rules primary_objective.control.control_method is missing");
       }
-      if (!primaryObjectiveConfig.timing || !primaryObjectiveConfig.timing.default_phase || !primaryObjectiveConfig.timing.round5_second_player_phase) {
-        throw new Error('Replay rules primary_objective.timing is missing required fields');
+      if (
+        !primaryObjectiveConfig.timing ||
+        !primaryObjectiveConfig.timing.default_phase ||
+        !primaryObjectiveConfig.timing.round5_second_player_phase
+      ) {
+        throw new Error("Replay rules primary_objective.timing is missing required fields");
       }
-      if (primaryObjectiveConfig.control.method !== 'oc_sum_greater') {
-        throw new Error(`Unsupported objective control method: ${primaryObjectiveConfig.control.method}`);
+      if (primaryObjectiveConfig.control.method !== "oc_sum_greater") {
+        throw new Error(
+          `Unsupported objective control method: ${primaryObjectiveConfig.control.method}`
+        );
       }
-      if (!['sticky', 'occupy'].includes(primaryObjectiveConfig.control.control_method)) {
-        throw new Error(`Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`);
+      if (!["sticky", "occupy"].includes(primaryObjectiveConfig.control.control_method)) {
+        throw new Error(
+          `Unsupported control_method: ${primaryObjectiveConfig.control.control_method}`
+        );
       }
       if (turnNumber < primaryObjectiveConfig.scoring.start_turn) {
         return;
@@ -790,8 +855,8 @@ export const BoardReplay: React.FC = () => {
       if (
         turnNumber === 5 &&
         actionPlayer === 2 &&
-        primaryObjectiveConfig.timing.round5_second_player_phase === 'fight' &&
-        actionPhase !== 'fight'
+        primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
+        actionPhase !== "fight"
       ) {
         return;
       }
@@ -821,52 +886,60 @@ export const BoardReplay: React.FC = () => {
         }
 
         if (!obj.name) {
-          throw new Error('Objective name is required for control tracking');
+          throw new Error("Objective name is required for control tracking");
         }
         const prevController = objectiveControllers[obj.name] ?? null;
-        let newController = primaryObjectiveConfig.control.control_method === 'sticky' ? prevController : null;
+        let newController =
+          primaryObjectiveConfig.control.control_method === "sticky" ? prevController : null;
         if (p1_oc > p2_oc) {
           newController = 1;
         } else if (p2_oc > p1_oc) {
           newController = 2;
-        } else if (primaryObjectiveConfig.control.control_method === 'sticky' && prevController === null) {
-          if (primaryObjectiveConfig.control.tie_behavior === 'no_control') {
+        } else if (
+          primaryObjectiveConfig.control.control_method === "sticky" &&
+          prevController === null
+        ) {
+          if (primaryObjectiveConfig.control.tie_behavior === "no_control") {
             newController = null;
           } else {
-            throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
+            throw new Error(
+              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
+            );
           }
-        } else if (primaryObjectiveConfig.control.control_method === 'occupy') {
-          if (primaryObjectiveConfig.control.tie_behavior !== 'no_control') {
-            throw new Error(`Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`);
+        } else if (primaryObjectiveConfig.control.control_method === "occupy") {
+          if (primaryObjectiveConfig.control.tie_behavior !== "no_control") {
+            throw new Error(
+              `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
+            );
           }
         }
 
         if (newController !== prevController) {
           if (newController === 1) {
             gameLog.addEvent({
-              type: 'phase_change',
+              type: "phase_change",
               message: `P1 controls objective ${obj.name} (OC ${p1_oc} vs ${p2_oc})`,
               turnNumber: turnNumber,
-              phase: 'command',
+              phase: "command",
               player: 1,
-              action_name: 'objective_control'
+              action_name: "objective_control",
             });
           } else if (newController === 2) {
             gameLog.addEvent({
-              type: 'phase_change',
+              type: "phase_change",
               message: `P2 controls objective ${obj.name} (OC ${p1_oc} vs ${p2_oc})`,
               turnNumber: turnNumber,
-              phase: 'command',
+              phase: "command",
               player: 2,
-              action_name: 'objective_control'
+              action_name: "objective_control",
             });
           } else {
             gameLog.addEvent({
-              type: 'phase_change',
+              type: "phase_change",
               message: `Objective ${obj.name} contested (OC ${p1_oc} vs ${p2_oc})`,
               turnNumber: turnNumber,
-              phase: 'command',
-              action_name: 'objective_control'
+              phase: "command",
+              action_name: "objective_control",
             });
           }
         }
@@ -877,16 +950,16 @@ export const BoardReplay: React.FC = () => {
 
     for (let i = 0; i < currentActionIndex; i++) {
       const action = currentEpisode.actions[i];
-      const turnNumber = parseInt(action.turn.replace('T', ''));
-      const actionPhase = action.type.includes('fight')
-        ? 'fight'
-        : action.type.includes('charge')
-          ? 'charge'
-          : action.type.includes('shoot') || action.type === 'advance'
-            ? 'shoot'
-            : 'move';
+      const turnNumber = parseInt(action.turn.replace("T", ""), 10);
+      const actionPhase = action.type.includes("fight")
+        ? "fight"
+        : action.type.includes("charge")
+          ? "charge"
+          : action.type.includes("shoot") || action.type === "advance"
+            ? "shoot"
+            : "move";
 
-      if (action.type === 'move' && action.from && action.to) {
+      if (action.type === "move" && action.from && action.to) {
         gameLog.logMoveAction(
           { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
           action.from.col,
@@ -896,39 +969,39 @@ export const BoardReplay: React.FC = () => {
           turnNumber,
           action.player
         );
-      } else if (action.type === 'advance' && action.from && action.to) {
+      } else if (action.type === "advance" && action.from && action.to) {
         // Calculate advance roll from distance between from and to
         const fromCube = offsetToCube(action.from.col, action.from.row);
         const toCube = offsetToCube(action.to.col, action.to.row);
         const advanceRoll = cubeDistance(fromCube, toCube);
-        
+
         // Log advance actions with roll to match PvP/PvE format
         gameLog.addEvent({
-          type: 'advance',
+          type: "advance",
           message: `Unit ${action.unit_id} advanced from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row}) (rolled ${advanceRoll})`,
           unitId: action.unit_id!,
           turnNumber: turnNumber,
-          phase: 'shooting',
+          phase: "shooting",
           startHex: `(${action.from.col},${action.from.row})`,
           endHex: `(${action.to.col},${action.to.row})`,
-          player: action.player
+          player: action.player,
         });
-      } else if (action.type === 'move_wait' && action.pos) {
+      } else if (action.type === "move_wait" && action.pos) {
         gameLog.logNoMoveAction(
           { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
           turnNumber,
           action.player
         );
-      } else if (action.type === 'wait' && action.pos) {
+      } else if (action.type === "wait" && action.pos) {
         gameLog.addEvent({
-          type: 'shoot',
+          type: "shoot",
           message: `Unit ${action.unit_id} (${action.pos.col},${action.pos.row}) chose not to shoot`,
           unitId: action.unit_id!,
           turnNumber: turnNumber,
-          phase: 'shooting',
-          player: action.player
+          phase: "shooting",
+          player: action.player,
         });
-      } else if (action.type === 'shoot') {
+      } else if (action.type === "shoot") {
         // Parse shooting details from log format to match PvP mode
         const shooterId = action.shooter_id!;
         const targetId = action.target_id!;
@@ -936,7 +1009,7 @@ export const BoardReplay: React.FC = () => {
         const targetPos = action.target_pos || { col: 0, row: 0 };
 
         // Reconstruct message in the same format as shooting_handlers.py
-        let message = '';
+        let message = "";
         const hitRoll = action.hit_roll;
         const woundRoll = action.wound_roll;
         const saveRoll = action.save_roll;
@@ -945,7 +1018,7 @@ export const BoardReplay: React.FC = () => {
 
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name if available
         const weaponName = action.weapon_name;
-        const weaponSuffix = weaponName ? ` with [${weaponName}]` : '';
+        const weaponSuffix = weaponName ? ` with [${weaponName}]` : "";
 
         // Determine hit target (assuming 3+ for now - could be in log later)
         const hitTarget = 3;
@@ -953,7 +1026,8 @@ export const BoardReplay: React.FC = () => {
 
         // Check if THIS shot killed the target by comparing HP before and after
         // Get target's HP from state BEFORE and AFTER this action
-        const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
+        const stateBeforeAction =
+          i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
         const stateAfterAction = currentEpisode.states[i];
         const targetBefore = stateBeforeAction?.units?.find((u: Unit) => u.id === targetId);
         const targetAfter = stateAfterAction?.units?.find((u: Unit) => u.id === targetId);
@@ -966,17 +1040,23 @@ export const BoardReplay: React.FC = () => {
         // Build shootDetails for color coding (must match format expected by getEventTypeClass)
         // Note: Don't include targetDied here - shoot lines should show hit/wound/save results
         // Death is shown as a separate black line below
-        const shootDetails = hitRoll !== undefined ? [{
-          shotNumber: 1,
-          attackRoll: hitRoll,
-          strengthRoll: woundRoll || 0,
-          hitResult: hitRoll >= hitTarget ? 'HIT' : 'MISS',
-          strengthResult: woundRoll && woundRoll >= woundTarget ? 'SUCCESS' : 'FAILED',
-          saveRoll: saveRoll,
-          saveTarget: saveTarget,
-          saveSuccess: saveRoll !== undefined && saveTarget > 0 ? saveRoll >= saveTarget : false,
-          damageDealt: damage
-        }] : undefined;
+        const shootDetails =
+          hitRoll !== undefined
+            ? [
+                {
+                  shotNumber: 1,
+                  attackRoll: hitRoll,
+                  strengthRoll: woundRoll || 0,
+                  hitResult: hitRoll >= hitTarget ? "HIT" : "MISS",
+                  strengthResult: woundRoll && woundRoll >= woundTarget ? "SUCCESS" : "FAILED",
+                  saveRoll: saveRoll,
+                  saveTarget: saveTarget,
+                  saveSuccess:
+                    saveRoll !== undefined && saveTarget > 0 ? saveRoll >= saveTarget : false,
+                  damageDealt: damage,
+                },
+              ]
+            : undefined;
 
         if (hitRoll !== undefined && hitRoll < hitTarget) {
           // Hit failed
@@ -997,67 +1077,68 @@ export const BoardReplay: React.FC = () => {
 
         // Use addEvent directly with custom formatted message to match PvP format
         gameLog.addEvent({
-          type: 'shoot',
+          type: "shoot",
           message,
           unitId: shooterId,
           targetId: targetId,
           turnNumber: turnNumber,
-          phase: 'shooting',
+          phase: "shooting",
           player: action.player,
-          shootDetails,  // Include for color coding
+          shootDetails, // Include for color coding
           // Add reward info for debug mode display (player 0 = agent)
           is_ai_action: action.player === 2,
           reward: action.reward,
-          action_name: 'shoot'
+          action_name: "shoot",
         });
 
         // Add separate death event if target was killed (like PvP mode does)
         if (targetDied && targetAfter) {
-          const targetType = targetAfter.type || 'Unknown';
+          const targetType = targetAfter.type || "Unknown";
           gameLog.addEvent({
-            type: 'death',
+            type: "death",
             message: `Unit ${targetId} (${targetType}) was DESTROYED!`,
             unitId: targetId,
             turnNumber: turnNumber,
-            phase: 'shooting',
-            player: action.player  // Use acting player (shooter), not target's player
+            phase: "shooting",
+            player: action.player, // Use acting player (shooter), not target's player
           });
         }
-      } else if (action.type === 'charge' && action.from && action.to) {
+      } else if (action.type === "charge" && action.from && action.to) {
         // Handle charge actions
         const unitId = action.unit_id!;
         const targetId = action.target_id;
         const chargeRollValue = action.charge_roll;
-        const rollInfo = chargeRollValue !== undefined ? ` (rolled ${chargeRollValue})` : '';
+        const rollInfo = chargeRollValue !== undefined ? ` (rolled ${chargeRollValue})` : "";
         const targetPos = action.target_pos || { col: 0, row: 0 };
 
         gameLog.addEvent({
-          type: 'charge',
+          type: "charge",
           message: `Unit ${unitId}(${action.to.col},${action.to.row}) CHARGED Unit ${targetId}(${targetPos.col},${targetPos.row}) from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})${rollInfo}`,
           unitId: unitId,
           targetId: targetId,
           turnNumber: turnNumber,
-          phase: 'charge',
+          phase: "charge",
           player: action.player,
           startHex: `(${action.from.col},${action.from.row})`,
-          endHex: `(${action.to.col},${action.to.row})`
+          endHex: `(${action.to.col},${action.to.row})`,
         });
-      } else if (action.type === 'charge_wait') {
+      } else if (action.type === "charge_wait") {
         // Handle charge wait actions (failed charge or chose not to charge)
         const unitId = action.unit_id!;
         const chargeRollValue = action.charge_roll;
-        const rollMessage = chargeRollValue !== undefined && chargeRollValue > 0
-          ? `Unit ${unitId} failed charge (rolled ${chargeRollValue})`
-          : `Unit ${unitId} chose not to charge`;
+        const rollMessage =
+          chargeRollValue !== undefined && chargeRollValue > 0
+            ? `Unit ${unitId} failed charge (rolled ${chargeRollValue})`
+            : `Unit ${unitId} chose not to charge`;
         gameLog.addEvent({
-          type: 'charge_fail',  // Use charge_fail type for light purple styling
+          type: "charge_fail", // Use charge_fail type for light purple styling
           message: rollMessage,
           unitId: unitId,
           turnNumber: turnNumber,
-          phase: 'charge',
-          player: action.player
+          phase: "charge",
+          player: action.player,
         });
-      } else if (action.type === 'charge_fail') {
+      } else if (action.type === "charge_fail") {
         // Handle explicit charge_fail actions (from train_step.log)
         const unitId = action.unit_id!;
         const targetId = action.target_id;
@@ -1066,33 +1147,36 @@ export const BoardReplay: React.FC = () => {
           ? `Unit ${unitId} FAILED charge to unit ${targetId} (Roll: ${chargeRollValue})`
           : `Unit ${unitId} FAILED charge (Roll: ${chargeRollValue})`;
         gameLog.addEvent({
-          type: 'charge_fail',  // Use charge_fail type for light purple styling
+          type: "charge_fail", // Use charge_fail type for light purple styling
           message: rollMessage,
           unitId: unitId,
           targetId: targetId,
           turnNumber: turnNumber,
-          phase: 'charge',
-          player: action.player
+          phase: "charge",
+          player: action.player,
         });
-      } else if (action.type === 'fight') {
+      } else if (action.type === "fight") {
         // Handle fight actions
         const attackerId = action.attacker_id!;
         const targetId = action.target_id!;
         const attackerPos = action.attacker_pos || { col: 0, row: 0 };
-        
+
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name if available
         const weaponName = action.weapon_name;
-        const weaponSuffix = weaponName ? ` with [${weaponName}]` : '';
+        const weaponSuffix = weaponName ? ` with [${weaponName}]` : "";
 
         // Build message based on combat results
         let message = `Unit ${attackerId} (${attackerPos.col},${attackerPos.row}) FOUGHT Unit ${targetId}${weaponSuffix}`;
         if (action.hit_roll !== undefined) {
-          const hitResult = action.hit_result || (action.hit_roll >= (action.hit_target || 3) ? 'HIT' : 'MISS');
+          const hitResult =
+            action.hit_result || (action.hit_roll >= (action.hit_target || 3) ? "HIT" : "MISS");
           message += ` : Hit ${action.hit_roll}(${action.hit_target || 3}+)`;
-          if (hitResult === 'HIT' && action.wound_roll !== undefined) {
-            const woundResult = action.wound_result || (action.wound_roll >= (action.wound_target || 4) ? 'WOUND' : 'FAIL');
+          if (hitResult === "HIT" && action.wound_roll !== undefined) {
+            const woundResult =
+              action.wound_result ||
+              (action.wound_roll >= (action.wound_target || 4) ? "WOUND" : "FAIL");
             message += ` - Wound ${action.wound_roll}(${action.wound_target || 4}+)`;
-            if (woundResult === 'WOUND' || woundResult === 'SUCCESS') {
+            if (woundResult === "WOUND" || woundResult === "SUCCESS") {
               if (action.save_roll !== undefined) {
                 message += ` - Save ${action.save_roll}(${action.save_target || 6}+)`;
               }
@@ -1102,7 +1186,7 @@ export const BoardReplay: React.FC = () => {
             } else {
               message += ` : FAILED !`;
             }
-          } else if (hitResult === 'MISS') {
+          } else if (hitResult === "MISS") {
             message += ` : FAILED !`;
           }
         }
@@ -1110,7 +1194,8 @@ export const BoardReplay: React.FC = () => {
         // Get target info for death check
         const stateAfterAction = currentEpisode.states[i];
         const target = stateAfterAction?.units?.find((u: Unit) => u.id === targetId);
-        const stateBeforeAction = i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
+        const stateBeforeAction =
+          i === 0 ? currentEpisode.initial_state : currentEpisode.states[i - 1];
         const targetBefore = stateBeforeAction?.units?.find((u: Unit) => u.id === targetId);
         const hpBefore = targetBefore ? targetBefore.HP_CUR : 0;
         const hpAfter = target ? target.HP_CUR : 0;
@@ -1122,56 +1207,80 @@ export const BoardReplay: React.FC = () => {
         const attackerPlayer = attackerUnitBefore ? attackerUnitBefore.player : action.player;
 
         // Build shootDetails for color coding
-        const fightDetails = action.hit_roll !== undefined ? [{
-          shotNumber: 1,
-          attackRoll: action.hit_roll,
-          strengthRoll: action.wound_roll || 0,
-          hitResult: action.hit_result || 'MISS',
-          strengthResult: action.wound_result || 'FAILED',
-          saveRoll: action.save_roll,
-          saveTarget: action.save_target,
-          saveSuccess: action.save_roll !== undefined && action.save_target ? action.save_roll >= action.save_target : false,
-          damageDealt: action.damage || 0
-        }] : undefined;
+        const fightDetails =
+          action.hit_roll !== undefined
+            ? [
+                {
+                  shotNumber: 1,
+                  attackRoll: action.hit_roll,
+                  strengthRoll: action.wound_roll || 0,
+                  hitResult: action.hit_result || "MISS",
+                  strengthResult: action.wound_result || "FAILED",
+                  saveRoll: action.save_roll,
+                  saveTarget: action.save_target,
+                  saveSuccess:
+                    action.save_roll !== undefined && action.save_target
+                      ? action.save_roll >= action.save_target
+                      : false,
+                  damageDealt: action.damage || 0,
+                },
+              ]
+            : undefined;
 
         gameLog.addEvent({
-          type: 'combat',
+          type: "combat",
           message,
           unitId: attackerId,
           targetId: targetId,
           turnNumber: turnNumber,
-          phase: 'fight',
+          phase: "fight",
           player: attackerPlayer,
           shootDetails: fightDetails,
           is_ai_action: action.player === 2,
           reward: action.reward,
-          action_name: 'fight'
+          action_name: "fight",
         });
 
         // Add death event if target died
         if (targetDied && target) {
-          const targetType = target.type || 'Unknown';
+          const targetType = target.type || "Unknown";
           gameLog.addEvent({
-            type: 'death',
+            type: "death",
             message: `Unit ${targetId} (${targetType}) was DESTROYED!`,
             unitId: targetId,
             turnNumber: turnNumber,
-            phase: 'fight',
+            phase: "fight",
             // Attribute death to the attacker player for consistency
-            player: attackerPlayer
+            player: attackerPlayer,
           });
         }
       }
 
       const stateAfterAction = currentEpisode.states[i];
-      const objectives = stateAfterAction?.objectives || currentEpisode.initial_state.objectives || [];
+      const objectives =
+        stateAfterAction?.objectives || currentEpisode.initial_state.objectives || [];
       if (objectives.length > 0 && stateAfterAction?.units) {
         const enrichedObjectiveUnits = enrichUnitsWithStats(stateAfterAction.units as Unit[]);
-        logObjectiveControlChanges(enrichedObjectiveUnits, objectives, turnNumber, actionPhase, action.player);
+        logObjectiveControlChanges(
+          enrichedObjectiveUnits,
+          objectives,
+          turnNumber,
+          actionPhase,
+          action.player
+        );
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActionIndex, currentEpisode, unitRegistryReady]);
+  }, [
+    currentActionIndex,
+    currentEpisode,
+    unitRegistryReady,
+    enrichUnitsWithStats,
+    gameLog.addEvent, // Clear and rebuild log up to current action
+    gameLog.clearLog,
+    gameLog.logMoveAction,
+    gameLog.logNoMoveAction,
+  ]);
 
   // Playback control component (inserted between TurnPhaseTracker and UnitStatusTable)
   const PlaybackControls = () => {
@@ -1184,14 +1293,18 @@ export const BoardReplay: React.FC = () => {
           {/* Step controls - LEFT */}
           <div className="replay-step-buttons">
             <button
-              onClick={() => setCurrentActionIndex(prev => Math.max(0, prev - 1))}
+              type="button"
+              onClick={() => setCurrentActionIndex((prev) => Math.max(0, prev - 1))}
               disabled={currentActionIndex === 0}
               className="replay-btn replay-btn--nav"
             >
               <span className="replay-icon replay-icon--prev">⏪</span>
             </button>
             <button
-              onClick={() => setCurrentActionIndex(prev => Math.min(currentEpisode.total_actions, prev + 1))}
+              type="button"
+              onClick={() =>
+                setCurrentActionIndex((prev) => Math.min(currentEpisode.total_actions, prev + 1))
+              }
               disabled={currentActionIndex >= currentEpisode.total_actions}
               className="replay-btn replay-btn--nav"
             >
@@ -1202,6 +1315,7 @@ export const BoardReplay: React.FC = () => {
           {/* Main playback controls - CENTER-LEFT */}
           <div className="replay-nav-buttons">
             <button
+              type="button"
               onClick={() => setCurrentActionIndex(0)}
               className="replay-btn replay-btn--nav"
               title="Go to start"
@@ -1210,6 +1324,7 @@ export const BoardReplay: React.FC = () => {
             </button>
             {!isPlaying ? (
               <button
+                type="button"
                 onClick={() => setIsPlaying(true)}
                 className="replay-btn replay-btn--play"
               >
@@ -1217,6 +1332,7 @@ export const BoardReplay: React.FC = () => {
               </button>
             ) : (
               <button
+                type="button"
                 onClick={() => setIsPlaying(false)}
                 className="replay-btn replay-btn--pause"
               >
@@ -1224,12 +1340,17 @@ export const BoardReplay: React.FC = () => {
               </button>
             )}
             <button
-              onClick={() => { setIsPlaying(false); setCurrentActionIndex(0); }}
+              type="button"
+              onClick={() => {
+                setIsPlaying(false);
+                setCurrentActionIndex(0);
+              }}
               className="replay-btn replay-btn--stop"
             >
               ⏹
             </button>
             <button
+              type="button"
               onClick={() => setCurrentActionIndex(currentEpisode.total_actions)}
               className="replay-btn replay-btn--nav"
             >
@@ -1242,9 +1363,10 @@ export const BoardReplay: React.FC = () => {
             <span className="replay-speed-label">Speed:</span>
             {[0.25, 0.5, 1.0, 2.0, 4.0].map((speed) => (
               <button
+                type="button"
                 key={speed}
                 onClick={() => setPlaybackSpeed(speed)}
-                className={`replay-btn replay-btn--speed ${playbackSpeed === speed ? 'active' : ''}`}
+                className={`replay-btn replay-btn--speed ${playbackSpeed === speed ? "active" : ""}`}
               >
                 {speed}x
               </button>
@@ -1256,7 +1378,9 @@ export const BoardReplay: React.FC = () => {
             {currentActionIndex === 0 ? (
               <>Initial State</>
             ) : (
-              <>Action {currentActionIndex} / {currentEpisode.total_actions}</>
+              <>
+                Action {currentActionIndex} / {currentEpisode.total_actions}
+              </>
             )}
           </div>
         </div>
@@ -1272,7 +1396,6 @@ export const BoardReplay: React.FC = () => {
     );
   };
 
-
   // Right column content (like BoardWithAPI but with replay controls)
   const rightColumnContent = (
     <>
@@ -1287,8 +1410,12 @@ export const BoardReplay: React.FC = () => {
       {gameConfig && currentState && currentEpisode && (
         <div className="turn-phase-tracker-right">
           <TurnPhaseTracker
-            currentTurn={currentActionIndex > 0 ? parseInt(currentEpisode.actions[currentActionIndex - 1].turn.replace('T', '')) : 1}
-            currentPhase={currentState.phase || 'move'}
+            currentTurn={
+              currentActionIndex > 0
+                ? parseInt(currentEpisode.actions[currentActionIndex - 1].turn.replace("T", ""), 10)
+                : 1
+            }
+            currentPhase={currentState.phase || "move"}
             phases={["command", "move", "shoot", "charge", "fight"]}
             current_player={currentState.current_player}
             maxTurns={gameConfig.game_rules.max_turns}
@@ -1296,12 +1423,12 @@ export const BoardReplay: React.FC = () => {
             onTurnClick={(turn) => {
               // Find the first action of the selected turn
               const targetTurn = `T${turn}`;
-              
+
               // First, find the last action of the previous turn (turn - 1)
               // This ensures we skip any actions from turn 1 that might have turn === "T2" (like death actions)
               const previousTurn = `T${turn - 1}`;
               let lastPreviousTurnIndex = -1;
-              
+
               // Find the last action of the previous turn
               for (let i = currentEpisode.actions.length - 1; i >= 0; i--) {
                 if (currentEpisode.actions[i].turn === previousTurn) {
@@ -1309,13 +1436,13 @@ export const BoardReplay: React.FC = () => {
                   break;
                 }
               }
-              
+
               // Now find the first action of the target turn that comes AFTER the last action of previous turn
               const startSearchIndex = lastPreviousTurnIndex + 1;
               const firstActionArrayIndex = currentEpisode.actions.findIndex(
                 (action, index) => index >= startSearchIndex && action.turn === targetTurn
               );
-              
+
               if (firstActionArrayIndex !== -1) {
                 // currentActionIndex represents number of actions executed
                 // To show the FIRST action of turn N (currentAction will be actions[firstActionArrayIndex]),
@@ -1335,7 +1462,7 @@ export const BoardReplay: React.FC = () => {
               let currentTurn: string;
               if (currentActionIndex === 0) {
                 // At initial state, get turn from first action
-                currentTurn = currentEpisode.actions[0]?.turn || 'T1';
+                currentTurn = currentEpisode.actions[0]?.turn || "T1";
               } else {
                 // Get turn from the action that will be executed next (the one at currentActionIndex)
                 // Or from the last executed action if we're viewing its result
@@ -1345,30 +1472,32 @@ export const BoardReplay: React.FC = () => {
                 } else {
                   // We're at the end, get turn from last action
                   const lastAction = currentEpisode.actions[currentActionIndex - 1];
-                  currentTurn = lastAction?.turn || currentEpisode.actions[0]?.turn || 'T1';
+                  currentTurn = lastAction?.turn || currentEpisode.actions[0]?.turn || "T1";
                 }
               }
-              
+
               // Map phase names to action types
               const phaseToActionTypes: Record<string, string[]> = {
-                'move': ['move', 'move_wait'],
-                'shoot': ['shoot', 'wait', 'advance'],
-                'charge': ['charge', 'charge_wait', 'charge_fail'],
-                'fight': ['fight']
+                move: ["move", "move_wait"],
+                shoot: ["shoot", "wait", "advance"],
+                charge: ["charge", "charge_wait", "charge_fail"],
+                fight: ["fight"],
               };
-              
+
               const actionTypes = phaseToActionTypes[phase] || [phase];
-              
+
               // Get the current player from the state
               const current_player = currentState.current_player;
-              
+
               // Find the first action of the selected phase in the current turn for the current player
-              const firstPhaseActionArrayIndex = currentEpisode.actions.findIndex(action => {
-                return action.turn === currentTurn && 
-                       action.player === current_player &&
-                       actionTypes.includes(action.type);
+              const firstPhaseActionArrayIndex = currentEpisode.actions.findIndex((action) => {
+                return (
+                  action.turn === currentTurn &&
+                  action.player === current_player &&
+                  actionTypes.includes(action.type)
+                );
               });
-              
+
               if (firstPhaseActionArrayIndex !== -1) {
                 // To show the FIRST action of the phase (currentAction will be actions[firstPhaseActionArrayIndex]),
                 // we need currentActionIndex = firstPhaseActionArrayIndex + 1
@@ -1381,23 +1510,23 @@ export const BoardReplay: React.FC = () => {
               // Get the current turn from the state we're viewing
               let currentTurn: string;
               if (currentActionIndex === 0) {
-                currentTurn = currentEpisode.actions[0]?.turn || 'T1';
+                currentTurn = currentEpisode.actions[0]?.turn || "T1";
               } else {
                 const nextAction = currentEpisode.actions[currentActionIndex];
                 if (nextAction) {
                   currentTurn = nextAction.turn;
                 } else {
                   const lastAction = currentEpisode.actions[currentActionIndex - 1];
-                  currentTurn = lastAction?.turn || currentEpisode.actions[0]?.turn || 'T1';
+                  currentTurn = lastAction?.turn || currentEpisode.actions[0]?.turn || "T1";
                 }
               }
-              
+
               // Find the first action of the current turn for the selected player
               // The first action of a player's turn is typically in the "command" phase
-              const firstPlayerActionArrayIndex = currentEpisode.actions.findIndex(action => {
+              const firstPlayerActionArrayIndex = currentEpisode.actions.findIndex((action) => {
                 return action.turn === currentTurn && action.player === player;
               });
-              
+
               if (firstPlayerActionArrayIndex !== -1) {
                 // To show the FIRST action of the player's turn (currentAction will be actions[firstPlayerActionArrayIndex]),
                 // we need currentActionIndex = firstPlayerActionArrayIndex + 1
@@ -1415,7 +1544,7 @@ export const BoardReplay: React.FC = () => {
           {/* Left: File dropdown (loads from server) */}
           <div className="replay-browse-group">
             <select
-              value={selectedFileName || ''}
+              value={selectedFileName || ""}
               onChange={(e) => handleFileSelectFromServer(e.target.value)}
               className="replay-file-select"
             >
@@ -1427,35 +1556,35 @@ export const BoardReplay: React.FC = () => {
               ))}
             </select>
             {selectedFileName && (
-              <span className="replay-file-status">
-                Loaded: {selectedFileName}
-              </span>
+              <span className="replay-file-status">Loaded: {selectedFileName}</span>
             )}
           </div>
 
           {/* Right: Episode dropdown (only visible after file selected) */}
           {replayData && replayData.episodes.length > 0 && (
             <select
-              value={selectedEpisode || ''}
-              onChange={(e) => selectEpisode(parseInt(e.target.value))}
+              value={selectedEpisode || ""}
+              onChange={(e) => selectEpisode(parseInt(e.target.value, 10))}
               className="replay-episode-select"
             >
               <option value="">Select Episode</option>
               {replayData.episodes.map((ep) => {
                 // Extract scenario identifier (e.g., "phase1-bot3" from "..._scenario_phase1-bot3" or just "phase1-bot3")
-                let scenarioId = '';
+                let scenarioId = "";
                 if (ep.scenario) {
                   const scenarioMatch = ep.scenario.match(/_scenario_(.+)$/);
                   if (scenarioMatch) {
                     scenarioId = scenarioMatch[1];
                   } else {
                     // If no _scenario_ prefix, use the scenario name as-is (but avoid "Unknown Scenario")
-                    scenarioId = ep.scenario !== 'Unknown Scenario' ? ep.scenario : '';
+                    scenarioId = ep.scenario !== "Unknown Scenario" ? ep.scenario : "";
                   }
                 }
                 return (
                   <option key={ep.episode_num} value={ep.episode_num}>
-                    Episode {ep.episode_num} - {scenarioId || 'Unknown'} - {ep.bot_name || 'Unknown'} - {ep.final_result || 'Unknown'}{ep.win_method ? ` (${ep.win_method})` : ''}
+                    Episode {ep.episode_num} - {scenarioId || "Unknown"} -{" "}
+                    {ep.bot_name || "Unknown"} - {ep.final_result || "Unknown"}
+                    {ep.win_method ? ` (${ep.win_method})` : ""}
                   </option>
                 );
               })}
@@ -1508,414 +1637,374 @@ export const BoardReplay: React.FC = () => {
   );
 
   // Get shooting target ID for explosion icon and shooter ID for shooting indicator
-  const shootingTargetId = currentAction?.type === 'shoot' && currentAction?.target_id
-    ? currentAction.target_id
-    : null;
-  const shootingUnitId = currentAction?.type === 'shoot' && currentAction?.shooter_id
-    ? currentAction.shooter_id
-    : null;
+  const shootingTargetId =
+    currentAction?.type === "shoot" && currentAction?.target_id ? currentAction.target_id : null;
+  const shootingUnitId =
+    currentAction?.type === "shoot" && currentAction?.shooter_id ? currentAction.shooter_id : null;
 
   // Get moving unit ID for boot icon during movement phase
-  const movingUnitId = (currentAction?.type === 'move' || currentAction?.type === 'move_wait') && currentAction?.unit_id
-    ? currentAction.unit_id
-    : null;
+  const movingUnitId =
+    (currentAction?.type === "move" || currentAction?.type === "move_wait") &&
+    currentAction?.unit_id
+      ? currentAction.unit_id
+      : null;
 
   // Get charging unit ID for lightning icon during charge phase (include charge_wait and charge_fail for failed charge badge)
-  const chargingUnitId = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail') && currentAction?.unit_id
-    ? currentAction.unit_id
-    : null;
+  const chargingUnitId =
+    (currentAction?.type === "charge" ||
+      currentAction?.type === "charge_wait" ||
+      currentAction?.type === "charge_fail") &&
+    currentAction?.unit_id
+      ? currentAction.unit_id
+      : null;
   // Get charge target ID for target logo (include charge_fail and charge_wait so logo appears even when charge fails)
-  const chargeTargetId = (currentAction?.type === 'charge' || currentAction?.type === 'charge_fail' || currentAction?.type === 'charge_wait') && currentAction?.target_id
-    ? currentAction.target_id
-    : null;
+  const chargeTargetId =
+    (currentAction?.type === "charge" ||
+      currentAction?.type === "charge_fail" ||
+      currentAction?.type === "charge_wait") &&
+    currentAction?.target_id
+      ? currentAction.target_id
+      : null;
 
   // Get fighting unit ID for crossed swords icon during fight phase
-  const fightingUnitId = currentAction?.type === 'fight' && currentAction?.attacker_id
-    ? currentAction.attacker_id
-    : null;
-  const fightTargetId = currentAction?.type === 'fight' && currentAction?.target_id
-    ? currentAction.target_id
-    : null;
+  const fightingUnitId =
+    currentAction?.type === "fight" && currentAction?.attacker_id
+      ? currentAction.attacker_id
+      : null;
+  const fightTargetId =
+    currentAction?.type === "fight" && currentAction?.target_id ? currentAction.target_id : null;
 
   // Get charge roll info for badge display
-  const chargeRoll = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail') && currentAction?.charge_roll !== undefined
-    ? currentAction.charge_roll
-    : null;
-  const chargeSuccess = (currentAction?.type === 'charge' || currentAction?.type === 'charge_wait' || currentAction?.type === 'charge_fail')
-    ? (currentAction?.charge_success !== false && currentAction?.type !== 'charge_fail')  // charge_fail is always false
-    : false;
+  const chargeRoll =
+    (currentAction?.type === "charge" ||
+      currentAction?.type === "charge_wait" ||
+      currentAction?.type === "charge_fail") &&
+    currentAction?.charge_roll !== undefined
+      ? currentAction.charge_roll
+      : null;
+  const chargeSuccess =
+    currentAction?.type === "charge" ||
+    currentAction?.type === "charge_wait" ||
+    currentAction?.type === "charge_fail"
+      ? currentAction?.charge_success !== false && currentAction?.type !== "charge_fail" // charge_fail is always false
+      : false;
 
   // Get advance roll info for badge display
-  const advanceRoll = (currentAction?.type === 'advance' && currentAction?.advance_roll !== undefined)
-    ? currentAction.advance_roll
-    : null;
-    const advancingUnitId = (currentAction?.type === 'advance' && currentAction?.unit_id)
-    ? currentAction.unit_id  // Use real unit ID so icon shows on preview at destination, not on ghost
-    : null;
+  const advanceRoll =
+    currentAction?.type === "advance" && currentAction?.advance_roll !== undefined
+      ? currentAction.advance_roll
+      : null;
+  const advancingUnitId =
+    currentAction?.type === "advance" && currentAction?.unit_id
+      ? currentAction.unit_id // Use real unit ID so icon shows on preview at destination, not on ghost
+      : null;
 
   // For move actions, select the ghost unit to show movement range
   // For shoot actions, select the shooter to show LoS/attack range
   // For charge actions, select the charging unit to show charge destination
   // For advance actions, select the ghost unit to show advance destinations
   // Ghost unit has ID -1 (move), -2 (charge), or -3 (advance) and is at the starting position
-  const replaySelectedUnitId: number | null = currentAction?.type === 'move'
-    ? -1
-    : (currentAction?.type === 'charge'
-      ? (currentAction.unit_id ?? null)  // Select the actual charging unit to trigger getChargeDestinations
-      : (currentAction?.type === 'advance'
-        ? -3  // Select the ghost unit to trigger getAdvanceDestinations
-        : (currentAction?.type === 'shoot' ? (currentAction.shooter_id ?? null) : null)));
+  const replaySelectedUnitId: number | null =
+    currentAction?.type === "move"
+      ? -1
+      : currentAction?.type === "charge"
+        ? (currentAction.unit_id ?? null) // Select the actual charging unit to trigger getChargeDestinations
+        : currentAction?.type === "advance"
+          ? -3 // Select the ghost unit to trigger getAdvanceDestinations
+          : currentAction?.type === "shoot"
+            ? (currentAction.shooter_id ?? null)
+            : null;
 
   // Center column: Board
-  const centerContent = currentState && gameConfig ? (
-    <BoardPvp
-      units={unitsWithGhost}
-      selectedUnitId={replaySelectedUnitId}
-      eligibleUnitIds={unitsWithGhost.map((u: Unit) => u.id)}
-      showHexCoordinates={showHexCoordinates}
-      mode={currentAction?.type === 'advance' ? 'advancePreview' : 'select'}
-      movePreview={currentAction?.type === 'advance' && currentAction?.to && currentAction?.unit_id
-        ? { unitId: currentAction.unit_id, destCol: currentAction.to.col, destRow: currentAction.to.row }
-        : null}
-      attackPreview={null}
-      onSelectUnit={() => {}}
-      onStartMovePreview={() => {}}
-      onDirectMove={() => {}}
-      onStartAttackPreview={() => {}}
-      onConfirmMove={() => {}}
-      onCancelMove={() => {}}
-      current_player={(currentAction?.type === 'move' || currentAction?.type === 'shoot' || currentAction?.type === 'charge' || currentAction?.type === 'fight') ? (currentAction.player as 1 | 2) : (currentState.current_player || 1)}
-      unitsMoved={[]}
-      phase={currentState.phase || 'move'}
-      onShoot={() => {}}
-      gameState={currentState as GameState}
-      replayActionIndex={currentActionIndex}
-      getChargeDestinations={(unitId: number) => {
-        // Calculate ALL valid charge destinations for replay mode using BFS
-        if (currentAction?.type === 'charge' && currentAction?.from && currentAction.unit_id === unitId) {
-          const chargeFrom = currentAction.from;
-          // Use the charge_roll from the action, not the actual distance traveled
-          const chargeRoll = currentAction.charge_roll;
-          
-          if (!chargeRoll || chargeRoll <= 0) {
-            return [];
-          }
-
-          // Find all enemy units (units from the other player)
-          const chargingUnit = unitsWithGhost.find((u: Unit) => u.id === unitId);
-          if (!chargingUnit) {
-            return [];
-          }
-
-          const enemyUnits = unitsWithGhost.filter((u: Unit) =>
-            u.player !== chargingUnit?.player &&
-            u.id >= 0 && // Not a ghost unit
-            u.HP_CUR > 0
-          );
-
-          if (enemyUnits.length === 0) {
-            return [];
-          }
-
-          // Helper function to get hex neighbors (6 directions)
-          const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
-            const parity = col & 1; // 0 for even, 1 for odd
-            if (parity === 0) { // Even column
-              return [
-                { col, row: row - 1 },      // N
-                { col: col + 1, row: row - 1 }, // NE
-                { col: col + 1, row },     // SE
-                { col, row: row + 1 },      // S
-                { col: col - 1, row },      // SW
-                { col: col - 1, row: row - 1 } // NW
-              ];
-            } else { // Odd column
-              return [
-                { col, row: row - 1 },      // N
-                { col: col + 1, row },      // NE
-                { col: col + 1, row: row + 1 }, // SE
-                { col, row: row + 1 },      // S
-                { col: col - 1, row: row + 1 }, // SW
-                { col: col - 1, row }       // NW
-              ];
-            }
-          };
-
-          // Helper function to check if hex is traversable
-          const isTraversable = (col: number, row: number): boolean => {
-            const boardCols = currentState?.board_cols || 25;
-            const boardRows = currentState?.board_rows || 21;
-            
-            // Check bounds
-            if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
-              return false;
-            }
-            
-            // Check walls
-            if (currentState?.walls?.some((w: { col: number; row: number }) => w.col === col && w.row === row)) {
-              return false;
-            }
-            
-            // Check if occupied by another unit (excluding the charging unit)
-            if (unitsWithGhost.some((u: Unit) =>
-              u.col === col && u.row === row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
-            )) {
-              return false;
-            }
-            
-            return true;
-          };
-
-          // Helper function to check if hex is adjacent to an enemy
-          const isAdjacentToEnemy = (col: number, row: number): boolean => {
-            const hexCube = offsetToCube(col, row);
-            return enemyUnits.some((enemy: Unit) => {
-              const enemyCube = offsetToCube(enemy.col, enemy.row);
-              return cubeDistance(hexCube, enemyCube) === 1;
-            });
-          };
-
-          // BFS to find all reachable hexes within charge_roll distance
-          const validDestinations: { col: number; row: number }[] = [];
-          const visited = new Set<string>();
-          const queue: Array<{ col: number; row: number; distance: number }> = [];
-          
-          const startKey = `${chargeFrom.col},${chargeFrom.row}`;
-          visited.add(startKey);
-          queue.push({ col: chargeFrom.col, row: chargeFrom.row, distance: 0 });
-
-          while (queue.length > 0) {
-            const current = queue.shift()!;
-            
-            // If we've reached max charge range, don't explore further
-            if (current.distance >= chargeRoll) {
-              continue;
-            }
-
-            // Explore all 6 hex neighbors
-            const neighbors = getHexNeighbors(current.col, current.row);
-            
-            for (const neighbor of neighbors) {
-              const neighborKey = `${neighbor.col},${neighbor.row}`;
-              
-              // Skip if already visited
-              if (visited.has(neighborKey)) {
-                continue;
+  const centerContent =
+    currentState && gameConfig ? (
+      <BoardPvp
+        units={unitsWithGhost}
+        selectedUnitId={replaySelectedUnitId}
+        eligibleUnitIds={unitsWithGhost.map((u: Unit) => u.id)}
+        showHexCoordinates={showHexCoordinates}
+        mode={currentAction?.type === "advance" ? "advancePreview" : "select"}
+        movePreview={
+          currentAction?.type === "advance" && currentAction?.to && currentAction?.unit_id
+            ? {
+                unitId: currentAction.unit_id,
+                destCol: currentAction.to.col,
+                destRow: currentAction.to.row,
               }
-
-              // Check if traversable
-              if (!isTraversable(neighbor.col, neighbor.row)) {
-                continue;
-              }
-
-              // Mark as visited
-              visited.add(neighborKey);
-              const neighborDistance = current.distance + 1;
-
-              // Check if this hex is adjacent to an enemy (valid destination)
-              if (isAdjacentToEnemy(neighbor.col, neighbor.row)) {
-                // Double-check that the destination hex is not occupied
-                if (!unitsWithGhost.some((u: Unit) =>
-                  u.col === neighbor.col && u.row === neighbor.row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
-                )) {
-                  validDestinations.push({ col: neighbor.col, row: neighbor.row });
-                }
-              }
-
-              // Continue exploring (charges can move through enemy-adjacent hexes)
-              queue.push({ col: neighbor.col, row: neighbor.row, distance: neighborDistance });
-            }
-          }
-
-          return validDestinations;
+            : null
         }
-        return [];
-      }}
-      getAdvanceDestinations={(unitId: number) => {
-        // Calculate ALL valid advance destinations for replay mode using BFS
-        // For advance, unitId will be -3 (ghost unit), so we need to find the actual unit
-        if (currentAction?.type === 'advance' && currentAction?.from && currentAction?.advance_roll && unitId === -3) {
-          const advanceFrom = currentAction.from;
-          const advanceRollValue = currentAction.advance_roll;
-          
-          if (!advanceRollValue || advanceRollValue <= 0) {
-            return [];
-          }
-
-          // Find the advancing unit (actual unit, not ghost)
-          const advancingUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
-          if (!advancingUnit) {
-            return [];
-          }
-
-          // Helper function to get hex neighbors (6 directions)
-          const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
-            const parity = col & 1; // 0 for even, 1 for odd
-            if (parity === 0) { // Even column
-              return [
-                { col, row: row - 1 },      // N
-                { col: col + 1, row: row - 1 }, // NE
-                { col: col + 1, row },     // SE
-                { col, row: row + 1 },      // S
-                { col: col - 1, row },      // SW
-                { col: col - 1, row: row - 1 } // NW
-              ];
-            } else { // Odd column
-              return [
-                { col, row: row - 1 },      // N
-                { col: col + 1, row },      // NE
-                { col: col + 1, row: row + 1 }, // SE
-                { col, row: row + 1 },      // S
-                { col: col - 1, row: row + 1 }, // SW
-                { col: col - 1, row }       // NW
-              ];
-            }
-          };
-
-          // Helper function to check if hex is traversable (advance cannot end adjacent to enemies)
-          const isTraversable = (col: number, row: number): boolean => {
-            const boardCols = currentState?.board_cols || 25;
-            const boardRows = currentState?.board_rows || 21;
-            
-            // Check bounds
-            if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
-              return false;
-            }
-            
-            // Check walls
-            if (currentState?.walls?.some((w: { col: number; row: number }) => w.col === col && w.row === row)) {
-              return false;
-            }
-            
-            // Check if occupied by another unit (excluding the advancing unit)
-            if (unitsWithGhost.some((u: Unit) =>
-              u.col === col && u.row === row && u.id !== currentAction.unit_id && u.id >= 0 && u.HP_CUR > 0
-            )) {
-              return false;
-            }
-            
-            return true;
-          };
-
-          // BFS to find all reachable hexes within advance_roll distance
-          const validDestinations: { col: number; row: number }[] = [];
-          const visited = new Set<string>();
-          const queue: Array<{ col: number; row: number; distance: number }> = [{ col: advanceFrom.col, row: advanceFrom.row, distance: 0 }];
-          visited.add(`${advanceFrom.col},${advanceFrom.row}`);
-
-          while (queue.length > 0) {
-            const current = queue.shift()!;
-            const { col, row, distance } = current;
-
-            if (distance > 0 && distance <= advanceRollValue && isTraversable(col, row)) {
-              validDestinations.push({ col, row });
-            }
-
-            if (distance < advanceRollValue) {
-              const neighbors = getHexNeighbors(col, row);
-              for (const neighbor of neighbors) {
-                const neighborKey = `${neighbor.col},${neighbor.row}`;
-                if (!visited.has(neighborKey)) {
-                  visited.add(neighborKey);
-                  const neighborDistance = distance + 1;
-                  if (neighborDistance <= advanceRollValue && isTraversable(neighbor.col, neighbor.row)) {
-                    queue.push({ col: neighbor.col, row: neighbor.row, distance: neighborDistance });
-                  }
-                }
-              }
-            }
-          }
-
-          return validDestinations;
+        attackPreview={null}
+        onSelectUnit={() => {}}
+        onStartMovePreview={() => {}}
+        onDirectMove={() => {}}
+        onStartAttackPreview={() => {}}
+        onConfirmMove={() => {}}
+        onCancelMove={() => {}}
+        current_player={
+          currentAction?.type === "move" ||
+          currentAction?.type === "shoot" ||
+          currentAction?.type === "charge" ||
+          currentAction?.type === "fight"
+            ? (currentAction.player as 1 | 2)
+            : currentState.current_player || 1
         }
-        return [];
-      }}
-      advanceRoll={advanceRoll}
-      advancingUnitId={advancingUnitId}
-      shootingTargetId={shootingTargetId}
-      shootingUnitId={shootingUnitId}
-      movingUnitId={movingUnitId}
-      chargingUnitId={chargingUnitId}
-      chargeTargetId={chargeTargetId}
-      fightingUnitId={fightingUnitId}
-      fightTargetId={fightTargetId}
-      chargeRoll={chargeRoll}
-      chargeSuccess={chargeSuccess}
-      wallHexesOverride={currentState.walls}
-      objectivesOverride={currentState.objectives}
-      availableCellsOverride={(() => {
-        if (currentAction?.type === 'advance' && currentAction?.from && (currentAction?.advance_roll !== undefined || currentAction?.to)) {
-          return (() => {
-            const advanceFrom = currentAction.from;
-            // Use advance_roll from log (the actual dice roll), NOT the distance traveled
-            let advanceRollValue: number;
-            if (currentAction.advance_roll !== undefined) {
-              advanceRollValue = currentAction.advance_roll;
-            } else if (currentAction.to) {
-              // Fallback: calculate from distance (should not happen if parser works correctly)
-              const fromCube = offsetToCube(advanceFrom.col, advanceFrom.row);
-              const toCube = offsetToCube(currentAction.to.col, currentAction.to.row);
-              advanceRollValue = cubeDistance(fromCube, toCube);
-            } else {
+        unitsMoved={[]}
+        phase={currentState.phase || "move"}
+        onShoot={() => {}}
+        gameState={currentState as GameState}
+        replayActionIndex={currentActionIndex}
+        getChargeDestinations={(unitId: number) => {
+          // Calculate ALL valid charge destinations for replay mode using BFS
+          if (
+            currentAction?.type === "charge" &&
+            currentAction?.from &&
+            currentAction.unit_id === unitId
+          ) {
+            const chargeFrom = currentAction.from;
+            // Use the charge_roll from the action, not the actual distance traveled
+            const chargeRoll = currentAction.charge_roll;
+
+            if (!chargeRoll || chargeRoll <= 0) {
               return [];
             }
-            
+
+            // Find all enemy units (units from the other player)
+            const chargingUnit = unitsWithGhost.find((u: Unit) => u.id === unitId);
+            if (!chargingUnit) {
+              return [];
+            }
+
+            const enemyUnits = unitsWithGhost.filter(
+              (u: Unit) =>
+                u.player !== chargingUnit?.player &&
+                u.id >= 0 && // Not a ghost unit
+                u.HP_CUR > 0
+            );
+
+            if (enemyUnits.length === 0) {
+              return [];
+            }
+
+            // Helper function to get hex neighbors (6 directions)
+            const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
+              const parity = col & 1; // 0 for even, 1 for odd
+              if (parity === 0) {
+                // Even column
+                return [
+                  { col, row: row - 1 }, // N
+                  { col: col + 1, row: row - 1 }, // NE
+                  { col: col + 1, row }, // SE
+                  { col, row: row + 1 }, // S
+                  { col: col - 1, row }, // SW
+                  { col: col - 1, row: row - 1 }, // NW
+                ];
+              } else {
+                // Odd column
+                return [
+                  { col, row: row - 1 }, // N
+                  { col: col + 1, row }, // NE
+                  { col: col + 1, row: row + 1 }, // SE
+                  { col, row: row + 1 }, // S
+                  { col: col - 1, row: row + 1 }, // SW
+                  { col: col - 1, row }, // NW
+                ];
+              }
+            };
+
+            // Helper function to check if hex is traversable
+            const isTraversable = (col: number, row: number): boolean => {
+              const boardCols = currentState?.board_cols || 25;
+              const boardRows = currentState?.board_rows || 21;
+
+              // Check bounds
+              if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
+                return false;
+              }
+
+              // Check walls
+              if (
+                currentState?.walls?.some(
+                  (w: { col: number; row: number }) => w.col === col && w.row === row
+                )
+              ) {
+                return false;
+              }
+
+              // Check if occupied by another unit (excluding the charging unit)
+              if (
+                unitsWithGhost.some(
+                  (u: Unit) =>
+                    u.col === col && u.row === row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
+                )
+              ) {
+                return false;
+              }
+
+              return true;
+            };
+
+            // Helper function to check if hex is adjacent to an enemy
+            const isAdjacentToEnemy = (col: number, row: number): boolean => {
+              const hexCube = offsetToCube(col, row);
+              return enemyUnits.some((enemy: Unit) => {
+                const enemyCube = offsetToCube(enemy.col, enemy.row);
+                return cubeDistance(hexCube, enemyCube) === 1;
+              });
+            };
+
+            // BFS to find all reachable hexes within charge_roll distance
+            const validDestinations: { col: number; row: number }[] = [];
+            const visited = new Set<string>();
+            const queue: Array<{ col: number; row: number; distance: number }> = [];
+
+            const startKey = `${chargeFrom.col},${chargeFrom.row}`;
+            visited.add(startKey);
+            queue.push({ col: chargeFrom.col, row: chargeFrom.row, distance: 0 });
+
+            while (queue.length > 0) {
+              const current = queue.shift()!;
+
+              // If we've reached max charge range, don't explore further
+              if (current.distance >= chargeRoll) {
+                continue;
+              }
+
+              // Explore all 6 hex neighbors
+              const neighbors = getHexNeighbors(current.col, current.row);
+
+              for (const neighbor of neighbors) {
+                const neighborKey = `${neighbor.col},${neighbor.row}`;
+
+                // Skip if already visited
+                if (visited.has(neighborKey)) {
+                  continue;
+                }
+
+                // Check if traversable
+                if (!isTraversable(neighbor.col, neighbor.row)) {
+                  continue;
+                }
+
+                // Mark as visited
+                visited.add(neighborKey);
+                const neighborDistance = current.distance + 1;
+
+                // Check if this hex is adjacent to an enemy (valid destination)
+                if (isAdjacentToEnemy(neighbor.col, neighbor.row)) {
+                  // Double-check that the destination hex is not occupied
+                  if (
+                    !unitsWithGhost.some(
+                      (u: Unit) =>
+                        u.col === neighbor.col &&
+                        u.row === neighbor.row &&
+                        u.id !== unitId &&
+                        u.id >= 0 &&
+                        u.HP_CUR > 0
+                    )
+                  ) {
+                    validDestinations.push({ col: neighbor.col, row: neighbor.row });
+                  }
+                }
+
+                // Continue exploring (charges can move through enemy-adjacent hexes)
+                queue.push({ col: neighbor.col, row: neighbor.row, distance: neighborDistance });
+              }
+            }
+
+            return validDestinations;
+          }
+          return [];
+        }}
+        getAdvanceDestinations={(unitId: number) => {
+          // Calculate ALL valid advance destinations for replay mode using BFS
+          // For advance, unitId will be -3 (ghost unit), so we need to find the actual unit
+          if (
+            currentAction?.type === "advance" &&
+            currentAction?.from &&
+            currentAction?.advance_roll &&
+            unitId === -3
+          ) {
+            const advanceFrom = currentAction.from;
+            const advanceRollValue = currentAction.advance_roll;
+
             if (!advanceRollValue || advanceRollValue <= 0) {
               return [];
             }
 
+            // Find the advancing unit (actual unit, not ghost)
             const advancingUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
             if (!advancingUnit) {
               return [];
             }
 
+            // Helper function to get hex neighbors (6 directions)
             const getHexNeighbors = (col: number, row: number): { col: number; row: number }[] => {
-              const parity = col & 1;
+              const parity = col & 1; // 0 for even, 1 for odd
               if (parity === 0) {
+                // Even column
                 return [
-                  { col, row: row - 1 },
-                  { col: col + 1, row: row - 1 },
-                  { col: col + 1, row },
-                  { col, row: row + 1 },
-                  { col: col - 1, row },
-                  { col: col - 1, row: row - 1 }
+                  { col, row: row - 1 }, // N
+                  { col: col + 1, row: row - 1 }, // NE
+                  { col: col + 1, row }, // SE
+                  { col, row: row + 1 }, // S
+                  { col: col - 1, row }, // SW
+                  { col: col - 1, row: row - 1 }, // NW
                 ];
               } else {
+                // Odd column
                 return [
-                  { col, row: row - 1 },
-                  { col: col + 1, row },
-                  { col: col + 1, row: row + 1 },
-                  { col, row: row + 1 },
-                  { col: col - 1, row: row + 1 },
-                  { col: col - 1, row }
+                  { col, row: row - 1 }, // N
+                  { col: col + 1, row }, // NE
+                  { col: col + 1, row: row + 1 }, // SE
+                  { col, row: row + 1 }, // S
+                  { col: col - 1, row: row + 1 }, // SW
+                  { col: col - 1, row }, // NW
                 ];
               }
             };
 
+            // Helper function to check if hex is traversable (advance cannot end adjacent to enemies)
             const isTraversable = (col: number, row: number): boolean => {
               const boardCols = currentState?.board_cols || 25;
               const boardRows = currentState?.board_rows || 21;
-              
+
+              // Check bounds
               if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
                 return false;
               }
-              
-              if (currentState?.walls?.some((w: { col: number; row: number }) => w.col === col && w.row === row)) {
+
+              // Check walls
+              if (
+                currentState?.walls?.some(
+                  (w: { col: number; row: number }) => w.col === col && w.row === row
+                )
+              ) {
                 return false;
               }
-              
-              if (unitsWithGhost.some((u: Unit) =>
-                u.col === col && u.row === row && u.id !== currentAction.unit_id && u.id >= 0 && u.HP_CUR > 0
-              )) {
+
+              // Check if occupied by another unit (excluding the advancing unit)
+              if (
+                unitsWithGhost.some(
+                  (u: Unit) =>
+                    u.col === col &&
+                    u.row === row &&
+                    u.id !== currentAction.unit_id &&
+                    u.id >= 0 &&
+                    u.HP_CUR > 0
+                )
+              ) {
                 return false;
               }
-              
+
               return true;
             };
 
+            // BFS to find all reachable hexes within advance_roll distance
             const validDestinations: { col: number; row: number }[] = [];
             const visited = new Set<string>();
-            const queue: Array<{ col: number; row: number; distance: number }> = [{ col: advanceFrom.col, row: advanceFrom.row, distance: 0 }];
+            const queue: Array<{ col: number; row: number; distance: number }> = [
+              { col: advanceFrom.col, row: advanceFrom.row, distance: 0 },
+            ];
             visited.add(`${advanceFrom.col},${advanceFrom.row}`);
 
             while (queue.length > 0) {
@@ -1933,8 +2022,15 @@ export const BoardReplay: React.FC = () => {
                   if (!visited.has(neighborKey)) {
                     visited.add(neighborKey);
                     const neighborDistance = distance + 1;
-                    if (neighborDistance <= advanceRollValue && isTraversable(neighbor.col, neighbor.row)) {
-                      queue.push({ col: neighbor.col, row: neighbor.row, distance: neighborDistance });
+                    if (
+                      neighborDistance <= advanceRollValue &&
+                      isTraversable(neighbor.col, neighbor.row)
+                    ) {
+                      queue.push({
+                        col: neighbor.col,
+                        row: neighbor.row,
+                        distance: neighborDistance,
+                      });
                     }
                   }
                 }
@@ -1942,30 +2038,173 @@ export const BoardReplay: React.FC = () => {
             }
 
             return validDestinations;
-          })();
-        }
-        return undefined;
-      })()}
-    />
-  ) : (
-    <div className="replay-empty-state">
-      <div className="replay-empty-state__content">
-        <h2 className="replay-empty-state__title">Replay Viewer</h2>
-        <p className="replay-empty-state__subtitle">Select a log file and episode to start replay</p>
-        <p className="replay-empty-state__info">
-          File: {selectedFileName || 'None'} |
-          Episode: {selectedEpisode ? `#${selectedEpisode}` : 'None'}
-        </p>
+          }
+          return [];
+        }}
+        advanceRoll={advanceRoll}
+        advancingUnitId={advancingUnitId}
+        shootingTargetId={shootingTargetId}
+        shootingUnitId={shootingUnitId}
+        movingUnitId={movingUnitId}
+        chargingUnitId={chargingUnitId}
+        chargeTargetId={chargeTargetId}
+        fightingUnitId={fightingUnitId}
+        fightTargetId={fightTargetId}
+        chargeRoll={chargeRoll}
+        chargeSuccess={chargeSuccess}
+        wallHexesOverride={currentState.walls}
+        objectivesOverride={currentState.objectives}
+        availableCellsOverride={(() => {
+          if (
+            currentAction?.type === "advance" &&
+            currentAction?.from &&
+            (currentAction?.advance_roll !== undefined || currentAction?.to)
+          ) {
+            return (() => {
+              const advanceFrom = currentAction.from;
+              // Use advance_roll from log (the actual dice roll), NOT the distance traveled
+              let advanceRollValue: number;
+              if (currentAction.advance_roll !== undefined) {
+                advanceRollValue = currentAction.advance_roll;
+              } else if (currentAction.to) {
+                // Fallback: calculate from distance (should not happen if parser works correctly)
+                const fromCube = offsetToCube(advanceFrom.col, advanceFrom.row);
+                const toCube = offsetToCube(currentAction.to.col, currentAction.to.row);
+                advanceRollValue = cubeDistance(fromCube, toCube);
+              } else {
+                return [];
+              }
+
+              if (!advanceRollValue || advanceRollValue <= 0) {
+                return [];
+              }
+
+              const advancingUnit = unitsWithGhost.find(
+                (u: Unit) => u.id === currentAction.unit_id
+              );
+              if (!advancingUnit) {
+                return [];
+              }
+
+              const getHexNeighbors = (
+                col: number,
+                row: number
+              ): { col: number; row: number }[] => {
+                const parity = col & 1;
+                if (parity === 0) {
+                  return [
+                    { col, row: row - 1 },
+                    { col: col + 1, row: row - 1 },
+                    { col: col + 1, row },
+                    { col, row: row + 1 },
+                    { col: col - 1, row },
+                    { col: col - 1, row: row - 1 },
+                  ];
+                } else {
+                  return [
+                    { col, row: row - 1 },
+                    { col: col + 1, row },
+                    { col: col + 1, row: row + 1 },
+                    { col, row: row + 1 },
+                    { col: col - 1, row: row + 1 },
+                    { col: col - 1, row },
+                  ];
+                }
+              };
+
+              const isTraversable = (col: number, row: number): boolean => {
+                const boardCols = currentState?.board_cols || 25;
+                const boardRows = currentState?.board_rows || 21;
+
+                if (col < 0 || row < 0 || col >= boardCols || row >= boardRows) {
+                  return false;
+                }
+
+                if (
+                  currentState?.walls?.some(
+                    (w: { col: number; row: number }) => w.col === col && w.row === row
+                  )
+                ) {
+                  return false;
+                }
+
+                if (
+                  unitsWithGhost.some(
+                    (u: Unit) =>
+                      u.col === col &&
+                      u.row === row &&
+                      u.id !== currentAction.unit_id &&
+                      u.id >= 0 &&
+                      u.HP_CUR > 0
+                  )
+                ) {
+                  return false;
+                }
+
+                return true;
+              };
+
+              const validDestinations: { col: number; row: number }[] = [];
+              const visited = new Set<string>();
+              const queue: Array<{ col: number; row: number; distance: number }> = [
+                { col: advanceFrom.col, row: advanceFrom.row, distance: 0 },
+              ];
+              visited.add(`${advanceFrom.col},${advanceFrom.row}`);
+
+              while (queue.length > 0) {
+                const current = queue.shift()!;
+                const { col, row, distance } = current;
+
+                if (distance > 0 && distance <= advanceRollValue && isTraversable(col, row)) {
+                  validDestinations.push({ col, row });
+                }
+
+                if (distance < advanceRollValue) {
+                  const neighbors = getHexNeighbors(col, row);
+                  for (const neighbor of neighbors) {
+                    const neighborKey = `${neighbor.col},${neighbor.row}`;
+                    if (!visited.has(neighborKey)) {
+                      visited.add(neighborKey);
+                      const neighborDistance = distance + 1;
+                      if (
+                        neighborDistance <= advanceRollValue &&
+                        isTraversable(neighbor.col, neighbor.row)
+                      ) {
+                        queue.push({
+                          col: neighbor.col,
+                          row: neighbor.row,
+                          distance: neighborDistance,
+                        });
+                      }
+                    }
+                  }
+                }
+              }
+
+              return validDestinations;
+            })();
+          }
+          return undefined;
+        })()}
+      />
+    ) : (
+      <div className="replay-empty-state">
+        <div className="replay-empty-state__content">
+          <h2 className="replay-empty-state__title">Replay Viewer</h2>
+          <p className="replay-empty-state__subtitle">
+            Select a log file and episode to start replay
+          </p>
+          <p className="replay-empty-state__info">
+            File: {selectedFileName || "None"} | Episode:{" "}
+            {selectedEpisode ? `#${selectedEpisode}` : "None"}
+          </p>
+        </div>
       </div>
-    </div>
-  );
+    );
 
   return (
     <>
-      <SharedLayout
-        rightColumnContent={rightColumnContent}
-        onOpenSettings={handleOpenSettings}
-      >
+      <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>
         {centerContent}
       </SharedLayout>
       <SettingsMenu

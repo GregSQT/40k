@@ -1,16 +1,16 @@
 // frontend/src/hooks/usePhaseTransition.ts
-import { useEffect, useCallback } from 'react';
-import type { GameState, Unit, UnitId, PlayerId, FightSubPhase } from '../types/game';
+import { useCallback, useEffect } from "react";
+import type { FightSubPhase, GameState, PlayerId, Unit, UnitId } from "../types/game";
 
 interface UsePhaseTransitionParams {
   gameState: GameState;
   boardConfig: Record<string, unknown> | null | undefined;
   isUnitEligible: (unit: Unit) => boolean;
   actions: {
-    setPhase: (phase: GameState['phase']) => void;
+    setPhase: (phase: GameState["phase"]) => void;
     setCurrentPlayer: (player: PlayerId) => void;
     setSelectedUnitId: (id: UnitId | null) => void;
-    setMode: (mode: GameState['mode']) => void;
+    setMode: (mode: GameState["mode"]) => void;
     resetMovedUnits: () => void;
     resetChargedUnits: () => void;
     resetAttackedUnits: () => void;
@@ -32,11 +32,14 @@ export const usePhaseTransition = ({
 }: UsePhaseTransitionParams) => {
   // Phase completion by eligibility (NOT step counts)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const shouldTransitionPhase = useCallback((_phase: string): boolean => {
-    const playerUnits = gameState.units.filter(u => u.player === gameState.current_player);
-    const eligibleUnits = playerUnits.filter(unit => isUnitEligible(unit));
-    return eligibleUnits.length === 0;
-  }, [gameState.units, gameState.current_player, isUnitEligible]);
+  const shouldTransitionPhase = useCallback(
+    (_phase: string): boolean => {
+      const playerUnits = gameState.units.filter((u) => u.player === gameState.current_player);
+      const eligibleUnits = playerUnits.filter((unit) => isUnitEligible(unit));
+      return eligibleUnits.length === 0;
+    },
+    [gameState.units, gameState.current_player, isUnitEligible]
+  );
 
   // Eligibility-based phase transitions (core principle)
   useEffect(() => {
@@ -60,16 +63,16 @@ export const usePhaseTransition = ({
             // End turn - transition to command phase (not move)
             const newPlayer = gameState.current_player === 1 ? 2 : 1;
             actions.setCurrentPlayer(newPlayer);
-            actions.setPhase("command");  // Au lieu de "move"
+            actions.setPhase("command"); // Au lieu de "move"
             // Note: Turn increment is handled by backend in fight_handlers
             break;
           }
         }
       }, 300);
     }
-  }, [gameState.phase, gameState.current_player, gameState.currentTurn, shouldTransitionPhase, actions]);
+  }, [gameState.phase, gameState.current_player, shouldTransitionPhase, actions]);
 
   return {
-    shouldTransitionPhase
+    shouldTransitionPhase,
   };
 };

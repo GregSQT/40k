@@ -2,8 +2,6 @@
   "permissions": {
     "allow": [],
     "deny": [],
-    "ask": [
-      "Bash"
-    ]
+    "ask": ["Bash"]
   }
 }

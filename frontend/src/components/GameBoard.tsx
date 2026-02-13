@@ -1,11 +1,21 @@
 // src/components/GameBoard.tsx
-import React from 'react';
-import BoardPvp from './BoardPvp';
+import type React from "react";
 //import { BoardReplay } from './BoardReplay';
 //import { TurnPhaseTracker } from './TurnPhaseTracker';
-import type { Unit, GameState, MovePreview, AttackPreview, UnitId, ShootingPhaseState, TargetPreview, FightSubPhase, PlayerId } from '../types';
-//import { setupBoardClickHandler } from '../utils/boardClickHandler';
+import type {
+  AttackPreview,
+  FightSubPhase,
+  GameState,
+  MovePreview,
+  PlayerId,
+  ShootingPhaseState,
+  TargetPreview,
+  Unit,
+  UnitId,
+} from "../types";
+import BoardPvp from "./BoardPvp";
 
+//import { setupBoardClickHandler } from '../utils/boardClickHandler';
 
 interface GameBoardProps {
   units: Unit[];
@@ -13,11 +23,11 @@ interface GameBoardProps {
   eligibleUnitIds: number[];
   shootingActivationQueue?: Unit[];
   activeShootingUnit?: Unit | null;
-  phase: GameState['phase'];
-  mode: GameState['mode'];
+  phase: GameState["phase"];
+  mode: GameState["mode"];
   movePreview: MovePreview | null;
   attackPreview: AttackPreview | null;
-  current_player: GameState['current_player'];
+  current_player: GameState["current_player"];
   unitsMoved: UnitId[];
   unitsCharged: UnitId[];
   unitsAttacked: UnitId[];
@@ -51,38 +61,45 @@ interface GameBoardProps {
 export const GameBoard: React.FC<GameBoardProps> = (props) => {
   // Type-safe wrapper for Board component
   // Convert string/number IDs to proper number type for Board component
-  
-    // Remove problematic useEffect - setupBoardClickHandler will be handled by BoardPvp directly
-  
+
+  // Remove problematic useEffect - setupBoardClickHandler will be handled by BoardPvp directly
+
   const handleSelectUnit = (id: number | string | null) => {
-    if (typeof id === 'string') {
+    if (typeof id === "string") {
       const numId = parseInt(id, 10);
-      props.onSelectUnit(isNaN(numId) ? null : numId);
+      props.onSelectUnit(Number.isNaN(numId) ? null : numId);
     } else {
       props.onSelectUnit(id);
     }
   };
-  
-  const handleStartMovePreview = (unitId: number | string, col: number | string, row: number | string) => {
-    const numUnitId = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId;
-    const numCol = typeof col === 'string' ? parseInt(col, 10) : col;
-    const numRow = typeof row === 'string' ? parseInt(row, 10) : row;
-    
-    if (!isNaN(numUnitId) && !isNaN(numCol) && !isNaN(numRow)) {
+
+  const handleStartMovePreview = (
+    unitId: number | string,
+    col: number | string,
+    row: number | string
+  ) => {
+    const numUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+    const numCol = typeof col === "string" ? parseInt(col, 10) : col;
+    const numRow = typeof row === "string" ? parseInt(row, 10) : row;
+
+    if (!Number.isNaN(numUnitId) && !Number.isNaN(numCol) && !Number.isNaN(numRow)) {
       props.onStartMovePreview(numUnitId, numCol, numRow);
     }
   };
 
-  const handleDirectMove = (unitId: number | string, col: number | string, row: number | string) => {
-    
-    const numUnitId = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId;
-    const numCol = typeof col === 'string' ? parseInt(col, 10) : col;
-    const numRow = typeof row === 'string' ? parseInt(row, 10) : row;
-    
+  const handleDirectMove = (
+    unitId: number | string,
+    col: number | string,
+    row: number | string
+  ) => {
+    const numUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+    const numCol = typeof col === "string" ? parseInt(col, 10) : col;
+    const numRow = typeof row === "string" ? parseInt(row, 10) : row;
+
     console.log("GameBoard parsed values:", { numUnitId, numCol, numRow });
     console.log("GameBoard calling props.onDirectMove...");
-    
-    if (!isNaN(numUnitId) && !isNaN(numCol) && !isNaN(numRow)) {
+
+    if (!Number.isNaN(numUnitId) && !Number.isNaN(numCol) && !Number.isNaN(numRow)) {
       props.onDirectMove(numUnitId, numCol, numRow);
     } else {
       console.error("GameBoard: Invalid parsed values, not calling props.onDirectMove");
@@ -90,7 +107,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   };
 
   const BoardComponent = BoardPvp;
-  
+
   return (
     <div className="game-board w-full flex flex-col">
       <BoardComponent

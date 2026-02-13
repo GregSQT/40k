@@ -1,15 +1,14 @@
 // frontend/src/Routes.tsx
 
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BoardWithAPI } from "./components/BoardWithAPI";
 import HomePage from "./pages/HomePage";
 //import PlayerVsAIPage from "./pages/PlayerVsAIPage";
 import ReplayPage from "./pages/ReplayPage";
-import { BoardWithAPI } from "./components/BoardWithAPI";
 
 export default function App() {
-  React.useEffect(() => {
-  }, []);
+  React.useEffect(() => {}, []);
 
   return (
     <BrowserRouter>

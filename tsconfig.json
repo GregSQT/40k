@@ -8,39 +8,17 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "frontend/src/*"
-      ],
-      "@roster/*": [
-        "frontend/src/roster/*"
-      ],
-      "@data/*": [
-        "frontend/src/data/*"
-      ],
-      "@components/*": [
-        "frontend/src/components/*"
-      ],
-      "@pages/*": [
-        "frontend/src/pages/*"
-      ],
-      "@types/*": [
-        "frontend/src/types/*"
-      ],
-      "@hooks/*": [
-        "frontend/src/hooks/*"
-      ],
-      "@services/*": [
-        "frontend/src/services/*"
-      ],
-      "@constants/*": [
-        "frontend/src/constants/*"
-      ],
-      "@utils/*": [
-        "frontend/src/utils/*"
-      ],
-      "@ai/*": [
-        "ai/*"
-      ]
+      "@/*": ["frontend/src/*"],
+      "@roster/*": ["frontend/src/roster/*"],
+      "@data/*": ["frontend/src/data/*"],
+      "@components/*": ["frontend/src/components/*"],
+      "@pages/*": ["frontend/src/pages/*"],
+      "@types/*": ["frontend/src/types/*"],
+      "@hooks/*": ["frontend/src/hooks/*"],
+      "@services/*": ["frontend/src/services/*"],
+      "@constants/*": ["frontend/src/constants/*"],
+      "@utils/*": ["frontend/src/utils/*"],
+      "@ai/*": ["ai/*"]
     }
   }
 }

@@ -8,16 +8,16 @@
   --color-danger: #ff4444;
   --color-success: #36e36b;
   --color-warning: #ff9900;
-  
+
   /* HP Bar Colors */
-  --hp-bar-player1: #1D4ED8;
+  --hp-bar-player1: #1d4ed8;
   --hp-bar-player2: #ff4d4d;
   --hp-bar-lost: #444444;
   --hp-bar-damage-preview: #444444;
 
   /* Replay Mode Icons - Centralized configuration */
   /* All icon parameters are defined here and used by both UnitRenderer (board) and GameLog */
-  
+
   /* Movement icon - CIRCLE (not square) */
   --icon-move-color: #00cc66;
   --icon-move-bg-color: #00cc66;
@@ -26,7 +26,7 @@
   --icon-move-stroke-thickness: 3;
   --icon-move-size: 1.3;
   --icon-move-circle-size: 0.75;
-  
+
   /* Shooting icon - SQUARE with pistol icon (blue tones) */
   --icon-shoot-color: #2563eb;
   --icon-shoot-bg-color: #2563eb;
@@ -35,7 +35,7 @@
   --icon-shoot-stroke-thickness: 3;
   --icon-shoot-size: 1.5;
   --icon-shoot-square-size: 0.75;
-  
+
   /* Charge icon - SQUARE with purple background */
   --icon-charge-color: #9966cc;
   --icon-charge-bg-color: #9966cc;
@@ -44,12 +44,12 @@
   --icon-charge-stroke-thickness: 3;
   --icon-charge-size: 1.5;
   --icon-charge-square-size: 0.75;
-  
+
   /* Charge target (deprecated - use target icon) */
   --icon-charge-target-stroke: #ffffff;
   --icon-charge-target-stroke-thickness: 3;
   --icon-charge-target-size: 1.6;
-  
+
   /* Fight/Combat icon - LARGER SQUARE */
   --icon-fight-color: #ff4444;
   --icon-fight-bg-color: #ff4444;
@@ -58,16 +58,16 @@
   --icon-fight-stroke-thickness: 3;
   --icon-fight-size: 1.5;
   --icon-fight-square-size: 0.75;
-  
+
   /* Advance icon - SQUARE with orange background */
-  --icon-advance-color: #FF8C00;
-  --icon-advance-bg-color: #FF8C00;
+  --icon-advance-color: #ff8c00;
+  --icon-advance-bg-color: #ff8c00;
   --icon-advance-bg-rgb: 255, 140, 0; /* RGB values for rgba() in CSS */
   --icon-advance-stroke: #ffffff;
   --icon-advance-stroke-thickness: 3;
   --icon-advance-size: 1.5;
   --icon-advance-square-size: 0.75;
-  
+
   /* Target icon (for all action targets: shoot, charge, fight) */
   --icon-target-color: #ea580c;
   --icon-target-bg-color: #ea580c;
@@ -76,35 +76,35 @@
   --icon-target-stroke-thickness: 3;
   --icon-target-size: 1.8;
   --icon-target-square-size: 0.75;
-  
+
   /* Explosion icon (deprecated - use target icon) */
   --icon-explosion-color: #ff6600;
   --icon-explosion-stroke: #ffffff;
   --icon-explosion-stroke-thickness: 3;
   --icon-explosion-size: 1.6;
-  
+
   /* Square icon settings (for both board and game log) */
-  --icon-square-bg-alpha: 1.0; /* Opaque background for board icons */
+  --icon-square-bg-alpha: 1; /* Opaque background for board icons */
   --icon-square-bg-alpha-gamelog: 0.6; /* Plus opaque pour les icônes du game log */
-  --icon-square-border-alpha: 1.0; /* Opaque border for board */
-  --icon-square-border-alpha-gamelog: 1.0; /* Bord plus visible pour les icônes du game log */
+  --icon-square-border-alpha: 1; /* Opaque border for board */
+  --icon-square-border-alpha-gamelog: 1; /* Bord plus visible pour les icônes du game log */
   --icon-square-border-width: 2;
   --icon-square-border-color: #ffffff; /* White border for all squares */
   --icon-square-border-radius: 4;
   --icon-square-icon-scale: 0.85; /* Icon size relative to square */
   --icon-square-standard-size: 0.75; /* Standard size for all squares */
-  
+
   /* Background Colors */
   --bg-primary: #222;
   --bg-secondary: #444;
   --bg-tertiary: #002200;
   --bg-overlay: rgba(0, 0, 0, 0.8);
-  
+
   /* Text Colors */
   --text-primary: #ffffff;
   --text-secondary: #888;
   --text-accent: var(--color-primary);
-  
+
   /* Spacing System */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -113,9 +113,9 @@
   --spacing-xl: 20px;
   --spacing-2xl: 24px;
   --spacing-3xl: 32px;
-  
+
   /* Typography */
-  --font-family: 'Arial', sans-serif;
+  --font-family: "Arial", sans-serif;
   --font-size-sm: 11px;
   --font-size-md: 14px;
   --font-size-lg: 18px;
@@ -124,17 +124,17 @@
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-bold: 700;
-  
+
   /* Border Radius */
   --radius-sm: 4px;
   --radius-md: 7px;
   --radius-lg: 10px;
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.16);
   --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.19);
-  
+
   /* Transitions */
   --transition-fast: 0.15s ease;
   --transition-normal: 0.25s ease;
@@ -510,7 +510,9 @@ body {
   color: #1f2937;
   border-radius: 6px;
   border: 1px solid #b8942f;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
   transition: all 0.15s ease;
   padding: 4px 12px;
   min-width: 250px;
@@ -523,7 +525,10 @@ body {
 .replay-file-select:focus {
   outline: none;
   border-color: #9a7a25;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 0 2px rgba(212, 168, 67, 0.3);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 0 0 2px rgba(212, 168, 67, 0.3);
 }
 
 /* Replay Browse Button (kept for backward compatibility) */
@@ -534,14 +539,18 @@ body {
   color: #1f2937;
   border-radius: 6px;
   border: 1px solid #b8942f;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
   transition: all 0.15s ease;
   padding: 1px 24px;
 }
 
 .replay-browse-btn:hover {
   background-color: #e5b94d;
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 .replay-browse-btn:active {
@@ -640,16 +649,36 @@ body {
 /* Actually, to match exactly: if cols 4-10 = 70%, then cols 4-9 should also = 70% */
 /* So: cols 4-9 = 11.67% each (70% total), but then col 10 makes unit stats 80% */
 /* The solution: Make cols 4-9 wider to compensate - they should span 70% + 10% = 80% */
-.unit-status-table colgroup col:nth-child(1) { width: 6%; }  /* Button column - wider to fit buttons */
-.unit-status-table colgroup col:nth-child(2) { width: 6%; }  /* ID column - wider to fit buttons */
-.unit-status-table colgroup col:nth-child(3) { width: 18%; }  /* Name column - wider for longer names */
-.unit-status-table colgroup col:nth-child(4) { width: 13.33%; }  /* Stat column - weapon stats (Rng) */
-.unit-status-table colgroup col:nth-child(5) { width: 13.33%; }  /* Stat column - weapon stats (A) */
-.unit-status-table colgroup col:nth-child(6) { width: 13.33%; }  /* Stat column - weapon stats (BS/CC) */
-.unit-status-table colgroup col:nth-child(7) { width: 13.33%; }  /* Stat column - weapon stats (S) */
-.unit-status-table colgroup col:nth-child(8) { width: 13.33%; }  /* Stat column - weapon stats (AP) */
-.unit-status-table colgroup col:nth-child(9) { width: 13.33%; }  /* Stat column - weapon stats (DMG) */
-.unit-status-table colgroup col:nth-child(10) { width: 10%; }  /* OC column - unit stats only */
+.unit-status-table colgroup col:nth-child(1) {
+  width: 6%;
+} /* Button column - wider to fit buttons */
+.unit-status-table colgroup col:nth-child(2) {
+  width: 6%;
+} /* ID column - wider to fit buttons */
+.unit-status-table colgroup col:nth-child(3) {
+  width: 18%;
+} /* Name column - wider for longer names */
+.unit-status-table colgroup col:nth-child(4) {
+  width: 13.33%;
+} /* Stat column - weapon stats (Rng) */
+.unit-status-table colgroup col:nth-child(5) {
+  width: 13.33%;
+} /* Stat column - weapon stats (A) */
+.unit-status-table colgroup col:nth-child(6) {
+  width: 13.33%;
+} /* Stat column - weapon stats (BS/CC) */
+.unit-status-table colgroup col:nth-child(7) {
+  width: 13.33%;
+} /* Stat column - weapon stats (S) */
+.unit-status-table colgroup col:nth-child(8) {
+  width: 13.33%;
+} /* Stat column - weapon stats (AP) */
+.unit-status-table colgroup col:nth-child(9) {
+  width: 13.33%;
+} /* Stat column - weapon stats (DMG) */
+.unit-status-table colgroup col:nth-child(10) {
+  width: 10%;
+} /* OC column - unit stats only */
 
 /* Column 3: Name - Allow text wrapping (width is set by colgroup) */
 .unit-status-table .unit-status-cell:nth-child(3),
@@ -672,7 +701,7 @@ body {
 }
 
 .turn-phase-tracker-right .flex {
-  flex-direction: row !important;
+  flex-direction: row;
 }
 
 .turn-phase-tracker-right > div {
@@ -709,8 +738,8 @@ body {
 }
 
 .unit-status-player-header--red {
-  background: #dc2626 !important; /* red-600 */
-  border-color: #b91c1c !important; /* red-700 */
+  background: #dc2626; /* red-600 */
+  border-color: #b91c1c; /* red-700 */
 }
 
 .unit-status-player-header {
@@ -756,12 +785,12 @@ body {
 }
 
 .unit-status-row--selected {
-  background: rgba(34, 197, 94, 0.3) !important; /* green highlight for selected/active unit */
+  background: rgba(34, 197, 94, 0.3); /* green highlight for selected/active unit */
   border: 2px solid #22c55e; /* green border */
 }
 
 .unit-status-row--clicked {
-  background: rgba(30, 144, 255, 0.2) !important; /* blue highlight for clicked non-selectable unit */
+  background: rgba(30, 144, 255, 0.2); /* blue highlight for clicked non-selectable unit */
   border: 2px solid var(--color-accent); /* blue border */
 }
 
@@ -798,7 +827,7 @@ body {
 
 .unit-status-cell--stat {
   /* width removed to allow inline width styles to work */
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   font-weight: var(--font-weight-medium);
 }
 
@@ -829,7 +858,9 @@ body {
 
 .unit-status-hp-bar-fill {
   height: 100%;
-  transition: width 0.3s ease, background-color 0.3s ease;
+  transition:
+    width 0.3s ease,
+    background-color 0.3s ease;
   border-radius: 1px;
 }
 
@@ -946,30 +977,54 @@ body {
   text-align: right;
 }
 
-.mb-0 { margin-bottom: 0; }
-.mb-1 { margin-bottom: var(--spacing-xs); }
-.mb-2 { margin-bottom: var(--spacing-sm); }
-.mb-3 { margin-bottom: var(--spacing-md); }
-.mb-4 { margin-bottom: var(--spacing-lg); }
-.mb-5 { margin-bottom: var(--spacing-xl); }
+.mb-0 {
+  margin-bottom: 0;
+}
+.mb-1 {
+  margin-bottom: var(--spacing-xs);
+}
+.mb-2 {
+  margin-bottom: var(--spacing-sm);
+}
+.mb-3 {
+  margin-bottom: var(--spacing-md);
+}
+.mb-4 {
+  margin-bottom: var(--spacing-lg);
+}
+.mb-5 {
+  margin-bottom: var(--spacing-xl);
+}
 
-.mt-0 { margin-top: 0; }
-.mt-1 { margin-top: var(--spacing-xs); }
-.mt-2 { margin-top: var(--spacing-sm); }
-.mt-3 { margin-top: var(--spacing-md); }
-.mt-4 { margin-top: var(--spacing-lg); }
-.mt-5 { margin-top: var(--spacing-xl); }
+.mt-0 {
+  margin-top: 0;
+}
+.mt-1 {
+  margin-top: var(--spacing-xs);
+}
+.mt-2 {
+  margin-top: var(--spacing-sm);
+}
+.mt-3 {
+  margin-top: var(--spacing-md);
+}
+.mt-4 {
+  margin-top: var(--spacing-lg);
+}
+.mt-5 {
+  margin-top: var(--spacing-xl);
+}
 
 /* Responsive Design */
 @media (max-width: 1400px) {
   .unit-status-tables {
     max-width: 800px;
   }
-  
+
   .unit-status-table {
     font-size: 12px;
   }
-  
+
   .unit-status-header-cell,
   .unit-status-cell {
     padding: 3px 5px;
@@ -982,7 +1037,7 @@ body {
     max-width: 100%;
     margin-top: 20px; /* Reduce top margin on smaller screens */
   }
-  
+
   .unit-status-table-wrapper {
     overflow-x: scroll;
   }
@@ -992,7 +1047,7 @@ body {
   .app-container {
     flex-direction: column;
   }
-  
+
   .sidebar {
     width: 100%;
     height: auto;
@@ -1000,16 +1055,16 @@ body {
     border-right: none;
     border-bottom: 1px solid #555;
   }
-  
+
   .game-header h1 {
     font-size: var(--font-size-xl);
   }
-  
+
   .game-area {
     flex-direction: column;
     padding: var(--spacing-sm);
   }
-  
+
   .unit-status-tables {
     margin-left: 0;
     width: 100%;
@@ -1020,7 +1075,7 @@ body {
   .game-header {
     padding: var(--spacing-lg) var(--spacing-sm);
   }
-  
+
   .game-header h1 {
     font-size: var(--font-size-lg);
   }
@@ -1036,7 +1091,7 @@ body {
 }
 
 .loading::after {
-  content: '';
+  content: "";
   width: 20px;
   height: 20px;
   margin-left: var(--spacing-sm);
@@ -1112,10 +1167,10 @@ textarea:focus {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }
 
@@ -1125,11 +1180,11 @@ textarea:focus {
     background: white;
     color: black;
   }
-  
+
   .sidebar {
     display: none;
   }
-  
+
   .game-header,
   .game-footer {
     border: none;
@@ -1265,7 +1320,7 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--icon-square-border-radius, 4)px;
+  border-radius: var(--icon-square-border-radius, 4) px;
   text-align: center;
   flex-shrink: 0;
 }
@@ -1273,32 +1328,42 @@ textarea:focus {
 /* Icon squares with colored backgrounds - Uses centralized CSS variables */
 .game-log-entry__icon--move {
   background: rgba(var(--icon-move-bg-rgb), var(--icon-square-bg-alpha-gamelog));
-  border: var(--icon-square-border-width)px solid rgba(var(--icon-move-bg-rgb), var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius)px;
+  border: var(--icon-square-border-width) px solid
+    rgba(var(--icon-move-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius) px;
 }
 
 .game-log-entry__icon--shoot {
   background: rgba(var(--icon-shoot-bg-rgb), var(--icon-square-bg-alpha-gamelog));
-  border: var(--icon-square-border-width)px solid rgba(var(--icon-shoot-bg-rgb), var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius)px;
+  border: var(--icon-square-border-width) px solid
+    rgba(var(--icon-shoot-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius) px;
 }
 
 .game-log-entry__icon--charge {
   background: rgba(var(--icon-charge-bg-rgb), var(--icon-square-bg-alpha-gamelog));
-  border: var(--icon-square-border-width)px solid rgba(var(--icon-charge-bg-rgb), var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius)px;
+  border: var(--icon-square-border-width) px solid
+    rgba(var(--icon-charge-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius) px;
 }
 
 .game-log-entry__icon--charge_fail {
-  background: rgba(153, 102, 204, calc(var(--icon-square-bg-alpha-gamelog) * 0.5)); /* Light purple for failed charge */
-  border: var(--icon-square-border-width)px solid rgba(153, 102, 204, calc(var(--icon-square-border-alpha-gamelog) * 0.5));
-  border-radius: var(--icon-square-border-radius)px;
+  background: rgba(
+    153,
+    102,
+    204,
+    calc(var(--icon-square-bg-alpha-gamelog) * 0.5)
+  ); /* Light purple for failed charge */
+  border: var(--icon-square-border-width) px solid
+    rgba(153, 102, 204, calc(var(--icon-square-border-alpha-gamelog) * 0.5));
+  border-radius: var(--icon-square-border-radius) px;
 }
 
 .game-log-entry__icon--combat {
   background: rgba(var(--icon-fight-bg-rgb), var(--icon-square-bg-alpha-gamelog));
-  border: var(--icon-square-border-width)px solid rgba(var(--icon-fight-bg-rgb), var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius)px;
+  border: var(--icon-square-border-width) px solid
+    rgba(var(--icon-fight-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius) px;
 }
 
 .game-log-entry__icon--death {
@@ -1324,20 +1389,22 @@ textarea:focus {
 
 .game-log-entry__icon--wait {
   background: rgba(128, 128, 128, var(--icon-square-bg-alpha-gamelog)); /* Gray for wait */
-  border: var(--icon-square-border-width)px solid rgba(128, 128, 128, var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius)px;
+  border: var(--icon-square-border-width) px solid
+    rgba(128, 128, 128, var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius) px;
 }
 
 .game-log-entry__icon--advance {
   background: rgba(139, 69, 19, var(--icon-square-bg-alpha-gamelog)); /* Brown for advance */
-  border: var(--icon-square-border-width)px solid rgba(139, 69, 19, var(--icon-square-border-alpha-gamelog));
-  border-radius: var(--icon-square-border-radius)px;
+  border: var(--icon-square-border-width) px solid
+    rgba(139, 69, 19, var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius) px;
 }
 
 .game-log-entry__time {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
 }
 
 .game-log-entry__turn {
@@ -1358,7 +1425,7 @@ textarea:focus {
 }
 
 .game-log-entry__player--blue {
-  background: #1D4ED8; /* Same blue as unit status table */
+  background: #1d4ed8; /* Same blue as unit status table */
 }
 
 .game-log-entry__player--red {
@@ -1405,17 +1472,17 @@ textarea:focus {
 /* Event Type Specific Styles */
 .game-log-entry--turn {
   border-left-color: var(--color-accent);
-  background: rgba(30, 144, 255, 0.40);
+  background: rgba(30, 144, 255, 0.4);
 }
 
 .game-log-entry--phase {
   border-left-color: #9966cc;
-  background: rgba(153, 102, 204, 0.40);
+  background: rgba(153, 102, 204, 0.4);
 }
 
 .game-log-entry--move {
   border-left-color: #00cc66;
-  background: rgba(0, 204, 102, 0.40);
+  background: rgba(0, 204, 102, 0.4);
 }
 
 .game-log-entry--charge {
@@ -1429,60 +1496,60 @@ textarea:focus {
 }
 
 .game-log-entry--advance {
-  border-left-color: #8B4513; /* Brown - advance move */
-  background: rgba(139, 69, 19, 0.40); /* Marron pour advance */
+  border-left-color: #8b4513; /* Brown - advance move */
+  background: rgba(139, 69, 19, 0.4); /* Marron pour advance */
 }
 
 /* Shooting Action Color Coding - BLUE palette */
 .game-log-entry--shoot {
   border-left-color: #2563eb; /* Default blue for shooting */
-  background: rgba(37, 99, 255, 0.40); /* Bleu pur/vif pour tir générique */
+  background: rgba(37, 99, 255, 0.4); /* Bleu pur/vif pour tir générique */
 }
 
 .game-log-entry--shoot-failed {
   border-left-color: #3b82f6; /* Lighter blue - failed hit/wound */
-  background: rgba(147, 197, 253, 0.40); /* Bleu clair mais plus saturé (MISS) */
+  background: rgba(147, 197, 253, 0.4); /* Bleu clair mais plus saturé (MISS) */
 }
 
 .game-log-entry--shoot-saved {
   border-left-color: #0ea5e9; /* Cyan/sky blue - target succeeded save roll */
-  background: rgba(96, 165, 250, 0.40); /* Bleu moyen (SAVED / pas de dégâts) */
+  background: rgba(96, 165, 250, 0.4); /* Bleu moyen (SAVED / pas de dégâts) */
 }
 
 .game-log-entry--shoot-damage {
   border-left-color: #1d4ed8; /* Darker blue - target loses HP */
-  background: rgba(30, 64, 175, 0.40); /* Bleu foncé (DMG) */
+  background: rgba(30, 64, 175, 0.4); /* Bleu foncé (DMG) */
 }
 
 .game-log-entry--shoot-no-damage {
   border-left-color: #0ea5e9; /* Same as saved - hits but no damage */
-  background: rgba(96, 165, 250, 0.40); /* Même bleu moyen que SAVED pour "pas de dégâts" */
+  background: rgba(96, 165, 250, 0.4); /* Même bleu moyen que SAVED pour "pas de dégâts" */
 }
 
 /* Combat Action Color Coding (same as shooting) */
 .game-log-entry--combat {
   border-left-color: #eab308; /* Default yellow for combat */
-  background: rgba(234, 179, 8, 0.40);
+  background: rgba(234, 179, 8, 0.4);
 }
 
 .game-log-entry--combat-failed {
   border-left-color: #eab308; /* Yellow - failed during hit or wound rolls */
-  background: rgba(234, 179, 8, 0.40);
+  background: rgba(234, 179, 8, 0.4);
 }
 
 .game-log-entry--combat-saved {
   border-left-color: #ea580c; /* Orange - target succeeded save roll */
-  background: rgba(234, 88, 12, 0.40);
+  background: rgba(234, 88, 12, 0.4);
 }
 
 .game-log-entry--combat-damage {
   border-left-color: #dc2626; /* Red - target loses HP */
-  background: rgba(220, 38, 38, 0.40);
+  background: rgba(220, 38, 38, 0.4);
 }
 
 .game-log-entry--combat-no-damage {
   border-left-color: #ea580c; /* Orange - hits but no damage (same as saved) */
-  background: rgba(234, 88, 12, 0.40);
+  background: rgba(234, 88, 12, 0.4);
 }
 
 .game-log-entry--death {
@@ -1497,7 +1564,7 @@ textarea:focus {
 
 .game-log-entry--cancel {
   border-left-color: #999;
-  background: rgba(153, 153, 153, 0.40);
+  background: rgba(153, 153, 153, 0.4);
 }
 
 .game-log-entry--cancel .game-log-entry__message {
@@ -1507,8 +1574,8 @@ textarea:focus {
 
 /* Wait/Skip Action - Gray background (higher specificity to override other event types) */
 .game-log-entry.game-log-entry--wait {
-  border-left-color: #666 !important;
-  background: rgba(128, 128, 128, 0.40) !important;
+  border-left-color: #666;
+  background: rgba(128, 128, 128, 0.4);
 }
 
 .game-log-entry.game-log-entry--wait .game-log-entry__message {
@@ -1519,7 +1586,7 @@ textarea:focus {
 /* Default/Unknown Event Type */
 .game-log-entry--default {
   border-left-color: #555;
-  background: rgba(85, 85, 85, 0.40);
+  background: rgba(85, 85, 85, 0.4);
 }
 
 .game-log-entry--default .game-log-entry__message {
@@ -1541,7 +1608,7 @@ textarea:focus {
   margin-bottom: 2px;
   font-size: 11px;
   color: var(--text-secondary);
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
 }
 
 .game-log-shoot-detail__shot {
@@ -1563,7 +1630,7 @@ textarea:focus {
   .game-log {
     max-height: none; /* Allow dynamic height calculation */
   }
-  
+
   .game-log__events {
     max-height: none; /* Allow dynamic height calculation */
   }
@@ -1574,15 +1641,15 @@ textarea:focus {
     margin-top: var(--spacing-md);
     max-height: none; /* Allow dynamic height calculation */
   }
-  
+
   .game-log__events {
     max-height: none; /* Allow dynamic height calculation */
   }
-  
+
   .game-log-entry {
     padding: var(--spacing-xs);
   }
-  
+
   .game-log-entry__message {
     font-size: 11px;
   }
@@ -1689,7 +1756,7 @@ textarea:focus {
 
 .game-log-entry__reward-value--none {
   color: var(--text-secondary);
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   min-width: 32px;
   display: inline-block;
   text-align: center;
@@ -1916,7 +1983,7 @@ textarea:focus {
   padding: 2px 6px;
   background: rgba(52, 211, 153, 0.1);
   border-radius: 4px;
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   font-size: var(--font-size-sm);
 }
 
@@ -2024,7 +2091,10 @@ textarea:focus {
   visibility: hidden;
   opacity: 0;
   transform: translateY(-2px);
-  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    visibility 0.12s;
   pointer-events: none;
 }
 

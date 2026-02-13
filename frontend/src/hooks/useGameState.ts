@@ -1,7 +1,19 @@
 // frontend/src/hooks/useGameState.ts
-import React, { useState, useCallback } from 'react';
-import type { GameState, Unit, UnitId, PlayerId, GamePhase, GameMode, ShootingPhaseState, TargetPreview, FightSubPhase, MovePreview, AttackPreview } from '../types/game';
-import { getSelectedRangedWeapon, getSelectedMeleeWeapon } from '../utils/weaponHelpers';
+import React, { useCallback, useState } from "react";
+import type {
+  AttackPreview,
+  FightSubPhase,
+  GameMode,
+  GamePhase,
+  GameState,
+  MovePreview,
+  PlayerId,
+  ShootingPhaseState,
+  TargetPreview,
+  Unit,
+  UnitId,
+} from "../types/game";
+import { getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
 
 interface ChargeRollPopup {
   unitId: UnitId;
@@ -61,25 +73,27 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
     episode_steps: 0, // Built-in step counting
     fightSubPhase: undefined,
     fightActivePlayer: undefined,
-    targetPreview: null
+    targetPreview: null,
   });
 
   // React hook pattern: respond to parameter changes
   React.useEffect(() => {
     if (initialUnits.length > 0) {
-      setGameState(prev => ({
+      setGameState((prev) => ({
         ...prev,
-        units: initialUnits.map(unit => {
+        units: initialUnits.map((unit) => {
           // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons arrays
           if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) {
             // Unit must have at least one weapon type (ranged or melee)
             if (!unit.CC_WEAPONS || unit.CC_WEAPONS.length === 0) {
-              throw new Error(`Unit ${unit.id} missing required weapons (must have RNG_WEAPONS or CC_WEAPONS)`);
+              throw new Error(
+                `Unit ${unit.id} missing required weapons (must have RNG_WEAPONS or CC_WEAPONS)`
+              );
             }
             return {
               ...unit,
               SHOOT_LEFT: 0, // No ranged weapons
-              HP_CUR: unit.HP_CUR ?? unit.HP_MAX
+              HP_CUR: unit.HP_CUR ?? unit.HP_MAX,
             };
           }
           // Get NB from selected or first weapon
@@ -87,9 +101,9 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
           return {
             ...unit,
             SHOOT_LEFT: selectedWeapon?.NB || 0,
-            HP_CUR: unit.HP_CUR ?? unit.HP_MAX
+            HP_CUR: unit.HP_CUR ?? unit.HP_MAX,
           };
-        })
+        }),
       }));
     }
   }, [initialUnits]);
@@ -107,168 +121,166 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       totalShots: 0,
       shotsRemaining: 0,
       isSelectingTarget: false,
-      currentStep: 'target_selection',
-      stepResults: {}
-    }
+      currentStep: "target_selection",
+      stepResults: {},
+    },
   });
   const [chargeRollPopup] = useState<ChargeRollPopup | null>(null);
 
   // Update unit with UPPERCASE field validation
   const updateUnit = useCallback((unitId: UnitId, updates: Partial<Unit>) => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
-      units: prev.units.map(unit => 
-        unit.id === unitId ? { ...unit, ...updates } : unit
-      )
+      units: prev.units.map((unit) => (unit.id === unitId ? { ...unit, ...updates } : unit)),
     }));
   }, []);
 
   const removeUnit = useCallback((unitId: UnitId) => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
-      units: prev.units.filter(unit => unit.id !== unitId)
+      units: prev.units.filter((unit) => unit.id !== unitId),
     }));
   }, []);
 
   // Initialize shooting phase with UPPERCASE field validation
   const initializeShootingPhase = useCallback(() => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
-      units: prev.units.map(unit => {
+      units: prev.units.map((unit) => {
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate weapons arrays
         if (!unit.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) {
           // Unit must have at least one weapon type (ranged or melee)
           if (!unit.CC_WEAPONS || unit.CC_WEAPONS.length === 0) {
-            throw new Error('unit must have RNG_WEAPONS or CC_WEAPONS');
+            throw new Error("unit must have RNG_WEAPONS or CC_WEAPONS");
           }
           return { ...unit, SHOOT_LEFT: 0 };
-          }
-          // Get NB from selected or first weapon
-          const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
+        }
+        // Get NB from selected or first weapon
+        const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
         return { ...unit, SHOOT_LEFT: selectedWeapon?.NB || 0 };
-      })
+      }),
     }));
   }, []);
 
   // Initialize fight phase with UPPERCASE field validation
   const initializeFightPhase = useCallback(() => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
-      units: prev.units.map(unit => {
+      units: prev.units.map((unit) => {
         // Get NB from selected or first CC weapon
         const selectedWeapon = getSelectedMeleeWeapon(unit) || unit.CC_WEAPONS?.[0];
         return { ...unit, ATTACK_LEFT: selectedWeapon?.NB || 0 };
-      })
+      }),
     }));
   }, []);
 
   const updateShootingPhaseState = useCallback((updates: Partial<ShootingPhaseState>) => {
-    setShootingPhaseState(prev => ({ ...prev, ...updates }));
+    setShootingPhaseState((prev) => ({ ...prev, ...updates }));
   }, []);
 
   const decrementShotsLeft = useCallback((unitId: UnitId) => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
-      units: prev.units.map(unit => {
+      units: prev.units.map((unit) => {
         if (unit.id === unitId) {
           if (unit.SHOOT_LEFT === undefined) {
-            throw new Error('unit.SHOOT_LEFT is required');
+            throw new Error("unit.SHOOT_LEFT is required");
           }
           return { ...unit, SHOOT_LEFT: Math.max(0, unit.SHOOT_LEFT - 1) };
         }
         return unit;
-      })
+      }),
     }));
   }, []);
 
   // Core state setters
   const setUnits = useCallback((units: Unit[]) => {
-    setGameState(prev => ({ ...prev, units }));
+    setGameState((prev) => ({ ...prev, units }));
   }, []);
 
   const setCurrentPlayer = useCallback((player: PlayerId) => {
-    setGameState(prev => ({ ...prev, current_player: player }));
+    setGameState((prev) => ({ ...prev, current_player: player }));
   }, []);
 
   const setPhase = useCallback((phase: GamePhase) => {
-    setGameState(prev => ({ ...prev, phase }));
+    setGameState((prev) => ({ ...prev, phase }));
   }, []);
 
   const setMode = useCallback((mode: GameMode) => {
-    setGameState(prev => ({ ...prev, mode }));
+    setGameState((prev) => ({ ...prev, mode }));
   }, []);
 
   const setSelectedUnitId = useCallback((id: UnitId | null) => {
-    setGameState(prev => ({ ...prev, selectedUnitId: id }));
+    setGameState((prev) => ({ ...prev, selectedUnitId: id }));
   }, []);
 
   const setTargetPreview = useCallback((preview: TargetPreview | null) => {
-    setGameState(prev => ({ ...prev, targetPreview: preview }));
+    setGameState((prev) => ({ ...prev, targetPreview: preview }));
   }, []);
 
   const setCurrentTurn = useCallback((turn: number) => {
-    setGameState(prev => ({ ...prev, currentTurn: turn }));
+    setGameState((prev) => ({ ...prev, currentTurn: turn }));
   }, []);
 
   const setFightSubPhase = useCallback((subPhase: FightSubPhase | undefined) => {
-    setGameState(prev => ({ ...prev, fightSubPhase: subPhase }));
+    setGameState((prev) => ({ ...prev, fightSubPhase: subPhase }));
   }, []);
 
   const setFightActivePlayer = useCallback((player: PlayerId | undefined) => {
-    setGameState(prev => ({ ...prev, fightActivePlayer: player }));
+    setGameState((prev) => ({ ...prev, fightActivePlayer: player }));
   }, []);
 
   // Tracking set management (sequential activation)
   const addMovedUnit = useCallback((unitId: UnitId) => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
-      unitsMoved: (prev.unitsMoved ?? []).includes(unitId) 
+      unitsMoved: (prev.unitsMoved ?? []).includes(unitId)
         ? (prev.unitsMoved ?? [])
-        : [...(prev.unitsMoved ?? []), unitId]
+        : [...(prev.unitsMoved ?? []), unitId],
     }));
   }, []);
 
   const addChargedUnit = useCallback((unitId: UnitId) => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
       unitsCharged: (prev.unitsCharged ?? []).includes(unitId)
         ? (prev.unitsCharged ?? [])
-        : [...(prev.unitsCharged ?? []), unitId]
+        : [...(prev.unitsCharged ?? []), unitId],
     }));
   }, []);
 
   const addAttackedUnit = useCallback((unitId: UnitId) => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
       unitsAttacked: (prev.unitsAttacked ?? []).includes(unitId)
         ? (prev.unitsAttacked ?? [])
-        : [...(prev.unitsAttacked ?? []), unitId]
+        : [...(prev.unitsAttacked ?? []), unitId],
     }));
   }, []);
 
   const addFledUnit = useCallback((unitId: UnitId) => {
-    setGameState(prev => ({
+    setGameState((prev) => ({
       ...prev,
       unitsFled: (prev.unitsFled ?? []).includes(unitId)
         ? (prev.unitsFled ?? [])
-        : [...(prev.unitsFled ?? []), unitId]
+        : [...(prev.unitsFled ?? []), unitId],
     }));
   }, []);
 
   const resetMovedUnits = useCallback(() => {
-    setGameState(prev => ({ ...prev, unitsMoved: [] }));
+    setGameState((prev) => ({ ...prev, unitsMoved: [] }));
   }, []);
 
   const resetChargedUnits = useCallback(() => {
-    setGameState(prev => ({ ...prev, unitsCharged: [] }));
+    setGameState((prev) => ({ ...prev, unitsCharged: [] }));
   }, []);
 
   const resetAttackedUnits = useCallback(() => {
-    setGameState(prev => ({ ...prev, unitsAttacked: [] }));
+    setGameState((prev) => ({ ...prev, unitsAttacked: [] }));
   }, []);
 
   const resetFledUnits = useCallback(() => {
-    setGameState(prev => ({ ...prev, unitsFled: [] }));
+    setGameState((prev) => ({ ...prev, unitsFled: [] }));
   }, []);
 
   return {

@@ -1,7 +1,6 @@
 // frontend/src/Routes.tsx
 
-import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { BoardWithAPI } from "./components/BoardWithAPI";
 
 export default function App() {

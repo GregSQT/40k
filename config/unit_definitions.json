@@ -10,12 +10,5 @@
       "class_name": "CaptainGravis"
     }
   },
-  "required_properties": [
-    "HP_MAX",
-    "MOVE",
-    "RNG_RNG",
-    "RNG_DMG",
-    "CC_DMG",
-    "ICON"
-  ]
+  "required_properties": ["HP_MAX", "MOVE", "RNG_RNG", "RNG_DMG", "CC_DMG", "ICON"]
 }

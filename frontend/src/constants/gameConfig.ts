@@ -10,14 +10,14 @@ export const calculateHexConfig = (hexRadius: number) => ({
 
 // Colors
 export const COLORS = {
-  HIGHLIGHT: 0x90d090,     // Light green for movement (less intense)
-  ATTACK: 0xe08080,        // Light red for attacks (moderately intense, visible on dark background)
-  CHARGE: 0xff9900,        // Orange for charges
-  SELECTION: 0xffd700,     // Gold for selection
-  ELIGIBLE: 0x00ff00,      // Green for eligible units
-  BACKGROUND: 0x002200,    // Dark green for board
-  PLAYER_1: 0x244488,      // Blue for player 1
-  PLAYER_2: 0x882222,      // Red for player 2
+  HIGHLIGHT: 0x90d090, // Light green for movement (less intense)
+  ATTACK: 0xe08080, // Light red for attacks (moderately intense, visible on dark background)
+  CHARGE: 0xff9900, // Orange for charges
+  SELECTION: 0xffd700, // Gold for selection
+  ELIGIBLE: 0x00ff00, // Green for eligible units
+  BACKGROUND: 0x002200, // Dark green for board
+  PLAYER_1: 0x244488, // Blue for player 1
+  PLAYER_2: 0x882222, // Red for player 2
 } as const;
 
 // Game Timing
@@ -38,7 +38,7 @@ export const AI_CONFIG = {
 // Dynamic phase labels based on loaded config
 export const getPhaseLabelMap = (phases: string[]) => {
   const labelMap: Record<string, string> = {};
-  phases.forEach(phase => {
+  phases.forEach((phase) => {
     labelMap[phase] = phase.charAt(0).toUpperCase() + phase.slice(1);
   });
   return labelMap;
@@ -51,16 +51,16 @@ export const PLAYERS = {
 } as const;
 
 export const PLAYER_LABELS = {
-  [PLAYERS.HUMAN]: 'Player 1',
-  [PLAYERS.AI]: 'Player 2 (AI)',
+  [PLAYERS.HUMAN]: "Player 1",
+  [PLAYERS.AI]: "Player 2 (AI)",
 } as const;
 
 // Game Modes
 export const MODES = {
-  SELECT: 'select',
-  MOVE_PREVIEW: 'movePreview',
-  ATTACK_PREVIEW: 'attackPreview',
-  CHARGE_PREVIEW: 'chargePreview',
+  SELECT: "select",
+  MOVE_PREVIEW: "movePreview",
+  ATTACK_PREVIEW: "attackPreview",
+  CHARGE_PREVIEW: "chargePreview",
 } as const;
 
 // API Configuration
@@ -68,16 +68,16 @@ export const API_CONFIG = {
   BASE_URL: (() => {
     const apiUrl = import.meta.env?.VITE_API_URL;
     if (!apiUrl) {
-      console.warn('VITE_API_URL not set, defaulting to http://localhost:5001');
-      return 'http://localhost:5001';
+      console.warn("VITE_API_URL not set, defaulting to http://localhost:5001");
+      return "http://localhost:5001";
     }
     return apiUrl;
   })(),
   ENDPOINTS: {
-    AI_ACTION: '/ai/action',
+    AI_ACTION: "/ai/action",
   },
   HEADERS: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 } as const;
 
@@ -93,22 +93,22 @@ export const VALIDATION = {
 
 // Error Messages
 export const ERROR_MESSAGES = {
-  UNIT_NOT_FOUND: 'Unit not found',
-  INVALID_MOVE: 'Invalid move',
-  INVALID_ATTACK: 'Invalid attack',
-  UNIT_NOT_ELIGIBLE: 'Unit is not eligible for this action',
-  AI_SERVICE_ERROR: 'AI service is unavailable',
-  NETWORK_ERROR: 'Network connection failed',
-  TIMEOUT_ERROR: 'Request timed out',
+  UNIT_NOT_FOUND: "Unit not found",
+  INVALID_MOVE: "Invalid move",
+  INVALID_ATTACK: "Invalid attack",
+  UNIT_NOT_ELIGIBLE: "Unit is not eligible for this action",
+  AI_SERVICE_ERROR: "AI service is unavailable",
+  NETWORK_ERROR: "Network connection failed",
+  TIMEOUT_ERROR: "Request timed out",
 } as const;
 
 // Success Messages
 export const SUCCESS_MESSAGES = {
-  MOVE_COMPLETED: 'Move completed successfully',
-  ATTACK_COMPLETED: 'Attack completed successfully',
-  CHARGE_COMPLETED: 'Charge completed successfully',
-  PHASE_COMPLETED: 'Phase completed',
-  TURN_COMPLETED: 'Turn completed',
+  MOVE_COMPLETED: "Move completed successfully",
+  ATTACK_COMPLETED: "Attack completed successfully",
+  CHARGE_COMPLETED: "Charge completed successfully",
+  PHASE_COMPLETED: "Phase completed",
+  TURN_COMPLETED: "Turn completed",
 } as const;
 
 // Feature Flags
@@ -119,7 +119,7 @@ export const FEATURES = {
   ENABLE_TOOLTIPS: true,
   ENABLE_KEYBOARD_SHORTCUTS: false,
   ENABLE_REPLAY_SYSTEM: true,
-  ENABLE_DEBUG_MODE: import.meta.env?.MODE === 'development',
+  ENABLE_DEBUG_MODE: import.meta.env?.MODE === "development",
 } as const;
 
 // Performance Configuration
@@ -141,22 +141,22 @@ export const A11Y = {
 
 // Development Configuration
 export const DEV_CONFIG = {
-  ENABLE_LOGGING: import.meta.env?.MODE === 'development',
+  ENABLE_LOGGING: import.meta.env?.MODE === "development",
   LOG_LEVEL: (() => {
     const logLevel = import.meta.env?.VITE_LOG_LEVEL;
     if (logLevel === undefined) {
-      return 'info';
+      return "info";
     }
     return logLevel;
   })(),
   ENABLE_PERFORMANCE_MONITORING: false,
-  ENABLE_ERROR_REPORTING: import.meta.env?.MODE === 'production',
+  ENABLE_ERROR_REPORTING: import.meta.env?.MODE === "production",
 } as const;
 
 // Dynamic types based on loaded config
 export type GamePhase = string; // Dynamic from config
-export type GameMode = typeof MODES[keyof typeof MODES];
-export type PlayerId = typeof PLAYERS[keyof typeof PLAYERS];
+export type GameMode = (typeof MODES)[keyof typeof MODES];
+export type PlayerId = (typeof PLAYERS)[keyof typeof PLAYERS];
 
 // Helper functions with dynamic phase checking
 export const createPhaseValidator = (validPhases: string[]) => {
@@ -175,21 +175,24 @@ export const isValidPlayerId = (id: number): id is PlayerId => {
 
 // Dynamic configuration validator
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const validateDynamicConfig = (boardConfig: Record<string, unknown> | null | undefined, _gameConfig: Record<string, unknown> | null | undefined) => {
+export const validateDynamicConfig = (
+  boardConfig: Record<string, unknown> | null | undefined,
+  _gameConfig: Record<string, unknown> | null | undefined
+) => {
   const errors: string[] = [];
 
   const cols = boardConfig?.cols as number | undefined;
   const rows = boardConfig?.rows as number | undefined;
   const hexRadius = boardConfig?.hex_radius as number | undefined;
-  
-  if (!cols || cols <= 0) errors.push('Board columns must be positive');
-  if (!rows || rows <= 0) errors.push('Board rows must be positive');
-  if (!hexRadius || hexRadius <= 0) errors.push('Hex radius must be positive');
-  if (TIMING.AI_ACTION_DELAY < 0) errors.push('AI action delay cannot be negative');
-  if (AI_CONFIG.DEFAULT_RETRIES < 0) errors.push('AI retries cannot be negative');
+
+  if (!cols || cols <= 0) errors.push("Board columns must be positive");
+  if (!rows || rows <= 0) errors.push("Board rows must be positive");
+  if (!hexRadius || hexRadius <= 0) errors.push("Hex radius must be positive");
+  if (TIMING.AI_ACTION_DELAY < 0) errors.push("AI action delay cannot be negative");
+  if (AI_CONFIG.DEFAULT_RETRIES < 0) errors.push("AI retries cannot be negative");
 
   if (errors.length > 0) {
-    throw new Error(`Configuration validation failed:\n${errors.join('\n')}`);
+    throw new Error(`Configuration validation failed:\n${errors.join("\n")}`);
   }
 
   return true;
