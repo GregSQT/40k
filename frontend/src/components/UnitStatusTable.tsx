@@ -8,7 +8,7 @@ interface UnitStatusTableProps {
   selectedUnitId: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
-  gameMode?: "pvp" | "debug" | "pve" | "training";
+  gameMode?: "pvp" | "debug" | "pve" | "test" | "training";
   isReplay?: boolean;
   victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;

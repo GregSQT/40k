@@ -745,8 +745,11 @@ class W40KEngine(gym.Env):
             # step_logger.episode_number was incremented in log_episode_start()
             self.game_state["episode_number"] = self.step_logger.episode_number
         
-        if self.config.get("deployment_type") == "active":
+        if self.game_state.get("deployment_type") == "active":
             self.game_state["phase"] = "deployment"
+            deployment_state = self.game_state.get("deployment_state")
+            if deployment_state is not None:
+                self.game_state["current_player"] = int(require_key(deployment_state, "current_deployer"))
         observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
         
@@ -1786,6 +1789,7 @@ class W40KEngine(gym.Env):
                                         "wound_result": "WOUND" if attack_result["wound_success"] else "FAIL",
                                         "save_result": "SAVED" if attack_result["save_success"] else "FAIL",
                                         "hit_target": attack_result["hit_target"],
+                                        "hit_rule_modifier": attack_result.get("hit_rule_modifier"),
                                         "wound_target": attack_result["wound_target"],
                                         "save_target": attack_result["save_target"],
                                         "target_died": attack_result["target_died"],
@@ -2288,6 +2292,8 @@ class W40KEngine(gym.Env):
     
     def _build_observation(self) -> np.ndarray:
         """Build observation - delegates to observation_builder."""
+        if self.game_state.get("phase") == "deployment":
+            return self.obs_builder.build_observation(self.game_state)
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
         if not eligible_units:
             current_phase = self.game_state.get("phase", "unknown")

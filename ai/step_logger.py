@@ -333,6 +333,7 @@ class StepLogger:
             save_result = details["save_result"]
             
             hit_target = details["hit_target"]
+            hit_rule_modifier = details.get("hit_rule_modifier")
             wound_target = details["wound_target"]
             save_target = details["save_target"]
             
@@ -345,7 +346,8 @@ class StepLogger:
                 base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str} with [{weapon_name}]"
             else:
                 base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str}"
-            detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+            hit_target_display = f"{hit_target}+({hit_rule_modifier})" if hit_rule_modifier else f"{hit_target}+"
+            detail_msg = f" - Hit:{hit_target_display}:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             
             # Add reward if available
             reward = details.get("reward")

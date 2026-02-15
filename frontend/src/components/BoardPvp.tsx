@@ -833,13 +833,6 @@ export default function Board({
           }
         });
       }
-      console.log("DEPLOYMENT DEBUG", {
-        phase,
-        current_player,
-        current_deployer: deploymentState.current_deployer,
-        pool_size: pool ? pool.length : 0,
-        availableCells: availableCells.length,
-      });
     }
 
     // Charge preview: chargeCells & targets

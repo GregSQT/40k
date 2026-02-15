@@ -22,6 +22,34 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 
 import subprocess
 import json
+import multiprocessing
+
+# Load training_env from config/config.json (MUST be before numpy/torch import)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)
+_config_path = os.path.join(_project_root, "config", "config.json")
+_training_env_vars = {}
+_torch_compile_mode = None  # "off" by default; set to "reduce-overhead", "max-autotune", or "default" to enable
+try:
+    with open(_config_path, "r") as _f:
+        _cfg = json.load(_f)
+    _training_env_vars = _cfg.get("training_env", {})  # get allowed: optional config
+    _raw = _cfg.get("torch", {}).get("compile_mode", "off")  # get allowed: optional config
+    _torch_compile_mode = None if _raw in (None, "off", "false", "none") else _raw
+    for _k, _v in _training_env_vars.items():
+        _val = str(int(_v)) if isinstance(_v, (int, float)) else str(_v)
+        os.environ.setdefault(_k, _val)
+except Exception:
+    pass
+if (_training_env_vars or _torch_compile_mode) and multiprocessing.current_process().name == "MainProcess":
+    _rel = os.path.relpath(_config_path, _project_root) if _project_root else _config_path
+    print(f"📋 Config from {_rel}")
+    _order = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "PYTORCH_CUDA_ALLOC_CONF", "CUDA_LAUNCH_BLOCKING")
+    _parts = " ".join(f"{k}={os.environ.get(k, '')}" for k in _order if k in _training_env_vars)
+    if _parts:
+        print(f"   env: {_parts}")
+    print(f"   torch.compile_mode: {_torch_compile_mode or 'off'}")
+
 import numpy as np
 import glob
 import shutil
@@ -69,8 +97,8 @@ def _build_training_bots_from_config(training_config):
     """
     from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
     
-    cfg = training_config.get("bot_training", {})
-    ratios = cfg.get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+    cfg = require_key(training_config, "bot_training")
+    ratios = cfg.get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})  # get allowed: ratios optional with defaults
     greedy_r = float(cfg.get("greedy_randomness", 0.10))
     defensive_r = float(cfg.get("defensive_randomness", 0.10))
     
@@ -109,6 +137,11 @@ from config_loader import get_config_loader
 from ai.game_replay_logger import GameReplayIntegration
 import torch
 
+# Use TF32 for faster matmul on Ampere+ GPUs (RTX 30xx, 40xx, A100, etc.)
+if hasattr(torch, "set_float32_matmul_precision"):
+    torch.set_float32_matmul_precision("high")
+
+
 def build_agent_model_path(models_root: str, agent_key: str) -> str:
     """Build model path from models root and agent key."""
     return os.path.join(models_root, agent_key, f"model_{agent_key}.zip")
@@ -139,6 +172,7 @@ from ai.training_callbacks import (
 # Training utilities (extracted to ai/training_utils.py)
 from ai.training_utils import (
     check_gpu_availability,
+    benchmark_device_speed,
     setup_imports,
     make_training_env,
     get_agent_scenario_file,
@@ -148,6 +182,84 @@ from ai.training_utils import (
 from ai.vec_normalize_utils import save_vec_normalize, load_vec_normalize, get_vec_normalize_path
 
 from shared.data_validation import require_key
+
+
+def _apply_torch_compile(model) -> None:
+    """Wrap policy.forward to move action_masks to model device (GPU or CPU), then apply torch.compile on CUDA.
+    CUDA graphs require all inputs on GPU; action_masks from env are numpy (CPU)."""
+    policy = getattr(model, "policy", None)
+    if policy is None:
+        return
+    device = getattr(model, "device", None)
+    if device is None:
+        return
+    original_forward = policy.forward
+    # Only compile when on CUDA and compile_mode is enabled (not null/"off")
+    on_cuda = str(device).startswith("cuda")
+    compile_mode = _torch_compile_mode
+    inner_forward = (
+        torch.compile(original_forward, mode=compile_mode) if (on_cuda and compile_mode) else original_forward
+    )
+
+    def _forward_with_device_masks(obs, deterministic=False, action_masks=None):
+        if action_masks is not None:
+            action_masks = torch.as_tensor(action_masks, device=device, dtype=torch.bool)
+        return inner_forward(obs, deterministic=deterministic, action_masks=action_masks)
+
+    policy.forward = _forward_with_device_masks
+
+
+# Aliases for --param: short keys map to nested config paths (or stay as-is for root keys)
+_PARAM_ALIASES = {
+    "n_steps": "model_params.n_steps",
+    "batch_size": "model_params.batch_size",
+    "n_epochs": "model_params.n_epochs",
+    "learning_rate": "model_params.learning_rate",
+    "gamma": "model_params.gamma",
+    "gae_lambda": "model_params.gae_lambda",
+    "clip_range": "model_params.clip_range",
+    "ent_coef": "model_params.ent_coef",
+    "vf_coef": "model_params.vf_coef",
+    # Root-level keys (no mapping needed, but listed for clarity)
+    "n_envs": "n_envs",
+    "total_episodes": "total_episodes",
+}
+
+
+def _parse_param_value(value: str) -> Any:
+    """Parse --param VALUE string to int, float, bool, or str."""
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    return value
+
+
+def _apply_param_overrides(config: dict, overrides: Optional[List]) -> None:
+    """Apply --param key value overrides to config in-place.
+    Key can use dot notation (e.g. model_params.n_steps) or short aliases (e.g. n_steps).
+    """
+    if not overrides:
+        return
+    for key, value in overrides:
+        path = _PARAM_ALIASES.get(key, key)
+        keys = path.split(".")
+        v = _parse_param_value(value)
+        d = config
+        for k in keys[:-1]:
+            if k not in d:
+                d[k] = {}
+            d = d[k]
+        d[keys[-1]] = v
+        print(f"   ⚙️  Override: {path} = {v}")
 
 # Replay converter (extracted to ai/replay_converter.py)
 from ai.replay_converter import (
@@ -165,19 +277,26 @@ from ai.replay_converter import (
 # Global step logger instance
 step_logger = None
 
-def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_params: int) -> Tuple[str, bool]:
+def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_params: int,
+                       obs_size: Optional[int] = None, net_arch: Optional[List[int]] = None) -> Tuple[str, bool]:
     """
     Resolve device selection for training.
 
     Args:
         device_mode: "CPU", "GPU", or None to auto-select.
         gpu_available: Whether CUDA GPU is available.
-        total_params: Sum of network hidden units (heuristic for auto selection).
+        total_params: Sum of network hidden units (heuristic estimate when net_arch not available).
+        obs_size: Observation size for benchmark (optional).
+        net_arch: Network architecture for benchmark (optional).
 
     Returns:
         Tuple of (device, use_gpu).
     """
     if device_mode is None:
+        if gpu_available and obs_size is not None and net_arch is not None:
+            result = benchmark_device_speed(obs_size, net_arch)
+            if result is not None:
+                return result
         use_gpu = gpu_available and (total_params > 2000)
         return ("cuda" if use_gpu else "cpu"), use_gpu
 
@@ -334,7 +453,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
         env = Monitor(selfplay_env)
 
     # VecNormalize: observations and rewards normalization (optional, configurable)
-    vec_norm_cfg = training_config.get("vec_normalize", {})
+    vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
         if n_envs == 1:
@@ -389,7 +508,10 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
-    device, use_gpu = resolve_device_mode(args.mode if args else None, gpu_available, total_params)
+    device, use_gpu = resolve_device_mode(
+        args.mode if args else None, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
 
     model_params["device"] = device
     model_params["verbose"] = 0  # Disable verbose logging
@@ -500,6 +622,7 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
                 model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
 
+    _apply_torch_compile(model)
     return model, env, training_config, model_path
 
 def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
@@ -620,7 +743,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
             env = Monitor(selfplay_env)
 
     # VecNormalize for create_multi_agent_model
-    vec_norm_cfg = training_config.get("vec_normalize", {})
+    vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
         if n_envs == 1:
@@ -660,7 +783,10 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
-    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
+    device, use_gpu = resolve_device_mode(
+        device_mode, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
 
     model_params["device"] = device
 
@@ -770,6 +896,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
                 model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     
+    _apply_torch_compile(model)
     return model, env, training_config, model_path
 
 
@@ -861,7 +988,11 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
+    obs_size = env.observation_space.shape[0]
+    device, use_gpu = resolve_device_mode(
+        device_mode, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
     model_params["device"] = device
 
     if not use_gpu and gpu_available:
@@ -891,6 +1022,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
                 model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
 
+    _apply_torch_compile(model)
     return model, env, training_config, model_path
 
 
@@ -1036,10 +1168,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Require n_envs for consistency with single-scenario training
     n_envs = require_key(training_config, "n_envs")
-    if n_envs != 1:
-        raise ValueError(
-            f"train_with_scenario_rotation requires n_envs=1 (got {n_envs})"
-        )
 
     # Raise error if required fields missing - NO FALLBACKS
     if "max_turns_per_episode" not in training_config:
@@ -1084,57 +1212,71 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # rewards_config_name is the SECTION NAME within the rewards file (e.g., "..._phase1")
     effective_agent_key = rewards_config_name if rewards_config_name else agent_key
     
-    current_scenario = scenario_list[0]
-    # Pass full scenario list for random selection per episode
-    base_env = W40KEngine(
-        rewards_config=rewards_config_name,
-        training_config_name=training_config_name,
-        controlled_agent=effective_agent_key,
-        active_agents=None,
-        scenario_file=current_scenario,
-        scenario_files=scenario_list,  # NEW: Random scenario selection per episode
-        unit_registry=unit_registry,
-        quiet=True,
-        gym_training_mode=True,
-        debug_mode=debug_mode
-    )
-
-    # Connect step logger after environment creation - compliant engine compatibility
-    if step_logger:
-        # Connect StepLogger directly to compliant W40KEngine
-        base_env.step_logger = step_logger
-        print("✅ StepLogger connected to compliant W40KEngine")
-
-    # Wrap environment
-    def mask_fn(env):
-        return env.get_action_mask()
-
-    masked_env = ActionMasker(base_env, mask_fn)
-
     # Create bots for bot training mode (random selection per episode)
-    # Ratios from training_config.bot_training (default: 20/40/40)
     training_bots = None
     if use_bots:
         if EVALUATION_BOTS_AVAILABLE:
             training_bots = _build_training_bots_from_config(training_config)
-            ratios = training_config.get("bot_training", {}).get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+            ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})  # get allowed: ratios optional with defaults
             r, g, d = ratios.get("random", 0.2) * 100, ratios.get("greedy", 0.4) * 100, ratios.get("defensive", 0.4) * 100
             print(f"🤖 Bot training ratios: {r:.0f}% Random, {g:.0f}% Greedy, {d:.0f}% Defensive")
         else:
             raise ImportError("Evaluation bots not available but use_bots=True")
 
-    # Wrap environment appropriately for bot or self-play training
-    if use_bots and training_bots:
-        bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
-        env = Monitor(bot_env)
+    # Branch: n_envs > 1 uses SubprocVecEnv for parallel training
+    if n_envs > 1:
+        print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
+        vec_envs = SubprocVecEnv([
+            make_training_env(
+                rank=i,
+                scenario_file=scenario_list[0],
+                rewards_config_name=rewards_config_name,
+                training_config_name=training_config_name,
+                controlled_agent_key=effective_agent_key,
+                unit_registry=unit_registry,
+                step_logger_enabled=False,
+                scenario_files=scenario_list,
+                debug_mode=debug_mode,
+                use_bots=use_bots,
+                training_bots=training_bots
+            )
+            for i in range(n_envs)
+        ])
+        env = vec_envs
+        print(f"✅ Vectorized training environment created with {n_envs} parallel processes")
     else:
-        env = Monitor(masked_env)
+        # Single environment (original behavior)
+        current_scenario = scenario_list[0]
+        base_env = W40KEngine(
+            rewards_config=rewards_config_name,
+            training_config_name=training_config_name,
+            controlled_agent=effective_agent_key,
+            active_agents=None,
+            scenario_file=current_scenario,
+            scenario_files=scenario_list,
+            unit_registry=unit_registry,
+            quiet=True,
+            gym_training_mode=True,
+            debug_mode=debug_mode
+        )
+        if step_logger:
+            base_env.step_logger = step_logger
+            print("✅ StepLogger connected to compliant W40KEngine")
+        def mask_fn(env):
+            return env.get_action_mask()
+        masked_env = ActionMasker(base_env, mask_fn)
+        if use_bots and training_bots:
+            bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
+            env = Monitor(bot_env)
+        else:
+            env = Monitor(masked_env)
 
     # VecNormalize for scenario rotation
-    vec_norm_cfg = training_config.get("vec_normalize", {})
+    vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        env = DummyVecEnv([lambda: env])
+        if n_envs == 1:
+            env = DummyVecEnv([lambda: env])
         vec_norm_loaded = load_vec_normalize(env, model_path)
         if vec_norm_loaded is not None and not new_model:
             env = vec_norm_loaded
@@ -1153,7 +1295,14 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             print("✅ VecNormalize: enabled (obs + reward normalization)")
     
     # Create or load model
-    model_params = training_config["model_params"]
+    model_params = training_config["model_params"].copy()
+
+    # Automatic n_steps adjustment when n_envs > 1: keep total steps per update constant
+    base_n_steps = model_params.get("n_steps", 10240)
+    if n_envs > 1:
+        effective_n_steps = max(1, base_n_steps // n_envs)
+        model_params["n_steps"] = effective_n_steps
+        print(f"📊 n_envs={n_envs}: using n_steps={effective_n_steps} per env ({base_n_steps} total per update)")
 
     # Handle entropy coefficient scheduling if configured
     # Use START value for model creation; callback will handle the schedule
@@ -1172,7 +1321,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
+    obs_size = env.observation_space.shape[0]
+    device, use_gpu = resolve_device_mode(
+        device_mode, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
     model_params["device"] = device
 
     if not use_gpu and gpu_available:
@@ -1242,6 +1395,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
         model = MaskablePPO(env=env, **model_params_copy)
     
+    _apply_torch_compile(model)
     # Import metrics tracker
     from ai.metrics_tracker import W40KMetricsTracker
 
@@ -1277,71 +1431,58 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # PPO requires n_steps rollouts before each update; we use this as a natural chunk size
     # for our episode-budgeted outer loop.
-    n_steps = training_config["model_params"]["n_steps"]
-    chunk_timesteps = n_steps * 4  # 4 updates per chunk for stable gradients
+    total_steps_per_update = model_params["n_steps"] * n_envs
+    chunk_timesteps = total_steps_per_update * 4  # 4 updates per chunk for stable gradients
 
-    # Use first scenario for initial setup (scenario selection is random per episode)
-    initial_scenario = scenario_list[0]
-    
-    # Create environment with scenario list for random selection per episode
-    base_env = W40KEngine(
-        rewards_config=rewards_config_name,
-        training_config_name=training_config_name,
-        controlled_agent=effective_agent_key,
-        active_agents=None,
-        scenario_file=initial_scenario,
-        scenario_files=scenario_list,  # Random scenario selection per episode
-        unit_registry=unit_registry,
-        quiet=True,
-        gym_training_mode=True,
-        debug_mode=debug_mode
-    )
-
-    # Wrap environment with action masking first
-    masked_env = ActionMasker(base_env, mask_fn)
-
-    # For bot training, use BotControlledEnv to handle Player 1's bot actions
-    if use_bots:
-        bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
-        env = Monitor(bot_env)
-    else:
-        # CRITICAL: Update frozen model periodically for proper self-play
-        if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
-            # Save current model to temp file and load as frozen copy
+    # For n_envs==1: recreate env with frozen model for self-play (model already has env for n_envs>1)
+    if n_envs == 1:
+        initial_scenario = scenario_list[0]
+        base_env = W40KEngine(
+            rewards_config=rewards_config_name,
+            training_config_name=training_config_name,
+            controlled_agent=effective_agent_key,
+            active_agents=None,
+            scenario_file=initial_scenario,
+            scenario_files=scenario_list,
+            unit_registry=unit_registry,
+            quiet=True,
+            gym_training_mode=True,
+            debug_mode=debug_mode
+        )
+        masked_env = ActionMasker(base_env, mask_fn)
+        if use_bots:
+            bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
+            env = Monitor(bot_env)
+        else:
+            if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
+                    temp_path = f.name
+                model.save(temp_path)
+                frozen_model = MaskablePPO.load(temp_path)
+                os.unlink(temp_path)
+                last_frozen_model_update = episodes_trained
+                if episodes_trained > 0:
+                    print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
+            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
+            env = Monitor(selfplay_env)
+        if vec_normalize_enabled:
             import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
-                temp_path = f.name
-            model.save(temp_path)
-            frozen_model = MaskablePPO.load(temp_path)
-            os.unlink(temp_path)  # Clean up temp file
-            last_frozen_model_update = episodes_trained
-            if episodes_trained > 0:
-                print(f"  🔄 Self-play: Updated frozen opponent (Episode {episodes_trained})")
-
-        # Wrap with SelfPlayWrapper for proper self-play training
-        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
-        env = Monitor(selfplay_env)
-
-    # Preserve VecNormalize when replacing env (self-play/bot loop uses fresh env)
-    if vec_normalize_enabled:
-        import tempfile
-        tmp_dir = tempfile.mkdtemp()
-        tmp_model_path = os.path.join(tmp_dir, "model.zip")
-        try:
-            if save_vec_normalize(model.get_env(), tmp_model_path):
-                venv = DummyVecEnv([lambda: env])
-                vec_norm = VecNormalize.load(get_vec_normalize_path(tmp_model_path), venv)
-                vec_norm.training = True
-                vec_norm.norm_reward = training_config.get("vec_normalize", {}).get("norm_reward", True)
-                env = vec_norm
-        finally:
-            if os.path.exists(tmp_dir):
-                for f in os.listdir(tmp_dir):
-                    os.unlink(os.path.join(tmp_dir, f))
-                os.rmdir(tmp_dir)
-
-    # Update model's environment
-    model.set_env(env)
+            tmp_dir = tempfile.mkdtemp()
+            tmp_model_path = os.path.join(tmp_dir, "model.zip")
+            try:
+                if save_vec_normalize(model.get_env(), tmp_model_path):
+                    venv = DummyVecEnv([lambda: env])
+                    vec_norm = VecNormalize.load(get_vec_normalize_path(tmp_model_path), venv)
+                    vec_norm.training = True
+                    vec_norm.norm_reward = training_config.get("vec_normalize", {}).get("norm_reward", True)  # get allowed: optional config
+                    env = vec_norm
+            finally:
+                if os.path.exists(tmp_dir):
+                    for f in os.listdir(tmp_dir):
+                        os.unlink(os.path.join(tmp_dir, f))
+                    os.rmdir(tmp_dir)
+        model.set_env(env)
     
     # Create callbacks for training
     scenario_display = f"Random from {len(scenario_list)} scenarios"
@@ -1350,6 +1491,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model_path=model_path,
         training_config=training_config,
         training_config_name=training_config_name,
+        rewards_config_name=rewards_config_name,
         metrics_tracker=metrics_tracker,
         total_episodes_override=total_episodes,
         max_episodes_override=total_episodes,  # Train directly to total_episodes
@@ -1555,13 +1697,17 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # Store final eval count for use after training completes
         training_config["_bot_eval_final"] = require_key(callback_params, "bot_eval_final")
         
+        if not rewards_config_name:
+            raise KeyError("setup_callbacks requires rewards_config_name for BotEvaluationCallback")
         bot_eval_callback = BotEvaluationCallback(
             eval_freq=bot_eval_freq,
             n_eval_episodes=bot_n_episodes_intermediate,
             best_model_save_path=os.path.dirname(model_path),
-            metrics_tracker=metrics_tracker,  # Pass metrics_tracker for TensorBoard logging
+            metrics_tracker=metrics_tracker,
             use_episode_freq=bot_eval_use_episodes,
-            verbose=1
+            verbose=1,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name
         )
         callbacks.append(bot_eval_callback)
         
@@ -1874,9 +2020,25 @@ def main():
                        help="Force training device: CPU or GPU (case-insensitive). If omitted, auto-selects based on network size and GPU availability.")
     parser.add_argument("--debug", action="store_true",
                        help="Enable debug console output (verbose logging)")
+    parser.add_argument("--param", action="append", nargs=2, metavar=("KEY", "VALUE"),
+                       help="Override config parameter (e.g. n_steps 10240 or model_params.batch_size 2048). Can be repeated.")
     
     args = parser.parse_args()
     
+    # Apply --param overrides to config loader (affects all subsequent config loads)
+    if getattr(args, "param", None):
+        config = get_config_loader()
+        _original_load = config.load_agent_training_config
+
+        def _load_with_overrides(agent_key, phase):
+            cfg = _original_load(agent_key, phase)
+            if isinstance(cfg, dict):
+                _apply_param_overrides(cfg, args.param)
+            return cfg
+
+        config.load_agent_training_config = _load_with_overrides
+        print(f"⚙️  Param overrides: {len(args.param)} parameter(s) will override config file")
+
     print("🎮 W40K AI Training - Following AI_GAME_OVERVIEW.md specifications")
     print("=" * 70)
     print(f"Training config: {args.training_config}")
@@ -1890,6 +2052,8 @@ def main():
     print(f"Debug mode: {args.debug}")
     if args.mode:
         print(f"Device mode: {args.mode}")
+    if getattr(args, "param", None):
+        print(f"Param overrides: {args.param}")
     if hasattr(args, 'convert_steplog') and args.convert_steplog:
         print(f"Convert steplog: {args.convert_steplog}")
     if hasattr(args, 'replay') and args.replay:
@@ -2319,7 +2483,8 @@ def main():
         )
         
         # Setup callbacks
-        callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
+        callbacks = setup_callbacks(config, model_path, training_config, args.training_config,
+                                    rewards_config_name=args.rewards_config)
         
         # Train model
         success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.agent)

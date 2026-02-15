@@ -91,6 +91,7 @@ from ai.training_callbacks import (
 # Training utilities (extracted to ai/training_utils.py)
 from ai.training_utils import (
     check_gpu_availability,
+    benchmark_device_speed,
     setup_imports,
     make_training_env,
     get_agent_scenario_file,
@@ -116,19 +117,26 @@ from ai.replay_converter import (
 # Global step logger instance
 step_logger = None
 
-def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_params: int) -> Tuple[str, bool]:
+def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_params: int,
+                       obs_size: Optional[int] = None, net_arch: Optional[List[int]] = None) -> Tuple[str, bool]:
     """
     Resolve device selection for training.
 
     Args:
         device_mode: "CPU", "GPU", or None to auto-select.
         gpu_available: Whether CUDA GPU is available.
-        total_params: Sum of network hidden units (heuristic for auto selection).
+        total_params: Sum of network hidden units (heuristic estimate when net_arch not available).
+        obs_size: Observation size for benchmark (optional).
+        net_arch: Network architecture for benchmark (optional).
 
     Returns:
         Tuple of (device, use_gpu).
     """
     if device_mode is None:
+        if gpu_available and obs_size is not None and net_arch is not None:
+            result = benchmark_device_speed(obs_size, net_arch)
+            if result is not None:
+                return result
         use_gpu = gpu_available and (total_params > 2000)
         return ("cuda" if use_gpu else "cpu"), use_gpu
 
@@ -316,7 +324,10 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
-    device, use_gpu = resolve_device_mode(args.mode if args else None, gpu_available, total_params)
+    device, use_gpu = resolve_device_mode(
+        args.mode if args else None, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
 
     model_params["device"] = device
     model_params["verbose"] = 0  # Disable verbose logging
@@ -558,7 +569,10 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
-    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
+    device, use_gpu = resolve_device_mode(
+        device_mode, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
 
     model_params["device"] = device
 
@@ -754,7 +768,11 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
+    obs_size = env.observation_space.shape[0]
+    device, use_gpu = resolve_device_mode(
+        device_mode, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
     model_params["device"] = device
 
     if not use_gpu and gpu_available:
@@ -1037,7 +1055,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-    device, use_gpu = resolve_device_mode(device_mode, gpu_available, total_params)
+    obs_size = env.observation_space.shape[0]
+    device, use_gpu = resolve_device_mode(
+        device_mode, gpu_available, total_params,
+        obs_size=obs_size, net_arch=net_arch
+    )
     model_params["device"] = device
 
     if not use_gpu and gpu_available:
@@ -1193,9 +1215,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model_path=model_path,
         training_config=training_config,
         training_config_name=training_config_name,
+        rewards_config_name=rewards_config_name,
         metrics_tracker=metrics_tracker,
         total_episodes_override=total_episodes,
-        max_episodes_override=total_episodes,  # Train directly to total_episodes
+        max_episodes_override=total_episodes,
         scenario_info=scenario_display,
         global_episode_offset=0,
         global_start_time=global_start_time
@@ -1396,13 +1419,17 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # Store final eval count for use after training completes
         training_config["_bot_eval_final"] = require_key(callback_params, "bot_eval_final")
         
+        if not rewards_config_name:
+            raise KeyError("setup_callbacks requires rewards_config_name for BotEvaluationCallback")
         bot_eval_callback = BotEvaluationCallback(
             eval_freq=bot_eval_freq,
             n_eval_episodes=bot_n_episodes_intermediate,
             best_model_save_path=os.path.dirname(model_path),
-            metrics_tracker=metrics_tracker,  # Pass metrics_tracker for TensorBoard logging
+            metrics_tracker=metrics_tracker,
             use_episode_freq=bot_eval_use_episodes,
-            verbose=1
+            verbose=1,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name
         )
         callbacks.append(bot_eval_callback)
         
@@ -2156,7 +2183,8 @@ def main():
         )
         
         # Setup callbacks
-        callbacks = setup_callbacks(config, model_path, training_config, args.training_config)
+        callbacks = setup_callbacks(config, model_path, training_config, args.training_config,
+                                    rewards_config_name=args.rewards_config)
         
         # Train model
         success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.agent)

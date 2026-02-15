@@ -907,15 +907,20 @@ class BotEvaluationCallback(BaseCallback):
 
     def __init__(self, eval_freq: int = 5000, n_eval_episodes: int = 20,
                  best_model_save_path: str = None, metrics_tracker=None,
-                 use_episode_freq: bool = False, verbose: int = 1):
+                 use_episode_freq: bool = False, verbose: int = 1,
+                 training_config_name: str = None, rewards_config_name: str = None):
         super().__init__(verbose)
+        if not training_config_name or not rewards_config_name:
+            raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
+        self.training_config_name = training_config_name
+        self.rewards_config_name = rewards_config_name
         self.eval_freq = eval_freq
         self.n_eval_episodes = n_eval_episodes
         self.best_model_save_path = best_model_save_path
-        self.metrics_tracker = metrics_tracker  # Store metrics_tracker reference
-        self.use_episode_freq = use_episode_freq  # True = episodes, False = timesteps
-        self.last_eval_episode = 0  # Track last episode we evaluated at
-        self.best_combined_win_rate = 0.0  # Track best performance
+        self.metrics_tracker = metrics_tracker
+        self.use_episode_freq = use_episode_freq
+        self.last_eval_episode = 0
+        self.best_combined_win_rate = 0.0
 
         if EVALUATION_BOTS_AVAILABLE:
             # Initialize bots with stochasticity to prevent overfitting (15% random actions)
@@ -985,48 +990,13 @@ class BotEvaluationCallback(BaseCallback):
 
     def _evaluate_against_bots(self) -> Dict[str, float]:
         """Evaluate agent against bots using standalone function"""
-        # Lazy import to avoid circular dependency
         from ai.bot_evaluation import evaluate_against_bots
-
-        # Extract controlled_agent, training_config_name, and rewards_config_name from training environment
-        controlled_agent = None
-        training_config_name = None
-        rewards_config_name = None
-
-        if hasattr(self, 'training_env') and hasattr(self.training_env, 'envs'):
-            if len(self.training_env.envs) > 0:
-                train_env = self.training_env.envs[0]
-                if hasattr(train_env, 'unwrapped'):
-                    train_env = train_env.unwrapped
-                if hasattr(train_env, 'config'):
-                    # controlled_agent is optional (None = player 0)
-                    controlled_agent = train_env.config.get('controlled_agent')  # get allowed
-                    # Extract training_config_name from config
-                    if 'training_config_name' not in train_env.config:
-                        raise KeyError("Training environment config missing required 'training_config_name' field")
-                    training_config_name = train_env.config['training_config_name']
-                    # Extract rewards_config_name from config (might be stored as rewards_config)
-                    if 'rewards_config' not in train_env.config and 'rewards_config_name' not in train_env.config:
-                        raise KeyError("Training environment config missing required 'rewards_config' or 'rewards_config_name' field")
-                    rewards_config_name = (
-                        train_env.config['rewards_config_name']
-                        if 'rewards_config_name' in train_env.config
-                        else train_env.config['rewards_config']
-                    )
-
-        # Raise error if extraction failed
-        if not training_config_name:
-            raise RuntimeError("Failed to extract training_config_name from training environment")
-        if not rewards_config_name:
-            raise RuntimeError("Failed to extract rewards_config_name from training environment")
-
-        # Use standalone function with no progress bar for intermediate eval
         return evaluate_against_bots(
             model=self.model,
-            training_config_name=training_config_name,
-            rewards_config_name=rewards_config_name,
+            training_config_name=self.training_config_name,
+            rewards_config_name=self.rewards_config_name,
             n_episodes=self.n_eval_episodes,
-            controlled_agent=controlled_agent,
+            controlled_agent=self.rewards_config_name,
             show_progress=False,
             deterministic=True
         )

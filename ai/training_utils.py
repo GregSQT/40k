@@ -16,15 +16,18 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import os
 import sys
 import glob
+import time
 import torch
+import torch.nn as nn
 import gymnasium as gym
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from stable_baselines3.common.monitor import Monitor
 from sb3_contrib.common.wrappers import ActionMasker
-from ai.env_wrappers import SelfPlayWrapper
+from ai.env_wrappers import SelfPlayWrapper, BotControlledEnv
 
 __all__ = [
     'check_gpu_availability',
+    'benchmark_device_speed',
     'setup_imports',
     'make_training_env',
     'get_agent_scenario_file',
@@ -61,6 +64,64 @@ def check_gpu_availability():
 
         return False
 
+
+def benchmark_device_speed(obs_size: int, net_arch: List[int], batch_size: int = 2048,
+                           n_warmup: int = 5, n_iters: int = 30) -> Optional[Tuple[str, bool]]:
+    """
+    Run a quick benchmark to determine whether CPU or GPU is faster for the given
+    network architecture. Simulates PPO forward pass with typical batch size.
+
+    Args:
+        obs_size: Observation space dimension.
+        net_arch: List of hidden layer sizes (e.g. [512, 512]).
+        batch_size: Batch size for benchmark (typical PPO batch).
+        n_warmup: Warmup iterations to avoid CUDA init skew.
+        n_iters: Iterations to average for timing.
+
+    Returns:
+        ("cuda", True) or ("cpu", False) if benchmark succeeds, None on failure.
+    """
+    if not torch.cuda.is_available():
+        return ("cpu", False)
+
+    arch = net_arch if isinstance(net_arch, list) else [512]
+    layers = []
+    prev = obs_size
+    for h in arch:
+        layers.append(nn.Linear(prev, h))
+        layers.append(nn.ReLU())
+        prev = h
+    layers.append(nn.Linear(prev, 64))  # action head
+    net = nn.Sequential(*layers)
+
+    def run_on_device(device: str) -> float:
+        d = torch.device(device)
+        m = net.to(d)
+        x = torch.randn(batch_size, obs_size, device=d)
+        for _ in range(n_warmup):
+            _ = m(x)
+        if d.type == "cuda":
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        for _ in range(n_iters):
+            _ = m(x)
+        if d.type == "cuda":
+            torch.cuda.synchronize()
+        return time.perf_counter() - t0
+
+    try:
+        t_cpu = run_on_device("cpu")
+        t_gpu = run_on_device("cuda")
+        use_gpu = t_gpu < t_cpu
+        winner = "GPU" if use_gpu else "CPU"
+        ratio = (t_cpu / t_gpu) if use_gpu else (t_gpu / t_cpu)
+        print(f"📊 Device benchmark: {winner} faster ({ratio:.1f}x) | CPU={t_cpu*1000:.0f}ms GPU={t_gpu*1000:.0f}ms")
+        return ("cuda", True) if use_gpu else ("cpu", False)
+    except Exception as e:
+        print(f"⚠️ Device benchmark failed ({e}), falling back to heuristic")
+        return None
+
+
 def setup_imports():
     """
     Setup import paths and return required modules.
@@ -81,7 +142,7 @@ def setup_imports():
 
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
-                     scenario_files=None, debug_mode=False):
+                     scenario_files=None, debug_mode=False, use_bots=False, training_bots=None):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -94,6 +155,9 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         unit_registry: Shared UnitRegistry instance
         step_logger_enabled: Whether step logging is enabled (disable for vectorized envs)
         scenario_files: List of scenario files for random selection per episode
+        debug_mode: Enable debug mode
+        use_bots: If True, wrap with BotControlledEnv instead of SelfPlayWrapper
+        training_bots: List of bot instances for BotControlledEnv (required if use_bots=True)
 
     Returns:
         Callable that creates and returns a wrapped environment instance
@@ -129,11 +193,14 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         
         masked_env = ActionMasker(base_env, mask_fn)
 
-        # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
-        selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
+        # Bot training or self-play
+        if use_bots and training_bots:
+            wrapped_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
+        else:
+            wrapped_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
 
         # Wrap with Monitor for episode statistics
-        return Monitor(selfplay_env)
+        return Monitor(wrapped_env)
     
     return _init
 

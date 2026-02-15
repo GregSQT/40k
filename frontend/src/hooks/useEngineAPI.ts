@@ -256,12 +256,6 @@ export const useEngineAPI = () => {
                 ? "PvE"
                 : "PvP";
           console.log(`Game started successfully in ${startedMode} mode`);
-          console.log("DEBUG: start_game game_state", {
-            phase: data.game_state.phase,
-            deployment_type: data.game_state.deployment_type,
-            deployment_state: data.game_state.deployment_state ? "set" : "none",
-            current_player: data.game_state.current_player,
-          });
         } else {
           throw new Error(data.error || "Failed to start game");
         }
@@ -1866,6 +1860,47 @@ export const useEngineAPI = () => {
     return gameState?.units_advanced ? gameState.units_advanced.map((id) => parseInt(id, 10)) : [];
   }, [gameState?.units_advanced]);
 
+  const memoizedDeploymentState = useMemo(() => {
+    if (!gameState?.deployment_state) {
+      return undefined;
+    }
+
+    const rawDeployer = Number(gameState.deployment_state.current_deployer);
+    if (rawDeployer !== 1 && rawDeployer !== 2) {
+      throw new Error(`Invalid deployment current_deployer: ${gameState.deployment_state.current_deployer}`);
+    }
+    const currentDeployer = rawDeployer as PlayerId;
+
+    const deployableUnits = Object.fromEntries(
+      Object.entries(gameState.deployment_state.deployable_units).map(([playerKey, unitIds]) => {
+        const parsedUnitIds = unitIds.map((id) => {
+          const parsed = parseInt(String(id), 10);
+          if (Number.isNaN(parsed)) {
+            throw new Error(`Invalid deployable unit id in deployment_state: ${id}`);
+          }
+          return parsed;
+        });
+        return [playerKey, parsedUnitIds];
+      })
+    );
+
+    const deployedUnits = gameState.deployment_state.deployed_units.map((id) => {
+      const parsed = parseInt(String(id), 10);
+      if (Number.isNaN(parsed)) {
+        throw new Error(`Invalid deployed unit id in deployment_state: ${id}`);
+      }
+      return parsed;
+    });
+
+    return {
+      current_deployer: currentDeployer,
+      deployable_units: deployableUnits,
+      deployed_units: deployedUnits,
+      deployment_pools: gameState.deployment_state.deployment_pools,
+      deployment_complete: gameState.deployment_state.deployment_complete,
+    };
+  }, [gameState?.deployment_state]);
+
   // Memoize inline callbacks to prevent re-renders
   const onStartAttackPreviewMemo = useCallback((unitId: number) => {
     setSelectedUnitId(typeof unitId === "string" ? parseInt(unitId, 10) : unitId);
@@ -1883,7 +1918,7 @@ export const useEngineAPI = () => {
       episode_steps: gameState.episode_steps,
       units: memoizedUnits,
       current_player: gameState.current_player as PlayerId,
-      phase: gameState.phase as "move" | "shoot" | "charge" | "fight",
+      phase: gameState.phase as "deployment" | "move" | "shoot" | "charge" | "fight",
       mode,
       selectedUnitId,
       unitsMoved: memoizedUnitsMoved,
@@ -1898,7 +1933,7 @@ export const useEngineAPI = () => {
       pve_mode: gameState.pve_mode,
       test_mode: gameState.test_mode,
       deployment_type: gameState.deployment_type,
-      deployment_state: gameState.deployment_state,
+      deployment_state: memoizedDeploymentState,
       move_activation_pool: gameState.move_activation_pool,
       shoot_activation_pool: gameState.shoot_activation_pool,
       charge_activation_pool: gameState.charge_activation_pool,
@@ -1931,6 +1966,7 @@ export const useEngineAPI = () => {
     memoizedUnitsAttacked,
     memoizedUnitsFled,
     memoizedUnitsAdvanced,
+    memoizedDeploymentState,
     maxTurnsFromConfig,
   ]);
 

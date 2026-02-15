@@ -148,6 +148,23 @@ Win/lose dominent trop → les récompenses intermédiaires deviennent négligea
 
 ---
 
+## Accélération : n_envs (environnements parallèles)
+
+Pour accélérer l'entraînement avec `--scenario bot` et plusieurs scénarios, augmenter `n_envs` dans le training config :
+
+| n_envs | Effet | n_steps (config) |
+|--------|-------|------------------|
+| 1 | Comportement par défaut | 10240 |
+| 2 | 2 processus CPU en parallèle | 10240 |
+| 4 | 4 processus CPU en parallèle | 10240 |
+| 8 | 8 processus CPU en parallèle | 10240 |
+
+**Ajustement automatique de n_steps** : quand `n_envs > 1`, le système calcule automatiquement `n_steps` par env pour garder le même total de steps par update (`n_steps × n_envs`). Ex. : `n_envs=4` → `n_steps=2560` par env (10240 total). Aucune modification manuelle nécessaire.
+
+**Exemple** : dans `*_training_config.json`, passer `"n_envs": 4` pour utiliser 4 cœurs CPU.
+
+---
+
 ## Règles générales
 
 1. **Un changement à la fois** : pour isoler l’effet de chaque paramètre.

@@ -96,6 +96,44 @@ def _weapon_has_pistol_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
+def _weapon_has_heavy_rule(weapon: Dict[str, Any]) -> bool:
+    """Check if weapon has HEAVY rule."""
+    if not weapon:
+        return False
+    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
+    # Handle both ParsedWeaponRule objects and strings
+    for rule in rules:
+        if hasattr(rule, 'rule'):  # ParsedWeaponRule object
+            if rule.rule == "HEAVY":
+                return True
+        elif rule == "HEAVY":  # String
+            return True
+    return False
+
+
+def _tracking_set_contains_unit(unit_id: Any, tracking_set: Set[Any]) -> bool:
+    """Check unit membership in tracking sets with normalized string comparison."""
+    unit_id_str = str(unit_id)
+    return any(str(tracked_id) == unit_id_str for tracked_id in tracking_set)
+
+
+def _is_unit_stationary_for_heavy(attacker_id: Any, game_state: Dict[str, Any]) -> bool:
+    """
+    HEAVY applies only if the unit remained stationary this turn.
+
+    Stationary means:
+    - not in units_moved during MOVE phase
+    - not in units_advanced during SHOOT phase
+    """
+    units_moved = require_key(game_state, "units_moved")
+    units_advanced = require_key(game_state, "units_advanced")
+    if _tracking_set_contains_unit(attacker_id, units_moved):
+        return False
+    if _tracking_set_contains_unit(attacker_id, units_advanced):
+        return False
+    return True
+
+
 def _get_combi_weapon_key(weapon: Dict[str, Any]) -> Optional[str]:
     """Return COMBI_WEAPON key if present."""
     if not weapon:
@@ -4061,7 +4099,12 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     
     # Hit roll -> hit_roll >= weapon.ATK
     hit_roll = random.randint(1, 6)
-    hit_target = weapon["ATK"]
+    base_hit_target = weapon["ATK"]
+    heavy_applied = _weapon_has_heavy_rule(weapon) and _is_unit_stationary_for_heavy(attacker_id, game_state)
+    if heavy_applied:
+        hit_target = max(2, base_hit_target - 1)
+    else:
+        hit_target = base_hit_target
     hit_success = hit_roll >= hit_target
     
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name in attack_log
@@ -4074,6 +4117,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
+            "hit_rule_modifier": "HEAVY" if heavy_applied else None,
             "hit_success": False,
             "wound_roll": 0,
             "wound_target": 0,
@@ -4097,6 +4141,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
+            "hit_rule_modifier": "HEAVY" if heavy_applied else None,
             "hit_success": True,  # Hit succeeded to reach wound roll
             "wound_roll": wound_roll,
             "wound_target": wound_target,
@@ -4120,6 +4165,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
+            "hit_rule_modifier": "HEAVY" if heavy_applied else None,
             "hit_success": True,  # Hit succeeded
             "wound_roll": wound_roll,
             "wound_target": wound_target,
@@ -4147,6 +4193,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     return {
         "hit_roll": hit_roll,
         "hit_target": hit_target,
+        "hit_rule_modifier": "HEAVY" if heavy_applied else None,
         "hit_success": True,  # Hit succeeded
         "wound_roll": wound_roll,
         "wound_target": wound_target,

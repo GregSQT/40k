@@ -20,5 +20,18 @@
     "training_config": "default",
     "rewards_config": "default",
     "game_config": "default"
+  },
+  "training_env": {
+    "OMP_NUM_THREADS": 4,
+    "MKL_NUM_THREADS": 4,
+    "OPENBLAS_NUM_THREADS": 4,
+    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+    "CUDA_LAUNCH_BLOCKING": "0"
+  },
+  "torch": {
+    "compile_mode": "off",
+    "compile_mode_option_1": "reduce-overhead (default) : CUDA graphs, low overhead",
+    "compile_mode_option_2": "max-autotune : CUDA graphs, high overhead",
+    "compile_mode_option_3": "default : compilation plus rapide, moins d\u2019optimisations"
   }
 }

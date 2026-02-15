@@ -29,6 +29,16 @@ def _get_deployment_pool(deployment_pools: Dict[Any, Any], player: int) -> List[
     raise KeyError(f"deployment_pools missing player {player}")
 
 
+def _get_deployable_remaining(deployment_state: Dict[str, Any], player: int) -> list:
+    """Get remaining deployable units for player. Raises KeyError if player key missing."""
+    deployable_units = require_key(deployment_state, "deployable_units")
+    if player in deployable_units:
+        return deployable_units[player]
+    if str(player) in deployable_units:
+        return deployable_units[str(player)]
+    raise KeyError(f"deployable_units missing player {player}")
+
+
 def _is_hex_occupied(game_state: Dict[str, Any], dest_col: int, dest_row: int) -> bool:
     for unit in require_key(game_state, "units"):
         if int(unit["col"]) == int(dest_col) and int(unit["row"]) == int(dest_row):
@@ -97,10 +107,10 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     update_units_cache_position(game_state, unit_id, dest_col, dest_row)
     _mark_deployed(deployment_state, unit_id, int(current_deployer))
 
-    remaining_current = deployment_state["deployable_units"].get(current_deployer, deployment_state["deployable_units"].get(str(current_deployer), []))
+    remaining_current = _get_deployable_remaining(deployment_state, int(current_deployer))
     if not remaining_current:
         next_player = 2 if int(current_deployer) == 1 else 1
-        remaining_next = deployment_state["deployable_units"].get(next_player, deployment_state["deployable_units"].get(str(next_player), []))
+        remaining_next = _get_deployable_remaining(deployment_state, next_player)
         if remaining_next:
             deployment_state["current_deployer"] = next_player
             game_state["current_player"] = next_player

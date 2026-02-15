@@ -6,7 +6,8 @@ import "../App.css";
 import { useEngineAPI } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
-import type { PlayerId, TargetPreview, Unit } from "../types";
+import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
+import type { DeploymentState } from "../types/game";
 import BoardPvp from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -173,7 +174,7 @@ export const BoardWithAPI: React.FC = () => {
 
     // CRITICAL: Check if AI has eligible units in current phase
     // Use simple heuristic instead of missing activation pools
-    const currentPhase = apiProps.gameState.phase;
+    const currentPhase = apiProps.gameState.phase as GamePhase;
     let hasEligibleAIUnits = false;
 
     if (currentPhase === "deployment") {
@@ -496,6 +497,115 @@ export const BoardWithAPI: React.FC = () => {
     );
   }
 
+  const deploymentPanel = (() => {
+    if (!apiProps.gameState) {
+      return null;
+    }
+    const phase = apiProps.gameState.phase as GamePhase;
+    if (phase !== "deployment" || apiProps.gameState.deployment_type !== "active") {
+      return null;
+    }
+    const deploymentState = apiProps.gameState.deployment_state;
+    if (!deploymentState) {
+      return null;
+    }
+
+    const currentDeployer = Number(deploymentState.current_deployer) as PlayerId;
+    const deployableIdsRaw = deploymentState.deployable_units?.[String(currentDeployer)] || [];
+    const deployableUnits = deployableIdsRaw
+      .map((id) => apiProps.gameState!.units.find((u) => String(u.id) === String(id)))
+      .filter((u): u is Unit => Boolean(u));
+    const deploymentPlayerClass =
+      currentDeployer === 2 ? "deployment-panel--player2" : "deployment-panel--player1";
+    const iconBorderColor = currentDeployer === 2 ? "var(--hp-bar-player2)" : "var(--hp-bar-player1)";
+    const deployableByType: Record<string, Unit[]> = {};
+    deployableUnits.forEach((unit) => {
+      const typeKey = unit.unitType || unit.type || unit.name || "Unknown";
+      if (!deployableByType[typeKey]) {
+        deployableByType[typeKey] = [];
+      }
+      deployableByType[typeKey].push(unit);
+    });
+
+    return (
+      <div className={`deployment-panel ${deploymentPlayerClass}`}>
+        <div
+          className={`deployment-panel__player-banner ${
+            currentDeployer === 2
+              ? "deployment-panel__player-banner--player2"
+              : "deployment-panel__player-banner--player1"
+          }`}
+        >
+          Player {currentDeployer} - Deployment
+        </div>
+        <div className="deployment-panel__type-list">
+          {Object.entries(deployableByType).map(([typeKey, unitsOfType]) => (
+            <div
+              key={`deploy-type-${typeKey}`}
+              className={`deployment-panel__type-group deployment-panel__type-group--player${currentDeployer}`}
+            >
+              <div className="deployment-panel__type-label">
+                {typeKey} : 
+              </div>
+              <div className="deployment-panel__type-icons">
+                {unitsOfType.map((unit) => {
+                  const isSelected = apiProps.selectedUnitId === unit.id;
+                  return (
+                    <button
+                      type="button"
+                      className="deployment-panel__unit-icon"
+                      key={`deploy-unit-${unit.id}`}
+                      title={`${typeKey} - ID ${unit.id}`}
+                      onClick={() => {
+                        apiProps.onSelectUnit(unit.id);
+                        setClickedUnitId(null);
+                      }}
+                      style={{
+                        width: "42px",
+                        height: "42px",
+                        borderRadius: "6px",
+                        border: isSelected ? "2px solid #7CFF7C" : `1px solid ${iconBorderColor}`,
+                        background: isSelected ? "rgba(124, 255, 124, 0.2)" : "rgba(0, 0, 0, 0.35)",
+                        color: "white",
+                        cursor: "pointer",
+                        padding: "0",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        overflow: "hidden",
+                        position: "relative",
+                      }}
+                    >
+                      <img
+                        src={unit.ICON}
+                        alt={typeKey}
+                        style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
+                      />
+                      <span
+                        style={{
+                          position: "absolute",
+                          right: "2px",
+                          bottom: "1px",
+                          fontSize: "9px",
+                          lineHeight: "1",
+                          background: "rgba(0, 0, 0, 0.65)",
+                          padding: "1px 2px",
+                          borderRadius: "3px",
+                        }}
+                      >
+                        {unit.id}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  })();
+
   const rightColumnContent = (
     <>
       {gameConfig ? (
@@ -562,6 +672,8 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       )}
+
+      {deploymentPanel}
 
       <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
         <UnitStatusTable
@@ -670,7 +782,7 @@ export const BoardWithAPI: React.FC = () => {
         onCancelCharge={apiProps.onCancelCharge}
         onValidateCharge={apiProps.onValidateCharge}
         onLogChargeRoll={apiProps.onLogChargeRoll}
-        gameState={apiProps.gameState!}
+        gameState={apiProps.gameState as GameState}
         getChargeDestinations={apiProps.getChargeDestinations}
         onAdvance={apiProps.onAdvance}
         onAdvanceMove={apiProps.onAdvanceMove}
@@ -684,7 +796,7 @@ export const BoardWithAPI: React.FC = () => {
         onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
         showAdvanceWarningPopup={settings.showAdvanceWarning}
         autoSelectWeapon={settings.autoSelectWeapon}
-        deploymentState={apiProps.gameState?.deployment_state}
+        deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
         objectivesOverride={objectivesOverride}
       />
       <SettingsMenu
