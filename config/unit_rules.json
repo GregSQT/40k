@@ -2,5 +2,17 @@
   "charge_after_advance": {
     "id": "charge_after_advance",
     "description": "Allows a unit to charge in the same turn it advanced."
+  },
+  "adaptable_predators": {
+    "id": "adaptable_predators",
+    "description": "This unit can shoot and charge in a turn in which it fell back."
+  },
+  "shoot_after_flee": {
+    "id": "shoot_after_flee",
+    "description": "Allows a unit to shoot in a turn in which it fell back."
+  },
+  "charge_after_flee": {
+    "id": "charge_after_flee",
+    "description": "Allows a unit to charge in a turn in which it fell back."
   }
 }

@@ -36,7 +36,7 @@
     "clip_range": 0.2,
     "clip_range_vf": null,
     "normalize_advantage": true,
-    "ent_coef": 0.05,
+    "ent_coef": 0.6,
     "vf_coef": 1.0,
     "max_grad_norm": 0.5,
     "target_kl": 0.01,

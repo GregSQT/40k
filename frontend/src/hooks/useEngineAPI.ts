@@ -82,6 +82,7 @@ interface APIGameState {
     UNIT_RULES: Array<{
       ruleId: string;
       displayName: string;
+      grants_rule_ids?: string[];
     }>;
   }>;
   current_player: number;
@@ -1046,6 +1047,21 @@ export const useEngineAPI = () => {
       }
       if (!unit.UNIT_RULES || !Array.isArray(unit.UNIT_RULES)) {
         throw new Error(`API ERROR: Unit ${unit.id} missing required UNIT_RULES array`);
+      }
+      for (const rule of unit.UNIT_RULES) {
+        if (!rule || typeof rule !== "object") {
+          throw new Error(`API ERROR: Unit ${unit.id} has invalid UNIT_RULES entry`);
+        }
+        if (!("ruleId" in rule) || !("displayName" in rule)) {
+          throw new Error(`API ERROR: Unit ${unit.id} has UNIT_RULES entry missing ruleId/displayName`);
+        }
+        if (
+          "grants_rule_ids" in rule &&
+          rule.grants_rule_ids !== undefined &&
+          !Array.isArray(rule.grants_rule_ids)
+        ) {
+          throw new Error(`API ERROR: Unit ${unit.id} has invalid grants_rule_ids in UNIT_RULES`);
+        }
       }
 
       return {

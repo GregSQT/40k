@@ -84,6 +84,7 @@ export interface WeaponSelectionState {
 export interface UnitRule {
   ruleId: string;
   displayName: string;
+  grants_rule_ids?: string[];
 }
 
 export interface DeploymentState {

@@ -786,7 +786,19 @@ def parse_step_log(filepath: str) -> Dict:
         unit_weapons_cache[unit_type] = weapons_info
         unit_combi_by_weapon[unit_type] = combi_by_weapon
         unit_rules = require_key(unit_data, "UNIT_RULES")
-        unit_rules_by_type[unit_type] = {require_key(rule, "ruleId") for rule in unit_rules}
+        expanded_rule_ids = set()
+        for rule in unit_rules:
+            direct_rule_id = require_key(rule, "ruleId")
+            expanded_rule_ids.add(direct_rule_id)
+            granted_rule_ids = rule.get("grants_rule_ids", [])
+            if not isinstance(granted_rule_ids, list):
+                raise TypeError(
+                    f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
+                    f"{type(granted_rule_ids).__name__}"
+                )
+            for granted_rule_id in granted_rule_ids:
+                expanded_rule_ids.add(str(granted_rule_id))
+        unit_rules_by_type[unit_type] = expanded_rule_ids
 
     # Build rule_id -> set of unit_types that have this rule (for validity check in output)
     rule_to_units: Dict[str, Set[str]] = {}
@@ -1542,9 +1554,15 @@ def parse_step_log(filepath: str) -> Dict:
                             # RULE: Shoot after fled
                             # CRITICAL: Normalize shooter_id to string for consistent comparison (units_fled stores strings)
                             if str(shooter_id) in units_fled:
-                                stats['shoot_after_fled'][player] += 1
-                                if stats['first_error_lines']['shoot_after_fled'][player] is None:
-                                    stats['first_error_lines']['shoot_after_fled'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                                shooter_unit_type_for_flee = require_key(unit_types, shooter_id)
+                                shooter_unit_rules_for_flee = require_key(unit_rules_by_type, shooter_unit_type_for_flee)
+                                if "shoot_after_flee" in shooter_unit_rules_for_flee:
+                                    key = ("shoot_after_flee", shooter_unit_type_for_flee)
+                                    stats['special_rule_usage'][key][player] += 1
+                                else:
+                                    stats['shoot_after_fled'][player] += 1
+                                    if stats['first_error_lines']['shoot_after_fled'][player] is None:
+                                        stats['first_error_lines']['shoot_after_fled'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # RULE: Shoot at friendly
                             # CRITICAL: Use shooter's actual player, not phase player
@@ -2310,9 +2328,15 @@ def parse_step_log(filepath: str) -> Dict:
                                     if stats['first_error_lines']['charge_invalid'][player] is None:
                                         stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             if charge_unit_id in units_fled:
-                                stats['charge_invalid'][player]['fled'] += 1
-                                if stats['first_error_lines']['charge_invalid'][player] is None:
-                                    stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                                charge_unit_type_for_flee = require_key(unit_types, charge_unit_id)
+                                charge_unit_rules_for_flee = require_key(unit_rules_by_type, charge_unit_type_for_flee)
+                                if "charge_after_flee" in charge_unit_rules_for_flee:
+                                    key = ("charge_after_flee", charge_unit_type_for_flee)
+                                    stats['special_rule_usage'][key][player] += 1
+                                else:
+                                    stats['charge_invalid'][player]['fled'] += 1
+                                    if stats['first_error_lines']['charge_invalid'][player] is None:
+                                        stats['first_error_lines']['charge_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             charge_roll_match = re.search(r'\[Roll:(\d+)\]', action_desc)
                             if charge_roll_match:
                                 charge_roll = int(charge_roll_match.group(1))
@@ -2389,9 +2413,15 @@ def parse_step_log(filepath: str) -> Dict:
                             
                             # RULE: Charge after fled
                             if charge_unit_id in units_fled:
-                                stats['charge_after_fled'][player] += 1
-                                if stats['first_error_lines']['charge_after_fled'][player] is None:
-                                    stats['first_error_lines']['charge_after_fled'][player] = {'episode': current_episode_num, 'line': line.strip()}
+                                charge_unit_type_for_flee = require_key(unit_types, charge_unit_id)
+                                charge_unit_rules_for_flee = require_key(unit_rules_by_type, charge_unit_type_for_flee)
+                                if "charge_after_flee" in charge_unit_rules_for_flee:
+                                    key = ("charge_after_flee", charge_unit_type_for_flee)
+                                    stats['special_rule_usage'][key][player] += 1
+                                else:
+                                    stats['charge_after_fled'][player] += 1
+                                    if stats['first_error_lines']['charge_after_fled'][player] is None:
+                                        stats['first_error_lines']['charge_after_fled'][player] = {'episode': current_episode_num, 'line': line.strip()}
                             
                             # RULE: Charge a dead unit
                             # Target ID is already extracted from charge_match above
@@ -4090,10 +4120,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("\n" + "=" * 80)
     log_print("📊 BOT EVALUATION RESULTS")
     log_print("=" * 80)
-    log_print("\n" + "-" * 80)
-    log_print("WIN METHODS")
     log_print("-" * 80)
-    log_print(f"{'Method':<20} {'Agent Wins (P1)':>18} {'Bot Wins (P2)':>18}")
+    log_print(f"WIN METHODS {'Agent Wins (P1)':>24} {'Bot Wins (P2)':>18}")
     log_print("-" * 80)
     
     p1_total = sum(stats['win_methods'][1].values())
@@ -4137,10 +4165,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 
     # WINS BY SCENARIO
     if stats['wins_by_scenario']:
-        log_print("\n" + "-" * 80)
-        log_print("WINS BY SCENARIO")
         log_print("-" * 80)
-        log_print(f"{'Scenario':<40} {'Agent (P1)':>15} {'Bot (P2)':>15} {'Draws':>10}")
+        log_print(f"WINS BY SCENARIO {'Agent (P1)':>37} {'Bot (P2)':>13} {'Draws':>12}")
         log_print("-" * 80)
         
         scenario_totals = []
@@ -4176,10 +4202,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print("No turn data recorded.")
     
     # ACTIONS BY TYPE
-    log_print("\n" + "-" * 80)
-    log_print("ACTIONS BY TYPE")
     log_print("-" * 80)
-    log_print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
+    log_print(f"ACTIONS BY TYPE {'Agent (P1)':>12} {'Bot (P2)':>17}")
     log_print("-" * 80)
     
     all_actions = set(stats['actions_by_player'][1].keys()) | set(stats['actions_by_player'][2].keys())
@@ -4198,10 +4222,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"{action_type:<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
     
     # SHOOTING PHASE BEHAVIOR
-    log_print("\n" + "-" * 80)
-    log_print("SHOOTING PHASE BEHAVIOR")
     log_print("-" * 80)
-    log_print(f"{'Action':<12} {'Agent (P1)':>18} {'Bot (P2)':>18}")
+    log_print(f"SHOOTING BEHAVIOR {'Agent (P1)':>5} {'Bot (P2)':>17}")
     log_print("-" * 80)
     
     agent_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
@@ -4239,11 +4261,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{'Shoot+Advance':<12} {agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)   {bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)")
     
     # PISTOL WEAPON SHOTS
-    log_print("\nDetails:")
     log_print("-" * 80)
-    log_print("PISTOL WEAPON SHOTS BY ADJACENCY")
-    log_print("-" * 80)
-    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"PISTOL WEAPON SHOTS BY ADJACENCY {'Agent (P1)':>13s} {'Bot (P2)':>16s}")
     log_print("-" * 80)
     agent_pistol_adj = stats['pistol_shots'][1]['adjacent']
     bot_pistol_adj = stats['pistol_shots'][2]['adjacent']
@@ -4265,11 +4284,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
     log_print(f"Non-PISTOL shots (adjacent):   {agent_non_pistol_adj:6d}           {bot_non_pistol_adj:6d}")
 
-    log_print("\nDetails:")
     log_print("-" * 80)
-    log_print("SHOOTING VALIDITY")
-    log_print("-" * 80)
-    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"SHOOTING VALIDITY {'Agent (P1)':>28s} {'Bot (P2)':>16s}")
     log_print("-" * 80)
     agent_invalid_total = (
         stats['shoot_invalid'][1]['no_los'] +
@@ -4298,9 +4314,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     
     # WAIT BEHAVIOR
     log_print("\n" + "-" * 80)
-    log_print("WAIT BEHAVIOR BY PHASE")
-    log_print("-" * 80)
-    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"WAIT BEHAVIOR BY PHASE {'Agent (P1)':>14s} {'Bot (P2)':>16s}")
     log_print("-" * 80)
     agent_move_wait = stats['wait_by_phase'][1]['move_wait']
     bot_move_wait = stats['wait_by_phase'][2]['move_wait']
@@ -4315,9 +4329,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     
     # TARGET PRIORITY
     log_print("\n" + "-" * 80)
-    log_print("TARGET PRIORITY ANALYSIS (Focus Fire)")
-    log_print("-" * 80)
-    log_print(f"{'':30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"TARGET PRIORITY ANALYSIS {'Agent (P1)':>20s} {'Bot (P2)':>16s}")
     log_print("-" * 80)
     
     agent_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_in_los']
@@ -4498,9 +4510,27 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][2]:
         first_err = stats['first_error_lines']['shoot_through_wall'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    phase_special_rule_usage = stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
+    phase_rule_to_units = stats.get('rule_to_units', {})
     agent_shoot_fled = stats['shoot_after_fled'][1]
     bot_shoot_fled = stats['shoot_after_fled'][2]
     log_print(f"Shoot after fled:             {agent_shoot_fled:6d}           {bot_shoot_fled:6d}")
+    agent_shoot_flee_rule_used = sum(
+        phase_special_rule_usage[k][1] for k in phase_special_rule_usage if k[0] == "shoot_after_flee"
+    )
+    bot_shoot_flee_rule_used = sum(
+        phase_special_rule_usage[k][2] for k in phase_special_rule_usage if k[0] == "shoot_after_flee"
+    )
+    log_print(f"Shoot after flee (rule):      {agent_shoot_flee_rule_used:6d}           {bot_shoot_flee_rule_used:6d}")
+    shoot_flee_usage_keys = sorted([k for k in phase_special_rule_usage if k[0] == "shoot_after_flee"])
+    for (_rule_id, unit_type) in shoot_flee_usage_keys:
+        counts = phase_special_rule_usage[("shoot_after_flee", unit_type)]
+        p1_used = counts.get(1, 0)
+        p2_used = counts.get(2, 0)
+        has_rule = unit_type in phase_rule_to_units.get("shoot_after_flee", set())
+        validite = "OK" if has_rule else "INVALID"
+        icon = "✅" if has_rule else "⚠️"
+        log_print(f"  {icon} shoot_after_flee / {unit_type:<22} -> P1:{p1_used:3d} P2:{p2_used:3d} ({validite})")
     if agent_shoot_fled > 0 and stats['first_error_lines']['shoot_after_fled'][1]:
         first_err = stats['first_error_lines']['shoot_after_fled'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -4582,6 +4612,22 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_charge_fled = stats['charge_invalid'][1]['fled']
     bot_charge_fled = stats['charge_invalid'][2]['fled']
     log_print(f"Charges after fled:           {agent_charge_fled:6d}           {bot_charge_fled:6d}")
+    agent_charge_flee_rule_used = sum(
+        phase_special_rule_usage[k][1] for k in phase_special_rule_usage if k[0] == "charge_after_flee"
+    )
+    bot_charge_flee_rule_used = sum(
+        phase_special_rule_usage[k][2] for k in phase_special_rule_usage if k[0] == "charge_after_flee"
+    )
+    log_print(f"Charge after flee (rule):     {agent_charge_flee_rule_used:6d}           {bot_charge_flee_rule_used:6d}")
+    charge_flee_usage_keys = sorted([k for k in phase_special_rule_usage if k[0] == "charge_after_flee"])
+    for (_rule_id, unit_type) in charge_flee_usage_keys:
+        counts = phase_special_rule_usage[("charge_after_flee", unit_type)]
+        p1_used = counts.get(1, 0)
+        p2_used = counts.get(2, 0)
+        has_rule = unit_type in phase_rule_to_units.get("charge_after_flee", set())
+        validite = "OK" if has_rule else "INVALID"
+        icon = "✅" if has_rule else "⚠️"
+        log_print(f"  {icon} charge_after_flee / {unit_type:<21} -> P1:{p1_used:3d} P2:{p2_used:3d} ({validite})")
     agent_charge_adv_used = sum(stats['special_rule_usage'][k][1] for k in stats['special_rule_usage'] if k[0] == "charge_after_advance")
     bot_charge_adv_used = sum(stats['special_rule_usage'][k][2] for k in stats['special_rule_usage'] if k[0] == "charge_after_advance")
     log_print(f"Charge after advance (rule):  {agent_charge_adv_used:6d}           {bot_charge_adv_used:6d}")
@@ -4686,10 +4732,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     special_rule_usage = stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
     rule_to_units = stats.get('rule_to_units', {})  # get allowed: optional stats
-    usage_keys = sorted(special_rule_usage.keys())
+    expected_keys = set()
+    for rule_id, unit_types in rule_to_units.items():
+        for unit_type in unit_types:
+            expected_keys.add((rule_id, unit_type))
+    usage_keys = sorted(set(special_rule_usage.keys()) | expected_keys)
     if usage_keys:
         for (rule_id, unit_type) in usage_keys:
-            counts = special_rule_usage[(rule_id, unit_type)]
+            counts = special_rule_usage.get((rule_id, unit_type), {1: 0, 2: 0})
             p1 = counts.get(1, 0)  # get allowed: optional player counts
             p2 = counts.get(2, 0)  # get allowed: optional player counts
             has_rule = unit_type in rule_to_units.get(rule_id, set())

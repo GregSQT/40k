@@ -24,10 +24,19 @@ from .shared_utils import (
 )
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
-    """Check if unit has a specific rule by ruleId."""
+    """Check if unit has a specific direct or granted rule effect by ruleId."""
     unit_rules = require_key(unit, "UNIT_RULES")
     for rule in unit_rules:
-        if require_key(rule, "ruleId") == rule_id:
+        direct_rule_id = require_key(rule, "ruleId")
+        if direct_rule_id == rule_id:
+            return True
+        granted_rule_ids = rule.get("grants_rule_ids", [])
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if rule_id in granted_rule_ids:
             return True
     return False
 
@@ -139,10 +148,11 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if adjacent_found:
             continue  # Already in melee, cannot charge
 
-        # "NOT in units_fled?"
+        # "NOT in units_fled?" unless the unit has a rule effect allowing charge after fleeing
         # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
         if unit_id_str in game_state["units_fled"]:
-            continue  # Fled units cannot charge
+            if not _unit_has_rule(unit, "charge_after_flee"):
+                continue  # Fled units cannot charge without explicit rule effect
 
         # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
         units_advanced = require_key(game_state, "units_advanced")
@@ -661,7 +671,8 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     """
     # CRITICAL: Check units_fled just before execution (may have changed during phase)
     # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
-    if str(unit["id"]) in require_key(game_state, "units_fled"):
+    unit_id_str = str(unit["id"])
+    if unit_id_str in require_key(game_state, "units_fled") and not _unit_has_rule(unit, "charge_after_flee"):
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         log_msg = f"[CHARGE ERROR] E{episode} T{turn} Unit {unit['id']} attempted to charge but has fled - REJECTED"

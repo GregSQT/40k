@@ -194,22 +194,47 @@ class UnitRegistry:
         )
         if unit_rules_match:
             rules_block = unit_rules_match.group(1).strip()
-            rule_entries = re.findall(
-                r'\{\s*ruleId\s*:\s*["\']([^"\']+)["\']\s*,\s*displayName\s*:\s*["\']([^"\']+)["\']\s*\}',
-                rules_block
-            )
-            if not rule_entries and rules_block:
-                raise ValueError("UNIT_RULES must contain objects with ruleId and displayName")
             unit_rules = []
-            for rule_id, display_name in rule_entries:
+            if rules_block:
+                rule_objects = re.findall(r'\{([\s\S]*?)\}', rules_block)
+                if not rule_objects:
+                    raise ValueError("UNIT_RULES must contain objects with ruleId and displayName")
+            else:
+                rule_objects = []
+
+            for rule_object in rule_objects:
+                rule_id_match = re.search(r'ruleId\s*:\s*["\']([^"\']+)["\']', rule_object)
+                display_name_match = re.search(r'displayName\s*:\s*["\']([^"\']+)["\']', rule_object)
+                if not rule_id_match or not display_name_match:
+                    raise ValueError("UNIT_RULES must contain objects with ruleId and displayName")
+
+                rule_id = rule_id_match.group(1)
+                display_name = display_name_match.group(1)
                 if rule_id not in self._unit_rules:
                     raise KeyError(f"Unknown unit rule id '{rule_id}' (missing in config/unit_rules.json)")
                 if not display_name or not display_name.strip():
                     raise ValueError(f"Unit rule '{rule_id}' missing displayName")
-                unit_rules.append({
+
+                grants_rule_ids_match = re.search(r'grants_rule_ids\s*:\s*\[([^\]]*)\]', rule_object)
+                grants_rule_ids = []
+                if grants_rule_ids_match:
+                    grants_raw = grants_rule_ids_match.group(1).strip()
+                    if grants_raw:
+                        grants_rule_ids = re.findall(r'["\']([^"\']+)["\']', grants_raw)
+                    for granted_rule_id in grants_rule_ids:
+                        if granted_rule_id not in self._unit_rules:
+                            raise KeyError(
+                                f"Unknown granted unit rule id '{granted_rule_id}' "
+                                f"(missing in config/unit_rules.json)"
+                            )
+
+                unit_rule_entry = {
                     "ruleId": rule_id,
                     "displayName": display_name
-                })
+                }
+                if grants_rule_ids:
+                    unit_rule_entry["grants_rule_ids"] = grants_rule_ids
+                unit_rules.append(unit_rule_entry)
             properties["UNIT_RULES"] = unit_rules
         else:
             properties["UNIT_RULES"] = []

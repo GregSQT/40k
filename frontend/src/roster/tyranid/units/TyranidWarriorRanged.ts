@@ -27,6 +27,16 @@ export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
   static TARGET_TYPE = "Troop"; // RangedTroop specialist - anti-infantry
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    {
+      ruleId: "adaptable_predators",
+      displayName: "Adaptable Predators",
+      grants_rule_ids: ["shoot_after_flee", "charge_after_flee"],
+    },
+  ];
+
+  // ICON
   static ICON = "/icons/WarriorRanged.webp"; // Path relative to public folder
   static ICON_SCALE = 2.2; // Size of the icon
 

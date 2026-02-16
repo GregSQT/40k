@@ -117,6 +117,24 @@ def _tracking_set_contains_unit(unit_id: Any, tracking_set: Set[Any]) -> bool:
     return any(str(tracked_id) == unit_id_str for tracked_id in tracking_set)
 
 
+def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
+    """Check if unit has a specific direct or granted rule effect by ruleId."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        direct_rule_id = require_key(rule, "ruleId")
+        if direct_rule_id == rule_id:
+            return True
+        granted_rule_ids = rule.get("grants_rule_ids", [])
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if rule_id in granted_rule_ids:
+            return True
+    return False
+
+
 def _is_unit_stationary_for_heavy(attacker_id: Any, game_state: Dict[str, Any]) -> bool:
     """
     HEAVY applies only if the unit remained stationary this turn.
@@ -1003,9 +1021,11 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     # units_fled.includes(unit.id)?
     # Direct field access with validation
     # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
+    # Exception: units with shoot_after_flee effect are allowed to shoot after fleeing.
     if "units_fled" not in game_state:
         raise KeyError("game_state missing required 'units_fled' field")
-    if str(unit["id"]) in game_state["units_fled"]:
+    unit_id_str = str(unit["id"])
+    if unit_id_str in game_state["units_fled"] and not _unit_has_rule(unit, "shoot_after_flee"):
         return False
     
     # STEP 1: ELIGIBILITY CHECK
@@ -1197,9 +1217,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     game_state["shoot_attack_results"] = []
     
     # AI_TURN.md STEP 2: Build unit's los_cache at activation
-    # CRITICAL: Only build los_cache if unit has not fled (units that fled cannot shoot)
+    # Build los_cache for units that can shoot (including shoot_after_flee exception).
     unit_id_str = str(unit_id)
-    if unit_id_str not in require_key(game_state, "units_fled"):
+    if unit_id_str not in require_key(game_state, "units_fled") or _unit_has_rule(unit, "shoot_after_flee"):
         build_unit_los_cache(game_state, unit_id)
     else:
         # Unit has fled - cannot shoot, so no los_cache needed
@@ -1425,9 +1445,9 @@ def valid_target_pool_build(
     
     # AI_TURN.md: ASSERT unit["los_cache"] exists (must be created by build_unit_los_cache at activation)
     if "los_cache" not in unit:
-        # Check if unit has fled (units that fled don't have los_cache but can advance)
+        # Check if unit has fled (fled units without shoot_after_flee can still advance, but cannot shoot)
         unit_id_str = str(unit["id"])
-        if unit_id_str not in require_key(game_state, "units_fled"):
+        if unit_id_str not in require_key(game_state, "units_fled") or _unit_has_rule(unit, "shoot_after_flee"):
             raise KeyError(f"Unit {unit_id_normalized} missing required 'los_cache' field. Must call build_unit_los_cache() at activation.")
         else:
             # Unit has fled - cannot shoot, return empty pool
@@ -1742,7 +1762,7 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             raise KeyError("units_cache must exist before valid target pool (built at reset)")
         
         # Build los_cache for unit (rebuild if unit has advanced)
-        if unit_id_str not in require_key(game_state, "units_fled"):
+        if unit_id_str not in require_key(game_state, "units_fled") or _unit_has_rule(unit, "shoot_after_flee"):
             build_unit_los_cache(game_state, unit_id)
         else:
             # Unit has fled - cannot shoot, so no los_cache needed
@@ -3190,7 +3210,9 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         # CRITICAL: Check units_fled just before execution (may have changed during phase)
         # CRITICAL: Normalize unit ID to string for consistent comparison (units_fled stores strings)
-        if str(unit["id"]) in require_key(game_state, "units_fled"):
+        # Exception: units with shoot_after_flee effect are allowed to shoot after fleeing.
+        unit_id_str = str(unit["id"])
+        if unit_id_str in require_key(game_state, "units_fled") and not _unit_has_rule(unit, "shoot_after_flee"):
             return False, {"error": "unit_has_fled", "unitId": unit_id}
         
         # ASSAULT RULE VALIDATION: Block shooting if unit advanced without ASSAULT weapon

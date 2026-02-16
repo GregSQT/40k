@@ -4,6 +4,9 @@ import type { Unit, UnitId } from "../types/game";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
   charge_after_advance: "Allows a unit to charge in the same turn it advanced.",
+  adaptable_predators: "This unit can shoot and charge in a turn in which it fell back.",
+  shoot_after_flee: "Allows a unit to shoot in a turn in which it fell back.",
+  charge_after_flee: "Allows a unit to charge in a turn in which it fell back.",
 };
 
 interface UnitStatusTableProps {

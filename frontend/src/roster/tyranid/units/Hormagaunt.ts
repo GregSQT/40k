@@ -26,8 +26,10 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static MOVE_TYPE = "Infantry"; // Fast infantry movement
   static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
+  // UNIT RULES
   static UNIT_RULES = [{ ruleId: "charge_after_advance", displayName: "Bounding Leap" }];
 
+  // ICON
   static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
   static ICON_SCALE = 1.2; // Size of the icon
 
