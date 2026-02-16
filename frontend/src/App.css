@@ -962,7 +962,9 @@ body {
   font-weight: var(--font-weight-medium);
   text-align: left;
   /* width and min-width removed to allow inline width styles to work */
-  /* overflow and text-overflow removed - handled by column width rules */
+  /* Allow unit rule tooltip to overflow outside table cell */
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .unit-status-cell--stat {
@@ -2197,7 +2199,7 @@ textarea:focus {
   display: inline-block;
   margin-left: 4px;
   padding: 1px 4px;
-  background: rgba(76, 175, 80, 0.3);
+  background: rgba(76, 175, 80, 0.2);
   border: 1px solid #4caf50;
   border-radius: 3px;
   font-size: 0.75em;
@@ -2210,13 +2212,18 @@ textarea:focus {
   position: relative;
   display: inline-flex;
   align-items: center;
+  z-index: 1;
+}
+
+.rule-badge-wrapper:hover {
+  z-index: 1200;
 }
 
 .rule-tooltip {
   position: absolute;
   left: 0;
-  top: 100%;
-  margin-top: 6px;
+  bottom: 100%;
+  margin-bottom: 6px;
   padding: 6px 8px;
   border: 2px solid #4caf50;
   border-radius: 6px;
@@ -2227,14 +2234,14 @@ textarea:focus {
   max-width: 600px;
   white-space: normal;
   overflow-wrap: break-word;
-  z-index: 1100;
+  z-index: 1201;
   visibility: hidden;
   opacity: 0;
-  transform: translateY(-2px);
+  transform: translateY(4px);
   transition:
-    opacity 0.12s ease,
-    transform 0.12s ease,
-    visibility 0.12s;
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0.2s;
   pointer-events: none;
 }
 

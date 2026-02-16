@@ -79,6 +79,10 @@ interface APIGameState {
     valid_target_pool?: string[];
     selected_target_id?: string;
     TOTAL_ATTACK_LOG?: string;
+    UNIT_RULES: Array<{
+      ruleId: string;
+      displayName: string;
+    }>;
   }>;
   current_player: number;
   phase: string;
@@ -1040,6 +1044,9 @@ export const useEngineAPI = () => {
       if (unit.ATTACK_LEFT === undefined || unit.ATTACK_LEFT === null) {
         throw new Error(`API ERROR: Unit ${unit.id} missing required ATTACK_LEFT field`);
       }
+      if (!unit.UNIT_RULES || !Array.isArray(unit.UNIT_RULES)) {
+        throw new Error(`API ERROR: Unit ${unit.id} missing required UNIT_RULES array`);
+      }
 
       return {
         id:
@@ -1070,6 +1077,7 @@ export const useEngineAPI = () => {
         SHOOT_LEFT: unit.SHOOT_LEFT,
         ATTACK_LEFT: unit.ATTACK_LEFT,
         available_weapons: unit.available_weapons,
+        UNIT_RULES: unit.UNIT_RULES,
       };
     });
   }, []);

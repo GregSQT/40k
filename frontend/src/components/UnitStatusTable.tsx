@@ -2,6 +2,10 @@
 import { memo, useMemo, useState } from "react";
 import type { Unit, UnitId } from "../types/game";
 
+const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
+  charge_after_advance: "Allows a unit to charge in the same turn it advanced.",
+};
+
 interface UnitStatusTableProps {
   units: Unit[];
   player: 1 | 2;
@@ -49,6 +53,7 @@ const UnitRow = memo<UnitRowProps>(
     const ccWeapons = unit.CC_WEAPONS || [];
 
     const unitName = unit.name || unit.type || `Unit ${unit.id}`;
+    const unitRules = unit.UNIT_RULES || [];
 
     return (
       <div style={{ marginBottom: "2px" }}>
@@ -147,7 +152,18 @@ const UnitRow = memo<UnitRowProps>(
                   fontSize: "12px",
                 }}
               >
-                {unitName}
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                  <span>{unitName}</span>
+                  {unitRules.map((rule) => {
+                    const tooltipText = UNIT_RULE_DESCRIPTIONS[rule.ruleId] ?? rule.ruleId;
+                    return (
+                      <span key={`${unit.id}-${rule.ruleId}`} className="rule-badge-wrapper">
+                        <span className="rule-badge">{rule.displayName}</span>
+                        <span className="rule-tooltip">{tooltipText}</span>
+                      </span>
+                    );
+                  })}
+                </div>
               </td>
 
               {/* HP */}

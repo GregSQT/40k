@@ -81,6 +81,11 @@ export interface WeaponSelectionState {
   position?: { x: number; y: number };
 }
 
+export interface UnitRule {
+  ruleId: string;
+  displayName: string;
+}
+
 export interface DeploymentState {
   current_deployer: PlayerId;
   deployable_units: Record<string, UnitId[]>;
@@ -125,6 +130,7 @@ export interface Unit {
   SHOOT_LEFT?: number;
   ATTACK_LEFT?: number;
   hasChargedThisTurn?: boolean;
+  UNIT_RULES?: UnitRule[];
 }
 
 export interface SingleShotState {
