@@ -1773,7 +1773,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     stats['first_error_lines']['shoot_at_engaged_enemy'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # Track PISTOL weapon shots (for statistics)
-                            heavy_applied_in_log = "(HEAVY)" in action_desc.upper()
+                            heavy_applied_in_log = re.search(r'\bHEAVY\b', action_desc.upper()) is not None
                             if weapon_match and target_pos and weapon_found:
                                 distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
                                 

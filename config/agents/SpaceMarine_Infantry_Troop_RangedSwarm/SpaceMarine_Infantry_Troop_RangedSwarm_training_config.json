@@ -27,10 +27,10 @@
   "step_log_buffer_size": 200,
   "model_params": {
     "policy": "MlpPolicy",
-    "learning_rate": {"initial": 0.00025, "final": 0.00010},
-    "n_steps": 32768,
+    "learning_rate": {"initial": 0.00020, "final": 0.00008},
+    "n_steps": 16384,
     "batch_size": 4096,
-    "n_epochs": 10,
+    "n_epochs": 8,
     "gamma": 0.97,
     "gae_lambda": 0.96,
     "clip_range": 0.2,

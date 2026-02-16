@@ -12,7 +12,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import signal
 import sys
@@ -129,6 +128,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--slope-warn", type=float, default=-0.002, help="Warning threshold for slope")
     parser.add_argument("--slope-stop", type=float, default=-0.004, help="Stop threshold for slope")
     parser.add_argument("--consecutive-stop", type=int, default=3, help="Consecutive stop windows required")
+    parser.add_argument(
+        "--drawdown-stop",
+        type=float,
+        default=0.05,
+        help="Stop threshold for drawdown from historical peak (0 disables drawdown stop)",
+    )
+    parser.add_argument(
+        "--consecutive-drawdown",
+        type=int,
+        default=2,
+        help="Consecutive drawdown windows required before stop",
+    )
+    parser.add_argument(
+        "--min-episodes-since-peak",
+        type=int,
+        default=1500,
+        help="Minimum episodes since last peak before counting drawdown stop hits",
+    )
     parser.add_argument("--min-episodes-before-check", type=int, default=8000, help="Ignore stop checks before this step")
     parser.add_argument("--poll-seconds", type=int, default=30, help="Polling interval in seconds")
     return parser.parse_args()
@@ -150,12 +167,16 @@ def main() -> int:
     print(f"   slope_warn: {args.slope_warn}")
     print(f"   slope_stop: {args.slope_stop}")
     print(f"   consecutive_stop: {args.consecutive_stop}")
+    print(f"   drawdown_stop: {args.drawdown_stop}")
+    print(f"   consecutive_drawdown: {args.consecutive_drawdown}")
+    print(f"   min_episodes_since_peak: {args.min_episodes_since_peak}")
     print(f"   min_episodes_before_check: {args.min_episodes_before_check}")
     if args.kill_on_stop:
         print(f"   auto-kill PID: {args.pid}")
 
     last_seen_step = -1
     consecutive_stop_hits = 0
+    consecutive_drawdown_hits = 0
 
     while True:
         points = _read_tag_points(logdir, args.tag)
@@ -181,7 +202,8 @@ def main() -> int:
             continue
 
         status = "OK"
-        if slope <= args.slope_stop and latest.step >= args.min_episodes_before_check:
+        hard_stop_step_reached = latest.step >= args.min_episodes_before_check
+        if slope <= args.slope_stop and hard_stop_step_reached:
             consecutive_stop_hits += 1
             status = f"STOP_CANDIDATE[{consecutive_stop_hits}/{args.consecutive_stop}]"
         else:
@@ -189,13 +211,36 @@ def main() -> int:
                 status = "WARN"
             consecutive_stop_hits = 0
 
+        peak_point = max(points, key=lambda p: p.value)
+        drawdown = peak_point.value - latest.value
+        episodes_since_peak = latest.step - peak_point.step
+        drawdown_triggered = (
+            args.drawdown_stop > 0.0
+            and hard_stop_step_reached
+            and drawdown >= args.drawdown_stop
+            and episodes_since_peak >= args.min_episodes_since_peak
+        )
+        if drawdown_triggered:
+            consecutive_drawdown_hits += 1
+        else:
+            consecutive_drawdown_hits = 0
+
+        if drawdown_triggered:
+            if status == "OK":
+                status = "DRAWDOWN_WARN"
+            status += f" DD[{consecutive_drawdown_hits}/{args.consecutive_drawdown}]"
+
         print(
             f"step={latest.step} value={latest.value:.4f} "
-            f"slope={slope:.6f} points={len(win_points)} status={status}"
+            f"slope={slope:.6f} drawdown={drawdown:.4f} "
+            f"since_peak={episodes_since_peak} points={len(win_points)} status={status}"
         )
 
-        if consecutive_stop_hits >= args.consecutive_stop:
-            print("🟥 Stop condition reached: persistent negative trend.")
+        stop_by_slope = consecutive_stop_hits >= args.consecutive_stop
+        stop_by_drawdown = consecutive_drawdown_hits >= args.consecutive_drawdown
+        if stop_by_slope or stop_by_drawdown:
+            reason = "persistent negative trend" if stop_by_slope else "persistent drawdown from peak"
+            print(f"🟥 Stop condition reached: {reason}.")
             if args.kill_on_stop and args.pid is not None:
                 _terminate_pid(args.pid)
             return 0

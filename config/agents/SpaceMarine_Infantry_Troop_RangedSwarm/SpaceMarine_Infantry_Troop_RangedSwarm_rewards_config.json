@@ -23,8 +23,8 @@
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 30,
-      "lose": -30,
+      "win": 20,
+      "lose": -20,
       "draw": 0.0
     },
     "objective_rewards": {
