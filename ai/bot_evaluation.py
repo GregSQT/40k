@@ -17,6 +17,42 @@ from shared.data_validation import require_key
 __all__ = ['evaluate_against_bots']
 
 
+def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: str):
+    """Load bot evaluation weights and randomness from agent training config."""
+    if not agent_key:
+        raise ValueError("controlled_agent is required to load bot evaluation parameters from agent config")
+
+    training_cfg = config_loader.load_agent_training_config(agent_key, training_config_name)
+    callback_params = require_key(training_cfg, "callback_params")
+
+    bot_eval_weights = require_key(callback_params, "bot_eval_weights")
+    random_weight = float(require_key(bot_eval_weights, "random"))
+    greedy_weight = float(require_key(bot_eval_weights, "greedy"))
+    defensive_weight = float(require_key(bot_eval_weights, "defensive"))
+    total_weight = random_weight + greedy_weight + defensive_weight
+    if abs(total_weight - 1.0) > 1e-9:
+        raise ValueError(
+            "callback_params.bot_eval_weights must sum to 1.0 "
+            f"(got random={random_weight}, greedy={greedy_weight}, defensive={defensive_weight}, total={total_weight})"
+        )
+
+    bot_eval_randomness = require_key(callback_params, "bot_eval_randomness")
+    greedy_randomness = float(require_key(bot_eval_randomness, "greedy"))
+    defensive_randomness = float(require_key(bot_eval_randomness, "defensive"))
+
+    return {
+        "weights": {
+            "random": random_weight,
+            "greedy": greedy_weight,
+            "defensive": defensive_weight,
+        },
+        "randomness": {
+            "greedy": greedy_randomness,
+            "defensive": defensive_randomness,
+        },
+    }
+
+
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
                          step_logger=None, debug_mode=False):
@@ -55,13 +91,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     from ai.env_wrappers import BotControlledEnv
     from sb3_contrib.common.wrappers import ActionMasker
 
-    results = {}
-    # Initialize bots with stochasticity to prevent overfitting (15% random actions)
-    bots = {
-        'random': RandomBot(),
-        'greedy': GreedyBot(randomness=0.15),
-        'defensive': DefensiveBot(randomness=0.15)
-    }
     config = get_config_loader()
 
     # CRITICAL FIX: Strip phase suffix from controlled_agent for file path lookup
@@ -72,6 +101,18 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             if controlled_agent.endswith(phase_suffix):
                 base_agent_key = controlled_agent[:-len(phase_suffix)]
                 break
+
+    bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
+    eval_weights = bot_eval_cfg["weights"]
+    eval_randomness = bot_eval_cfg["randomness"]
+
+    results = {}
+    # Initialize bots with configured stochasticity to prevent overfitting.
+    bots = {
+        'random': RandomBot(),
+        'greedy': GreedyBot(randomness=eval_randomness["greedy"]),
+        'defensive': DefensiveBot(randomness=eval_randomness["defensive"])
+    }
 
     # MULTI-SCENARIO EVALUATION: Get all available bot scenarios
     # Bot evaluation should always use bot scenarios (not phase-specific scenarios)
@@ -384,9 +425,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             f"Fix environment/scenario issues before relying on evaluation metrics."
         )
 
-    # Combined score with improved weighting: RandomBot 35%, GreedyBot 30%, DefensiveBot 35%
-    # Increased RandomBot weight to prevent overfitting to predictable patterns
-    results['combined'] = 0.35 * results['random'] + 0.30 * results['greedy'] + 0.35 * results['defensive']
+    # Combined score from agent-specific config.
+    results['combined'] = (
+        eval_weights['random'] * results['random'] +
+        eval_weights['greedy'] * results['greedy'] +
+        eval_weights['defensive'] * results['defensive']
+    )
 
     # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
     if show_progress:

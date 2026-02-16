@@ -33,7 +33,9 @@
       "bot_eval_freq": 100,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
+      "bot_eval_final": 50,
+      "bot_eval_weights": {"random": 0.35, "greedy": 0.30, "defensive": 0.35},
+      "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
     },
     "observation_params": {
       "obs_size": 323,
@@ -80,7 +82,9 @@
       "bot_eval_freq": 100,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
+      "bot_eval_final": 50,
+      "bot_eval_weights": {"random": 0.35, "greedy": 0.30, "defensive": 0.35},
+      "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
     },
     "observation_params": {
       "obs_size": 323,
@@ -126,7 +130,9 @@
       "bot_eval_freq": 100,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
+      "bot_eval_final": 50,
+      "bot_eval_weights": {"random": 0.35, "greedy": 0.30, "defensive": 0.35},
+      "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
     },
     "observation_params": {
       "obs_size": 323,
@@ -151,7 +157,9 @@
       "bot_eval_freq": 100,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 5,
-      "bot_eval_final": 50
+      "bot_eval_final": 50,
+      "bot_eval_weights": {"random": 0.35, "greedy": 0.30, "defensive": 0.35},
+      "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
     },
     "observation_params": {
       "obs_size": 323,
@@ -201,7 +209,9 @@
       "bot_eval_freq": 20,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 3,
-      "bot_eval_final": 20
+      "bot_eval_final": 20,
+      "bot_eval_weights": {"random": 0.35, "greedy": 0.30, "defensive": 0.35},
+      "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
     },
     "observation_params": {
       "obs_size": 323,

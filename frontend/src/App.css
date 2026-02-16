@@ -712,6 +712,67 @@ body {
   gap: 8px;
 }
 
+.scoring-panel {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  margin: 0 0 8px 0;
+  padding: 2px 0;
+}
+
+.scoring-panel__bar {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  position: relative;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+}
+
+.scoring-panel__segment {
+  height: 100%;
+}
+
+.scoring-panel__segment--p1 {
+  background: var(--hp-bar-player1);
+}
+
+.scoring-panel__segment--p2 {
+  background: var(--hp-bar-player2);
+}
+
+.scoring-panel__labels {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  pointer-events: none;
+}
+
+.scoring-panel__divider {
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  background: #ffffff;
+  transform: translateX(-50%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.scoring-panel__score {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: var(--font-weight-bold);
+}
+
 .deployment-panel {
   background: var(--bg-secondary);
   border: 1px solid #555;

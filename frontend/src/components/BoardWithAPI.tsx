@@ -634,6 +634,27 @@ export const BoardWithAPI: React.FC = () => {
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
 
+      <div className="scoring-panel">
+        {(() => {
+          const p1Score = victoryPoints ? (victoryPoints[1] ?? victoryPoints["1"] ?? 0) : 0;
+          const p2Score = victoryPoints ? (victoryPoints[2] ?? victoryPoints["2"] ?? 0) : 0;
+          const total = p1Score + p2Score;
+          const p1Percent = total > 0 ? (p1Score / total) * 100 : 50;
+          const p2Percent = 100 - p1Percent;
+          return (
+            <div className="scoring-panel__bar" role="img" aria-label={`Scoring P1 ${p1Score} points, P2 ${p2Score} points`}>
+              <div className="scoring-panel__segment scoring-panel__segment--p1" style={{ width: `${p1Percent}%` }} />
+              <div className="scoring-panel__segment scoring-panel__segment--p2" style={{ width: `${p2Percent}%` }} />
+              <div className="scoring-panel__divider" />
+              <div className="scoring-panel__labels">
+                <span className="scoring-panel__score">P1: {p1Score}</span>
+                <span className="scoring-panel__score">P2: {p2Score}</span>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
       {/* AI Status Display */}
       {isAiMode && (
         <div

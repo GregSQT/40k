@@ -10,7 +10,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
-from engine.game_utils import add_console_log, safe_print
+from engine.game_utils import add_console_log, safe_print, add_debug_file_log
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
@@ -213,6 +213,17 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         else:
             return True, charge_phase_end(game_state)
 
+    if "debug_mode" in game_state and game_state["debug_mode"]:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        active_charge_unit = game_state.get("active_charge_unit")
+        pool_size = len(game_state.get("charge_activation_pool", []))
+        add_debug_file_log(
+            game_state,
+            f"[CHARGE TRACE] E{episode} T{turn} execute_action action={action_type} "
+            f"unit_id={unit_id} active_charge_unit={active_charge_unit} pool_size={pool_size}"
+        )
+
     # Validate unit is eligible (keep for validation, remove only after successful action)
     if unit_id not in game_state["charge_activation_pool"]:
         return False, {"error": "unit_not_eligible", "unitId": unit_id, "action": action_type}
@@ -289,6 +300,19 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 valid_targets = charge_build_valid_targets(game_state, unit_id)
                 had_valid_destinations = len(valid_targets) > 0
                 return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
+            # PvE AI: treat skip as explicit wait to avoid infinite loop on non-active unit
+            if "pve_mode" not in config:
+                config_pve_mode = False
+            else:
+                config_pve_mode = config["pve_mode"]
+            if not isinstance(config_pve_mode, bool):
+                raise ValueError(f"pve_mode must be boolean (got {type(config_pve_mode).__name__})")
+            current_player = require_key(game_state, "current_player")
+            is_pve_ai = config_pve_mode and current_player == 2
+            if is_pve_ai:
+                valid_targets = charge_build_valid_targets(game_state, unit_id)
+                had_valid_destinations = len(valid_targets) > 0
+                return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
             # Unit is in pool but not active - return no effect (don't remove from pool)
             return True, {"action": "no_effect", "unitId": unit_id, "reason": "unit_not_active_in_charge_phase"}
         # AI_TURN.md Line 515: Agent chooses wait (has valid destinations, chooses to skip)
@@ -336,6 +360,14 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
 
     # Unit execution loop (automatic)
     execution_result = charge_unit_execution_loop(game_state, unit["id"])
+    if "debug_mode" in game_state and game_state["debug_mode"]:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        add_debug_file_log(
+            game_state,
+            f"[CHARGE TRACE] E{episode} T{turn} _handle_unit_activation unit_id={unit['id']} "
+            f"execution_result_ok={execution_result[0] if isinstance(execution_result, tuple) else 'invalid'}"
+        )
 
     # Clean flag detection
     # AI_TURN.md COMPLIANCE: Direct field access with explicit validation
@@ -371,6 +403,14 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             waiting_for_player = execution_result[1]["waiting_for_player"]
 
         if waiting_for_player:
+            if "debug_mode" in game_state and game_state["debug_mode"]:
+                episode = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                add_debug_file_log(
+                    game_state,
+                    f"[CHARGE TRACE] E{episode} T{turn} _handle_unit_activation waiting_for_player=True "
+                    f"unit_id={unit['id']} is_pve_ai={is_pve_ai} is_gym_training={is_gym_training}"
+                )
             if "valid_targets" not in execution_result[1]:
                 raise KeyError("Execution result missing required 'valid_targets' field")
             valid_targets = execution_result[1]["valid_targets"]
@@ -593,6 +633,14 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
         "valid_targets": valid_targets,  # List of target dicts
         "waiting_for_player": True
     }
+    if "debug_mode" in game_state and game_state["debug_mode"]:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        add_debug_file_log(
+            game_state,
+            f"[CHARGE TRACE] E{episode} T{turn} charge_unit_execution_loop unit_id={unit_id} "
+            f"valid_targets={len(valid_targets)} waiting_for_player=True"
+        )
     
     # Add blinking effect for PvP and PvE modes
     if should_blink:
@@ -1367,6 +1415,14 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     if "valid_charge_destinations_pool" not in game_state:
         raise KeyError("game_state missing required 'valid_charge_destinations_pool' field")
     valid_pool = game_state["valid_charge_destinations_pool"]
+    if "debug_mode" in game_state and game_state["debug_mode"]:
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        add_debug_file_log(
+            game_state,
+            f"[CHARGE TRACE] E{episode} T{turn} charge_target_selection unit_id={unit_id} "
+            f"target_id={target_id} charge_roll={charge_roll} valid_pool={len(valid_pool)}"
+        )
 
     # Check if pool is empty (roll too low)
     if not valid_pool:

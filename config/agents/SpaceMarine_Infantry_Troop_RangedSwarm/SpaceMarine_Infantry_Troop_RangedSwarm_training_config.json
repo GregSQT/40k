@@ -1,19 +1,21 @@
 {
   "default": {
   "type": "################################################### Default ###################################################",
-  "total_episodes": 50000,
+  "total_episodes": 20000,
   "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
   "max_turns_per_episode": 5,
-  "n_envs": 36,
+  "n_envs": 48,
   "callback_params": {
     "checkpoint_save_freq": 50000,
     "checkpoint_name_prefix": "ppo_checkpoint",
     "eval_deterministic": false,
     "eval_render": false,
-    "bot_eval_freq": 200,
+    "bot_eval_freq": 500,
     "bot_eval_use_episodes": true,
     "bot_eval_intermediate": 20,
-    "bot_eval_final": 0
+    "bot_eval_final": 100,
+    "bot_eval_weights": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
+    "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
   },
     "observation_params": {
       "obs_size": 323,
@@ -25,22 +27,22 @@
   "step_log_buffer_size": 200,
   "model_params": {
     "policy": "MlpPolicy",
-    "learning_rate": {"initial": 0.00006, "final": 0.00004},
-    "n_steps": 61440,
-    "batch_size": 10240,
-    "n_epochs": 15,
-    "gamma": 0.95,
-    "gae_lambda": 0.99,
-    "clip_range": 0.15,
+    "learning_rate": {"initial": 0.00025, "final": 0.00010},
+    "n_steps": 32768,
+    "batch_size": 4096,
+    "n_epochs": 10,
+    "gamma": 0.97,
+    "gae_lambda": 0.96,
+    "clip_range": 0.2,
     "clip_range_vf": null,
     "normalize_advantage": true,
-    "ent_coef": 0.18,
+    "ent_coef": 0.05,
     "vf_coef": 1.0,
     "max_grad_norm": 0.5,
-    "target_kl": 0.02,
+    "target_kl": 0.01,
     "tensorboard_log": "./tensorboard/",
     "policy_kwargs": {
-      "net_arch": [512, 512]
+      "net_arch": [320, 320]
     },
     "verbose": 0
   },
@@ -54,8 +56,8 @@
   },
   "bot_training": {
     "ratios": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
-    "greedy_randomness": 0.10,
-    "defensive_randomness": 0.10
+    "greedy_randomness": 0.15,
+    "defensive_randomness": 0.15
   }
 },
   "debug": {
@@ -73,7 +75,9 @@
       "bot_eval_freq": 10000,
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 10,
-      "bot_eval_final": 0
+      "bot_eval_final": 0,
+      "bot_eval_weights": {"random": 0.35, "greedy": 0.30, "defensive": 0.35},
+      "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
     },
     "observation_params": {
       "obs_size": 323,

@@ -243,7 +243,7 @@ def _parse_param_value(value: str) -> Any:
     return value
 
 
-def _apply_param_overrides(config: dict, overrides: Optional[List]) -> None:
+def _apply_param_overrides(config: dict, overrides: Optional[List], log_overrides: bool = True) -> None:
     """Apply --param key value overrides to config in-place.
     Key can use dot notation (e.g. model_params.n_steps) or short aliases (e.g. n_steps).
     """
@@ -259,7 +259,8 @@ def _apply_param_overrides(config: dict, overrides: Optional[List]) -> None:
                 d[k] = {}
             d = d[k]
         d[keys[-1]] = v
-        print(f"   ⚙️  Override: {path} = {v}")
+        if log_overrides:
+            print(f"   ⚙️  Override: {path} = {v}")
 
 # Replay converter (extracted to ai/replay_converter.py)
 from ai.replay_converter import (
@@ -2030,10 +2031,14 @@ def main():
         config = get_config_loader()
         _original_load = config.load_agent_training_config
 
+        _overrides_logged = False
+
         def _load_with_overrides(agent_key, phase):
+            nonlocal _overrides_logged
             cfg = _original_load(agent_key, phase)
             if isinstance(cfg, dict):
-                _apply_param_overrides(cfg, args.param)
+                _apply_param_overrides(cfg, args.param, log_overrides=not _overrides_logged)
+                _overrides_logged = True
             return cfg
 
         config.load_agent_training_config = _load_with_overrides

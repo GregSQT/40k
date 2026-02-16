@@ -106,39 +106,27 @@ class EpisodeTerminationCallback(BaseCallback):
         """Track episodes and display progress."""
         self.step_count += 1
 
-        # Detect episodes using MULTIPLE methods
-        episode_ended = False
+        # Detect episode completions. In vectorized training, multiple envs can end
+        # on the same callback step, so we must count all completed episodes.
+        episodes_finished = 0
 
-        # Method 1: Check info dicts for 'episode' key (SB3 standard)
+        # Method 1 (preferred): infos with SB3 "episode" payload.
         if hasattr(self, 'locals') and 'infos' in self.locals:
-            for info in self.locals['infos']:
-                if 'episode' in info:
-                    episode_ended = True
-                    self.episode_count += 1
-                    break
+            infos = self.locals['infos']
+            if isinstance(infos, list):
+                episodes_finished = sum(1 for info in infos if isinstance(info, dict) and 'episode' in info)
 
-        # Method 2: Check dones array (backup)
-        if not episode_ended and hasattr(self, 'locals') and 'dones' in self.locals:
-            if any(self.locals['dones']):
-                episode_ended = True
-                self.episode_count += 1
-
-        # Method 3: Try to get episode count from environment directly (most reliable)
-        if not episode_ended and hasattr(self, 'training_env'):
+        # Method 2 (fallback): dones array when infos do not expose episode payload.
+        if episodes_finished == 0 and hasattr(self, 'locals') and 'dones' in self.locals:
+            dones = self.locals['dones']
             try:
-                if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
-                    env = self.training_env.envs[0]
-                    # Unwrap ActionMasker/Monitor wrappers
-                    while hasattr(env, 'env'):
-                        env = env.env
+                episodes_finished = int(sum(1 for d in dones if bool(d)))
+            except TypeError:
+                episodes_finished = 1 if bool(dones) else 0
 
-                    if hasattr(env, 'episode_count'):
-                        env_episodes = env.episode_count
-                        if env_episodes > self.episode_count:
-                            self.episode_count = env_episodes
-                            episode_ended = True
-            except Exception:
-                pass
+        episode_ended = episodes_finished > 0
+        if episode_ended:
+            self.episode_count += episodes_finished
 
         # Update progress display on episode end
         if episode_ended:
@@ -942,8 +930,9 @@ class BotEvaluationCallback(BaseCallback):
             # Episode-based evaluation
             if self.metrics_tracker:
                 current_episode = self.metrics_tracker.episode_count
-                # Evaluate every eval_freq episodes, but only once per episode
-                if current_episode > 0 and current_episode % self.eval_freq == 0 and current_episode != self.last_eval_episode:
+                # Vectorized training can skip exact multiples (e.g., jump from 490 to 530),
+                # so trigger when we have progressed by at least eval_freq episodes.
+                if current_episode > 0 and (current_episode - self.last_eval_episode) >= self.eval_freq:
                     should_evaluate = True
                     self.last_eval_episode = current_episode
         else:
@@ -954,12 +943,8 @@ class BotEvaluationCallback(BaseCallback):
         if should_evaluate:
             results = self._evaluate_against_bots()
 
-            # Calculate combined performance (evaluate_against_bots returns dict with 'random','greedy','defensive','combined')
-            combined_win_rate = (
-                results['random'] * 0.35 +
-                results['greedy'] * 0.30 +
-                results['defensive'] * 0.35
-            )
+            # Use combined metric computed by evaluate_against_bots from agent config.
+            combined_win_rate = require_key(results, 'combined')
 
             # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)
             if self.metrics_tracker:
