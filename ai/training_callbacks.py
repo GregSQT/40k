@@ -896,10 +896,18 @@ class BotEvaluationCallback(BaseCallback):
     def __init__(self, eval_freq: int = 5000, n_eval_episodes: int = 20,
                  best_model_save_path: str = None, metrics_tracker=None,
                  use_episode_freq: bool = False, verbose: int = 1,
-                 training_config_name: str = None, rewards_config_name: str = None):
+                 training_config_name: str = None, rewards_config_name: str = None,
+                 save_best_robust: bool = False, robust_window: int = 3,
+                 robust_drawdown_penalty: float = 0.5):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
+        if robust_window <= 0:
+            raise ValueError(f"robust_window must be > 0 (got {robust_window})")
+        if robust_drawdown_penalty < 0.0:
+            raise ValueError(
+                f"robust_drawdown_penalty must be >= 0.0 (got {robust_drawdown_penalty})"
+            )
         self.training_config_name = training_config_name
         self.rewards_config_name = rewards_config_name
         self.eval_freq = eval_freq
@@ -909,6 +917,11 @@ class BotEvaluationCallback(BaseCallback):
         self.use_episode_freq = use_episode_freq
         self.last_eval_episode = 0
         self.best_combined_win_rate = 0.0
+        self.save_best_robust = save_best_robust
+        self.robust_window = robust_window
+        self.robust_drawdown_penalty = robust_drawdown_penalty
+        self.combined_history = deque(maxlen=robust_window)
+        self.best_robust_score = -float("inf")
 
         if EVALUATION_BOTS_AVAILABLE:
             # Initialize bots with stochasticity to prevent overfitting (15% random actions)
@@ -919,6 +932,15 @@ class BotEvaluationCallback(BaseCallback):
             }
         else:
             self.bots = {}
+
+    def _save_model_with_vecnormalize(self, save_path: str) -> None:
+        """Save model and associated VecNormalize statistics."""
+        self.model.save(save_path)
+        try:
+            from ai.vec_normalize_utils import save_vec_normalize
+            save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
+        except Exception:
+            pass
 
     def _on_step(self) -> bool:
         if not EVALUATION_BOTS_AVAILABLE:
@@ -965,12 +987,26 @@ class BotEvaluationCallback(BaseCallback):
                 self.best_combined_win_rate = combined_win_rate
                 if self.best_model_save_path:
                     save_path = f"{self.best_model_save_path}/best_model"
-                    self.model.save(save_path)
-                    try:
-                        from ai.vec_normalize_utils import save_vec_normalize
-                        save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
-                    except Exception:
-                        pass
+                    self._save_model_with_vecnormalize(save_path)
+
+            # Optional robust checkpoint selection: moving average penalized by drawdown.
+            self.combined_history.append(combined_win_rate)
+            if self.save_best_robust and len(self.combined_history) >= self.robust_window:
+                current_peak = max(self.combined_history)
+                current_drawdown = current_peak - combined_win_rate
+                moving_average = float(np.mean(self.combined_history))
+                robust_score = moving_average - (self.robust_drawdown_penalty * current_drawdown)
+
+                if hasattr(self.model, 'logger') and self.model.logger:
+                    self.model.logger.record('eval_bots/robust_score', robust_score)
+                    self.model.logger.record('eval_bots/robust_moving_average', moving_average)
+                    self.model.logger.record('eval_bots/robust_drawdown', current_drawdown)
+
+                if robust_score > self.best_robust_score:
+                    self.best_robust_score = robust_score
+                    if self.best_model_save_path:
+                        robust_save_path = f"{self.best_model_save_path}/best_robust_model"
+                        self._save_model_with_vecnormalize(robust_save_path)
         return True
 
     def _evaluate_against_bots(self) -> Dict[str, float]:

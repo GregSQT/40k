@@ -1694,6 +1694,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         bot_eval_freq = require_key(callback_params, "bot_eval_freq")
         bot_n_episodes_intermediate = require_key(callback_params, "bot_eval_intermediate")
         bot_eval_use_episodes = require_key(callback_params, "bot_eval_use_episodes")
+        save_best_robust = bool(callback_params.get("save_best_robust", False))
+        robust_window = 3
+        robust_drawdown_penalty = 0.5
+        if save_best_robust:
+            robust_window = int(require_key(callback_params, "robust_window"))
+            robust_drawdown_penalty = float(require_key(callback_params, "robust_drawdown_penalty"))
         
         # Store final eval count for use after training completes
         training_config["_bot_eval_final"] = require_key(callback_params, "bot_eval_final")
@@ -1708,7 +1714,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             use_episode_freq=bot_eval_use_episodes,
             verbose=1,
             training_config_name=training_config_name,
-            rewards_config_name=rewards_config_name
+            rewards_config_name=rewards_config_name,
+            save_best_robust=save_best_robust,
+            robust_window=robust_window,
+            robust_drawdown_penalty=robust_drawdown_penalty,
         )
         callbacks.append(bot_eval_callback)
         

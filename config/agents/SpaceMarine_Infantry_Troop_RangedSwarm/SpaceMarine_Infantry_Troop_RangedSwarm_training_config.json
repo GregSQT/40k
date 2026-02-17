@@ -14,6 +14,9 @@
     "bot_eval_use_episodes": true,
     "bot_eval_intermediate": 50,
     "bot_eval_final": 100,
+    "save_best_robust": true,
+    "robust_window": 3,
+    "robust_drawdown_penalty": 0.5,
     "bot_eval_weights": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
     "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
   },
@@ -40,6 +43,70 @@
     "vf_coef": 1.0,
     "max_grad_norm": 0.5,
     "target_kl": 0.005,
+    "tensorboard_log": "./tensorboard/",
+    "policy_kwargs": {
+      "net_arch": [320, 320]
+    },
+    "verbose": 0
+  },
+  "vec_normalize": {
+    "enabled": true,
+    "norm_obs": true,
+    "norm_reward": true,
+    "clip_obs": 10.0,
+    "clip_reward": 10.0,
+    "gamma": 0.99
+  },
+  "bot_training": {
+    "ratios": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
+    "greedy_randomness": 0.15,
+    "defensive_randomness": 0.15
+  }
+},
+  "stabilize": {
+  "type": "############################################### Stabilize (Phase 2) ###############################################",
+  "total_episodes": 4000,
+  "total_episodes_normal": "Phase 2 append anti-regression",
+  "max_turns_per_episode": 5,
+  "n_envs": 48,
+  "callback_params": {
+    "checkpoint_save_freq": 50000,
+    "checkpoint_name_prefix": "ppo_checkpoint",
+    "eval_deterministic": false,
+    "eval_render": false,
+    "bot_eval_freq": 500,
+    "bot_eval_use_episodes": true,
+    "bot_eval_intermediate": 50,
+    "bot_eval_final": 100,
+    "save_best_robust": true,
+    "robust_window": 3,
+    "robust_drawdown_penalty": 0.5,
+    "bot_eval_weights": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
+    "bot_eval_randomness": {"greedy": 0.15, "defensive": 0.15}
+  },
+    "observation_params": {
+      "obs_size": 323,
+    "perception_radius": 25,
+    "max_nearby_units": 10,
+    "max_valid_targets": 5,
+    "justification": "R=25 covers MOVE(12)+CHARGE(12)+ENEMY_OFFSET(1). 314 floats = 16 global (added has_advanced) + 22 unit capabilities + 32 terrain + 72 ally + 132 enemy (6×22) + 40 targets (5×8) - ADVANCE_IMPLEMENTATION_PLAN.md"
+  },
+  "step_log_buffer_size": 200,
+  "model_params": {
+    "policy": "MlpPolicy",
+    "learning_rate": {"initial": 0.00012, "final": 0.00003},
+    "n_steps": 16384,
+    "batch_size": 4096,
+    "n_epochs": 4,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.12,
+    "clip_range_vf": null,
+    "normalize_advantage": true,
+    "ent_coef": 0.05,
+    "vf_coef": 1.0,
+    "max_grad_norm": 0.5,
+    "target_kl": 0.004,
     "tensorboard_log": "./tensorboard/",
     "policy_kwargs": {
       "net_arch": [320, 320]
