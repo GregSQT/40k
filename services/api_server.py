@@ -6,8 +6,11 @@ Connects AI_TURN.md compliant engine to frontend board visualization
 
 import json
 import os
+import sqlite3
 import sys
 import time
+import hashlib
+import secrets
 from typing import Dict, Any, Optional
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -24,6 +27,9 @@ sys.path.insert(0, engine_dir)
 from engine.w40k_core import W40KEngine
 from main import load_config
 from shared.data_validation import require_key
+
+AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
+PBKDF2_ITERATIONS = 200000
 
 
 def make_json_serializable(obj):
@@ -73,12 +79,344 @@ def _sync_units_hp_from_cache(serializable_state: Dict[str, Any], game_state: Di
             continue
         unit["HP_CUR"] = require_key(cache_entry, "HP_CUR")
 
+
+def _get_auth_db_connection() -> sqlite3.Connection:
+    """
+    Return a sqlite connection configured for named column access.
+    """
+    os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
+    connection = sqlite3.connect(AUTH_DB_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def _hash_password(password: str) -> str:
+    """
+    Hash password with PBKDF2-HMAC-SHA256.
+    """
+    if not isinstance(password, str) or not password:
+        raise ValueError("password is required and must be a non-empty string")
+    salt = secrets.token_bytes(16)
+    derived_key = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PBKDF2_ITERATIONS,
+    )
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${derived_key.hex()}"
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    """
+    Verify password against PBKDF2 hash format.
+    """
+    if not isinstance(password, str) or not password:
+        return False
+    if not isinstance(stored_hash, str) or not stored_hash:
+        raise ValueError("stored_hash must be a non-empty string")
+
+    parts = stored_hash.split("$")
+    if len(parts) != 4:
+        raise ValueError("Invalid password hash format in database")
+    algorithm, iterations_str, salt_hex, hash_hex = parts
+    if algorithm != "pbkdf2_sha256":
+        raise ValueError(f"Unsupported password hash algorithm: {algorithm}")
+    iterations = int(iterations_str)
+    salt = bytes.fromhex(salt_hex)
+    expected = bytes.fromhex(hash_hex)
+    candidate = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return secrets.compare_digest(candidate, expected)
+
+
+def _extract_bearer_token() -> str:
+    """
+    Extract Bearer token from Authorization header.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        raise ValueError("Missing Authorization header")
+    parts = auth_header.strip().split(" ")
+    if len(parts) != 2 or parts[0] != "Bearer" or not parts[1]:
+        raise ValueError("Invalid Authorization header format. Expected: Bearer <token>")
+    return parts[1]
+
+
+def _resolve_permissions_for_profile(connection: sqlite3.Connection, profile_id: int) -> Dict[str, Any]:
+    """
+    Resolve allowed game modes and options for a profile.
+    """
+    modes_rows = connection.execute(
+        """
+        SELECT gm.code
+        FROM profile_game_modes pgm
+        JOIN game_modes gm ON gm.id = pgm.game_mode_id
+        WHERE pgm.profile_id = ?
+        ORDER BY gm.code
+        """,
+        (profile_id,),
+    ).fetchall()
+    option_rows = connection.execute(
+        """
+        SELECT o.code, po.enabled
+        FROM profile_options po
+        JOIN options o ON o.id = po.option_id
+        WHERE po.profile_id = ?
+        ORDER BY o.code
+        """,
+        (profile_id,),
+    ).fetchall()
+
+    options_map: Dict[str, bool] = {}
+    for row in option_rows:
+        option_code = row["code"]
+        options_map[option_code] = bool(row["enabled"])
+
+    return {
+        "game_modes": [row["code"] for row in modes_rows],
+        "options": options_map,
+    }
+
+
+def _get_authenticated_user_or_response():
+    """
+    Validate bearer session token and return current user row.
+    """
+    try:
+        token = _extract_bearer_token()
+    except ValueError as auth_error:
+        return None, (jsonify({"success": False, "error": str(auth_error)}), 401)
+
+    connection = _get_auth_db_connection()
+    try:
+        row = connection.execute(
+            """
+            SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            JOIN profiles p ON p.id = u.profile_id
+            WHERE s.token = ?
+            """,
+            (token,),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    if row is None:
+        return None, (jsonify({"success": False, "error": "Invalid or expired session"}), 401)
+    return row, None
+
+
+def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
+    """
+    Check if requested mode is present in allowed game modes.
+    """
+    allowed_modes = require_key(permissions, "game_modes")
+    if not isinstance(allowed_modes, list):
+        raise TypeError("permissions.game_modes must be a list")
+    return mode in allowed_modes
+
+
+def initialize_auth_db() -> None:
+    """
+    Create auth tables and seed default profile permissions.
+    """
+    connection = _get_auth_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                profile_id INTEGER NOT NULL REFERENCES profiles(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS game_modes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS options (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS profile_game_modes (
+                profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+                game_mode_id INTEGER NOT NULL REFERENCES game_modes(id) ON DELETE CASCADE,
+                UNIQUE(profile_id, game_mode_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS profile_options (
+                profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+                option_id INTEGER NOT NULL REFERENCES options(id) ON DELETE CASCADE,
+                enabled INTEGER NOT NULL,
+                UNIQUE(profile_id, option_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO profiles (code, label) VALUES (?, ?)",
+            ("base", "Joueur Base"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profiles (code, label) VALUES (?, ?)",
+            ("admin", "Administrateur"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            ("pve", "Player vs Environment"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            ("pvp", "Player vs Player"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            ("debug", "Debug Mode"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            ("test", "Test Mode"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO options (code, label) VALUES (?, ?)",
+            ("show_advance_warning", "Afficher avertissement mode advance"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO options (code, label) VALUES (?, ?)",
+            ("auto_weapon_selection", "Selection automatique d'arme"),
+        )
+
+        profile_row = cursor.execute(
+            "SELECT id FROM profiles WHERE code = ?",
+            ("base",),
+        ).fetchone()
+        if profile_row is None:
+            raise RuntimeError("Failed to seed required profile 'base'")
+        profile_id = profile_row["id"]
+        admin_profile_row = cursor.execute(
+            "SELECT id FROM profiles WHERE code = ?",
+            ("admin",),
+        ).fetchone()
+        if admin_profile_row is None:
+            raise RuntimeError("Failed to seed required profile 'admin'")
+        admin_profile_id = admin_profile_row["id"]
+
+        pve_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            ("pve",),
+        ).fetchone()
+        pvp_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            ("pvp",),
+        ).fetchone()
+        if pve_row is None or pvp_row is None:
+            raise RuntimeError("Failed to seed required game modes")
+        debug_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            ("debug",),
+        ).fetchone()
+        test_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            ("test",),
+        ).fetchone()
+        if debug_row is None or test_row is None:
+            raise RuntimeError("Failed to seed required admin game modes")
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (profile_id, pve_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (profile_id, pvp_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, pve_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, pvp_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, debug_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, test_row["id"]),
+        )
+
+        warning_option_row = cursor.execute(
+            "SELECT id FROM options WHERE code = ?",
+            ("show_advance_warning",),
+        ).fetchone()
+        auto_weapon_row = cursor.execute(
+            "SELECT id FROM options WHERE code = ?",
+            ("auto_weapon_selection",),
+        ).fetchone()
+        if warning_option_row is None or auto_weapon_row is None:
+            raise RuntimeError("Failed to seed required option definitions")
+
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO profile_options (profile_id, option_id, enabled)
+            VALUES (?, ?, 1)
+            """,
+            (profile_id, warning_option_row["id"]),
+        )
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO profile_options (profile_id, option_id, enabled)
+            VALUES (?, ?, 1)
+            """,
+            (profile_id, auto_weapon_row["id"]),
+        )
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO profile_options (profile_id, option_id, enabled)
+            VALUES (?, ?, 1)
+            """,
+            (admin_profile_id, warning_option_row["id"]),
+        )
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO profile_options (profile_id, option_id, enabled)
+            VALUES (?, ?, 1)
+            """,
+            (admin_profile_id, auto_weapon_row["id"]),
+        )
+
+        connection.commit()
+    finally:
+        connection.close()
+
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend requests
 
 # Minimal Flask logging for debugging when needed
 flask_request_logs = []
+
+initialize_auth_db()
 
 # Global engine instance
 engine: Optional[W40KEngine] = None
@@ -614,6 +952,140 @@ def health_check():
         "engine_initialized": engine is not None
     })
 
+@app.route('/api/auth/register', methods=['POST'])
+def register_user():
+    """Create a user account with base profile."""
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "JSON body is required"}), 400
+
+    login = data.get("login")
+    password = data.get("password")
+    if not isinstance(login, str) or not login.strip():
+        return jsonify({"success": False, "error": "login is required and must be a non-empty string"}), 400
+    if not isinstance(password, str) or not password:
+        return jsonify({"success": False, "error": "password is required and must be a non-empty string"}), 400
+
+    normalized_login = login.strip()
+    connection = _get_auth_db_connection()
+    try:
+        existing_user = connection.execute(
+            "SELECT id FROM users WHERE login = ?",
+            (normalized_login,),
+        ).fetchone()
+        if existing_user is not None:
+            return jsonify({"success": False, "error": "login already exists"}), 409
+
+        base_profile = connection.execute(
+            "SELECT id, code FROM profiles WHERE code = ?",
+            ("base",),
+        ).fetchone()
+        if base_profile is None:
+            raise RuntimeError("Profile 'base' is missing from auth database")
+
+        password_hash = _hash_password(password)
+        cursor = connection.execute(
+            "INSERT INTO users (login, password_hash, profile_id) VALUES (?, ?, ?)",
+            (normalized_login, password_hash, base_profile["id"]),
+        )
+        connection.commit()
+        return jsonify(
+            {
+                "success": True,
+                "user_id": cursor.lastrowid,
+                "login": normalized_login,
+                "profile": base_profile["code"],
+            }
+        ), 201
+    finally:
+        connection.close()
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login_user():
+    """Authenticate user and return access token with permissions."""
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "JSON body is required"}), 400
+
+    login = data.get("login")
+    password = data.get("password")
+    if not isinstance(login, str) or not login.strip():
+        return jsonify({"success": False, "error": "login is required and must be a non-empty string"}), 400
+    if not isinstance(password, str) or not password:
+        return jsonify({"success": False, "error": "password is required and must be a non-empty string"}), 400
+
+    normalized_login = login.strip()
+    connection = _get_auth_db_connection()
+    try:
+        user_row = connection.execute(
+            """
+            SELECT u.id AS user_id, u.login, u.password_hash, p.id AS profile_id, p.code AS profile_code
+            FROM users u
+            JOIN profiles p ON p.id = u.profile_id
+            WHERE u.login = ?
+            """,
+            (normalized_login,),
+        ).fetchone()
+        if user_row is None:
+            return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+        if not _verify_password(password, user_row["password_hash"]):
+            return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+        access_token = secrets.token_urlsafe(48)
+        connection.execute(
+            "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
+            (access_token, user_row["user_id"], str(int(time.time()))),
+        )
+        permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
+        connection.commit()
+
+        return jsonify(
+            {
+                "success": True,
+                "access_token": access_token,
+                "user": {
+                    "id": user_row["user_id"],
+                    "login": user_row["login"],
+                    "profile": user_row["profile_code"],
+                },
+                "permissions": permissions,
+                "default_redirect_mode": "pve",
+            }
+        )
+    finally:
+        connection.close()
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def current_user():
+    """Return current user session and permissions."""
+    user_row, error_response = _get_authenticated_user_or_response()
+    if error_response is not None:
+        return error_response
+    if user_row is None:
+        return jsonify({"success": False, "error": "authentication failed"}), 401
+
+    connection = _get_auth_db_connection()
+    try:
+        permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
+    finally:
+        connection.close()
+
+    return jsonify(
+        {
+            "success": True,
+            "user": {
+                "id": user_row["user_id"],
+                "login": user_row["login"],
+                "profile": user_row["profile_code"],
+            },
+            "permissions": permissions,
+            "default_redirect_mode": "pve",
+        }
+    )
+
 @app.route('/api/debug/engine-test', methods=['GET'])
 def test_engine():
     """Test engine initialization directly."""
@@ -647,6 +1119,12 @@ def start_game():
     global engine
     
     try:
+        auth_user, auth_error = _get_authenticated_user_or_response()
+        if auth_error is not None:
+            return auth_error
+        if auth_user is None:
+            return jsonify({"success": False, "error": "authentication failed"}), 401
+
         # Check for PvE mode in request
         data = request.get_json() or {}
         if "pve_mode" in data and not isinstance(data["pve_mode"], bool):
@@ -661,6 +1139,31 @@ def start_game():
         test_mode = data.get('test_mode', False)
         debug_mode = data.get('debug_mode', False)
         scenario_file = data.get('scenario_file', None)
+
+        requested_mode = "pvp"
+        if pve_mode:
+            requested_mode = "pve"
+        elif test_mode:
+            requested_mode = "test"
+        elif debug_mode:
+            requested_mode = "debug"
+
+        connection = _get_auth_db_connection()
+        try:
+            permissions = _resolve_permissions_for_profile(connection, auth_user["profile_id"])
+        finally:
+            connection.close()
+
+        if not _is_mode_allowed(requested_mode, permissions):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        f"Mode '{requested_mode}' is not allowed for profile "
+                        f"'{auth_user['profile_code']}'"
+                    ),
+                }
+            ), 403
         
         # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
         if test_mode:
@@ -1096,6 +1599,9 @@ def serve_frontend():
         "frontend_url": "http://localhost:5175",
         "api_endpoints": {
             "health": "/api/health",
+            "auth_register": "/api/auth/register",
+            "auth_login": "/api/auth/login",
+            "auth_me": "/api/auth/me",
             "start_game": "/api/game/start",
             "execute_action": "/api/game/action",
             "ai_turn": "/api/game/ai-turn",

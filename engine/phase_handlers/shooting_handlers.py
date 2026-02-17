@@ -3870,7 +3870,13 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Enhanced message format including shooter position and weapon name per movement phase integration
     # Positions captured before damage (target may be removed from cache if dead)
     attack_log_part = attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']
-    enhanced_message = f"Unit {unit_id} ({shooter_col}, {shooter_row}) SHOT Unit {target_id} ({target_col}, {target_row}){weapon_suffix} : {attack_log_part}"
+    shot_rule_marker = ""
+    if str(unit_id) in require_key(game_state, "units_fled") and _unit_has_rule(shooter, "shoot_after_flee"):
+        shot_rule_marker = " (SHOOT AFTER FLED)"
+    enhanced_message = (
+        f"Unit {unit_id} ({shooter_col}, {shooter_row}) SHOT{shot_rule_marker} "
+        f"Unit {target_id} ({target_col}, {target_row}){weapon_suffix} : {attack_log_part}"
+    )
 
     # CRITICAL FIX: Append action_log BEFORE reward calculation
     # This ensures the log exists even if reward calculation fails
@@ -3905,6 +3911,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     # Append the shoot log entry immediately
     game_state["action_logs"].append(shoot_log_entry)
+    add_console_log(game_state, enhanced_message)
     
     # DEBUG: Log shooting attack execution
     if "episode_number" in game_state and "turn" in game_state:

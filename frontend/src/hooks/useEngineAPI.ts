@@ -1,5 +1,6 @@
 // frontend/src/hooks/useEngineAPI.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
@@ -240,9 +241,17 @@ export const useEngineAPI = () => {
           requestPayload.scenario_file = "config/scenario_pve.json";
         }
 
+        const authSession = getAuthSession();
+        if (!authSession?.token) {
+          throw new Error("Session utilisateur manquante. Merci de vous reconnecter.");
+        }
+
         const response = await fetch(`${API_BASE}/game/start`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authSession.token}`,
+          },
           body: JSON.stringify(requestPayload),
         });
 

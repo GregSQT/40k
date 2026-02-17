@@ -3,6 +3,7 @@ import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import "../App.css";
+import { clearAuthSession, getAuthSession } from "../auth/authStorage";
 import { useEngineAPI } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
@@ -17,6 +18,14 @@ import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import { UnitStatusTable } from "./UnitStatusTable";
 
 export const BoardWithAPI: React.FC = () => {
+  const authSession = getAuthSession();
+  if (!authSession) {
+    throw new Error("Session utilisateur introuvable dans BoardWithAPI");
+  }
+
+  const canUseAdvanceWarning = authSession.permissions.options.show_advance_warning;
+  const canUseAutoWeaponSelection = authSession.permissions.options.auto_weapon_selection;
+
   const apiProps = useEngineAPI();
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
 
@@ -116,13 +125,18 @@ export const BoardWithAPI: React.FC = () => {
     const showDebugStr = localStorage.getItem("showDebug");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
     return {
-      showAdvanceWarning: showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : false,
+      showAdvanceWarning:
+        canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
       showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
-      autoSelectWeapon: autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true,
+      autoSelectWeapon:
+        canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
     };
   });
 
   const handleToggleAdvanceWarning = (value: boolean) => {
+    if (!canUseAdvanceWarning) {
+      return;
+    }
     setSettings((prev) => ({ ...prev, showAdvanceWarning: value }));
     localStorage.setItem("showAdvanceWarning", JSON.stringify(value));
   };
@@ -133,6 +147,9 @@ export const BoardWithAPI: React.FC = () => {
   };
 
   const handleToggleAutoSelectWeapon = (value: boolean) => {
+    if (!canUseAutoWeaponSelection) {
+      return;
+    }
     setSettings((prev) => ({ ...prev, autoSelectWeapon: value }));
     localStorage.setItem("autoSelectWeapon", JSON.stringify(value));
   };
@@ -823,11 +840,17 @@ export const BoardWithAPI: React.FC = () => {
       <SettingsMenu
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onLogout={() => {
+          clearAuthSession();
+          window.location.href = "/auth";
+        }}
         showAdvanceWarning={settings.showAdvanceWarning}
+        canToggleAdvanceWarning={canUseAdvanceWarning}
         onToggleAdvanceWarning={handleToggleAdvanceWarning}
         showDebug={settings.showDebug}
         onToggleDebug={handleToggleDebug}
         autoSelectWeapon={settings.autoSelectWeapon}
+        canToggleAutoSelectWeapon={canUseAutoWeaponSelection}
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
       />
     </SharedLayout>

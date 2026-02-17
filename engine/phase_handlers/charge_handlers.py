@@ -1725,9 +1725,19 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     else:
         current_turn = game_state["current_turn"]
 
+    target_col, target_row = require_unit_position(target_id, game_state)
+    charge_rule_marker = ""
+    if str(unit["id"]) in require_key(game_state, "units_fled") and _unit_has_rule(unit, "charge_after_flee"):
+        charge_rule_marker = " (CHARGE AFTER FLED)"
+    charge_message = (
+        f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker} "
+        f"Unit {target_id} ({target_col}, {target_row}) from ({orig_col}, {orig_row}) "
+        f"to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
+    )
+
     game_state["action_logs"].append({
         "type": "charge",
-        "message": f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED to ({dest_col}, {dest_row}) (Roll: {charge_roll})",
+        "message": charge_message,
         "turn": current_turn,
         "phase": "charge",
         "unitId": unit["id"],
@@ -1743,6 +1753,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         "reward": round(action_reward, 2),
         "is_ai_action": unit["player"] == 1
     })
+    add_console_log(game_state, charge_message)
 
     # Clear preview
     charge_clear_preview(game_state)

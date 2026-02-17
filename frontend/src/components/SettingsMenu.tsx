@@ -4,22 +4,28 @@ import type React from "react";
 interface SettingsMenuProps {
   isOpen: boolean;
   onClose: () => void;
+  onLogout: () => void;
   showAdvanceWarning: boolean;
+  canToggleAdvanceWarning: boolean;
   onToggleAdvanceWarning: (value: boolean) => void;
   showDebug: boolean;
   onToggleDebug: (value: boolean) => void;
   autoSelectWeapon: boolean;
+  canToggleAutoSelectWeapon: boolean;
   onToggleAutoSelectWeapon: (value: boolean) => void;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   isOpen,
   onClose,
+  onLogout,
   showAdvanceWarning,
+  canToggleAdvanceWarning,
   onToggleAdvanceWarning,
   showDebug,
   onToggleDebug,
   autoSelectWeapon,
+  canToggleAutoSelectWeapon,
   onToggleAutoSelectWeapon,
 }) => {
   if (!isOpen) return null;
@@ -62,22 +68,24 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           ⚙️ Paramètres
         </h2>
 
-        <div style={{ marginBottom: "16px" }}>
-          <label
-            style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
-          >
-            <input
-              type="checkbox"
-              checked={showAdvanceWarning}
-              onChange={(e) => onToggleAdvanceWarning(e.target.checked)}
-              style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
-            />
-            <span>Afficher l'avertissement lors du mode Advance</span>
-          </label>
-          <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
-            Désactiver cette option permet de passer en mode Advance sans confirmation.
-          </p>
-        </div>
+        {canToggleAdvanceWarning && (
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+            >
+              <input
+                type="checkbox"
+                checked={showAdvanceWarning}
+                onChange={(e) => onToggleAdvanceWarning(e.target.checked)}
+                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Afficher l'avertissement lors du mode Advance</span>
+            </label>
+            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+              Désactiver cette option permet de passer en mode Advance sans confirmation.
+            </p>
+          </div>
+        )}
 
         <div style={{ marginBottom: "16px" }}>
           <label
@@ -96,24 +104,41 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           </p>
         </div>
 
-        <div style={{ marginBottom: "16px" }}>
-          <label
-            style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
-          >
-            <input
-              type="checkbox"
-              checked={autoSelectWeapon}
-              onChange={(e) => onToggleAutoSelectWeapon(e.target.checked)}
-              style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
-            />
-            <span>Sélection automatique d'arme</span>
-          </label>
-          <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
-            Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir.
-          </p>
-        </div>
+        {canToggleAutoSelectWeapon && (
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+            >
+              <input
+                type="checkbox"
+                checked={autoSelectWeapon}
+                onChange={(e) => onToggleAutoSelectWeapon(e.target.checked)}
+                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Sélection automatique d'arme</span>
+            </label>
+            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+              Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir.
+            </p>
+          </div>
+        )}
 
-        <div style={{ marginTop: "24px", display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ marginTop: "24px", display: "flex", justifyContent: "space-between" }}>
+          <button
+            type="button"
+            onClick={onLogout}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#991b1b",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "16px",
+            }}
+          >
+            Se déconnecter
+          </button>
           <button
             type="button"
             onClick={onClose}
