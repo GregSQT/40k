@@ -781,6 +781,19 @@ body {
   margin-bottom: var(--spacing-sm);
 }
 
+.deployment-panel--dual {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deployment-panel__roster {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
 .deployment-panel__player-banner {
   padding: 4px 8px;
   text-align: left;
@@ -798,6 +811,22 @@ body {
 
 .deployment-panel__player-banner--player2 {
   background-color: var(--hp-bar-player2);
+}
+
+.deployment-panel__toggle {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  color: #ffffff;
+  border-radius: 4px;
+  min-width: 24px;
+  min-height: 24px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.deployment-panel__toggle:hover {
+  background: rgba(0, 0, 0, 0.35);
 }
 
 .deployment-panel__type-group {
@@ -830,6 +859,12 @@ body {
   text-align: left;
   min-width: 50px;
   flex-shrink: 0;
+}
+
+.deployment-panel__empty {
+  color: #d0d0d0;
+  font-size: 12px;
+  padding: 4px 2px;
 }
 
 .deployment-panel__type-icons {

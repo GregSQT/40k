@@ -96,6 +96,10 @@ export const BoardWithAPI: React.FC = () => {
   // Track UnitStatusTable collapse states
   const [_player1Collapsed, setPlayer1Collapsed] = useState(false);
   const [_player2Collapsed, setPlayer2Collapsed] = useState(false);
+  const [deploymentRosterCollapsed, setDeploymentRosterCollapsed] = useState<Record<PlayerId, boolean>>({
+    1: false,
+    2: false,
+  });
 
   const getVictoryPointsForPlayer = (player: 1 | 2): number | undefined => {
     if (!apiProps.gameState) {
@@ -528,98 +532,139 @@ export const BoardWithAPI: React.FC = () => {
     }
 
     const currentDeployer = Number(deploymentState.current_deployer) as PlayerId;
-    const deployableIdsRaw = deploymentState.deployable_units?.[String(currentDeployer)] || [];
-    const deployableUnits = deployableIdsRaw
-      .map((id) => apiProps.gameState!.units.find((u) => String(u.id) === String(id)))
-      .filter((u): u is Unit => Boolean(u));
-    const deploymentPlayerClass =
-      currentDeployer === 2 ? "deployment-panel--player2" : "deployment-panel--player1";
-    const iconBorderColor = currentDeployer === 2 ? "var(--hp-bar-player2)" : "var(--hp-bar-player1)";
-    const deployableByType: Record<string, Unit[]> = {};
-    deployableUnits.forEach((unit) => {
-      const typeKey = unit.unitType || unit.type || unit.name || "Unknown";
-      if (!deployableByType[typeKey]) {
-        deployableByType[typeKey] = [];
-      }
-      deployableByType[typeKey].push(unit);
-    });
+    const players: PlayerId[] = [1, 2];
+    const getIconBorderColor = (player: PlayerId): string =>
+      player === 2 ? "var(--hp-bar-player2)" : "var(--hp-bar-player1)";
 
     return (
-      <div className={`deployment-panel ${deploymentPlayerClass}`}>
-        <div
-          className={`deployment-panel__player-banner ${
-            currentDeployer === 2
-              ? "deployment-panel__player-banner--player2"
-              : "deployment-panel__player-banner--player1"
-          }`}
-        >
-          Player {currentDeployer} - Deployment
-        </div>
-        <div className="deployment-panel__type-list">
-          {Object.entries(deployableByType).map(([typeKey, unitsOfType]) => (
-            <div
-              key={`deploy-type-${typeKey}`}
-              className={`deployment-panel__type-group deployment-panel__type-group--player${currentDeployer}`}
-            >
-              <div className="deployment-panel__type-label">
-                {typeKey} : 
+      <div className="deployment-panel deployment-panel--dual">
+        {players.map((player) => {
+          const deployableIdsRaw = deploymentState.deployable_units?.[String(player)] || [];
+          const deployableUnits = deployableIdsRaw
+            .map((id) => apiProps.gameState!.units.find((u) => String(u.id) === String(id)))
+            .filter((u): u is Unit => Boolean(u));
+          const deployableByType: Record<string, Unit[]> = {};
+          deployableUnits.forEach((unit) => {
+            const typeKey = unit.unitType || unit.type || unit.name || "Unknown";
+            if (!deployableByType[typeKey]) {
+              deployableByType[typeKey] = [];
+            }
+            deployableByType[typeKey].push(unit);
+          });
+          const isCurrentDeployer = player === currentDeployer;
+          const isCollapsed = deploymentRosterCollapsed[player];
+
+          return (
+            <div key={`deployment-roster-${player}`} className="deployment-panel__roster">
+              <div
+                className={`deployment-panel__player-banner ${
+                  player === 2
+                    ? "deployment-panel__player-banner--player2"
+                    : "deployment-panel__player-banner--player1"
+                }`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
+              >
+                <span>
+                  Player {player} - Deployment {isCurrentDeployer ? "(Active)" : "(Waiting)"}
+                </span>
+                <button
+                  type="button"
+                  className="deployment-panel__toggle"
+                  onClick={() =>
+                    setDeploymentRosterCollapsed((prev) => ({
+                      ...prev,
+                      [player]: !prev[player],
+                    }))
+                  }
+                  aria-label={isCollapsed ? `Etendre roster player ${player}` : `Reduire roster player ${player}`}
+                >
+                  {isCollapsed ? "+" : "−"}
+                </button>
               </div>
-              <div className="deployment-panel__type-icons">
-                {unitsOfType.map((unit) => {
-                  const isSelected = apiProps.selectedUnitId === unit.id;
-                  const displayName = unit.DISPLAY_NAME || unit.name || typeKey;
-                  return (
-                    <button
-                      type="button"
-                      className="deployment-panel__unit-icon"
-                      key={`deploy-unit-${unit.id}`}
-                      title={`${displayName} - ID ${unit.id}`}
-                      onClick={() => {
-                        apiProps.onSelectUnit(unit.id);
-                        setClickedUnitId(null);
-                      }}
-                      style={{
-                        width: "42px",
-                        height: "42px",
-                        borderRadius: "6px",
-                        border: isSelected ? "2px solid #7CFF7C" : `1px solid ${iconBorderColor}`,
-                        background: isSelected ? "rgba(124, 255, 124, 0.2)" : "rgba(0, 0, 0, 0.35)",
-                        color: "white",
-                        cursor: "pointer",
-                        padding: "0",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        overflow: "hidden",
-                        position: "relative",
-                      }}
+
+              {!isCollapsed && (
+                <div className="deployment-panel__type-list">
+                  {Object.keys(deployableByType).length === 0 && (
+                    <div className="deployment-panel__empty">Aucune unite deployable restante</div>
+                  )}
+                  {Object.entries(deployableByType).map(([typeKey, unitsOfType]) => (
+                    <div
+                      key={`deploy-type-${player}-${typeKey}`}
+                      className={`deployment-panel__type-group deployment-panel__type-group--player${player}`}
                     >
-                      <img
-                        src={unit.ICON}
-                        alt={displayName}
-                        style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
-                      />
-                      <span
-                        style={{
-                          position: "absolute",
-                          right: "2px",
-                          bottom: "1px",
-                          fontSize: "9px",
-                          lineHeight: "1",
-                          background: "rgba(0, 0, 0, 0.65)",
-                          padding: "1px 2px",
-                          borderRadius: "3px",
-                        }}
-                      >
-                        {unit.id}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                      <div className="deployment-panel__type-label">{typeKey} :</div>
+                      <div className="deployment-panel__type-icons">
+                        {unitsOfType.map((unit) => {
+                          const isSelected = apiProps.selectedUnitId === unit.id;
+                          const displayName = unit.DISPLAY_NAME || unit.name || typeKey;
+                          return (
+                            <button
+                              type="button"
+                              className="deployment-panel__unit-icon"
+                              key={`deploy-unit-${player}-${unit.id}`}
+                              title={`${displayName} - ID ${unit.id}${isCurrentDeployer ? "" : " (inactive this turn)"}`}
+                              onClick={() => {
+                                if (!isCurrentDeployer) {
+                                  return;
+                                }
+                                apiProps.onSelectUnit(unit.id);
+                                setClickedUnitId(null);
+                              }}
+                              disabled={!isCurrentDeployer}
+                              style={{
+                                width: "42px",
+                                height: "42px",
+                                borderRadius: "6px",
+                                border: isSelected
+                                  ? "2px solid #7CFF7C"
+                                  : `1px solid ${getIconBorderColor(player)}`,
+                                background: isSelected ? "rgba(124, 255, 124, 0.2)" : "rgba(0, 0, 0, 0.35)",
+                                color: "white",
+                                cursor: isCurrentDeployer ? "pointer" : "not-allowed",
+                                opacity: isCurrentDeployer ? 1 : 0.55,
+                                padding: "0",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                overflow: "hidden",
+                                position: "relative",
+                              }}
+                            >
+                              <img
+                                src={unit.ICON}
+                                alt={displayName}
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "contain",
+                                  pointerEvents: "none",
+                                }}
+                              />
+                              <span
+                                style={{
+                                  position: "absolute",
+                                  right: "2px",
+                                  bottom: "1px",
+                                  fontSize: "9px",
+                                  lineHeight: "1",
+                                  background: "rgba(0, 0, 0, 0.65)",
+                                  padding: "1px 2px",
+                                  borderRadius: "3px",
+                                }}
+                              >
+                                {unit.id}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     );
   })();

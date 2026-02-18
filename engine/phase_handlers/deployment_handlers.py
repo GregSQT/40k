@@ -62,6 +62,34 @@ def _mark_deployed(deployment_state: Dict[str, Any], unit_id: str, current_deplo
             raise KeyError(f"deployable_units missing player {current_deployer}")
 
 
+def _resolve_next_deployer_after_success(
+    deployment_state: Dict[str, Any], current_deployer: int
+) -> Optional[int]:
+    """
+    Resolve next deployer after a successful deployment with alternated order.
+
+    Rules:
+    - Player 1 starts (initialized elsewhere).
+    - Alternate after each deployment while both players still have deployable units.
+    - If only one player has deployable units left, that player continues.
+    - Return None when deployment is complete.
+    """
+    remaining_current = _get_deployable_remaining(deployment_state, int(current_deployer))
+    other_player = 2 if int(current_deployer) == 1 else 1
+    remaining_other = _get_deployable_remaining(deployment_state, other_player)
+
+    has_current = len(remaining_current) > 0
+    has_other = len(remaining_other) > 0
+
+    if has_current and has_other:
+        return other_player
+    if has_current:
+        return int(current_deployer)
+    if has_other:
+        return other_player
+    return None
+
+
 def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Execute deployment action.
@@ -107,15 +135,12 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     update_units_cache_position(game_state, unit_id, dest_col, dest_row)
     _mark_deployed(deployment_state, unit_id, int(current_deployer))
 
-    remaining_current = _get_deployable_remaining(deployment_state, int(current_deployer))
-    if not remaining_current:
-        next_player = 2 if int(current_deployer) == 1 else 1
-        remaining_next = _get_deployable_remaining(deployment_state, next_player)
-        if remaining_next:
-            deployment_state["current_deployer"] = next_player
-            game_state["current_player"] = next_player
-        else:
-            deployment_state["deployment_complete"] = True
+    next_deployer = _resolve_next_deployer_after_success(deployment_state, int(current_deployer))
+    if next_deployer is None:
+        deployment_state["deployment_complete"] = True
+    else:
+        deployment_state["current_deployer"] = next_deployer
+        game_state["current_player"] = next_deployer
 
     result = {
         "action": "deploy_unit",
