@@ -24,6 +24,10 @@ Si `deployment_type` vaut `active`:
 - le jeu demarre en `phase="deployment"`;
 - aucune unite n'a de position valide avant placement;
 - une action `deploy_unit` est requise pour placer chaque unite;
+- le deploiement est alterne:
+  - Player 1 commence;
+  - puis alternance P1 <-> P2 tant que les deux ont des unites deployables;
+  - si un joueur n'a plus d'unite deployable, l'autre continue seul jusqu'a terminer;
 - la phase se termine quand toutes les unites ont ete placees.
 
 ### Etat `game_state` (minimal)
@@ -34,6 +38,7 @@ Ajouts proposes:
   - `deployable_units` (liste d'IDs par joueur)
   - `deployed_units` (set d'IDs)
   - `deployment_pools` (hex valides par joueur)
+  - `deployment_order_mode` = `alternated_p1_start`
   - `deployment_complete` (bool)
 
 ### Ou sont stockees les unites avant deploiement
@@ -50,11 +55,26 @@ Ajouts proposes:
    - valide l'hex
    - met a jour `unit.col` et `unit.row`
    - ajoute l'ID a `deployed_units`
-5) Quand toutes les unites d'un joueur sont placees:
-   - `current_deployer` passe a l'autre joueur
-6) Quand toutes les unites sont placees:
+5) Gestion du joueur suivant:
+   - si les deux joueurs ont encore des unites deployables:
+     - alterner (`current_deployer` bascule vers l'autre joueur);
+   - si un seul joueur a encore des unites deployables:
+     - conserver ce joueur comme `current_deployer` jusqu'a epuisement de ses unites;
+6) Quand toutes les unites des deux joueurs sont placees:
    - `deployment_complete = true`
    - passage a la phase suivante (`command` ou `move`).
+
+### UI roster deployment (mode test)
+- Les rosters deployables des 2 joueurs sont visibles en parallele.
+- Chaque roster a un controle `reduire/etendre` (collapse/expand).
+- Ordre d'affichage impose:
+  1) Roster deployable Player 1
+  2) Roster deployable Player 2
+  3) `UnitStatusTable` Player 1
+  4) `UnitStatusTable` Player 2
+- Contraintes de position demandees:
+  - le roster de Player 1 reste au-dessus de `UnitStatusTable` de Player 2;
+  - le roster de Player 2 est place entre le roster de Player 1 et `UnitStatusTable` de Player 1.
 
 ### Regles de validation (strictes)
 - hex dans `deployment_pools[player]`.
@@ -72,6 +92,10 @@ Actions minimales:
 Flux:
 1) `deployment_start` construit les pools.
 2) `deploy_unit` place une unite si valide.
+3) alternance de `current_deployer`:
+   - P1 commence;
+   - alterner tant que les deux joueurs ont des unites deployables;
+   - quand un joueur n'a plus d'unites, l'autre termine seul.
 3) quand toutes les unites sont placees:
    - `deployment_complete = true`
    - phase suivante: `command` (ou `move` selon le flow existant).
@@ -102,12 +126,27 @@ Risques:
 - incoherence entre UI et game_state (state non synchronise).
 
 Tests minimaux:
-- deployer toutes les unites sans erreur (p1/p2).
+- deployer toutes les unites sans erreur avec alternance (P1 commence).
 - tenter un placement invalide (hors zone, wall, occupe) -> erreur explicite.
+- verifier qu'un joueur continue seul quand l'autre n'a plus d'unites deployables.
+- verifier l'affichage simultane des 2 rosters deployables avec boutons reduire/etendre.
+- verifier l'ordre d'affichage UI:
+  - roster P1
+  - roster P2
+  - `UnitStatusTable` P1
+  - `UnitStatusTable` P2
 - verifier transition `deployment` -> `command`/`move` quand tout est place.
 
 ### Checklist d'acceptation (mini)
 - chaque unite placee a une position valide (pas de hex interdit).
 - aucun placement possible hors `deployment_pools` (erreur explicite).
+- alternance respectee: P1 commence puis alternance tant que possible.
+- si un joueur n'a plus d'unite deployable, l'autre termine seul.
+- rosters deployables P1/P2 visibles en parallele avec controle reduire/etendre.
+- ordre UI respecte:
+  - roster P1
+  - roster P2
+  - `UnitStatusTable` P1
+  - `UnitStatusTable` P2
 - `deployment_complete = true` uniquement quand toutes les unites sont placees.
 - phase suivante atteinte sans activation automatique non selectionnee.
