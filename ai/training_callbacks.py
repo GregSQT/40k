@@ -3,6 +3,7 @@
 ai/training_callbacks.py - Training callbacks for Stable-Baselines3
 
 Contains:
+- LearningRateScheduleCallback: Linearly reduce learning rate during training
 - EntropyScheduleCallback: Linearly reduce entropy coefficient during training
 - EpisodeTerminationCallback: Terminate training after exact episode count
 - EpisodeBasedEvalCallback: Episode-counting evaluation callback
@@ -30,12 +31,56 @@ except ImportError:
     EVALUATION_BOTS_AVAILABLE = False
 
 __all__ = [
+    'LearningRateScheduleCallback',
     'EntropyScheduleCallback',
     'EpisodeTerminationCallback',
     'EpisodeBasedEvalCallback',
     'MetricsCollectionCallback',
     'BotEvaluationCallback'
 ]
+
+
+class LearningRateScheduleCallback(BaseCallback):
+    """Callback to linearly reduce learning rate during training (episode-based)."""
+
+    def __init__(self, start_lr: float, end_lr: float, total_episodes: int, verbose: int = 0):
+        super().__init__(verbose)
+        self.start_lr = start_lr
+        self.end_lr = end_lr
+        self.total_episodes = total_episodes
+        self.episode_count = 0
+        self.last_update_step = 0
+
+    @staticmethod
+    def _set_model_learning_rate(model, lr_value: float) -> None:
+        """Apply learning rate to all SB3 learning-rate access points."""
+        model.learning_rate = lr_value
+        # PPO uses lr_schedule internally during train(); keep it aligned with episode-based LR.
+        model.lr_schedule = lambda _progress_remaining: lr_value
+        if hasattr(model, 'policy') and hasattr(model.policy, 'optimizer'):
+            for param_group in model.policy.optimizer.param_groups:
+                param_group["lr"] = lr_value
+
+    def _on_training_start(self) -> None:
+        self._set_model_learning_rate(self.model, self.start_lr)
+
+    def _on_step(self) -> bool:
+        # Detect episode end using dones array (more reliable than info dict)
+        if hasattr(self, 'locals') and 'dones' in self.locals:
+            dones = self.locals['dones']
+            episodes_finished = sum(dones) if hasattr(dones, '__iter__') else (1 if dones else 0)
+
+            if episodes_finished > 0:
+                self.episode_count += episodes_finished
+                progress = min(1.0, self.episode_count / self.total_episodes)
+                new_lr = self.start_lr + (self.end_lr - self.start_lr) * progress
+                self._set_model_learning_rate(self.model, new_lr)
+
+                if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 1000:
+                    # Keep internal throttling state in sync without printing a separate line.
+                    # Progress display is handled by EpisodeTerminationCallback.
+                    self.last_update_step = self.num_timesteps
+        return True
 
 
 class EntropyScheduleCallback(BaseCallback):
@@ -64,7 +109,8 @@ class EntropyScheduleCallback(BaseCallback):
                 self.model.ent_coef = new_ent
 
                 if self.verbose > 0 and self.num_timesteps - self.last_update_step >= 1000:
-                    print(f"Episode {self.episode_count}/{self.total_episodes}: ent_coef = {new_ent:.3f}")
+                    # Keep internal throttling state in sync without printing a separate line.
+                    # Progress display is handled by EpisodeTerminationCallback.
                     self.last_update_step = self.num_timesteps
         return True
 
@@ -193,13 +239,25 @@ class EpisodeTerminationCallback(BaseCallback):
                     speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
                     time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
 
-                # Build detailed scenario display
-                if self.scenario_info:
-                    scenario_display = f" | {self.scenario_info}"
-                else:
-                    scenario_display = ""
+                # Build learning-rate / entropy display to keep key PPO knobs visible in progress line
+                lr_display = ""
+                if hasattr(self, 'model') and self.model is not None and hasattr(self.model, 'learning_rate'):
+                    lr_value = self.model.learning_rate
+                    if callable(lr_value):
+                        progress_remaining = self.model._current_progress_remaining if hasattr(self.model, '_current_progress_remaining') else 1.0
+                        lr_value = lr_value(progress_remaining)
+                    lr_display = f" | lr = {float(lr_value):.6f}"
+
+                ent_display = ""
+                if hasattr(self, 'model') and self.model is not None and hasattr(self.model, 'ent_coef'):
+                    ent_value = self.model.ent_coef
+                    if callable(ent_value):
+                        progress_remaining = self.model._current_progress_remaining if hasattr(self.model, '_current_progress_remaining') else 1.0
+                        ent_value = ent_value(progress_remaining)
+                    ent_display = f" | ent_coef = {float(ent_value):.3f}"
+
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
-                progress_line = f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{scenario_display}"
+                progress_line = f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{lr_display}{ent_display}"
                 print(f"\r{progress_line:<100}", end='', flush=True)
 
         # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
@@ -567,6 +625,12 @@ class MetricsCollectionCallback(BaseCallback):
         if 'bot_eval_final' not in training_config['callback_params']:
             raise KeyError("training_config['callback_params'] missing required 'bot_eval_final' field")
         n_episodes = training_config['callback_params']['bot_eval_final']
+        eval_deterministic = require_key(training_config['callback_params'], 'eval_deterministic')
+        if not isinstance(eval_deterministic, bool):
+            raise ValueError(
+                f"callback_params.eval_deterministic must be boolean "
+                f"(got {type(eval_deterministic).__name__})"
+            )
 
         # Use standalone function with progress bar for final eval
         return evaluate_against_bots(
@@ -576,7 +640,7 @@ class MetricsCollectionCallback(BaseCallback):
             n_episodes=n_episodes,
             controlled_agent=controlled_agent,
             show_progress=True,
-            deterministic=True
+            deterministic=eval_deterministic
         )
     
     def _on_step(self) -> bool:
@@ -898,7 +962,9 @@ class BotEvaluationCallback(BaseCallback):
                  use_episode_freq: bool = False, verbose: int = 1,
                  training_config_name: str = None, rewards_config_name: str = None,
                  save_best_robust: bool = False, robust_window: int = 3,
-                 robust_drawdown_penalty: float = 0.5):
+                 robust_drawdown_penalty: float = 0.5,
+                 eval_deterministic: bool = True,
+                 final_summary_target_episodes: Optional[int] = None):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -907,6 +973,10 @@ class BotEvaluationCallback(BaseCallback):
         if robust_drawdown_penalty < 0.0:
             raise ValueError(
                 f"robust_drawdown_penalty must be >= 0.0 (got {robust_drawdown_penalty})"
+            )
+        if not isinstance(eval_deterministic, bool):
+            raise ValueError(
+                f"eval_deterministic must be boolean (got {type(eval_deterministic).__name__})"
             )
         self.training_config_name = training_config_name
         self.rewards_config_name = rewards_config_name
@@ -920,8 +990,13 @@ class BotEvaluationCallback(BaseCallback):
         self.save_best_robust = save_best_robust
         self.robust_window = robust_window
         self.robust_drawdown_penalty = robust_drawdown_penalty
+        self.eval_deterministic = eval_deterministic
         self.combined_history = deque(maxlen=robust_window)
         self.best_robust_score = -float("inf")
+        self.best_robust_combined = -float("inf")
+        self.best_robust_eval_marker: Optional[int] = None
+        self.best_robust_model_path: Optional[str] = None
+        self.final_summary_target_episodes = final_summary_target_episodes
 
         if EVALUATION_BOTS_AVAILABLE:
             # Initialize bots with stochasticity to prevent overfitting (15% random actions)
@@ -948,6 +1023,7 @@ class BotEvaluationCallback(BaseCallback):
 
         # Determine if we should evaluate based on mode
         should_evaluate = False
+        eval_marker = self.num_timesteps
         if self.use_episode_freq:
             # Episode-based evaluation
             if self.metrics_tracker:
@@ -957,6 +1033,7 @@ class BotEvaluationCallback(BaseCallback):
                 if current_episode > 0 and (current_episode - self.last_eval_episode) >= self.eval_freq:
                     should_evaluate = True
                     self.last_eval_episode = current_episode
+                    eval_marker = int(current_episode)
         else:
             # Timestep-based evaluation (original behavior)
             if self.num_timesteps % self.eval_freq == 0:
@@ -997,17 +1074,35 @@ class BotEvaluationCallback(BaseCallback):
                 moving_average = float(np.mean(self.combined_history))
                 robust_score = moving_average - (self.robust_drawdown_penalty * current_drawdown)
 
-                if hasattr(self.model, 'logger') and self.model.logger:
-                    self.model.logger.record('eval_bots/robust_score', robust_score)
-                    self.model.logger.record('eval_bots/robust_moving_average', moving_average)
-                    self.model.logger.record('eval_bots/robust_drawdown', current_drawdown)
-
                 if robust_score > self.best_robust_score:
                     self.best_robust_score = robust_score
+                    self.best_robust_combined = combined_win_rate
+                    self.best_robust_eval_marker = eval_marker
                     if self.best_model_save_path:
                         robust_save_path = f"{self.best_model_save_path}/best_robust_model"
                         self._save_model_with_vecnormalize(robust_save_path)
+                        self.best_robust_model_path = f"{robust_save_path}.zip"
         return True
+
+    def _on_training_end(self) -> None:
+        """Print robust-checkpoint summary at end of training."""
+        if not self.save_best_robust:
+            return
+        if self.final_summary_target_episodes is not None:
+            if self.metrics_tracker is None:
+                return
+            if self.metrics_tracker.episode_count < self.final_summary_target_episodes:
+                return
+        if self.best_robust_score == -float("inf"):
+            return
+        print("\n📌 Robust checkpoint summary")
+        marker_name = "episodes" if self.use_episode_freq else "timesteps"
+        marker_value = self.best_robust_eval_marker if self.best_robust_eval_marker is not None else self.num_timesteps
+        print(f"   Best robust score: {self.best_robust_score:.4f}")
+        print(f"   Combined at robust best: {self.best_robust_combined:.4f}")
+        print(f"   Selected at {marker_name}: {marker_value}")
+        if self.best_robust_model_path:
+            print(f"   Robust model path: {self.best_robust_model_path}")
 
     def _evaluate_against_bots(self) -> Dict[str, float]:
         """Evaluate agent against bots using standalone function"""
@@ -1019,5 +1114,5 @@ class BotEvaluationCallback(BaseCallback):
             n_episodes=self.n_eval_episodes,
             controlled_agent=self.rewards_config_name,
             show_progress=False,
-            deterministic=True
+            deterministic=self.eval_deterministic
         )

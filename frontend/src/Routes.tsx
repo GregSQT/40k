@@ -3,6 +3,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { getAuthSession } from "./auth/authStorage";
 import { BoardWithAPI } from "./components/BoardWithAPI";
+import { BoardReplay } from "./components/BoardReplay";
 import AuthPage from "./pages/AuthPage";
 
 const RootRedirect = () => {
@@ -35,12 +36,21 @@ const ProtectedGameRoute = () => {
   return <BoardWithAPI />;
 };
 
+const ProtectedReplayRoute = () => {
+  const authSession = getAuthSession();
+  if (!authSession) {
+    return <Navigate to="/auth" replace />;
+  }
+  return <BoardReplay />;
+};
+
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/game" element={<ProtectedGameRoute />} />
+        <Route path="/replay" element={<ProtectedReplayRoute />} />
         <Route path="/" element={<RootRedirect />} />
         <Route path="*" element={<RootRedirect />} />
       </Routes>

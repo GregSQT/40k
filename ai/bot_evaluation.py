@@ -11,10 +11,60 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import os
 import sys
 import numpy as np
+from typing import Callable, Optional
 
 from shared.data_validation import require_key
 
 __all__ = ['evaluate_against_bots']
+
+
+def _build_eval_obs_normalizer(
+    model,
+    vec_normalize_enabled: bool,
+    vec_model_path: Optional[str],
+) -> Optional[Callable[[np.ndarray], np.ndarray]]:
+    """
+    Build observation normalizer for bot evaluation.
+
+    When VecNormalize is enabled in training config, evaluation must apply the same
+    observation normalization to avoid train/eval distribution mismatch.
+    """
+    if not vec_normalize_enabled:
+        return None
+
+    train_env = model.get_env() if hasattr(model, "get_env") else None
+    if train_env is not None:
+        from stable_baselines3.common.vec_env import VecNormalize
+
+        env_cursor = train_env
+        while env_cursor is not None:
+            if isinstance(env_cursor, VecNormalize):
+                vec_env = env_cursor
+
+                def _normalize_with_live_vec(obs: np.ndarray) -> np.ndarray:
+                    obs_arr = np.asarray(obs, dtype=np.float32)
+                    if obs_arr.ndim == 1:
+                        obs_arr = obs_arr.reshape(1, -1)
+                    normalized = vec_env.normalize_obs(obs_arr)
+                    return np.asarray(normalized, dtype=np.float32).squeeze()
+
+                return _normalize_with_live_vec
+            env_cursor = getattr(env_cursor, "venv", None)
+
+    if vec_model_path:
+        from ai.vec_normalize_utils import normalize_observation_for_inference
+
+        def _normalize_with_saved_stats(obs: np.ndarray) -> np.ndarray:
+            obs_arr = np.asarray(obs, dtype=np.float32)
+            normalized = normalize_observation_for_inference(obs_arr, vec_model_path)
+            return np.asarray(normalized, dtype=np.float32)
+
+        return _normalize_with_saved_stats
+
+    raise RuntimeError(
+        "VecNormalize is enabled for this agent, but bot evaluation could not access "
+        "VecNormalize stats from model env or saved model path."
+    )
 
 
 def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: str):
@@ -101,6 +151,48 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             if controlled_agent.endswith(phase_suffix):
                 base_agent_key = controlled_agent[:-len(phase_suffix)]
                 break
+
+    training_cfg = config.load_agent_training_config(base_agent_key, training_config_name)
+    vec_norm_cfg = require_key(training_cfg, "vec_normalize")
+    if not isinstance(vec_norm_cfg, dict):
+        raise TypeError(f"vec_normalize must be a dict (got {type(vec_norm_cfg).__name__})")
+    vec_normalize_enabled = bool(require_key(vec_norm_cfg, "enabled"))
+
+    vec_norm_eval_cfg = require_key(training_cfg, "vec_normalize_eval")
+    if not isinstance(vec_norm_eval_cfg, dict):
+        raise TypeError(f"vec_normalize_eval must be a dict (got {type(vec_norm_eval_cfg).__name__})")
+    vec_eval_enabled = bool(require_key(vec_norm_eval_cfg, "enabled"))
+    vec_eval_training = require_key(vec_norm_eval_cfg, "training")
+    if not isinstance(vec_eval_training, bool):
+        raise TypeError(
+            f"vec_normalize_eval.training must be boolean (got {type(vec_eval_training).__name__})"
+        )
+    vec_eval_norm_reward = require_key(vec_norm_eval_cfg, "norm_reward")
+    if not isinstance(vec_eval_norm_reward, bool):
+        raise TypeError(
+            f"vec_normalize_eval.norm_reward must be boolean (got {type(vec_eval_norm_reward).__name__})"
+        )
+    if vec_eval_training:
+        raise ValueError("vec_normalize_eval.training must be false for bot evaluation")
+    if vec_eval_norm_reward:
+        raise ValueError("vec_normalize_eval.norm_reward must be false for bot evaluation")
+    if vec_eval_enabled and not vec_normalize_enabled:
+        raise ValueError(
+            "vec_normalize_eval.enabled is true but vec_normalize.enabled is false"
+        )
+
+    models_root = config.get_models_root()
+    vec_model_path = os.path.join(
+        models_root,
+        base_agent_key,
+        f"model_{base_agent_key}.zip"
+    )
+
+    obs_normalizer = _build_eval_obs_normalizer(
+        model=model,
+        vec_normalize_enabled=vec_normalize_enabled and vec_eval_enabled,
+        vec_model_path=vec_model_path,
+    )
 
     bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
     eval_weights = bot_eval_cfg["weights"]
@@ -310,7 +402,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                                 pass
                         # LOG TEMPORAIRE: PREDICT_TIMING → only every 50 steps to avoid I/O bottleneck
                         t0 = time.perf_counter()
-                        action, _ = model.predict(obs, action_masks=action_masks, deterministic=deterministic)
+                        model_obs = obs_normalizer(obs) if obs_normalizer else obs
+                        action, _ = model.predict(model_obs, action_masks=action_masks, deterministic=deterministic)
                         predict_duration = time.perf_counter() - t0
                         if debug_mode and ep_num >= 0 and step_count % 50 == 0:
                             debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')

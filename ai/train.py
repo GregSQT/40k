@@ -162,6 +162,7 @@ from ai.bot_evaluation import evaluate_against_bots
 
 # Training callbacks (extracted to ai/training_callbacks.py)
 from ai.training_callbacks import (
+    LearningRateScheduleCallback,
     EntropyScheduleCallback,
     EpisodeTerminationCallback,
     EpisodeBasedEvalCallback,
@@ -1643,6 +1644,24 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         callbacks.append(episode_callback)
 
     # Add entropy coefficient schedule callback if configured
+    if "model_params" in training_config and "learning_rate" in training_config["model_params"]:
+        lr_cfg = training_config["model_params"]["learning_rate"]
+        if isinstance(lr_cfg, dict):
+            if "initial" not in lr_cfg or "final" not in lr_cfg:
+                raise KeyError("model_params.learning_rate dict must contain required keys: 'initial' and 'final'")
+            start_lr = float(lr_cfg["initial"])
+            end_lr = float(lr_cfg["final"])
+            total_eps = total_episodes_override if total_episodes_override else training_config["total_episodes"]
+            lr_callback = LearningRateScheduleCallback(
+                start_lr=start_lr,
+                end_lr=end_lr,
+                total_episodes=total_eps,
+                verbose=1
+            )
+            callbacks.append(lr_callback)
+            print(f"✅ Added learning-rate schedule callback: {start_lr} -> {end_lr} over {total_eps} episodes")
+
+    # Add entropy coefficient schedule callback if configured
     if "model_params" in training_config and "ent_coef" in training_config["model_params"]:
         ent_coef = training_config["model_params"]["ent_coef"]
         if isinstance(ent_coef, dict) and "start" in ent_coef and "end" in ent_coef:
@@ -1694,6 +1713,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         bot_eval_freq = require_key(callback_params, "bot_eval_freq")
         bot_n_episodes_intermediate = require_key(callback_params, "bot_eval_intermediate")
         bot_eval_use_episodes = require_key(callback_params, "bot_eval_use_episodes")
+        eval_deterministic = require_key(callback_params, "eval_deterministic")
+        if not isinstance(eval_deterministic, bool):
+            raise ValueError(
+                f"callback_params.eval_deterministic must be boolean "
+                f"(got {type(eval_deterministic).__name__})"
+            )
         save_best_robust = bool(callback_params.get("save_best_robust", False))
         robust_window = 3
         robust_drawdown_penalty = 0.5
@@ -1718,6 +1743,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             save_best_robust=save_best_robust,
             robust_window=robust_window,
             robust_drawdown_penalty=robust_drawdown_penalty,
+            eval_deterministic=eval_deterministic,
+            final_summary_target_episodes=total_eps,
         )
         callbacks.append(bot_eval_callback)
         

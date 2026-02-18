@@ -4,9 +4,9 @@
     "Unit": "######################### SpaceMarine_Infantry_Troop_RangedSwarm ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "base_actions": {
-      "ranged_attack": 0.5,
-      "melee_attack": 0.5,
-      "charge_success": 0.5,
+      "ranged_attack": 0.3,
+      "melee_attack": 0.3,
+      "charge_success": 0.1,
       "wait": -0.3
     },
     "shoot_priority_1": 0.0,
@@ -18,8 +18,8 @@
     "attack_priority_1": 0.0,
     "attack_priority_2": 0.0,
     "result_bonuses": {
-      "kill_target":  1.5,
-      "target_lowest_hp": 0.5
+      "kill_target":  1.0,
+      "target_lowest_hp": 0.3
     },
     "target_type_bonuses": {},
     "situational_modifiers": {

@@ -148,7 +148,7 @@ class W40KMetricsTracker:
         
         print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
         print(f"📊 Metric System:")
-        print(f"   🎯 0_critical/ (10) - Essential hyperparameter tuning metrics")
+        print(f"   🎯 0_critical/ (12) - Essential hyperparameter tuning metrics")
         print(f"   🎮 game_critical/ (5) - Core gameplay indicators")
         print(f"   ⚙️  training_critical/ (6) - PPO algorithm health")
         print(f"   💡 TIP: Start with 0_critical/ - everything you need for tuning")
@@ -726,6 +726,8 @@ class W40KMetricsTracker:
         - 0_critical/i_gradient_norm       - <10 -> No gradient explosion
         - 0_critical/j_immediate_reward_ratio - <0.9 -> Reward balance
         - 0_critical/k_reward_victory_gap  - >20-30 -> Reward aligned with victory
+        - 0_critical/l_value_loss_smooth   - Smoothed critic loss
+        - 0_critical/m_worst_bot_score     - Min(random, greedy, defensive)
 
         NOTE: position_score moved to combat/ category
         """
@@ -792,6 +794,8 @@ class W40KMetricsTracker:
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = np.mean(combined_losses)
             self.writer.add_scalar('0_critical/d_loss_mean', loss_mean, self.episode_count)
+            value_loss_smooth = float(np.mean(recent_value))
+            self.writer.add_scalar('0_critical/l_value_loss_smooth', value_loss_smooth, self.episode_count)
         
         # ==========================================
         # TECHNICAL HEALTH (3 metrics)
@@ -858,6 +862,10 @@ class W40KMetricsTracker:
             self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], self.episode_count)
         if 'defensive' in bot_results:
             self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], self.episode_count)
+        if all(k in bot_results for k in ('random', 'greedy', 'defensive')):
+            worst_bot_score = min(bot_results['random'], bot_results['greedy'], bot_results['defensive'])
+            self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, self.episode_count)
+            self.writer.add_scalar('0_critical/m_worst_bot_score', worst_bot_score, self.episode_count)
 
         # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:

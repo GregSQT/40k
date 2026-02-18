@@ -9,7 +9,7 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GameState, Unit, Weapon } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
-import { getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
+import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
 import BoardPvp from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -319,15 +319,21 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     if (isPlaying && selectedEpisode !== null && replayData) {
       const episode = replayData.episodes[selectedEpisode - 1];
+      const maxActionIndex = Math.min(episode.total_actions, episode.states.length);
       const interval = 500 / playbackSpeed;
 
       playbackInterval.current = setInterval(() => {
         setCurrentActionIndex((prev) => {
-          if (prev >= episode.total_actions) {
+          if (prev >= maxActionIndex) {
             setIsPlaying(false);
-            return prev;
+            return maxActionIndex;
           }
-          return prev + 1;
+          const nextIndex = prev + 1;
+          if (nextIndex >= maxActionIndex) {
+            setIsPlaying(false);
+            return maxActionIndex;
+          }
+          return nextIndex;
         });
       }, interval);
 
@@ -341,6 +347,8 @@ export const BoardReplay: React.FC = () => {
   const getCurrentGameState = (): ReplayGameState | null => {
     if (!selectedEpisode || !replayData) return null;
     const episode = replayData.episodes[selectedEpisode - 1];
+    const maxActionIndex = Math.min(episode.total_actions, episode.states.length);
+    const clampedActionIndex = Math.max(0, Math.min(currentActionIndex, maxActionIndex));
 
     const buildUnitsCache = (
       units: Unit[]
@@ -363,7 +371,7 @@ export const BoardReplay: React.FC = () => {
     // Action index 0 = initial state (before any actions)
     // Action index 1 = state after first action (states[0])
     // Action index N = state after Nth action (states[N-1])
-    if (currentActionIndex === 0) {
+    if (clampedActionIndex === 0) {
       // Enrich initial state units with stats
       const enrichedUnits = enrichUnitsWithStats(episode.initial_state.units || []);
       return {
@@ -373,7 +381,12 @@ export const BoardReplay: React.FC = () => {
         episode_steps: episode.initial_state.episode_steps || 0,
       } as ReplayGameState;
     } else {
-      const state = episode.states[currentActionIndex - 1];
+      const state = episode.states[clampedActionIndex - 1];
+      if (!state) {
+        throw new Error(
+          `Replay state missing for action index ${clampedActionIndex} (states length: ${episode.states.length})`
+        );
+      }
 
       // Enrich state units with stats
       const enrichedUnits = enrichUnitsWithStats(state?.units || []);
@@ -631,9 +644,19 @@ export const BoardReplay: React.FC = () => {
   }, [currentEpisode, currentActionIndex, enrichUnitsWithStats, unitRegistryReady]);
 
   // Get current action for move preview
+  const currentActionIndexClamped =
+    currentEpisode !== null
+      ? Math.max(
+          0,
+          Math.min(
+            currentActionIndex,
+            Math.min(currentEpisode.total_actions, currentEpisode.states.length)
+          )
+        )
+      : 0;
   const currentAction =
-    currentEpisode && currentActionIndex > 0
-      ? currentEpisode.actions[currentActionIndex - 1]
+    currentEpisode && currentActionIndexClamped > 0
+      ? currentEpisode.actions[currentActionIndexClamped - 1]
       : null;
 
   // Add ghost unit at starting position for move actions
@@ -651,7 +674,11 @@ export const BoardReplay: React.FC = () => {
         ) {
           // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
           const selectedRngWeapon = getSelectedRangedWeapon(u);
-          const rngNb = selectedRngWeapon?.NB || 0;
+          const rngNbRaw = selectedRngWeapon?.NB;
+          if (rngNbRaw === undefined) {
+            throw new Error(`Missing RNG weapon NB for replay shooter ${u.id}`);
+          }
+          const rngNb = getDiceAverage(rngNbRaw);
           const shooterId = currentAction.shooter_id;
 
           // Index of the last *completed* action before the current one
