@@ -6,6 +6,7 @@ import { TyranidInfantrySwarmRangedSwarm } from "../classes/TyranidInfantrySwarm
 
 export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static NAME = "Termagant";
+  static DISPLAY_NAME = "Termagant";
   // BASE
   static MOVE = 6; // Move distance
   static T = 3; // Toughness score

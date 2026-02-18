@@ -5,6 +5,7 @@ import { TyranidInfantryEliteMeleeElite } from "../classes/TyranidInfantryEliteM
 
 export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static NAME = "Carnifex";
+  static DISPLAY_NAME = "Carnifex";
   // BASE
   static MOVE = 8; // Move distance
   static T = 9; // Toughness score

@@ -1478,6 +1478,7 @@ class W40KEngine(gym.Env):
                                 action_details = {
                                     "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
                                     "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                    "unit_display_name": updated_unit.get("DISPLAY_NAME"),
                                     # unit_with_coords sera mis à jour plus bas avec result
                                     "action": action,
                                     "start_pos": (orig_col, orig_row)
@@ -1488,6 +1489,7 @@ class W40KEngine(gym.Env):
                                 action_details = {
                                     "current_turn": pre_action_turn,  # Use turn captured BEFORE action execution
                                     "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                    "unit_display_name": updated_unit.get("DISPLAY_NAME"),
                                     # unit_with_coords sera mis à jour plus bas avec result
                                     "action": action
                                 }
@@ -1625,6 +1627,7 @@ class W40KEngine(gym.Env):
                                 if target_unit:
                                     # Capture target coordinates - these should be stable (targets don't move during opponent's turn)
                                     action_details["target_coords"] = require_unit_position(target_unit, self.game_state)
+                                    action_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
 
                             # Déterminer step_increment selon le type d'action et success
                             # Pour les actions qui incrémentent episode_steps (ligne 642), step_increment = success
@@ -1671,6 +1674,11 @@ class W40KEngine(gym.Env):
                                 "end_pos": end_pos,  # Destination prévue (to)
                                 "unit_with_coords": f"{unit_id}({start_pos[0]},{start_pos[1]})"  # CRITICAL FIX: Unit didn't move, use start_pos
                             })
+                            target_id = action_details.get("target_id")
+                            if target_id:
+                                target_unit = self._get_unit_by_id(str(target_id))
+                                if target_unit:
+                                    action_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
 
                             # Add reward and log for failed charge action
                             step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
@@ -1777,10 +1785,12 @@ class W40KEngine(gym.Env):
                                     attack_details = {
                                         "current_turn": pre_action_turn,
                                         "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                        "unit_display_name": actual_shooter_unit.get("DISPLAY_NAME"),
                                         "unit_with_coords": f"{actual_shooter_id}({unit_col},{unit_row})",
                                         "action": action,
                                         "target_id": target_id,
                                         "target_coords": target_coords,
+                                        "target_display_name": target_unit.get("DISPLAY_NAME") if target_unit else None,
                                         "hit_roll": attack_result["hit_roll"],
                                         "wound_roll": attack_result["wound_roll"],
                                         "save_roll": attack_result["save_roll"],

@@ -5,6 +5,7 @@ import { TyranidInfantryEliteMeleeElite } from "../classes/TyranidInfantryEliteM
 
 export class GenestealerPrime extends TyranidInfantryEliteMeleeElite {
   static NAME = "GenestealerPrime";
+  static DISPLAY_NAME = "Genestealer (Prime)";
   // BASE
   static MOVE = 8; // Move distance
   static T = 5; // Toughness score

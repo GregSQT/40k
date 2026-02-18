@@ -5,6 +5,7 @@ import { TyranidInfantrySwarmMeleeSwarm } from "../classes/TyranidInfantrySwarmM
 
 export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static NAME = "Hormagaunt";
+  static DISPLAY_NAME = "Hormagaunt";
   // BASE
   static MOVE = 10; // Move distance
   static T = 3; // Toughness score

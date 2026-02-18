@@ -55,7 +55,7 @@ const UnitRow = memo<UnitRowProps>(
     const rngWeapons = unit.RNG_WEAPONS || [];
     const ccWeapons = unit.CC_WEAPONS || [];
 
-    const unitName = unit.name || unit.type || `Unit ${unit.id}`;
+    const unitName = unit.DISPLAY_NAME || unit.name || unit.type || `Unit ${unit.id}`;
     const unitRules = unit.UNIT_RULES || [];
 
     return (
@@ -85,8 +85,6 @@ const UnitRow = memo<UnitRowProps>(
                   : isClicked
                     ? "rgba(255, 200, 100, 0.1)"
                     : "transparent",
-                borderTop: "2px solid rgba(255, 255, 255, 0.2)",
-                borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
               }}
             >
               {/* Expand/Collapse Button for Unit */}

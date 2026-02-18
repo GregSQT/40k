@@ -32,6 +32,7 @@ interface APIGameState {
   units: Array<{
     id: string;
     player: number;
+    DISPLAY_NAME?: string;
     col: number;
     row: number;
     HP_CUR: number;
@@ -1073,10 +1074,16 @@ export const useEngineAPI = () => {
         }
       }
 
+      const displayName =
+        typeof unit.DISPLAY_NAME === "string" && unit.DISPLAY_NAME.trim().length > 0
+          ? unit.DISPLAY_NAME
+          : unit.unitType;
+
       return {
         id:
           parseInt(unit.id, 10) || (typeof unit.id === "number" ? unit.id : parseInt(unit.id, 10)),
-        name: unit.unitType,
+        name: displayName,
+        DISPLAY_NAME: displayName,
         type: unit.unitType,
         player: unit.player as PlayerId,
         col: unit.col,

@@ -68,6 +68,7 @@ class GameStateManager:
             "id": config["id"],
             "player": config["player"],
             "unitType": config["unitType"],  # NO DEFAULTS - must be provided
+            "DISPLAY_NAME": config["DISPLAY_NAME"],
             
             # Position
             "col": normalize_coordinates(config["col"], config["row"])[0],
@@ -335,6 +336,7 @@ class GameStateManager:
                     "id": str(unit_data["id"]),
                     "player": unit_player,
                     "unitType": unit_type,
+                    "DISPLAY_NAME": require_key(full_unit_data, "DISPLAY_NAME"),
                     "col": normalize_coordinates(chosen_col, chosen_row)[0],
                     "row": normalize_coordinates(chosen_col, chosen_row)[1],
                     "HP_CUR": full_unit_data["HP_MAX"],

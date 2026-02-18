@@ -5,6 +5,7 @@ import { SpaceMarineInfantryEliteMeleeElite } from "../classes/SpaceMarineInfant
 
 export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
   static NAME = "Terminator";
+  static DISPLAY_NAME = "Terminator";
 
   // BASE
   static MOVE = 5; // Move distance

@@ -926,12 +926,37 @@ body {
 
 .unit-status-row--selected {
   background: rgba(34, 197, 94, 0.3); /* green highlight for selected/active unit */
-  border: 2px solid #22c55e; /* green border */
 }
 
 .unit-status-row--clicked {
   background: rgba(30, 144, 255, 0.2); /* blue highlight for clicked non-selectable unit */
-  border: 2px solid var(--color-accent); /* blue border */
+}
+
+/* Full-row outline for selected/clicked unit rows */
+.unit-status-row--selected > .unit-status-cell {
+  border-top: 2px solid #22c55e;
+  border-bottom: 2px solid #22c55e;
+}
+
+.unit-status-row--selected > .unit-status-cell:first-child {
+  border-left: 2px solid #22c55e;
+}
+
+.unit-status-row--selected > .unit-status-cell:last-child {
+  border-right: 2px solid #22c55e;
+}
+
+.unit-status-row--clicked > .unit-status-cell {
+  border-top: 2px solid var(--color-accent);
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.unit-status-row--clicked > .unit-status-cell:first-child {
+  border-left: 2px solid var(--color-accent);
+}
+
+.unit-status-row--clicked > .unit-status-cell:last-child {
+  border-right: 2px solid var(--color-accent);
 }
 
 /* Cell styles */
@@ -2228,7 +2253,7 @@ textarea:focus {
   border: 2px solid #4caf50;
   border-radius: 6px;
   background: rgba(20, 20, 20, 0.98);
-  color: #e6ffed;
+  color: #b6f7c9;
   font-size: 0.9em;
   width: max-content;
   max-width: 600px;
@@ -2249,6 +2274,20 @@ textarea:focus {
   visibility: visible;
   opacity: 1;
   transform: translateY(0);
+}
+
+/* Board unit hover tooltip: same colors as weapon rule tooltip */
+.unit-icon-tooltip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  margin-bottom: 0;
+  padding: 9px 10px;
+  z-index: 1300;
+  visibility: visible;
+  opacity: 1;
+  transform: translate(12px, -14px);
+  pointer-events: none;
 }
 
 .combi-badge {

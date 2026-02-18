@@ -409,6 +409,12 @@ export default function Board({
     unitId: number;
     position: { x: number; y: number };
   } | null>(null);
+  const [unitHoverTooltip, setUnitHoverTooltip] = useState<{
+    visible: boolean;
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Listen for weapon selection icon click
   useEffect(() => {
@@ -1786,6 +1792,7 @@ export default function Board({
           return true;
         })(),
         onAdvance: onAdvance,
+        onUnitTooltip: setUnitHoverTooltip,
         debugMode: showHexCoordinates,
       });
     }
@@ -1840,6 +1847,7 @@ export default function Board({
           onConfirmMove,
           parseColor,
           autoSelectWeapon,
+          onUnitTooltip: setUnitHoverTooltip,
           debugMode: showHexCoordinates,
         });
       }
@@ -1898,6 +1906,7 @@ export default function Board({
           // Pass advance roll info for replay mode (use real unit ID, not ghost ID)
           advanceRoll,
           advancingUnitId: movePreview.unitId, // Use real unit ID for preview icon at destination
+          onUnitTooltip: setUnitHoverTooltip,
           debugMode: showHexCoordinates,
         });
       }
@@ -1952,6 +1961,7 @@ export default function Board({
           targetPreview,
           onConfirmMove,
           parseColor,
+          onUnitTooltip: setUnitHoverTooltip,
           autoSelectWeapon,
           debugMode: showHexCoordinates,
         });
@@ -2450,6 +2460,17 @@ export default function Board({
             overflow: "visible",
           }}
         />
+        {unitHoverTooltip?.visible && (
+          <div
+            className="rule-tooltip unit-icon-tooltip"
+            style={{
+              left: `${unitHoverTooltip.x}px`,
+              top: `${unitHoverTooltip.y}px`,
+            }}
+          >
+            {unitHoverTooltip.text}
+          </div>
+        )}
       </div>
       {/* SingleShotDisplay temporarily disabled - missing component
           {shootingPhaseState?.singleShotState && (

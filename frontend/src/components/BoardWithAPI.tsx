@@ -567,12 +567,13 @@ export const BoardWithAPI: React.FC = () => {
               <div className="deployment-panel__type-icons">
                 {unitsOfType.map((unit) => {
                   const isSelected = apiProps.selectedUnitId === unit.id;
+                  const displayName = unit.DISPLAY_NAME || unit.name || typeKey;
                   return (
                     <button
                       type="button"
                       className="deployment-panel__unit-icon"
                       key={`deploy-unit-${unit.id}`}
-                      title={`${typeKey} - ID ${unit.id}`}
+                      title={`${displayName} - ID ${unit.id}`}
                       onClick={() => {
                         apiProps.onSelectUnit(unit.id);
                         setClickedUnitId(null);
@@ -595,7 +596,7 @@ export const BoardWithAPI: React.FC = () => {
                     >
                       <img
                         src={unit.ICON}
-                        alt={typeKey}
+                        alt={displayName}
                         style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
                       />
                       <span

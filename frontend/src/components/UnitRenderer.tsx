@@ -125,6 +125,7 @@ interface UnitRendererProps {
 
   // Debug mode
   debugMode?: boolean;
+  onUnitTooltip?: (tooltip: { visible: boolean; text: string; x: number; y: number }) => void;
 }
 
 export class UnitRenderer {
@@ -150,6 +151,44 @@ export class UnitRenderer {
       return parseFloat(value);
     }
     return fallback;
+  }
+
+  private getUnitTooltipText(): string {
+    const { unit } = this.props;
+    const displayName =
+      unit.DISPLAY_NAME || unit.name || unit.type || unit.unitType || "Unknown";
+    return `${displayName} - ID ${unit.id}`;
+  }
+
+  private attachTooltipHandlers(displayObject: PIXI.DisplayObject): void {
+    if (!this.props.onUnitTooltip) {
+      return;
+    }
+    const tooltipText = this.getUnitTooltipText();
+    const updateTooltipPosition = (e: PIXI.FederatedPointerEvent): void => {
+      const canvas = this.props.app.view as HTMLCanvasElement;
+      const rect = canvas.getBoundingClientRect();
+      this.props.onUnitTooltip?.({
+        visible: true,
+        text: tooltipText,
+        x: rect.left + e.global.x,
+        y: rect.top + e.global.y,
+      });
+    };
+    displayObject.on("pointerover", (e: PIXI.FederatedPointerEvent) => {
+      updateTooltipPosition(e);
+    });
+    displayObject.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
+      updateTooltipPosition(e);
+    });
+    displayObject.on("pointerout", () => {
+      this.props.onUnitTooltip?.({
+        visible: false,
+        text: tooltipText,
+        x: 0,
+        y: 0,
+      });
+    });
   }
 
   private cleanupExistingBlinkIntervals(): void {
@@ -398,7 +437,9 @@ export class UnitRenderer {
         g.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
         g.endFill();
         g.zIndex = iconZIndex;
-        g.eventMode = "none";
+        g.eventMode = "static";
+        g.cursor = "default";
+        this.attachTooltipHandlers(g);
         app.stage.addChild(g);
         return;
       }
@@ -473,6 +514,7 @@ export class UnitRenderer {
     // Add click handlers for normal units (with charge-cancel on re-click)
     unitCircle.eventMode = "static";
     unitCircle.cursor = "pointer";
+    this.attachTooltipHandlers(unitCircle);
     // Always add click handlers so we can detect clicks on all units
 
     if (phase === "charge" && selectedUnitId === unit.id && this.props.mode === "chargePreview") {
@@ -568,7 +610,6 @@ export class UnitRenderer {
           this.props.blinkingUnits.length > 0
         ) {
           // Unit is blocked by LoS in PvP mode - no click handler, no hand cursor
-          unitCircle.eventMode = "none";
           unitCircle.cursor = "default";
         } else {
           unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
@@ -620,7 +661,6 @@ export class UnitRenderer {
           });
         }
       } else {
-        unitCircle.eventMode = "none";
         unitCircle.cursor = "default";
       }
     }
@@ -750,7 +790,7 @@ export class UnitRenderer {
       textAlpha = 0.5;
     }
 
-    const unitText = new PIXI.Text(unit.name || `U${unit.id}`, {
+    const unitText = new PIXI.Text(unit.DISPLAY_NAME || unit.name || `U${unit.id}`, {
       fontSize: this.props.UNIT_TEXT_SIZE,
       fill: textColor,
       align: "center",

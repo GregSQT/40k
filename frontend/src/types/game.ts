@@ -98,6 +98,7 @@ export interface DeploymentState {
 export interface Unit {
   id: UnitId;
   name?: string;
+  DISPLAY_NAME?: string;
   type?: string;
   unitType?: string;
   player: PlayerId;

@@ -6,6 +6,7 @@ import { TyranidInfantryTroopRangedTroop } from "../classes/TyranidInfantryTroop
 
 export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
   static NAME = "Tyranid Warrior Ranged";
+  static DISPLAY_NAME = "Tyranid Warrior (Ranged)";
   // BASE
   static MOVE = 6; // Move distance
   static T = 5; // Toughness score

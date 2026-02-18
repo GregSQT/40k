@@ -210,14 +210,25 @@ class StepLogger:
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:
                     unit_type = require_key(unit, "unitType")
+                    display_name = unit.get("DISPLAY_NAME")
+                    display_suffix = f" [{display_name}]" if isinstance(display_name, str) and display_name.strip() else ""
                     player_name = f"P{unit['player']}"
-                    f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}) {player_name}: Starting position ({unit['col']},{unit['row']})\n")
+                    f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: Starting position ({unit['col']},{unit['row']})\n")
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
             
                 
         except Exception as e:
             print(f"⚠️ Episode start logging error: {e}")
+
+    def _format_display_name_suffix(self, details, field_name):
+        """Format optional display name suffix for step log readability."""
+        if not isinstance(details, dict):
+            return ""
+        display_name = details.get(field_name)
+        if isinstance(display_name, str) and display_name.strip():
+            return f" [{display_name}]"
+        return ""
     
     def _format_replay_style_message(self, unit_id, action_type, details):
         """Format messages with detailed combat info - enhanced replay format"""
@@ -233,6 +244,7 @@ class StepLogger:
             if "(" in coords_part:
                 coord_start = coords_part.find("(")
                 unit_coords = coords_part[coord_start:]
+        unit_label = f"Unit {unit_id}{unit_coords}"
         
         if action_type == "move" and details:
             # Extract position info for move message
@@ -246,10 +258,10 @@ class StepLogger:
                             f.write(f"[STEP_LOGGER DEBUG] Unit {unit_id}: unit_coords={unit_coords} start_pos=({start_col},{start_row}) end_pos=({end_col},{end_row}) unit_with_coords={details.get('unit_with_coords')} col={details.get('col')} row={details.get('row')}\n")
                     except Exception:
                         pass  # Don't fail if logging fails
-                base_msg = f"Unit {unit_id}{unit_coords} MOVED from ({start_col},{start_row}) to ({end_col},{end_row})"
+                base_msg = f"{unit_label} MOVED from ({start_col},{start_row}) to ({end_col},{end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates from mirror_action
-                base_msg = f"Unit {unit_id}{unit_coords} MOVED to ({details['col']},{details['row']})"
+                base_msg = f"{unit_label} MOVED to ({details['col']},{details['row']})"
             else:
                 raise KeyError("Move action missing required position data")
 
@@ -265,10 +277,10 @@ class StepLogger:
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                base_msg = f"Unit {unit_id}{unit_coords} FLED from ({start_col},{start_row}) to ({end_col},{end_row})"
+                base_msg = f"{unit_label} FLED from ({start_col},{start_row}) to ({end_col},{end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates
-                base_msg = f"Unit {unit_id}{unit_coords} FLED to ({details['col']},{details['row']})"
+                base_msg = f"{unit_label} FLED to ({details['col']},{details['row']})"
             else:
                 raise KeyError("Flee action missing required position data")
 
@@ -286,9 +298,9 @@ class StepLogger:
                 end_col, end_row = details["end_pos"]
                 advance_range = details.get("advance_range")
                 if advance_range is not None and advance_range > 0:
-                    base_msg = f"Unit {unit_id}{unit_coords} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}]"
+                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}]"
                 else:
-                    base_msg = f"Unit {unit_id}{unit_coords} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row})"
+                    base_msg = f"{unit_label} ADVANCED from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
                 raise KeyError("Advance action missing required position data")
 
@@ -341,11 +353,12 @@ class StepLogger:
             weapon_name = details.get("weapon_name")
             target_coords = details.get("target_coords")
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
+            target_label = f"Unit {target_id}{target_coords_str}"
             
             if weapon_name:
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str} with [{weapon_name}]"
+                base_msg = f"{unit_label} SHOT at {target_label} with [{weapon_name}]"
             else:
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str}"
+                base_msg = f"{unit_label} SHOT at {target_label}"
             hit_rule_suffix = f" {hit_rule_modifier}" if hit_rule_modifier else ""
             detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}){hit_rule_suffix} Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
             
@@ -424,16 +437,17 @@ class StepLogger:
                     # Include target coordinates if available
                     target_coords = details.get("target_coords")
                     target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
+                    target_label = f"Unit {target_id}{target_coords_str}"
                     # Include charge roll (2d6) if available
                     charge_roll = details.get("charge_roll")
                     if charge_roll is not None:
-                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED Unit {target_id}{target_coords_str} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll:{charge_roll}]"
+                        base_msg = f"{unit_label} CHARGED {target_label} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll:{charge_roll}]"
                     else:
-                        base_msg = f"Unit {unit_id}{unit_coords} CHARGED Unit {target_id}{target_coords_str} from ({start_col},{start_row}) to ({end_col},{end_row})"
+                        base_msg = f"{unit_label} CHARGED {target_label} from ({start_col},{start_row}) to ({end_col},{end_row})"
                 else:
-                    base_msg = f"Unit {unit_id}{unit_coords} CHARGED Unit {target_id}"
+                    base_msg = f"{unit_label} CHARGED Unit {target_id}"
             else:
-                base_msg = f"Unit {unit_id}{unit_coords} CHARGED"
+                base_msg = f"{unit_label} CHARGED"
 
             # Add reward if available
             reward = details.get("reward")
@@ -452,7 +466,7 @@ class StepLogger:
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
-                base_msg = f"Unit {unit_id}{unit_coords} FAILED CHARGE Unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"
+                base_msg = f"{unit_label} FAILED CHARGE Unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
                 raise KeyError("Charge_fail action missing required position data")
 
@@ -490,11 +504,12 @@ class StepLogger:
             weapon_name = details.get("weapon_name")
             target_coords = details.get("target_coords")
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
+            target_label = f"Unit {target_id}{target_coords_str}"
             
             if weapon_name:
-                base_msg = f"Unit {unit_id}{unit_coords} ATTACKED Unit {target_id}{target_coords_str} with [{weapon_name}]"
+                base_msg = f"{unit_label} ATTACKED {target_label} with [{weapon_name}]"
             else:
-                base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id}{target_coords_str}"
+                base_msg = f"{unit_label} FOUGHT {target_label}"
             
             # Apply truncation logic like shooting phase - stop after first failure
             detail_parts = [f"Hit:{hit_target}+:{hit_roll}({hit_result})"]
@@ -541,13 +556,13 @@ class StepLogger:
             return base_msg + detail_msg
 
         elif action_type == "wait":
-            return f"Unit {unit_id}{unit_coords} WAIT"
+            return f"{unit_label} WAIT"
 
         elif action_type == "skip":
             reason = (details.get("skip_reason") or "").strip()
             if reason:
-                return f"Unit {unit_id}{unit_coords} SKIP ({reason})"
-            return f"Unit {unit_id}{unit_coords} SKIP"
+                return f"{unit_label} SKIP ({reason})"
+            return f"{unit_label} SKIP"
             
         elif action_type == "combat_individual":
             # Individual attack within multi-attack sequence

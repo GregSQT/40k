@@ -5,6 +5,7 @@ import { SpaceMarineInfantryLeaderEliteMeleeElite } from "../classes/SpaceMarine
 
 export class CaptainGravis extends SpaceMarineInfantryLeaderEliteMeleeElite {
   static NAME = "Captain Gravis";
+  static DISPLAY_NAME = "Captain (Gravis)";
 
   // BASE
   static MOVE = 5; // Move distance
