@@ -342,7 +342,9 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
           </div>
         )}
         <div style={{ display: "flex", gap: "2px", flex: 1, justifyContent: "flex-end" }}>
-          {phases.map((phase) => {
+          {phases
+            .filter((phase) => !(phase === "deployment" && currentPhase !== "deployment"))
+            .map((phase) => {
             const status = getPhaseStatus(phase);
             const style = getPhaseStyle(phase, status, !!onPhaseClick);
 

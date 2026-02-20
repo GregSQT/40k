@@ -1,6 +1,6 @@
 {
   "faction": "tyranid",
-  "description": "Tyranid army with 4 TyranidWarriorRanged",
+  "description": "Tyranid army:\n4 Tyranid Warriors (Ranged)",
   "units": [
     {
       "unit_type": "TyranidWarriorRanged",

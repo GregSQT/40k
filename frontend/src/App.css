@@ -940,6 +940,7 @@ body {
   min-height: 72px;
   font-size: 13px;
   color: #cbd5e1;
+  white-space: pre-wrap;
 }
 
 .deployment-panel__picker-actions {

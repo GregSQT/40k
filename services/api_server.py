@@ -1573,20 +1573,31 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     all_unit_ids = [int(str(require_key(unit, "id"))) for unit in require_key(game_state, "units")]
     next_unit_id = (max(all_unit_ids) + 1) if all_unit_ids else 1
     new_units, _ = _build_units_from_army_config(army_cfg, current_deployer, next_unit_id, engine_instance)
-    new_ids = [str(require_key(unit, "id")) for unit in new_units]
 
-    # Replace only current deployer's units.
+    # Replace only current deployer's units, then compact IDs to prevent unbounded growth.
     other_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) != current_deployer]
-    game_state["units"] = other_units + new_units
+    combined_units = other_units + new_units
+    id_remap: Dict[str, str] = {}
+    for idx, unit in enumerate(combined_units, start=1):
+        old_id = str(require_key(unit, "id"))
+        new_id = str(idx)
+        id_remap[old_id] = new_id
+        unit["id"] = new_id
+    game_state["units"] = combined_units
 
-    # Keep deployment state coherent after replacement.
-    if current_deployer in deployable_units:
-        deployable_units[current_deployer] = new_ids
-    elif str(current_deployer) in deployable_units:
-        deployable_units[str(current_deployer)] = new_ids
-    else:
-        raise KeyError(f"deployable_units missing player {current_deployer}")
-    deployment_state["deployed_units"] = {uid for uid in deployed_set if uid not in current_player_unit_ids}
+    # Keep deployment state coherent after replacement and ID compaction.
+    old_deployed_after_replace = {uid for uid in deployed_set if uid not in current_player_unit_ids}
+    new_deployed_set = {id_remap[uid] for uid in old_deployed_after_replace if uid in id_remap}
+    deployment_state["deployed_units"] = new_deployed_set
+
+    rebuilt_deployable_units: Dict[int, list[str]] = {1: [], 2: []}
+    for unit in combined_units:
+        unit_id = str(require_key(unit, "id"))
+        unit_player = int(require_key(unit, "player"))
+        if unit_id not in new_deployed_set:
+            rebuilt_deployable_units[unit_player].append(unit_id)
+    deployment_state["deployable_units"] = rebuilt_deployable_units
+
     deployment_state["current_deployer"] = current_deployer
     game_state["current_player"] = current_deployer
 
@@ -1603,12 +1614,26 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         for uid, entry in units_cache.items()
     }
 
+    # If AI player roster changed, reload micro models so PvE/Test AI can act with new unit types.
+    ai_enabled = bool(
+        getattr(engine_instance, "is_pve_mode", False)
+        or getattr(engine_instance, "is_test_mode", False)
+        or getattr(engine_instance, "is_debug_mode", False)
+    )
+    if ai_enabled and current_deployer == 2:
+        engine_instance.pve_controller.load_ai_model_for_pve(game_state, engine_instance)
+
+    updated_unit_ids = [
+        str(require_key(unit, "id"))
+        for unit in combined_units
+        if int(require_key(unit, "player")) == current_deployer
+    ]
     return True, {
         "action": "change_roster",
         "army_file": army_file,
         "army_name": army_file[:-5],
         "current_deployer": current_deployer,
-        "updated_unit_ids": new_ids,
+        "updated_unit_ids": updated_unit_ids,
     }
 
 
