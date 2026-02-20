@@ -1,0 +1,14 @@
+{
+  "faction": "tyranid",
+  "description": "Tyranid army with 3 TyranidWarriorRanged and 7 Hormagaunts",
+  "units": [
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 3
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 7
+    }
+  ]
+}

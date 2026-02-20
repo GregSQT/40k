@@ -1,0 +1,18 @@
+{
+  "faction": "spaceMarine",
+  "description": "Space Marine Intercessor squad (3 Intercessors, 1 Sergeant, 1 Grenade Launcher)",
+  "units": [
+    {
+      "unit_type": "Intercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "Intercessor Sergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor Grenade Launcher",
+      "count": 1
+    }
+  ]
+}

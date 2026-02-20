@@ -1,10 +1,10 @@
 {
   "faction": "tyranid",
-  "description": "Tyranid army with 2 Hormagaunts",
+  "description": "Tyranid army with 12 Hormagaunts",
   "units": [
     {
       "unit_type": "Hormagaunt",
-      "count": 2
+      "count": 12
     }
   ]
 }

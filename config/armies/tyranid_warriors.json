@@ -1,0 +1,10 @@
+{
+  "faction": "tyranid",
+  "description": "Tyranid army with 4 TyranidWarriorRanged",
+  "units": [
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 4
+    }
+  ]
+}
