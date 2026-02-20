@@ -743,6 +743,7 @@ export const BoardWithAPI: React.FC = () => {
                 : ["move", "shoot", "charge", "fight"]
             }
             current_player={apiProps.gameState?.current_player}
+            onEndPhaseClick={apiProps.onEndPhase}
             maxTurns={(() => {
               if (!gameConfig?.game_rules?.max_turns) {
                 throw new Error(

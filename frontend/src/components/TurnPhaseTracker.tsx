@@ -11,6 +11,7 @@ interface TurnPhaseTrackerProps {
   onTurnClick?: (turn: number) => void; // Optional callback for turn button clicks (replay mode)
   onPhaseClick?: (phase: string) => void; // Optional callback for phase button clicks (replay mode)
   onPlayerClick?: (player: number) => void; // Optional callback for player button clicks (replay mode)
+  onEndPhaseClick?: (player: number) => void; // End current phase for active player
 }
 
 export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
@@ -23,6 +24,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   onTurnClick,
   onPhaseClick,
   onPlayerClick,
+  onEndPhaseClick,
 }) => {
   // Validate required props (raise errors for missing data)
   if (!phases || phases.length === 0) {
@@ -215,6 +217,37 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
     }
   };
 
+  const getEndPhaseStyle = (
+    player: number,
+    isEnabled: boolean,
+    hasClickHandler: boolean
+  ): React.CSSProperties => {
+    const baseStyle: React.CSSProperties = {
+      padding: "4px 8px",
+      borderRadius: "4px",
+      fontWeight: "bold",
+      fontSize: "13px",
+      border: "1px solid",
+      cursor: hasClickHandler && isEnabled ? "pointer" : "not-allowed",
+      outline: "none",
+      color: "#FFFFFF",
+      opacity: isEnabled ? 1 : 0.55,
+    };
+
+    if (player === 1) {
+      return {
+        ...baseStyle,
+        backgroundColor: "#1D4ED8",
+        borderColor: "#1E3A8A",
+      };
+    }
+    return {
+      ...baseStyle,
+      backgroundColor: "#dc2626",
+      borderColor: "#991B1B",
+    };
+  };
+
   return (
     <div
       className={className}
@@ -234,7 +267,21 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
           width: "100%",
         }}
       >
-        <div style={{ display: "flex", gap: "2px" }}>
+        <div style={{ display: "flex", gap: "2px", flex: 1, justifyContent: "flex-start", alignItems: "center" }}>
+          <span
+            style={{
+              padding: "4px 8px",
+              borderRadius: "4px",
+              fontWeight: "medium",
+              fontSize: "15px",
+              lineHeight: "1.1",
+              border: "1px solid #93C5FD",
+              backgroundColor: "#BFDBFE",
+              color: "#1E40AF",
+            }}
+          >
+            Turn :
+          </span>
           {turns.map((turn) => {
             const status = getTurnStatus(turn);
             const style = getTurnStyle(status, !!onTurnClick);
@@ -247,13 +294,24 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                 disabled={!onTurnClick}
                 onClick={() => onTurnClick?.(turn)}
               >
-                Turn {turn}
+                {turn}
               </button>
             );
           })}
         </div>
         {current_player !== undefined && (
-          <div style={{ display: "flex", gap: "2px" }}>
+          <div style={{ display: "flex", gap: "2px", alignItems: "center", justifyContent: "center" }}>
+            {current_player === 1 && (
+              <button
+                type="button"
+                style={getEndPhaseStyle(1, true, !!onEndPhaseClick)}
+                onClick={() => onEndPhaseClick?.(1)}
+                disabled={!onEndPhaseClick}
+                title="Terminer immédiatement la phase pour P1"
+              >
+                End Phase
+              </button>
+            )}
             <button
               type="button"
               style={getPlayerStyle(1, current_player === 1, !!onPlayerClick)}
@@ -270,9 +328,20 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             >
               P2
             </button>
+            {current_player === 2 && (
+              <button
+                type="button"
+                style={getEndPhaseStyle(2, true, !!onEndPhaseClick)}
+                onClick={() => onEndPhaseClick?.(2)}
+                disabled={!onEndPhaseClick}
+                title="Terminer immédiatement la phase pour P2"
+              >
+                End Phase
+              </button>
+            )}
           </div>
         )}
-        <div style={{ display: "flex", gap: "2px" }}>
+        <div style={{ display: "flex", gap: "2px", flex: 1, justifyContent: "flex-end" }}>
           {phases.map((phase) => {
             const status = getPhaseStatus(phase);
             const style = getPhaseStyle(phase, status, !!onPhaseClick);

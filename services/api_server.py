@@ -11,7 +11,7 @@ import sys
 import time
 import hashlib
 import secrets
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -1280,7 +1280,10 @@ def execute_action():
             return jsonify({"success": False, "error": "No action provided"}), 400
         
         # Route ALL actions through engine consistently
-        success, result = engine.execute_semantic_action(action)
+        if action.get("action") == "end_phase":
+            success, result = _execute_end_phase_action(engine, action)
+        else:
+            success, result = engine.execute_semantic_action(action)
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
@@ -1321,6 +1324,102 @@ def execute_action():
             "error": f"Action execution failed: {str(e)}",
             "traceback": error_details
         }), 500
+
+
+def _get_activation_pool_key_for_phase(phase: str) -> str:
+    """Return activation pool key for a phase supporting manual end_phase."""
+    if phase == "move":
+        return "move_activation_pool"
+    if phase == "shoot":
+        return "shoot_activation_pool"
+    if phase == "charge":
+        return "charge_activation_pool"
+    raise ValueError(f"end_phase is not supported for phase '{phase}'")
+
+
+def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """
+    End current phase by applying WAIT/SKIP end_activation to all remaining units in pool.
+    Only supports move/shoot/charge phases.
+    """
+    game_state = require_key(engine_instance.__dict__, "game_state")
+    current_phase = require_key(game_state, "phase")
+    pool_key = _get_activation_pool_key_for_phase(current_phase)
+    current_player = require_key(game_state, "current_player")
+
+    if "player" not in action:
+        raise KeyError("end_phase action missing required 'player' field")
+    requested_player = int(action["player"])
+    if int(current_player) != requested_player:
+        return False, {
+            "error": "wrong_player_end_phase",
+            "current_player": int(current_player),
+            "requested_player": requested_player,
+            "phase": current_phase,
+        }
+
+    # Process all units currently eligible in this phase.
+    loop_count = 0
+    max_loops = 300
+    last_result: Dict[str, Any] = {"action": "end_phase", "phase": current_phase}
+
+    while True:
+        loop_count += 1
+        if loop_count > max_loops:
+            raise RuntimeError(f"end_phase loop exceeded safety limit for phase '{current_phase}'")
+
+        if require_key(game_state, "phase") != current_phase:
+            return True, last_result
+
+        activation_pool = require_key(game_state, pool_key)
+        if not activation_pool:
+            break
+
+        unit_id = str(activation_pool[0])
+        activate_success, activate_result = engine_instance.execute_semantic_action(
+            {"action": "activate_unit", "unitId": unit_id}
+        )
+        if not activate_success:
+            return False, {
+                "error": "end_phase_activation_failed",
+                "phase": current_phase,
+                "unitId": unit_id,
+                "details": activate_result,
+            }
+
+        last_result = activate_result if isinstance(activate_result, dict) else last_result
+
+        if require_key(game_state, "phase") != current_phase:
+            return True, last_result
+
+        skip_success, skip_result = engine_instance.execute_semantic_action(
+            {"action": "skip", "unitId": unit_id}
+        )
+        if not skip_success:
+            return False, {
+                "error": "end_phase_skip_failed",
+                "phase": current_phase,
+                "unitId": unit_id,
+                "details": skip_result,
+            }
+        last_result = skip_result if isinstance(skip_result, dict) else last_result
+
+        if require_key(game_state, "phase") != current_phase:
+            return True, last_result
+
+    # If pool is empty but phase did not transition yet, trigger explicit phase advance.
+    advance_success, advance_result = engine_instance.execute_semantic_action(
+        {"action": "advance_phase", "from": current_phase, "reason": "manual_end_phase"}
+    )
+    if not advance_success:
+        return False, {
+            "error": "end_phase_advance_failed",
+            "phase": current_phase,
+            "details": advance_result,
+        }
+    if isinstance(advance_result, dict):
+        advance_result["action"] = "end_phase"
+    return True, advance_result
 
 @app.route('/api/game/state', methods=['GET'])
 def get_game_state():

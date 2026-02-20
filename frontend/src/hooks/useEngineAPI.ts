@@ -1295,6 +1295,28 @@ export const useEngineAPI = () => {
     [executeAction]
   );
 
+  const handleEndPhase = useCallback(
+    async (player: number) => {
+      if (!gameState) {
+        throw new Error("Cannot end phase: gameState is not available");
+      }
+      if (gameState.current_player !== player) {
+        throw new Error(
+          `Cannot end phase for player ${player}: current player is ${gameState.current_player}`
+        );
+      }
+      if (gameState.phase !== "move" && gameState.phase !== "shoot" && gameState.phase !== "charge") {
+        throw new Error(`end_phase is only supported in move/shoot/charge phases, got '${gameState.phase}'`);
+      }
+
+      await executeAction({
+        action: "end_phase",
+        player: player,
+      });
+    },
+    [executeAction, gameState]
+  );
+
   const handleStartMovePreview = useCallback(
     (unitId: number | string, col: number | string, row: number | string) => {
       setMovePreview({
@@ -2097,6 +2119,7 @@ export const useEngineAPI = () => {
       gameState: null,
       onSelectUnit: () => {},
       onSkipUnit: () => {},
+      onEndPhase: async () => {},
       onStartMovePreview: () => {},
       onDirectMove: () => {},
       onStartAttackPreview: () => {},
@@ -2165,6 +2188,7 @@ export const useEngineAPI = () => {
     gameState: memoizedGameState,
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
+    onEndPhase: handleEndPhase,
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: handleDirectMove,
     onStartAttackPreview: onStartAttackPreviewMemo,
