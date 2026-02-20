@@ -11,6 +11,7 @@ import sys
 import time
 import hashlib
 import secrets
+import copy
 from typing import Dict, Any, Optional, Tuple
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -27,6 +28,8 @@ sys.path.insert(0, engine_dir)
 from engine.w40k_core import W40KEngine
 from main import load_config
 from shared.data_validation import require_key
+from engine.combat_utils import resolve_dice_value
+from engine.phase_handlers.shared_utils import build_units_cache
 
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
 PBKDF2_ITERATIONS = 200000
@@ -1282,6 +1285,8 @@ def execute_action():
         # Route ALL actions through engine consistently
         if action.get("action") == "end_phase":
             success, result = _execute_end_phase_action(engine, action)
+        elif action.get("action") == "change_roster":
+            success, result = _execute_change_roster_action(engine, action)
         else:
             success, result = engine.execute_semantic_action(action)
 
@@ -1420,6 +1425,200 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
     if isinstance(advance_result, dict):
         advance_result["action"] = "end_phase"
     return True, advance_result
+
+
+def _load_army_file(army_file: str) -> Dict[str, Any]:
+    """Load and validate one army config from config/armies."""
+    if not army_file or not isinstance(army_file, str):
+        raise ValueError("army_file must be a non-empty string")
+    if "/" in army_file or "\\" in army_file:
+        raise ValueError(f"army_file must be a filename only, got: {army_file}")
+    if not army_file.endswith(".json"):
+        raise ValueError(f"army_file must end with .json, got: {army_file}")
+
+    armies_dir = os.path.join(abs_parent, "config", "armies")
+    army_path = os.path.join(armies_dir, army_file)
+    if not os.path.exists(army_path):
+        raise FileNotFoundError(f"Army file not found: {army_file}")
+
+    with open(army_path, "r", encoding="utf-8") as f:
+        army_cfg = json.load(f)
+
+    require_key(army_cfg, "faction")
+    require_key(army_cfg, "description")
+    units = require_key(army_cfg, "units")
+    if not isinstance(units, list) or not units:
+        raise ValueError(f"Army file {army_file} must contain a non-empty units array")
+    for idx, unit in enumerate(units):
+        if not isinstance(unit, dict):
+            raise TypeError(f"Army file {army_file} units[{idx}] must be an object")
+        unit_type = require_key(unit, "unit_type")
+        count = require_key(unit, "count")
+        if not isinstance(unit_type, str) or not unit_type.strip():
+            raise ValueError(f"Army file {army_file} units[{idx}].unit_type must be a non-empty string")
+        if not isinstance(count, int) or count <= 0:
+            raise ValueError(f"Army file {army_file} units[{idx}].count must be a positive integer")
+    return army_cfg
+
+
+def _list_armies() -> list[Dict[str, Any]]:
+    """Return metadata for all army files in config/armies."""
+    armies_dir = os.path.join(abs_parent, "config", "armies")
+    if not os.path.isdir(armies_dir):
+        raise FileNotFoundError(f"Armies directory not found: {armies_dir}")
+
+    army_files = sorted([name for name in os.listdir(armies_dir) if name.endswith(".json")])
+    armies: list[Dict[str, Any]] = []
+    for army_file in army_files:
+        army_cfg = _load_army_file(army_file)
+        armies.append(
+            {
+                "file": army_file,
+                "name": army_file[:-5],
+                "faction": require_key(army_cfg, "faction"),
+                "description": require_key(army_cfg, "description"),
+            }
+        )
+    return armies
+
+
+def _build_units_from_army_config(
+    army_cfg: Dict[str, Any],
+    player: int,
+    next_unit_id: int,
+    engine_instance: W40KEngine,
+) -> Tuple[list[Dict[str, Any]], int]:
+    """Build full engine units for one player from army config."""
+    if not hasattr(engine_instance, "unit_registry") or engine_instance.unit_registry is None:
+        raise ValueError("engine.unit_registry is required to build units from army config")
+
+    built_units: list[Dict[str, Any]] = []
+    units = require_key(army_cfg, "units")
+    for unit_def in units:
+        unit_type = require_key(unit_def, "unit_type")
+        count = require_key(unit_def, "count")
+        unit_data = engine_instance.unit_registry.get_unit_data(unit_type)
+        for _ in range(count):
+            unit_id_str = str(next_unit_id)
+            next_unit_id += 1
+            rng_weapons = copy.deepcopy(require_key(unit_data, "RNG_WEAPONS"))
+            cc_weapons = copy.deepcopy(require_key(unit_data, "CC_WEAPONS"))
+            selected_rng_weapon_index = 0 if rng_weapons else None
+            selected_cc_weapon_index = 0 if cc_weapons else None
+            shoot_left = 0
+            if rng_weapons and selected_rng_weapon_index is not None:
+                selected_weapon = rng_weapons[selected_rng_weapon_index]
+                shoot_left = resolve_dice_value(require_key(selected_weapon, "NB"), "api_roster_change_shoot_left")
+            attack_left = 0
+            if cc_weapons and selected_cc_weapon_index is not None:
+                selected_weapon = cc_weapons[selected_cc_weapon_index]
+                attack_left = resolve_dice_value(require_key(selected_weapon, "NB"), "api_roster_change_attack_left")
+
+            built_units.append(
+                {
+                    "id": unit_id_str,
+                    "player": player,
+                    "unitType": unit_type,
+                    "DISPLAY_NAME": require_key(unit_data, "DISPLAY_NAME"),
+                    "col": -1,
+                    "row": -1,
+                    "HP_CUR": require_key(unit_data, "HP_MAX"),
+                    "HP_MAX": require_key(unit_data, "HP_MAX"),
+                    "MOVE": require_key(unit_data, "MOVE"),
+                    "T": require_key(unit_data, "T"),
+                    "ARMOR_SAVE": require_key(unit_data, "ARMOR_SAVE"),
+                    "INVUL_SAVE": require_key(unit_data, "INVUL_SAVE"),
+                    "RNG_WEAPONS": rng_weapons,
+                    "CC_WEAPONS": cc_weapons,
+                    "selectedRngWeaponIndex": selected_rng_weapon_index,
+                    "selectedCcWeaponIndex": selected_cc_weapon_index,
+                    "LD": require_key(unit_data, "LD"),
+                    "OC": require_key(unit_data, "OC"),
+                    "VALUE": require_key(unit_data, "VALUE"),
+                    "ICON": require_key(unit_data, "ICON"),
+                    "ICON_SCALE": require_key(unit_data, "ICON_SCALE"),
+                    "UNIT_RULES": copy.deepcopy(require_key(unit_data, "UNIT_RULES")),
+                    "SHOOT_LEFT": shoot_left,
+                    "ATTACK_LEFT": attack_left,
+                }
+            )
+    return built_units, next_unit_id
+
+
+def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """Replace active deployer's undeployed roster with selected army file."""
+    game_state = require_key(engine_instance.__dict__, "game_state")
+    if require_key(game_state, "phase") != "deployment":
+        return False, {"error": "change_roster_only_in_deployment", "phase": game_state.get("phase")}
+    if require_key(game_state, "deployment_type") != "active":
+        return False, {"error": "change_roster_requires_active_deployment"}
+    deployment_state = require_key(game_state, "deployment_state")
+    current_deployer = int(require_key(deployment_state, "current_deployer"))
+
+    # Enforce: change roster only before active player deploys first unit.
+    deployable_units = require_key(deployment_state, "deployable_units")
+    deployed_units = require_key(deployment_state, "deployed_units")
+    deployable_for_player = deployable_units.get(current_deployer, deployable_units.get(str(current_deployer)))
+    if deployable_for_player is None:
+        raise KeyError(f"deployable_units missing player {current_deployer}")
+    deployed_set = {str(uid) for uid in deployed_units}
+    current_player_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) == current_deployer]
+    current_player_unit_ids = {str(require_key(unit, "id")) for unit in current_player_units}
+    if current_player_unit_ids & deployed_set:
+        return False, {"error": "change_roster_locked_after_first_deploy", "current_deployer": current_deployer}
+
+    army_file = require_key(action, "army_file")
+    army_cfg = _load_army_file(army_file)
+
+    all_unit_ids = [int(str(require_key(unit, "id"))) for unit in require_key(game_state, "units")]
+    next_unit_id = (max(all_unit_ids) + 1) if all_unit_ids else 1
+    new_units, _ = _build_units_from_army_config(army_cfg, current_deployer, next_unit_id, engine_instance)
+    new_ids = [str(require_key(unit, "id")) for unit in new_units]
+
+    # Replace only current deployer's units.
+    other_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) != current_deployer]
+    game_state["units"] = other_units + new_units
+
+    # Keep deployment state coherent after replacement.
+    if current_deployer in deployable_units:
+        deployable_units[current_deployer] = new_ids
+    elif str(current_deployer) in deployable_units:
+        deployable_units[str(current_deployer)] = new_ids
+    else:
+        raise KeyError(f"deployable_units missing player {current_deployer}")
+    deployment_state["deployed_units"] = {uid for uid in deployed_set if uid not in current_player_unit_ids}
+    deployment_state["current_deployer"] = current_deployer
+    game_state["current_player"] = current_deployer
+
+    # Rebuild cache from updated units list.
+    build_units_cache(game_state)
+    units_cache = require_key(game_state, "units_cache")
+    game_state["units_cache_prev"] = {
+        uid: {
+            "col": require_key(entry, "col"),
+            "row": require_key(entry, "row"),
+            "HP_CUR": require_key(entry, "HP_CUR"),
+            "player": require_key(entry, "player"),
+        }
+        for uid, entry in units_cache.items()
+    }
+
+    return True, {
+        "action": "change_roster",
+        "army_file": army_file,
+        "army_name": army_file[:-5],
+        "current_deployer": current_deployer,
+        "updated_unit_ids": new_ids,
+    }
+
+
+@app.route('/api/armies', methods=['GET'])
+def list_armies():
+    """List selectable armies from config/armies."""
+    try:
+        return jsonify({"success": True, "armies": _list_armies()})
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to list armies: {str(e)}"}), 500
 
 @app.route('/api/game/state', methods=['GET'])
 def get_game_state():

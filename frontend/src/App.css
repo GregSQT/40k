@@ -829,6 +829,139 @@ body {
   background: rgba(0, 0, 0, 0.35);
 }
 
+.deployment-panel__change-roster {
+  background: #1e3a8a;
+  color: #ffffff;
+  border: 1px solid #1d4ed8;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+
+.deployment-panel__change-roster:hover {
+  background: #1d4ed8;
+}
+
+.deployment-panel__change-roster--player2 {
+  background: #991b1b;
+  border-color: #dc2626;
+}
+
+.deployment-panel__change-roster--player2:hover {
+  background: #b91c1c;
+}
+
+.deployment-panel__picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deployment-panel__picker-dismiss {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  cursor: default;
+}
+
+.deployment-panel__picker {
+  width: min(760px, 90vw);
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 12px;
+  color: #e5e7eb;
+  position: relative;
+  z-index: 1;
+}
+
+.deployment-panel__picker-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.deployment-panel__picker-loading {
+  font-size: 13px;
+  color: #d1d5db;
+}
+
+.deployment-panel__picker-error {
+  font-size: 13px;
+  color: #fca5a5;
+}
+
+.deployment-panel__picker-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.deployment-panel__picker-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deployment-panel__picker-item {
+  background: #1f2937;
+  border: 1px solid #374151;
+  color: #e5e7eb;
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.deployment-panel__picker-item:hover {
+  background: #374151;
+}
+
+.deployment-panel__picker-tooltip {
+  border: 1px solid #374151;
+  border-radius: 6px;
+  background: #0f172a;
+  padding: 8px;
+  min-height: 72px;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.deployment-panel__picker-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.deployment-panel__picker-close {
+  background: #374151;
+  color: #ffffff;
+  border: 1px solid #4b5563;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.deployment-panel__picker-close:hover {
+  background: #4b5563;
+}
+
 .deployment-panel__type-group {
   border-radius: 6px;
   padding: 8px;

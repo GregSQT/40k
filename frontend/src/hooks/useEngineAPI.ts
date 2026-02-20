@@ -128,6 +128,13 @@ interface APIGameState {
   }>;
 }
 
+interface ArmyListItem {
+  file: string;
+  name: string;
+  faction: string;
+  description: string;
+}
+
 export const useEngineAPI = () => {
   const [gameState, setGameState] = useState<APIGameState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1374,6 +1381,36 @@ export const useEngineAPI = () => {
     [executeAction, gameState]
   );
 
+  const listArmies = useCallback(async (): Promise<ArmyListItem[]> => {
+    const response = await fetch(`${API_BASE}/armies`);
+    if (!response.ok) {
+      throw new Error(`Failed to load armies: HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data?.success) {
+      throw new Error(`Failed to load armies: ${String(data?.error || "unknown error")}`);
+    }
+    if (!Array.isArray(data.armies)) {
+      throw new Error("Invalid /api/armies response: armies must be an array");
+    }
+    return data.armies as ArmyListItem[];
+  }, []);
+
+  const changeRoster = useCallback(
+    async (armyFile: string) => {
+      if (!gameState || gameState.phase !== "deployment") {
+        throw new Error("changeRoster is only available during deployment phase");
+      }
+      await executeAction({
+        action: "change_roster",
+        army_file: armyFile,
+      });
+      setSelectedUnitId(null);
+      setMode("select");
+    },
+    [executeAction, gameState]
+  );
+
   const handleConfirmMove = useCallback(async () => {
     if (!movePreview) {
       return;
@@ -2130,6 +2167,8 @@ export const useEngineAPI = () => {
       onShoot: () => {},
       onSkipShoot: () => {},
       onDeployUnit: async () => {},
+      listArmies: async () => [],
+      changeRoster: async () => {},
       onStartTargetPreview: () => {},
       onFightAttack: () => {},
       onActivateFight: () => {},
@@ -2197,6 +2236,8 @@ export const useEngineAPI = () => {
     onShoot: handleShoot,
     onSkipShoot: handleSkipShoot,
     onDeployUnit: handleDeployUnit,
+    listArmies,
+    changeRoster,
     onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: handleFightAttack,
     onActivateFight: handleActivateFight,

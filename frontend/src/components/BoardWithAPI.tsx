@@ -104,6 +104,48 @@ export const BoardWithAPI: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
+  const [rosterPickerPlayer, setRosterPickerPlayer] = useState<PlayerId | null>(null);
+  const [rosterPickerArmies, setRosterPickerArmies] = useState<
+    Array<{ file: string; name: string; faction: string; description: string }>
+  >([]);
+  const [rosterPickerHoveredDescription, setRosterPickerHoveredDescription] = useState<string>("");
+  const [rosterPickerLoading, setRosterPickerLoading] = useState(false);
+  const [rosterPickerError, setRosterPickerError] = useState<string | null>(null);
+
+  const closeRosterPicker = () => {
+    setRosterPickerPlayer(null);
+    setRosterPickerHoveredDescription("");
+    setRosterPickerError(null);
+  };
+
+  const openRosterPicker = async (player: PlayerId) => {
+    if (!apiProps.listArmies) {
+      throw new Error("listArmies API is not available");
+    }
+    setRosterPickerPlayer(player);
+    setRosterPickerLoading(true);
+    setRosterPickerError(null);
+    try {
+      const armies = await apiProps.listArmies();
+      setRosterPickerArmies(armies);
+    } catch (err) {
+      setRosterPickerError(err instanceof Error ? err.message : "Failed to load armies");
+    } finally {
+      setRosterPickerLoading(false);
+    }
+  };
+
+  const handleSelectRoster = async (armyFile: string) => {
+    if (!apiProps.changeRoster) {
+      throw new Error("changeRoster API is not available");
+    }
+    try {
+      await apiProps.changeRoster(armyFile);
+      closeRosterPicker();
+    } catch (err) {
+      setRosterPickerError(err instanceof Error ? err.message : "Failed to change roster");
+    }
+  };
 
   const getVictoryPointsForPlayer = (player: 1 | 2): number | undefined => {
     if (!apiProps.gameState) {
@@ -595,6 +637,12 @@ export const BoardWithAPI: React.FC = () => {
           });
           const isCurrentDeployer = player === currentDeployer;
           const isCollapsed = deploymentRosterCollapsed[player];
+          const deployedUnitIds = deploymentState.deployed_units.map((id) => String(id));
+          const hasDeployedByPlayer = deployedUnitIds.some((deployedId) => {
+            const deployedUnit = apiProps.gameState!.units.find((u) => String(u.id) === deployedId);
+            return deployedUnit ? Number(deployedUnit.player) === player : false;
+          });
+          const canChangeRoster = isCurrentDeployer && !hasDeployedByPlayer;
 
           return (
             <div key={`deployment-roster-${player}`} className="deployment-panel__roster">
@@ -604,24 +652,35 @@ export const BoardWithAPI: React.FC = () => {
                     ? "deployment-panel__player-banner--player2"
                     : "deployment-panel__player-banner--player1"
                 }`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "8px" }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
               >
-                <button
-                  type="button"
-                  className="deployment-panel__toggle"
-                  onClick={() =>
-                    setDeploymentRosterCollapsed((prev) => ({
-                      ...prev,
-                      [player]: !prev[player],
-                    }))
-                  }
-                  aria-label={isCollapsed ? `Etendre roster player ${player}` : `Reduire roster player ${player}`}
-                >
-                  {isCollapsed ? "+" : "−"}
-                </button>
-                <span>
-                  Player {player} - Deployment {isCurrentDeployer ? "(Active)" : "(Waiting)"}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "8px" }}>
+                  <button
+                    type="button"
+                    className="deployment-panel__toggle"
+                    onClick={() =>
+                      setDeploymentRosterCollapsed((prev) => ({
+                        ...prev,
+                        [player]: !prev[player],
+                      }))
+                    }
+                    aria-label={isCollapsed ? `Etendre roster player ${player}` : `Reduire roster player ${player}`}
+                  >
+                    {isCollapsed ? "+" : "−"}
+                  </button>
+                  <span>
+                    Player {player} - Deployment {isCurrentDeployer ? "(Active)" : "(Waiting)"}
+                  </span>
+                </div>
+                {canChangeRoster && (
+                  <button
+                    type="button"
+                    className={`deployment-panel__change-roster deployment-panel__change-roster--player${player}`}
+                    onClick={() => openRosterPicker(player)}
+                  >
+                    change roster
+                  </button>
+                )}
               </div>
 
               {!isCollapsed && (
@@ -805,8 +864,8 @@ export const BoardWithAPI: React.FC = () => {
               <div className="scoring-panel__segment scoring-panel__segment--p2" style={{ width: `${p2Percent}%` }} />
               <div className="scoring-panel__divider" />
               <div className="scoring-panel__labels">
-                <span className="scoring-panel__score">P1: {p1Score}</span>
-                <span className="scoring-panel__score">P2: {p2Score}</span>
+                <span className="scoring-panel__score">P1 - Primary: {p1Score}</span>
+                <span className="scoring-panel__score">P2 - Primary: {p2Score}</span>
               </div>
             </div>
           );
@@ -823,6 +882,48 @@ export const BoardWithAPI: React.FC = () => {
           }}
         >
           {deploymentTooltip.text}
+        </div>
+      )}
+      {rosterPickerPlayer !== null && (
+        <div className="deployment-panel__picker-backdrop">
+          <button
+            type="button"
+            className="deployment-panel__picker-dismiss"
+            aria-label="Close roster picker"
+            onClick={closeRosterPicker}
+          />
+          <div className="deployment-panel__picker">
+            <div className="deployment-panel__picker-title">
+              Change roster - Player {rosterPickerPlayer}
+            </div>
+            {rosterPickerLoading && <div className="deployment-panel__picker-loading">Loading armies...</div>}
+            {rosterPickerError && <div className="deployment-panel__picker-error">{rosterPickerError}</div>}
+            {!rosterPickerLoading && !rosterPickerError && (
+              <div className="deployment-panel__picker-content">
+                <div className="deployment-panel__picker-list">
+                  {rosterPickerArmies.map((army) => (
+                    <button
+                      type="button"
+                      key={army.file}
+                      className="deployment-panel__picker-item"
+                      onMouseEnter={() => setRosterPickerHoveredDescription(army.description)}
+                      onClick={() => handleSelectRoster(army.file)}
+                    >
+                      {army.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="deployment-panel__picker-tooltip">
+                  {rosterPickerHoveredDescription || "Survolez une armee pour voir sa description"}
+                </div>
+              </div>
+            )}
+            <div className="deployment-panel__picker-actions">
+              <button type="button" className="deployment-panel__picker-close" onClick={closeRosterPicker}>
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
