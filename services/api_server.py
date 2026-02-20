@@ -80,6 +80,31 @@ def _sync_units_hp_from_cache(serializable_state: Dict[str, Any], game_state: Di
         unit["HP_CUR"] = require_key(cache_entry, "HP_CUR")
 
 
+def _build_player_types(is_ai_enabled: bool) -> Dict[str, str]:
+    """
+    Build player type mapping for frontend orchestration.
+
+    Player 1 is always human in current game modes.
+    Player 2 is AI only for AI-enabled modes.
+    """
+    return {
+        "1": "human",
+        "2": "ai" if is_ai_enabled else "human",
+    }
+
+
+def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: W40KEngine) -> None:
+    """
+    Ensure player_types is present in both engine.game_state and serialized response.
+    """
+    is_pve_mode = bool(getattr(engine_instance, "is_pve_mode", False))
+    is_test_mode = bool(getattr(engine_instance, "is_test_mode", False))
+    is_debug_mode = bool(getattr(engine_instance, "is_debug_mode", False))
+    player_types = _build_player_types(is_pve_mode or is_test_mode or is_debug_mode)
+    engine_instance.game_state["player_types"] = player_types
+    serializable_state["player_types"] = player_types
+
+
 def _get_auth_db_connection() -> sqlite3.Connection:
     """
     Return a sqlite connection configured for named column access.
@@ -1180,6 +1205,8 @@ def start_game():
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
             # Ensure PvE mode is explicitly disabled for PvP
             engine.is_pve_mode = False
+            engine.is_test_mode = False
+            engine.is_debug_mode = False
         
         print("DEBUG: About to call engine.reset()")
         # Reset the engine for new game
@@ -1196,6 +1223,8 @@ def start_game():
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
+        engine.is_debug_mode = debug_mode
+        _attach_player_types(serializable_state, engine)
 
         # Add max_turns from game config
         from config_loader import get_config_loader
@@ -1256,6 +1285,7 @@ def execute_action():
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
+        _attach_player_types(serializable_state, engine)
 
         # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
         # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
@@ -1303,6 +1333,7 @@ def get_game_state():
     # Convert game state to JSON-serializable format
     serializable_state = make_json_serializable(dict(engine.game_state))
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
+    _attach_player_types(serializable_state, engine)
     
     return jsonify({
         "success": True,
@@ -1319,10 +1350,13 @@ def reset_game():
     
     try:
         obs, info = engine.reset()
-        
+        serializable_state = make_json_serializable(dict(engine.game_state))
+        _sync_units_hp_from_cache(serializable_state, engine.game_state)
+        _attach_player_types(serializable_state, engine)
+
         return jsonify({
             "success": True,
-            "game_state": engine.game_state,
+            "game_state": serializable_state,
             "message": "Game reset successfully"
         })
     
@@ -1427,6 +1461,7 @@ def execute_ai_turn():
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
+        _attach_player_types(serializable_state, engine)
         
         # Extract action logs for this specific AI action
         action_logs = serializable_state.get("action_logs", [])

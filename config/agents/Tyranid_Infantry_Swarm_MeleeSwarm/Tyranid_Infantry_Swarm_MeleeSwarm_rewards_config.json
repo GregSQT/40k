@@ -5,10 +5,10 @@
     "Unit": "######################### Tyranid_Infantry_Swarm_MeleeSwarm ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "base_actions": {
-      "ranged_attack": 0.0,
-      "melee_attack": 1.0,
-      "charge_success": 1.0,
-      "wait": -0.5
+      "ranged_attack": 0,
+      "melee_attack": 0.3,
+      "charge_success": 0.1,
+      "wait": -0.3
     },
     "shoot_priority_1": 0.0,
     "shoot_priority_2": 0.0,
@@ -19,20 +19,20 @@
     "attack_priority_1": 0.0,
     "attack_priority_2": 0.0,
     "result_bonuses": {
-      "kill_target": 3.0,
-      "target_lowest_hp": 1.0
+      "kill_target":  1.0,
+      "target_lowest_hp": 0.3
     },
     "target_type_bonuses": {},
     "situational_modifiers": {
-      "win": 50.0,
-      "lose": -50.0,
+      "win": 20,
+      "lose": -20,
       "draw": 0.0
     },
     "objective_rewards": {
-      "reward_per_objective_turn5": 0.0,
-      "reward_per_objective": 10.0,
+      "reward_per_objective": 6.0,
+      "reward_for_objective_lead": 3.0,
       "use_objective_lead": true,
-      "reward_for_objective_lead": 10.0
+      "reward_per_objective_turn5": 0.0
     },
     "system_penalties": {
       "forbidden_action": -1.0,

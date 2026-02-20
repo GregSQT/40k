@@ -13,6 +13,7 @@ export function setupBoardClickHandler(callbacks: {
   onShoot(shooterId: UnitId, targetId: UnitId): void;
   onCombatAttack(attackerId: UnitId, targetId: UnitId | null): void;
   onConfirmMove(): void;
+  onCancelMove?(): void;
   onCancelCharge?(): void;
   onCancelAdvance?(): void;
   onActivateCharge?(chargerId: UnitId): void;
@@ -121,7 +122,11 @@ export function setupBoardClickHandler(callbacks: {
       }
       return; // Prevent fallthrough to other handlers
     } else if (mode === "movePreview") {
-      callbacks.onConfirmMove();
+      if (clickType === "left" && selectedUnitId === unitId) {
+        callbacks.onConfirmMove();
+      } else {
+        callbacks.onCancelMove?.();
+      }
     } else if (phase === "fight" && mode === "select") {
       // Fight phase select mode - selecting a unit to activate
       callbacks.onSelectUnit(unitId);
@@ -204,20 +209,17 @@ export function setupBoardClickHandler(callbacks: {
         callbacks.onDeployUnit(selectedUnitId, col, row);
       }
     } else if (mode === "select" && selectedUnitId !== null && phase === "move") {
-      // In Movement Phase, clicking green hex should directly move the unit
-      if (callbacks.onDirectMove) {
-        callbacks.onDirectMove(selectedUnitId, col, row);
-      } else if (callbacks.onStartMovePreview) {
-        callbacks.onStartMovePreview(selectedUnitId, col, row);
-        callbacks.onConfirmMove();
+      if (!callbacks.onStartMovePreview) {
+        throw new Error("onStartMovePreview callback is required during move phase");
       }
+      callbacks.onStartMovePreview(selectedUnitId, col, row);
     } else if (mode === "advancePreview" && selectedUnitId !== null && phase === "shoot") {
       // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance mode - clicking orange hex moves the unit
       if (callbacks.onAdvanceMove) {
         callbacks.onAdvanceMove(selectedUnitId, col, row);
       }
     } else if (mode === "movePreview") {
-      callbacks.onConfirmMove();
+      callbacks.onCancelMove?.();
     }
   };
 

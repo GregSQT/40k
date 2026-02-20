@@ -11,7 +11,8 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import os
 import sys
 import numpy as np
-from typing import Callable, Optional
+import re
+from typing import Callable, Optional, Dict, List, Any
 
 from shared.data_validation import require_key
 
@@ -101,6 +102,66 @@ def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: s
             "defensive": defensive_randomness,
         },
     }
+
+
+def _scenario_name_from_file(base_agent_key: str, scenario_file: str) -> str:
+    """Build short scenario name used in logs/results."""
+    if not base_agent_key:
+        return os.path.basename(scenario_file).replace(".json", "")
+    return (
+        os.path.basename(scenario_file)
+        .replace(f"{base_agent_key}_scenario_", "")
+        .replace(".json", "")
+    )
+
+
+def _scenario_metric_slug(scenario_name: str) -> str:
+    """Convert scenario label to TensorBoard-safe metric suffix."""
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", scenario_name.strip()).strip("_").lower()
+    if not normalized:
+        raise ValueError(f"Invalid scenario name for metric slug: '{scenario_name}'")
+    return normalized
+
+
+def _filter_scenarios_from_config(
+    training_cfg: Dict[str, Any],
+    scenario_list: List[str],
+    base_agent_key: str,
+) -> List[str]:
+    """
+    Optionally filter evaluation scenarios from callback_params.bot_eval_scenarios.
+
+    Expected format:
+      callback_params:
+        bot_eval_scenarios: ["bot-1", "bot-2"]
+    """
+    callback_params = require_key(training_cfg, "callback_params")
+    requested = callback_params.get("bot_eval_scenarios")
+    if requested is None:
+        return scenario_list
+    if not isinstance(requested, list):
+        raise TypeError(
+            "callback_params.bot_eval_scenarios must be a list of scenario names"
+        )
+    if len(requested) == 0:
+        raise ValueError("callback_params.bot_eval_scenarios cannot be an empty list")
+
+    requested_names = [str(name) for name in requested]
+    scenario_map = {
+        _scenario_name_from_file(base_agent_key, path): path
+        for path in scenario_list
+    }
+
+    missing = [name for name in requested_names if name not in scenario_map]
+    if missing:
+        available = ", ".join(sorted(scenario_map.keys()))
+        missing_fmt = ", ".join(missing)
+        raise KeyError(
+            "Unknown scenario(s) in callback_params.bot_eval_scenarios: "
+            f"{missing_fmt}. Available: {available}"
+        )
+
+    return [scenario_map[name] for name in requested_names]
 
 
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
@@ -221,6 +282,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         except FileNotFoundError:
             raise FileNotFoundError(f"No scenarios found for agent '{base_agent_key}'. "
                                     f"Expected bot scenarios at config/agents/{base_agent_key}/scenarios/")
+    scenario_list = _filter_scenarios_from_config(training_cfg, scenario_list, base_agent_key)
 
     if n_episodes <= 0:
         raise ValueError("n_episodes must be > 0 for bot evaluation")
@@ -237,6 +299,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
     total_expected_episodes = len(bots) * n_episodes
     total_failed_episodes = 0
+    scenario_bot_stats: Dict[str, Dict[str, Dict[str, float]]] = {}
 
     for bot_name, bot in bots.items():
         wins = 0
@@ -245,10 +308,13 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
         # MULTI-SCENARIO: Iterate through all scenarios
         for scenario_index, scenario_file in enumerate(scenario_list):
-            scenario_name = os.path.basename(scenario_file).replace(f"{base_agent_key}_scenario_", "").replace(".json", "") if base_agent_key else "default"
+            scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
             episodes_for_scenario = episodes_per_scenario + (1 if scenario_index < extra_episodes else 0)
             if episodes_for_scenario == 0:
                 continue
+            scenario_wins = 0
+            scenario_losses = 0
+            scenario_draws = 0
 
             # PERFORMANCE: Create environment ONCE per scenario and reuse for all episodes
             # This avoids expensive re-initialization (loading configs, creating wrappers, etc.)
@@ -430,10 +496,13 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
                     if winner == agent_player:
                         wins += 1
+                        scenario_wins += 1
                     elif winner == -1:
                         draws += 1
+                        scenario_draws += 1
                     else:
                         losses += 1
+                        scenario_losses += 1
 
                     # DIAGNOSTIC: Collect shoot stats from all episodes
                     bot_stats = bot_env.get_shoot_stats()
@@ -476,6 +545,15 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             finally:
                 # Close environment after all episodes for this scenario are done
                 bot_env.close()
+                if scenario_name not in scenario_bot_stats:
+                    scenario_bot_stats[scenario_name] = {}
+                scenario_bot_stats[scenario_name][bot_name] = {
+                    "episodes": float(episodes_for_scenario),
+                    "wins": float(scenario_wins),
+                    "losses": float(scenario_losses),
+                    "draws": float(scenario_draws),
+                    "win_rate": float(scenario_wins) / float(episodes_for_scenario),
+                }
 
         # Calculate win rate across ALL scenarios
         total_games = n_episodes
@@ -525,6 +603,29 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         eval_weights['defensive'] * results['defensive']
     )
 
+    scenario_scores: Dict[str, Dict[str, float]] = {}
+    for scenario_name, per_bot in scenario_bot_stats.items():
+        random_stats = require_key(per_bot, "random")
+        greedy_stats = require_key(per_bot, "greedy")
+        defensive_stats = require_key(per_bot, "defensive")
+
+        random_wr = float(require_key(random_stats, "win_rate"))
+        greedy_wr = float(require_key(greedy_stats, "win_rate"))
+        defensive_wr = float(require_key(defensive_stats, "win_rate"))
+
+        combined_score = (
+            eval_weights["random"] * random_wr
+            + eval_weights["greedy"] * greedy_wr
+            + eval_weights["defensive"] * defensive_wr
+        )
+
+        worst_bot_score = min(random_wr, greedy_wr, defensive_wr)
+        scenario_scores[scenario_name] = {
+            "combined": combined_score,
+            "worst_bot_score": worst_bot_score,
+        }
+    results["scenario_scores"] = scenario_scores
+
     # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
     if show_progress:
         print("\n" + "="*80)
@@ -532,5 +633,18 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         print("="*80)
         print("Bot behavior analysis completed - check logs for detailed stats")
         print("="*80 + "\n")
+        if scenario_scores:
+            ranking = sorted(
+                scenario_scores.items(),
+                key=lambda item: item[1]["combined"],
+                reverse=True
+            )
+            print("🏁 Scenario ranking (combined):")
+            for name, values in ranking:
+                print(
+                    f"  - {name}: combined={values['combined']:.3f} "
+                    f"| worst_bot_score={values['worst_bot_score']:.3f}"
+                )
+            print()
 
     return results

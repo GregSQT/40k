@@ -111,6 +111,7 @@ interface APIGameState {
   active_fight_unit?: string;
   pve_mode?: boolean;
   test_mode?: boolean;
+  player_types?: Record<string, "human" | "ai">;
   deployment_type?: "random" | "fixed" | "active";
   deployment_state?: {
     current_deployer: number;
@@ -146,6 +147,9 @@ export const useEngineAPI = () => {
     destCol: number;
     destRow: number;
   } | null>(null);
+  const [pendingPreviewAction, setPendingPreviewAction] = useState<"move" | "advance" | null>(
+    null
+  );
   const [attackPreview, setAttackPreview] = useState<{
     unitId: number;
     col: number;
@@ -262,6 +266,14 @@ export const useEngineAPI = () => {
 
         const data = await response.json();
         if (data.success) {
+          const expectedPlayer2Type: "human" | "ai" =
+            isDebugMode || isPvEMode || isTestMode ? "ai" : "human";
+          const player2Type = data.game_state?.player_types?.["2"];
+          if (player2Type !== expectedPlayer2Type) {
+            throw new Error(
+              `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
+            );
+          }
           setGameState(data.game_state);
           const startedMode = data.game_state.debug_mode
             ? "Debug"
@@ -368,6 +380,7 @@ export const useEngineAPI = () => {
       setMode("select");
       setSelectedUnitId(null);
       setMovePreview(null);
+      setPendingPreviewAction(null);
       setAttackPreview(null);
       setChargeDestinations([]);
       setAdvanceDestinations([]);
@@ -510,23 +523,17 @@ export const useEngineAPI = () => {
             }
           }
 
-          // Check if we just activated a unit in shoot phase (use lastActionRef phase, not current phase which may have changed)
-          // Backend returns allow_advance: true when unit has no valid targets
-          // Don't auto-trigger advance - wait for user to click advance icon
-          // AI_TURN.md: "⚠️ POINT OF NO RETURN (Human: Click ADVANCE logo)"
-          // The advance roll should only be made when user explicitly clicks the advance icon
+          // Backend returns allow_advance: true when active unit has no valid shooting targets.
+          // Trust backend signal regardless of the initiating UI action (activate_unit or friendly_unit switch).
+          // Don't auto-trigger advance: wait for explicit player click on advance icon.
           if (
-            lastActionRef.current?.action === "activate_unit" &&
-            lastActionRef.current?.phase === "shoot" &&
+            data.game_state?.phase === "shoot" &&
             data.result?.unitId &&
-            data.result?.unitId === lastActionRef.current?.unitId &&
             data.result?.allow_advance === true
           ) {
-            // Set selectedUnitId to show advance icon, but don't trigger advance automatically
             const unitId = parseInt(data.result.unitId, 10);
             setSelectedUnitId(unitId);
-            // Set mode to allow advance icon to be displayed
-            setMode("select");
+            setMode("advancePreview");
           }
 
           // Process backend cleanup signals
@@ -761,6 +768,8 @@ export const useEngineAPI = () => {
             setAdvanceRoll(data.result.advance_roll);
             setAdvancingUnitId(parseInt(data.result.unitId, 10));
             setSelectedUnitId(parseInt(data.result.unitId, 10));
+            setMovePreview(null);
+            setPendingPreviewAction(null);
             setMode("advancePreview" as GameMode);
           }
           // Handle movement activation response with valid destinations
@@ -984,14 +993,11 @@ export const useEngineAPI = () => {
           // This prevents Unit 3 (fled) from rendering at old position when Unit 4 (shooter) is activated
           // Root cause: attackPreview was set during fight phase and never cleared when shooting started
           // Don't set mode to attackPreview here - wait for backend response (blinking_units or allow_advance)
-          // Skip this if allow_advance is present (will be handled by advance handler)
-          else if (
-            data.game_state?.phase === "shoot" &&
-            data.game_state?.active_shooting_unit &&
-            !data.result?.allow_advance
-          ) {
+          else if (data.game_state?.phase === "shoot" && data.game_state?.active_shooting_unit) {
             setSelectedUnitId(parseInt(data.game_state.active_shooting_unit, 10));
-            setAttackPreview(null); // Clear stale attackPreview to prevent ghost rendering
+            if (!data.result?.allow_advance) {
+              setAttackPreview(null); // Clear stale attackPreview to prevent ghost rendering
+            }
             // Mode will be set by blinking_units handler (attackPreview) or allow_advance handler (advancePreview)
           } else {
             setSelectedUnitId(null);
@@ -1201,11 +1207,7 @@ export const useEngineAPI = () => {
           }
           const shootActivationPool = gameState.shoot_activation_pool.map((id) => parseInt(id, 10));
 
-          if (
-            shootActivationPool.includes(numericUnitId) &&
-            (!gameState.active_shooting_unit ||
-              gameState.active_shooting_unit === numericUnitId.toString())
-          ) {
+          if (shootActivationPool.includes(numericUnitId)) {
             await executeAction({
               action: "activate_unit",
               unitId: numericUnitId.toString(),
@@ -1300,6 +1302,7 @@ export const useEngineAPI = () => {
         destCol: typeof col === "string" ? parseInt(col, 10) : col,
         destRow: typeof row === "string" ? parseInt(row, 10) : row,
       });
+      setPendingPreviewAction("move");
       setMode("movePreview");
     },
     []
@@ -1317,6 +1320,7 @@ export const useEngineAPI = () => {
       try {
         await executeAction(action);
         setMovePreview(null);
+        setPendingPreviewAction(null);
         setMode("select");
       } catch (error) {
         console.error("❌ DIRECT MOVE FAILED:", error);
@@ -1349,15 +1353,36 @@ export const useEngineAPI = () => {
   );
 
   const handleConfirmMove = useCallback(async () => {
-    if (movePreview) {
-      await handleDirectMove(movePreview.unitId, movePreview.destCol, movePreview.destRow);
+    if (!movePreview) {
+      return;
     }
-  }, [movePreview, handleDirectMove]);
+
+    if (pendingPreviewAction === "advance") {
+      await executeAction({
+        action: "advance",
+        unitId: movePreview.unitId.toString(),
+        destCol: movePreview.destCol,
+        destRow: movePreview.destRow,
+      });
+      setMovePreview(null);
+      setPendingPreviewAction(null);
+      return;
+    }
+
+    await handleDirectMove(movePreview.unitId, movePreview.destCol, movePreview.destRow);
+    setPendingPreviewAction(null);
+  }, [movePreview, pendingPreviewAction, executeAction, handleDirectMove]);
 
   const handleCancelMove = useCallback(() => {
+    const isAdvancePreviewConfirmation = pendingPreviewAction === "advance";
     setMovePreview(null);
+    setPendingPreviewAction(null);
+    if (isAdvancePreviewConfirmation) {
+      setMode("advancePreview");
+      return;
+    }
     setMode("select");
-  }, []);
+  }, [pendingPreviewAction]);
 
   // Backend handles all shooting logic - frontend just sends clicks
   const handleShoot = useCallback(
@@ -1479,6 +1504,8 @@ export const useEngineAPI = () => {
     setAdvanceDestinations([]);
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
+    setMovePreview(null);
+    setPendingPreviewAction(null);
     setMode("select");
     setSelectedUnitId(null);
 
@@ -1529,6 +1556,8 @@ export const useEngineAPI = () => {
     setAdvanceDestinations([]);
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
+    setMovePreview(null);
+    setPendingPreviewAction(null);
     setMode("select");
     setSelectedUnitId(null);
   }, []);
@@ -1546,6 +1575,8 @@ export const useEngineAPI = () => {
     setAdvanceDestinations([]);
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
+    setMovePreview(null);
+    setPendingPreviewAction(null);
     setMode("select");
     setSelectedUnitId(null);
 
@@ -1556,12 +1587,46 @@ export const useEngineAPI = () => {
     });
   }, [advanceWarningPopup, executeAction]);
 
+  const unitHasAssaultWeapon = useCallback(
+    (unitId: number): boolean => {
+      if (!gameState) {
+        throw new Error("Missing gameState while checking ASSAULT weapon availability");
+      }
+      const unit = gameState.units.find((u) => parseInt(u.id, 10) === unitId);
+      if (!unit) {
+        throw new Error(`Cannot find unit ${unitId} while checking ASSAULT weapon availability`);
+      }
+      return unit.RNG_WEAPONS.some(
+        (weapon) =>
+          Array.isArray(weapon.WEAPON_RULES) && weapon.WEAPON_RULES.includes("ASSAULT")
+      );
+    },
+    [gameState]
+  );
+
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance move to destination
   const handleAdvanceMove = useCallback(
     async (unitId: number | string, destCol: number, destRow: number) => {
       const numericUnitId = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
 
-      // Send advance action with destination to backend
+      if (!gameState || gameState.phase !== "shoot") {
+        throw new Error("Advance preview is only supported during shoot phase");
+      }
+
+      const canShowShootPreviewAfterAdvance = unitHasAssaultWeapon(numericUnitId);
+
+      if (canShowShootPreviewAfterAdvance) {
+        setMovePreview({
+          unitId: numericUnitId,
+          destCol,
+          destRow,
+        });
+        setSelectedUnitId(numericUnitId);
+        setPendingPreviewAction("advance");
+        setMode("movePreview");
+        return;
+      }
+
       await executeAction({
         action: "advance",
         unitId: numericUnitId.toString(),
@@ -1572,7 +1637,7 @@ export const useEngineAPI = () => {
       // Don't reset advance state here - let backend cleanup signals handle it
       // This allows the advance roll badge to be displayed before cleanup
     },
-    [executeAction]
+    [executeAction, gameState, unitHasAssaultWeapon]
   );
 
   const handleFightAttack = useCallback(
@@ -1972,6 +2037,7 @@ export const useEngineAPI = () => {
       unitChargeRolls: {},
       pve_mode: gameState.pve_mode,
       test_mode: gameState.test_mode,
+      player_types: gameState.player_types,
       deployment_type: gameState.deployment_type,
       deployment_state: memoizedDeploymentState,
       move_activation_pool: gameState.move_activation_pool,
@@ -2151,21 +2217,46 @@ export const useEngineAPI = () => {
       }
       aiTurnInProgress = true;
 
-      const urlParams = new URLSearchParams(window.location.search);
-      const mode = urlParams.get("mode");
-      const isAiFromURL = mode === "debug" || mode === "pve" || mode === "test";
-
       // Check if AI has eligible units in current phase FIRST
       const phaseCheck = gameState.phase;
 
-      if (!gameState || (!gameState.pve_mode && !gameState.test_mode && !isAiFromURL)) {
+      if (!gameState) {
         aiTurnInProgress = false;
         return;
       }
+      const playerTypes = gameState.player_types;
+      if (!playerTypes) {
+        throw new Error("Missing player_types in gameState");
+      }
+      const getPlayerType = (playerId: number): "human" | "ai" => {
+        const playerType = playerTypes[String(playerId)];
+        if (!playerType) {
+          throw new Error(`Missing player type for player ${playerId}`);
+        }
+        return playerType;
+      };
+      const isAiUnitInState = (state: APIGameState, unitId: string | number): boolean => {
+        const statePlayerTypes = state.player_types;
+        if (!statePlayerTypes) {
+          throw new Error("Missing player_types in state while evaluating AI unit");
+        }
+        const unit = state.units.find((u) => String(u.id) === String(unitId));
+        if (!unit) {
+          throw new Error(`Missing unit ${String(unitId)} in state while evaluating AI unit`);
+        }
+        const unitPlayerType = statePlayerTypes[String(unit.player)];
+        if (!unitPlayerType) {
+          throw new Error(`Missing player type for player ${unit.player}`);
+        }
+        return unitPlayerType === "ai";
+      };
+      const isAiUnitId = (unitId: string | number): boolean => {
+        return isAiUnitInState(gameState, unitId);
+      };
 
       // CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
       // Only check current_player for non-fight phases
-      if (phaseCheck !== "fight" && gameState.current_player !== 2) {
+      if (phaseCheck !== "fight" && getPlayerType(gameState.current_player) !== "ai") {
         aiTurnInProgress = false;
         return;
       }
@@ -2179,26 +2270,14 @@ export const useEngineAPI = () => {
         }
         const deployer = deploymentState.current_deployer;
         const pool = deploymentState.deployable_units?.[String(deployer)] || [];
-        eligibleAICount = deployer === 2 ? pool.length : 0;
+        eligibleAICount = getPlayerType(deployer) === "ai" ? pool.length : 0;
       } else if (phaseCheck === "shoot" && gameState.shoot_activation_pool) {
         const shootPool = gameState.shoot_activation_pool || [];
-        eligibleAICount = shootPool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        eligibleAICount = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (phaseCheck === "move" && gameState.move_activation_pool) {
-        eligibleAICount = gameState.move_activation_pool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        eligibleAICount = gameState.move_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (phaseCheck === "charge" && gameState.charge_activation_pool) {
-        eligibleAICount = gameState.charge_activation_pool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        eligibleAICount = gameState.charge_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (phaseCheck === "fight") {
         // Fight phase has 3 sub-phases with different pools
         const fightSubphase = gameState.fight_subphase;
@@ -2228,11 +2307,7 @@ export const useEngineAPI = () => {
           fightPool = gameState.non_active_alternating_activation_pool;
         }
 
-        eligibleAICount = fightPool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        eligibleAICount = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
       }
 
       if (eligibleAICount === 0) {
@@ -2245,24 +2320,12 @@ export const useEngineAPI = () => {
       let aiEligibleUnits = 0;
 
       if (currentPhase === "move" && gameState.move_activation_pool) {
-        aiEligibleUnits = gameState.move_activation_pool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        aiEligibleUnits = gameState.move_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (currentPhase === "shoot" && gameState.shoot_activation_pool) {
         const shootPool = gameState.shoot_activation_pool || [];
-        aiEligibleUnits = shootPool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        aiEligibleUnits = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (currentPhase === "charge" && gameState.charge_activation_pool) {
-        aiEligibleUnits = gameState.charge_activation_pool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        aiEligibleUnits = gameState.charge_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (currentPhase === "fight") {
         // Same fight pool logic as above
         const fightSubphase = gameState.fight_subphase;
@@ -2291,11 +2354,7 @@ export const useEngineAPI = () => {
           fightPool = gameState.non_active_alternating_activation_pool;
         }
 
-        aiEligibleUnits = fightPool.filter((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = gameState.units.find((u) => String(u.id) === String(unitId));
-          return unit && unit.player === 2;
-        }).length;
+        aiEligibleUnits = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
       }
 
       if (aiEligibleUnits === 0) {
@@ -2313,11 +2372,9 @@ export const useEngineAPI = () => {
           return { action: "skip", unitId };
         }
 
-        // Strategy: Move toward nearest enemy using FRESH game state
-        const enemies = currentGameState?.units.filter((u) => u.player === 1 && u.HP_CUR > 0) || [];
-
-        if (enemies.length === 0) {
-          // No enemies - just take first destination
+        // Find nearest enemy using fresh unit positions
+        const currentUnit = currentGameState?.units.find((u) => u.id.toString() === unitId);
+        if (!currentUnit) {
           const dest = validDestinations[0];
           return {
             action: "move",
@@ -2326,10 +2383,11 @@ export const useEngineAPI = () => {
             destRow: dest[1],
           };
         }
-
-        // Find nearest enemy using fresh unit positions
-        const currentUnit = currentGameState?.units.find((u) => u.id.toString() === unitId);
-        if (!currentUnit) {
+        // Strategy: Move toward nearest enemy using FRESH game state
+        const enemies = currentGameState.units.filter(
+          (u) => u.player !== currentUnit.player && u.HP_CUR > 0
+        );
+        if (enemies.length === 0) {
           const dest = validDestinations[0];
           return {
             action: "move",
@@ -2518,12 +2576,9 @@ export const useEngineAPI = () => {
               if (!pool) {
                 throw new Error(`Missing fight activation pool for subphase: ${fightSubphase}`);
               }
-              const aiUnitIds = new Set(
-                gameState.units.filter((u) => u.player === 2).map((u) => u.id.toString())
-              );
-              return pool.some((id) => aiUnitIds.has(id.toString()));
+              return pool.some((id) => isAiUnitId(id));
             }
-            return gameState.current_player === 2;
+            return getPlayerType(gameState.current_player) === "ai";
           })();
 
           if (!canCallAiTurn) {
@@ -3016,7 +3071,11 @@ export const useEngineAPI = () => {
                 const unit = updatedGameState?.units?.find(
                   (u: APIGameState["units"][0]) => String(u.id) === String(unitId)
                 );
-                return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+                return (
+                  !!unit &&
+                  (unit.HP_CUR ?? unit.HP_MAX) > 0 &&
+                  isAiUnitInState(updatedGameState as APIGameState, unitId)
+                );
               });
             } else if (currentPhase === "move" && updatedGameState?.move_activation_pool) {
               hasMoreEligibleUnits = updatedGameState.move_activation_pool.some(
@@ -3024,7 +3083,11 @@ export const useEngineAPI = () => {
                   const unit = updatedGameState?.units?.find(
                     (u: APIGameState["units"][0]) => String(u.id) === String(unitId)
                   );
-                  return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+                  return (
+                    !!unit &&
+                    (unit.HP_CUR ?? unit.HP_MAX) > 0 &&
+                    isAiUnitInState(updatedGameState as APIGameState, unitId)
+                  );
                 }
               );
             } else if (currentPhase === "charge" && updatedGameState?.charge_activation_pool) {
@@ -3033,7 +3096,11 @@ export const useEngineAPI = () => {
                   const unit = updatedGameState?.units?.find(
                     (u: APIGameState["units"][0]) => String(u.id) === String(unitId)
                   );
-                  return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+                  return (
+                    !!unit &&
+                    (unit.HP_CUR ?? unit.HP_MAX) > 0 &&
+                    isAiUnitInState(updatedGameState as APIGameState, unitId)
+                  );
                 }
               );
             }

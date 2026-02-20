@@ -774,6 +774,7 @@ export default function Board({
       onShoot: stableCallbacks.current.onShoot,
       onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: stableCallbacks.current.onConfirmMove,
+      onCancelMove: stableCallbacks.current.onCancelMove,
       onCancelCharge: stableCallbacks.current.onCancelCharge,
       onCancelAdvance: stableCallbacks.current.onCancelAdvance,
       onDeployUnit: stableCallbacks.current.onDeployUnit,
@@ -802,7 +803,9 @@ export default function Board({
     const contextMenuHandler = (e: Event) => {
       e.preventDefault();
 
-      if (phase === "shoot") {
+      if (phase === "shoot" && mode === "movePreview") {
+        onCancelMove?.();
+      } else if (phase === "shoot") {
         // During shooting phase, only cancel target preview if one exists
         if (targetPreview) {
           onCancelTargetPreview?.();
@@ -1100,10 +1103,6 @@ export default function Board({
     const coverCells: { col: number; row: number }[] = []; // Orange = targets in cover
     const blockedTargets: Set<string> = new Set(); // Track targets with no line of sight (no hex shown)
     const coverTargets: Set<string> = new Set(); // Track targets in cover
-    let previewUnit: Unit | undefined;
-    let attackFromCol: number | null = null;
-    let attackFromRow: number | null = null;
-
     // Calculate blockedTargets for ALL enemies during shooting phase (not just preview)
     if (phase === "shoot" && selectedUnit) {
       const enemyUnits = units.filter((u) => u.player !== selectedUnit.player);
@@ -1127,177 +1126,125 @@ export default function Board({
       }
     }
 
-    if (mode === "movePreview" && movePreview) {
-      previewUnit = units.find((u) => u.id === movePreview.unitId);
-      attackFromCol = movePreview.destCol;
-      attackFromRow = movePreview.destRow;
-    } else if (mode === "attackPreview" && attackPreview) {
-      const clickedUnit = units.find((u) => u.id === attackPreview.unitId);
-      if (clickedUnit && clickedUnit.id === selectedUnitId) {
-        previewUnit = clickedUnit;
-        attackFromCol = clickedUnit.col;
-        attackFromRow = clickedUnit.row;
-      } else {
-        previewUnit = undefined;
-        attackFromCol = null;
-        attackFromRow = null;
+    const resolveShootingPreviewSource = (): { unit: Unit; fromCol: number; fromRow: number } | null => {
+      if (mode === "advancePreview") {
+        return null;
       }
-    } else if (
-      phase === "shoot" &&
-      selectedUnit?.SHOOT_LEFT !== undefined &&
-      selectedUnit.SHOOT_LEFT > 0
-    ) {
-      previewUnit = selectedUnit;
-      attackFromCol = selectedUnit.col;
-      attackFromRow = selectedUnit.row;
-    }
 
-    if (
-      previewUnit &&
-      attackFromCol !== null &&
-      attackFromRow !== null &&
-      mode !== "advancePreview" &&
-      (mode === "movePreview" ||
-        mode === "attackPreview" ||
-        (phase === "shoot" &&
-          selectedUnit?.SHOOT_LEFT !== undefined &&
-          selectedUnit.SHOOT_LEFT > 0))
-    ) {
-      const centerCube = offsetToCube(attackFromCol, attackFromRow);
+      if (mode === "movePreview" && movePreview) {
+        const movePreviewUnit = units.find((u) => u.id === movePreview.unitId);
+        if (!movePreviewUnit) {
+          return null;
+        }
+        return {
+          unit: movePreviewUnit,
+          fromCol: movePreview.destCol,
+          fromRow: movePreview.destRow,
+        };
+      }
 
-      // Check line of sight for each potential target during shooting
-      if (phase === "shoot") {
-        const enemyUnits = units.filter((u) => u.player !== previewUnit!.player);
-        for (const enemy of enemyUnits) {
-          const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
-          if (distance <= (getMaxRangedRange(previewUnit) || 0)) {
-            const lineOfSight = hasLineOfSight(
-              { col: attackFromCol, row: attackFromRow },
-              { col: enemy.col, row: enemy.row },
-              effectiveWallHexes
+      if (mode === "attackPreview" && attackPreview) {
+        const attackPreviewUnit = units.find((u) => u.id === attackPreview.unitId);
+        if (!attackPreviewUnit || attackPreviewUnit.id !== selectedUnitId) {
+          return null;
+        }
+        return {
+          unit: attackPreviewUnit,
+          fromCol: attackPreviewUnit.col,
+          fromRow: attackPreviewUnit.row,
+        };
+      }
+
+      if (phase === "shoot" && selectedUnit?.SHOOT_LEFT !== undefined && selectedUnit.SHOOT_LEFT > 0) {
+        return {
+          unit: selectedUnit,
+          fromCol: selectedUnit.col,
+          fromRow: selectedUnit.row,
+        };
+      }
+
+      return null;
+    };
+
+    const appendShootingPreviewCells = (source: { unit: Unit; fromCol: number; fromRow: number }) => {
+      if (!source.unit.RNG_WEAPONS || source.unit.RNG_WEAPONS.length === 0) {
+        throw new Error(
+          `Unit ${source.unit.id} (${source.unit.type || "unknown"}) has no ranged weapons for shooting phase preview`
+        );
+      }
+
+      const centerCube = offsetToCube(source.fromCol, source.fromRow);
+      const range = getMaxRangedRange(source.unit);
+      const coverPathHexes = new Set<string>();
+      const enemyUnits = units.filter((u) => u.player !== source.unit.player);
+      const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
+
+      for (const enemy of enemyUnits) {
+        const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
+        if (distance > 0 && distance <= range) {
+          const lineOfSight = hasLineOfSight(
+            { col: source.fromCol, row: source.fromRow },
+            { col: enemy.col, row: enemy.row },
+            effectiveWallHexes
+          );
+
+          if (!lineOfSight.canSee) {
+            blockedTargets.add(`${enemy.col},${enemy.row}`);
+          } else if (lineOfSight.inCover) {
+            coverCells.push({ col: enemy.col, row: enemy.row });
+            coverTargets.add(`${enemy.col},${enemy.row}`);
+
+            const pathHexes: Position[] = getHexLine(
+              source.fromCol,
+              source.fromRow,
+              enemy.col,
+              enemy.row
             );
-
-            if (!lineOfSight.canSee) {
-              blockedTargets.add(`${enemy.col},${enemy.row}`);
-            } else if (lineOfSight.inCover) {
-              coverTargets.add(`${enemy.col},${enemy.row}`);
-            }
+            pathHexes.forEach((hex) => {
+              const hexKey = `${hex.col},${hex.row}`;
+              if (!wallHexSet.has(hexKey)) {
+                coverPathHexes.add(hexKey);
+              }
+            });
+          } else {
+            attackCells.push({ col: enemy.col, row: enemy.row });
           }
         }
       }
 
-      // Validate required range properties are defined and get range
-      // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (imported at top)
+      for (let col = 0; col < BOARD_COLS; col++) {
+        for (let row = 0; row < BOARD_ROWS; row++) {
+          const targetCube = offsetToCube(col, row);
+          const dist = cubeDistance(centerCube, targetCube);
+          if (dist > 0 && dist <= range) {
+            const hexKey = `${col},${row}`;
+            const hasEnemy = units.some((u) => u.player !== source.unit.player && u.col === col && u.row === row);
 
-      let range: number;
-      if (phase === "fight") {
-        // Check if unit has melee weapons
-        if (!previewUnit.CC_WEAPONS || previewUnit.CC_WEAPONS.length === 0) {
-          throw new Error(
-            `Unit ${previewUnit.id} (${previewUnit.type || "unknown"}) has no melee weapons for fight phase preview`
-          );
-        }
-        range = getMeleeRange(); // Always 1
-        // For fight phase, show all hexes in range (original behavior)
-        for (let col = 0; col < BOARD_COLS; col++) {
-          for (let row = 0; row < BOARD_ROWS; row++) {
-            const targetCube = offsetToCube(col, row);
-            const dist = cubeDistance(centerCube, targetCube);
-            if (dist > 0 && dist <= range) {
-              attackCells.push({ col, row });
-            }
-          }
-        }
-      } else {
-        // Check if unit has ranged weapons
-        if (!previewUnit.RNG_WEAPONS || previewUnit.RNG_WEAPONS.length === 0) {
-          throw new Error(
-            `Unit ${previewUnit.id} (${previewUnit.type || "unknown"}) has no ranged weapons for shooting phase preview`
-          );
-        }
-        range = getMaxRangedRange(previewUnit);
-
-        // During shooting phase, show different colored hexes based on line of sight
-        if (phase === "shoot") {
-          // First, find all enemies in range and mark cover paths
-          const coverPathHexes = new Set<string>();
-          const enemyUnits = units.filter((u) => u.player !== previewUnit!.player);
-
-          // First process actual enemy units
-          for (const enemy of enemyUnits) {
-            const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
-            if (distance > 0 && distance <= range) {
-              const lineOfSight = hasLineOfSight(
-                { col: attackFromCol!, row: attackFromRow! },
-                { col: enemy.col, row: enemy.row },
-                effectiveWallHexes
-              );
-
-              if (lineOfSight.canSee && lineOfSight.inCover) {
-                // Mark this enemy as in cover
-                coverCells.push({ col: enemy.col, row: enemy.row });
-                coverTargets.add(`${enemy.col},${enemy.row}`);
-
-                // Mark all hexes in the path that contribute to cover (but exclude wall hexes)
-                const pathHexes: Position[] = getHexLine(
-                  attackFromCol!,
-                  attackFromRow!,
-                  enemy.col,
-                  enemy.row
-                );
-                const wallHexSet = new Set<string>(
-                  effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`)
-                );
-                pathHexes.forEach((hex) => {
-                  const hexKey = `${hex.col},${hex.row}`;
-                  if (!wallHexSet.has(hexKey)) {
-                    coverPathHexes.add(hexKey);
-                  }
-                });
-              } else if (lineOfSight.canSee) {
-                // Clear line of sight enemy
-                attackCells.push({ col: enemy.col, row: enemy.row });
+            if (!hasEnemy) {
+              if (coverPathHexes.has(hexKey)) {
+                coverCells.push({ col, row });
               } else {
-                // Blocked enemy
-                blockedTargets.add(`${enemy.col},${enemy.row}`);
-              }
-            }
-          }
-
-          // Now show all hexes in range with appropriate colors
-          for (let col = 0; col < BOARD_COLS; col++) {
-            for (let row = 0; row < BOARD_ROWS; row++) {
-              const targetCube = offsetToCube(col, row);
-              const dist = cubeDistance(centerCube, targetCube);
-              if (dist > 0 && dist <= range) {
-                const hexKey = `${col},${row}`;
-                const hasEnemy = units.some(
-                  (u) => u.player !== previewUnit!.player && u.col === col && u.row === row
+                const lineOfSight = hasLineOfSight(
+                  { col: source.fromCol, row: source.fromRow },
+                  { col: col, row: row },
+                  effectiveWallHexes
                 );
 
-                if (!hasEnemy) {
-                  // For empty hexes, show orange if part of cover path, red if clear
-                  if (coverPathHexes.has(hexKey)) {
-                    coverCells.push({ col, row });
-                  } else {
-                    const lineOfSight = hasLineOfSight(
-                      { col: attackFromCol!, row: attackFromRow! },
-                      { col: col, row: row },
-                      effectiveWallHexes
-                    );
-
-                    if (lineOfSight.canSee && !lineOfSight.inCover) {
-                      attackCells.push({ col, row });
-                    } else if (lineOfSight.canSee && lineOfSight.inCover) {
-                      coverCells.push({ col, row });
-                    }
-                  }
+                if (lineOfSight.canSee && !lineOfSight.inCover) {
+                  attackCells.push({ col, row });
+                } else if (lineOfSight.canSee && lineOfSight.inCover) {
+                  coverCells.push({ col, row });
                 }
               }
             }
           }
         }
       }
+    };
+
+    const shootingPreviewSource = resolveShootingPreviewSource();
+    if (shootingPreviewSource) {
+      appendShootingPreviewCells(shootingPreviewSource);
     }
 
     // ✅ DRAW BOARD ONCE with populated availableCells
@@ -1598,7 +1545,6 @@ export default function Board({
         MARGIN;
 
       // Skip units that are being previewed elsewhere
-      if (mode === "movePreview" && movePreview && unit.id === movePreview.unitId) continue;
       if (mode === "advancePreview" && movePreview && unit.id === movePreview.unitId) continue;
       if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
 
@@ -1693,8 +1639,13 @@ export default function Board({
         unit.id === selectedUnitId &&
         chargeCells.length > 0 &&
         !hasExistingGhost; // Don't ghost the real unit if replay mode already added a ghost
+      const isMoveOriginGhost =
+        mode === "movePreview" &&
+        (phase === "move" || phase === "shoot") &&
+        movePreview !== null &&
+        unit.id === movePreview.unitId;
 
-      const unitToRender = isChargeOrigin
+      const unitToRender = isChargeOrigin || isMoveOriginGhost
         ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
         : unit;
 
@@ -1706,7 +1657,7 @@ export default function Board({
         uiElementsContainer: uiElementsContainerRef.current!, // Pass persistent UI container
         useOverlayIcons: true,
         isPreview: false,
-        isEligible: isEligibleForRendering || false,
+        isEligible: isMoveOriginGhost ? false : (isEligibleForRendering || false),
         isShootable,
         boardConfig: boardConfigForRender,
         HEX_RADIUS,
@@ -2211,10 +2162,18 @@ export default function Board({
 
       for (const unit of units) {
         const unitIdNum = typeof unit.id === "number" ? unit.id : parseInt(unit.id as string, 10);
-        const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const overlayCol =
+          mode === "movePreview" && movePreview && movePreview.unitId === unitIdNum
+            ? movePreview.destCol
+            : unit.col;
+        const overlayRow =
+          mode === "movePreview" && movePreview && movePreview.unitId === unitIdNum
+            ? movePreview.destRow
+            : unit.row;
+        const centerX = overlayCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
         const centerY =
-          unit.row * HEX_VERT_SPACING +
-          ((unit.col % 2) * HEX_VERT_SPACING) / 2 +
+          overlayRow * HEX_VERT_SPACING +
+          ((overlayCol % 2) * HEX_VERT_SPACING) / 2 +
           HEX_HEIGHT / 2 +
           MARGIN;
         const unitIconScale = unit.ICON_SCALE || ICON_SCALE;
@@ -2222,10 +2181,21 @@ export default function Board({
         const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
 
         // Icons: advance + weapon selection
-        const isActiveShooting =
+        const isActiveShootingFromState =
           gameState?.active_shooting_unit &&
           parseInt(gameState.active_shooting_unit, 10) === unitIdNum;
-        if (phase === "shoot" && unit.player === current_player && isActiveShooting) {
+        const isExplicitlyActivatedInUi =
+          selectedUnitId === unitIdNum &&
+          (mode === "attackPreview" ||
+            mode === "advancePreview" ||
+            mode === "movePreview" ||
+            mode === "targetPreview");
+        const shouldShowShootingActionIcons =
+          phase === "shoot" &&
+          unit.player === current_player &&
+          isActiveShootingFromState &&
+          isExplicitlyActivatedInUi;
+        if (shouldShowShootingActionIcons) {
           const iconSize = getRequiredCssNumber("--icon-advance-size");
           const iconScale = getRequiredCssNumber("--icon-square-icon-scale");
           const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;

@@ -613,11 +613,9 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             del game_state["active_shooting_unit"]
         return shooting_phase_end(game_state)
     
-    # Invariant: AI/gym can auto-activate; human should choose the unit manually.
-    # Required for convert_gym_action, get_action_mask, and any reader (e.g. debug log).
+    # Auto-activate next unit only for AI-controlled players.
     cfg = require_key(game_state, "config")
-    is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
-    if is_pve and current_player != 2:
+    if not _should_auto_activate_next_shooting_unit(game_state, cfg, eligible_units):
         if "active_shooting_unit" in game_state:
             del game_state["active_shooting_unit"]
     else:
@@ -997,6 +995,40 @@ def _ai_select_shooting_target(game_state: Dict[str, Any], unit_id: str, valid_t
 
     return best_target
 
+
+def _is_ai_controlled_shooting_unit(
+    game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]
+) -> bool:
+    """
+    Determine whether the active shooting unit is AI-controlled.
+
+    Preferred source of truth is game_state.player_types.
+    Fallback keeps existing non-UI training behavior for gym/pve only.
+    """
+    player_types = game_state.get("player_types")
+    if player_types is not None:
+        player_type = player_types.get(str(require_key(unit, "player")))
+        if player_type is None:
+            raise KeyError(f"Missing player_types entry for player {require_key(unit, 'player')}")
+        return player_type == "ai"
+    is_pve_ai = config.get("pve_mode", False) and unit["player"] == 2
+    is_gym_training = config.get("gym_training_mode", False)
+    return is_pve_ai or is_gym_training
+
+
+def _should_auto_activate_next_shooting_unit(
+    game_state: Dict[str, Any], config: Dict[str, Any], pool: List[str]
+) -> bool:
+    """
+    Auto-activate next unit only when that unit is AI-controlled.
+    """
+    if not pool:
+        return False
+    next_unit = _get_unit_by_id(game_state, pool[0])
+    if not next_unit:
+        return False
+    return _is_ai_controlled_shooting_unit(game_state, next_unit, config)
+
 def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int) -> bool:
     """
     ADVANCE_IMPLEMENTATION: Updated to support Advance action.
@@ -1228,6 +1260,9 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     
     # Determine adjacency
     unit_is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+    # Recompute advance capability at activation time from current board state.
+    # Do not rely on stale value set at phase-start pool build.
+    unit["_can_advance"] = not unit_is_adjacent
     
     # PISTOL rule: Reset _shooting_with_pistol for this activation (no category restriction yet)
     # This must be done BEFORE weapon_availability_check to avoid incorrect filtering
@@ -1295,7 +1330,6 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             )
             result["skip_reason"] = "no_valid_actions"
             return result
-    
     # YES -> SHOOTING ACTIONS AVAILABLE -> Go to STEP 3: ACTION_SELECTION
     unit["valid_target_pool"] = valid_target_pool
     
@@ -2335,19 +2369,16 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     # Call end_activation (exactly like MOVE phase)
     result = end_activation(game_state, unit, arg1, arg2, arg3, arg4, arg5)
     
-    # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
-    # Must hold after every end_activation (shoot/advance/wait/execution_loop), not only wait/skip.
-    # Exception: PvE human player must manually select the next unit.
+    # Auto-select next unit only for AI-controlled player.
     pool = require_key(game_state, "shoot_activation_pool")
+    auto_selected_next_unit = False
     if pool:
         cfg = require_key(game_state, "config")
-        is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
-        current_player = require_key(game_state, "current_player")
-        if is_pve and current_player != 2:
-            if "active_shooting_unit" in game_state:
-                del game_state["active_shooting_unit"]
-        else:
+        if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
             game_state["active_shooting_unit"] = pool[0]
+            auto_selected_next_unit = True
+        elif "active_shooting_unit" in game_state:
+            del game_state["active_shooting_unit"]
     
     # CRITICAL: Pool empty detection is handled in execute_action (like MOVE phase)
     # This prevents double call to _shooting_phase_complete (once here, once in _process_shooting_phase)
@@ -2375,6 +2406,11 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
         "unitId": unit["id"],
         "activation_complete": True
     })
+    # Backend is source of truth: when activation really ends and no next unit is auto-activated,
+    # explicitly instruct frontend to return to neutral select state.
+    if arg5 == 1 and not auto_selected_next_unit and "active_shooting_unit" not in game_state:
+        result["reset_mode"] = "select"
+        result["clear_selected_unit"] = True
     # Align with fight phase: ensure waiting_for_player is explicit for shoot logging
     if action_type == "shoot" and "waiting_for_player" not in result:
         result["waiting_for_player"] = False
@@ -2589,14 +2625,8 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         selected_weapon = get_selected_ranged_weapon(unit)
         current_weapon_nb = require_key(unit, "_current_shoot_nb") if selected_weapon else None
         
-        # CLEAN FLAG DETECTION: Use config parameter
         unit_check = _get_unit_by_id(game_state, unit_id)
-        is_pve_ai = config.get("pve_mode", False) and unit_check and unit_check["player"] == 2
-        is_gym_training = config.get("gym_training_mode", False)
-        is_bot = unit_check and unit_check["player"] == 2 and not is_pve_ai
-        
-        # For AI/gym/bots: end activation as before
-        if is_pve_ai or is_gym_training or is_bot:
+        if unit_check and _is_ai_controlled_shooting_unit(game_state, unit_check, config):
             if selected_weapon and unit["SHOOT_LEFT"] == current_weapon_nb:
                 # No targets at activation
                 return _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1)
@@ -2618,19 +2648,9 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
             # Shot last target available
             return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
     
-    # CLEAN FLAG DETECTION: Use config parameter
     unit = _get_unit_by_id(game_state, unit_id)
-    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
-    
-    # CHANGE 1: Add gym_training_mode detection
-    # Gym agents have already made shoot/skip decisions via action selection (actions 4-8 or 11)
-    # The execution loop reaches here when SHOOT_LEFT > 0 after a shot, so we need to auto-execute
-    is_gym_training = config.get("gym_training_mode", False)
-    # Bots (player 2) should also auto-continue attacks like gym training
-    is_bot = unit and unit["player"] == 2 and not is_pve_ai
-    
-    # CHANGE 2: Auto-execute for BOTH PvE AI, gym training, and bots
-    if (is_pve_ai or is_gym_training or is_bot) and valid_targets:
+    # Gym/PvE AI can auto-continue attacks; humans must explicitly choose targets.
+    if unit and _is_ai_controlled_shooting_unit(game_state, unit, config) and valid_targets:
         # Pool is source of truth - do not rebuild here (AI_TURN.md: no redundant checks)
         
         # AUTO-SHOOT: PvE AI and gym training
@@ -2711,7 +2731,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if "action" not in action:
         raise KeyError(f"Action missing required 'action' field: {action}")
     action_type = action["action"]
-    
     # Handler self-initialization (aligned with MOVE phase)
     game_state_phase = game_state["phase"] if "phase" in game_state else None
     shoot_pool_exists = "shoot_activation_pool" in game_state
@@ -2757,7 +2776,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # DEBUG: Log unit activation for dead unit detection
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
-    from engine.game_utils import add_console_log, add_debug_log
+    from engine.game_utils import add_debug_log
     hp_cur = get_hp_from_cache(unit_id, game_state)  # Phase 2: from cache
     # CRITICAL: Normalize unit_id to string for consistent comparison (pool stores strings)
     unit_id_str = str(unit_id)
@@ -2822,6 +2841,16 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if action_type == "activate_unit":
         result = shooting_unit_activation_start(game_state, unit_id)
         if result.get("success"):
+            # Normalize backend contract: allow_advance implies player can act (advance) now.
+            # Keep this path explicit and return immediately so the signal is never lost.
+            if result.get("allow_advance"):
+                result["waiting_for_player"] = True
+                result["action"] = "empty_target_advance_available"
+                if "empty_target_pool" not in result:
+                    result["empty_target_pool"] = True
+                if "can_advance" not in result:
+                    result["can_advance"] = True
+                return True, result
             # Check if empty_target_pool with can_advance
             if result.get("empty_target_pool") and result.get("can_advance"):
                 # STEP 6: EMPTY_TARGET_HANDLING - advance available
@@ -3122,16 +3151,21 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         # Left click on another unit in pool - switch units (only if current unit hasn't shot)
         if "shoot_activation_pool" not in game_state:
             raise KeyError("game_state missing required 'shoot_activation_pool' field")
-        if target_id in game_state["shoot_activation_pool"]:
-            # Check if current unit has shot - if yes, block switch
+        target_id_str = str(target_id)
+        pool_ids = [str(uid) for uid in game_state["shoot_activation_pool"]]
+        if target_id_str in pool_ids:
             current_unit = _get_unit_by_id(game_state, unit_id)
             if current_unit:
                 has_shot = _unit_has_shot_with_any_weapon(current_unit)
                 if has_shot:
                     # Unit has already shot - cannot switch (must finish shooting)
-                    return True, {"action": "no_effect", "unitId": unit_id, "error": "cannot_switch_after_shooting"}
-            return _handle_unit_switch_with_context(game_state, unit_id, target_id, config)
-        return False, {"error": "unit_not_in_pool", "targetId": target_id}
+                    return True, {
+                        "action": "no_effect",
+                        "unitId": unit_id,
+                        "error": "cannot_switch_after_shooting",
+                    }
+            return _handle_unit_switch_with_context(game_state, unit_id, target_id_str, config)
+        return False, {"error": "unit_not_in_pool", "targetId": target_id_str}
     
     elif click_target == "active_unit":
         # Left click on active unit - behavior depends on whether unit has shot
@@ -3146,14 +3180,11 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             # Unit has not shot yet - postpone (deselect, return to pool)
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
-            # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
-            # Exception: PvE human player must manually select the next unit.
+            # Auto-select next unit only for AI-controlled player.
             pool = require_key(game_state, "shoot_activation_pool")
             if pool:
                 cfg = require_key(game_state, "config")
-                is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
-                current_player = require_key(game_state, "current_player")
-                if not (is_pve and current_player != 2):
+                if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
                     game_state["active_shooting_unit"] = pool[0]
             return True, {
                 "action": "postpone",
@@ -3176,14 +3207,11 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
             # Clear active unit
             if "active_shooting_unit" in game_state:
                 del game_state["active_shooting_unit"]
-            # Invariant: when in shoot with non-empty pool, active_shooting_unit = pool[0]
-            # Exception: PvE human player must manually select the next unit.
+            # Auto-select next unit only for AI-controlled player.
             pool = require_key(game_state, "shoot_activation_pool")
             if pool:
                 cfg = require_key(game_state, "config")
-                is_pve = require_key(cfg, "pve_mode") or game_state.get("is_pve_mode", False)
-                current_player = require_key(game_state, "current_player")
-                if not (is_pve and current_player != 2):
+                if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
                     game_state["active_shooting_unit"] = pool[0]
             # Return to UNIT_ACTIVABLE_CHECK step (by returning activation_ended=False)
             return True, {
@@ -4292,6 +4320,15 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
     if new_unit:
         result = shooting_unit_activation_start(game_state, new_unit_id)
         if result.get("success"):
+            # Preserve advance availability contract for units without valid shooting targets.
+            if result.get("allow_advance"):
+                result["waiting_for_player"] = True
+                result["action"] = "empty_target_advance_available"
+                if "empty_target_pool" not in result:
+                    result["empty_target_pool"] = True
+                if "can_advance" not in result:
+                    result["can_advance"] = True
+                return True, result
             return _shooting_unit_execution_loop(game_state, new_unit_id, config)
     
     return False, {"error": "unit_switch_failed"}

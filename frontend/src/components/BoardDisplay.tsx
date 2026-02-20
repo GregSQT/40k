@@ -238,8 +238,9 @@ export const drawBoard = (
         if (isAdvanceDestination || isChargeable || isAttackable || isInCover || isAvailable) {
           const highlightCell = new PIXI.Graphics();
 
-          // Shooting phase: use unified vivid blue tones for attack preview
-          if (phase === "shoot") {
+          // Shooting preview palette: used in shoot phase and movePreview confirm step
+          const useShootingPreviewPalette = phase === "shoot" || mode === "movePreview";
+          if (useShootingPreviewPalette) {
             // In advancePreview mode, use light brown for availableCells
             if (mode === "advancePreview" && isAvailable) {
               // Light brown for advance destinations (0xD4A574 = light brown)

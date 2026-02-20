@@ -28,7 +28,6 @@
       "draw": 0.0
     },
     "objective_rewards": {
-      
       "reward_per_objective": 6.0,
       "reward_for_objective_lead": 3.0,
       "use_objective_lead": true,

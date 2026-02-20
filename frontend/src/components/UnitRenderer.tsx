@@ -335,7 +335,7 @@ export class UnitRenderer {
   }
 
   private calculateEligibilityCompliant(): boolean {
-    const { unit, phase, current_player, unitsMoved, unitsFled } = this.props;
+    const { unit, phase, current_player, unitsFled } = this.props;
 
     // Basic eligibility checks
     // Allow just-killed units to be rendered as grey ghosts
@@ -354,7 +354,7 @@ export class UnitRenderer {
 
     switch (phase) {
       case "move":
-        return !unitsMoved.includes(unit.id);
+        return this.props.isEligible || false;
       case "shoot": {
         // Queue-based eligibility during active shooting phase
         // Type-safe checks with proper fallbacks

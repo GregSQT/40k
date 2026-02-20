@@ -30,6 +30,7 @@ __all__ = [
     'benchmark_device_speed',
     'setup_imports',
     'make_training_env',
+    'make_macro_training_env',
     'get_agent_scenario_file',
     'get_scenario_list_for_phase',
     'ensure_scenario'
@@ -202,6 +203,72 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         # Wrap with Monitor for episode statistics
         return Monitor(wrapped_env)
     
+    return _init
+
+
+def make_macro_training_env(
+    rank,
+    scenario_file,
+    rewards_config_name,
+    training_config_name,
+    controlled_agent_key,
+    model_path_template,
+    macro_player,
+    scenario_files,
+    debug_mode=False
+):
+    """
+    Factory function to create one MacroTrainingWrapper instance for vectorized training.
+
+    Args:
+        rank: Environment index (0, 1, 2, ...)
+        scenario_file: Primary scenario JSON path
+        rewards_config_name: Name of rewards configuration
+        training_config_name: Name of training configuration
+        controlled_agent_key: Agent key used by W40KEngine
+        model_path_template: Template path to micro models with {model_key}
+        macro_player: Controlled macro player id (1 or 2)
+        scenario_files: Scenario files used by macro wrapper
+        debug_mode: Enable debug mode
+
+    Returns:
+        Callable that creates and returns a wrapped macro environment instance
+    """
+    def _init():
+        from engine.w40k_core import W40KEngine
+        from ai.unit_registry import UnitRegistry
+        from ai.macro_training_env import MacroTrainingWrapper
+
+        unit_registry = UnitRegistry()
+        base_env = W40KEngine(
+            rewards_config=rewards_config_name,
+            training_config_name=training_config_name,
+            controlled_agent=controlled_agent_key,
+            active_agents=None,
+            scenario_file=scenario_file,
+            scenario_files=scenario_files,
+            unit_registry=unit_registry,
+            quiet=True,
+            gym_training_mode=True,
+            debug_mode=debug_mode
+        )
+        base_env.step_logger = None
+
+        macro_env = MacroTrainingWrapper(
+            base_env=base_env,
+            unit_registry=unit_registry,
+            scenario_files=scenario_files,
+            model_path_template=model_path_template,
+            macro_player=macro_player,
+            debug_mode=debug_mode
+        )
+
+        def mask_fn(env):
+            return env.get_action_mask()
+
+        masked_env = ActionMasker(macro_env, mask_fn)
+        return Monitor(masked_env)
+
     return _init
 
 

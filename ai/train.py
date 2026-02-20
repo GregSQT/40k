@@ -176,6 +176,7 @@ from ai.training_utils import (
     benchmark_device_speed,
     setup_imports,
     make_training_env,
+    make_macro_training_env,
     get_agent_scenario_file,
     get_scenario_list_for_phase,
     ensure_scenario
@@ -940,50 +941,59 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
 
     print(f"✅ Using scenario: {scenario_file}")
 
-    from ai.unit_registry import UnitRegistry
-    unit_registry = UnitRegistry()
-
     effective_agent_key = rewards_config_name if rewards_config_name else agent_key
 
     n_envs = require_key(training_config, "n_envs")
-    if n_envs != 1:
-        raise ValueError(f"MacroController training requires n_envs=1 (got {n_envs})")
-
-    base_env = W40KEngine(
-        rewards_config=rewards_config_name,
-        training_config_name=training_config_name,
-        controlled_agent=effective_agent_key,
-        active_agents=None,
-        scenario_file=scenario_file,
-        unit_registry=unit_registry,
-        quiet=True,
-        gym_training_mode=True,
-        debug_mode=debug_mode
-    )
-
-    if step_logger:
-        base_env.step_logger = step_logger
-        print("✅ StepLogger connected to compliant W40KEngine")
-
     macro_player = require_key(training_config, "macro_player")
 
     models_root = config.get_models_root()
     model_path_template = os.path.join(models_root, "{model_key}", "model_{model_key}.zip")
-
-    macro_env = MacroTrainingWrapper(
-        base_env=base_env,
-        unit_registry=unit_registry,
-        scenario_files=[scenario_file],
-        model_path_template=model_path_template,
-        macro_player=macro_player,
-        debug_mode=debug_mode
-    )
-
-    def mask_fn(env):
-        return env.get_action_mask()
-
-    masked_env = ActionMasker(macro_env, mask_fn)
-    env = Monitor(masked_env)
+    if n_envs > 1:
+        print(f"🚀 Creating {n_envs} parallel macro environments for accelerated training...")
+        env = SubprocVecEnv([
+            make_macro_training_env(
+                rank=i,
+                scenario_file=scenario_file,
+                rewards_config_name=rewards_config_name,
+                training_config_name=training_config_name,
+                controlled_agent_key=effective_agent_key,
+                model_path_template=model_path_template,
+                macro_player=macro_player,
+                scenario_files=[scenario_file],
+                debug_mode=debug_mode
+            )
+            for i in range(n_envs)
+        ])
+        print(f"✅ Vectorized macro training environment created with {n_envs} parallel processes")
+    else:
+        from ai.unit_registry import UnitRegistry
+        unit_registry = UnitRegistry()
+        base_env = W40KEngine(
+            rewards_config=rewards_config_name,
+            training_config_name=training_config_name,
+            controlled_agent=effective_agent_key,
+            active_agents=None,
+            scenario_file=scenario_file,
+            unit_registry=unit_registry,
+            quiet=True,
+            gym_training_mode=True,
+            debug_mode=debug_mode
+        )
+        if step_logger:
+            base_env.step_logger = step_logger
+            print("✅ StepLogger connected to compliant W40KEngine")
+        macro_env = MacroTrainingWrapper(
+            base_env=base_env,
+            unit_registry=unit_registry,
+            scenario_files=[scenario_file],
+            model_path_template=model_path_template,
+            macro_player=macro_player,
+            debug_mode=debug_mode
+        )
+        def mask_fn(env):
+            return env.get_action_mask()
+        masked_env = ActionMasker(macro_env, mask_fn)
+        env = Monitor(masked_env)
 
     model_path = build_agent_model_path(models_root, agent_key)
 

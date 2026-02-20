@@ -40,15 +40,13 @@ export const BoardWithAPI: React.FC = () => {
         : location.pathname === "/game" && location.search.includes("mode=pve")
           ? "pve"
           : "pvp";
-  const isDebugMode = gameMode === "debug" || window.location.search.includes("mode=debug");
-  const isTestMode = gameMode === "test" || window.location.search.includes("mode=test");
-  const isPvEMode = gameMode === "pve" || window.location.search.includes("mode=pve");
-  const isAiMode =
-    isDebugMode ||
-    isPvEMode ||
-    isTestMode ||
-    apiProps.gameState?.pve_mode === true ||
-    apiProps.gameState?.test_mode === true;
+  const isAiMode = (() => {
+    const playerTypes = apiProps.gameState?.player_types;
+    if (!playerTypes) {
+      return false;
+    }
+    return Object.values(playerTypes).some((playerType) => playerType === "ai");
+  })();
   const victoryPoints = apiProps.gameState?.victory_points;
   const objectivesOverride = (() => {
     const objectives = apiProps.gameState?.objectives as
@@ -100,6 +98,12 @@ export const BoardWithAPI: React.FC = () => {
     1: false,
     2: false,
   });
+  const [deploymentTooltip, setDeploymentTooltip] = useState<{
+    visible: boolean;
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const getVictoryPointsForPlayer = (player: 1 | 2): number | undefined => {
     if (!apiProps.gameState) {
@@ -181,7 +185,24 @@ export const BoardWithAPI: React.FC = () => {
   useEffect(() => {
     if (!apiProps.gameState) return;
 
-    // Check if in PvE/Debug mode
+    const playerTypes = apiProps.gameState.player_types;
+    if (!playerTypes) {
+      throw new Error("Missing player_types in gameState for AI turn orchestration");
+    }
+    const getPlayerType = (playerId: number): "human" | "ai" => {
+      const playerType = playerTypes[String(playerId)];
+      if (!playerType) {
+        throw new Error(`Missing player type for player ${playerId}`);
+      }
+      return playerType;
+    };
+    const isAiUnit = (unit: Unit): boolean => getPlayerType(unit.player) === "ai";
+    const hasAiUnitsInPool = (pool: Array<string | number>, state: { units: Unit[] }): boolean =>
+      pool.some((unitId) => {
+        const unit = state.units.find((u: Unit) => String(u.id) === String(unitId));
+        return !!unit && isAiUnit(unit) && (unit.HP_CUR ?? unit.HP_MAX) > 0;
+      });
+
     const isAiEnabled = isAiMode;
 
     // Check if game is over by examining unit health
@@ -205,30 +226,21 @@ export const BoardWithAPI: React.FC = () => {
       } else {
         const deployer = deploymentState.current_deployer;
         const pool = deploymentState.deployable_units?.[String(deployer)] || [];
-        hasEligibleAIUnits = deployer === 2 && pool.length > 0;
+        hasEligibleAIUnits = getPlayerType(deployer) === "ai" && pool.length > 0;
       }
     } else if (currentPhase === "move") {
       // Move phase: Check move activation pool for AI eligibility
       if (apiProps.gameState.move_activation_pool) {
-        hasEligibleAIUnits = apiProps.gameState.move_activation_pool.some((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
-          return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        });
+        hasEligibleAIUnits = hasAiUnitsInPool(apiProps.gameState.move_activation_pool, apiProps.gameState);
       }
     } else if (currentPhase === "shoot") {
-      // Let backend handle shooting phase logic - it will auto-advance if no valid targets
-      hasEligibleAIUnits = apiProps.gameState.units.some(
-        (unit) => unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0
-      );
+      hasEligibleAIUnits = apiProps.gameState.shoot_activation_pool
+        ? hasAiUnitsInPool(apiProps.gameState.shoot_activation_pool, apiProps.gameState)
+        : false;
     } else if (currentPhase === "charge") {
       // Charge phase: Check charge activation pool for AI eligibility
       if (apiProps.gameState.charge_activation_pool) {
-        hasEligibleAIUnits = apiProps.gameState.charge_activation_pool.some((unitId) => {
-          // Normalize comparison: pools contain strings, unit.id might be number
-          const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
-          return unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        });
+        hasEligibleAIUnits = hasAiUnitsInPool(apiProps.gameState.charge_activation_pool, apiProps.gameState);
       }
     } else if (currentPhase === "fight") {
       // Fight phase: Check fight subphase pools for AI eligibility
@@ -260,33 +272,17 @@ export const BoardWithAPI: React.FC = () => {
         fightPool = apiProps.gameState.active_alternating_activation_pool;
       }
 
-      hasEligibleAIUnits = fightPool.some((unitId) => {
-        // Normalize comparison: pools contain strings, unit.id might be number
-        const unit = apiProps.gameState!.units.find((u: Unit) => String(u.id) === String(unitId));
-        const isAI = unit && unit.player === 2 && (unit.HP_CUR ?? unit.HP_MAX) > 0;
-        return isAI;
-      });
+      hasEligibleAIUnits = hasAiUnitsInPool(fightPool, apiProps.gameState);
     }
 
-    // CRITICAL: In fight phase, current_player stays 1, but AI can still act in alternating phase
-    const fightSubphaseForCheck = apiProps.fightSubPhase || apiProps.gameState?.fight_subphase;
     const current_player = apiProps.gameState?.current_player;
+    if (current_player === undefined || current_player === null) {
+      throw new Error("Missing current_player in gameState");
+    }
     const isAITurn =
       currentPhase === "fight"
-        ? hasEligibleAIUnits &&
-          // Charging subphase: AI turn if current_player is 2
-          ((fightSubphaseForCheck === "charging" && current_player === 2) ||
-            // Alternating active: AI turn if current_player is 2 (active pool = current player's units)
-            (fightSubphaseForCheck === "alternating_active" && current_player === 2) ||
-            // Alternating non-active: AI turn if current_player is 1 (non-active = opposite of current player)
-            // When current_player is 2, non-active pool contains P1 units, so it's NOT AI turn
-            // When current_player is 1, non-active pool contains P2 units, so it IS AI turn
-            (fightSubphaseForCheck === "alternating_non_active" && current_player === 1) ||
-            // Cleanup active: AI turn if current_player is 2
-            (fightSubphaseForCheck === "cleanup_active" && current_player === 2) ||
-            // Cleanup non-active: AI turn if current_player is 1
-            (fightSubphaseForCheck === "cleanup_non_active" && current_player === 1))
-        : current_player === 2;
+        ? hasEligibleAIUnits
+        : getPlayerType(current_player) === "ai";
 
     // Removed duplicate log - now handled below with change detection
 
@@ -351,17 +347,36 @@ export const BoardWithAPI: React.FC = () => {
           if (latestPlayer === undefined || latestPlayer === null) {
             throw new Error("Missing current_player before AI turn");
           }
-          if (latestPhase !== "fight" && latestPlayer !== 2) {
+          if (latestPhase !== "fight" && getPlayerType(latestPlayer) !== "ai") {
             return;
           }
           if (latestPhase === "fight") {
             const latestFightSubphase = apiProps.fightSubPhase || latestState.fight_subphase;
-            const isAITurnNow =
-              (latestFightSubphase === "charging" && latestPlayer === 2) ||
-              (latestFightSubphase === "alternating_active" && latestPlayer === 2) ||
-              (latestFightSubphase === "alternating_non_active" && latestPlayer === 1) ||
-              (latestFightSubphase === "cleanup_active" && latestPlayer === 2) ||
-              (latestFightSubphase === "cleanup_non_active" && latestPlayer === 1);
+            let latestFightPool: string[] = [];
+            if (latestFightSubphase === "charging" && latestState.charging_activation_pool) {
+              latestFightPool = latestState.charging_activation_pool;
+            } else if (
+              latestFightSubphase === "alternating_non_active" &&
+              latestState.non_active_alternating_activation_pool
+            ) {
+              latestFightPool = latestState.non_active_alternating_activation_pool;
+            } else if (
+              latestFightSubphase === "alternating_active" &&
+              latestState.active_alternating_activation_pool
+            ) {
+              latestFightPool = latestState.active_alternating_activation_pool;
+            } else if (
+              latestFightSubphase === "cleanup_non_active" &&
+              latestState.non_active_alternating_activation_pool
+            ) {
+              latestFightPool = latestState.non_active_alternating_activation_pool;
+            } else if (
+              latestFightSubphase === "cleanup_active" &&
+              latestState.active_alternating_activation_pool
+            ) {
+              latestFightPool = latestState.active_alternating_activation_pool;
+            }
+            const isAITurnNow = hasAiUnitsInPool(latestFightPool, latestState);
             if (!isAITurnNow) {
               return;
             }
@@ -543,13 +558,40 @@ export const BoardWithAPI: React.FC = () => {
           const deployableUnits = deployableIdsRaw
             .map((id) => apiProps.gameState!.units.find((u) => String(u.id) === String(id)))
             .filter((u): u is Unit => Boolean(u));
+          const getDeploymentGroupKey = (unit: Unit): string => {
+            const displayName = unit.DISPLAY_NAME || unit.name || unit.type || unit.unitType;
+            if (!displayName) {
+              throw new Error(`Deployment unit ${unit.id} missing display name`);
+            }
+            const marker = " (";
+            const markerIndex = displayName.indexOf(marker);
+            if (markerIndex > 0 && displayName.endsWith(")")) {
+              return displayName.slice(0, markerIndex).trim();
+            }
+            return displayName.trim();
+          };
           const deployableByType: Record<string, Unit[]> = {};
           deployableUnits.forEach((unit) => {
-            const typeKey = unit.unitType || unit.type || unit.name || "Unknown";
+            const typeKey = getDeploymentGroupKey(unit);
             if (!deployableByType[typeKey]) {
               deployableByType[typeKey] = [];
             }
             deployableByType[typeKey].push(unit);
+          });
+          Object.values(deployableByType).forEach((unitsOfType) => {
+            unitsOfType.sort((a, b) => {
+              if (typeof a.VALUE !== "number" || typeof b.VALUE !== "number") {
+                throw new Error(
+                  `Deployment sorting requires numeric VALUE (units ${a.id}=${String(a.VALUE)}, ${b.id}=${String(b.VALUE)})`
+                );
+              }
+              if (b.VALUE !== a.VALUE) {
+                return b.VALUE - a.VALUE;
+              }
+              const aName = a.DISPLAY_NAME || a.name || a.type || a.unitType || "";
+              const bName = b.DISPLAY_NAME || b.name || b.type || b.unitType || "";
+              return aName.localeCompare(bName);
+            });
           });
           const isCurrentDeployer = player === currentDeployer;
           const isCollapsed = deploymentRosterCollapsed[player];
@@ -562,11 +604,8 @@ export const BoardWithAPI: React.FC = () => {
                     ? "deployment-panel__player-banner--player2"
                     : "deployment-panel__player-banner--player1"
                 }`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "8px" }}
               >
-                <span>
-                  Player {player} - Deployment {isCurrentDeployer ? "(Active)" : "(Waiting)"}
-                </span>
                 <button
                   type="button"
                   className="deployment-panel__toggle"
@@ -580,6 +619,9 @@ export const BoardWithAPI: React.FC = () => {
                 >
                   {isCollapsed ? "+" : "−"}
                 </button>
+                <span>
+                  Player {player} - Deployment {isCurrentDeployer ? "(Active)" : "(Waiting)"}
+                </span>
               </div>
 
               {!isCollapsed && (
@@ -597,12 +639,31 @@ export const BoardWithAPI: React.FC = () => {
                         {unitsOfType.map((unit) => {
                           const isSelected = apiProps.selectedUnitId === unit.id;
                           const displayName = unit.DISPLAY_NAME || unit.name || typeKey;
+                          const tooltipText = `${displayName} - ID ${unit.id}${isCurrentDeployer ? "" : " (inactive this turn)"}`;
                           return (
                             <button
                               type="button"
                               className="deployment-panel__unit-icon"
                               key={`deploy-unit-${player}-${unit.id}`}
-                              title={`${displayName} - ID ${unit.id}${isCurrentDeployer ? "" : " (inactive this turn)"}`}
+                              onMouseEnter={(e) => {
+                                setDeploymentTooltip({
+                                  visible: true,
+                                  text: tooltipText,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                });
+                              }}
+                              onMouseMove={(e) => {
+                                setDeploymentTooltip((prev) => ({
+                                  visible: true,
+                                  text: prev?.text ?? tooltipText,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                }));
+                              }}
+                              onMouseLeave={() => {
+                                setDeploymentTooltip(null);
+                              }}
                               onClick={() => {
                                 if (!isCurrentDeployer) {
                                   return;
@@ -697,6 +758,39 @@ export const BoardWithAPI: React.FC = () => {
         <div className="turn-phase-tracker-right">Loading game configuration...</div>
       )}
 
+      {/* AI Status Display */}
+      {isAiMode && (
+        (() => {
+          const currentPlayer = apiProps.gameState?.current_player;
+          const currentPlayerType =
+            currentPlayer !== undefined && currentPlayer !== null
+              ? apiProps.gameState?.player_types?.[String(currentPlayer)]
+              : null;
+          const isCurrentPlayerAI = currentPlayerType === "ai";
+          return (
+        <div
+          className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
+            isCurrentPlayerAI
+              ? isAIProcessingRef.current
+                ? "bg-purple-900 border border-purple-700"
+                : "bg-purple-800 border border-purple-600"
+              : "bg-gray-800 border border-gray-600"
+          }`}
+        >
+          <span className="text-sm font-medium text-white">
+            {isCurrentPlayerAI ? "🤖 AI Turn" : "👤 Your Turn"}
+          </span>
+          {isCurrentPlayerAI && isAIProcessingRef.current && (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
+              <span className="text-purple-200 text-sm">AI thinking...</span>
+            </>
+          )}
+        </div>
+          );
+        })()
+      )}
+
       <div className="scoring-panel">
         {(() => {
           const p1Score = victoryPoints ? (victoryPoints[1] ?? victoryPoints["1"] ?? 0) : 0;
@@ -718,26 +812,16 @@ export const BoardWithAPI: React.FC = () => {
         })()}
       </div>
 
-      {/* AI Status Display */}
-      {isAiMode && (
+      {deploymentPanel}
+      {deploymentTooltip?.visible && (
         <div
-          className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
-            apiProps.gameState?.current_player === 2
-              ? isAIProcessingRef.current
-                ? "bg-purple-900 border border-purple-700"
-                : "bg-purple-800 border border-purple-600"
-              : "bg-gray-800 border border-gray-600"
-          }`}
+          className="rule-tooltip unit-icon-tooltip"
+          style={{
+            left: `${deploymentTooltip.x}px`,
+            top: `${deploymentTooltip.y}px`,
+          }}
         >
-          <span className="text-sm font-medium text-white">
-            {apiProps.gameState?.current_player === 2 ? "🤖 AI Turn" : "👤 Your Turn"}
-          </span>
-          {apiProps.gameState?.current_player === 2 && isAIProcessingRef.current && (
-            <>
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
-              <span className="text-purple-200 text-sm">AI thinking...</span>
-            </>
-          )}
+          {deploymentTooltip.text}
         </div>
       )}
 
@@ -756,8 +840,6 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       )}
-
-      {deploymentPanel}
 
       <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
         <UnitStatusTable

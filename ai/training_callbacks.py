@@ -15,10 +15,11 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 
 import os
 import time
+import re
 from collections import deque
 import numpy as np
 import torch
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from stable_baselines3.common.callbacks import BaseCallback
 
 from shared.data_validation import require_key
@@ -568,6 +569,19 @@ class MetricsCollectionCallback(BaseCallback):
                 print(f"vs GreedyBot:     {bot_results['greedy']:.2f} ({bot_results['greedy_wins']}/{n_final} wins)")
                 print(f"vs DefensiveBot:  {bot_results['defensive']:.2f} ({bot_results['defensive_wins']}/{n_final} wins)")
                 print(f"\nCombined Score:   {bot_results['combined']:.2f} {'✅' if bot_results['combined'] >= 0.70 else '⚠️'}")
+                scenario_scores = bot_results.get("scenario_scores")
+                if isinstance(scenario_scores, dict) and scenario_scores:
+                    ranking = sorted(
+                        scenario_scores.items(),
+                        key=lambda item: item[1]["combined"],
+                        reverse=True
+                    )
+                    print("\nScenario ranking (combined):")
+                    for scenario_name, values in ranking:
+                        print(
+                            f"  - {scenario_name}: combined={values['combined']:.3f} "
+                            f"| worst_bot_score={values['worst_bot_score']:.3f}"
+                        )
         
         # Critical metrics check
         print(f"\n📊 CRITICAL METRICS:")
@@ -1017,6 +1031,47 @@ class BotEvaluationCallback(BaseCallback):
         except Exception:
             pass
 
+    @staticmethod
+    def _scenario_metric_slug(scenario_name: str) -> str:
+        """Convert scenario label to TensorBoard-safe metric suffix."""
+        normalized = re.sub(r"[^a-zA-Z0-9]+", "_", scenario_name.strip()).strip("_").lower()
+        if not normalized:
+            raise ValueError(f"Invalid scenario name for metric slug: '{scenario_name}'")
+        return normalized
+
+    def _log_scenario_scores(self, results: Dict[str, Any]) -> None:
+        """
+        Log per-scenario bot evaluation scores to TensorBoard.
+
+        Metrics namespace:
+          bot_eval/scenario/<slug>/combined
+          bot_eval/scenario/<slug>/worst_bot_score
+        """
+        scenario_scores = results.get("scenario_scores")
+        if scenario_scores is None:
+            return
+        if not isinstance(scenario_scores, dict):
+            raise TypeError(
+                f"scenario_scores must be dict (got {type(scenario_scores).__name__})"
+            )
+        if hasattr(self.model, "logger") and self.model.logger:
+            for scenario_name, values in scenario_scores.items():
+                if not isinstance(values, dict):
+                    raise TypeError(
+                        f"scenario_scores['{scenario_name}'] must be dict "
+                        f"(got {type(values).__name__})"
+                    )
+                slug = self._scenario_metric_slug(str(scenario_name))
+                self.model.logger.record(
+                    f"bot_eval/scenario/{slug}/combined",
+                    float(require_key(values, "combined"))
+                )
+                self.model.logger.record(
+                    f"bot_eval/scenario/{slug}/worst_bot_score",
+                    float(require_key(values, "worst_bot_score"))
+                )
+            self.model.logger.dump(step=self.model.num_timesteps)
+
     def _on_step(self) -> bool:
         if not EVALUATION_BOTS_AVAILABLE:
             return True
@@ -1058,6 +1113,7 @@ class BotEvaluationCallback(BaseCallback):
             # Also log to model's logger (backup)
             if hasattr(self.model, 'logger') and self.model.logger:
                 self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
+            self._log_scenario_scores(results)
 
             # Save best model based on combined performance
             if combined_win_rate > self.best_combined_win_rate:
@@ -1104,7 +1160,7 @@ class BotEvaluationCallback(BaseCallback):
         if self.best_robust_model_path:
             print(f"   Robust model path: {self.best_robust_model_path}")
 
-    def _evaluate_against_bots(self) -> Dict[str, float]:
+    def _evaluate_against_bots(self) -> Dict[str, Any]:
         """Evaluate agent against bots using standalone function"""
         from ai.bot_evaluation import evaluate_against_bots
         return evaluate_against_bots(
