@@ -1291,6 +1291,9 @@ class W40KEngine(gym.Env):
         Process semantic action with detailed execution debugging.
         CRITICAL: This is the SINGLE POINT OF LOGGING for all actions (training, frontend, PvE).
         """
+        if self.game_state.get("game_over", False):
+            return False, {"error": "game_over", "winner": self.game_state.get("winner")}
+
         current_phase = self.game_state["phase"]
         
         # CRITICAL: Capture phase, player, turn, episode, and positions BEFORE action execution for accurate logging
@@ -1992,6 +1995,16 @@ class W40KEngine(gym.Env):
             else:
                 break  # Phase has eligible units, stop cascading
         
+        # Keep semantic-action flow aligned with step() terminal detection.
+        self.game_state["game_over"] = self._check_game_over()
+        if self.game_state["game_over"]:
+            winner, win_method = self._determine_winner_with_method()
+            self.game_state["winner"] = winner
+            result["game_over"] = True
+            result["winner"] = winner
+            if win_method is not None:
+                result["win_method"] = win_method
+
         return success, result
     
     

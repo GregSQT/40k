@@ -301,7 +301,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         </div>
         {current_player !== undefined && (
           <div style={{ display: "flex", gap: "2px", alignItems: "center", justifyContent: "center" }}>
-            {current_player === 1 && (
+            {current_player === 1 && onEndPhaseClick && (
               <button
                 type="button"
                 style={getEndPhaseStyle(1, true, !!onEndPhaseClick)}
@@ -328,7 +328,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             >
               P2
             </button>
-            {current_player === 2 && (
+            {current_player === 2 && onEndPhaseClick && (
               <button
                 type="button"
                 style={getEndPhaseStyle(2, true, !!onEndPhaseClick)}

@@ -126,6 +126,8 @@ interface APIGameState {
     name: string;
     hexes: Array<{ col: number; row: number } | [number, number]>;
   }>;
+  game_over?: boolean;
+  winner?: number | null;
 }
 
 interface ArmyListItem {
@@ -382,6 +384,10 @@ export const useEngineAPI = () => {
   // Reset mode to "select" when phase changes
   useEffect(() => {
     if (gameState?.phase) {
+      if (targetPreview?.blinkTimer) {
+        clearInterval(targetPreview.blinkTimer);
+      }
+      setTargetPreview(null);
       // Reset mode when phase changes (except if we're already in the correct mode for the phase)
       // This ensures mode is reset after fight phase ends
       setMode("select");
@@ -394,12 +400,15 @@ export const useEngineAPI = () => {
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
     }
-  }, [gameState?.phase]);
+  }, [gameState?.phase, targetPreview?.blinkTimer]);
 
   // Execute action via API
   const executeAction = useCallback(
     async (action: Record<string, unknown>) => {
       if (!gameState) {
+        return;
+      }
+      if (gameState.game_over) {
         return;
       }
 
@@ -944,6 +953,10 @@ export const useEngineAPI = () => {
             data.result?.waiting_for_player &&
             data.result?.valid_targets
           ) {
+            if (targetPreview?.blinkTimer) {
+              clearInterval(targetPreview.blinkTimer);
+            }
+            setTargetPreview(null);
             // Keep the attacking unit selected and show valid targets
             const unitId = parseInt(data.result.unitId || data.game_state.active_fight_unit, 10);
             setSelectedUnitId(unitId);
@@ -2120,6 +2133,8 @@ export const useEngineAPI = () => {
       victory_points: gameState.victory_points,
       primary_objective: gameState.primary_objective,
       objectives: gameState.objectives,
+      game_over: gameState.game_over,
+      winner: gameState.winner,
     };
   }, [
     gameState,

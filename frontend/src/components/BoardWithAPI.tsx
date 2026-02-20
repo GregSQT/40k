@@ -111,6 +111,7 @@ export const BoardWithAPI: React.FC = () => {
   const [rosterPickerHoveredDescription, setRosterPickerHoveredDescription] = useState<string>("");
   const [rosterPickerLoading, setRosterPickerLoading] = useState(false);
   const [rosterPickerError, setRosterPickerError] = useState<string | null>(null);
+  const [showGameOverPopup, setShowGameOverPopup] = useState(false);
 
   const closeRosterPicker = () => {
     setRosterPickerPlayer(null);
@@ -146,6 +147,13 @@ export const BoardWithAPI: React.FC = () => {
       setRosterPickerError(err instanceof Error ? err.message : "Failed to change roster");
     }
   };
+
+  const isGameOver = apiProps.gameState?.game_over === true;
+  useEffect(() => {
+    if (isGameOver) {
+      setShowGameOverPopup(true);
+    }
+  }, [isGameOver]);
 
   const getVictoryPointsForPlayer = (player: 1 | 2): number | undefined => {
     if (!apiProps.gameState) {
@@ -802,7 +810,7 @@ export const BoardWithAPI: React.FC = () => {
                 : ["move", "shoot", "charge", "fight"]
             }
             current_player={apiProps.gameState?.current_player}
-            onEndPhaseClick={apiProps.onEndPhase}
+            onEndPhaseClick={isGameOver ? undefined : apiProps.onEndPhase}
             maxTurns={(() => {
               if (!gameConfig?.game_rules?.max_turns) {
                 throw new Error(
@@ -882,6 +890,34 @@ export const BoardWithAPI: React.FC = () => {
           }}
         >
           {deploymentTooltip.text}
+        </div>
+      )}
+      {showGameOverPopup && apiProps.gameState && (
+        <div className="deployment-panel__picker-backdrop">
+          <div className="deployment-panel__picker">
+            <div className="deployment-panel__picker-title">Game Over</div>
+            <div className="deployment-panel__picker-content" style={{ display: "block" }}>
+              <div className="deployment-panel__picker-tooltip">
+                {(() => {
+                  const p1 = victoryPoints ? (victoryPoints[1] ?? victoryPoints["1"] ?? 0) : 0;
+                  const p2 = victoryPoints ? (victoryPoints[2] ?? victoryPoints["2"] ?? 0) : 0;
+                  const winner = apiProps.gameState?.winner;
+                  const winnerText =
+                    winner === 1 ? "Winner: Player 1" : winner === 2 ? "Winner: Player 2" : "Draw";
+                  return `Final score:\nP1: ${p1}\nP2: ${p2}\n${winnerText}`;
+                })()}
+              </div>
+            </div>
+            <div className="deployment-panel__picker-actions">
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={() => setShowGameOverPopup(false)}
+              >
+                OK
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {rosterPickerPlayer !== null && (
@@ -1016,17 +1052,17 @@ export const BoardWithAPI: React.FC = () => {
         blinkingUnits={apiProps.blinkingUnits}
         blinkingAttackerId={apiProps.blinkingAttackerId}
         isBlinkingActive={apiProps.isBlinkingActive}
-        onSelectUnit={apiProps.onSelectUnit}
-        onSkipUnit={apiProps.onSkipUnit}
-        onStartMovePreview={apiProps.onStartMovePreview}
-        onDirectMove={apiProps.onDirectMove}
-        onStartAttackPreview={apiProps.onStartAttackPreview}
-        onDeployUnit={apiProps.onDeployUnit}
-        onConfirmMove={apiProps.onConfirmMove}
-        onCancelMove={apiProps.onCancelMove}
-        onShoot={apiProps.onShoot}
-        onSkipShoot={apiProps.onSkipShoot}
-        onStartTargetPreview={apiProps.onStartTargetPreview}
+        onSelectUnit={isGameOver ? () => {} : apiProps.onSelectUnit}
+        onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
+        onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
+        onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}
+        onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
+        onDeployUnit={isGameOver ? () => {} : apiProps.onDeployUnit}
+        onConfirmMove={isGameOver ? () => {} : apiProps.onConfirmMove}
+        onCancelMove={isGameOver ? () => {} : apiProps.onCancelMove}
+        onShoot={isGameOver ? () => {} : apiProps.onShoot}
+        onSkipShoot={isGameOver ? () => {} : apiProps.onSkipShoot}
+        onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
         onCancelTargetPreview={() => {
           const targetPreview = apiProps.targetPreview as TargetPreview | null;
           if (targetPreview?.blinkTimer) {
@@ -1034,8 +1070,8 @@ export const BoardWithAPI: React.FC = () => {
           }
           // Clear target preview in engine API
         }}
-        onFightAttack={apiProps.onFightAttack}
-        onActivateFight={apiProps.onActivateFight}
+        onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
+        onActivateFight={isGameOver ? () => {} : apiProps.onActivateFight}
         current_player={apiProps.current_player as PlayerId}
         unitsMoved={apiProps.unitsMoved}
         unitsCharged={apiProps.unitsCharged}
@@ -1043,25 +1079,25 @@ export const BoardWithAPI: React.FC = () => {
         unitsFled={apiProps.unitsFled}
         phase={apiProps.phase as "deployment" | "move" | "shoot" | "charge" | "fight"}
         fightSubPhase={apiProps.fightSubPhase}
-        onCharge={apiProps.onCharge}
-        onActivateCharge={apiProps.onActivateCharge}
-        onChargeEnemyUnit={apiProps.onChargeEnemyUnit}
-        onMoveCharger={apiProps.onMoveCharger}
-        onCancelCharge={apiProps.onCancelCharge}
-        onValidateCharge={apiProps.onValidateCharge}
-        onLogChargeRoll={apiProps.onLogChargeRoll}
+        onCharge={isGameOver ? () => {} : apiProps.onCharge}
+        onActivateCharge={isGameOver ? () => {} : apiProps.onActivateCharge}
+        onChargeEnemyUnit={isGameOver ? () => {} : apiProps.onChargeEnemyUnit}
+        onMoveCharger={isGameOver ? () => {} : apiProps.onMoveCharger}
+        onCancelCharge={isGameOver ? () => {} : apiProps.onCancelCharge}
+        onValidateCharge={isGameOver ? () => {} : apiProps.onValidateCharge}
+        onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
         gameState={apiProps.gameState as GameState}
         getChargeDestinations={apiProps.getChargeDestinations}
-        onAdvance={apiProps.onAdvance}
-        onAdvanceMove={apiProps.onAdvanceMove}
-        onCancelAdvance={apiProps.onCancelAdvance}
+        onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
+        onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
+        onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
         getAdvanceDestinations={apiProps.getAdvanceDestinations}
         advanceRoll={apiProps.advanceRoll}
         advancingUnitId={apiProps.advancingUnitId}
         advanceWarningPopup={apiProps.advanceWarningPopup}
-        onConfirmAdvanceWarning={apiProps.onConfirmAdvanceWarning}
-        onCancelAdvanceWarning={apiProps.onCancelAdvanceWarning}
-        onSkipAdvanceWarning={apiProps.onSkipAdvanceWarning}
+        onConfirmAdvanceWarning={isGameOver ? () => {} : apiProps.onConfirmAdvanceWarning}
+        onCancelAdvanceWarning={isGameOver ? () => {} : apiProps.onCancelAdvanceWarning}
+        onSkipAdvanceWarning={isGameOver ? () => {} : apiProps.onSkipAdvanceWarning}
         showAdvanceWarningPopup={settings.showAdvanceWarning}
         autoSelectWeapon={settings.autoSelectWeapon}
         deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
