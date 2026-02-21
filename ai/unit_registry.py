@@ -230,10 +230,9 @@ class UnitRegistry:
 
                 unit_rule_entry = {
                     "ruleId": rule_id,
-                    "displayName": display_name
+                    "displayName": display_name,
+                    "grants_rule_ids": grants_rule_ids,
                 }
-                if grants_rule_ids:
-                    unit_rule_entry["grants_rule_ids"] = grants_rule_ids
                 unit_rules.append(unit_rule_entry)
             properties["UNIT_RULES"] = unit_rules
         else:

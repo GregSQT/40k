@@ -1410,14 +1410,18 @@ export const useEngineAPI = () => {
   }, []);
 
   const changeRoster = useCallback(
-    async (armyFile: string) => {
+    async (armyFile: string, player?: number) => {
       if (!gameState || gameState.phase !== "deployment") {
         throw new Error("changeRoster is only available during deployment phase");
       }
-      await executeAction({
+      const actionPayload: Record<string, unknown> = {
         action: "change_roster",
         army_file: armyFile,
-      });
+      };
+      if (player !== undefined) {
+        actionPayload.player = player;
+      }
+      await executeAction(actionPayload);
       setSelectedUnitId(null);
       setMode("select");
     },
@@ -2399,7 +2403,16 @@ export const useEngineAPI = () => {
       const currentPhase = gameState.phase;
       let aiEligibleUnits = 0;
 
-      if (currentPhase === "move" && gameState.move_activation_pool) {
+      if (currentPhase === "deployment") {
+        const deploymentState = gameState.deployment_state;
+        if (!deploymentState) {
+          aiEligibleUnits = 0;
+        } else {
+          const deployer = deploymentState.current_deployer;
+          const pool = deploymentState.deployable_units?.[String(deployer)] || [];
+          aiEligibleUnits = getPlayerType(deployer) === "ai" ? pool.length : 0;
+        }
+      } else if (currentPhase === "move" && gameState.move_activation_pool) {
         aiEligibleUnits = gameState.move_activation_pool.filter((unitId) => isAiUnitId(unitId)).length;
       } else if (currentPhase === "shoot" && gameState.shoot_activation_pool) {
         const shootPool = gameState.shoot_activation_pool || [];

@@ -15,6 +15,7 @@ import random
 import os
 import time
 from shared.data_validation import require_key, require_present
+from engine.action_decoder import ActionValidationError
 
 __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
 
@@ -205,17 +206,31 @@ class BotControlledEnv(gym.Wrapper):
         else:
             bot_choice = self.bot.select_action(valid_actions)
 
-        if bot_choice not in valid_actions:
-            return valid_actions[0]
+        try:
+            bot_action = self.engine.action_decoder.normalize_action_input(
+                raw_action=bot_choice,
+                phase=current_phase,
+                source="bot_controlled_env",
+                action_space_size=len(action_mask),
+            )
+            self.engine.action_decoder.validate_action_against_mask(
+                action_int=bot_action,
+                action_mask=action_mask,
+                phase=current_phase,
+                source="bot_controlled_env",
+                unit_id=(eligible_units[0]["id"] if eligible_units else None),
+            )
+        except ActionValidationError as e:
+            raise RuntimeError(f"Bot action validation failed: {e}") from e
 
         # DIAGNOSTIC: Track actual shoot/wait decisions in shoot phase
         if current_phase == "shoot":
-            if bot_choice in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+            if bot_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
                 self.shoot_actions += 1
-            elif bot_choice == 11:  # Wait action
+            elif bot_action == 11:  # Wait action
                 self.wait_actions += 1
 
-        return bot_choice
+        return bot_action
 
     def get_shoot_stats(self) -> dict:
         """Return shooting statistics for diagnostic analysis."""

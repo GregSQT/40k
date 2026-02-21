@@ -200,7 +200,13 @@ class ObservationBuilder:
             else:
                 raise KeyError(f"Unknown fight_subphase for macro eligibility: {fight_subphase}")
         elif current_phase == "deployment":
-            return set()
+            deployment_state = require_key(game_state, "deployment_state")
+            current_deployer = int(require_key(deployment_state, "current_deployer"))
+            deployable_units = require_key(deployment_state, "deployable_units")
+            pool = deployable_units.get(current_deployer, deployable_units.get(str(current_deployer)))
+            if pool is None:
+                raise KeyError(f"deployable_units missing player {current_deployer}")
+            return {str(uid) for uid in pool}
         else:
             raise KeyError(f"Unsupported phase for macro eligibility: {current_phase}")
         
@@ -1437,6 +1443,16 @@ class ObservationBuilder:
             # Command phase has no "active unit" for observation; return None so build_observation returns zeros
             return None
         elif current_phase == "deployment":
+            deployment_state = require_key(game_state, "deployment_state")
+            current_deployer = int(require_key(deployment_state, "current_deployer"))
+            deployable_units = require_key(deployment_state, "deployable_units")
+            deployable_list = deployable_units.get(current_deployer, deployable_units.get(str(current_deployer)))
+            if deployable_list is None:
+                raise KeyError(f"deployable_units missing player {current_deployer}")
+            for unit_id in deployable_list:
+                unit = get_unit_by_id(str(unit_id), game_state)
+                if unit and is_unit_alive(str(unit["id"]), game_state):
+                    return unit
             return None
         else:
             raise KeyError(f"game_state phase must be move/shoot/charge/fight/command/deployment, got: {current_phase}")

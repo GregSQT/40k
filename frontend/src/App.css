@@ -11,7 +11,7 @@
 
   /* HP Bar Colors */
   --hp-bar-player1: #1d4ed8;
-  --hp-bar-player2: #ff4d4d;
+  --hp-bar-player2: #cc2f2f;
   --hp-bar-lost: #444444;
   --hp-bar-damage-preview: #444444;
 
@@ -418,6 +418,32 @@ body {
   background: #ca8a04;
   font-weight: var(--font-weight-bold);
   font-size: 13px;
+}
+
+.test-start-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 10px 0 8px;
+  padding: 10px 0;
+  border-top: 1px solid #4b5563;
+  border-bottom: 1px solid #4b5563;
+}
+
+.test-start-bar__button {
+  padding: 12px 28px;
+  border-radius: 8px;
+  border: 1px solid #f59e0b;
+  background: #fcd34d;
+  color: #78350f;
+  font-size: 24px;
+  font-weight: 800;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.test-start-bar__button:hover {
+  background: #fde68a;
 }
 
 .replay-btn--pause:hover {

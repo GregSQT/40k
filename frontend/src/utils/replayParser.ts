@@ -125,6 +125,8 @@ interface ReplayEpisodeDuringParsing {
     }
   >;
   initial_positions: Record<number, { col: number; row: number }>;
+  first_seen_positions: Record<number, { col: number; row: number }>;
+  deployed_unit_ids: Set<number>;
   walls: Array<{ col: number; row: number }>;
   objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>;
   rules?: ReplayRules;
@@ -167,6 +169,23 @@ export function parse_log_file_from_text(text: string): ReplayData {
   };
   const episodes: ReplayEpisodeDuringParsing[] = [];
   let currentEpisode: ReplayEpisodeDuringParsing | null = null;
+  const syncKnownUnitPosition = (
+    episode: ReplayEpisodeDuringParsing,
+    unitId: number,
+    col: number,
+    row: number
+  ): void => {
+    if (col < 0 || row < 0) {
+      return;
+    }
+    if (!episode.first_seen_positions[unitId]) {
+      episode.first_seen_positions[unitId] = { col, row };
+    }
+    if (episode.units[unitId]) {
+      episode.units[unitId].col = col;
+      episode.units[unitId].row = row;
+    }
+  };
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -181,6 +200,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
         actions: [],
         units: {},
         initial_positions: {},
+        first_seen_positions: {},
+        deployed_unit_ids: new Set<number>(),
         final_result: null,
         win_method: null,
         scenario: "Unknown",
@@ -270,7 +291,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Unit starting positions
     const unitStart = trimmed.match(
-      /Unit (\d+) \((.+?)\) P(\d+): Starting position \((\d+),\s*(\d+)\)/
+      /Unit (\d+) \((.+?)\) P(\d+): Starting position \((-?\d+),\s*(-?\d+)\)/
     );
     if (unitStart) {
       const unitId = parseInt(unitStart[1], 10);
@@ -303,6 +324,35 @@ export function parse_log_file_from_text(text: string): ReplayData {
       continue;
     }
 
+    // Parse DEPLOYMENT actions
+    const deployMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) DEPLOYMENT : Unit (\d+)\((-?\d+),(-?\d+)\) DEPLOYED from \((-?\d+),(-?\d+)\) to \((-?\d+),(-?\d+)\)/
+    );
+    if (deployMatch) {
+      const timestamp = deployMatch[1];
+      const turn = deployMatch[2];
+      const player = parseInt(deployMatch[3], 10);
+      const unitId = parseInt(deployMatch[4], 10);
+      const fromCol = parseInt(deployMatch[7], 10);
+      const fromRow = parseInt(deployMatch[8], 10);
+      const toCol = parseInt(deployMatch[9], 10);
+      const toRow = parseInt(deployMatch[10], 10);
+
+      currentEpisode.actions.push({
+        type: "deploy",
+        timestamp,
+        turn,
+        player,
+        unit_id: unitId,
+        from: { col: fromCol, row: fromRow },
+        to: { col: toCol, row: toRow },
+      });
+
+      currentEpisode.deployed_unit_ids.add(unitId);
+      syncKnownUnitPosition(currentEpisode, unitId, toCol, toRow);
+      continue;
+    }
+
     // Parse MOVE actions
     const moveMatch = trimmed.match(
       /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT|FLED)/
@@ -315,6 +365,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const endCol = parseInt(moveMatch[5], 10);
       const endRow = parseInt(moveMatch[6], 10);
       const actionType = moveMatch[7];
+      syncKnownUnitPosition(currentEpisode, unitId, endCol, endRow);
 
       if (actionType === "MOVED" || actionType === "FLED") {
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
@@ -369,6 +420,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const shooterCol = parseInt(shootMatch[5], 10);
       const shooterRow = parseInt(shootMatch[6], 10);
       const actionType = shootMatch[7];
+      syncKnownUnitPosition(currentEpisode, shooterId, shooterCol, shooterRow);
       // console.log('Action type:', actionType);
 
       if (actionType === "ADVANCED") {
@@ -412,7 +464,8 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
         }
       } else if (actionType === "SHOT at Unit") {
-        const targetMatch = trimmed.match(/SHOT at Unit (\d+)\((\d+),(\d+)\)/);
+        const targetIdMatch = trimmed.match(/SHOT at Unit (\d+)/);
+        const targetCoordsMatch = trimmed.match(/SHOT at Unit \d+\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
         // Try to extract detailed combat rolls from format: Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED)
@@ -428,10 +481,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
         // console.log('Parsing shoot line:', trimmed);
         // if (hitMatch) console.log('Found Hit - target:', hitMatch[1], 'roll:', hitMatch[2]);
 
-        if (targetMatch) {
-          const targetId = parseInt(targetMatch[1], 10);
-          const targetCol = parseInt(targetMatch[2], 10);
-          const targetRow = parseInt(targetMatch[3], 10);
+        if (targetIdMatch) {
+          const targetId = parseInt(targetIdMatch[1], 10);
+          let targetPos: { col: number; row: number } | undefined;
+          if (targetCoordsMatch) {
+            targetPos = {
+              col: parseInt(targetCoordsMatch[1], 10),
+              row: parseInt(targetCoordsMatch[2], 10),
+            };
+          } else if (currentEpisode.units[targetId]) {
+            targetPos = {
+              col: currentEpisode.units[targetId].col,
+              row: currentEpisode.units[targetId].row,
+            };
+          }
           const damage = damageMatch ? parseInt(damageMatch[1], 10) : 0;
 
           const action: ReplayAction = {
@@ -442,9 +505,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
             shooter_id: shooterId,
             shooter_pos: { col: shooterCol, row: shooterRow },
             target_id: targetId,
-            target_pos: { col: targetCol, row: targetRow },
             damage,
           };
+          if (targetPos) {
+            action.target_pos = targetPos;
+          }
 
           // Add detailed rolls if available (format: Hit:3+:6 means target 3+, rolled 6)
           if (hitMatch) {
@@ -498,6 +563,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const unitCol = parseInt(chargeMatch[5], 10);
       const unitRow = parseInt(chargeMatch[6], 10);
       const actionType = chargeMatch[7];
+      syncKnownUnitPosition(currentEpisode, unitId, unitCol, unitRow);
 
       if (actionType === "CHARGED Unit") {
         // Parse target unit and positions
@@ -631,6 +697,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const attackerCol = parseInt(fightMatch[5], 10);
       const attackerRow = parseInt(fightMatch[6], 10);
       const targetId = parseInt(fightMatch[7], 10);
+      syncKnownUnitPosition(currentEpisode, attackerId, attackerCol, attackerRow);
 
       // Parse weapon name if present (MULTIPLE_WEAPONS_IMPLEMENTATION.md)
       const weaponMatch = trimmed.match(/with \[([^\]]+)\]/);
@@ -748,7 +815,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
     const initialUnits = [];
     for (const uid in episode.units) {
       const unit = episode.units[uid];
-      const startPos = episode.initial_positions[uid];
+      const startPosRaw = episode.initial_positions[uid];
+      if (!startPosRaw) {
+        throw new Error(`Missing initial position for unit ${uid} in replay parser`);
+      }
+      let startPos = startPosRaw;
+      const isUndeployedStart = startPosRaw.col < 0 || startPosRaw.row < 0;
+      // Backward compatibility: old logs may not contain explicit DEPLOYMENT actions.
+      // In that case, infer a usable start position from first seen coordinates.
+      if (isUndeployedStart && !episode.deployed_unit_ids.has(Number(uid))) {
+        const inferred = episode.first_seen_positions[Number(uid)];
+        if (inferred) {
+          startPos = inferred;
+        }
+      }
       // Use unit's actual HP_MAX (set based on unit type during parsing)
       const unitHP = unit.HP_MAX;
       initialUnits.push({
@@ -803,11 +883,23 @@ export function parse_log_file_from_text(text: string): ReplayData {
       });
       unitsToRemove.clear();
 
-      if (action.type === "move" && action.unit_id) {
+      if (action.type === "deploy" && action.unit_id) {
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
+        }
+      } else if (action.type === "move" && action.unit_id) {
+        const unitId = action.unit_id;
+        if (currentUnits[unitId] && action.to) {
+          currentUnits[unitId].col = action.to.col;
+          currentUnits[unitId].row = action.to.row;
+        }
+      } else if (action.type === "move_wait" && action.unit_id && action.pos) {
+        const unitId = action.unit_id;
+        if (currentUnits[unitId]) {
+          currentUnits[unitId].col = action.pos.col;
+          currentUnits[unitId].row = action.pos.row;
         }
       } else if (action.type === "charge" && action.unit_id) {
         // Handle charge actions - update unit position
@@ -875,7 +967,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
       // Determine phase from action type
       let phase = "move";
-      if (action.type.includes("move")) {
+      if (action.type === "deploy") {
+        phase = "deployment";
+      } else if (action.type.includes("move")) {
         phase = "move";
       } else if (action.type.includes("shoot") || action.type === "advance") {
         phase = "shoot";

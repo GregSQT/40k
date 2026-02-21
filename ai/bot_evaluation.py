@@ -12,7 +12,7 @@ import os
 import sys
 import numpy as np
 import re
-from typing import Callable, Optional, Dict, List, Any
+from typing import Callable, Optional, Dict, List, Any, Tuple
 
 from shared.data_validation import require_key
 
@@ -164,6 +164,16 @@ def _filter_scenarios_from_config(
     return [scenario_map[name] for name in requested_names]
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Format seconds as MM:SS or H:MM:SS."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
                          step_logger=None, debug_mode=False):
@@ -301,6 +311,14 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     total_failed_episodes = 0
     scenario_bot_stats: Dict[str, Dict[str, Dict[str, float]]] = {}
 
+    eval_parallel_envs = int(require_key(training_cfg, "n_envs"))
+    if eval_parallel_envs <= 0:
+        raise ValueError(f"n_envs must be > 0 for evaluation batching (got {eval_parallel_envs})")
+    if step_logger and step_logger.enabled:
+        # Step logger is file-based and not designed for concurrent env interleaving.
+        # Keep deterministic serial mode when detailed step logging is enabled.
+        eval_parallel_envs = 1
+
     for bot_name, bot in bots.items():
         wins = 0
         losses = 0
@@ -316,199 +334,164 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             scenario_losses = 0
             scenario_draws = 0
 
-            # PERFORMANCE: Create environment ONCE per scenario and reuse for all episodes
-            # This avoids expensive re-initialization (loading configs, creating wrappers, etc.)
+            # Build engine class once; env instances are created in parallel slots.
             W40KEngine, _ = setup_imports()
-
-            # Create base environment with specified training config
-            base_env = W40KEngine(
-                rewards_config=rewards_config_name,
-                training_config_name=training_config_name,
-                controlled_agent=controlled_agent,
-                active_agents=None,
-                scenario_file=scenario_file,
-                unit_registry=unit_registry,
-                quiet=True,
-                gym_training_mode=True,
-                debug_mode=debug_mode
-            )
-
-            # Connect step_logger if provided and enabled
-            if step_logger and step_logger.enabled:
-                base_env.step_logger = step_logger
 
             # Wrap with ActionMasker (CRITICAL for proper action masking)
             def mask_fn(env):
                 return env.get_action_mask()
 
-            masked_env = ActionMasker(base_env, mask_fn)
-            bot_env = BotControlledEnv(masked_env, bot, unit_registry)
+            def create_bot_env() -> BotControlledEnv:
+                base_env = W40KEngine(
+                    rewards_config=rewards_config_name,
+                    training_config_name=training_config_name,
+                    controlled_agent=controlled_agent,
+                    active_agents=None,
+                    scenario_file=scenario_file,
+                    unit_registry=unit_registry,
+                    quiet=True,
+                    gym_training_mode=True,
+                    debug_mode=debug_mode
+                )
+                if step_logger and step_logger.enabled:
+                    base_env.step_logger = step_logger
+                masked_env = ActionMasker(base_env, mask_fn)
+                return BotControlledEnv(masked_env, bot, unit_registry)
 
-            # Run all episodes for this bot/scenario using the same environment
+            batch_env_count = min(eval_parallel_envs, episodes_for_scenario)
+            if batch_env_count <= 0:
+                raise ValueError(
+                    f"Invalid batch_env_count={batch_env_count} for episodes_for_scenario={episodes_for_scenario}"
+                )
+            bot_envs = [create_bot_env() for _ in range(batch_env_count)]
+            slot_obs: List[Optional[np.ndarray]] = [None for _ in range(batch_env_count)]
+            slot_info: List[Optional[Dict[str, Any]]] = [None for _ in range(batch_env_count)]
+            slot_active = [False for _ in range(batch_env_count)]
+            slot_step_counts = [0 for _ in range(batch_env_count)]
+            max_steps = 1000  # Safety guard
+
             try:
-                for episode_num in range(episodes_for_scenario):
-                    current_episode_num = episode_num
-                    completed_episodes += 1
+                started_episodes = 0
+                finished_episodes = 0
 
-                    # Progress bar (only if show_progress=True)
-                    if show_progress:
-                        progress_pct = (completed_episodes / total_episodes) * 100
-                        bar_length = 50
-                        filled = int(bar_length * completed_episodes / total_episodes)
-                        bar = '█' * filled + '░' * (bar_length - filled)
-
-                        elapsed = time.time() - start_time
-                        avg_time = elapsed / completed_episodes
-                        remaining = total_episodes - completed_episodes
-                        eta = avg_time * remaining
-
-                        # Calculate evaluation speed
-                        eps_speed = completed_episodes / elapsed if elapsed > 0 else 0
-
-                        # Format times as HH:MM:SS or MM:SS depending on duration
-                        def format_time(seconds):
-                            hours = int(seconds // 3600)
-                            minutes = int((seconds % 3600) // 60)
-                            secs = int(seconds % 60)
-                            if hours > 0:
-                                return f"{hours}:{minutes:02d}:{secs:02d}"
-                            else:
-                                return f"{minutes:02d}:{secs:02d}"
-
-                        elapsed_str = format_time(elapsed)
-                        eta_str = format_time(eta)
-                        speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
-
-                        sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]")
-                        sys.stdout.flush()
-
-                    # Set bot name for episode logging (for step_logger)
+                for slot_idx in range(batch_env_count):
+                    if started_episodes >= episodes_for_scenario:
+                        break
                     if step_logger and step_logger.enabled:
                         step_logger.current_bot_name = bot_name
+                    obs, info = bot_envs[slot_idx].reset()
+                    slot_obs[slot_idx] = obs
+                    slot_info[slot_idx] = info
+                    slot_active[slot_idx] = True
+                    slot_step_counts[slot_idx] = 0
+                    started_episodes += 1
 
-                    obs, info = bot_env.reset()
-                    done = False
-                    step_count = 0
-                    max_steps = 1000  # Safety guard
+                while finished_episodes < episodes_for_scenario:
+                    active_slots = [i for i in range(batch_env_count) if slot_active[i]]
+                    if not active_slots:
+                        raise RuntimeError(
+                            f"No active evaluation slots while finished_episodes={finished_episodes} "
+                            f"and episodes_for_scenario={episodes_for_scenario}"
+                        )
 
-                    # Episodes terminate naturally when game conditions are met:
-                    # - All enemy units eliminated, OR
-                    # - Turn 5 completed (objective-based victory)
-                    while not done:
-                        if step_count >= max_steps:
-                            game_state = bot_env.engine.game_state
+                    batch_obs = []
+                    batch_masks = []
+                    for slot_idx in active_slots:
+                        obs_value = slot_obs[slot_idx]
+                        if obs_value is None:
+                            raise ValueError(f"Missing observation for active slot {slot_idx}")
+                        model_obs = obs_normalizer(obs_value) if obs_normalizer else obs_value
+                        batch_obs.append(model_obs)
+                        batch_masks.append(bot_envs[slot_idx].engine.get_action_mask())
+
+                    batch_obs_np = np.asarray(batch_obs, dtype=np.float32)
+                    batch_masks_np = np.asarray(batch_masks, dtype=bool)
+                    actions, _ = model.predict(
+                        batch_obs_np,
+                        action_masks=batch_masks_np,
+                        deterministic=deterministic
+                    )
+                    actions_np = np.asarray(actions)
+                    if actions_np.ndim == 0:
+                        actions_np = actions_np.reshape(1)
+                    if len(actions_np) != len(active_slots):
+                        raise ValueError(
+                            f"predict returned {len(actions_np)} actions for {len(active_slots)} active slots"
+                        )
+
+                    for local_idx, slot_idx in enumerate(active_slots):
+                        if slot_step_counts[slot_idx] >= max_steps:
+                            game_state = bot_envs[slot_idx].engine.game_state
                             episode = require_key(game_state, "episode_number")
                             turn = require_key(game_state, "turn")
                             phase = require_key(game_state, "phase")
                             current_player = require_key(game_state, "current_player")
-                            fight_subphase = game_state.get("fight_subphase")
-                            move_pool = len(game_state["move_activation_pool"]) if "move_activation_pool" in game_state else "missing"
-                            shoot_pool = len(game_state["shoot_activation_pool"]) if "shoot_activation_pool" in game_state else "missing"
-                            charge_pool = len(game_state["charge_activation_pool"]) if "charge_activation_pool" in game_state else "missing"
-                            charging_pool = len(game_state["charging_activation_pool"]) if "charging_activation_pool" in game_state else "missing"
-                            active_alt_pool = len(game_state["active_alternating_activation_pool"]) if "active_alternating_activation_pool" in game_state else "missing"
-                            non_active_alt_pool = len(game_state["non_active_alternating_activation_pool"]) if "non_active_alternating_activation_pool" in game_state else "missing"
-                            print(
-                                f"\n❌ ERROR: Episode exceeded {max_steps} steps (episode={episode}, turn={turn}, "
-                                f"phase={phase}, player={current_player}, fight_subphase={fight_subphase}, "
-                                f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}, "
-                                f"charging_pool={charging_pool}, active_alt_pool={active_alt_pool}, "
-                                f"non_active_alt_pool={non_active_alt_pool}). Forcing termination.",
-                                flush=True
+                            raise RuntimeError(
+                                f"Episode exceeded {max_steps} steps (episode={episode}, turn={turn}, "
+                                f"phase={phase}, player={current_player})"
                             )
-                            
-                            # LOG TEMPORAIRE: Log when step limit is reached (only if --debug)
-                            if debug_mode:
-                                game_state = bot_env.engine.game_state
-                                episode = require_key(game_state, "episode_number")
-                                turn = require_key(game_state, "turn")
-                                phase = require_key(game_state, "phase")
-                                current_player = require_key(game_state, "current_player")
-                                
-                                # Get pool states
-                                shoot_pool = require_key(game_state, "shoot_activation_pool")
-                                move_pool = require_key(game_state, "move_activation_pool")
-                                active_shooting_unit = require_key(game_state, "active_shooting_unit")
-                                
-                                # Get eligible units
-                                action_mask = bot_env.engine.get_action_mask()
-                                num_valid_actions = action_mask.sum() if isinstance(action_mask, np.ndarray) else 0
-                                
-                                debug_message = (
-                                    f"[MAX_STEPS LIMIT REACHED] Episode {episode}, Step {step_count}/{max_steps}\n"
-                                    f"  Turn: {turn}, Phase: {phase}, Current Player: {current_player}\n"
-                                    f"  Shoot Pool: {[str(uid) for uid in shoot_pool]} (size: {len(shoot_pool)})\n"
-                                    f"  Move Pool: {[str(uid) for uid in move_pool]} (size: {len(move_pool)})\n"
-                                    f"  Active Shooting Unit: {active_shooting_unit}\n"
-                                    f"  Valid Actions: {num_valid_actions}\n"
-                                    f"  Action Mask: {action_mask.tolist() if isinstance(action_mask, np.ndarray) else action_mask}"
-                                )
-                                
-                                debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
-                                try:
-                                    with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
-                                        f.write(debug_message + "\n")
-                                        f.flush()
-                                except Exception as e:
-                                    print(f"⚠️ Failed to write to debug.log: {e}", flush=True)
-                            
-                            break
-                        # LOG TEMPORAIRE: GET_MASK_TIMING (get_action_mask in bot loop; only if --debug)
-                        ep_num = require_key(bot_env.engine.game_state, "episode_number")
-                        t_get_mask0 = time.perf_counter() if debug_mode else None
-                        action_masks = bot_env.engine.get_action_mask()
-                        # LOG TEMPORAIRE: only every 50 steps to avoid I/O bottleneck (episode can appear stuck otherwise)
-                        if debug_mode and t_get_mask0 is not None and ep_num >= 0 and step_count % 50 == 0:
-                            get_mask_duration = time.perf_counter() - t_get_mask0
-                            try:
-                                debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
-                                with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
-                                    f.write(f"GET_MASK_TIMING episode={int(ep_num)} step_index={step_count} duration_s={get_mask_duration:.6f}\n")
-                            except (OSError, IOError):
-                                pass
-                        # LOG TEMPORAIRE: PREDICT_TIMING → only every 50 steps to avoid I/O bottleneck
-                        t0 = time.perf_counter()
-                        model_obs = obs_normalizer(obs) if obs_normalizer else obs
-                        action, _ = model.predict(model_obs, action_masks=action_masks, deterministic=deterministic)
-                        predict_duration = time.perf_counter() - t0
-                        if debug_mode and ep_num >= 0 and step_count % 50 == 0:
-                            debug_log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug.log')
-                            try:
-                                with open(debug_log_path, 'a', encoding='utf-8', errors='replace') as f:
-                                    f.write(f"PREDICT_TIMING episode={int(ep_num)} step_index={step_count} duration_s={predict_duration:.6f}\n")
-                            except (OSError, IOError):
-                                pass
 
-                        obs, reward, terminated, truncated, info = bot_env.step(action)
-                        done = terminated or truncated
-                        step_count += 1
+                        action_int = int(actions_np[local_idx])
+                        obs, reward, terminated, truncated, info = bot_envs[slot_idx].step(action_int)
+                        slot_obs[slot_idx] = obs
+                        slot_info[slot_idx] = info
+                        slot_step_counts[slot_idx] = slot_step_counts[slot_idx] + 1
+                        done = bool(terminated or truncated)
 
-                        # Progress hint for long episodes so user sees it's not stuck
-                        if show_progress and step_count % 100 == 0 and step_count > 0:
-                            sys.stdout.write(f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} vs {bot_name.capitalize()}Bot [{scenario_name}] step {step_count} [{elapsed_str}<{eta_str}, {speed_str}]   ")
+                        if not done:
+                            continue
+
+                        # CRITICAL FIX: Learning agent is ALWAYS Player 1
+                        winner = info.get('winner')
+                        if winner == 1:
+                            wins += 1
+                            scenario_wins += 1
+                        elif winner == -1:
+                            draws += 1
+                            scenario_draws += 1
+                        else:
+                            losses += 1
+                            scenario_losses += 1
+
+                        if f'{bot_name}_shoot_stats' not in results:
+                            results[f'{bot_name}_shoot_stats'] = []
+                        results[f'{bot_name}_shoot_stats'].append(bot_envs[slot_idx].get_shoot_stats())
+
+                        completed_episodes += 1
+                        finished_episodes += 1
+
+                        if show_progress:
+                            progress_pct = (completed_episodes / total_episodes) * 100
+                            bar_length = 50
+                            filled = int(bar_length * completed_episodes / total_episodes)
+                            bar = '█' * filled + '░' * (bar_length - filled)
+                            elapsed = time.time() - start_time
+                            avg_time = elapsed / completed_episodes
+                            remaining = total_episodes - completed_episodes
+                            eta = avg_time * remaining
+                            eps_speed = completed_episodes / elapsed if elapsed > 0 else 0
+                            elapsed_str = _format_elapsed(elapsed)
+                            eta_str = _format_elapsed(eta)
+                            speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed * 60:.1f}ep/m"
+                            sys.stdout.write(
+                                f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} "
+                                f"vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]"
+                            )
                             sys.stdout.flush()
 
-                    # Determine winner - track wins/losses/draws
-                    # CRITICAL FIX: Learning agent is ALWAYS Player 0, regardless of controlled_agent name
-                    # controlled_agent is the agent key string (e.g., "SpaceMarine_phase1"), NOT a player ID
-                    agent_player = 1  # Learning agent is always Player 1
-                    winner = info.get('winner')
-
-                    if winner == agent_player:
-                        wins += 1
-                        scenario_wins += 1
-                    elif winner == -1:
-                        draws += 1
-                        scenario_draws += 1
-                    else:
-                        losses += 1
-                        scenario_losses += 1
-
-                    # DIAGNOSTIC: Collect shoot stats from all episodes
-                    bot_stats = bot_env.get_shoot_stats()
-                    if f'{bot_name}_shoot_stats' not in results:
-                        results[f'{bot_name}_shoot_stats'] = []
-                    results[f'{bot_name}_shoot_stats'].append(bot_stats)
+                        if started_episodes < episodes_for_scenario:
+                            if step_logger and step_logger.enabled:
+                                step_logger.current_bot_name = bot_name
+                            reset_obs, reset_info = bot_envs[slot_idx].reset()
+                            slot_obs[slot_idx] = reset_obs
+                            slot_info[slot_idx] = reset_info
+                            slot_active[slot_idx] = True
+                            slot_step_counts[slot_idx] = 0
+                            started_episodes += 1
+                        else:
+                            slot_active[slot_idx] = False
+                            slot_obs[slot_idx] = None
+                            slot_info[slot_idx] = None
 
             except Exception as e:
                 total_failed_episodes += 1
@@ -516,7 +499,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     print(f"\n❌ Bot evaluation failed for {bot_name} on scenario {scenario_name}: {e}")
                 error_type = type(e).__name__
                 try:
-                    game_state = bot_env.engine.game_state
+                    active_slot = 0
+                    for idx in range(len(bot_envs)):
+                        if slot_active[idx]:
+                            active_slot = idx
+                            break
+                    game_state = bot_envs[active_slot].engine.game_state
                     episode = game_state.get("episode_number")
                     turn = game_state.get("turn")
                     phase = game_state.get("phase")
@@ -533,7 +521,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 if show_progress:
                     print(
                         f"❌ Bot evaluation error details: type={error_type} "
-                        f"episode_index={current_episode_num if 'current_episode_num' in locals() else 'unknown'} "
+                        f"episode_index=unknown "
                         f"episode_number={episode} turn={turn} phase={phase} "
                         f"player={current_player} fight_subphase={fight_subphase}"
                     )
@@ -544,7 +532,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 # Do not treat this as valid games; skip win/loss counting
             finally:
                 # Close environment after all episodes for this scenario are done
-                bot_env.close()
+                for env_instance in bot_envs:
+                    env_instance.close()
                 if scenario_name not in scenario_bot_stats:
                     scenario_bot_stats[scenario_name] = {}
                 scenario_bot_stats[scenario_name][bot_name] = {

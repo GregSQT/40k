@@ -280,6 +280,20 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return calculated_reward
             
+        elif action_type == "deploy_unit":
+            deploy_reward = 0.0
+            reward_breakdown['base_actions'] = deploy_reward
+            reward_breakdown['total'] = deploy_reward
+
+            if game_state.get("game_over", False):
+                situational_reward = self._get_situational_reward(game_state)
+                reward_breakdown['situational'] = situational_reward
+                deploy_reward += situational_reward
+                reward_breakdown['total'] = deploy_reward
+
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return deploy_reward
+
         elif action_type == "move" or action_type == "flee":
             # Movement rewards removed (unused) - keep behavior deterministic
             movement_reward = 0.0

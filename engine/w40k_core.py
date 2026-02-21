@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 
 # Import shared utilities
 from shared.data_validation import require_key
-from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value
+from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 
 # Phase handlers (existing - keep these)
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
@@ -137,6 +137,7 @@ class W40KEngine(gym.Env):
             scenario_units = scenario_result["units"]
             scenario_primary_objective_ids = scenario_result.get("primary_objectives")
             scenario_deployment_type = scenario_result.get("deployment_type")
+            scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
             scenario_deployment_zone = scenario_result.get("deployment_zone")
             scenario_deployment_pools = scenario_result.get("deployment_pools")
             scenario_primary_objective_id = None
@@ -212,6 +213,7 @@ class W40KEngine(gym.Env):
                 "controlled_player": 1,  # FIXED: Agent controls player 1 (matches scenario setup)
                 "primary_objective": primary_objective_config,
                 "deployment_type": scenario_deployment_type,
+                "deployment_type_by_player": scenario_deployment_type_by_player,
                 "deployment_zone": scenario_deployment_zone,
                 "deployment_pools": scenario_deployment_pools
             }
@@ -551,6 +553,7 @@ class W40KEngine(gym.Env):
             "units_shot": set(),
             "units_charged": set(),
             "units_attacked": set(),
+            "units_advanced": set(),
             "command_activation_pool": [],
             "move_activation_pool": [],
             "fight_subphase": None,
@@ -563,6 +566,7 @@ class W40KEngine(gym.Env):
             "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
         self.game_state["deployment_type"] = self.config.get("deployment_type")
+        self.game_state["deployment_type_by_player"] = self.config.get("deployment_type_by_player")
         self.game_state["deployment_zone"] = self.config.get("deployment_zone")
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
@@ -642,20 +646,50 @@ class W40KEngine(gym.Env):
             self.pve_controller.load_ai_model_for_pve(self.game_state, self)
 
         deployment_type = self.config.get("deployment_type")
-        if deployment_type == "active":
+        deployment_type_by_player = self.config.get("deployment_type_by_player")
+        effective_deployment_type_by_player = {1: deployment_type, 2: deployment_type}
+        if isinstance(deployment_type_by_player, dict):
+            p1_type = deployment_type_by_player.get(1, deployment_type_by_player.get("1", deployment_type))
+            p2_type = deployment_type_by_player.get(2, deployment_type_by_player.get("2", deployment_type))
+            effective_deployment_type_by_player = {1: p1_type, 2: p2_type}
+        if any(
+            effective_deployment_type_by_player[player_id] == "active"
+            for player_id in (1, 2)
+        ):
             deployment_pools = self.config.get("deployment_pools")
             if deployment_pools is None:
                 raise KeyError("deployment_pools is required for active deployment")
             deployable_units = {1: [], 2: []}
             for unit in self.game_state["units"]:
                 unit_player = require_key(unit, "player")
-                if int(unit_player) == 1:
-                    deployable_units[1].append(str(unit["id"]))
-                elif int(unit_player) == 2:
-                    deployable_units[2].append(str(unit["id"]))
+                unit_player_int = int(unit_player)
+                player_deployment_type = effective_deployment_type_by_player.get(unit_player_int)
+                if player_deployment_type is None:
+                    raise ValueError(f"Missing deployment type for player {unit_player_int}")
+                if player_deployment_type == "active":
+                    set_unit_coordinates(unit, -1, -1)
+                    if unit_player_int == 1:
+                        deployable_units[1].append(str(unit["id"]))
+                    elif unit_player_int == 2:
+                        deployable_units[2].append(str(unit["id"]))
+                    else:
+                        raise ValueError(f"Invalid unit player for deployment: {unit_player}")
+                elif player_deployment_type in ("fixed", "random"):
+                    # Keep scenario-provided coordinates for fixed/random players.
+                    pass
                 else:
-                    raise ValueError(f"Invalid unit player for deployment: {unit_player}")
+                    raise ValueError(
+                        f"Invalid deployment type for player {unit_player_int}: {player_deployment_type}"
+                    )
+            # Rebuild cache after forcing active-deployment units to (-1, -1).
+            build_units_cache(self.game_state)
+            uc = require_key(self.game_state, "units_cache")
+            self.game_state["units_cache_prev"] = {
+                uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
+                for uid, d in uc.items()
+            }
             self.game_state["deployment_type"] = deployment_type
+            self.game_state["deployment_type_by_player"] = effective_deployment_type_by_player
             self.game_state["deployment_zone"] = self.config.get("deployment_zone")
             self.game_state["deployment_state"] = {
                 "current_deployer": 1,
@@ -664,7 +698,14 @@ class W40KEngine(gym.Env):
                 "deployment_pools": deployment_pools,
                 "deployment_complete": False
             }
-            deployment_handlers.deployment_phase_start(self.game_state)
+            if not deployable_units[1] and deployable_units[2]:
+                self.game_state["deployment_state"]["current_deployer"] = 2
+            if not deployable_units[1] and not deployable_units[2]:
+                self.game_state["deployment_state"]["deployment_complete"] = True
+                command_handlers.command_phase_start(self.game_state)
+                movement_handlers.movement_phase_start(self.game_state)
+            else:
+                deployment_handlers.deployment_phase_start(self.game_state)
         else:
             # Initialize command phase for game start using handler delegation
             # CRITICAL: reset() is not in the cascade loop, so we need to handle initialization differently
@@ -1047,46 +1088,56 @@ class W40KEngine(gym.Env):
         # Convert to gym format
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
         if not eligible_units:
+            if self.game_state.get("game_over", False):
+                observation = self._build_observation()
+            else:
             # Pool empty -> advance phase before building observation (no recursion)
-            current_phase = self.game_state.get("phase", "unknown")
-            advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-            advance_success, advance_result = self._process_semantic_action(advance_action)
-            if not advance_success:
-                raise RuntimeError(f"advance_phase failed: {advance_result}")
-            
-            # Mirror cascade behavior from step(): execute phase transitions before building observation
-            if isinstance(advance_result, dict) and advance_result.get("phase_complete") and advance_result.get("next_phase"):
-                max_cascade = 10
-                cascade_count = 0
-                result = advance_result
-                while result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
-                    next_phase = result["next_phase"]
-                    current_phase = self.game_state.get("phase", "unknown")
-                    cascade_count += 1
-                    
-                    if next_phase == current_phase:
-                        break
-                    
-                    if next_phase == "deployment":
-                        phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
-                    elif next_phase == "command":
-                        phase_init_result = command_handlers.command_phase_start(self.game_state)
-                    elif next_phase == "shoot":
-                        phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
-                    elif next_phase == "charge":
-                        phase_init_result = charge_handlers.charge_phase_start(self.game_state)
-                    elif next_phase == "fight":
-                        phase_init_result = fight_handlers.fight_phase_start(self.game_state)
-                    elif next_phase == "move":
-                        phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+                current_phase = self.game_state.get("phase", "unknown")
+                advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
+                advance_success, advance_result = self._process_semantic_action(advance_action)
+                if not advance_success:
+                    if (
+                        isinstance(advance_result, dict)
+                        and advance_result.get("error") == "game_over"
+                    ):
+                        self.game_state["game_over"] = True
+                        observation = self._build_observation()
                     else:
-                        break
-                    
-                    if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
-                        result = phase_init_result
-                    else:
-                        break
-            observation = self._build_observation()
+                        raise RuntimeError(f"advance_phase failed: {advance_result}")
+                else:
+                    # Mirror cascade behavior from step(): execute phase transitions before building observation
+                    if isinstance(advance_result, dict) and advance_result.get("phase_complete") and advance_result.get("next_phase"):
+                        max_cascade = 10
+                        cascade_count = 0
+                        result = advance_result
+                        while result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
+                            next_phase = result["next_phase"]
+                            current_phase = self.game_state.get("phase", "unknown")
+                            cascade_count += 1
+                            
+                            if next_phase == current_phase:
+                                break
+                            
+                            if next_phase == "deployment":
+                                phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
+                            elif next_phase == "command":
+                                phase_init_result = command_handlers.command_phase_start(self.game_state)
+                            elif next_phase == "shoot":
+                                phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
+                            elif next_phase == "charge":
+                                phase_init_result = charge_handlers.charge_phase_start(self.game_state)
+                            elif next_phase == "fight":
+                                phase_init_result = fight_handlers.fight_phase_start(self.game_state)
+                            elif next_phase == "move":
+                                phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+                            else:
+                                break
+                            
+                            if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
+                                result = phase_init_result
+                            else:
+                                break
+                    observation = self._build_observation()
         else:
             observation = self._build_observation()
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
@@ -1233,11 +1284,6 @@ class W40KEngine(gym.Env):
         current_player = self.game_state["current_player"]
         current_phase = self.game_state["phase"]
         
-        if current_phase == "deployment":
-            if current_player != 2:
-                return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase}
-            return deployment_handlers.deployment_ai_step(self.game_state)
-
         # CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
         # Only check current_player for non-fight phases
         if current_phase != "fight" and current_player != 2:  # AI is player 2
@@ -1460,7 +1506,7 @@ class W40KEngine(gym.Env):
                         if not action_type:
                             raise ValueError(f"action_type is None or empty - cannot log action. result keys: {list(result.keys())}")
 
-                        valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee", "skip"]
+                        valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait", "advance", "flee", "skip", "deploy_unit"]
                         if action_type not in valid_action_types:
                             raise ValueError(f"Invalid action_type '{action_type}'. Valid types: {valid_action_types}")
 
@@ -1588,6 +1634,42 @@ class W40KEngine(gym.Env):
                                 "row": actual_row,
                                 "advance_range": result.get("advance_range"),  # Include advance roll
                                 "unit_with_coords": f"{unit_id}({actual_col},{actual_row})"  # CRITICAL FIX: Update with correct destination coordinates
+                            })
+
+                        if action_type == "deploy_unit":
+                            if str(unit_id) not in pre_action_positions:
+                                raise ValueError(
+                                    f"Deploy action missing start position in pre_action_positions: unit_id={unit_id}"
+                                )
+                            start_pos = pre_action_positions[str(unit_id)]
+                            if not isinstance(result, dict):
+                                raise TypeError(
+                                    f"result must be a dict for deploy_unit action, got {type(result).__name__}"
+                                )
+                            dest_col = result.get("destCol")
+                            dest_row = result.get("destRow")
+                            if dest_col is None or dest_row is None:
+                                raise ValueError(
+                                    f"Deploy action missing destination in result: "
+                                    f"result.destCol={dest_col}, result.destRow={dest_row}, result keys={list(result.keys())}"
+                                )
+                            if updated_unit is None:
+                                raise ValueError(
+                                    f"Deploy action missing updated unit in game_state: unit_id={unit_id}"
+                                )
+                            actual_col, actual_row = require_unit_position(updated_unit, self.game_state)
+                            if (actual_col, actual_row) != (dest_col, dest_row):
+                                raise ValueError(
+                                    f"Deploy action destination mismatch: unit_id={unit_id} "
+                                    f"result=({dest_col},{dest_row}) actual=({actual_col},{actual_row})"
+                                )
+                            end_pos = (actual_col, actual_row)
+                            action_details.update({
+                                "start_pos": start_pos,
+                                "end_pos": end_pos,
+                                "col": actual_col,
+                                "row": actual_row,
+                                "unit_with_coords": f"{unit_id}({actual_col},{actual_row})",
                             })
 
                         # shoot actions now use all_attack_results (like combat) - handled in specialized block above
@@ -2319,10 +2401,21 @@ class W40KEngine(gym.Env):
             return self.obs_builder.build_observation(self.game_state)
         action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
         if not eligible_units:
+            if self.game_state.get("game_over", False):
+                if not hasattr(self.obs_builder, "obs_size"):
+                    raise KeyError("obs_builder missing required 'obs_size' field")
+                return np.zeros(self.obs_builder.obs_size, dtype=np.float32)
             current_phase = self.game_state.get("phase", "unknown")
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
             advance_success, advance_result = self._process_semantic_action(advance_action)
             if not advance_success:
+                if (
+                    isinstance(advance_result, dict)
+                    and advance_result.get("error") == "game_over"
+                ):
+                    if not hasattr(self.obs_builder, "obs_size"):
+                        raise KeyError("obs_builder missing required 'obs_size' field")
+                    return np.zeros(self.obs_builder.obs_size, dtype=np.float32)
                 raise RuntimeError(f"advance_phase failed: {advance_result}")
             _action_mask, eligible_units = self.action_decoder.get_action_mask_and_eligible_units(self.game_state)
             if not eligible_units:
@@ -2398,6 +2491,7 @@ class W40KEngine(gym.Env):
         scenario_units = scenario_result["units"]
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
         scenario_deployment_zone = scenario_result.get("deployment_zone")
         scenario_deployment_pools = scenario_result.get("deployment_pools")
         scenario_primary_objective_id = None
@@ -2441,6 +2535,7 @@ class W40KEngine(gym.Env):
                 self._scenario_objectives = board_config["objectives"] if "objectives" in board_config else (board_config["objective_hexes"] if "objective_hexes" in board_config else [])
 
         self.config["deployment_type"] = scenario_deployment_type
+        self.config["deployment_type_by_player"] = scenario_deployment_type_by_player
         self.config["deployment_zone"] = scenario_deployment_zone
         self.config["deployment_pools"] = scenario_deployment_pools
         self._scenario_primary_objective = primary_objective_config

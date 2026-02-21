@@ -124,7 +124,7 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
         direct_rule_id = require_key(rule, "ruleId")
         if direct_rule_id == rule_id:
             return True
-        granted_rule_ids = rule.get("grants_rule_ids", [])
+        granted_rule_ids = require_key(rule, "grants_rule_ids")
         if not isinstance(granted_rule_ids, list):
             raise TypeError(
                 f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
@@ -1003,7 +1003,7 @@ def _is_ai_controlled_shooting_unit(
     Determine whether the active shooting unit is AI-controlled.
 
     Preferred source of truth is game_state.player_types.
-    Fallback keeps existing non-UI training behavior for gym/pve only.
+    Secondary path keeps existing non-UI training behavior for gym/pve only.
     """
     player_types = game_state.get("player_types")
     if player_types is not None:
@@ -2551,9 +2551,29 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                 if not usable_weapons:
                     # No usable weapons left, end activation
                     return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
-                
-                return True, {
 
+                # Training/PvE path: do not return waiting_for_player without a matching gym action.
+                # This prevents deadlocks where the active unit stays forever in shoot_activation_pool.
+                if _is_ai_controlled_shooting_unit(game_state, unit, config):
+                    selected_weapon_info = usable_weapons[0]
+                    selected_weapon_index = require_key(selected_weapon_info, "index")
+                    selected_weapon = require_key(selected_weapon_info, "weapon")
+
+                    unit["selectedRngWeaponIndex"] = selected_weapon_index
+                    nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_auto_weapon_switch")
+                    unit["SHOOT_LEFT"] = nb_roll
+                    unit["_current_shoot_nb"] = nb_roll
+
+                    updated_valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+                    unit["valid_target_pool"] = updated_valid_targets
+
+                    if not updated_valid_targets:
+                        return _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1)
+
+                    target_id = _ai_select_shooting_target(game_state, unit_id, updated_valid_targets)
+                    return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
+
+                return True, {
                     "while_loop_active": True,
                     "valid_targets": valid_targets,
                     "shootLeft": 0,
@@ -4445,6 +4465,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     
     unit_id = unit["id"]
     orig_col, orig_row = require_unit_position(unit, game_state)
+    is_gym_training = bool(config.get("gym_training_mode", False))
+    is_pve_ai = bool(config.get("pve_mode", False)) and int(unit["player"]) == 2
     
     # CRITICAL: Cannot advance if unit has already shot -> SKIP (unit cannot act)
     has_shot = _unit_has_shot_with_any_weapon(unit)
@@ -4710,6 +4732,14 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # AI_TURN.md STEP 4: ADVANCE_ACTION post-advance logic (lines 666-679)
         # Continue only if unit actually moved
         if not actually_moved:
+            # In gym/PvE automatic mode, staying on same hex must close activation to avoid deadlock loops.
+            if is_gym_training or is_pve_ai:
+                success, result = _handle_shooting_end_activation(
+                    game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+                )
+                result["advance_rejected"] = True
+                result["skip_reason"] = "no_effective_advance_movement"
+                return success, result
             # Unit did not advance -> Go back to STEP 3: ACTION_SELECTION
             return True, {
                 "waiting_for_player": True,
@@ -4792,10 +4822,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     else:
         # No destination - return valid destinations for player/AI to choose
         # For AI, auto-select best destination
-        is_gym_training = config.get("gym_training_mode", False)
-        is_pve_ai = config.get("pve_mode", False) and unit["player"] == 2
+        movable_destinations = [d for d in valid_destinations if int(d[0]) != int(orig_col) or int(d[1]) != int(orig_row)]
         
-        if (is_gym_training or is_pve_ai) and valid_destinations:
+        if (is_gym_training or is_pve_ai) and movable_destinations:
             # Auto-select: move toward nearest enemy (aggressive strategy)
             units_cache = require_key(game_state, "units_cache")
             unit_player = int(unit["player"]) if unit["player"] is not None else None
@@ -4806,9 +4835,9 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 unit_col, unit_row = require_unit_position(unit, game_state)
                 nearest_enemy_id = min(enemies, key=lambda e: _calculate_hex_distance(unit_col, unit_row, *require_unit_position(e, game_state)))
                 nearest_enemy_col, nearest_enemy_row = require_unit_position(nearest_enemy_id, game_state)
-                best_dest = min(valid_destinations, key=lambda d: _calculate_hex_distance(d[0], d[1], nearest_enemy_col, nearest_enemy_row))
+                best_dest = min(movable_destinations, key=lambda d: _calculate_hex_distance(d[0], d[1], nearest_enemy_col, nearest_enemy_row))
             else:
-                best_dest = valid_destinations[0] if valid_destinations else (orig_col, orig_row)
+                best_dest = movable_destinations[0]
             
             # Recursively call with destination
             action["destCol"] = best_dest[0]
@@ -4816,7 +4845,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             return _handle_advance_action(game_state, unit, action, config)
         
         # CRITICAL FIX: If no valid destinations in gym training, end activation to prevent infinite loop
-        if (is_gym_training or is_pve_ai) and not valid_destinations:
+        if (is_gym_training or is_pve_ai) and not movable_destinations:
             # No valid destinations - SKIP (cannot advance)
             success, result = _handle_shooting_end_activation(
                 game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"

@@ -310,6 +310,25 @@ class StepLogger:
                 base_msg += f" [R:{reward:+.1f}]"
 
             return base_msg
+
+        elif action_type == "deploy_unit" and details:
+            if (
+                "start_pos" in details
+                and details["start_pos"] is not None
+                and "end_pos" in details
+                and details["end_pos"] is not None
+            ):
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                base_msg = f"{unit_label} DEPLOYED from ({start_col},{start_row}) to ({end_col},{end_row})"
+            else:
+                raise KeyError("Deploy action missing required position data")
+
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+
+            return base_msg
                 
         elif action_type == "shoot":
             if "target_id" not in details:

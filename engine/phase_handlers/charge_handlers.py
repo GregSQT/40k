@@ -30,7 +30,7 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
         direct_rule_id = require_key(rule, "ruleId")
         if direct_rule_id == rule_id:
             return True
-        granted_rule_ids = rule.get("grants_rule_ids", [])
+        granted_rule_ids = require_key(rule, "grants_rule_ids")
         if not isinstance(granted_rule_ids, list):
             raise TypeError(
                 f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
@@ -227,7 +227,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
         active_charge_unit = game_state.get("active_charge_unit")
-        pool_size = len(game_state.get("charge_activation_pool", []))
+        pool_size = len(require_key(game_state, "charge_activation_pool"))
         add_debug_file_log(
             game_state,
             f"[CHARGE TRACE] E{episode} T{turn} execute_action action={action_type} "

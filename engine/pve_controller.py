@@ -12,6 +12,7 @@ from typing import Dict, Any, Tuple, List
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, normalize_coordinates, get_unit_coordinates
 from engine.phase_handlers.shared_utils import is_unit_alive
 from shared.data_validation import require_key
+from engine.action_decoder import ActionValidationError
 from config_loader import get_config_loader
 from engine.macro_intents import (
     INTENT_COUNT,
@@ -146,7 +147,10 @@ class PvEController:
         if not self.micro_models:
             raise RuntimeError("Micro models not loaded for PvE")
 
-        if self.macro_model is None:
+        current_phase = require_key(game_state, "phase")
+        use_macro_model = self.macro_model is not None and current_phase != "deployment"
+
+        if not use_macro_model:
             action_mask, eligible_units = engine.action_decoder.get_action_mask_and_eligible_units(game_state)
             if not eligible_units:
                 raise RuntimeError("No eligible units for PvE decision (macro disabled)")
@@ -155,11 +159,12 @@ class PvEController:
                 selected_unit_id = str(active_shooting_unit)
             else:
                 selected_unit_id = str(require_key(eligible_units[0], "id"))
-            macro_obs = engine.build_macro_observation()
-            attrition_index = require_key(macro_obs, "attrition_objective_index")
-            self._set_macro_intent_target(
-                INTENT_ATTRITION, int(attrition_index), macro_obs, game_state
-            )
+            if current_phase != "deployment":
+                macro_obs = engine.build_macro_observation()
+                attrition_index = require_key(macro_obs, "attrition_objective_index")
+                self._set_macro_intent_target(
+                    INTENT_ATTRITION, int(attrition_index), macro_obs, game_state
+                )
             micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(selected_unit_id, game_state)
             micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
             micro_obs = self._normalize_obs_for_inference(micro_obs, micro_model_path)
@@ -200,7 +205,7 @@ class PvEController:
         elif hasattr(micro_prediction, 'item'):
             predicted_action = micro_prediction.item()
         else:
-            predicted_action = int(micro_prediction)
+            predicted_action = micro_prediction
         
         # Apply action mask like in training - force valid action if predicted action is invalid
         if game_state.get("debug_mode", False):
@@ -215,17 +220,22 @@ class PvEController:
                 f"phase={current_phase} predicted_action={predicted_action} "
                 f"mask_true_indices={mask_indices}"
             )
-        if not action_mask[predicted_action]:
-            valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
-            if valid_actions:
-                action_int = valid_actions[0]
-            else:
-                raise RuntimeError(
-                    "PvEController encountered an empty action mask for selected unit. "
-                    "Engine must advance phase/turn instead of exposing empty masks."
-                )
-        else:
-            action_int = predicted_action
+        try:
+            action_int = engine.action_decoder.normalize_action_input(
+                raw_action=predicted_action,
+                phase=require_key(game_state, "phase"),
+                source="pve_controller",
+                action_space_size=len(action_mask),
+            )
+            engine.action_decoder.validate_action_against_mask(
+                action_int=action_int,
+                action_mask=action_mask,
+                phase=require_key(game_state, "phase"),
+                source="pve_controller",
+                unit_id=selected_unit_id,
+            )
+        except ActionValidationError as e:
+            raise RuntimeError(f"PvE action validation failed: {e}") from e
         
         # Convert to semantic action using engine's method
         semantic_action = engine.action_decoder.convert_gym_action(

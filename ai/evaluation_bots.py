@@ -20,17 +20,70 @@ from engine.phase_handlers.shared_utils import (
     get_unit_position, require_unit_position,
 )
 
+DEPLOYMENT_ACTIONS = [4, 5, 6, 7, 8]
+WAIT_ACTION = 11
+
+
+def _select_weighted_deployment_action(
+    valid_actions: List[int],
+    weights_by_action: Dict[int, float],
+    last_action: Optional[int],
+    repeat_count: int,
+    max_repeat: int,
+) -> int:
+    """Select deployment intent with weighted randomness and anti-repeat guard."""
+    candidates = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
+    if not candidates:
+        raise ValueError("No deployment actions available in valid_actions")
+
+    if last_action in candidates and repeat_count >= max_repeat and len(candidates) > 1:
+        candidates = [a for a in candidates if a != last_action]
+
+    candidate_weights: List[float] = []
+    for action in candidates:
+        if action not in weights_by_action:
+            raise KeyError(f"Missing deployment weight for action {action}")
+        candidate_weights.append(float(weights_by_action[action]))
+
+    total_weight = sum(candidate_weights)
+    if total_weight <= 0:
+        raise ValueError(f"Invalid deployment weights sum: {total_weight}")
+
+    return int(random.choices(candidates, weights=candidate_weights, k=1)[0])
+
 
 class RandomBot:
     """Picks random valid actions, but prioritizes shooting when available"""
 
     def select_action(self, valid_actions: List[int]) -> int:
-        # CRITICAL FIX: Prioritize shooting in shoot phase (like all other bots)
-        # Without this, RandomBot has only 33% shoot rate vs 90%+ for other bots
-        if 4 in valid_actions:  # Shoot action
-            return 4
-        # For other phases, pick randomly
-        return random.choice(valid_actions) if valid_actions else 7
+        if not valid_actions:
+            raise ValueError("RandomBot.select_action requires at least one valid action")
+        return random.choice(valid_actions)
+
+    def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
+        """Phase-aware selection to avoid deployment/shooting action index ambiguity."""
+        if not valid_actions:
+            return WAIT_ACTION
+        phase = require_key(game_state, "phase")
+        if phase == "deployment":
+            deploy_actions = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
+            if deploy_actions:
+                return random.choice(deploy_actions)
+            return random.choice(valid_actions)
+        if phase == "shoot":
+            shoot_actions = [a for a in DEPLOYMENT_ACTIONS if a in valid_actions]
+            if shoot_actions:
+                return random.choice(shoot_actions)
+            if 12 in valid_actions:
+                return 12
+            if WAIT_ACTION in valid_actions:
+                return WAIT_ACTION
+            return random.choice(valid_actions)
+        if WAIT_ACTION in valid_actions:
+            non_wait_actions = [a for a in valid_actions if a != WAIT_ACTION]
+            if non_wait_actions:
+                return random.choice(non_wait_actions)
+        return random.choice(valid_actions)
 
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         if valid_destinations:
@@ -55,11 +108,14 @@ class GreedyBot:
                        0.0 = pure greedy, 0.15 = 15% random actions (recommended for training)
         """
         self.randomness = max(0.0, min(1.0, randomness))  # Clamp to [0, 1]
+        self._deployment_last_action: Optional[int] = None
+        self._deployment_repeat_count = 0
+        self._deployment_episode_marker: Optional[Any] = None
 
     def select_action(self, valid_actions: List[int]) -> int:
         # Add randomness to prevent overfitting
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions) if valid_actions else 7
+            return random.choice(valid_actions) if valid_actions else WAIT_ACTION
 
         # Prefer shoot > move > wait
         if 4 in valid_actions:  # Shoot
@@ -67,7 +123,54 @@ class GreedyBot:
         elif 0 in valid_actions:  # Move
             return 0
         else:
-            return valid_actions[0] if valid_actions else 7
+            return valid_actions[0] if valid_actions else WAIT_ACTION
+
+    def select_action_with_state(self, valid_actions: List[int], game_state) -> int:
+        """Phase-aware greedy policy aligned with current action-space semantics."""
+        if not valid_actions:
+            return WAIT_ACTION
+        phase = require_key(game_state, "phase")
+        if self.randomness > 0 and random.random() < self.randomness:
+            return random.choice(valid_actions)
+        if phase == "deployment":
+            episode_marker = game_state.get("episode_number")
+            if self._deployment_episode_marker != episode_marker:
+                self._deployment_episode_marker = episode_marker
+                self._deployment_last_action = None
+                self._deployment_repeat_count = 0
+            deployment_weights = {
+                4: 0.30,  # aggressive front
+                5: 0.30,  # objective pressure
+                6: 0.20,  # safe/cohesion
+                7: 0.10,  # left flank
+                8: 0.10,  # right flank
+            }
+            chosen = _select_weighted_deployment_action(
+                valid_actions=valid_actions,
+                weights_by_action=deployment_weights,
+                last_action=self._deployment_last_action,
+                repeat_count=self._deployment_repeat_count,
+                max_repeat=2,
+            )
+            if self._deployment_last_action == chosen:
+                self._deployment_repeat_count += 1
+            else:
+                self._deployment_last_action = chosen
+                self._deployment_repeat_count = 1
+            return chosen
+        if phase == "shoot":
+            for preferred in [4, 5, 6, 7, 8, 12, WAIT_ACTION]:
+                if preferred in valid_actions:
+                    return preferred
+            return valid_actions[0]
+        if phase == "move":
+            for preferred in [0, 1, 2, 3, WAIT_ACTION]:
+                if preferred in valid_actions:
+                    return preferred
+            return valid_actions[0]
+        if WAIT_ACTION in valid_actions and len(valid_actions) > 1:
+            return valid_actions[0] if valid_actions[0] != WAIT_ACTION else valid_actions[1]
+        return valid_actions[0]
     
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         if not valid_destinations:
@@ -130,19 +233,22 @@ class DefensiveBot:
                        0.0 = pure defensive, 0.15 = 15% random actions (recommended for training)
         """
         self.randomness = max(0.0, min(1.0, randomness))  # Clamp to [0, 1]
+        self._deployment_last_action: Optional[int] = None
+        self._deployment_repeat_count = 0
+        self._deployment_episode_marker: Optional[Any] = None
 
     def select_action(self, valid_actions: List[int]) -> int:
         # Add randomness to prevent overfitting
         if self.randomness > 0 and random.random() < self.randomness:
-            return random.choice(valid_actions) if valid_actions else 7
+            return random.choice(valid_actions) if valid_actions else WAIT_ACTION
 
         # Conservative: shoot when possible, otherwise wait
         if 4 in valid_actions:  # Shoot
             return 4
-        elif 7 in valid_actions:  # Wait
-            return 7
+        elif WAIT_ACTION in valid_actions:  # Wait
+            return WAIT_ACTION
         else:
-            return valid_actions[0] if valid_actions else 7
+            return valid_actions[0] if valid_actions else WAIT_ACTION
     
     def select_movement_destination(self, unit, valid_destinations: List[Tuple[int, int]], game_state=None) -> Tuple[int, int]:
         if not valid_destinations:
@@ -173,6 +279,36 @@ class DefensiveBot:
         Enhanced defensive logic with threat awareness.
         Prioritize shooting threats, move away from danger zones.
         """
+        if not valid_actions:
+            return WAIT_ACTION
+        phase = require_key(game_state, "phase")
+        if phase == "deployment":
+            episode_marker = game_state.get("episode_number")
+            if self._deployment_episode_marker != episode_marker:
+                self._deployment_episode_marker = episode_marker
+                self._deployment_last_action = None
+                self._deployment_repeat_count = 0
+            deployment_weights = {
+                4: 0.20,  # aggressive front
+                5: 0.25,  # objective pressure
+                6: 0.35,  # safe/cohesion
+                7: 0.10,  # left flank
+                8: 0.10,  # right flank
+            }
+            chosen = _select_weighted_deployment_action(
+                valid_actions=valid_actions,
+                weights_by_action=deployment_weights,
+                last_action=self._deployment_last_action,
+                repeat_count=self._deployment_repeat_count,
+                max_repeat=2,
+            )
+            if self._deployment_last_action == chosen:
+                self._deployment_repeat_count += 1
+            else:
+                self._deployment_last_action = chosen
+                self._deployment_repeat_count = 1
+            return chosen
+
         current_player = require_key(game_state, 'current_player')
         
         active_unit = None
@@ -182,7 +318,7 @@ class DefensiveBot:
                 break
         
         if not active_unit:
-            return valid_actions[0] if valid_actions else 7
+            return valid_actions[0]
         
         nearby_threats = self._count_nearby_threats(active_unit, game_state)
         

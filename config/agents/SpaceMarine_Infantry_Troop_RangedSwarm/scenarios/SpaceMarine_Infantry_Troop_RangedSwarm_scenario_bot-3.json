@@ -1,6 +1,6 @@
 {
     "deployment_zone": "hammer",
-    "deployment_type": "random",
+    "deployment_type": "active",
     "units": [
       {"id": 1, "unit_type": "IntercessorSergeant", "player": 1, "col": 12, "row": 2},
       {"id": 2, "unit_type": "IntercessorGrenadeLauncher", "player": 1, "col": 7, "row": 6},

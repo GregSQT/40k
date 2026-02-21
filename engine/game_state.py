@@ -153,20 +153,48 @@ class GameStateManager:
 
             deployment_zone = None
             deployment_type = "fixed"
+            deployment_type_by_player: Dict[int, str] = {1: "fixed", 2: "fixed"}
             if isinstance(scenario_data, dict):
                 has_deployment_zone = "deployment_zone" in scenario_data
                 has_deployment_type = "deployment_type" in scenario_data
-                if has_deployment_zone or has_deployment_type:
-                    if not has_deployment_zone or not has_deployment_type:
+                has_deployment_type_p1 = "deployment_type_P1" in scenario_data
+                has_deployment_type_p2 = "deployment_type_P2" in scenario_data
+                has_any_deployment_type = (
+                    has_deployment_type
+                    or has_deployment_type_p1
+                    or has_deployment_type_p2
+                )
+                if has_deployment_zone or has_any_deployment_type:
+                    if not has_deployment_zone:
                         raise KeyError(
-                            f"Scenario file {scenario_file} requires both 'deployment_zone' and 'deployment_type'"
+                            f"Scenario file {scenario_file} requires 'deployment_zone' when deployment type is configured"
                         )
                     deployment_zone = require_key(scenario_data, "deployment_zone")
-                    deployment_type = require_key(scenario_data, "deployment_type")
-                if deployment_type not in ("random", "fixed", "active"):
-                    raise ValueError(
-                        f"Invalid deployment_type '{deployment_type}' in {scenario_file} (expected 'random', 'fixed', or 'active')"
+                    if has_deployment_type:
+                        deployment_type = require_key(scenario_data, "deployment_type")
+                    else:
+                        deployment_type = "fixed"
+                    deployment_type_p1 = (
+                        require_key(scenario_data, "deployment_type_P1")
+                        if has_deployment_type_p1
+                        else deployment_type
                     )
+                    deployment_type_p2 = (
+                        require_key(scenario_data, "deployment_type_P2")
+                        if has_deployment_type_p2
+                        else deployment_type
+                    )
+                    deployment_type_by_player = {
+                        1: deployment_type_p1,
+                        2: deployment_type_p2,
+                    }
+                valid_deployment_types = ("random", "fixed", "active")
+                for player_id, player_deployment_type in deployment_type_by_player.items():
+                    if player_deployment_type not in valid_deployment_types:
+                        raise ValueError(
+                            f"Invalid deployment type for player {player_id}: '{player_deployment_type}' "
+                            f"in {scenario_file} (expected one of {valid_deployment_types})"
+                        )
             
             wall_hex_set = set()
             if isinstance(scenario_data, dict) and "wall_hexes" in scenario_data:
@@ -228,10 +256,13 @@ class GameStateManager:
                     1: _build_deploy_pool(deployment_data["p1"]),
                     2: _build_deploy_pool(deployment_data["p2"]),
                 }
-                if deployment_type in ("random", "active"):
+                if any(
+                    deployment_type_by_player[player_id] in ("random", "active")
+                    for player_id in (1, 2)
+                ):
                     if not wall_hex_set:
                         raise KeyError(
-                            f"Scenario file {scenario_file} missing required 'wall_hexes' for {deployment_type} deployment"
+                            f"Scenario file {scenario_file} missing required 'wall_hexes' for random/active deployment"
                         )
                     deploy_pools = {
                         1: deploy_pools[1] - wall_hex_set,
@@ -246,7 +277,10 @@ class GameStateManager:
                 
                 unit_type = unit_data["unit_type"]
                 unit_player = require_key(unit_data, "player")
-                if deployment_type == "random":
+                if int(unit_player) not in deployment_type_by_player:
+                    raise ValueError(f"Invalid unit player for deployment: {unit_player}")
+                player_deployment_type = deployment_type_by_player[int(unit_player)]
+                if player_deployment_type == "random":
                     if unit_player not in deploy_pools:
                         raise ValueError(f"Invalid unit player for deployment: {unit_player}")
                     available_hexes = list(deploy_pools[unit_player] - used_hexes)
@@ -257,7 +291,7 @@ class GameStateManager:
                         )
                     chosen_col, chosen_row = random.choice(available_hexes)
                     used_hexes.add((chosen_col, chosen_row))
-                elif deployment_type == "active":
+                elif player_deployment_type == "active":
                     chosen_col, chosen_row = -1, -1
                 else:
                     required_fields = ["id", "player", "col", "row"]
@@ -409,6 +443,7 @@ class GameStateManager:
                 "primary_objective": scenario_primary_objective_single,
                 "deployment_zone": deployment_zone,
                 "deployment_type": deployment_type,
+                "deployment_type_by_player": deployment_type_by_player,
                 "deployment_pools": deployment_pools_serializable
             }
     

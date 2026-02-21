@@ -160,28 +160,3 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     return True, result
 
 
-def deployment_ai_step(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Deterministic AI deployment for current_deployer.
-    """
-    deployment_state = require_key(game_state, "deployment_state")
-    current_deployer = require_key(deployment_state, "current_deployer")
-    deployment_pools = require_key(deployment_state, "deployment_pools")
-    deployable_units = require_key(deployment_state, "deployable_units")
-    deployable_list = deployable_units.get(current_deployer, deployable_units.get(str(current_deployer)))
-    if not deployable_list:
-        return True, {"action": "deploy_unit", "deployment_complete": deployment_state.get("deployment_complete", False)}
-
-    unit_id = str(deployable_list[0])
-    pool = _get_deployment_pool(deployment_pools, int(current_deployer))
-    pool_sorted = sorted([(int(col), int(row)) for col, row in pool])
-    for col, row in pool_sorted:
-        if not _is_hex_occupied(game_state, col, row):
-            return execute_deployment_action(game_state, {
-                "action": "deploy_unit",
-                "unitId": unit_id,
-                "destCol": col,
-                "destRow": row
-            })
-
-    return False, {"error": "no_available_deploy_hexes", "current_deployer": current_deployer}

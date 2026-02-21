@@ -878,7 +878,8 @@ export class UnitRenderer {
       : null;
 
     const isTarget =
-      (shootingTargetId &&
+      (shootingTargetId !== null &&
+        shootingTargetId !== undefined &&
         unitIdNum ===
           (typeof shootingTargetId === "string"
             ? parseInt(shootingTargetId, 10)

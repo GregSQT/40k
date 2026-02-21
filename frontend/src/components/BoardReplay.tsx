@@ -1443,7 +1443,7 @@ export const BoardReplay: React.FC = () => {
                 : 1
             }
             currentPhase={currentState.phase || "move"}
-            phases={["command", "move", "shoot", "charge", "fight"]}
+            phases={["deployment", "command", "move", "shoot", "charge", "fight"]}
             current_player={currentState.current_player}
             maxTurns={gameConfig.game_rules.max_turns}
             className=""
@@ -1505,6 +1505,7 @@ export const BoardReplay: React.FC = () => {
 
               // Map phase names to action types
               const phaseToActionTypes: Record<string, string[]> = {
+                deployment: ["deploy"],
                 move: ["move", "move_wait"],
                 shoot: ["shoot", "wait", "advance"],
                 charge: ["charge", "charge_wait", "charge_fail"],
@@ -1663,11 +1664,32 @@ export const BoardReplay: React.FC = () => {
     </>
   );
 
+  const resolvedShootingTargetId =
+    currentAction?.type === "shoot"
+      ? (() => {
+          if (currentAction.target_id !== undefined) {
+            return currentAction.target_id;
+          }
+          if (currentAction.target_pos && currentState?.units) {
+            const targetUnit = currentState.units.find(
+              (u) =>
+                u.col === currentAction.target_pos!.col &&
+                u.row === currentAction.target_pos!.row &&
+                (u.HP_CUR ?? 0) > 0
+            );
+            return targetUnit ? targetUnit.id : null;
+          }
+          return null;
+        })()
+      : null;
+
   // Get shooting target ID for explosion icon and shooter ID for shooting indicator
   const shootingTargetId =
-    currentAction?.type === "shoot" && currentAction?.target_id ? currentAction.target_id : null;
+    currentAction?.type === "shoot" ? resolvedShootingTargetId : null;
   const shootingUnitId =
-    currentAction?.type === "shoot" && currentAction?.shooter_id ? currentAction.shooter_id : null;
+    currentAction?.type === "shoot" && currentAction?.shooter_id !== undefined
+      ? currentAction.shooter_id
+      : null;
 
   // Get moving unit ID for boot icon during movement phase
   const movingUnitId =

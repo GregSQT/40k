@@ -1510,6 +1510,9 @@ export default function Board({
 
     if (app.stage) {
       app.stage.removeChildren();
+      if (uiElementsContainerRef.current) {
+        app.stage.addChild(uiElementsContainerRef.current);
+      }
     }
     drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
       availableCells: effectiveAvailableCells,

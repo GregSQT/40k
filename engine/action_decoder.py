@@ -7,11 +7,20 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
-from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
+from engine.combat_utils import calculate_hex_distance, get_unit_coordinates, has_line_of_sight
 from engine.phase_handlers.shared_utils import is_unit_alive
 
 # Game phases - single source of truth for phase count
-GAME_PHASES = ["command", "move", "shoot", "charge", "fight"]
+GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
+
+class ActionValidationError(ValueError):
+    """Raised when an action fails strict normalization or mask validation."""
+
+    def __init__(self, code: str, message: str, context: Dict[str, Any]):
+        self.code = code
+        self.context = context
+        super().__init__(f"{code}: {message} | context={context}")
+
 
 class ActionDecoder:
     """Decodes actions and computes valid action masks."""
@@ -61,6 +70,20 @@ class ActionDecoder:
             mask[11] = True
             return mask
 
+        if current_phase == "deployment":
+            active_unit = eligible_units[0] if eligible_units else None
+            if active_unit:
+                current_deployer = self._get_current_deployer(game_state)
+                valid_hexes = self._get_valid_deployment_hexes(game_state, current_deployer)
+                num_hexes = len(valid_hexes)
+                if num_hexes == 0:
+                    raise ValueError(
+                        f"Deployment deadlock: no valid hex for player {current_deployer}, "
+                        f"unit {active_unit.get('id')}"
+                    )
+                for i in range(min(5, num_hexes)):
+                    mask[4 + i] = True
+            return mask
         if current_phase == "command":
             mask[11] = True
             return mask
@@ -139,6 +162,8 @@ class ActionDecoder:
     
     def _get_valid_actions_for_phase(self, phase: str) -> List[int]:
         """Get valid action types for current phase with target selection support."""
+        if phase == "deployment":
+            return [4, 5, 6, 7, 8]  # Deployment hex slots 0-4
         if phase == "move":
             return [0, 1, 2, 3, 11]  # Move directions + wait
         elif phase == "shoot":
@@ -158,6 +183,19 @@ class ActionDecoder:
         """
         current_phase = game_state["phase"]
 
+        if current_phase == "deployment":
+            deployment_state = require_key(game_state, "deployment_state")
+            current_deployer = self._get_current_deployer(game_state)
+            deployable_units = require_key(deployment_state, "deployable_units")
+            deployable_list = deployable_units.get(current_deployer, deployable_units.get(str(current_deployer)))
+            if deployable_list is None:
+                raise KeyError(f"deployable_units missing player {current_deployer}")
+            eligible = []
+            for uid in deployable_list:
+                unit = get_unit_by_id(str(uid), game_state)
+                if unit and is_unit_alive(str(unit["id"]), game_state):
+                    eligible.append(unit)
+            return eligible
         if current_phase == "command":
             return []  # Empty pool for now, ready for future
         elif current_phase == "move":
@@ -249,6 +287,89 @@ class ActionDecoder:
     # ============================================================================
     # ACTION CONVERSION
     # ============================================================================
+
+    def normalize_action_input(
+        self,
+        raw_action: Any,
+        phase: str,
+        source: str,
+        action_space_size: int,
+    ) -> int:
+        """Normalize action to int with strict type and range checks."""
+        context = {
+            "phase": phase,
+            "source": source,
+            "raw_action_repr": repr(raw_action),
+            "raw_action_type": type(raw_action).__name__,
+        }
+
+        if isinstance(raw_action, bool):
+            raise ActionValidationError("invalid_type", "bool action is not allowed", context)
+
+        if isinstance(raw_action, np.ndarray):
+            if raw_action.size != 1:
+                raise ActionValidationError(
+                    "invalid_shape",
+                    f"numpy action must be scalar-like, got size={raw_action.size}",
+                    context,
+                )
+            raw_action = raw_action.item()
+            context["normalized_from"] = "ndarray"
+            context["raw_action_type"] = type(raw_action).__name__
+
+        if isinstance(raw_action, np.generic):
+            raw_action = raw_action.item()
+            context["normalized_from"] = "numpy_scalar"
+            context["raw_action_type"] = type(raw_action).__name__
+
+        if not isinstance(raw_action, int):
+            raise ActionValidationError(
+                "invalid_type",
+                f"action must be int-compatible, got {type(raw_action).__name__}",
+                context,
+            )
+
+        action_int = int(raw_action)
+        if action_int < 0 or action_int >= action_space_size:
+            context["normalized_action"] = action_int
+            context["action_space_size"] = action_space_size
+            raise ActionValidationError(
+                "out_of_range",
+                f"action {action_int} outside [0, {action_space_size - 1}]",
+                context,
+            )
+        return action_int
+
+    def validate_action_against_mask(
+        self,
+        action_int: int,
+        action_mask: np.ndarray,
+        phase: str,
+        source: str,
+        unit_id: Optional[Any] = None,
+    ) -> None:
+        """Validate normalized action against action mask."""
+        if action_mask.dtype != bool:
+            raise TypeError(f"action_mask must be bool dtype, got {action_mask.dtype}")
+        if action_int >= len(action_mask):
+            raise ActionValidationError(
+                "out_of_range",
+                f"action {action_int} outside mask length {len(action_mask)}",
+                {"phase": phase, "source": source, "unit_id": unit_id},
+            )
+        if not bool(action_mask[action_int]):
+            valid_actions = [i for i, is_valid in enumerate(action_mask) if bool(is_valid)]
+            raise ActionValidationError(
+                "masked_out",
+                f"action {action_int} is masked out",
+                {
+                    "phase": phase,
+                    "source": source,
+                    "unit_id": unit_id,
+                    "action": action_int,
+                    "valid_actions": valid_actions,
+                },
+            )
     
     def convert_gym_action(
         self,
@@ -259,15 +380,13 @@ class ActionDecoder:
     ) -> Dict[str, Any]:
         """Convert gym integer action to semantic action with target selection support.
         PERF: When action_mask and eligible_units are provided (e.g. from step), avoids recomputing them."""
-        # CRITICAL: Convert numpy types to Python int FIRST
-        if hasattr(action, 'item'):
-            action_int = int(action.item())
-        elif isinstance(action, np.ndarray):
-            action_int = int(action.flatten()[0])
-        else:
-            action_int = int(action)
-
         current_phase = game_state["phase"]
+        action_int = self.normalize_action_input(
+            raw_action=action,
+            phase=current_phase,
+            source="gym",
+            action_space_size=13,
+        )
 
         # Use provided mask/units or compute (e.g. PvE, other callers)
         if action_mask is None or eligible_units is None:
@@ -296,6 +415,31 @@ class ActionDecoder:
         # GUARANTEED UNIT SELECTION - use first eligible unit directly
         selected_unit_id = eligible_units[0]["id"]
         
+        if current_phase == "deployment":
+            if action_int in [4, 5, 6, 7, 8]:
+                current_deployer = self._get_current_deployer(game_state)
+                valid_hexes = self._get_valid_deployment_hexes(game_state, current_deployer)
+                if not valid_hexes:
+                    return {
+                        "action": "invalid",
+                        "error": "no_valid_deployment_hexes",
+                        "unitId": selected_unit_id,
+                        "attempted_action": action_int,
+                        "end_activation_required": False,
+                    }
+                dest_col, dest_row = self._select_deployment_hex_for_action(
+                    action_int=action_int,
+                    unit_id=selected_unit_id,
+                    game_state=game_state,
+                    current_deployer=current_deployer,
+                    valid_hexes=valid_hexes,
+                )
+                return {
+                    "action": "deploy_unit",
+                    "unitId": selected_unit_id,
+                    "destCol": dest_col,
+                    "destRow": dest_row,
+                }
         if current_phase == "move":
             if action_int in [0, 1, 2, 3]:  # Move with strategic heuristic
                 # Actions 0-3 map to movement strategies:
@@ -438,6 +582,557 @@ class ActionDecoder:
         
         # SKIP is system response when no valid actions possible (not agent choice)
         return {"action": "skip", "reason": "no_valid_action_found"}
+
+    def _get_current_deployer(self, game_state: Dict[str, Any]) -> int:
+        """Return current deployment player with strict validation."""
+        deployment_state = require_key(game_state, "deployment_state")
+        current_deployer = require_key(deployment_state, "current_deployer")
+        try:
+            return int(current_deployer)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid deployment current_deployer: {current_deployer}") from exc
+
+    def _get_valid_deployment_hexes(self, game_state: Dict[str, Any], current_deployer: int) -> List[tuple]:
+        """Build sorted list of currently valid deployment hexes for player."""
+        deployment_state = require_key(game_state, "deployment_state")
+        deployment_pools = require_key(deployment_state, "deployment_pools")
+        pool = deployment_pools.get(current_deployer, deployment_pools.get(str(current_deployer)))
+        if pool is None:
+            raise KeyError(f"deployment_pools missing player {current_deployer}")
+
+        occupied = set()
+        for unit in require_key(game_state, "units"):
+            unit_col = int(require_key(unit, "col"))
+            unit_row = int(require_key(unit, "row"))
+            if unit_col >= 0 and unit_row >= 0:
+                occupied.add((unit_col, unit_row))
+
+        valid_hexes = []
+        for raw_hex in pool:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                col, row = int(raw_hex[0]), int(raw_hex[1])
+            elif isinstance(raw_hex, dict):
+                col = int(require_key(raw_hex, "col"))
+                row = int(require_key(raw_hex, "row"))
+            else:
+                raise TypeError(f"Invalid deployment hex format: {raw_hex}")
+            if (col, row) not in occupied:
+                valid_hexes.append((col, row))
+
+        return sorted(valid_hexes)
+
+    def _get_enemy_reference_hexes(self, game_state: Dict[str, Any], current_deployer: int) -> List[tuple[int, int]]:
+        """
+        Build enemy reference hexes for distance scoring.
+
+        Uses currently deployed enemy units when available; otherwise uses enemy deployment pool.
+        """
+        enemy_player = 2 if int(current_deployer) == 1 else 1
+        enemy_deployed = []
+        for unit in require_key(game_state, "units"):
+            unit_player = int(require_key(unit, "player"))
+            if unit_player != enemy_player:
+                continue
+            col = int(require_key(unit, "col"))
+            row = int(require_key(unit, "row"))
+            if col >= 0 and row >= 0:
+                enemy_deployed.append((col, row))
+        if enemy_deployed:
+            return enemy_deployed
+
+        deployment_state = require_key(game_state, "deployment_state")
+        deployment_pools = require_key(deployment_state, "deployment_pools")
+        if enemy_player in deployment_pools:
+            enemy_pool = deployment_pools[enemy_player]
+        elif str(enemy_player) in deployment_pools:
+            enemy_pool = deployment_pools[str(enemy_player)]
+        else:
+            raise KeyError(f"deployment_pools missing player {enemy_player}")
+        parsed_enemy_pool = []
+        for raw_hex in enemy_pool:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                parsed_enemy_pool.append((int(raw_hex[0]), int(raw_hex[1])))
+            elif isinstance(raw_hex, dict):
+                parsed_enemy_pool.append((int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row"))))
+            else:
+                raise TypeError(f"Invalid deployment hex format: {raw_hex}")
+        return parsed_enemy_pool
+
+    def _get_enemy_deployment_pool_hexes(
+        self, game_state: Dict[str, Any], current_deployer: int
+    ) -> List[tuple[int, int]]:
+        """Get enemy deployment pool hexes (stable reference for potential LoS)."""
+        enemy_player = 2 if int(current_deployer) == 1 else 1
+        deployment_state = require_key(game_state, "deployment_state")
+        deployment_pools = require_key(deployment_state, "deployment_pools")
+        if enemy_player in deployment_pools:
+            enemy_pool = deployment_pools[enemy_player]
+        elif str(enemy_player) in deployment_pools:
+            enemy_pool = deployment_pools[str(enemy_player)]
+        else:
+            raise KeyError(f"deployment_pools missing player {enemy_player}")
+        parsed_enemy_pool = []
+        for raw_hex in enemy_pool:
+            if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                parsed_enemy_pool.append((int(raw_hex[0]), int(raw_hex[1])))
+            elif isinstance(raw_hex, dict):
+                parsed_enemy_pool.append((int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row"))))
+            else:
+                raise TypeError(f"Invalid deployment hex format: {raw_hex}")
+        return parsed_enemy_pool
+
+    def _get_objective_hexes(self, game_state: Dict[str, Any]) -> List[tuple[int, int]]:
+        """Extract objective hexes from game_state with strict validation."""
+        objectives = require_key(game_state, "objectives")
+        objective_hexes: List[tuple[int, int]] = []
+        for objective in objectives:
+            objective_hex_list = require_key(objective, "hexes")
+            for raw_hex in objective_hex_list:
+                if isinstance(raw_hex, (list, tuple)) and len(raw_hex) == 2:
+                    objective_hexes.append((int(raw_hex[0]), int(raw_hex[1])))
+                elif isinstance(raw_hex, dict):
+                    objective_hexes.append((int(require_key(raw_hex, "col")), int(require_key(raw_hex, "row"))))
+                else:
+                    raise TypeError(f"Invalid objective hex format: {raw_hex}")
+        if not objective_hexes:
+            raise ValueError("objectives are required for deployment scoring")
+        return objective_hexes
+
+    def _build_deployed_snapshot_version(
+        self, deployed_snapshot: Dict[str, tuple[int, int, int]]
+    ) -> tuple[tuple[str, int, int, int], ...]:
+        """Build deterministic version token for currently deployed units."""
+        version_items: List[tuple[str, int, int, int]] = []
+        for unit_id, payload in deployed_snapshot.items():
+            player, col, row = payload
+            version_items.append((str(unit_id), int(player), int(col), int(row)))
+        version_items.sort(key=lambda item: item[0])
+        return tuple(version_items)
+
+    def _has_line_of_sight_cached(
+        self,
+        from_col: int,
+        from_row: int,
+        to_col: int,
+        to_row: int,
+        game_state: Dict[str, Any],
+        los_pair_cache: Dict[tuple[int, int, int, int, tuple[tuple[str, int, int, int], ...]], bool],
+        snapshot_version: tuple[tuple[str, int, int, int], ...],
+    ) -> bool:
+        """Memoized LoS lookup scoped to deployment snapshot version."""
+        cache_key = (int(from_col), int(from_row), int(to_col), int(to_row), snapshot_version)
+        if cache_key in los_pair_cache:
+            return los_pair_cache[cache_key]
+        result = has_line_of_sight(
+            {"col": int(from_col), "row": int(from_row)},
+            {"col": int(to_col), "row": int(to_row)},
+            game_state,
+        )
+        los_pair_cache[cache_key] = result
+        return result
+
+    def _count_los_exposure(
+        self,
+        candidate_col: int,
+        candidate_row: int,
+        enemy_deployed_units: List[Dict[str, Any]],
+        game_state: Dict[str, Any],
+        los_pair_cache: Dict[tuple[int, int, int, int, tuple[tuple[str, int, int, int], ...]], bool],
+        snapshot_version: tuple[tuple[str, int, int, int], ...],
+    ) -> int:
+        """Count deployed enemy units with LoS to candidate deployment hex."""
+        exposure_count = 0
+        for enemy in enemy_deployed_units:
+            enemy_col = int(require_key(enemy, "col"))
+            enemy_row = int(require_key(enemy, "row"))
+            if enemy_col < 0 or enemy_row < 0:
+                continue
+            can_see = self._has_line_of_sight_cached(
+                from_col=enemy_col,
+                from_row=enemy_row,
+                to_col=candidate_col,
+                to_row=candidate_row,
+                game_state=game_state,
+                los_pair_cache=los_pair_cache,
+                snapshot_version=snapshot_version,
+            )
+            if can_see:
+                exposure_count += 1
+        return exposure_count
+
+    def _count_potential_los_from_reference_hexes(
+        self,
+        candidate_col: int,
+        candidate_row: int,
+        enemy_reference_hexes: List[tuple[int, int]],
+        game_state: Dict[str, Any],
+        los_pair_cache: Dict[tuple[int, int, int, int, tuple[tuple[str, int, int, int], ...]], bool],
+        snapshot_version: tuple[tuple[str, int, int, int], ...],
+    ) -> int:
+        """
+        Count potential LoS exposure from enemy reference deployment hexes.
+
+        Used when enemy units are not yet deployed; gives a wall/cover-aware proxy.
+        """
+        potential_exposure = 0
+        for ref_col, ref_row in enemy_reference_hexes:
+            can_see = self._has_line_of_sight_cached(
+                from_col=int(ref_col),
+                from_row=int(ref_row),
+                to_col=int(candidate_col),
+                to_row=int(candidate_row),
+                game_state=game_state,
+                los_pair_cache=los_pair_cache,
+                snapshot_version=snapshot_version,
+            )
+            if can_see:
+                potential_exposure += 1
+        return potential_exposure
+
+    def _build_enemy_los_reference_hexes(
+        self, enemy_reference_hexes: List[tuple[int, int]]
+    ) -> List[tuple[int, int]]:
+        """
+        Build a compact deterministic subset of enemy reference hexes for LoS potential.
+
+        Using all deployment hexes is too expensive and redundant. We keep tactical signal
+        with strategic anchors: left/right extremes, top/bottom extremes, and center.
+        """
+        if not enemy_reference_hexes:
+            raise ValueError("enemy_reference_hexes cannot be empty")
+
+        sorted_by_col = sorted(enemy_reference_hexes, key=lambda h: (h[0], h[1]))
+        sorted_by_row = sorted(enemy_reference_hexes, key=lambda h: (h[1], h[0]))
+
+        leftmost = sorted_by_col[0]
+        rightmost = sorted_by_col[-1]
+        topmost = sorted_by_row[0]
+        bottommost = sorted_by_row[-1]
+
+        center_col = (leftmost[0] + rightmost[0]) // 2
+        center_row = (topmost[1] + bottommost[1]) // 2
+        center_hex = min(
+            enemy_reference_hexes,
+            key=lambda h: (abs(h[0] - center_col) + abs(h[1] - center_row), h[0], h[1]),
+        )
+
+        anchors = [leftmost, rightmost, topmost, bottommost, center_hex]
+        unique_anchors: List[tuple[int, int]] = []
+        seen = set()
+        for anchor in anchors:
+            if anchor not in seen:
+                seen.add(anchor)
+                unique_anchors.append(anchor)
+        return unique_anchors
+
+    def _build_deployed_snapshot(
+        self, game_state: Dict[str, Any]
+    ) -> Dict[str, tuple[int, int, int]]:
+        """Build snapshot of deployed units: unit_id -> (player, col, row)."""
+        snapshot: Dict[str, tuple[int, int, int]] = {}
+        for unit in require_key(game_state, "units"):
+            col = int(require_key(unit, "col"))
+            row = int(require_key(unit, "row"))
+            if col < 0 or row < 0:
+                continue
+            unit_id = str(require_key(unit, "id"))
+            player = int(require_key(unit, "player"))
+            snapshot[unit_id] = (player, col, row)
+        return snapshot
+
+    def _build_deployment_scoring_cache(
+        self,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        valid_hexes: List[tuple[int, int]],
+    ) -> Dict[str, Any]:
+        """Build full deployment scoring cache for current state."""
+        deployed_snapshot = self._build_deployed_snapshot(game_state)
+        snapshot_version = self._build_deployed_snapshot_version(deployed_snapshot)
+        enemy_player = 2 if int(current_deployer) == 1 else 1
+
+        ally_col_counts: Dict[int, int] = {}
+        ally_deployed_hexes: List[tuple[int, int]] = []
+        enemy_deployed_units: List[Dict[str, Any]] = []
+        for player, col, row in deployed_snapshot.values():
+            if player == int(current_deployer):
+                ally_deployed_hexes.append((col, row))
+                if col in ally_col_counts:
+                    ally_col_counts[col] = ally_col_counts[col] + 1
+                else:
+                    ally_col_counts[col] = 1
+            elif player == enemy_player:
+                enemy_deployed_units.append({"col": col, "row": row})
+
+        enemy_pool_hexes = self._get_enemy_deployment_pool_hexes(game_state, current_deployer)
+        enemy_los_reference_hexes = self._build_enemy_los_reference_hexes(enemy_pool_hexes)
+
+        los_exposure_by_hex: Dict[tuple[int, int], int] = {}
+        potential_los_exposure_by_hex: Dict[tuple[int, int], int] = {}
+        los_pair_cache: Dict[tuple[int, int, int, int, tuple[tuple[str, int, int, int], ...]], bool] = {}
+        for col, row in valid_hexes:
+            los_exposure_by_hex[(col, row)] = self._count_los_exposure(
+                col,
+                row,
+                enemy_deployed_units,
+                game_state,
+                los_pair_cache,
+                snapshot_version,
+            )
+            potential_los_exposure_by_hex[(col, row)] = self._count_potential_los_from_reference_hexes(
+                col,
+                row,
+                enemy_los_reference_hexes,
+                game_state,
+                los_pair_cache,
+                snapshot_version,
+            )
+
+        return {
+            "current_deployer": int(current_deployer),
+            "deployed_snapshot": deployed_snapshot,
+            "deployed_snapshot_version": snapshot_version,
+            "valid_hexes": list(valid_hexes),
+            "valid_hex_set": set(valid_hexes),
+            "ally_col_counts": ally_col_counts,
+            "ally_deployed_hexes": ally_deployed_hexes,
+            "enemy_deployed_units": enemy_deployed_units,
+            "los_exposure_by_hex": los_exposure_by_hex,
+            "potential_los_exposure_by_hex": potential_los_exposure_by_hex,
+            "los_pair_cache": los_pair_cache,
+        }
+
+    def _update_deployment_scoring_cache_incremental(
+        self,
+        cache: Dict[str, Any],
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        current_snapshot: Dict[str, tuple[int, int, int]],
+    ) -> bool:
+        """
+        Update deployment scoring cache incrementally after one new deployment.
+
+        Returns True when incremental update succeeded, False when full rebuild is required.
+        """
+        if int(current_deployer) != int(require_key(cache, "current_deployer")):
+            return False
+
+        previous_snapshot = require_key(cache, "deployed_snapshot")
+        previous_ids = set(previous_snapshot.keys())
+        current_ids = set(current_snapshot.keys())
+        removed_ids = previous_ids - current_ids
+        added_ids = current_ids - previous_ids
+        if removed_ids:
+            return False
+        if len(added_ids) != 1:
+            return False
+
+        added_id = next(iter(added_ids))
+        player, col, row = current_snapshot[added_id]
+        added_pos = (col, row)
+        current_snapshot_version = self._build_deployed_snapshot_version(current_snapshot)
+
+        valid_hex_set = require_key(cache, "valid_hex_set")
+        valid_hexes = require_key(cache, "valid_hexes")
+        if added_pos in valid_hex_set:
+            valid_hex_set.remove(added_pos)
+            valid_hexes.remove(added_pos)
+        los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
+        potential_los_exposure_by_hex = require_key(cache, "potential_los_exposure_by_hex")
+        if added_pos in los_exposure_by_hex:
+            del los_exposure_by_hex[added_pos]
+        if added_pos in potential_los_exposure_by_hex:
+            del potential_los_exposure_by_hex[added_pos]
+
+        ally_col_counts = require_key(cache, "ally_col_counts")
+        ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
+        enemy_deployed_units = require_key(cache, "enemy_deployed_units")
+        los_pair_cache = require_key(cache, "los_pair_cache")
+        cached_snapshot_version = require_key(cache, "deployed_snapshot_version")
+        if cached_snapshot_version != current_snapshot_version:
+            los_pair_cache.clear()
+            cache["deployed_snapshot_version"] = current_snapshot_version
+
+        if int(player) == int(current_deployer):
+            ally_deployed_hexes.append((col, row))
+            if col in ally_col_counts:
+                ally_col_counts[col] = ally_col_counts[col] + 1
+            else:
+                ally_col_counts[col] = 1
+        else:
+            enemy_unit = {"col": col, "row": row}
+            enemy_deployed_units.append(enemy_unit)
+            for hex_col, hex_row in valid_hexes:
+                can_see = self._has_line_of_sight_cached(
+                    from_col=int(col),
+                    from_row=int(row),
+                    to_col=int(hex_col),
+                    to_row=int(hex_row),
+                    game_state=game_state,
+                    los_pair_cache=los_pair_cache,
+                    snapshot_version=current_snapshot_version,
+                )
+                if can_see:
+                    key = (hex_col, hex_row)
+                    previous_value = require_key(los_exposure_by_hex, key)
+                    los_exposure_by_hex[key] = previous_value + 1
+
+        cache["deployed_snapshot"] = current_snapshot
+        cache["deployed_snapshot_version"] = current_snapshot_version
+        return True
+
+    def _get_or_build_deployment_scoring_cache(
+        self,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        valid_hexes: List[tuple[int, int]],
+    ) -> Dict[str, Any]:
+        """
+        Get deployment scoring cache with incremental updates when possible.
+
+        Full rebuild is used only when state drift is not a single deployment delta.
+        """
+        current_snapshot = self._build_deployed_snapshot(game_state)
+        cache_key = "_deployment_scoring_cache"
+        if cache_key not in game_state:
+            new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
+            game_state[cache_key] = new_cache
+            return new_cache
+
+        cache = require_key(game_state, cache_key)
+        updated = self._update_deployment_scoring_cache_incremental(
+            cache=cache,
+            game_state=game_state,
+            current_deployer=current_deployer,
+            current_snapshot=current_snapshot,
+        )
+        if updated:
+            return cache
+
+        new_cache = self._build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
+        game_state[cache_key] = new_cache
+        return new_cache
+
+    def _select_deployment_hex_for_action(
+        self,
+        action_int: int,
+        unit_id: Any,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        valid_hexes: List[tuple[int, int]],
+    ) -> tuple[int, int]:
+        """
+        Select deployment hex using tactical criteria driven by deployment action.
+
+        Action mapping:
+        - 4: aggressive front
+        - 5: objective pressure
+        - 6: safe/cohesion
+        - 7: left flank
+        - 8: right flank
+        """
+        if action_int not in [4, 5, 6, 7, 8]:
+            raise ValueError(f"Invalid deployment action: {action_int}")
+
+        unit = get_unit_by_id(str(unit_id), game_state)
+        if unit is None:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+
+        cache = self._get_or_build_deployment_scoring_cache(game_state, current_deployer, valid_hexes)
+        ally_col_counts = require_key(cache, "ally_col_counts")
+        ally_deployed_hexes = require_key(cache, "ally_deployed_hexes")
+        los_exposure_by_hex = require_key(cache, "los_exposure_by_hex")
+        potential_los_exposure_by_hex = require_key(cache, "potential_los_exposure_by_hex")
+        enemy_reference_hexes = self._get_enemy_reference_hexes(game_state, current_deployer)
+        objective_hexes = self._get_objective_hexes(game_state)
+        candidate_cols = [col for col, _ in valid_hexes]
+        candidate_rows = [row for _, row in valid_hexes]
+        center_col = (min(candidate_cols) + max(candidate_cols)) // 2
+        center_row = (min(candidate_rows) + max(candidate_rows)) // 2
+
+        def nearest_distance(col: int, row: int, refs: List[tuple[int, int]]) -> int:
+            if not refs:
+                raise ValueError("Reference hex list cannot be empty for deployment scoring")
+            return min(calculate_hex_distance(col, row, ref_col, ref_row) for ref_col, ref_row in refs)
+
+        def score_for_hex(col: int, row: int) -> tuple:
+            nearest_enemy_distance = nearest_distance(col, row, enemy_reference_hexes)
+            nearest_objective_distance = nearest_distance(col, row, objective_hexes)
+            if ally_deployed_hexes:
+                nearest_ally_distance = nearest_distance(col, row, ally_deployed_hexes)
+            else:
+                nearest_ally_distance = 0
+            if (col, row) not in los_exposure_by_hex:
+                raise KeyError(f"Missing los_exposure cache entry for hex ({col},{row})")
+            if (col, row) not in potential_los_exposure_by_hex:
+                raise KeyError(f"Missing potential_los_exposure cache entry for hex ({col},{row})")
+            los_exposure = los_exposure_by_hex[(col, row)]
+            potential_los_exposure = potential_los_exposure_by_hex[(col, row)]
+            progress = -row if int(current_deployer) == 1 else row
+            center_distance = abs(col - center_col)
+            if col in ally_col_counts:
+                horizontal_cluster_penalty = ally_col_counts[col]
+            else:
+                horizontal_cluster_penalty = 0
+
+            if action_int == 4:
+                return (
+                    progress,
+                    -nearest_enemy_distance,
+                    -nearest_objective_distance,
+                    -los_exposure,
+                    -potential_los_exposure,
+                    -horizontal_cluster_penalty,
+                    -center_distance,
+                )
+            if action_int == 5:
+                return (
+                    -nearest_objective_distance,
+                    -los_exposure,
+                    -potential_los_exposure,
+                    progress,
+                    -nearest_enemy_distance,
+                    -horizontal_cluster_penalty,
+                    -center_distance,
+                )
+            if action_int == 6:
+                return (
+                    -los_exposure,
+                    -potential_los_exposure,
+                    nearest_enemy_distance,
+                    -nearest_objective_distance,
+                    -nearest_ally_distance,
+                    -horizontal_cluster_penalty,
+                    -center_distance,
+                )
+            if action_int == 7:
+                return (
+                    -los_exposure,
+                    -potential_los_exposure,
+                    -col,
+                    -nearest_objective_distance,
+                    nearest_enemy_distance,
+                    -horizontal_cluster_penalty,
+                )
+            return (
+                -los_exposure,
+                -potential_los_exposure,
+                col,
+                -nearest_objective_distance,
+                nearest_enemy_distance,
+                -horizontal_cluster_penalty,
+            )
+
+        # Neutral tie-break: prefer balanced center placement, no left/right bias.
+        best_hex = max(
+            valid_hexes,
+            key=lambda h: (
+                score_for_hex(h[0], h[1]),
+                -abs(h[0] - center_col),
+                -abs(h[1] - center_row),
+            ),
+        )
+        return best_hex
     
     # ============================================================================
     # TARGET VALIDATION

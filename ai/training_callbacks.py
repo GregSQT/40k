@@ -163,7 +163,7 @@ class EpisodeTerminationCallback(BaseCallback):
             if isinstance(infos, list):
                 episodes_finished = sum(1 for info in infos if isinstance(info, dict) and 'episode' in info)
 
-        # Method 2 (fallback): dones array when infos do not expose episode payload.
+        # Method 2 (secondary): dones array when infos do not expose episode payload.
         if episodes_finished == 0 and hasattr(self, 'locals') and 'dones' in self.locals:
             dones = self.locals['dones']
             try:

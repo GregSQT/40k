@@ -537,6 +537,7 @@ def initialize_engine():
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
         scenario_deployment_zone = scenario_result.get("deployment_zone")
         scenario_deployment_pools = scenario_result.get("deployment_pools")
         
@@ -564,6 +565,7 @@ def initialize_engine():
             "scenario_wall_hexes": scenario_wall_hexes,
             "scenario_objectives": scenario_objectives,
             "deployment_type": scenario_deployment_type,
+            "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
             "deployment_pools": scenario_deployment_pools
         }
@@ -697,6 +699,7 @@ def initialize_pve_engine(scenario_file: str = None, debug_mode: bool = False):
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
         scenario_deployment_zone = scenario_result.get("deployment_zone")
         scenario_deployment_pools = scenario_result.get("deployment_pools")
         
@@ -724,6 +727,7 @@ def initialize_pve_engine(scenario_file: str = None, debug_mode: bool = False):
             "scenario_wall_hexes": scenario_wall_hexes,
             "scenario_objectives": scenario_objectives,
             "deployment_type": scenario_deployment_type,
+            "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
             "deployment_pools": scenario_deployment_pools
         }
@@ -854,6 +858,7 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
         scenario_wall_hexes = scenario_result.get("wall_hexes")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
+        scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
         scenario_deployment_zone = scenario_result.get("deployment_zone")
         scenario_deployment_pools = scenario_result.get("deployment_pools")
         
@@ -881,6 +886,7 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
             "scenario_wall_hexes": scenario_wall_hexes,
             "scenario_objectives": scenario_objectives,
             "deployment_type": scenario_deployment_type,
+            "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
             "deployment_pools": scenario_deployment_pools
         }
@@ -1554,28 +1560,37 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         return False, {"error": "change_roster_requires_active_deployment"}
     deployment_state = require_key(game_state, "deployment_state")
     current_deployer = int(require_key(deployment_state, "current_deployer"))
+    target_deployer = current_deployer
+
+    requested_player = action.get("player")
+    if requested_player is not None:
+        if not bool(getattr(engine_instance, "is_test_mode", False)):
+            return False, {"error": "change_roster_player_only_in_test_mode"}
+        target_deployer = int(requested_player)
+        if target_deployer not in (1, 2):
+            raise ValueError(f"Invalid player for change_roster: {requested_player}")
 
     # Enforce: change roster only before active player deploys first unit.
     deployable_units = require_key(deployment_state, "deployable_units")
     deployed_units = require_key(deployment_state, "deployed_units")
-    deployable_for_player = deployable_units.get(current_deployer, deployable_units.get(str(current_deployer)))
+    deployable_for_player = deployable_units.get(target_deployer, deployable_units.get(str(target_deployer)))
     if deployable_for_player is None:
-        raise KeyError(f"deployable_units missing player {current_deployer}")
+        raise KeyError(f"deployable_units missing player {target_deployer}")
     deployed_set = {str(uid) for uid in deployed_units}
-    current_player_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) == current_deployer]
+    current_player_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) == target_deployer]
     current_player_unit_ids = {str(require_key(unit, "id")) for unit in current_player_units}
     if current_player_unit_ids & deployed_set:
-        return False, {"error": "change_roster_locked_after_first_deploy", "current_deployer": current_deployer}
+        return False, {"error": "change_roster_locked_after_first_deploy", "current_deployer": target_deployer}
 
     army_file = require_key(action, "army_file")
     army_cfg = _load_army_file(army_file)
 
     all_unit_ids = [int(str(require_key(unit, "id"))) for unit in require_key(game_state, "units")]
     next_unit_id = (max(all_unit_ids) + 1) if all_unit_ids else 1
-    new_units, _ = _build_units_from_army_config(army_cfg, current_deployer, next_unit_id, engine_instance)
+    new_units, _ = _build_units_from_army_config(army_cfg, target_deployer, next_unit_id, engine_instance)
 
     # Replace only current deployer's units, then compact IDs to prevent unbounded growth.
-    other_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) != current_deployer]
+    other_units = [u for u in require_key(game_state, "units") if int(require_key(u, "player")) != target_deployer]
     combined_units = other_units + new_units
     id_remap: Dict[str, str] = {}
     for idx, unit in enumerate(combined_units, start=1):
@@ -1620,19 +1635,20 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         or getattr(engine_instance, "is_test_mode", False)
         or getattr(engine_instance, "is_debug_mode", False)
     )
-    if ai_enabled and current_deployer == 2:
+    if ai_enabled and target_deployer == 2:
         engine_instance.pve_controller.load_ai_model_for_pve(game_state, engine_instance)
 
     updated_unit_ids = [
         str(require_key(unit, "id"))
         for unit in combined_units
-        if int(require_key(unit, "player")) == current_deployer
+        if int(require_key(unit, "player")) == target_deployer
     ]
     return True, {
         "action": "change_roster",
         "army_file": army_file,
         "army_name": army_file[:-5],
         "current_deployer": current_deployer,
+        "updated_player": target_deployer,
         "updated_unit_ids": updated_unit_ids,
     }
 
