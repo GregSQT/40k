@@ -931,15 +931,28 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
     cfg = get_config_loader()
 
     scenario_file = None
-    if scenario_override:
-        if os.path.isfile(scenario_override):
-            scenario_file = scenario_override
+    scenario_files = None
+    if scenario_override == "all":
+        scenario_files = get_scenario_list_for_phase(cfg, agent_key, training_config_name)
+        if len(scenario_files) == 0:
+            raise FileNotFoundError(
+                f"No scenarios found for MacroController with training_config='{training_config_name}'. "
+                f"Expected files matching: {agent_key}_scenario_{training_config_name}*.json"
+            )
+        scenario_file = scenario_files[0]
+        print(f"✅ Using scenario rotation (MacroController): {len(scenario_files)} scenarios")
+        for s in scenario_files:
+            print(f"   - {os.path.basename(s)}")
+    else:
+        if scenario_override:
+            if os.path.isfile(scenario_override):
+                scenario_file = scenario_override
+            else:
+                scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
         else:
             scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
-    else:
-        scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
-
-    print(f"✅ Using scenario: {scenario_file}")
+        scenario_files = [scenario_file]
+        print(f"✅ Using scenario: {scenario_file}")
 
     effective_agent_key = rewards_config_name if rewards_config_name else agent_key
 
@@ -959,7 +972,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
                 controlled_agent_key=effective_agent_key,
                 model_path_template=model_path_template,
                 macro_player=macro_player,
-                scenario_files=[scenario_file],
+                scenario_files=scenario_files,
                 debug_mode=debug_mode
             )
             for i in range(n_envs)
@@ -974,6 +987,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
             controlled_agent=effective_agent_key,
             active_agents=None,
             scenario_file=scenario_file,
+            scenario_files=scenario_files,
             unit_registry=unit_registry,
             quiet=True,
             gym_training_mode=True,
@@ -985,7 +999,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
         macro_env = MacroTrainingWrapper(
             base_env=base_env,
             unit_registry=unit_registry,
-            scenario_files=[scenario_file],
+            scenario_files=scenario_files,
             model_path_template=model_path_template,
             macro_player=macro_player,
             debug_mode=debug_mode
@@ -2393,8 +2407,8 @@ def main():
         # Single agent training mode
         elif args.agent:
             if args.agent == "MacroController":
-                if args.scenario in ("all", "self", "bot"):
-                    raise ValueError("MacroController training does not support scenario rotation modes")
+                if args.scenario in ("self", "bot"):
+                    raise ValueError("MacroController supports --scenario all, but not self/bot modes")
 
                 model, env, training_config, model_path = create_macro_controller_model(
                     config,

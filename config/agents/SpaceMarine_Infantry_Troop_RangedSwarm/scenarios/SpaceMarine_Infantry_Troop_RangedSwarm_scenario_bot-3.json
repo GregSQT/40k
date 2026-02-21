@@ -18,7 +18,9 @@
       {"id": 14, "unit_type": "Hormagaunt", "player": 2, "col": 15, "row": 4},
       {"id": 15, "unit_type": "Hormagaunt", "player": 2, "col": 12, "row": 2},
       {"id": 16, "unit_type": "Hormagaunt", "player": 2, "col": 7, "row": 6},
-      {"id": 17, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 10}
+      {"id": 17, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 6},
+      {"id": 18, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 6},
+      {"id": 19, "unit_type": "Hormagaunt", "player": 2, "col": 21, "row": 8}
     ],
     "wall_hexes": [
       [2,5],[2,6],[2,7],[3,4],[4,4],[5,3],[6,3],[7,2],[8,2],[9,1],

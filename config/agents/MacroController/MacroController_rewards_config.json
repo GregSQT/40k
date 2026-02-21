@@ -5,10 +5,10 @@
     "Unit": "######################### MacroController ################################################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "base_actions": {
-      "ranged_attack": 0.2,
-      "melee_attack": 0.2,
-      "charge_success": 0.1,
-      "wait": -0.05
+      "ranged_attack": 0.05,
+      "melee_attack": 0.05,
+      "charge_success": 0.05,
+      "wait": -0.02
     },
     "shoot_priority_1": 0.4,
     "shoot_priority_2": 0.25,
@@ -29,8 +29,8 @@
       "draw": 0.0
     },
     "objective_rewards": {
-      "reward_per_objective": 6.0,
-      "reward_for_objective_lead": 3.0,
+      "reward_per_objective": 8.0,
+      "reward_for_objective_lead": 4.0,
       "use_objective_lead": true,
       "reward_per_objective_turn5": 0.0
     },
