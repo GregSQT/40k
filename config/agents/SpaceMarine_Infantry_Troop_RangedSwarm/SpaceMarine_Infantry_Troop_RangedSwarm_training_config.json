@@ -12,7 +12,7 @@
     "eval_render": false,
     "bot_eval_freq": 1000,
     "bot_eval_use_episodes": true,
-    "bot_eval_intermediate": 200,
+    "bot_eval_intermediate": 70,
     "bot_eval_final": 100,
     "save_best_robust": true,
     "robust_window": 5,

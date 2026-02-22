@@ -176,7 +176,8 @@ def _format_elapsed(seconds: float) -> str:
 
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
-                         step_logger=None, debug_mode=False):
+                         step_logger=None, debug_mode=False, eval_progress_label: Optional[str] = None,
+                         show_summary: bool = True, eval_progress_prefix: Optional[str] = None):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -188,6 +189,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         show_progress: Show progress bar with time estimates
         deterministic: Use deterministic policy
         step_logger: Optional StepLogger instance for detailed action logging
+        eval_progress_label: Optional suffix displayed on evaluation progress line
+        show_summary: Print diagnostic and scenario ranking summary at end
+        eval_progress_prefix: Optional fixed prefix shown before eval progress (e.g., phase progress)
 
     Returns:
         Dict with keys: 'random', 'greedy', 'defensive', 'combined',
@@ -306,6 +310,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     total_episodes = n_episodes * len(bots)
     completed_episodes = 0
     start_time = time.time() if show_progress else None
+    last_progress_line_len = 0
 
     total_expected_episodes = len(bots) * n_episodes
     total_failed_episodes = 0
@@ -473,11 +478,27 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                             elapsed_str = _format_elapsed(elapsed)
                             eta_str = _format_elapsed(eta)
                             speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed * 60:.1f}ep/m"
-                            sys.stdout.write(
-                                f"\r{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} "
-                                f"vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]"
-                            )
+                            if eval_progress_prefix:
+                                eval_label = eval_progress_label if eval_progress_label else ""
+                                line = (
+                                    f"{progress_pct:3.0f}% {completed_episodes}/{total_episodes} "
+                                    f"[{elapsed_str}<{eta_str}, {speed_str}] {eval_label}"
+                                ).rstrip()
+                            elif eval_progress_label:
+                                line = (
+                                    f"{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} "
+                                    f"[{elapsed_str}<{eta_str}, {speed_str}] {eval_progress_label}"
+                                )
+                            else:
+                                line = (
+                                    f"{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} "
+                                    f"vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]"
+                                )
+                            full_line = f"{eval_progress_prefix} | {line}" if eval_progress_prefix else line
+                            clear_padding = " " * max(0, last_progress_line_len - len(full_line))
+                            sys.stdout.write(f"\r{full_line}{clear_padding}")
                             sys.stdout.flush()
+                            last_progress_line_len = len(full_line)
 
                         if started_episodes < episodes_for_scenario:
                             if step_logger and step_logger.enabled:
@@ -571,8 +592,25 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         _secs = int(elapsed % 60)
         elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
         speed_str = f"{total_episodes/elapsed:.2f}ep/s" if elapsed > 0 else "0.00ep/s"
-        print(f"\r{progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes} [Completed] [{elapsed_str}, {speed_str}]")
-        print()  # New line after final progress bar
+        if eval_progress_prefix:
+            eval_label = eval_progress_label if eval_progress_label else ""
+            final_line = (
+                f"{progress_pct:3.0f}% {total_episodes}/{total_episodes} "
+                f"[Completed] [{elapsed_str}, {speed_str}] {eval_label}"
+            ).rstrip()
+        elif eval_progress_label:
+            final_line = (
+                f"{progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes} "
+                f"[Completed] [{elapsed_str}, {speed_str}] {eval_progress_label}"
+            )
+        else:
+            final_line = (
+                f"{progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes} "
+                f"[Completed] [{elapsed_str}, {speed_str}]"
+            )
+        full_final_line = f"{eval_progress_prefix} | {final_line}" if eval_progress_prefix else final_line
+        clear_padding = " " * max(0, last_progress_line_len - len(full_final_line))
+        print(f"\r{full_final_line}{clear_padding}")
 
     # AI_IMPLEMENTATION.md: No silent evaluation degradation.
     # If any episodes failed to run, surface this explicitly and avoid logging
@@ -616,7 +654,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     results["scenario_scores"] = scenario_scores
 
     # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
-    if show_progress:
+    if show_progress and show_summary:
         print("\n" + "="*80)
         print("📊 DIAGNOSTIC: Shoot Phase Behavior")
         print("="*80)

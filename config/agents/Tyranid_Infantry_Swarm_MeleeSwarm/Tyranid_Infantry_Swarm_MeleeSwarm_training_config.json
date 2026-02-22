@@ -11,8 +11,9 @@
     "eval_deterministic": true,
     "eval_render": false,
     "bot_eval_freq": 1000,
+    "bot_eval_show_progress": true,
     "bot_eval_use_episodes": true,
-    "bot_eval_intermediate": 200,
+    "bot_eval_intermediate": 50,
     "bot_eval_final": 100,
     "save_best_robust": true,
     "robust_window": 5,
@@ -61,6 +62,36 @@
     "enabled": true,
     "training": false,
     "norm_reward": false
+  },
+  "curriculum": {
+    "enabled": true,
+    "phase_order": ["phase1", "phase2", "phase3"],
+    "gate_eval_freq": 1000,
+    "current_phase_ratio_percent": 85,
+    "previous_phase_ratio_percent": 15,
+    "phases": {
+      "phase1": {
+        "min_episodes_in_phase": 4000,
+        "max_episodes_in_phase": 12000,
+        "combined_min": 0.58,
+        "worst_bot_score_min": 0.45,
+        "consecutive_evals_required": 2
+      },
+      "phase2": {
+        "min_episodes_in_phase": 6000,
+        "max_episodes_in_phase": 14000,
+        "combined_min": 0.62,
+        "worst_bot_score_min": 0.48,
+        "consecutive_evals_required": 2
+      },
+      "phase3": {
+        "min_episodes_in_phase": 10000,
+        "max_episodes_in_phase": 30000,
+        "combined_min": 0.66,
+        "worst_bot_score_min": 0.52,
+        "consecutive_evals_required": 3
+      }
+    }
   },
   "bot_training": {
     "ratios": {"random": 0.25, "greedy": 0.375, "defensive": 0.375},

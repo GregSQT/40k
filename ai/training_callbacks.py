@@ -120,7 +120,8 @@ class EpisodeTerminationCallback(BaseCallback):
 
     def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0,
                  total_episodes: int = None, scenario_info: str = None,
-                 disable_early_stopping: bool = False, global_start_time: float = None):
+                 disable_early_stopping: bool = False, global_start_time: float = None,
+                 phase_label: Optional[str] = None):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -135,12 +136,14 @@ class EpisodeTerminationCallback(BaseCallback):
         self.total_episodes = total_episodes if total_episodes else max_episodes
         self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
         self.global_episode_offset = 0  # Set by rotation code to track overall progress
+        self.phase_label = phase_label
         # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
         self.disable_early_stopping = disable_early_stopping
         # EMA for smooth ETA estimation (weights recent episodes more heavily)
         self.ema_episode_time = None
         self.last_episode_time = None
         self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
+        self._last_progress_line_len = 0
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -258,8 +261,11 @@ class EpisodeTerminationCallback(BaseCallback):
                     ent_display = f" | ent_coef = {float(ent_value):.3f}"
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
-                progress_line = f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{lr_display}{ent_display}"
-                print(f"\r{progress_line:<100}", end='', flush=True)
+                phase_display = f" | {self.phase_label}" if self.phase_label else ""
+                progress_line = f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{lr_display}{ent_display}{phase_display}"
+                clear_padding = " " * max(0, self._last_progress_line_len - len(progress_line))
+                print(f"\r{progress_line}{clear_padding}", end='', flush=True)
+                self._last_progress_line_len = len(progress_line)
 
         # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
         if self.episode_count >= self.max_episodes:
@@ -978,7 +984,11 @@ class BotEvaluationCallback(BaseCallback):
                  save_best_robust: bool = False, robust_window: int = 3,
                  robust_drawdown_penalty: float = 0.5,
                  eval_deterministic: bool = True,
-                 final_summary_target_episodes: Optional[int] = None):
+                 final_summary_target_episodes: Optional[int] = None,
+                 initial_episode_marker: int = 0,
+                 show_eval_progress: bool = False,
+                 phase_progress_total_episodes: Optional[int] = None,
+                 phase_progress_episode_offset: int = 0):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -999,7 +1009,28 @@ class BotEvaluationCallback(BaseCallback):
         self.best_model_save_path = best_model_save_path
         self.metrics_tracker = metrics_tracker
         self.use_episode_freq = use_episode_freq
-        self.last_eval_episode = 0
+        if initial_episode_marker < 0:
+            raise ValueError(
+                f"initial_episode_marker must be >= 0 (got {initial_episode_marker})"
+            )
+        if not isinstance(show_eval_progress, bool):
+            raise ValueError(
+                f"show_eval_progress must be boolean (got {type(show_eval_progress).__name__})"
+            )
+        if phase_progress_total_episodes is not None and phase_progress_total_episodes <= 0:
+            raise ValueError(
+                f"phase_progress_total_episodes must be > 0 (got {phase_progress_total_episodes})"
+            )
+        if phase_progress_episode_offset < 0:
+            raise ValueError(
+                f"phase_progress_episode_offset must be >= 0 (got {phase_progress_episode_offset})"
+            )
+        self.last_eval_episode = int(initial_episode_marker)
+        self.last_eval_marker: Optional[int] = None
+        self.show_eval_progress = show_eval_progress
+        self.phase_progress_total_episodes = phase_progress_total_episodes
+        self.phase_progress_episode_offset = int(phase_progress_episode_offset)
+        self.eval_count = 0
         self.best_combined_win_rate = 0.0
         self.save_best_robust = save_best_robust
         self.robust_window = robust_window
@@ -1011,6 +1042,7 @@ class BotEvaluationCallback(BaseCallback):
         self.best_robust_eval_marker: Optional[int] = None
         self.best_robust_model_path: Optional[str] = None
         self.final_summary_target_episodes = final_summary_target_episodes
+        self.last_eval_results: Optional[Dict[str, Any]] = None
 
         if EVALUATION_BOTS_AVAILABLE:
             # Initialize bots with stochasticity to prevent overfitting (15% random actions)
@@ -1095,7 +1127,10 @@ class BotEvaluationCallback(BaseCallback):
                 should_evaluate = True
 
         if should_evaluate:
-            results = self._evaluate_against_bots()
+            self.eval_count += 1
+            results = self._evaluate_against_bots(eval_marker)
+            self.last_eval_results = results
+            self.last_eval_marker = int(eval_marker)
 
             # Use combined metric computed by evaluate_against_bots from agent config.
             combined_win_rate = require_key(results, 'combined')
@@ -1160,15 +1195,32 @@ class BotEvaluationCallback(BaseCallback):
         if self.best_robust_model_path:
             print(f"   Robust model path: {self.best_robust_model_path}")
 
-    def _evaluate_against_bots(self) -> Dict[str, Any]:
+    def _build_eval_progress_prefix(self, eval_marker: int) -> Optional[str]:
+        """Build phase progress prefix for inline evaluation display."""
+        if self.phase_progress_total_episodes is None:
+            return None
+        phase_episode_count = max(0, eval_marker - self.phase_progress_episode_offset)
+        bounded_episodes = min(phase_episode_count, self.phase_progress_total_episodes)
+        progress_ratio = bounded_episodes / self.phase_progress_total_episodes
+        progress_pct = progress_ratio * 100.0
+        bar_length = 40
+        filled = int(bar_length * progress_ratio)
+        bar = '█' * filled + '░' * (bar_length - filled)
+        return f"{progress_pct:3.0f}% {bar} {bounded_episodes}/{self.phase_progress_total_episodes}"
+
+    def _evaluate_against_bots(self, eval_marker: int) -> Dict[str, Any]:
         """Evaluate agent against bots using standalone function"""
         from ai.bot_evaluation import evaluate_against_bots
+        eval_progress_prefix = self._build_eval_progress_prefix(eval_marker) if self.show_eval_progress else None
         return evaluate_against_bots(
             model=self.model,
             training_config_name=self.training_config_name,
             rewards_config_name=self.rewards_config_name,
             n_episodes=self.n_eval_episodes,
             controlled_agent=self.rewards_config_name,
-            show_progress=False,
-            deterministic=self.eval_deterministic
+            show_progress=self.show_eval_progress,
+            deterministic=self.eval_deterministic,
+            eval_progress_label=f"Eval {self.eval_count}" if self.show_eval_progress else None,
+            show_summary=not self.show_eval_progress,
+            eval_progress_prefix=eval_progress_prefix
         )

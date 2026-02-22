@@ -45,7 +45,14 @@ class W40KMetricsTracker:
     Streamlined to 20 critical metrics, removing redundant calculations.
     """
     
-    def __init__(self, agent_key: str, log_dir: str = "./tensorboard/"):
+    def __init__(
+        self,
+        agent_key: str,
+        log_dir: str = "./tensorboard/",
+        initial_episode_count: int = 0,
+        initial_step_count: int = 0,
+        show_banner: bool = True
+    ):
         self.agent_key = agent_key
         self.log_dir = os.path.join(log_dir, agent_key)
         self.writer = SummaryWriter(self.log_dir)
@@ -62,8 +69,8 @@ class W40KMetricsTracker:
         self.all_episode_lengths = []    # Complete episode length history
         
         # Episode tracking
-        self.episode_count = 0
-        self.step_count = 0
+        self.episode_count = initial_episode_count
+        self.step_count = initial_step_count
         
         # NEW: Reward decomposition tracking
         self.reward_components = {
@@ -146,12 +153,13 @@ class W40KMetricsTracker:
             'valid_actions': 0
         }
         
-        print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
-        print(f"📊 Metric System:")
-        print(f"   🎯 0_critical/ (12) - Essential hyperparameter tuning metrics")
-        print(f"   🎮 game_critical/ (5) - Core gameplay indicators")
-        print(f"   ⚙️  training_critical/ (6) - PPO algorithm health")
-        print(f"   💡 TIP: Start with 0_critical/ - everything you need for tuning")
+        if show_banner:
+            print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
+            print(f"📊 Metric System:")
+            print(f"   🎯 0_critical/ (12) - Essential hyperparameter tuning metrics")
+            print(f"   🎮 game_critical/ (5) - Core gameplay indicators")
+            print(f"   ⚙️  training_critical/ (6) - PPO algorithm health")
+            print(f"   💡 TIP: Start with 0_critical/ - everything you need for tuning")
     
     def log_episode_end(self, episode_data: Dict[str, Any]):
         """Log core episode metrics - reward, win rate, and episode length"""

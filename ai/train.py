@@ -23,6 +23,7 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 import subprocess
 import json
 import multiprocessing
+from copy import deepcopy
 
 # Load training_env from config/config.json (MUST be before numpy/torch import)
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1157,7 +1158,13 @@ def _evaluate_macro_model(model, env, n_episodes, macro_player, deterministic=Tr
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
                                  scenario_list, total_episodes,
                                  new_model=False, append_training=False, use_bots=False, debug_mode=False,
-                                 device_mode: Optional[str] = None):
+                                 device_mode: Optional[str] = None,
+                                 training_config_override: Optional[Dict[str, Any]] = None,
+                                 callback_total_episodes_override: Optional[int] = None,
+                                 callback_global_episode_offset: int = 0,
+                                 phase_label: Optional[str] = None,
+                                 silent_chunk: bool = False,
+                                 return_run_info: bool = False):
     """Train model with random scenario selection per episode.
     
     Args:
@@ -1172,25 +1179,37 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         use_bots: If True, use bots for Player 1 instead of self-play frozen model
 
     Returns:
-        Tuple of (success: bool, final_model, final_env)
+        Tuple of (success: bool, final_model, final_env) by default.
+        If return_run_info=True, returns (success, final_model, final_env, run_info).
     """
-    print(f"\n{'='*80}")
-    print(f"🔄 MULTI-SCENARIO TRAINING")
-    print(f"{'='*80}")
-    print(f"Total episodes: {total_episodes}")
-    print(f"Scenarios: {len(scenario_list)}")
-    for i, scenario in enumerate(scenario_list, 1):
+    def chunk_log(message: str) -> None:
+        if not silent_chunk:
+            print(message)
+
+    chunk_log(f"\n{'='*80}")
+    chunk_log("🔄 MULTI-SCENARIO TRAINING")
+    chunk_log(f"{'='*80}")
+    chunk_log(f"Total episodes: {total_episodes}")
+    scenario_counts: Dict[str, int] = {}
+    for scenario in scenario_list:
         scenario_name = os.path.basename(scenario)
-        print(f"  {i}. {scenario_name}")
+        scenario_counts[scenario_name] = scenario_counts.get(scenario_name, 0) + 1
+    unique_scenarios = sorted(scenario_counts.items(), key=lambda item: item[0])
+    chunk_log(
+        f"Scenarios (weighted): {len(scenario_list)} entries, "
+        f"{len(unique_scenarios)} unique files"
+    )
+    for scenario_name, count in unique_scenarios:
+        chunk_log(f"  - {scenario_name} (weight={count})")
     if len(scenario_list) > 1:
-        print(f"🎲 RANDOM MODE: Each episode randomly selects one of the {len(scenario_list)} scenarios")
-    print(f"{'='*80}\n")
+        chunk_log(f"🎲 RANDOM MODE: Each episode randomly selects one of the {len(scenario_list)} scenarios")
+    chunk_log(f"{'='*80}\n")
 
     # Check GPU availability (match single-scenario training output)
-    gpu_available = check_gpu_availability()
+    gpu_available = check_gpu_availability() if not silent_chunk else torch.cuda.is_available()
     
     # Load agent-specific training config to get model parameters
-    training_config = config.load_agent_training_config(agent_key, training_config_name)
+    training_config = training_config_override if training_config_override is not None else config.load_agent_training_config(agent_key, training_config_name)
 
     # Require n_envs for consistency with single-scenario training
     n_envs = require_key(training_config, "n_envs")
@@ -1212,7 +1231,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Calculate max_steps_per_turn dynamically
     max_steps = num_units * num_phases
-    print(f"📊 Auto-calculated max_steps_per_turn: {num_units} units × {num_phases} phases = {max_steps}")
+    chunk_log(f"📊 Auto-calculated max_steps_per_turn: {num_units} units × {num_phases} phases = {max_steps}")
 
     # Calculate average steps per episode for timestep conversion
     max_turns = training_config["max_turns_per_episode"]
@@ -1223,7 +1242,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     model_path = build_agent_model_path(models_root, agent_key)
     
     # Create initial model with first scenario (or load if append_training)
-    print(f"📦 {'Loading existing model' if append_training else 'Creating initial model'} with first scenario...")
+    chunk_log(f"📦 {'Loading existing model' if append_training else 'Creating initial model'} with first scenario...")
     
     # Import environment
     W40KEngine, register_environment = setup_imports()
@@ -1245,13 +1264,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             training_bots = _build_training_bots_from_config(training_config)
             ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})  # get allowed: ratios optional with defaults
             r, g, d = ratios.get("random", 0.2) * 100, ratios.get("greedy", 0.4) * 100, ratios.get("defensive", 0.4) * 100
-            print(f"🤖 Bot training ratios: {r:.0f}% Random, {g:.0f}% Greedy, {d:.0f}% Defensive")
+            chunk_log(f"🤖 Bot training ratios: {r:.0f}% Random, {g:.0f}% Greedy, {d:.0f}% Defensive")
         else:
             raise ImportError("Evaluation bots not available but use_bots=True")
 
     # Branch: n_envs > 1 uses SubprocVecEnv for parallel training
     if n_envs > 1:
-        print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
+        chunk_log(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
         vec_envs = SubprocVecEnv([
             make_training_env(
                 rank=i,
@@ -1269,7 +1288,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             for i in range(n_envs)
         ])
         env = vec_envs
-        print(f"✅ Vectorized training environment created with {n_envs} parallel processes")
+        chunk_log(f"✅ Vectorized training environment created with {n_envs} parallel processes")
     else:
         # Single environment (original behavior)
         current_scenario = scenario_list[0]
@@ -1287,7 +1306,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         )
         if step_logger:
             base_env.step_logger = step_logger
-            print("✅ StepLogger connected to compliant W40KEngine")
+            chunk_log("✅ StepLogger connected to compliant W40KEngine")
         def mask_fn(env):
             return env.get_action_mask()
         masked_env = ActionMasker(base_env, mask_fn)
@@ -1308,7 +1327,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             env = vec_norm_loaded
             env.training = True
             env.norm_reward = vec_norm_cfg.get("norm_reward", True)
-            print("✅ VecNormalize: loaded stats from checkpoint")
+            chunk_log("✅ VecNormalize: loaded stats from checkpoint")
         else:
             env = VecNormalize(
                 env,
@@ -1318,7 +1337,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 clip_reward=vec_norm_cfg.get("clip_reward", 10.0),
                 gamma=vec_norm_cfg.get("gamma", 0.99),
             )
-            print("✅ VecNormalize: enabled (obs + reward normalization)")
+            chunk_log("✅ VecNormalize: enabled (obs + reward normalization)")
     
     # Create or load model
     model_params = training_config["model_params"].copy()
@@ -1328,7 +1347,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     if n_envs > 1:
         effective_n_steps = max(1, base_n_steps // n_envs)
         model_params["n_steps"] = effective_n_steps
-        print(f"📊 n_envs={n_envs}: using n_steps={effective_n_steps} per env ({base_n_steps} total per update)")
+        chunk_log(f"📊 n_envs={n_envs}: using n_steps={effective_n_steps} per env ({base_n_steps} total per update)")
 
     # Handle entropy coefficient scheduling if configured
     # Use START value for model creation; callback will handle the schedule
@@ -1337,7 +1356,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         start_val = float(ent_config["start"])
         end_val = float(ent_config["end"])
         model_params["ent_coef"] = start_val  # Use initial value
-        print(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
+        chunk_log(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
 
     # Use specific log directory for continuous TensorBoard graphs across runs
     tb_log_name = f"{training_config_name}_{agent_key}"
@@ -1355,19 +1374,19 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     model_params["device"] = device
 
     if not use_gpu and gpu_available:
-        print(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
+        chunk_log(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
 
     if new_model or not os.path.exists(model_path):
-        print(f"🆕 Creating new model: {model_path}")
+        chunk_log(f"🆕 Creating new model: {model_path}")
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
             lr_cfg = model_params_copy["learning_rate"]
             model_params_copy["learning_rate"] = _make_learning_rate_schedule(lr_cfg)
-            print(f"✅ Learning rate schedule: {lr_cfg['initial']} → {lr_cfg['final']} (linear decay)")
+            chunk_log(f"✅ Learning rate schedule: {lr_cfg['initial']} → {lr_cfg['final']} (linear decay)")
         model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
-        print(f"📁 Loading existing model for continued training: {model_path}")
+        chunk_log(f"📁 Loading existing model for continued training: {model_path}")
         try:
             model = MaskablePPO.load(model_path, env=env, device=device)
 
@@ -1396,7 +1415,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             if "max_grad_norm" in model_params:
                 model.max_grad_norm = model_params["max_grad_norm"]
 
-            print(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
+            chunk_log(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
 
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
@@ -1404,17 +1423,17 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             from stable_baselines3.common.logger import configure
             new_logger = configure(specific_log_dir, ["tensorboard"])
             model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
+            chunk_log(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
         except Exception as e:
-            print(f"⚠️ Failed to load model: {e}")
-            print("🆕 Creating new model instead...")
+            chunk_log(f"⚠️ Failed to load model: {e}")
+            chunk_log("🆕 Creating new model instead...")
             model_params_copy = model_params.copy()
             model_params_copy["tensorboard_log"] = specific_log_dir
             if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
                 model_params_copy["learning_rate"] = _make_learning_rate_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
     else:
-        print(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
+        chunk_log(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
         model_params_copy = model_params.copy()
         model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
@@ -1440,7 +1459,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     model_tensorboard_dir = f"./tensorboard/{tb_log_name}"
     
     # Create metrics tracker for entire rotation training
-    metrics_tracker = W40KMetricsTracker(agent_key, model_tensorboard_dir)
+    metrics_tracker = W40KMetricsTracker(
+        agent_key,
+        model_tensorboard_dir,
+        initial_episode_count=callback_global_episode_offset,
+        initial_step_count=int(getattr(model, "num_timesteps", 0)),
+        show_banner=not silent_chunk
+    )
     # print(f"📈 Metrics tracking enabled for agent: {agent_key}")
 
     # Create metrics callback ONCE before loop (not inside it)
@@ -1519,11 +1544,17 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         training_config_name=training_config_name,
         rewards_config_name=rewards_config_name,
         metrics_tracker=metrics_tracker,
-        total_episodes_override=total_episodes,
+        total_episodes_override=(
+            callback_total_episodes_override
+            if callback_total_episodes_override is not None
+            else total_episodes
+        ),
         max_episodes_override=total_episodes,  # Train directly to total_episodes
         scenario_info=scenario_display,
-        global_episode_offset=0,
-        global_start_time=global_start_time
+        global_episode_offset=callback_global_episode_offset,
+        global_start_time=global_start_time,
+        phase_label=phase_label,
+        silent_logs=silent_chunk
     )
     
     # Link metrics_tracker to bot evaluation callback
@@ -1532,7 +1563,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             callback.metrics_tracker = metrics_tracker
     
     # Combine all callbacks
-    enhanced_callbacks = CallbackList(training_callbacks + [metrics_callback])
+    # Metrics callback must run first so episode_count is up to date for
+    # episode-based gate/evaluation callbacks in the same step.
+    enhanced_callbacks = CallbackList([metrics_callback] + training_callbacks)
     
     # Train directly to total_episodes using an EPISODE-BUDGETED wrapper around SB3.learn().
     #
@@ -1543,12 +1576,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous across chunks.
     # We only allow SB3 to reset its internal counter at the very start of training.
-    while metrics_tracker.episode_count < total_episodes:
+    target_episode_count = callback_global_episode_offset + total_episodes
+    while metrics_tracker.episode_count < target_episode_count:
         # As a safety guard, we still use the same chunk_timesteps. 
         # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
         model.learn(
             total_timesteps=chunk_timesteps,
-            reset_num_timesteps=(metrics_tracker.episode_count == 0),
+            reset_num_timesteps=(model.num_timesteps == 0),
             tb_log_name=tb_log_name,  # Same name = continuous graph
             callback=enhanced_callbacks,
             log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
@@ -1556,17 +1590,19 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         )
 
     # Final episode count
-    episodes_trained = metrics_tracker.episode_count
+    episodes_trained = metrics_tracker.episode_count - callback_global_episode_offset
 
     # Final save
     model.save(model_path)
     if save_vec_normalize(model.get_env(), model_path):
-        print(f"   VecNormalize stats saved")
-    print(f"\n{'='*80}")
-    print(f"✅ TRAINING COMPLETE")
-    print(f"   Total episodes trained: {episodes_trained}")
-    print(f"   Final model: {model_path}")
-    print(f"{'='*80}\n")
+        if not silent_chunk:
+            print(f"   VecNormalize stats saved")
+    if not silent_chunk:
+        print(f"\n{'='*80}")
+        print(f"✅ TRAINING COMPLETE")
+        print(f"   Total episodes trained: {episodes_trained}")
+        print(f"   Final model: {model_path}")
+        print(f"{'='*80}\n")
 
     # Run final comprehensive bot evaluation
     if EVALUATION_BOTS_AVAILABLE:
@@ -1575,7 +1611,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         else:
             n_final = training_config['callback_params']['bot_eval_final']
             if n_final <= 0:
-                print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
+                if not silent_chunk:
+                    print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
             else:
                 print(f"\n{'='*80}")
                 print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
@@ -1619,11 +1656,28 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     print(f"  Combined Score: {combined:5.1f}%")
                 print(f"{'='*80}\n")
 
+    run_info: Dict[str, Any] = {}
+    bot_eval_callback = next(
+        (cb for cb in training_callbacks if isinstance(cb, BotEvaluationCallback)),
+        None
+    )
+    if bot_eval_callback is not None:
+        run_info = {
+            "last_bot_eval": bot_eval_callback.last_eval_results,
+            "last_bot_eval_marker": bot_eval_callback.last_eval_marker,
+            "best_robust_score": bot_eval_callback.best_robust_score,
+            "best_robust_combined": bot_eval_callback.best_robust_combined,
+            "best_robust_eval_marker": bot_eval_callback.best_robust_eval_marker
+        }
+
+    if return_run_info:
+        return True, model, env, run_info
     return True, model, env
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
                    total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
-                   global_start_time=None, agent=None, rewards_config_name=None):
+                   global_start_time=None, agent=None, rewards_config_name=None,
+                   phase_label: Optional[str] = None, silent_logs: bool = False):
     W40KEngine, _ = setup_imports()
     callbacks = []
     
@@ -1662,7 +1716,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             total_episodes=total_eps,
             scenario_info=scenario_info,
             disable_early_stopping=False,  # FIXED: Always stop at exact episode count
-            global_start_time=global_start_time
+            global_start_time=global_start_time,
+            phase_label=phase_label
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
@@ -1683,7 +1738,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 verbose=1
             )
             callbacks.append(lr_callback)
-            print(f"✅ Added learning-rate schedule callback: {start_lr} -> {end_lr} over {total_eps} episodes")
+            if not silent_logs:
+                print(f"✅ Added learning-rate schedule callback: {start_lr} -> {end_lr} over {total_eps} episodes")
 
     # Add entropy coefficient schedule callback if configured
     if "model_params" in training_config and "ent_coef" in training_config["model_params"]:
@@ -1700,7 +1756,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 verbose=1
             )
             callbacks.append(entropy_callback)
-            print(f"✅ Added entropy schedule callback: {start_ent} -> {end_ent} over {total_eps} episodes")
+            if not silent_logs:
+                print(f"✅ Added entropy schedule callback: {start_ent} -> {end_ent} over {total_eps} episodes")
 
     # Evaluation callback - test model periodically with logging enabled
     # Load scenario and unit registry for evaluation callback
@@ -1743,6 +1800,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 f"callback_params.eval_deterministic must be boolean "
                 f"(got {type(eval_deterministic).__name__})"
             )
+        bot_eval_show_progress = callback_params.get("bot_eval_show_progress", False)
+        if not isinstance(bot_eval_show_progress, bool):
+            raise ValueError(
+                f"callback_params.bot_eval_show_progress must be boolean "
+                f"(got {type(bot_eval_show_progress).__name__})"
+            )
         save_best_robust = bool(callback_params.get("save_best_robust", False))
         robust_window = 3
         robust_drawdown_penalty = 0.5
@@ -1769,13 +1832,18 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             robust_drawdown_penalty=robust_drawdown_penalty,
             eval_deterministic=eval_deterministic,
             final_summary_target_episodes=total_eps,
+            initial_episode_marker=max(0, int(global_episode_offset)),
+            show_eval_progress=bot_eval_show_progress,
+            phase_progress_total_episodes=(int(total_eps) if phase_label else None),
+            phase_progress_episode_offset=(int(global_episode_offset) if phase_label else 0),
         )
         callbacks.append(bot_eval_callback)
         
         freq_unit = "episodes" if bot_eval_use_episodes else "timesteps"
     else:
-        print("⚠️ Evaluation bots not available - no evaluation metrics")
-        print("   Install evaluation_bots.py to enable progress tracking")
+        if not silent_logs:
+            print("⚠️ Evaluation bots not available - no evaluation metrics")
+            print("   Install evaluation_bots.py to enable progress tracking")
     
     return callbacks
 
@@ -2013,6 +2081,461 @@ def test_scenario_manager_integration():
         traceback.print_exc()
         return False
 
+
+def _get_curriculum_log_path(agent_key: str) -> str:
+    """Return the curriculum log path for an agent."""
+    return os.path.join(project_root, "logs", f"{agent_key}.curriculum.log")
+
+
+def _write_curriculum_event(log_path: str, event_type: str, payload: Dict[str, Any]) -> None:
+    """Append one structured curriculum event (JSON line)."""
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    entry = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "event": event_type,
+    }
+    entry.update(payload)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def _get_phase_scenarios(config, agent_key: str, phase_name: str) -> List[str]:
+    """Get all scenario files for one curriculum phase directory."""
+    phase_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios", phase_name)
+    if not os.path.isdir(phase_dir):
+        raise FileNotFoundError(
+            f"Missing curriculum scenario directory: {phase_dir}. "
+            f"Create it and add scenario json files."
+        )
+    scenarios = sorted(glob.glob(os.path.join(phase_dir, "*.json")))
+    if not scenarios:
+        raise FileNotFoundError(
+            f"No scenario files found in {phase_dir}. Expected at least one *.json file."
+        )
+    return scenarios
+
+
+def _build_phase_mix(
+    current_phase_scenarios: List[str],
+    previous_phase_scenarios: List[str],
+    current_ratio_percent: int,
+    previous_ratio_percent: int
+) -> List[str]:
+    """Build weighted scenario list for one curriculum phase chunk."""
+    if current_ratio_percent <= 0:
+        raise ValueError(
+            f"curriculum current_phase_ratio_percent must be > 0 (got {current_ratio_percent})"
+        )
+    if previous_ratio_percent < 0:
+        raise ValueError(
+            f"curriculum previous_phase_ratio_percent must be >= 0 (got {previous_ratio_percent})"
+        )
+    if (current_ratio_percent + previous_ratio_percent) != 100:
+        raise ValueError(
+            "curriculum ratios must sum to 100: "
+            f"current_phase_ratio_percent={current_ratio_percent}, "
+            f"previous_phase_ratio_percent={previous_ratio_percent}"
+        )
+    if previous_ratio_percent > 0 and not previous_phase_scenarios:
+        raise ValueError(
+            "previous_phase_ratio_percent > 0 but there is no previous phase scenario pool"
+        )
+
+    weighted = list(current_phase_scenarios) * current_ratio_percent
+    if previous_phase_scenarios:
+        weighted.extend(list(previous_phase_scenarios) * previous_ratio_percent)
+    return weighted
+
+
+def _extract_worst_bot_score_for_gate(eval_results: Dict[str, Any]) -> float:
+    """
+    Extract worst_bot_score used by curriculum gates.
+
+    Accepted formats:
+    - Top-level key: eval_results["worst_bot_score"]
+    - Per-scenario map: eval_results["scenario_scores"][<scenario>]["worst_bot_score"]
+
+    Raises:
+        ValueError: If no valid worst_bot_score source exists.
+    """
+    if "worst_bot_score" in eval_results:
+        return float(require_key(eval_results, "worst_bot_score"))
+
+    scenario_scores = eval_results.get("scenario_scores")
+    if not isinstance(scenario_scores, dict) or len(scenario_scores) == 0:
+        raise ValueError(
+            "Missing worst_bot_score for curriculum gate: expected top-level "
+            "'worst_bot_score' or non-empty 'scenario_scores' dictionary."
+        )
+
+    scenario_worst_scores: List[float] = []
+    for scenario_name, values in scenario_scores.items():
+        if not isinstance(values, dict):
+            raise ValueError(
+                "Invalid scenario_scores format for curriculum gate: "
+                f"scenario '{scenario_name}' must map to a dictionary."
+            )
+        if "worst_bot_score" not in values:
+            raise ValueError(
+                "Invalid scenario_scores format for curriculum gate: "
+                f"scenario '{scenario_name}' missing required key 'worst_bot_score'."
+            )
+        scenario_worst_scores.append(float(require_key(values, "worst_bot_score")))
+
+    if not scenario_worst_scores:
+        raise ValueError(
+            "Cannot compute curriculum gate worst_bot_score: scenario_scores is empty."
+        )
+
+    return min(scenario_worst_scores)
+
+
+def _format_phase_label_for_display(phase_name: str) -> str:
+    """Format curriculum phase name for user-facing progress."""
+    if phase_name.startswith("phase") and len(phase_name) > 5 and phase_name[5:].isdigit():
+        return f"phase {phase_name[5:]}"
+    return phase_name
+
+
+def _build_curriculum_phase_progress_prefix(
+    phase_episodes: int,
+    max_episodes_in_phase: int,
+    bar_length: int = 40
+) -> str:
+    """Build fixed left progress panel for curriculum gate evaluations."""
+    if max_episodes_in_phase <= 0:
+        raise ValueError(
+            f"max_episodes_in_phase must be > 0 (got {max_episodes_in_phase})"
+        )
+    bounded_episodes = min(max(phase_episodes, 0), max_episodes_in_phase)
+    progress_ratio = bounded_episodes / max_episodes_in_phase
+    progress_pct = progress_ratio * 100.0
+    filled = int(bar_length * progress_ratio)
+    bar = '█' * filled + '░' * (bar_length - filled)
+    return f"{progress_pct:3.0f}% {bar} {bounded_episodes}/{max_episodes_in_phase}"
+
+
+def _print_inline_status_line(line: str) -> None:
+    """
+    Print an inline terminal status line with proper cleanup of leftovers
+    from previous longer lines.
+    """
+    current_len = len(line)
+    previous_len = getattr(_print_inline_status_line, "_last_len", 0)
+    clear_padding = " " * max(0, previous_len - current_len)
+    print(f"\r{line}{clear_padding}", end="", flush=True)
+    _print_inline_status_line._last_len = current_len
+
+
+def train_with_curriculum(
+    config,
+    agent_key: str,
+    training_config_name: str,
+    rewards_config_name: str,
+    start_phase: str,
+    new_model: bool = False,
+    append_training: bool = False,
+    debug_mode: bool = False,
+    device_mode: Optional[str] = None
+):
+    """Run multi-phase curriculum training from start_phase."""
+    training_config = config.load_agent_training_config(agent_key, training_config_name)
+    curriculum = require_key(training_config, "curriculum")
+    enabled = require_key(curriculum, "enabled")
+    if not isinstance(enabled, bool) or not enabled:
+        raise ValueError(
+            f"Curriculum is disabled in {agent_key}/{training_config_name} training config"
+        )
+
+    phase_order = require_key(curriculum, "phase_order")
+    if not isinstance(phase_order, list) or not phase_order:
+        raise ValueError("curriculum.phase_order must be a non-empty list")
+    if start_phase not in phase_order:
+        raise ValueError(
+            f"start_phase '{start_phase}' not present in curriculum.phase_order={phase_order}"
+        )
+
+    phases_cfg = require_key(curriculum, "phases")
+    current_ratio_percent = int(require_key(curriculum, "current_phase_ratio_percent"))
+    previous_ratio_percent = int(require_key(curriculum, "previous_phase_ratio_percent"))
+
+    callback_params = require_key(training_config, "callback_params")
+    bot_eval_freq = int(require_key(callback_params, "bot_eval_freq"))
+    bot_eval_use_episodes = require_key(callback_params, "bot_eval_use_episodes")
+    if not isinstance(bot_eval_use_episodes, bool) or not bot_eval_use_episodes:
+        raise ValueError("Curriculum requires callback_params.bot_eval_use_episodes=true")
+    if bot_eval_freq <= 0:
+        raise ValueError(f"callback_params.bot_eval_freq must be > 0 (got {bot_eval_freq})")
+    gate_eval_freq = int(require_key(curriculum, "gate_eval_freq"))
+    if gate_eval_freq <= 0:
+        raise ValueError(f"curriculum.gate_eval_freq must be > 0 (got {gate_eval_freq})")
+    if gate_eval_freq % bot_eval_freq != 0:
+        raise ValueError(
+            "curriculum.gate_eval_freq must be a multiple of callback_params.bot_eval_freq "
+            f"(got gate_eval_freq={gate_eval_freq}, bot_eval_freq={bot_eval_freq})"
+        )
+
+    start_index = phase_order.index(start_phase)
+    selected_phases = phase_order[start_index:]
+    log_path = _get_curriculum_log_path(agent_key)
+
+    _write_curriculum_event(
+        log_path,
+        "curriculum_start",
+        {
+            "agent": agent_key,
+            "training_config": training_config_name,
+            "rewards_config": rewards_config_name,
+            "start_phase": start_phase,
+            "phase_order": selected_phases
+        }
+    )
+
+    first_run = True
+    total_global_episodes = 0
+    previous_phase_scenarios: List[str] = []
+    final_model = None
+    final_env = None
+    final_run_info: Dict[str, Any] = {}
+
+    for phase_index, phase_name in enumerate(selected_phases):
+        phase_cfg = require_key(phases_cfg, phase_name)
+        min_episodes_in_phase = int(require_key(phase_cfg, "min_episodes_in_phase"))
+        max_episodes_in_phase = int(require_key(phase_cfg, "max_episodes_in_phase"))
+        combined_min = float(require_key(phase_cfg, "combined_min"))
+        worst_bot_score_min = float(require_key(phase_cfg, "worst_bot_score_min"))
+        consecutive_evals_required = int(require_key(phase_cfg, "consecutive_evals_required"))
+
+        if min_episodes_in_phase <= 0:
+            raise ValueError(
+                f"{phase_name}.min_episodes_in_phase must be > 0 (got {min_episodes_in_phase})"
+            )
+        if max_episodes_in_phase < min_episodes_in_phase:
+            raise ValueError(
+                f"{phase_name}.max_episodes_in_phase must be >= min_episodes_in_phase "
+                f"({max_episodes_in_phase} < {min_episodes_in_phase})"
+            )
+        if consecutive_evals_required <= 0:
+            raise ValueError(
+                f"{phase_name}.consecutive_evals_required must be > 0 "
+                f"(got {consecutive_evals_required})"
+            )
+
+        current_phase_scenarios = _get_phase_scenarios(config, agent_key, phase_name)
+        phase_label = _format_phase_label_for_display(phase_name)
+        print(
+            f"\n🎯 Phase start: {phase_label} "
+            f"({phase_index + 1}/{len(selected_phases)}) | "
+            f"target combined>={combined_min:.3f}, worst_bot_score>={worst_bot_score_min:.3f}, "
+            f"consecutive={consecutive_evals_required}, min_ep={min_episodes_in_phase}, max_ep={max_episodes_in_phase}"
+        )
+        _write_curriculum_event(
+            log_path,
+            "phase_start",
+            {
+                "agent": agent_key,
+                "phase": phase_name,
+                "phase_index": phase_index + 1,
+                "phase_count": len(selected_phases),
+                "scenario_count": len(current_phase_scenarios),
+                "min_episodes_in_phase": min_episodes_in_phase,
+                "max_episodes_in_phase": max_episodes_in_phase,
+                "combined_min": combined_min,
+                "worst_bot_score_min": worst_bot_score_min,
+                "consecutive_evals_required": consecutive_evals_required
+            }
+        )
+
+        phase_episodes = 0
+        consecutive_ok = 0
+        phase_eval_index = 0
+        phase_completed = False
+        is_last_phase = (phase_name == selected_phases[-1])
+
+        while phase_episodes < max_episodes_in_phase:
+            remaining = max_episodes_in_phase - phase_episodes
+            chunk_episodes = min(bot_eval_freq, remaining)
+            if chunk_episodes <= 0:
+                raise ValueError(f"Invalid curriculum chunk size for phase {phase_name}: {chunk_episodes}")
+
+            mixed_scenarios = _build_phase_mix(
+                current_phase_scenarios=current_phase_scenarios,
+                previous_phase_scenarios=previous_phase_scenarios,
+                current_ratio_percent=current_ratio_percent if previous_phase_scenarios else 100,
+                previous_ratio_percent=previous_ratio_percent if previous_phase_scenarios else 0
+            )
+
+            chunk_config = deepcopy(training_config)
+            chunk_config["total_episodes"] = chunk_episodes
+            chunk_callback_params = require_key(chunk_config, "callback_params")
+
+            # Robust checkpoint summary is relevant only for the final phase.
+            if not is_last_phase:
+                chunk_callback_params["save_best_robust"] = False
+                chunk_callback_params["bot_eval_final"] = 0
+
+            success, model, env, run_info = train_with_scenario_rotation(
+                config=config,
+                agent_key=agent_key,
+                training_config_name=training_config_name,
+                rewards_config_name=rewards_config_name,
+                scenario_list=mixed_scenarios,
+                total_episodes=chunk_episodes,
+                new_model=(new_model and first_run),
+                append_training=(append_training or not first_run),
+                use_bots=True,
+                debug_mode=debug_mode,
+                device_mode=device_mode,
+                training_config_override=chunk_config,
+                callback_total_episodes_override=max_episodes_in_phase,
+                callback_global_episode_offset=phase_episodes,
+                phase_label=phase_label,
+                silent_chunk=True,
+                return_run_info=True
+            )
+            if not success:
+                return False, model, env
+
+            first_run = False
+            final_model = model
+            final_env = env
+            final_run_info = run_info
+            phase_episodes += chunk_episodes
+            total_global_episodes += chunk_episodes
+
+            is_gate_eval_checkpoint = (
+                (phase_episodes % gate_eval_freq == 0)
+                or (phase_episodes >= max_episodes_in_phase)
+            )
+            if not is_gate_eval_checkpoint:
+                continue
+
+            phase_eval_index += 1
+            eval_progress_prefix = _build_curriculum_phase_progress_prefix(
+                phase_episodes=phase_episodes,
+                max_episodes_in_phase=max_episodes_in_phase
+            )
+            last_eval = run_info.get("last_bot_eval")
+            if last_eval is None:
+                raise RuntimeError(
+                    "Curriculum gate requires synchronized bot evaluation result, but run_info['last_bot_eval'] "
+                    f"is missing at phase={phase_name}, phase_episodes={phase_episodes}, "
+                    f"global_episodes={total_global_episodes}. "
+                    "No fallback evaluation is allowed by strict mode."
+                )
+            last_eval_marker = run_info.get("last_bot_eval_marker")
+            if last_eval_marker is None:
+                raise RuntimeError(
+                    "Curriculum gate requires synchronized bot evaluation marker, but run_info['last_bot_eval_marker'] "
+                    f"is missing at phase={phase_name}, phase_episodes={phase_episodes}, "
+                    f"global_episodes={total_global_episodes}. "
+                    "No fallback evaluation is allowed by strict mode."
+                )
+            if int(last_eval_marker) != int(total_global_episodes):
+                raise RuntimeError(
+                    "Curriculum gate evaluation is out of sync: "
+                    f"expected marker={total_global_episodes}, got marker={last_eval_marker} "
+                    f"(phase={phase_name}, phase_episodes={phase_episodes}). "
+                    "No fallback evaluation is allowed by strict mode."
+                )
+
+            # Redraw fixed training state immediately after evaluation output.
+            _print_inline_status_line(f"{eval_progress_prefix} | training | {phase_label}")
+
+            combined = float(require_key(last_eval, "combined"))
+            worst_bot_score = _extract_worst_bot_score_for_gate(last_eval)
+            gate_now = (
+                phase_episodes >= min_episodes_in_phase
+                and combined >= combined_min
+                and worst_bot_score >= worst_bot_score_min
+            )
+            consecutive_ok = (consecutive_ok + 1) if gate_now else 0
+
+            _write_curriculum_event(
+                log_path,
+                "phase_eval",
+                {
+                    "agent": agent_key,
+                    "phase": phase_name,
+                    "phase_episodes": phase_episodes,
+                    "global_episodes": total_global_episodes,
+                    "combined": combined,
+                    "worst_bot_score": worst_bot_score,
+                    "gate_ok": gate_now,
+                    "consecutive_ok": consecutive_ok
+                }
+            )
+
+            if consecutive_ok >= consecutive_evals_required:
+                print(
+                    f"✅ Phase transition: {phase_label} -> "
+                    f"{_format_phase_label_for_display(selected_phases[phase_index + 1]) if not is_last_phase else 'end'}\n"
+                    f"   trigger eval: {phase_eval_index}\n"
+                    f"   targets: combined>={combined_min:.3f}, worst_bot_score>={worst_bot_score_min:.3f}, "
+                    f"consecutive>={consecutive_evals_required}, min_ep>={min_episodes_in_phase}\n"
+                    f"   reached: combined={combined:.3f}, worst_bot_score={worst_bot_score:.3f}, "
+                    f"consecutive={consecutive_ok}, phase_ep={phase_episodes}"
+                )
+                _write_curriculum_event(
+                    log_path,
+                    "phase_complete",
+                    {
+                        "agent": agent_key,
+                        "phase": phase_name,
+                        "reason": "gate_reached",
+                        "phase_episodes": phase_episodes,
+                        "global_episodes": total_global_episodes
+                    }
+                )
+                phase_completed = True
+                break
+
+        if not phase_completed:
+            print(
+                f"✅ Phase transition (max reached): {phase_label} -> "
+                f"{_format_phase_label_for_display(selected_phases[phase_index + 1]) if not is_last_phase else 'end'}\n"
+                f"   last eval: {phase_eval_index}\n"
+                f"   targets: combined>={combined_min:.3f}, worst_bot_score>={worst_bot_score_min:.3f}, "
+                f"consecutive>={consecutive_evals_required}, min_ep>={min_episodes_in_phase}\n"
+                f"   reached: combined={combined:.3f}, worst_bot_score={worst_bot_score:.3f}, "
+                f"max_ep={max_episodes_in_phase}, phase_ep={phase_episodes}"
+            )
+            _write_curriculum_event(
+                log_path,
+                "phase_complete",
+                {
+                    "agent": agent_key,
+                    "phase": phase_name,
+                    "reason": "max_episodes_reached",
+                    "phase_episodes": phase_episodes,
+                    "global_episodes": total_global_episodes
+                }
+            )
+
+        previous_phase_scenarios = current_phase_scenarios
+
+    if final_run_info:
+        _write_curriculum_event(
+            log_path,
+            "curriculum_final_summary",
+            {
+                "agent": agent_key,
+                "best_robust_score": final_run_info.get("best_robust_score"),
+                "combined_at_robust_best": final_run_info.get("best_robust_combined"),
+                "selected_at_episodes": final_run_info.get("best_robust_eval_marker")
+            }
+        )
+    _write_curriculum_event(
+        log_path,
+        "curriculum_end",
+        {
+            "agent": agent_key,
+            "global_episodes": total_global_episodes
+        }
+    )
+
+    return True, final_model, final_env
+
 def start_multi_agent_orchestration(config, total_episodes: int, training_config_name: str = "default",
                                    rewards_config_name: str = "default", max_concurrent: int = None,
                                    training_phase: str = None):
@@ -2074,7 +2597,7 @@ def main():
     parser.add_argument("--scenario-template", type=str, default=None,
                        help="Scenario template name from scenario_templates.json for replay generation")
     parser.add_argument("--scenario", type=str, default=None,
-                       help="Specific scenario to use (e.g., 'phase2-3') or 'all' for rotation through all scenarios")
+                       help="Specific scenario (e.g., 'phase2-3'), 'all' for rotation, or curriculum phase ('phase1', 'phase2', ...)")
     parser.add_argument("--macro-eval-mode", type=str, choices=["micro", "bot"], default="micro",
                        help="MacroController evaluation mode: micro (vs trained agents) or bot (vs evaluation bots)")
     parser.add_argument("--mode", type=str, default=None,
@@ -2444,6 +2967,79 @@ def main():
                         print("📊 Skipping testing (--test-episodes 0)")
                     return 0
                 return 1
+
+            # Curriculum mode: --scenario phaseX
+            if args.scenario and args.scenario.startswith("phase"):
+                training_config = config.load_agent_training_config(args.agent, args.training_config)
+                curriculum_cfg = training_config.get("curriculum")
+                if curriculum_cfg is None:
+                    raise KeyError(
+                        f"--scenario {args.scenario} requires a curriculum block in "
+                        f"{args.agent}/{args.training_config} training config"
+                    )
+
+                phase_order = require_key(curriculum_cfg, "phase_order")
+                if not isinstance(phase_order, list) or not phase_order:
+                    raise ValueError("curriculum.phase_order must be a non-empty list")
+                if args.scenario not in phase_order:
+                    raise ValueError(
+                        f"Unknown curriculum phase '{args.scenario}'. Expected one of: {phase_order}"
+                    )
+
+                if args.scenario == phase_order[0]:
+                    print(f"🎓 Curriculum mode enabled from {args.scenario} ({len(phase_order)} phases)")
+                    success, model, env = train_with_curriculum(
+                        config=config,
+                        agent_key=args.agent,
+                        training_config_name=args.training_config,
+                        rewards_config_name=args.rewards_config,
+                        start_phase=args.scenario,
+                        new_model=args.new,
+                        append_training=args.append,
+                        debug_mode=args.debug,
+                        device_mode=args.mode
+                    )
+                    if success and args.test_episodes > 0:
+                        test_trained_model(
+                            model,
+                            args.test_episodes,
+                            args.training_config,
+                            args.agent,
+                            args.rewards_config,
+                            debug_mode=args.debug
+                        )
+                    return 0 if success else 1
+
+                print(f"🎯 Single phase mode: {args.scenario}")
+                phase_scenarios = _get_phase_scenarios(config, args.agent, args.scenario)
+                curriculum_phases = require_key(curriculum_cfg, "phases")
+                phase_cfg = require_key(curriculum_phases, args.scenario)
+                total_episodes = int(require_key(phase_cfg, "max_episodes_in_phase"))
+
+                success, model, env = train_with_scenario_rotation(
+                    config=config,
+                    agent_key=args.agent,
+                    training_config_name=args.training_config,
+                    rewards_config_name=args.rewards_config,
+                    scenario_list=phase_scenarios,
+                    total_episodes=total_episodes,
+                    new_model=args.new,
+                    append_training=args.append,
+                    debug_mode=args.debug,
+                    use_bots=True,
+                    device_mode=args.mode
+                )
+
+                if success and args.test_episodes > 0:
+                    test_trained_model(
+                        model,
+                        args.test_episodes,
+                        args.training_config,
+                        args.agent,
+                        args.rewards_config,
+                        debug_mode=args.debug
+                    )
+                return 0 if success else 1
 
             # Check if scenario rotation is requested
             if args.scenario == "all" or args.scenario == "self" or args.scenario == "bot":
