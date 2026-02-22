@@ -33,9 +33,13 @@ export const GameController: React.FC<GameControllerProps> = ({ initialUnits, cl
       ? "debug"
       : location.pathname === "/game" && location.search.includes("mode=test")
         ? "test"
-        : location.pathname === "/game" && location.search.includes("mode=pve")
-          ? "pve"
-          : "pvp";
+      : location.pathname === "/game" && location.search.includes("mode=pve")
+        ? "test"
+      : location.pathname === "/game" && location.search.includes("mode=pvp_old")
+        ? "pvp_old"
+      : location.pathname === "/game" && location.search.includes("mode=pve_old")
+        ? "pve_old"
+        : "pvp";
   const _isDebugMode = gameMode === "debug";
 
   // Track UnitStatusTable collapse states

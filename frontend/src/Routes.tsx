@@ -25,8 +25,18 @@ const ProtectedGameRoute = () => {
   const modeFromQuery = new URLSearchParams(location.search).get("mode");
   const requestedMode = modeFromQuery ?? "pve";
   const allowedModes = authSession.permissions.game_modes;
-  if (!allowedModes.includes(requestedMode)) {
-    const fallbackMode = allowedModes.includes("pve") ? "pve" : allowedModes[0];
+  // Allow *_old modes when old client-side session permissions are stale.
+  // Backend remains the source of truth and will reject unauthorized starts.
+  const isRequestedModeAllowed =
+    allowedModes.includes(requestedMode) ||
+    (requestedMode === "pvp_old" && allowedModes.includes("pvp")) ||
+    (requestedMode === "pve_old" && allowedModes.includes("pve"));
+  if (!isRequestedModeAllowed) {
+    const fallbackMode = allowedModes.includes("pve")
+      ? "pve"
+      : allowedModes.includes("pve_old")
+        ? "pve_old"
+        : allowedModes[0];
     if (!fallbackMode) {
       throw new Error("No authorized game mode configured for current user");
     }

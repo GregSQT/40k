@@ -37,9 +37,13 @@ export const BoardWithAPI: React.FC = () => {
       ? "debug"
       : location.pathname === "/game" && location.search.includes("mode=test")
         ? "test"
-        : location.pathname === "/game" && location.search.includes("mode=pve")
-          ? "pve"
-          : "pvp";
+      : location.pathname === "/game" && location.search.includes("mode=pve")
+        ? "test"
+      : location.pathname === "/game" && location.search.includes("mode=pvp_old")
+        ? "pvp_old"
+      : location.pathname === "/game" && location.search.includes("mode=pve_old")
+        ? "pve_old"
+        : "pvp";
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {

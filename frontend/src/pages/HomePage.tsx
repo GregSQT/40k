@@ -20,6 +20,12 @@ export default function HomePage() {
           PvE Game
         </Link>
         <Link
+          to="/game?mode=pve_old"
+          className="px-6 py-3 bg-cyan-700 text-white rounded-lg hover:bg-cyan-600 inline-block"
+        >
+          PvE Old Game
+        </Link>
+        <Link
           to="/game?mode=test"
           className="px-6 py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-500 inline-block"
         >

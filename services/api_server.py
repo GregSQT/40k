@@ -241,7 +241,14 @@ def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
     allowed_modes = require_key(permissions, "game_modes")
     if not isinstance(allowed_modes, list):
         raise TypeError("permissions.game_modes must be a list")
-    return mode in allowed_modes
+    if mode in allowed_modes:
+        return True
+    # Backward compatibility for stale permissions snapshots.
+    if mode == "pvp_old" and "pvp" in allowed_modes:
+        return True
+    if mode == "pve_old" and "pve" in allowed_modes:
+        return True
+    return False
 
 
 def initialize_auth_db() -> None:
@@ -313,7 +320,15 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            ("pve_old", "Player vs Environment (Old)"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
             ("pvp", "Player vs Player"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            ("pvp_old", "Player vs Player (Old)"),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
@@ -351,11 +366,19 @@ def initialize_auth_db() -> None:
             "SELECT id FROM game_modes WHERE code = ?",
             ("pve",),
         ).fetchone()
+        pve_old_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            ("pve_old",),
+        ).fetchone()
         pvp_row = cursor.execute(
             "SELECT id FROM game_modes WHERE code = ?",
             ("pvp",),
         ).fetchone()
-        if pve_row is None or pvp_row is None:
+        pvp_old_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            ("pvp_old",),
+        ).fetchone()
+        if pve_row is None or pve_old_row is None or pvp_row is None or pvp_old_row is None:
             raise RuntimeError("Failed to seed required game modes")
         debug_row = cursor.execute(
             "SELECT id FROM game_modes WHERE code = ?",
@@ -374,7 +397,15 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (profile_id, pve_old_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (profile_id, pvp_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (profile_id, pvp_old_row["id"]),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
@@ -382,7 +413,15 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, pve_old_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (admin_profile_id, pvp_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, pvp_old_row["id"]),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
@@ -1167,20 +1206,28 @@ def start_game():
             raise ValueError(f"test_mode must be boolean (got {type(data['test_mode']).__name__})")
         if "debug_mode" in data and not isinstance(data["debug_mode"], bool):
             raise ValueError(f"debug_mode must be boolean (got {type(data['debug_mode']).__name__})")
+        if "mode_code" in data and data["mode_code"] is not None and not isinstance(data["mode_code"], str):
+            raise ValueError(f"mode_code must be string or null (got {type(data['mode_code']).__name__})")
         if "scenario_file" in data and data["scenario_file"] is not None and not isinstance(data["scenario_file"], str):
             raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
         pve_mode = data.get('pve_mode', False)
         test_mode = data.get('test_mode', False)
         debug_mode = data.get('debug_mode', False)
+        mode_code = data.get('mode_code', None)
         scenario_file = data.get('scenario_file', None)
 
         requested_mode = "pvp"
-        if pve_mode:
-            requested_mode = "pve"
-        elif test_mode:
+        if test_mode:
             requested_mode = "test"
         elif debug_mode:
             requested_mode = "debug"
+        elif mode_code is not None:
+            allowed_mode_codes = {"pvp", "pvp_old", "pve", "pve_old"}
+            if mode_code not in allowed_mode_codes:
+                raise ValueError(f"Unsupported mode_code '{mode_code}'. Allowed values: {sorted(allowed_mode_codes)}")
+            requested_mode = mode_code
+        elif pve_mode:
+            requested_mode = "pve_old"
 
         connection = _get_auth_db_connection()
         try:
@@ -1204,7 +1251,11 @@ def start_game():
             print("DEBUG: Initializing engine for Test mode")
             if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
                 return jsonify({"success": False, "error": "Test engine initialization failed"}), 500
-        elif pve_mode:
+        elif requested_mode == "pve":
+            print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
+            if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+                return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
+        elif requested_mode == "pve_old":
             print("DEBUG: Initializing engine for PvE mode")
             if not initialize_pve_engine(scenario_file=scenario_file, debug_mode=debug_mode):
                 return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
@@ -1244,15 +1295,21 @@ def start_game():
         serializable_state["pve_mode"] = getattr(engine, 'is_pve_mode', False)
         serializable_state["test_mode"] = getattr(engine, 'is_test_mode', False)
 
-        mode_label = "PvE"
-        if test_mode:
-            mode_label = "Test"
-        if pve_mode and debug_mode:
-            mode_label = "Debug"
+        mode_labels = {
+            "pvp": "PvP",
+            "pvp_old": "PvP Old",
+            "pve_old": "PvE Old",
+            "pve": "PvE",
+            "test": "Test",
+            "debug": "Debug",
+        }
+        mode_label = mode_labels.get(requested_mode)
+        if mode_label is None:
+            raise ValueError(f"Unsupported requested_mode '{requested_mode}'")
         return jsonify({
             "success": True,
             "game_state": serializable_state,
-            "message": f"Game started successfully ({mode_label if pve_mode else 'PvP'} mode)"
+            "message": f"Game started successfully ({mode_label} mode)"
         })
     
     except Exception as e:
