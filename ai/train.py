@@ -1663,6 +1663,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     )
     if bot_eval_callback is not None:
         run_info = {
+            "episodes_trained": int(episodes_trained),
             "last_bot_eval": bot_eval_callback.last_eval_results,
             "last_bot_eval_marker": bot_eval_callback.last_eval_marker,
             "best_robust_score": bot_eval_callback.best_robust_score,
@@ -2400,8 +2401,20 @@ def train_with_curriculum(
             final_model = model
             final_env = env
             final_run_info = run_info
-            phase_episodes += chunk_episodes
-            total_global_episodes += chunk_episodes
+            chunk_episodes_trained = int(require_key(run_info, "episodes_trained"))
+            if chunk_episodes_trained <= 0:
+                raise RuntimeError(
+                    f"Invalid chunk episodes_trained={chunk_episodes_trained} "
+                    f"for phase={phase_name}, expected > 0"
+                )
+            if chunk_episodes_trained < chunk_episodes:
+                raise RuntimeError(
+                    f"Chunk trained fewer episodes than requested: "
+                    f"trained={chunk_episodes_trained}, requested={chunk_episodes} "
+                    f"(phase={phase_name})."
+                )
+            phase_episodes += chunk_episodes_trained
+            total_global_episodes += chunk_episodes_trained
 
             is_gate_eval_checkpoint = (
                 (phase_episodes % gate_eval_freq == 0)
