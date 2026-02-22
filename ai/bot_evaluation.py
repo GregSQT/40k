@@ -496,7 +496,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                                 )
                             full_line = f"{eval_progress_prefix} | {line}" if eval_progress_prefix else line
                             clear_padding = " " * max(0, last_progress_line_len - len(full_line))
-                            sys.stdout.write(f"\r{full_line}{clear_padding}")
+                            sys.stdout.write(f"\r{' ' * 260}\r{full_line}{clear_padding}")
                             sys.stdout.flush()
                             last_progress_line_len = len(full_line)
 
@@ -610,7 +610,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             )
         full_final_line = f"{eval_progress_prefix} | {final_line}" if eval_progress_prefix else final_line
         clear_padding = " " * max(0, last_progress_line_len - len(full_final_line))
-        print(f"\r{full_final_line}{clear_padding}")
+        sys.stdout.write(f"\r{' ' * 260}\r{full_final_line}{clear_padding}")
+        sys.stdout.flush()
 
     # AI_IMPLEMENTATION.md: No silent evaluation degradation.
     # If any episodes failed to run, surface this explicitly and avoid logging

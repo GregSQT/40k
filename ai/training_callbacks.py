@@ -1030,7 +1030,7 @@ class BotEvaluationCallback(BaseCallback):
         self.show_eval_progress = show_eval_progress
         self.phase_progress_total_episodes = phase_progress_total_episodes
         self.phase_progress_episode_offset = int(phase_progress_episode_offset)
-        self.eval_count = 0
+        self.eval_count = int(initial_episode_marker // eval_freq) if use_episode_freq and eval_freq > 0 else 0
         self.best_combined_win_rate = 0.0
         self.save_best_robust = save_best_robust
         self.robust_window = robust_window

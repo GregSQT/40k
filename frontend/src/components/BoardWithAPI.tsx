@@ -116,7 +116,8 @@ export const BoardWithAPI: React.FC = () => {
   const [rosterPickerLoading, setRosterPickerLoading] = useState(false);
   const [rosterPickerError, setRosterPickerError] = useState<string | null>(null);
   const [showGameOverPopup, setShowGameOverPopup] = useState(false);
-  const [testDeploymentStarted, setTestDeploymentStarted] = useState(gameMode !== "test");
+  const isRosterSetupMode = gameMode === "test" || gameMode === "pvp" || gameMode === "pve";
+  const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
 
   const closeRosterPicker = () => {
     setRosterPickerPlayer(null);
@@ -149,7 +150,7 @@ export const BoardWithAPI: React.FC = () => {
       throw new Error("No roster picker player selected");
     }
     try {
-      const targetPlayer = gameMode === "test" ? rosterPickerPlayer : undefined;
+      const targetPlayer = isRosterSetupMode ? rosterPickerPlayer : undefined;
       await apiProps.changeRoster(armyFile, targetPlayer);
       closeRosterPicker();
     } catch (err) {
@@ -165,14 +166,14 @@ export const BoardWithAPI: React.FC = () => {
   }, [isGameOver]);
 
   useEffect(() => {
-    const isActiveTestDeployment =
-      gameMode === "test" &&
+    const isActiveSetupDeployment =
+      isRosterSetupMode &&
       apiProps.gameState?.phase === "deployment" &&
       apiProps.gameState?.deployment_type === "active";
-    if (isActiveTestDeployment) {
+    if (isActiveSetupDeployment) {
       setTestDeploymentStarted(false);
     }
-  }, [gameMode, apiProps.gameState?.phase, apiProps.gameState?.deployment_type]);
+  }, [isRosterSetupMode, apiProps.gameState?.phase, apiProps.gameState?.deployment_type]);
 
   const getVictoryPointsForPlayer = (player: 1 | 2): number | undefined => {
     if (!apiProps.gameState) {
@@ -620,7 +621,7 @@ export const BoardWithAPI: React.FC = () => {
     const getIconBorderColor = (player: PlayerId): string =>
       player === 2 ? "var(--hp-bar-player2)" : "var(--hp-bar-player1)";
 
-    const isTestDeploymentMode = gameMode === "test";
+    const isTestDeploymentMode = isRosterSetupMode;
     const isTestSetupLocked = isTestDeploymentMode && !testDeploymentStarted;
     return (
       <div className="deployment-panel deployment-panel--dual">
@@ -1036,7 +1037,7 @@ export const BoardWithAPI: React.FC = () => {
         />
       </ErrorBoundary>
 
-      {gameMode === "test" &&
+      {isRosterSetupMode &&
         apiProps.gameState?.phase === "deployment" &&
         apiProps.gameState?.deployment_type === "active" &&
         !testDeploymentStarted && (
@@ -1100,7 +1101,7 @@ export const BoardWithAPI: React.FC = () => {
         isBlinkingActive={apiProps.isBlinkingActive}
         onSelectUnit={
           isGameOver ||
-          (gameMode === "test" &&
+          (isRosterSetupMode &&
             apiProps.gameState?.phase === "deployment" &&
             apiProps.gameState?.deployment_type === "active" &&
             !testDeploymentStarted)
@@ -1113,7 +1114,7 @@ export const BoardWithAPI: React.FC = () => {
         onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
         onDeployUnit={
           isGameOver ||
-          (gameMode === "test" &&
+          (isRosterSetupMode &&
             apiProps.gameState?.phase === "deployment" &&
             apiProps.gameState?.deployment_type === "active" &&
             !testDeploymentStarted)

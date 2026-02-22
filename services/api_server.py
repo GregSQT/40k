@@ -1251,6 +1251,14 @@ def start_game():
             print("DEBUG: Initializing engine for Test mode")
             if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
                 return jsonify({"success": False, "error": "Test engine initialization failed"}), 500
+        elif requested_mode == "pvp":
+            print("DEBUG: Initializing engine for PvP mode (copied from Test mode)")
+            if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+                return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
+            # PvP must remain human vs human even if initialization reuses Test flow.
+            engine.is_pve_mode = False
+            engine.is_test_mode = False
+            engine.is_debug_mode = False
         elif requested_mode == "pve":
             print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
             if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
@@ -1267,6 +1275,7 @@ def start_game():
             engine.is_pve_mode = False
             engine.is_test_mode = False
             engine.is_debug_mode = False
+        engine.current_mode_code = requested_mode
         
         print("DEBUG: About to call engine.reset()")
         # Reset the engine for new game
@@ -1621,8 +1630,16 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
 
     requested_player = action.get("player")
     if requested_player is not None:
-        if not bool(getattr(engine_instance, "is_test_mode", False)):
-            return False, {"error": "change_roster_player_only_in_test_mode"}
+        current_mode_code = getattr(engine_instance, "current_mode_code", None)
+        allowed_multi_player_roster_modes = {"test", "pvp", "pve"}
+        player_types = game_state.get("player_types")
+        legacy_human_vs_human_setup = (
+            isinstance(player_types, dict)
+            and player_types.get("1") == "human"
+            and player_types.get("2") == "human"
+        )
+        if current_mode_code not in allowed_multi_player_roster_modes and not legacy_human_vs_human_setup:
+            return False, {"error": "change_roster_player_only_in_setup_modes"}
         target_deployer = int(requested_player)
         if target_deployer not in (1, 2):
             raise ValueError(f"Invalid player for change_roster: {requested_player}")

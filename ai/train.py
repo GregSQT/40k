@@ -1836,7 +1836,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             initial_episode_marker=max(0, int(global_episode_offset)),
             show_eval_progress=bot_eval_show_progress,
             phase_progress_total_episodes=(int(total_eps) if phase_label else None),
-            phase_progress_episode_offset=(int(global_episode_offset) if phase_label else 0),
+            phase_progress_episode_offset=0,
         )
         callbacks.append(bot_eval_callback)
         
