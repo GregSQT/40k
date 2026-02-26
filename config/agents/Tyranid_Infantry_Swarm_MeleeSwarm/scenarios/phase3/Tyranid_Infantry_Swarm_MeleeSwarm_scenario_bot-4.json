@@ -16,15 +16,16 @@
       {"id": 12, "unit_type": "Hormagaunt", "player": 1, "col": 3, "row": 10},
       {"id": 13, "unit_type": "Hormagaunt", "player": 1, "col": 7, "row": 8},
       {"id": 14, "unit_type": "Hormagaunt", "player": 1, "col": 21, "row": 8},
-      {"id": 15, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
-      {"id": 16, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 7, "row": 14},
-      {"id": 17, "unit_type": "Hormagaunt", "player": 2, "col": 8, "row": 6},
-      {"id": 18, "unit_type": "Hormagaunt", "player": 2, "col": 15, "row": 4},
+      {"id": 15, "unit_type": "Hormagaunt", "player": 1, "col": 20, "row": 10},
+      {"id": 16, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
+      {"id": 17, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 7, "row": 14},
+      {"id": 18, "unit_type": "Hormagaunt", "player": 2, "col": 8, "row": 6},
+      {"id": 19, "unit_type": "Hormagaunt", "player": 2, "col": 15, "row": 4},
       {"id": 20, "unit_type": "Hormagaunt", "player": 2, "col": 14, "row": 7},
       {"id": 21, "unit_type": "Hormagaunt", "player": 2, "col": 17, "row": 5},
-      {"id": 22, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 8},
-      {"id": 22, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 10},
-      {"id": 23, "unit_type": "Hormagaunt", "player": 2, "col": 20, "row": 6}
+      {"id": 22, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 6},
+      {"id": 23, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 6},
+      {"id": 24, "unit_type": "Hormagaunt", "player": 2, "col": 21, "row": 8}
     ],
     "wall_hexes": [
       [2,5],[2,6],[2,7],[3,4],[4,4],[5,3],[6,3],[7,2],[8,2],[9,1],

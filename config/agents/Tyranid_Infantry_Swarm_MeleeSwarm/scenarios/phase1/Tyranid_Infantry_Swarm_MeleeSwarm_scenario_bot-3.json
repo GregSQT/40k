@@ -9,8 +9,10 @@
     {"id": 5, "unit_type": "Hormagaunt", "player": 1, "col": 10, "row": 5},
     {"id": 6, "unit_type": "Hormagaunt", "player": 1, "col": 23, "row": 6},
     {"id": 7, "unit_type": "Hormagaunt", "player": 1, "col": 23, "row": 8},
-    {"id": 8, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
-    {"id": 9, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 7, "row": 14}
+    {"id": 8, "unit_type": "Hormagaunt", "player": 1, "col": 8, "row": 6},
+    {"id": 9, "unit_type": "Hormagaunt", "player": 1, "col": 15, "row": 4},
+    {"id": 10, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
+    {"id": 11, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 7, "row": 14}
     
   ],
   "wall_hexes": [

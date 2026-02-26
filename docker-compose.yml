@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wh40k-backend
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      W40K_DEBUG: "false"
+    volumes:
+      - ${SYNO_CONFIG_PATH:?Set SYNO_CONFIG_PATH in your environment}:/app/config
+      - ${SYNO_MODELS_PATH:?Set SYNO_MODELS_PATH in your environment}:/app/ai/models
+      - ${SYNO_RUNTIME_PATH:?Set SYNO_RUNTIME_PATH in your environment}:/app/runtime
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: wh40k-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"

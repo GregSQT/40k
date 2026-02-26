@@ -4,6 +4,7 @@
   "total_episodes": 30000,
   "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
   "max_turns_per_episode": 5,
+  "macro_player": 1,
   "n_envs": 48,
   "callback_params": {
     "checkpoint_save_freq": 50000,

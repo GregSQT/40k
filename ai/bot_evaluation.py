@@ -495,8 +495,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                                     f"vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]"
                                 )
                             full_line = f"{eval_progress_prefix} | {line}" if eval_progress_prefix else line
-                            clear_padding = " " * max(0, last_progress_line_len - len(full_line))
-                            sys.stdout.write(f"\r{' ' * 260}\r{full_line}{clear_padding}")
+                            clear_padding_len = max(0, last_progress_line_len - len(full_line))
+                            clear_padding = " " * clear_padding_len
+                            sys.stdout.write(f"\r{full_line}{clear_padding}")
                             sys.stdout.flush()
                             last_progress_line_len = len(full_line)
 
@@ -609,8 +610,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 f"[Completed] [{elapsed_str}, {speed_str}]"
             )
         full_final_line = f"{eval_progress_prefix} | {final_line}" if eval_progress_prefix else final_line
-        clear_padding = " " * max(0, last_progress_line_len - len(full_final_line))
-        sys.stdout.write(f"\r{' ' * 260}\r{full_final_line}{clear_padding}")
+        clear_padding_len = max(0, last_progress_line_len - len(full_final_line))
+        clear_padding = " " * clear_padding_len
+        sys.stdout.write(f"\r{full_final_line}{clear_padding}")
         sys.stdout.flush()
 
     # AI_IMPLEMENTATION.md: No silent evaluation degradation.

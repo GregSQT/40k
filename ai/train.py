@@ -1162,6 +1162,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  training_config_override: Optional[Dict[str, Any]] = None,
                                  callback_total_episodes_override: Optional[int] = None,
                                  callback_global_episode_offset: int = 0,
+                                 callback_phase_episode_offset: int = 0,
                                  phase_label: Optional[str] = None,
                                  silent_chunk: bool = False,
                                  return_run_info: bool = False):
@@ -1552,6 +1553,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         max_episodes_override=total_episodes,  # Train directly to total_episodes
         scenario_info=scenario_display,
         global_episode_offset=callback_global_episode_offset,
+        phase_episode_offset=callback_phase_episode_offset,
         global_start_time=global_start_time,
         phase_label=phase_label,
         silent_logs=silent_chunk
@@ -1562,10 +1564,21 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
             callback.metrics_tracker = metrics_tracker
     
-    # Combine all callbacks
-    # Metrics callback must run first so episode_count is up to date for
-    # episode-based gate/evaluation callbacks in the same step.
-    enhanced_callbacks = CallbackList([metrics_callback] + training_callbacks)
+    # Combine all callbacks with strict ordering:
+    # 1) Metrics first (episode_count must be up to date)
+    # 2) Bot eval before termination (ensure last_bot_eval exists at gate checkpoints)
+    # 3) Episode termination last
+    non_terminal_callbacks = []
+    terminal_callbacks = []
+    for callback in training_callbacks:
+        callback_name = callback.__class__.__name__
+        if callback_name == "EpisodeTerminationCallback":
+            terminal_callbacks.append(callback)
+        else:
+            non_terminal_callbacks.append(callback)
+
+    ordered_training_callbacks = non_terminal_callbacks + terminal_callbacks
+    enhanced_callbacks = CallbackList([metrics_callback] + ordered_training_callbacks)
     
     # Train directly to total_episodes using an EPISODE-BUDGETED wrapper around SB3.learn().
     #
@@ -1592,11 +1605,19 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Final episode count
     episodes_trained = metrics_tracker.episode_count - callback_global_episode_offset
 
-    # Final save
-    model.save(model_path)
-    if save_vec_normalize(model.get_env(), model_path):
-        if not silent_chunk:
-            print(f"   VecNormalize stats saved")
+    callback_params = require_key(training_config, "callback_params")
+    save_best_robust = bool(require_key(callback_params, "save_best_robust"))
+
+    # Final save unless robust mode owns canonical output.
+    if not save_best_robust:
+        model.save(model_path)
+        if save_vec_normalize(model.get_env(), model_path):
+            if not silent_chunk:
+                print(f"   VecNormalize stats saved")
+    elif not os.path.exists(model_path):
+        raise RuntimeError(
+            f"Robust save mode is enabled but canonical model was not produced: {model_path}"
+        )
     if not silent_chunk:
         print(f"\n{'='*80}")
         print(f"✅ TRAINING COMPLETE")
@@ -1677,6 +1698,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
                    total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
+                   phase_episode_offset: int = 0,
                    global_start_time=None, agent=None, rewards_config_name=None,
                    phase_label: Optional[str] = None, silent_logs: bool = False):
     W40KEngine, _ = setup_imports()
@@ -1718,7 +1740,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             scenario_info=scenario_info,
             disable_early_stopping=False,  # FIXED: Always stop at exact episode count
             global_start_time=global_start_time,
-            phase_label=phase_label
+            phase_label=phase_label,
+            phase_episode_offset=phase_episode_offset,
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
@@ -1736,6 +1759,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 start_lr=start_lr,
                 end_lr=end_lr,
                 total_episodes=total_eps,
+                initial_episode_count=phase_episode_offset,
                 verbose=1
             )
             callbacks.append(lr_callback)
@@ -1754,6 +1778,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 start_ent=start_ent,
                 end_ent=end_ent,
                 total_episodes=total_eps,
+                initial_episode_count=phase_episode_offset,
                 verbose=1
             )
             callbacks.append(entropy_callback)
@@ -1836,7 +1861,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             initial_episode_marker=max(0, int(global_episode_offset)),
             show_eval_progress=bot_eval_show_progress,
             phase_progress_total_episodes=(int(total_eps) if phase_label else None),
-            phase_progress_episode_offset=0,
+            phase_progress_episode_offset=(int(phase_episode_offset) if phase_label else 0),
         )
         callbacks.append(bot_eval_callback)
         
@@ -1937,11 +1962,15 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         # Print final training summary with critical metrics and bot evaluation
         metrics_callback.print_final_training_summary(model=model, training_config=training_config, training_config_name=training_config_name, rewards_config_name=rewards_config_name)
         
-        # Save final model
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        model.save(model_path)
-        if save_vec_normalize(model.get_env(), model_path):
-            print(f"   VecNormalize stats saved")
+        callback_params = require_key(training_config, "callback_params")
+        save_best_robust = bool(require_key(callback_params, "save_best_robust"))
+
+        # Save final model unless robust mode owns canonical output.
+        if not save_best_robust:
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            model.save(model_path)
+            if save_vec_normalize(model.get_env(), model_path):
+                print(f"   VecNormalize stats saved")
         
         # Clean up checkpoint files after successful training
         model_dir = os.path.dirname(model_path)
@@ -2148,25 +2177,91 @@ def _build_phase_mix(
     return weighted
 
 
-def _extract_worst_bot_score_for_gate(eval_results: Dict[str, Any]) -> float:
+def _apply_bot_matchup_multipliers(
+    phase_scenarios: List[str],
+    phase_cfg: Dict[str, Any],
+) -> List[str]:
     """
-    Extract worst_bot_score used by curriculum gates.
+    Apply optional per-matchup multipliers inside one phase scenario pool.
 
-    Accepted formats:
-    - Top-level key: eval_results["worst_bot_score"]
-    - Per-scenario map: eval_results["scenario_scores"][<scenario>]["worst_bot_score"]
+    Config format (optional):
+      "bot_matchup_multipliers": {
+        "bot-3": 2
+      }
+
+    Matching rule:
+    - key is matched against scenario basename (substring), or exact basename/stem.
+    - default multiplier is 1 when no key matches.
+    """
+    multipliers_cfg = phase_cfg.get("bot_matchup_multipliers")
+    if multipliers_cfg is None:
+        return list(phase_scenarios)
+    if not isinstance(multipliers_cfg, dict):
+        raise ValueError(
+            f"bot_matchup_multipliers must be a dictionary (got {type(multipliers_cfg).__name__})"
+        )
+    if len(multipliers_cfg) == 0:
+        raise ValueError("bot_matchup_multipliers cannot be empty when provided")
+
+    validated_multipliers: Dict[str, int] = {}
+    for key, value in multipliers_cfg.items():
+        if not isinstance(key, str) or key.strip() == "":
+            raise ValueError("bot_matchup_multipliers keys must be non-empty strings")
+        multiplier = int(value)
+        if multiplier <= 0:
+            raise ValueError(
+                f"bot_matchup_multipliers['{key}'] must be > 0 (got {multiplier})"
+            )
+        validated_multipliers[key] = multiplier
+
+    key_match_counts: Dict[str, int] = {key: 0 for key in validated_multipliers}
+    expanded_scenarios: List[str] = []
+    for scenario_path in phase_scenarios:
+        basename = os.path.basename(scenario_path)
+        stem = os.path.splitext(basename)[0]
+        matching_keys = [
+            key for key in validated_multipliers
+            if key in basename or key == basename or key == stem
+        ]
+        if len(matching_keys) > 1:
+            raise ValueError(
+                f"Ambiguous bot_matchup_multipliers for scenario '{basename}': "
+                f"matched keys={matching_keys}"
+            )
+
+        scenario_multiplier = 1
+        if matching_keys:
+            matched_key = matching_keys[0]
+            key_match_counts[matched_key] += 1
+            scenario_multiplier = validated_multipliers[matched_key]
+        expanded_scenarios.extend([scenario_path] * scenario_multiplier)
+
+    missing_keys = [key for key, count in key_match_counts.items() if count == 0]
+    if missing_keys:
+        raise ValueError(
+            "bot_matchup_multipliers keys did not match any scenario file: "
+            f"{missing_keys}"
+        )
+
+    return expanded_scenarios
+
+
+def _extract_worst_bot_scores_for_gate(eval_results: Dict[str, Any]) -> Tuple[float, float]:
+    """
+    Extract (mean, min_raw) worst-bot scores for curriculum gates.
+
+    Gate semantics:
+    - mean: primary threshold for phase transition stability
+    - min_raw: safety floor to avoid passing with a severe blind spot
 
     Raises:
-        ValueError: If no valid worst_bot_score source exists.
+        ValueError: If scenario_scores are missing/invalid.
     """
-    if "worst_bot_score" in eval_results:
-        return float(require_key(eval_results, "worst_bot_score"))
-
     scenario_scores = eval_results.get("scenario_scores")
     if not isinstance(scenario_scores, dict) or len(scenario_scores) == 0:
         raise ValueError(
-            "Missing worst_bot_score for curriculum gate: expected top-level "
-            "'worst_bot_score' or non-empty 'scenario_scores' dictionary."
+            "Missing scenario_scores for curriculum gate worst-bot aggregation. "
+            "Expected non-empty 'scenario_scores' dictionary."
         )
 
     scenario_worst_scores: List[float] = []
@@ -2185,10 +2280,12 @@ def _extract_worst_bot_score_for_gate(eval_results: Dict[str, Any]) -> float:
 
     if not scenario_worst_scores:
         raise ValueError(
-            "Cannot compute curriculum gate worst_bot_score: scenario_scores is empty."
+            "Cannot compute curriculum gate worst-bot aggregation: scenario_scores is empty."
         )
 
-    return min(scenario_worst_scores)
+    mean_score = float(sum(scenario_worst_scores) / len(scenario_worst_scores))
+    min_raw_score = float(min(scenario_worst_scores))
+    return mean_score, min_raw_score
 
 
 def _format_phase_label_for_display(phase_name: str) -> str:
@@ -2304,7 +2401,8 @@ def train_with_curriculum(
         min_episodes_in_phase = int(require_key(phase_cfg, "min_episodes_in_phase"))
         max_episodes_in_phase = int(require_key(phase_cfg, "max_episodes_in_phase"))
         combined_min = float(require_key(phase_cfg, "combined_min"))
-        worst_bot_score_min = float(require_key(phase_cfg, "worst_bot_score_min"))
+        worst_bot_score_mean_min = float(require_key(phase_cfg, "worst_bot_score_min"))
+        worst_bot_score_floor_min = float(require_key(phase_cfg, "worst_bot_score_floor_min"))
         consecutive_evals_required = int(require_key(phase_cfg, "consecutive_evals_required"))
 
         if min_episodes_in_phase <= 0:
@@ -2322,12 +2420,14 @@ def train_with_curriculum(
                 f"(got {consecutive_evals_required})"
             )
 
-        current_phase_scenarios = _get_phase_scenarios(config, agent_key, phase_name)
+        raw_phase_scenarios = _get_phase_scenarios(config, agent_key, phase_name)
+        current_phase_scenarios = _apply_bot_matchup_multipliers(raw_phase_scenarios, phase_cfg)
         phase_label = _format_phase_label_for_display(phase_name)
         print(
             f"\n🎯 Phase start: {phase_label} "
             f"({phase_index + 1}/{len(selected_phases)}) | "
-            f"target combined>={combined_min:.3f}, worst_bot_score>={worst_bot_score_min:.3f}, "
+            f"target combined>={combined_min:.3f}, worst_bot_score_mean>={worst_bot_score_mean_min:.3f}, "
+            f"worst_bot_score_min_raw>={worst_bot_score_floor_min:.3f}, "
             f"consecutive={consecutive_evals_required}, min_ep={min_episodes_in_phase}, max_ep={max_episodes_in_phase}"
         )
         _write_curriculum_event(
@@ -2342,7 +2442,8 @@ def train_with_curriculum(
                 "min_episodes_in_phase": min_episodes_in_phase,
                 "max_episodes_in_phase": max_episodes_in_phase,
                 "combined_min": combined_min,
-                "worst_bot_score_min": worst_bot_score_min,
+                "worst_bot_score_mean_min": worst_bot_score_mean_min,
+                "worst_bot_score_floor_min": worst_bot_score_floor_min,
                 "consecutive_evals_required": consecutive_evals_required
             }
         )
@@ -2369,11 +2470,20 @@ def train_with_curriculum(
             chunk_config = deepcopy(training_config)
             chunk_config["total_episodes"] = chunk_episodes
             chunk_callback_params = require_key(chunk_config, "callback_params")
+            chunk_bot_eval_freq = min(bot_eval_freq, chunk_episodes)
+            if chunk_bot_eval_freq <= 0:
+                raise RuntimeError(
+                    f"Invalid chunk bot_eval_freq={chunk_bot_eval_freq} "
+                    f"for phase={phase_name}, chunk_episodes={chunk_episodes}"
+                )
+            chunk_callback_params["bot_eval_freq"] = chunk_bot_eval_freq
+            # In curriculum mode, disable per-chunk final evaluation.
+            # A single final evaluation is executed once after the whole curriculum.
+            chunk_callback_params["bot_eval_final"] = 0
 
             # Robust checkpoint summary is relevant only for the final phase.
             if not is_last_phase:
                 chunk_callback_params["save_best_robust"] = False
-                chunk_callback_params["bot_eval_final"] = 0
 
             success, model, env, run_info = train_with_scenario_rotation(
                 config=config,
@@ -2389,7 +2499,8 @@ def train_with_curriculum(
                 device_mode=device_mode,
                 training_config_override=chunk_config,
                 callback_total_episodes_override=max_episodes_in_phase,
-                callback_global_episode_offset=phase_episodes,
+                callback_global_episode_offset=total_global_episodes,
+                callback_phase_episode_offset=phase_episodes,
                 phase_label=phase_label,
                 silent_chunk=True,
                 return_run_info=True
@@ -2456,11 +2567,12 @@ def train_with_curriculum(
             _print_inline_status_line(f"{eval_progress_prefix} | training | {phase_label}")
 
             combined = float(require_key(last_eval, "combined"))
-            worst_bot_score = _extract_worst_bot_score_for_gate(last_eval)
+            worst_bot_score_mean, worst_bot_score_min_raw = _extract_worst_bot_scores_for_gate(last_eval)
             gate_now = (
                 phase_episodes >= min_episodes_in_phase
                 and combined >= combined_min
-                and worst_bot_score >= worst_bot_score_min
+                and worst_bot_score_mean >= worst_bot_score_mean_min
+                and worst_bot_score_min_raw >= worst_bot_score_floor_min
             )
             consecutive_ok = (consecutive_ok + 1) if gate_now else 0
 
@@ -2473,20 +2585,24 @@ def train_with_curriculum(
                     "phase_episodes": phase_episodes,
                     "global_episodes": total_global_episodes,
                     "combined": combined,
-                    "worst_bot_score": worst_bot_score,
+                    "worst_bot_score_mean": worst_bot_score_mean,
+                    "worst_bot_score_min_raw": worst_bot_score_min_raw,
                     "gate_ok": gate_now,
                     "consecutive_ok": consecutive_ok
                 }
             )
 
             if consecutive_ok >= consecutive_evals_required:
+                print()
                 print(
                     f"✅ Phase transition: {phase_label} -> "
                     f"{_format_phase_label_for_display(selected_phases[phase_index + 1]) if not is_last_phase else 'end'}\n"
                     f"   trigger eval: {phase_eval_index}\n"
-                    f"   targets: combined>={combined_min:.3f}, worst_bot_score>={worst_bot_score_min:.3f}, "
+                    f"   targets: combined>={combined_min:.3f}, worst_bot_score_mean>={worst_bot_score_mean_min:.3f}, "
+                    f"worst_bot_score_min_raw>={worst_bot_score_floor_min:.3f}, "
                     f"consecutive>={consecutive_evals_required}, min_ep>={min_episodes_in_phase}\n"
-                    f"   reached: combined={combined:.3f}, worst_bot_score={worst_bot_score:.3f}, "
+                    f"   reached: combined={combined:.3f}, worst_bot_score_mean={worst_bot_score_mean:.3f}, "
+                    f"worst_bot_score_min_raw={worst_bot_score_min_raw:.3f}, "
                     f"consecutive={consecutive_ok}, phase_ep={phase_episodes}"
                 )
                 _write_curriculum_event(
@@ -2504,13 +2620,16 @@ def train_with_curriculum(
                 break
 
         if not phase_completed:
+            print()
             print(
                 f"✅ Phase transition (max reached): {phase_label} -> "
                 f"{_format_phase_label_for_display(selected_phases[phase_index + 1]) if not is_last_phase else 'end'}\n"
                 f"   last eval: {phase_eval_index}\n"
-                f"   targets: combined>={combined_min:.3f}, worst_bot_score>={worst_bot_score_min:.3f}, "
+                f"   targets: combined>={combined_min:.3f}, worst_bot_score_mean>={worst_bot_score_mean_min:.3f}, "
+                f"worst_bot_score_min_raw>={worst_bot_score_floor_min:.3f}, "
                 f"consecutive>={consecutive_evals_required}, min_ep>={min_episodes_in_phase}\n"
-                f"   reached: combined={combined:.3f}, worst_bot_score={worst_bot_score:.3f}, "
+                f"   reached: combined={combined:.3f}, worst_bot_score_mean={worst_bot_score_mean:.3f}, "
+                f"worst_bot_score_min_raw={worst_bot_score_min_raw:.3f}, "
                 f"max_ep={max_episodes_in_phase}, phase_ep={phase_episodes}"
             )
             _write_curriculum_event(
@@ -2536,6 +2655,41 @@ def train_with_curriculum(
                 "best_robust_score": final_run_info.get("best_robust_score"),
                 "combined_at_robust_best": final_run_info.get("best_robust_combined"),
                 "selected_at_episodes": final_run_info.get("best_robust_eval_marker")
+            }
+        )
+
+    final_eval_episodes = int(require_key(callback_params, "bot_eval_final"))
+    if final_eval_episodes > 0:
+        final_eval_deterministic = require_key(callback_params, "eval_deterministic")
+        if not isinstance(final_eval_deterministic, bool):
+            raise ValueError(
+                f"callback_params.eval_deterministic must be boolean "
+                f"(got {type(final_eval_deterministic).__name__})"
+            )
+        print("\n" + "=" * 80)
+        print(
+            f"🤖 CURRICULUM FINAL BOT EVALUATION "
+            f"({final_eval_episodes} episodes per bot across all scenarios)"
+        )
+        print("=" * 80 + "\n")
+        final_eval_results = evaluate_against_bots(
+            model=final_model,
+            training_config_name=training_config_name,
+            rewards_config_name=rewards_config_name,
+            n_episodes=final_eval_episodes,
+            controlled_agent=rewards_config_name,
+            show_progress=True,
+            deterministic=final_eval_deterministic,
+            show_summary=True
+        )
+        _write_curriculum_event(
+            log_path,
+            "curriculum_final_bot_eval",
+            {
+                "agent": agent_key,
+                "episodes_per_bot": final_eval_episodes,
+                "deterministic": final_eval_deterministic,
+                "combined": final_eval_results.get("combined"),
             }
         )
     _write_curriculum_event(

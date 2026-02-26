@@ -40,7 +40,7 @@
     "clip_range": 0.14,
     "clip_range_vf": null,
     "normalize_advantage": true,
-    "ent_coef": { "start": 0.04, "end": 0.02 },
+    "ent_coef": { "start": 0.04, "end": 0.015 },
     "vf_coef": 1.0,
     "max_grad_norm": 0.5,
     "target_kl": 0.01,
@@ -72,16 +72,20 @@
     "phases": {
       "phase1": {
         "min_episodes_in_phase": 4000,
-        "max_episodes_in_phase": 12000,
+        "max_episodes_in_phase": 18000,
         "combined_min": 0.58,
         "worst_bot_score_min": 0.45,
+        "worst_bot_score_floor_min": 0.30,
+        "bot_matchup_multipliers": {"bot-1": 1, "bot-2": 1, "bot-3": 2, "bot-4": 1},
         "consecutive_evals_required": 2
       },
       "phase2": {
         "min_episodes_in_phase": 6000,
-        "max_episodes_in_phase": 14000,
+        "max_episodes_in_phase": 24000,
         "combined_min": 0.62,
         "worst_bot_score_min": 0.48,
+        "worst_bot_score_floor_min": 0.30,
+        "bot_matchup_multipliers": {"bot-1": 1, "bot-2": 1, "bot-3": 2, "bot-4": 1},
         "consecutive_evals_required": 2
       },
       "phase3": {
@@ -89,6 +93,7 @@
         "max_episodes_in_phase": 30000,
         "combined_min": 0.66,
         "worst_bot_score_min": 0.52,
+        "worst_bot_score_floor_min": 0.30,
         "consecutive_evals_required": 3
       }
     }

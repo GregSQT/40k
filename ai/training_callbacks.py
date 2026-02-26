@@ -16,6 +16,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import os
 import time
 import re
+import shutil
 from collections import deque
 import numpy as np
 import torch
@@ -23,6 +24,7 @@ from typing import Dict, Optional, Any
 from stable_baselines3.common.callbacks import BaseCallback
 
 from shared.data_validation import require_key
+from ai.vec_normalize_utils import get_vec_normalize_path
 
 # Import evaluation bots for testing - flag used by print_final_training_summary
 try:
@@ -44,12 +46,21 @@ __all__ = [
 class LearningRateScheduleCallback(BaseCallback):
     """Callback to linearly reduce learning rate during training (episode-based)."""
 
-    def __init__(self, start_lr: float, end_lr: float, total_episodes: int, verbose: int = 0):
+    def __init__(
+        self,
+        start_lr: float,
+        end_lr: float,
+        total_episodes: int,
+        initial_episode_count: int = 0,
+        verbose: int = 0
+    ):
         super().__init__(verbose)
         self.start_lr = start_lr
         self.end_lr = end_lr
         self.total_episodes = total_episodes
-        self.episode_count = 0
+        if initial_episode_count < 0:
+            raise ValueError(f"initial_episode_count must be >= 0 (got {initial_episode_count})")
+        self.episode_count = initial_episode_count
         self.last_update_step = 0
 
     @staticmethod
@@ -63,7 +74,9 @@ class LearningRateScheduleCallback(BaseCallback):
                 param_group["lr"] = lr_value
 
     def _on_training_start(self) -> None:
-        self._set_model_learning_rate(self.model, self.start_lr)
+        progress = min(1.0, self.episode_count / self.total_episodes)
+        initial_lr = self.start_lr + (self.end_lr - self.start_lr) * progress
+        self._set_model_learning_rate(self.model, initial_lr)
 
     def _on_step(self) -> bool:
         # Detect episode end using dones array (more reliable than info dict)
@@ -87,13 +100,27 @@ class LearningRateScheduleCallback(BaseCallback):
 class EntropyScheduleCallback(BaseCallback):
     """Callback to linearly reduce entropy coefficient during training."""
 
-    def __init__(self, start_ent: float, end_ent: float, total_episodes: int, verbose: int = 0):
+    def __init__(
+        self,
+        start_ent: float,
+        end_ent: float,
+        total_episodes: int,
+        initial_episode_count: int = 0,
+        verbose: int = 0
+    ):
         super().__init__(verbose)
         self.start_ent = start_ent
         self.end_ent = end_ent
         self.total_episodes = total_episodes
-        self.episode_count = 0
+        if initial_episode_count < 0:
+            raise ValueError(f"initial_episode_count must be >= 0 (got {initial_episode_count})")
+        self.episode_count = initial_episode_count
         self.last_update_step = 0
+
+    def _on_training_start(self) -> None:
+        progress = min(1.0, self.episode_count / self.total_episodes)
+        initial_ent = self.start_ent + (self.end_ent - self.start_ent) * progress
+        self.model.ent_coef = initial_ent
 
     def _on_step(self) -> bool:
         # Detect episode end using dones array (more reliable than info dict)
@@ -121,7 +148,8 @@ class EpisodeTerminationCallback(BaseCallback):
     def __init__(self, max_episodes: int, expected_timesteps: int, verbose: int = 0,
                  total_episodes: int = None, scenario_info: str = None,
                  disable_early_stopping: bool = False, global_start_time: float = None,
-                 phase_label: Optional[str] = None):
+                 phase_label: Optional[str] = None,
+                 phase_episode_offset: int = 0):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -137,11 +165,17 @@ class EpisodeTerminationCallback(BaseCallback):
         self.scenario_info = scenario_info  # e.g., "Cycle 8 | Scenario: phase2-1"
         self.global_episode_offset = 0  # Set by rotation code to track overall progress
         self.phase_label = phase_label
+        if phase_episode_offset < 0:
+            raise ValueError(
+                f"phase_episode_offset must be >= 0 (got {phase_episode_offset})"
+            )
+        self.phase_episode_offset = int(phase_episode_offset)
         # ROTATION FIX: Disable early stopping to let model.learn() consume all timesteps
         self.disable_early_stopping = disable_early_stopping
         # EMA for smooth ETA estimation (weights recent episodes more heavily)
         self.ema_episode_time = None
-        self.last_episode_time = None
+        self.last_display_time = None
+        self.last_display_episode_count = None
         self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
         self._last_progress_line_len = 0
 
@@ -183,50 +217,61 @@ class EpisodeTerminationCallback(BaseCallback):
             import time
             current_time = time.time()
 
-            # Calculate global progress (across all rotations)
-            global_episode_count = self.global_episode_offset + self.episode_count
+            # In curriculum mode (phase_label set), progress must be phase-local.
+            # Outside curriculum, keep global progress across rotations.
+            if self.phase_label:
+                display_episode_count = self.phase_episode_offset + self.episode_count
+                display_total_episodes = self.total_episodes
+            else:
+                display_episode_count = self.global_episode_offset + self.episode_count
+                display_total_episodes = self.total_episodes
 
-            # Update progress every 10 episodes (use GLOBAL count, not local)
-            if global_episode_count % 10 == 0 or global_episode_count == 1:
-                global_progress_pct = (global_episode_count / self.total_episodes) * 100
+            # Update progress every 10 episodes.
+            if display_episode_count % 10 == 0 or display_episode_count == 1:
+                global_progress_pct = (display_episode_count / display_total_episodes) * 100
 
                 # Global progress bar (full width)
                 bar_length = 40
-                filled = int(bar_length * global_episode_count / self.total_episodes)
+                filled = int(bar_length * display_episode_count / display_total_episodes)
                 bar = '█' * filled + '░' * (bar_length - filled)
 
                 # Calculate time with EMA for smooth, accurate ETA estimates
                 time_info = ""
-                if self.start_time is not None and global_episode_count > 0:
+                if self.start_time is not None and display_episode_count > 0:
                     # Total elapsed time from start
                     elapsed = current_time - self.start_time
 
-                    # Update EMA of episode time for better ETA estimation
-                    if self.last_episode_time is not None:
-                        # Time for last batch of episodes (10 episodes)
-                        episode_batch_time = current_time - self.last_episode_time
-                        avg_time_per_episode = episode_batch_time / 10
-
-                        if self.ema_episode_time is None:
-                            # Initialize EMA with first measurement
-                            self.ema_episode_time = avg_time_per_episode
-                        else:
-                            # Update EMA: new_ema = alpha * new_value + (1 - alpha) * old_ema
-                            self.ema_episode_time = (self.ema_alpha * avg_time_per_episode +
-                                                    (1 - self.ema_alpha) * self.ema_episode_time)
-
-                    self.last_episode_time = current_time
+                    # Update EMA from real deltas (time and episodes), no fixed-batch assumption.
+                    if (
+                        self.last_display_time is not None
+                        and self.last_display_episode_count is not None
+                    ):
+                        delta_time = current_time - self.last_display_time
+                        delta_episodes = display_episode_count - self.last_display_episode_count
+                        if delta_time > 0 and delta_episodes > 0:
+                            avg_time_per_episode = delta_time / delta_episodes
+                            if self.ema_episode_time is None:
+                                # Initialize EMA with first valid measurement
+                                self.ema_episode_time = avg_time_per_episode
+                            else:
+                                # new_ema = alpha * new_value + (1 - alpha) * old_ema
+                                self.ema_episode_time = (
+                                    self.ema_alpha * avg_time_per_episode
+                                    + (1 - self.ema_alpha) * self.ema_episode_time
+                                )
+                    self.last_display_time = current_time
+                    self.last_display_episode_count = display_episode_count
 
                     # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
-                    remaining_episodes = self.total_episodes - global_episode_count
+                    remaining_episodes = display_total_episodes - display_episode_count
                     if self.ema_episode_time is not None:
                         eta = self.ema_episode_time * remaining_episodes
                         eps_speed = 1.0 / self.ema_episode_time if self.ema_episode_time > 0 else 0
                     else:
                         # Use overall average when EMA not yet available (early episodes)
-                        avg_episode_time = elapsed / global_episode_count
+                        avg_episode_time = elapsed / display_episode_count
                         eta = avg_episode_time * remaining_episodes
-                        eps_speed = global_episode_count / elapsed if elapsed > 0 else 0
+                        eps_speed = display_episode_count / elapsed if elapsed > 0 else 0
 
                     # Format times as HH:MM:SS or MM:SS depending on duration
                     def format_time(seconds):
@@ -262,7 +307,7 @@ class EpisodeTerminationCallback(BaseCallback):
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
-                progress_line = f"{global_progress_pct:3.0f}% {bar} {global_episode_count}/{self.total_episodes}{time_info}{lr_display}{ent_display}{phase_display}"
+                progress_line = f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}{time_info}{lr_display}{ent_display}{phase_display}"
                 clear_padding = " " * max(0, self._last_progress_line_len - len(progress_line))
                 print(f"\r{progress_line}{clear_padding}", end='', flush=True)
                 self._last_progress_line_len = len(progress_line)
@@ -1063,6 +1108,55 @@ class BotEvaluationCallback(BaseCallback):
         except Exception:
             pass
 
+    def _infer_agent_key(self) -> str:
+        """Infer agent key from best-model save directory."""
+        if not self.best_model_save_path:
+            raise ValueError("best_model_save_path is required to infer agent key")
+        agent_key = os.path.basename(os.path.normpath(self.best_model_save_path))
+        if not agent_key:
+            raise ValueError(f"Cannot infer agent key from path: {self.best_model_save_path}")
+        return agent_key
+
+    def _build_robust_save_base_path(self, robust_score: float) -> str:
+        """Build robust checkpoint base path (without .zip extension)."""
+        agent_key = self._infer_agent_key()
+        robust_score_str = f"{robust_score:.4f}"
+        return os.path.join(
+            self.best_model_save_path,
+            f"{agent_key}_robust_{robust_score_str}"
+        )
+
+    def _build_canonical_model_path(self) -> str:
+        """Build canonical model path model_<agent>.zip."""
+        agent_key = self._infer_agent_key()
+        return os.path.join(self.best_model_save_path, f"model_{agent_key}.zip")
+
+    def _remove_model_artifacts(self, model_zip_path: str) -> None:
+        """Remove model zip and associated VecNormalize stats if they exist."""
+        if os.path.exists(model_zip_path):
+            os.remove(model_zip_path)
+        vec_path = get_vec_normalize_path(model_zip_path)
+        if os.path.exists(vec_path):
+            os.remove(vec_path)
+
+    def _copy_model_artifacts(self, src_model_zip: str, dst_model_zip: str) -> None:
+        """Copy model zip and VecNormalize stats from src to dst."""
+        if not os.path.exists(src_model_zip):
+            raise FileNotFoundError(f"Source model zip not found: {src_model_zip}")
+        shutil.copy2(src_model_zip, dst_model_zip)
+
+        src_vec_path = get_vec_normalize_path(src_model_zip)
+        if os.path.exists(src_vec_path):
+            dst_vec_path = get_vec_normalize_path(dst_model_zip)
+            shutil.copy2(src_vec_path, dst_vec_path)
+
+    def _cleanup_legacy_best_robust_artifacts(self) -> None:
+        """Remove legacy best_robust_model artifacts from previous naming scheme."""
+        if not self.best_model_save_path:
+            raise ValueError("best_model_save_path is required for legacy cleanup")
+        legacy_zip_path = os.path.join(self.best_model_save_path, "best_robust_model.zip")
+        self._remove_model_artifacts(legacy_zip_path)
+
     @staticmethod
     def _scenario_metric_slug(scenario_name: str) -> str:
         """Convert scenario label to TensorBoard-safe metric suffix."""
@@ -1166,13 +1260,24 @@ class BotEvaluationCallback(BaseCallback):
                 robust_score = moving_average - (self.robust_drawdown_penalty * current_drawdown)
 
                 if robust_score > self.best_robust_score:
+                    previous_robust_model_path = self.best_robust_model_path
                     self.best_robust_score = robust_score
                     self.best_robust_combined = combined_win_rate
                     self.best_robust_eval_marker = eval_marker
                     if self.best_model_save_path:
-                        robust_save_path = f"{self.best_model_save_path}/best_robust_model"
+                        robust_save_path = self._build_robust_save_base_path(robust_score)
                         self._save_model_with_vecnormalize(robust_save_path)
                         self.best_robust_model_path = f"{robust_save_path}.zip"
+                        self._cleanup_legacy_best_robust_artifacts()
+
+                        if (
+                            previous_robust_model_path is not None
+                            and previous_robust_model_path != self.best_robust_model_path
+                        ):
+                            self._remove_model_artifacts(previous_robust_model_path)
+
+                        canonical_model_path = self._build_canonical_model_path()
+                        self._copy_model_artifacts(self.best_robust_model_path, canonical_model_path)
         return True
 
     def _on_training_end(self) -> None:

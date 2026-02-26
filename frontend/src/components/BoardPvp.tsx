@@ -1406,12 +1406,13 @@ export default function Board({
       if (currentTurn < startTurn) {
         shouldApplyObjectiveControl = false;
       }
-      if (
-        currentTurn === 5 &&
-        current_player === 2 &&
-        primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
-        phase !== "fight"
-      ) {
+
+      let expectedScoringPhase = primaryObjectiveConfig.timing.default_phase;
+      if (currentTurn === 5 && current_player === 2) {
+        expectedScoringPhase = primaryObjectiveConfig.timing.round5_second_player_phase;
+      }
+
+      if (phase !== expectedScoringPhase) {
         shouldApplyObjectiveControl = false;
       }
       tieBehavior = primaryObjectiveConfig.control.tie_behavior;
