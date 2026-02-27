@@ -270,6 +270,63 @@ Resultats observes : [A completer]
 - pilotage metriques ;
 - pratiques de securisation backend.
 
+### 4.7 Deploiement Docker sur NAS Synology
+
+Le projet a ete deploie sur un NAS Synology DS1525+ (DSM 7.3.2) via Docker Compose, avec separation claire entre code applicatif et donnees persistantes.
+
+Configuration retenue :
+
+- backend Flask expose sur `5001` (interne et LAN) ;
+- frontend Nginx expose sur `8081` (LAN) ;
+- reverse proxy DSM en HTTPS sur `game.40k-greg.synology.me:443` vers `127.0.0.1:8081` ;
+- NAT routeur limite a `80` et `443` vers `192.168.1.100` ;
+- DMZ desactivee.
+
+Volumes persistants utilises :
+
+- `/volume1/docker/40k/config/users.db` -> `/app/config/users.db` ;
+- `/volume1/docker/40k/models` -> `/app/ai/models` ;
+- `/volume1/docker/40k/runtime` -> `/app/runtime`.
+
+Points de vigilance identifies pendant l'integration :
+
+- conflit de dependances Python en environnement NAS (necessite d'un `requirements.runtime.txt`) ;
+- CORS frontend resolu en imposant les appels API en relatif (`/api`) ;
+- permissions SQLite (montage NAS) corrigees via configuration du service backend ;
+- presence obligatoire des modeles IA (`MacroController` + modeles micro requis par le scenario PvE).
+
+Schema de deploiement :
+
+```mermaid
+flowchart LR
+    U[Utilisateur Internet/LAN] --> DNS[DDNS: game.40k-greg.synology.me]
+    DNS --> RP[Reverse Proxy DSM :443]
+    RP --> FE[Frontend Docker Nginx :8081]
+    FE --> API[Backend Flask :5001]
+    API --> DB[(users.db)]
+    API --> MODELS[(ai/models)]
+    API --> RUNTIME[(runtime/logs)]
+```
+
+Flux applicatif simplifie :
+
+```mermaid
+sequenceDiagram
+    participant B as Navigateur
+    participant RP as Reverse Proxy DSM
+    participant FE as Frontend Nginx
+    participant API as Backend Flask
+
+    B->>RP: HTTPS /auth, /game
+    RP->>FE: HTTP :8081
+    FE-->>B: SPA + assets
+    B->>RP: HTTPS /api/auth/login
+    RP->>FE: /api/*
+    FE->>API: Proxy interne :5001
+    API-->>FE: JSON
+    FE-->>B: Etat de jeu / erreurs metier
+```
+
 ---
 
 ## 5. Conclusion

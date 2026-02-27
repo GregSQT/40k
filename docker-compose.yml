@@ -23,7 +23,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: frontend/Dockerfile
+      dockerfile: frontend/Dockerfileaha²a&é
     container_name: wh40k-frontend
     restart: unless-stopped
     depends_on:
