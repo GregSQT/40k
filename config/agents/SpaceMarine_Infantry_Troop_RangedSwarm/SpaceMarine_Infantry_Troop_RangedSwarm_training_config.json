@@ -6,7 +6,7 @@
   "max_turns_per_episode": 5,
   "n_envs": 48,
   "callback_params": {
-    "checkpoint_save_freq": 50000,
+    "checkpoint_save_freq": 500000,
     "checkpoint_name_prefix": "ppo_checkpoint",
     "eval_deterministic": true,
     "eval_render": false,

@@ -46,6 +46,7 @@ class MacroTrainingWrapper(gym.Wrapper):
         scenario_files: List[str],
         model_path_template: str,
         macro_player: int,
+        macro_max_units: int,
         debug_mode: bool = False,
     ) -> None:
         super().__init__(base_env)
@@ -53,8 +54,11 @@ class MacroTrainingWrapper(gym.Wrapper):
         self.unit_registry = unit_registry
         self.debug_mode = debug_mode
         self.macro_player = int(macro_player)
+        self.macro_max_units = int(macro_max_units)
         if self.macro_player not in (1, 2):
             raise ValueError(f"macro_player must be 1 or 2 (got {self.macro_player})")
+        if self.macro_max_units <= 0:
+            raise ValueError(f"macro_max_units must be > 0 (got {self.macro_max_units})")
 
         if not scenario_files:
             raise ValueError("scenario_files is required for MacroTrainingWrapper")
@@ -96,9 +100,15 @@ class MacroTrainingWrapper(gym.Wrapper):
         ]
         self.objective_feature_size = 3
 
-        self.max_units = self._get_max_units_from_scenarios(self.scenario_files)
-        if self.max_units <= 0:
-            raise ValueError(f"Invalid max_units for macro training: {self.max_units}")
+        scenario_max_units = self._get_max_units_from_scenarios(self.scenario_files)
+        if scenario_max_units <= 0:
+            raise ValueError(f"Invalid max_units from scenarios for macro training: {scenario_max_units}")
+        if scenario_max_units > self.macro_max_units:
+            raise ValueError(
+                "Scenario units exceed configured macro_max_units: "
+                f"scenario_max_units={scenario_max_units} macro_max_units={self.macro_max_units}"
+            )
+        self.max_units = self.macro_max_units
         self.max_objectives = self._get_max_objectives_from_scenarios(self.scenario_files) + 1
         if self.max_objectives <= 0:
             raise ValueError(f"Invalid max_objectives for macro training: {self.max_objectives}")
@@ -717,6 +727,7 @@ class MacroVsBotWrapper(MacroTrainingWrapper):
         scenario_files: List[str],
         model_path_template: str,
         macro_player: int,
+        macro_max_units: int,
         bot,
         debug_mode: bool = False,
     ) -> None:
@@ -726,6 +737,7 @@ class MacroVsBotWrapper(MacroTrainingWrapper):
             scenario_files=scenario_files,
             model_path_template=model_path_template,
             macro_player=macro_player,
+            macro_max_units=macro_max_units,
             debug_mode=debug_mode,
         )
         self.bot = bot

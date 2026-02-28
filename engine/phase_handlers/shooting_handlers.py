@@ -3210,7 +3210,8 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
                 "action": "postpone",
                 "unitId": unit_id,
                 "activation_ended": False,
-                "reset_mode": "select"
+                "reset_mode": "select",
+                "clear_selected_unit": True
             }
     
     else:
@@ -3238,7 +3239,8 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
                 "action": "postpone",
                 "unitId": unit_id,
                 "activation_ended": False,
-                "reset_mode": "select"
+                "reset_mode": "select",
+                "clear_selected_unit": True
             }
         else:
             # YES -> Do not end activation automatically (allow user to click active unit to confirm)

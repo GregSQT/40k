@@ -959,6 +959,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
 
     n_envs = require_key(training_config, "n_envs")
     macro_player = require_key(training_config, "macro_player")
+    macro_max_units = require_key(training_config, "macro_max_units")
 
     models_root = config.get_models_root()
     model_path_template = os.path.join(models_root, "{model_key}", "model_{model_key}.zip")
@@ -973,6 +974,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
                 controlled_agent_key=effective_agent_key,
                 model_path_template=model_path_template,
                 macro_player=macro_player,
+                macro_max_units=macro_max_units,
                 scenario_files=scenario_files,
                 debug_mode=debug_mode
             )
@@ -1003,6 +1005,7 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
             scenario_files=scenario_files,
             model_path_template=model_path_template,
             macro_player=macro_player,
+            macro_max_units=macro_max_units,
             debug_mode=debug_mode
         )
         def mask_fn(env):
@@ -1077,6 +1080,7 @@ def _build_macro_eval_env(config, training_config_name, rewards_config_name, age
         base_env.step_logger = step_logger
     training_config = config.load_agent_training_config(agent_key, training_config_name)
     macro_player = require_key(training_config, "macro_player")
+    macro_max_units = require_key(training_config, "macro_max_units")
     models_root = config.get_models_root()
     model_path_template = os.path.join(models_root, "{model_key}", "model_{model_key}.zip")
     if bot is None:
@@ -1086,6 +1090,7 @@ def _build_macro_eval_env(config, training_config_name, rewards_config_name, age
             scenario_files=[scenario_file],
             model_path_template=model_path_template,
             macro_player=macro_player,
+            macro_max_units=macro_max_units,
             debug_mode=debug_mode
         )
     return MacroVsBotWrapper(
@@ -1094,6 +1099,7 @@ def _build_macro_eval_env(config, training_config_name, rewards_config_name, age
         scenario_files=[scenario_file],
         model_path_template=model_path_template,
         macro_player=macro_player,
+        macro_max_units=macro_max_units,
         bot=bot,
         debug_mode=debug_mode
     )

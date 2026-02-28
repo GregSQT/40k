@@ -1131,7 +1131,9 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "toCol": result_to_col,  # Use unit coordinates after movement - SINGLE SOURCE OF TRUTH
         "toRow": result_to_row,  # Use unit coordinates after movement - SINGLE SOURCE OF TRUTH
         "activation_complete": True,
-        "waiting_for_player": False  # Movement is complete, no waiting needed
+        "waiting_for_player": False,  # Movement is complete, no waiting needed
+        "reset_mode": "select",
+        "clear_selected_unit": True
     })
     
     return True, result
@@ -1160,7 +1162,9 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
         result.update({
             "action": "wait",  # Agent chose to pass
             "unitId": unit["id"],
-            "activation_complete": True
+            "activation_complete": True,
+            "reset_mode": "select",
+            "clear_selected_unit": True
         })
     else:
         # AI_TURN.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1) - no step (unit could not act)
@@ -1176,7 +1180,9 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
             "action": "skip",
             "skip_reason": "no_valid_move_destinations",
             "unitId": unit["id"],
-            "activation_complete": True
+            "activation_complete": True,
+            "reset_mode": "select",
+            "clear_selected_unit": True
         })
 
     return True, result

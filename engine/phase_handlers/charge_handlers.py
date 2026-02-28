@@ -1857,7 +1857,9 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
     result.update({
         "action": "wait",
         "unitId": unit["id"],
-        "activation_complete": True
+        "activation_complete": True,
+        "reset_mode": "select",
+        "clear_selected_unit": True
     })
 
     # Check if pool is now empty after removing this unit

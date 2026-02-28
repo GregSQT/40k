@@ -5,6 +5,7 @@
   "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
   "max_turns_per_episode": 5,
   "macro_player": 1,
+  "macro_max_units": 32,
   "n_envs": 48,
   "callback_params": {
     "checkpoint_save_freq": 50000,
@@ -74,6 +75,7 @@
   "total_episodes": 10000,
   "total_episodes_normal": "Phase 2 append anti-regression",
   "max_turns_per_episode": 5,
+  "macro_max_units": 32,
   "n_envs": 48,
   "callback_params": {
     "checkpoint_save_freq": 50000,
@@ -143,6 +145,7 @@
     "total_episodes": 10,
     "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
     "max_turns_per_episode": 5,
+    "macro_max_units": 32,
     "n_envs": 1,
     "callback_params": {
       "checkpoint_save_freq": 50000,

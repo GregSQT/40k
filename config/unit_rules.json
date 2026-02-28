@@ -3,16 +3,40 @@
     "id": "charge_after_advance",
     "description": "Allows a unit to charge in the same turn it advanced."
   },
-  "adaptable_predators": {
-    "id": "adaptable_predators",
-    "description": "This unit can shoot and charge in a turn in which it fell back."
+  "charge_after_flee": {
+    "id": "charge_after_flee",
+    "description": "Allows a unit to charge in a turn in which it fell back."
+  },
+  "charge_impact": {
+    "id": "charge_impact",
+    "description": "After this unit has charged, select one enemy unit withing engagement. Roll 1d6 : On a 4+, the target suffers 1 mortal wound"
+  },
+  "closest_target_penetration": {
+    "id": "closest_target_penetration",
+    "description": "When this unit makes a shooting attack at the closest eligible unit, add 1 to the weapon's penetration."
+  },
+  "reroll_1_towound": {
+    "id": "reroll_1_towound",
+    "description": "When this unit makes an attack, it can reroll rolls of 1 for the wound rolls."
+  },
+  "reroll_towound_target_on_objective": {
+    "id": "reroll_towound_target_on_objective",
+    "description": "When this unit makes an attack, it can reroll the wound rolls if the target unit is on an objective."
   },
   "shoot_after_flee": {
     "id": "shoot_after_flee",
     "description": "Allows a unit to shoot in a turn in which it fell back."
   },
-  "charge_after_flee": {
-    "id": "charge_after_flee",
-    "description": "Allows a unit to charge in a turn in which it fell back."
+
+
+
+
+  "targeted_intercession": {
+    "id": "targeted_intercession",
+    "description": "Assault Interecessor : When this unit makes an attack, it can reroll rolls of 1 for the wound rolls. If the target is on an objective, it can reroll the wound rolls."
+  },
+  "adaptable_predators": {
+    "id": "adaptable_predators",
+    "description": "Tyranid Warrior (range) : This unit can shoot and charge in a turn in which it fell back."
   }
 }

@@ -1099,14 +1099,29 @@ class BotEvaluationCallback(BaseCallback):
         else:
             self.bots = {}
 
-    def _save_model_with_vecnormalize(self, save_path: str) -> None:
-        """Save model and associated VecNormalize statistics."""
-        self.model.save(save_path)
+    @staticmethod
+    def _ensure_zip_path(model_path: str) -> str:
+        """Return a model path that always ends with .zip."""
+        return model_path if model_path.endswith(".zip") else f"{model_path}.zip"
+
+    def _save_model_with_vecnormalize(self, save_path: str) -> str:
+        """Save model (.zip) and associated VecNormalize statistics.
+
+        Returns:
+            Absolute/relative path to the saved model zip.
+        """
+        model_zip_path = self._ensure_zip_path(save_path)
+        self.model.save(model_zip_path)
+        if not os.path.exists(model_zip_path):
+            raise FileNotFoundError(
+                f"Model save did not produce expected .zip artifact: {model_zip_path}"
+            )
         try:
             from ai.vec_normalize_utils import save_vec_normalize
-            save_vec_normalize(self.model.get_env(), f"{save_path}.zip")
+            save_vec_normalize(self.model.get_env(), model_zip_path)
         except Exception:
             pass
+        return model_zip_path
 
     def _infer_agent_key(self) -> str:
         """Infer agent key from best-model save directory."""
@@ -1117,14 +1132,15 @@ class BotEvaluationCallback(BaseCallback):
             raise ValueError(f"Cannot infer agent key from path: {self.best_model_save_path}")
         return agent_key
 
-    def _build_robust_save_base_path(self, robust_score: float) -> str:
-        """Build robust checkpoint base path (without .zip extension)."""
+    def _build_robust_model_zip_path(self, robust_score: float) -> str:
+        """Build robust checkpoint path with explicit .zip extension."""
         agent_key = self._infer_agent_key()
         robust_score_str = f"{robust_score:.4f}"
-        return os.path.join(
+        model_base_path = os.path.join(
             self.best_model_save_path,
             f"{agent_key}_robust_{robust_score_str}"
         )
+        return self._ensure_zip_path(model_base_path)
 
     def _build_canonical_model_path(self) -> str:
         """Build canonical model path model_<agent>.zip."""
@@ -1265,9 +1281,9 @@ class BotEvaluationCallback(BaseCallback):
                     self.best_robust_combined = combined_win_rate
                     self.best_robust_eval_marker = eval_marker
                     if self.best_model_save_path:
-                        robust_save_path = self._build_robust_save_base_path(robust_score)
-                        self._save_model_with_vecnormalize(robust_save_path)
-                        self.best_robust_model_path = f"{robust_save_path}.zip"
+                        robust_model_zip_path = self._build_robust_model_zip_path(robust_score)
+                        saved_robust_zip_path = self._save_model_with_vecnormalize(robust_model_zip_path)
+                        self.best_robust_model_path = saved_robust_zip_path
                         self._cleanup_legacy_best_robust_artifacts()
 
                         if (

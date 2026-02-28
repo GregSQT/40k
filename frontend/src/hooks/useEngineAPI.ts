@@ -435,6 +435,12 @@ export const useEngineAPI = () => {
       if (!gameState) {
         return;
       }
+      if (!gameState.units_cache) {
+        setError(
+          "Partie non demarree: units_cache manquant. Lance d'abord /api/game/start avec succes."
+        );
+        return;
+      }
       if (gameState.game_over) {
         return;
       }
@@ -576,6 +582,7 @@ export const useEngineAPI = () => {
           ) {
             const unitId = parseInt(data.result.unitId, 10);
             setSelectedUnitId(unitId);
+            setAdvancingUnitId(unitId);
             setMode("advancePreview");
           }
 
@@ -1602,6 +1609,11 @@ export const useEngineAPI = () => {
   const handleCancelAdvance = useCallback(async () => {
     // Get the advancing unit ID before clearing state
     const unitIdToSkip = advancingUnitId;
+    if (unitIdToSkip === null) {
+      throw new Error(
+        "Invariant violation: advancingUnitId is required to cancel advance activation"
+      );
+    }
 
     // Clear advance state
     setAdvanceDestinations([]);
@@ -1613,12 +1625,10 @@ export const useEngineAPI = () => {
     setSelectedUnitId(null);
 
     // Send skip action to backend to remove unit from activation pool
-    if (unitIdToSkip !== null) {
-      await executeAction({
-        action: "skip",
-        unitId: unitIdToSkip.toString(),
-      });
-    }
+    await executeAction({
+      action: "skip",
+      unitId: unitIdToSkip.toString(),
+    });
   }, [executeAction, advancingUnitId]);
 
   // Handle advance warning popup confirmation

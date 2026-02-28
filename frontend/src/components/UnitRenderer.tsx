@@ -1824,6 +1824,28 @@ export class UnitRenderer {
 
     // Use persistent UI container if provided, otherwise fall back to stage
     const targetContainer = uiElementsContainer || app.stage;
+    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+
+    // Always clean up stale advance badges for this unit before deciding to render a new one.
+    if (uiElementsContainer) {
+      const staleElements = uiElementsContainer.children.filter((child: PIXI.DisplayObject) =>
+        child.name?.startsWith(`advance-badge-${unitIdNum}-`)
+      );
+      staleElements.forEach((child: PIXI.DisplayObject) => {
+        uiElementsContainer.removeChild(child);
+        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
+      });
+    } else {
+      const staleElements = app.stage.children.filter(
+        (child: PIXI.DisplayObject) =>
+          (child instanceof PIXI.Graphics || child instanceof PIXI.Text) &&
+          child.name?.startsWith(`advance-badge-${unitIdNum}-`)
+      );
+      staleElements.forEach((child: PIXI.DisplayObject) => {
+        app.stage.removeChild(child);
+        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
+      });
+    }
 
     // Show advance roll badge ONLY on the unit that is advancing
     if (!advancingUnitId || unit.id !== advancingUnitId) {
@@ -1832,18 +1854,6 @@ export class UnitRenderer {
 
     // Must have an advance roll value to display
     if (advanceRoll === undefined || advanceRoll === null) return;
-
-    // Clean up any existing advance badge for this unit from the container
-    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
-    if (uiElementsContainer) {
-      const existingElements = uiElementsContainer.children.filter(
-        (child: PIXI.DisplayObject) => child.name === `advance-badge-${unitIdNum}`
-      );
-      existingElements.forEach((child: PIXI.DisplayObject) => {
-        uiElementsContainer.removeChild(child);
-        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
-      });
-    }
 
     // Calculate badge position (bottom-right of unit) - same as charge roll badge
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;

@@ -214,6 +214,7 @@ def make_macro_training_env(
     controlled_agent_key,
     model_path_template,
     macro_player,
+    macro_max_units,
     scenario_files,
     debug_mode=False
 ):
@@ -228,6 +229,7 @@ def make_macro_training_env(
         controlled_agent_key: Agent key used by W40KEngine
         model_path_template: Template path to micro models with {model_key}
         macro_player: Controlled macro player id (1 or 2)
+        macro_max_units: Fixed macro capacity for unit slots (strict upper bound)
         scenario_files: Scenario files used by macro wrapper
         debug_mode: Enable debug mode
 
@@ -260,6 +262,7 @@ def make_macro_training_env(
             scenario_files=scenario_files,
             model_path_template=model_path_template,
             macro_player=macro_player,
+            macro_max_units=macro_max_units,
             debug_mode=debug_mode
         )
 

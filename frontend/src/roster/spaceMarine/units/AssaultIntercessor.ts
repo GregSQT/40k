@@ -1,10 +1,10 @@
 // frontend/src/roster/spaceMarine/units/AssaultIntercessor.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopMeleeTroop } from "../classes/SpaceMarineInfantryTroopMeleeTroop";
+import { SpaceMarineInfantryTroopMeleeSwarm } from "../classes/SpaceMarineInfantryTroopMeleeSwarm";
 
-export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeTroop {
-  static NAME = "Assault Intercessor";
+export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeSwarm {
+  static NAME = "AssaultIntercessor";
   static DISPLAY_NAME = "Assault Intercessor";
   // BASE
   static MOVE = 6; // Move distance
@@ -21,6 +21,18 @@ export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeTroop {
   static RNG_WEAPONS = getWeapons(AssaultIntercessor.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["assault_intercessor_chainsword"];
   static CC_WEAPONS = getWeapons(AssaultIntercessor.CC_WEAPON_CODES);
+
+  // UNIT RULES
+  static UNIT_RULES = [
+    {
+      ruleId: "targeted_intercession",
+      displayName: "Targeted Intercession",
+      grants_rule_ids: ["reroll_1_towound", "reroll_towound_target_on_objective"],
+    },
+  ];
+
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "assault intercessor squad"}];
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save

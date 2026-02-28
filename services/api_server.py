@@ -1334,6 +1334,12 @@ def execute_action():
     
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
+    if "units_cache" not in engine.game_state:
+        return jsonify({
+            "success": False,
+            "error": "Game not started: units_cache is missing. Call /api/game/start successfully before /api/game/action.",
+            "error_code": "game_not_started_call_start_first",
+        }), 400
     
     try:
         data = request.json
