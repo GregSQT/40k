@@ -1601,6 +1601,15 @@ def parse_step_log(filepath: str) -> Dict:
                                     if stats['first_error_lines']['shoot_after_flee'][player] is None:
                                         stats['first_error_lines']['shoot_after_flee'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
+                            # RULE METRICS: Targeted Intercession granted reroll mechanics (shooting)
+                            shooter_unit_type_for_reroll = require_key(unit_types, shooter_id)
+                            if re.search(r'\(REROLL 1 TO WOUND\)', action_desc, re.IGNORECASE):
+                                key = ("reroll_1_towound", shooter_unit_type_for_reroll)
+                                stats['special_rule_usage'][key][player] += 1
+                            if re.search(r'\(REROLL TO WOUND ON OBJECTIVE\)', action_desc, re.IGNORECASE):
+                                key = ("reroll_towound_target_on_objective", shooter_unit_type_for_reroll)
+                                stats['special_rule_usage'][key][player] += 1
+
                             # RULE: Shoot at friendly
                             # CRITICAL: Use shooter's actual player, not phase player
                             # The phase player (P1/P2) indicates whose turn it is, not which player the shooter belongs to
@@ -3310,6 +3319,13 @@ def parse_step_log(filepath: str) -> Dict:
                             if weapon_match:
                                 weapon_display_name = weapon_match.group(1).strip()
                                 fighter_unit_type = require_key(unit_types, fighter_id)
+                                # RULE METRICS: Targeted Intercession granted reroll mechanics (fight)
+                                if re.search(r'\(REROLL 1 TO WOUND\)', action_desc, re.IGNORECASE):
+                                    key = ("reroll_1_towound", fighter_unit_type)
+                                    stats['special_rule_usage'][key][player] += 1
+                                if re.search(r'\(REROLL TO WOUND ON OBJECTIVE\)', action_desc, re.IGNORECASE):
+                                    key = ("reroll_towound_target_on_objective", fighter_unit_type)
+                                    stats['special_rule_usage'][key][player] += 1
                                 if fighter_unit_type:
                                     limits = require_key(unit_attack_limits, fighter_unit_type)
                                     cc_nb_by_weapon = require_key(limits, "cc_nb_by_weapon")

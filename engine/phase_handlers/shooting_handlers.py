@@ -124,7 +124,9 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
         direct_rule_id = require_key(rule, "ruleId")
         if direct_rule_id == rule_id:
             return True
-        granted_rule_ids = require_key(rule, "grants_rule_ids")
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
         if not isinstance(granted_rule_ids, list):
             raise TypeError(
                 f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
@@ -132,6 +134,35 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
             )
         if rule_id in granted_rule_ids:
             return True
+    return False
+
+
+def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    """Return True if unit coordinates are inside any objective hex."""
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    objectives = require_key(game_state, "objectives")
+    if not isinstance(objectives, list):
+        raise TypeError(f"game_state['objectives'] must be a list, got {type(objectives).__name__}")
+
+    for objective in objectives:
+        objective_hexes = require_key(objective, "hexes")
+        if not isinstance(objective_hexes, list):
+            raise TypeError(f"objective['hexes'] must be a list, got {type(objective_hexes).__name__}")
+        for objective_hex in objective_hexes:
+            if isinstance(objective_hex, dict):
+                obj_col, obj_row = normalize_coordinates(
+                    require_key(objective_hex, "col"),
+                    require_key(objective_hex, "row")
+                )
+            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
+                obj_col, obj_row = normalize_coordinates(objective_hex[0], objective_hex[1])
+            else:
+                raise TypeError(
+                    "objective hex entry must be {'col','row'} or [col,row]/(col,row), "
+                    f"got {objective_hex!r}"
+                )
+            if unit_col == obj_col and unit_row == obj_row:
+                return True
     return False
 
 
@@ -4215,10 +4246,24 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     wound_roll = random.randint(1, 6)
     wound_target = _calculate_wound_target(weapon["STR"], target["T"])
     wound_success = wound_roll >= wound_target
+    wound_log_suffix = ""
+    if not wound_success:
+        can_reroll_failed_wound_on_objective = (
+            _unit_has_rule(attacker, "reroll_towound_target_on_objective")
+            and _is_unit_on_objective(target, game_state)
+        )
+        can_reroll_wound_ones = wound_roll == 1 and _unit_has_rule(attacker, "reroll_1_towound")
+        if can_reroll_failed_wound_on_objective or can_reroll_wound_ones:
+            wound_roll = random.randint(1, 6)
+            wound_success = wound_roll >= wound_target
+            if can_reroll_failed_wound_on_objective:
+                wound_log_suffix = "(REROLL TO WOUND ON OBJECTIVE)"
+            else:
+                wound_log_suffix = "(REROLL 1 TO WOUND)"
     
     if not wound_success:
         # FAIL case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+) : FAILED !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} : FAILED !"
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -4242,7 +4287,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     
     if save_success:
         # SAVE case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) : SAVED !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) : SAVED !"
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -4266,10 +4311,10 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     
     if new_hp <= 0:
         # Target dies
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} delt : Unit {target_id} DIED !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} delt : Unit {target_id} DIED !"
     else:
         # Target survives
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DELT !"
+        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DELT !"
     
     return {
         "hit_roll": hit_roll,

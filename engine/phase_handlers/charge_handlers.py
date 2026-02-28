@@ -30,7 +30,9 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
         direct_rule_id = require_key(rule, "ruleId")
         if direct_rule_id == rule_id:
             return True
-        granted_rule_ids = require_key(rule, "grants_rule_ids")
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
         if not isinstance(granted_rule_ids, list):
             raise TypeError(
                 f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "

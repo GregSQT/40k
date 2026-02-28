@@ -30,6 +30,55 @@ from .shared_utils import (
     get_unit_position, require_unit_position,
 )
 
+
+def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
+    """Check if unit has a specific direct or granted rule effect by ruleId."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        direct_rule_id = require_key(rule, "ruleId")
+        if direct_rule_id == rule_id:
+            return True
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if rule_id in granted_rule_ids:
+            return True
+    return False
+
+
+def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    """Return True if unit coordinates are inside any objective hex."""
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    objectives = require_key(game_state, "objectives")
+    if not isinstance(objectives, list):
+        raise TypeError(f"game_state['objectives'] must be a list, got {type(objectives).__name__}")
+
+    for objective in objectives:
+        objective_hexes = require_key(objective, "hexes")
+        if not isinstance(objective_hexes, list):
+            raise TypeError(f"objective['hexes'] must be a list, got {type(objective_hexes).__name__}")
+        for objective_hex in objective_hexes:
+            if isinstance(objective_hex, dict):
+                obj_col, obj_row = normalize_coordinates(
+                    require_key(objective_hex, "col"),
+                    require_key(objective_hex, "row")
+                )
+            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
+                obj_col, obj_row = normalize_coordinates(objective_hex[0], objective_hex[1])
+            else:
+                raise TypeError(
+                    "objective hex entry must be {'col','row'} or [col,row]/(col,row), "
+                    f"got {objective_hex!r}"
+                )
+            if unit_col == obj_col and unit_row == obj_row:
+                return True
+    return False
+
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Initialize fight phase and build activation pools.
@@ -1739,10 +1788,24 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         wound_roll = random.randint(1, 6)
         wound_target = _calculate_wound_target(weapon["STR"], target["T"])
         wound_success = wound_roll >= wound_target
+        wound_log_suffix = ""
+        if not wound_success:
+            can_reroll_failed_wound_on_objective = (
+                _unit_has_rule(attacker, "reroll_towound_target_on_objective")
+                and _is_unit_on_objective(target, game_state)
+            )
+            can_reroll_wound_ones = wound_roll == 1 and _unit_has_rule(attacker, "reroll_1_towound")
+            if can_reroll_failed_wound_on_objective or can_reroll_wound_ones:
+                wound_roll = random.randint(1, 6)
+                wound_success = wound_roll >= wound_target
+                if can_reroll_failed_wound_on_objective:
+                    wound_log_suffix = "(REROLL TO WOUND ON OBJECTIVE)"
+                else:
+                    wound_log_suffix = "(REROLL 1 TO WOUND)"
 
         if not wound_success:
             # FAIL TO WOUND case
-            attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) : FAILED !"
+            attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} : FAILED !"
         else:
             # WOUND -> Continue to save roll
             save_roll = random.randint(1, 6)
@@ -1751,7 +1814,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
 
             if save_success:
                 # SAVED case
-                attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) : SAVED !"
+                attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) : SAVED !"
             else:
                 # DAMAGE case - apply damage. HP_CUR single write path: update_units_cache_hp only (Phase 2: from cache)
                 damage_dealt = resolve_dice_value(require_key(weapon, "DMG"), "fight_damage")
@@ -1772,9 +1835,9 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate cache for dead unit
                     from engine.ai.weapon_selector import invalidate_cache_for_unit
                     invalidate_cache_for_unit(cache, str(target["id"]))
-                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} dealt : Unit {target_id} DIED !"
+                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} dealt : Unit {target_id} DIED !"
                 else:
-                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+) - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DEALT !"
+                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DEALT !"
 
     # AI_TURN.md COMPLIANCE: Log ALL attacks to action_logs (not just damage)
     if "action_logs" not in game_state:
