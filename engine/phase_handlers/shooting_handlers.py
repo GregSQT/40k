@@ -268,10 +268,11 @@ def weapon_availability_check(
                 can_use = False
                 reason = "Cannot shoot after advance (weapon_rule=0)"
             else:
-                # arg1=1 AND arg2=1 -> ✅ Weapon MUST have ASSAULT rule (continue to next check)
-                if not _weapon_has_assault_rule(weapon):
+                # arg1=1 AND arg2=1 -> ✅ Weapon MUST have ASSAULT rule OR unit must have shoot_after_advance
+                has_shoot_after_advance = _unit_has_rule(unit, "shoot_after_advance")
+                if not _weapon_has_assault_rule(weapon) and not has_shoot_after_advance:
                     can_use = False
-                    reason = "No ASSAULT rule (cannot shoot after advancing)"
+                    reason = "No ASSAULT rule or shoot_after_advance (cannot shoot after advancing)"
         
         # Check arg3 (adjacent_status)
         if can_use and adjacent_status == 1:
@@ -3302,7 +3303,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if has_advanced:
             from engine.utils.weapon_helpers import get_selected_ranged_weapon
             selected_weapon = get_selected_ranged_weapon(unit)
-            if not selected_weapon or not _weapon_has_assault_rule(selected_weapon):
+            can_shoot_after_advance = _unit_has_rule(unit, "shoot_after_advance")
+            if not selected_weapon or (not _weapon_has_assault_rule(selected_weapon) and not can_shoot_after_advance):
                 return False, {"error": "cannot_shoot_after_advance_without_assault", "unitId": unit_id_str}
         
         # PISTOL RULE VALIDATION: Block shooting non-PISTOL weapons when adjacent to enemy

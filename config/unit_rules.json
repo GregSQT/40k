@@ -23,6 +23,10 @@
     "id": "reroll_towound_target_on_objective",
     "description": "When this unit makes an attack, it can reroll the wound rolls if the target unit is on an objective."
   },
+  "shoot_after_advance": {
+    "id": "shoot_after_advance",
+    "description": "Allows a unit to shoot in a turn in which it advanced."
+  },
   "shoot_after_flee": {
     "id": "shoot_after_flee",
     "description": "Allows a unit to shoot in a turn in which it fell back."
@@ -31,12 +35,17 @@
 
 
 
-  "targeted_intercession": {
-    "id": "targeted_intercession",
-    "description": "Assault Interecessor : When this unit makes an attack, it can reroll rolls of 1 for the wound rolls. If the target is on an objective, it can reroll the wound rolls."
-  },
   "adaptable_predators": {
     "id": "adaptable_predators",
     "description": "Tyranid Warrior (range) : This unit can shoot and charge in a turn in which it fell back."
+  },
+  "cunning_hunters": {
+    "id": "cunning_hunters",
+    "description": "Grey Hunters : This unit can shoot in a turn in which it fell back or advanced."
+  },
+  "targeted_intercession": {
+    "id": "targeted_intercession",
+    "description": "Assault Interecessor : When this unit makes an attack, it can reroll rolls of 1 for the wound rolls. If the target is on an objective, it can reroll the wound rolls."
   }
+  
 }

@@ -336,12 +336,9 @@ class UnitRegistry:
         for faction in self.factions:
             self.faction_role_matrix[faction] = []
         
-        # Advanced 4-part agent mapping: Faction_MoveType_TankingLevel_AttackTypeTarget
+        # Inter-faction agent mapping: MoveType_TankingLevel_AttackTypeTarget
         for unit_type, unit_data in self.units.items():
-            faction = unit_data['faction']
-            role = unit_data['role']
-            
-            # Generate 4-part agent key based on unit characteristics
+            # Generate inter-faction key based on unit characteristics
             agent_key = self._generate_advanced_agent_key(unit_type, unit_data)
             
             # Add to matrix
@@ -351,8 +348,7 @@ class UnitRegistry:
             self.faction_role_matrix[agent_key].append(unit_type)
     
     def _generate_advanced_agent_key(self, unit_type: str, unit_data: Dict) -> str:
-        """Generate 4-part agent key: Faction_MoveType_TankingLevel_AttackTypeTarget"""
-        faction = unit_data['faction']
+        """Generate inter-faction key: MoveType_TankingLevel_AttackTypeTarget."""
         role = unit_data['role']  # "Melee" or "Ranged"
         
         # Get all required properties - will raise errors if missing
@@ -360,7 +356,7 @@ class UnitRegistry:
         tanking_level = self._get_tanking_level(unit_type, unit_data)
         attack_target = self._get_attack_target(unit_type, unit_data, role)
         
-        return f"{faction}_{move_type}_{tanking_level}_{attack_target}"
+        return f"{move_type}_{tanking_level}_{attack_target}"
     
     def _determine_move_type(self, unit_type: str, unit_data: Dict) -> str:
         """Determine movement type based on unit characteristics."""

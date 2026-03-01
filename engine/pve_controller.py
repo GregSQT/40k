@@ -67,10 +67,11 @@ class PvEController:
                 raise ValueError(f"micro_only_mode must be boolean (got {type(micro_only_mode).__name__})")
             config = get_config_loader()
             models_root = config.get_models_root()
+            macro_model_storage_key = config._resolve_agent_config_key(self.macro_model_key)
             macro_model_path = os.path.join(
                 models_root,
-                self.macro_model_key,
-                f"model_{self.macro_model_key}.zip"
+                macro_model_storage_key,
+                f"model_{macro_model_storage_key}.zip"
             )
             if debug_mode:
                 print(f"DEBUG: Macro model path: {macro_model_path}")
@@ -111,10 +112,11 @@ class PvEController:
             self.micro_models = {}
             self.micro_model_paths = {}
             for model_key in micro_model_keys:
+                model_storage_key = config._resolve_agent_config_key(model_key)
                 model_path = os.path.join(
                     models_root,
-                    model_key,
-                    f"model_{model_key}.zip"
+                    model_storage_key,
+                    f"model_{model_storage_key}.zip"
                 )
                 if debug_mode:
                     print(f"DEBUG: Micro model path: {model_path}")

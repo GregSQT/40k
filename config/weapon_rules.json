@@ -1,6 +1,6 @@
 {
-"ANTI": {
-    "name": "Anti-<Keyword>",
+"ANTI_VEHICLE": {
+    "name": "Anti-Vehicle",
     "description": "An unmodified Wound roll of X+ against a target with the matching keyword scores a Critical Wound.",
     "has_parameter": true
   },

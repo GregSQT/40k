@@ -1,11 +1,11 @@
-// frontend/src/roster/spaceMarine/units/Terminator.ts
+// frontend/src/roster/spaceMarine/units/TerminatorAssaultCannon.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteMeleeElite } from "../classes/SpaceMarineInfantryEliteMeleeElite";
+import { SpaceMarineInfantryEliteRangedTroop } from "../classes/SpaceMarineInfantryEliteRangedTroop";
 
-export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
-  static NAME = "Terminator";
-  static DISPLAY_NAME = "Terminator";
+export class TerminatorAssaultCannon extends SpaceMarineInfantryEliteRangedTroop {
+  static NAME = "TerminatorAssaultCannon";
+  static DISPLAY_NAME = "Terminator (Assault Cannon)";
 
   // BASE
   static MOVE = 5; // Move distance
@@ -19,9 +19,9 @@ export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["assault_cannon"];
-  static RNG_WEAPONS = getWeapons(Terminator.RNG_WEAPON_CODES);
+  static RNG_WEAPONS = getWeapons(TerminatorAssaultCannon.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["power_fist"];
-  static CC_WEAPONS = getWeapons(Terminator.CC_WEAPON_CODES);
+  static CC_WEAPONS = getWeapons(TerminatorAssaultCannon.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
@@ -32,6 +32,6 @@ export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
   static ICON_SCALE = 2.0; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, Terminator.HP_MAX, startPos);
+    super(name, TerminatorAssaultCannon.HP_MAX, startPos);
   }
 }

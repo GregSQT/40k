@@ -22,6 +22,8 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "export:units": "ts-node scripts/exportUnits.ts > config/unit_definitions.json",
+    "generate:unit-agent-matrix": "python scripts/unit_matrix_generate.py",
+    "check:unit-agent-matrix": "python scripts/unit_matrix_generate.py --check",
     "eject": "react-scripts eject",
     "format": "biome format --write .",
     "format:check": "biome format .",

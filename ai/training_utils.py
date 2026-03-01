@@ -288,43 +288,62 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
     Returns:
         List of scenario file paths
     """
-    scenarios = []
-
+    scenarios: List[str] = []
     if not agent_key:
         return scenarios
 
-    scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
-    if not os.path.isdir(scenarios_dir):
+    scenarios_root = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
+    if not os.path.isdir(scenarios_root):
         return scenarios
 
-    # For "bot" and "self" scenario types, search independently of training config
-    # This allows: AgentName_scenario_bot1.json, AgentName_scenario_bot2.json, etc.
-    if scenario_type in ("bot", "self"):
-        # Pattern: AgentName_scenario_bot*.json (independent of training config)
-        pattern = f"{agent_key}_scenario_{scenario_type}*.json"
-        matching_files = glob.glob(os.path.join(scenarios_dir, pattern))
-        scenarios = matching_files
+    training_dir = os.path.join(scenarios_root, "training")
+    holdout_dir = os.path.join(scenarios_root, "holdout")
+    has_training_dir = os.path.isdir(training_dir)
+    has_holdout_dir = os.path.isdir(holdout_dir)
+
+    if scenario_type == "holdout":
+        search_dirs = [holdout_dir] if has_holdout_dir else []
+    elif scenario_type == "training":
+        search_dirs = [training_dir] if has_training_dir else []
     else:
-        # Original behavior: Pattern includes training config
-        # AgentName_scenario_phase1.json OR AgentName_scenario_phase1-1.json
-        pattern = f"{agent_key}_scenario_{training_config_name}*.json"
-        matching_files = glob.glob(os.path.join(scenarios_dir, pattern))
+        # Default training behavior:
+        # - if training/ exists, use it exclusively (prevents holdout leakage)
+        # - otherwise, keep legacy root behavior.
+        search_dirs = [training_dir] if has_training_dir else [scenarios_root]
 
-        # Filter by scenario type if specified (for numbered scenarios like "1", "2")
-        if scenario_type:
-            filtered = []
-            for f in matching_files:
-                basename = os.path.basename(f)
-                if f"-{scenario_type}" in basename:
-                    filtered.append(f)
-            scenarios = filtered
+    for search_dir in search_dirs:
+        if scenario_type in ("bot", "self"):
+            patterns = [
+                f"{agent_key}_{scenario_type}*.json",
+                f"{agent_key}_*_{scenario_type}*.json",
+            ]
         else:
-            scenarios = matching_files
+            patterns = [
+                f"{agent_key}_{training_config_name}.json",
+                f"{agent_key}_{training_config_name}-*.json",
+            ]
 
-    # Sort to ensure deterministic order
-    scenarios = sorted(scenarios)
+        matches: List[str] = []
+        for pattern in patterns:
+            matches.extend(glob.glob(os.path.join(search_dir, pattern)))
 
-    return scenarios
+        # If no phase-specific match exists in this directory, accept all agent files.
+        if not matches:
+            matches = glob.glob(os.path.join(search_dir, f"{agent_key}_*.json"))
+
+        scenarios.extend(matches)
+
+    # Filter by explicit subtype marker (e.g. "1", "2", "bot-1"), if provided.
+    if scenario_type and scenario_type not in ("bot", "self", "training", "holdout"):
+        filtered: List[str] = []
+        for scenario_path in scenarios:
+            basename = os.path.basename(scenario_path)
+            if f"-{scenario_type}" in basename:
+                filtered.append(scenario_path)
+        scenarios = filtered
+
+    # Deduplicate + deterministic ordering
+    return sorted(set(scenarios))
 
 def get_agent_scenario_file(config, agent_key, training_config_name, scenario_override=None):
     """Get scenario file path for agent-specific training.
@@ -341,19 +360,29 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
     Raises:
         FileNotFoundError: If no valid scenario file found
     """
+    scenarios_root = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
+    training_dir = os.path.join(scenarios_root, "training")
+    has_training_dir = os.path.isdir(training_dir)
+
+    # Search order for training:
+    # - prefer training/ when it exists
+    # - keep root as backward-compatible fallback source
+    search_dirs = [training_dir, scenarios_root] if has_training_dir else [scenarios_root]
+
     # If specific scenario requested, try to find it
     if scenario_override and scenario_override != "all":
         if agent_key:
             # Agent-specific scenario with explicit override
-            explicit_candidates = []
-            explicit_candidates.append(os.path.join(
-                config.config_dir, "agents", agent_key, "scenarios",
-                f"{agent_key}_scenario_{scenario_override}.json"
-            ))
-            explicit_candidates.append(os.path.join(
-                config.config_dir, "agents", agent_key, "scenarios",
-                f"{agent_key}_scenario_{training_config_name}-{scenario_override}.json"
-            ))
+            explicit_candidates: List[str] = []
+            for search_dir in search_dirs:
+                explicit_candidates.append(os.path.join(
+                    search_dir,
+                    f"{agent_key}_{scenario_override}.json"
+                ))
+                explicit_candidates.append(os.path.join(
+                    search_dir,
+                    f"{agent_key}_{training_config_name}-{scenario_override}.json"
+                ))
 
             found_explicit = [p for p in explicit_candidates if os.path.isfile(p)]
             if len(found_explicit) == 1:
@@ -367,34 +396,41 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
 
     # Try agent-specific scenario first (single, unambiguous file)
     if agent_key:
-        agent_scenario_path = os.path.join(
-            config.config_dir, "agents", agent_key, "scenarios",
-            f"{agent_key}_scenario_{training_config_name}.json"
-        )
-        if os.path.isfile(agent_scenario_path):
-            return agent_scenario_path
+        exact_candidates: List[str] = []
+        for search_dir in search_dirs:
+            exact_candidates.append(os.path.join(search_dir, f"{agent_key}_{training_config_name}.json"))
+        exact_matches = sorted([p for p in exact_candidates if os.path.isfile(p)])
+        if len(exact_matches) == 1:
+            return exact_matches[0]
+        if len(exact_matches) > 1:
+            raise FileNotFoundError(
+                f"Ambiguous exact scenario for agent '{agent_key}' and phase '{training_config_name}': "
+                f"{exact_matches}. Please keep only one exact phase scenario."
+            )
 
-        # Try variants for this phase (phase1-bot1, phase1-self1, phase2-1, etc.)
-        # Use glob to find any file matching the pattern, but do not silently pick one.
-        scenarios_dir = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
-        pattern = os.path.join(scenarios_dir, f"{agent_key}_scenario_{training_config_name}-*.json")
-        matching_files = sorted(glob.glob(pattern))
+        # Try variants for this phase (phase1-bot1, phase2-1, etc.).
+        matching_files: List[str] = []
+        for search_dir in search_dirs:
+            matching_files.extend(sorted(glob.glob(
+                os.path.join(search_dir, f"{agent_key}_{training_config_name}-*.json")
+            )))
+        matching_files = sorted(set(matching_files))
+
         if len(matching_files) == 1:
-            # Exactly one variant -> unambiguous
             return matching_files[0]
         elif len(matching_files) > 1:
-            # Multiple variants for this phase -> require explicit override
             variant_names = [os.path.basename(f) for f in matching_files]
             raise FileNotFoundError(
                 f"Multiple scenario variants found for agent '{agent_key}' and phase '{training_config_name}': "
-                f"{variant_names}. You must specify --scenario with an explicit variant name "
-                f"(e.g., 'phase2-1', 'phase2-bot1')."
+                f"{variant_names}. You must specify --scenario with an explicit variant name."
             )
 
     # No valid scenario found
     raise FileNotFoundError(
         f"No scenario file found for agent '{agent_key}' with phase '{training_config_name}'. "
-        f"Tried: agent-specific explicit scenario and phase-specific variants."
+        f"Tried training-first lookup with naming convention "
+        f"'{agent_key}_{training_config_name}.json' "
+        f"plus phase variants."
     )
 
 

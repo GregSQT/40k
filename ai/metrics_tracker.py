@@ -882,6 +882,36 @@ class W40KMetricsTracker:
             self.writer.add_scalar('bot_eval/combined', bot_results['combined'], self.episode_count)
             # Log IMMEDIATELY to 0_critical/ namespace (don't wait for next episode)
             self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], self.episode_count)
+
+    def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
+        """Log holdout split aggregates to TensorBoard."""
+        if 'holdout_regular_mean' in split_metrics:
+            self.writer.add_scalar(
+                'bot_eval/holdout_regular_mean',
+                float(split_metrics['holdout_regular_mean']),
+                self.episode_count
+            )
+        if 'holdout_hard_mean' in split_metrics:
+            self.writer.add_scalar(
+                'bot_eval/holdout_hard_mean',
+                float(split_metrics['holdout_hard_mean']),
+                self.episode_count
+            )
+        if 'holdout_overall_mean' in split_metrics:
+            self.writer.add_scalar(
+                'bot_eval/holdout_overall_mean',
+                float(split_metrics['holdout_overall_mean']),
+                self.episode_count
+            )
+
+    def log_scenario_split_scores(self, split_scores: Dict[str, float]) -> None:
+        """Log per-scenario split scores under dedicated category."""
+        for key, value in split_scores.items():
+            self.writer.add_scalar(
+                f'bot_split/{key}',
+                float(value),
+                self.episode_count
+            )
     
     def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
         """

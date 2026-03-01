@@ -2,9 +2,9 @@
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopRangedSwarm } from "../classes/SpaceMarineInfantryTroopRangedSwarm";
+import { SpaceMarineInfantryTroopMeleeElite } from "../classes/SpaceMarineInfantryTroopMeleeElite.ts";
 
-export class IntercessorSergeant extends SpaceMarineInfantryTroopRangedSwarm {
+export class IntercessorSergeant extends SpaceMarineInfantryTroopMeleeElite {
   static NAME = "IntercessorSergeant";
   static DISPLAY_NAME = "Intercessor (Sergeant)";
   // BASE

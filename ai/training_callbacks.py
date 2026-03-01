@@ -1212,6 +1212,18 @@ class BotEvaluationCallback(BaseCallback):
                     f"bot_eval/scenario/{slug}/worst_bot_score",
                     float(require_key(values, "worst_bot_score"))
                 )
+            scenario_split_scores = results.get("scenario_split_scores")
+            if scenario_split_scores is not None:
+                if not isinstance(scenario_split_scores, dict):
+                    raise TypeError(
+                        f"scenario_split_scores must be dict "
+                        f"(got {type(scenario_split_scores).__name__})"
+                    )
+                for metric_key, score in scenario_split_scores.items():
+                    self.model.logger.record(
+                        f"bot_split/{metric_key}",
+                        float(score)
+                    )
             self.model.logger.dump(step=self.model.num_timesteps)
 
     def _on_step(self) -> bool:

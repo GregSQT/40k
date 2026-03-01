@@ -106,13 +106,13 @@ def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: s
 
 def _scenario_name_from_file(base_agent_key: str, scenario_file: str) -> str:
     """Build short scenario name used in logs/results."""
+    basename = os.path.basename(scenario_file).replace(".json", "")
     if not base_agent_key:
-        return os.path.basename(scenario_file).replace(".json", "")
-    return (
-        os.path.basename(scenario_file)
-        .replace(f"{base_agent_key}_scenario_", "")
-        .replace(".json", "")
-    )
+        return basename
+    agent_prefix = f"{base_agent_key}_"
+    if basename.startswith(agent_prefix):
+        return basename[len(agent_prefix):]
+    return basename
 
 
 def _scenario_metric_slug(scenario_name: str) -> str:
@@ -121,6 +121,44 @@ def _scenario_metric_slug(scenario_name: str) -> str:
     if not normalized:
         raise ValueError(f"Invalid scenario name for metric slug: '{scenario_name}'")
     return normalized
+
+
+def _scenario_split_metric_key(scenario_name: str) -> Optional[str]:
+    """
+    Convert scenario name to split metric key.
+
+    Supported names:
+      - training_bot-<n>        -> training_bot_<n>
+      - holdout_hard_bot-<n>    -> hard_bot_<n>
+      - holdout_regular_bot-<n> -> regular_bot_<n>
+    """
+    name = scenario_name.strip()
+    training_match = re.fullmatch(r"training_bot-(\d+)", name)
+    if training_match:
+        return f"training_bot_{training_match.group(1)}"
+
+    hard_match = re.fullmatch(r"holdout_hard_bot-(\d+)", name)
+    if hard_match:
+        return f"hard_bot_{hard_match.group(1)}"
+
+    regular_match = re.fullmatch(r"holdout_regular_bot-(\d+)", name)
+    if regular_match:
+        return f"regular_bot_{regular_match.group(1)}"
+
+    return None
+
+
+def _compute_scenario_split_scores(
+    scenario_scores: Dict[str, Dict[str, float]],
+) -> Dict[str, float]:
+    """Build split score dictionary keyed by training/hard/regular bot identifiers."""
+    split_scores: Dict[str, float] = {}
+    for scenario_name, values in scenario_scores.items():
+        metric_key = _scenario_split_metric_key(str(scenario_name))
+        if metric_key is None:
+            continue
+        split_scores[metric_key] = float(require_key(values, "combined"))
+    return split_scores
 
 
 def _filter_scenarios_from_config(
@@ -164,6 +202,58 @@ def _filter_scenarios_from_config(
     return [scenario_map[name] for name in requested_names]
 
 
+def _compute_holdout_split_metrics(
+    training_cfg: Dict[str, Any],
+    scenario_scores: Dict[str, Dict[str, float]],
+    scenario_pool: str,
+) -> Dict[str, float]:
+    """Compute holdout regular/hard aggregates from callback_params scenario lists."""
+    if scenario_pool != "holdout":
+        return {}
+
+    callback_params = require_key(training_cfg, "callback_params")
+    regular_names = callback_params.get("holdout_regular_scenarios")
+    hard_names = callback_params.get("holdout_hard_scenarios")
+
+    if regular_names is None and hard_names is None:
+        return {}
+    if not isinstance(regular_names, list) or len(regular_names) == 0:
+        raise ValueError(
+            "callback_params.holdout_regular_scenarios must be a non-empty list "
+            "when holdout split metrics are configured"
+        )
+    if not isinstance(hard_names, list) or len(hard_names) == 0:
+        raise ValueError(
+            "callback_params.holdout_hard_scenarios must be a non-empty list "
+            "when holdout split metrics are configured"
+        )
+
+    available = set(scenario_scores.keys())
+    regular_keys = [str(name) for name in regular_names]
+    hard_keys = [str(name) for name in hard_names]
+
+    missing_regular = [name for name in regular_keys if name not in available]
+    missing_hard = [name for name in hard_keys if name not in available]
+    if missing_regular or missing_hard:
+        raise KeyError(
+            "Holdout split scenario names are missing from evaluation results. "
+            f"Missing regular={missing_regular}, missing hard={missing_hard}, "
+            f"available={sorted(available)}"
+        )
+
+    regular_values = [float(require_key(scenario_scores[name], "combined")) for name in regular_keys]
+    hard_values = [float(require_key(scenario_scores[name], "combined")) for name in hard_keys]
+    all_values = regular_values + hard_values
+    if len(all_values) == 0:
+        raise ValueError("Holdout split metrics cannot be computed from empty scenario score sets")
+
+    return {
+        "holdout_regular_mean": float(sum(regular_values) / len(regular_values)),
+        "holdout_hard_mean": float(sum(hard_values) / len(hard_values)),
+        "holdout_overall_mean": float(sum(all_values) / len(all_values)),
+    }
+
+
 def _format_elapsed(seconds: float) -> str:
     """Format seconds as MM:SS or H:MM:SS."""
     hours = int(seconds // 3600)
@@ -177,7 +267,8 @@ def _format_elapsed(seconds: float) -> str:
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
                          step_logger=None, debug_mode=False, eval_progress_label: Optional[str] = None,
-                         show_summary: bool = True, eval_progress_prefix: Optional[str] = None):
+                         show_summary: bool = True, eval_progress_prefix: Optional[str] = None,
+                         scenario_pool: str = "training"):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -212,7 +303,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         return {}
 
     # Import scenario utilities from training_utils
-    from ai.training_utils import get_scenario_list_for_phase, get_agent_scenario_file, setup_imports
+    from ai.training_utils import get_scenario_list_for_phase, setup_imports
     from ai.env_wrappers import BotControlledEnv
     from sb3_contrib.common.wrappers import ActionMasker
 
@@ -281,21 +372,30 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         'defensive': DefensiveBot(randomness=eval_randomness["defensive"])
     }
 
-    # MULTI-SCENARIO EVALUATION: Get all available bot scenarios
-    # Bot evaluation should always use bot scenarios (not phase-specific scenarios)
-    scenario_list = get_scenario_list_for_phase(config, base_agent_key, "bot")
+    if scenario_pool not in ("training", "holdout"):
+        raise ValueError(
+            f"scenario_pool must be 'training' or 'holdout' (got {scenario_pool!r})"
+        )
 
-    # If no bot scenarios found, fall back to phase-specific scenarios
-    if len(scenario_list) == 0:
-        scenario_list = get_scenario_list_for_phase(config, base_agent_key, training_config_name)
+    scenario_list = get_scenario_list_for_phase(
+        config,
+        base_agent_key,
+        training_config_name,
+        scenario_type=scenario_pool
+    )
 
-    # If still nothing found, try single scenario file
     if len(scenario_list) == 0:
-        try:
-            scenario_list = [get_agent_scenario_file(config, base_agent_key, training_config_name)]
-        except FileNotFoundError:
-            raise FileNotFoundError(f"No scenarios found for agent '{base_agent_key}'. "
-                                    f"Expected bot scenarios at config/agents/{base_agent_key}/scenarios/")
+        expected_dir = os.path.join(
+            config.config_dir,
+            "agents",
+            base_agent_key,
+            "scenarios",
+            scenario_pool
+        )
+        raise FileNotFoundError(
+            f"No {scenario_pool} scenarios found for agent '{base_agent_key}'. "
+            f"Expected files in: {expected_dir} with naming '{base_agent_key}_*.json'."
+        )
     scenario_list = _filter_scenarios_from_config(training_cfg, scenario_list, base_agent_key)
 
     if n_episodes <= 0:
@@ -655,6 +755,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             "worst_bot_score": worst_bot_score,
         }
     results["scenario_scores"] = scenario_scores
+    results["scenario_split_scores"] = _compute_scenario_split_scores(scenario_scores)
+    holdout_split_metrics = _compute_holdout_split_metrics(training_cfg, scenario_scores, scenario_pool)
+    results.update(holdout_split_metrics)
 
     # DIAGNOSTIC: Print shoot statistics (sample from last episode of each bot)
     if show_progress and show_summary:

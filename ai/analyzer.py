@@ -1858,8 +1858,20 @@ def parse_step_log(filepath: str) -> Dict:
                                         stats['first_error_lines']['shoot_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # Track shots after advance
+                            shot_after_advance_allowed_by_assault = False
+                            if weapon_found and weapon_info_matched:
+                                weapon_rules_for_advance = require_key(weapon_info_matched, "rules")
+                                shot_after_advance_allowed_by_assault = "ASSAULT" in weapon_rules_for_advance
                             if shooter_id in units_advanced:
                                 stats['shots_after_advance'][player] += 1
+                                shooter_unit_type_for_advance = require_key(unit_types, shooter_id)
+                                shooter_unit_rules_for_advance = require_key(unit_rules_by_type, shooter_unit_type_for_advance)
+                                if (
+                                    "shoot_after_advance" in shooter_unit_rules_for_advance
+                                    and not shot_after_advance_allowed_by_assault
+                                ):
+                                    key = ("shoot_after_advance", shooter_unit_type_for_advance)
+                                    stats['special_rule_usage'][key][player] += 1
 
                             # Track weapon rule usage (ASSAULT, PISTOL)
                             if weapon_found and weapon_info_matched:

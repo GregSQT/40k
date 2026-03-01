@@ -3,9 +3,9 @@
 import { getWeapons } from "../armory";
 import { SpaceMarineInfantryEliteMeleeElite } from "../classes/SpaceMarineInfantryEliteMeleeElite";
 
-export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
-  static NAME = "Terminator";
-  static DISPLAY_NAME = "Terminator";
+export class AssaultTerminator extends SpaceMarineInfantryEliteMeleeElite {
+  static NAME = "AssaultTerminator";
+  static DISPLAY_NAME = "Assault Terminator";
 
   // BASE
   static MOVE = 5; // Move distance
@@ -19,19 +19,19 @@ export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
 
   // WEAPONS
   static RNG_WEAPON_CODES = [];
-  static RNG_WEAPONS = getWeapons(Terminator.RNG_WEAPON_CODES);
+  static RNG_WEAPONS = getWeapons(AssaultTerminator.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["thunder_hammer_terminator"];
-  static CC_WEAPONS = getWeapons(Terminator.CC_WEAPON_CODES);
+  static CC_WEAPONS = getWeapons(AssaultTerminator.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
   static TARGET_TYPE = "Elite"; // MeleeElite specialist - hunt elite targets
 
-  static ICON = "/icons/Terminator.webp"; // Path relative to public folder
+  static ICON = "/icons/AssaultTerminator.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, Terminator.HP_MAX, startPos);
+    super(name, AssaultTerminator.HP_MAX, startPos);
   }
 }

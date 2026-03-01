@@ -144,8 +144,14 @@ if hasattr(torch, "set_float32_matmul_precision"):
 
 
 def build_agent_model_path(models_root: str, agent_key: str) -> str:
-    """Build model path from models root and agent key."""
-    return os.path.join(models_root, agent_key, f"model_{agent_key}.zip")
+    """Build model path from models root and agent key.
+
+    Inter-faction keys are resolved to the configured storage key to keep
+    model loading/saving aligned with selected source agents during migration.
+    """
+    config_loader = get_config_loader()
+    model_storage_key = config_loader._resolve_agent_config_key(agent_key)
+    return os.path.join(models_root, model_storage_key, f"model_{model_storage_key}.zip")
 import time  # Add time import for StepLogger timestamps
 from tqdm import tqdm  # For episode progress bar
 import gymnasium as gym  # For SelfPlayWrapper to inherit from gym.Wrapper
@@ -1653,7 +1659,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     controlled_agent=effective_agent_key,
                     show_progress=True,
                     deterministic=True,
-                    step_logger=step_logger
+                    step_logger=step_logger,
+                    scenario_pool="holdout",
                 )
 
                 # Log final results to metrics tracker
@@ -1665,6 +1672,25 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                         'combined': require_key(bot_results, 'combined')
                     }
                     metrics_tracker.log_bot_evaluations(final_bot_results)
+                    holdout_split_metrics = {
+                        key: float(require_key(bot_results, key))
+                        for key in (
+                            'holdout_regular_mean',
+                            'holdout_hard_mean',
+                            'holdout_overall_mean',
+                        )
+                        if key in bot_results
+                    }
+                    if holdout_split_metrics:
+                        metrics_tracker.log_holdout_split_metrics(holdout_split_metrics)
+                    scenario_split_scores = bot_results.get("scenario_split_scores")
+                    if scenario_split_scores is not None:
+                        if not isinstance(scenario_split_scores, dict):
+                            raise TypeError(
+                                f"bot_results.scenario_split_scores must be dict "
+                                f"(got {type(scenario_split_scores).__name__})"
+                            )
+                        metrics_tracker.log_scenario_split_scores(scenario_split_scores)
 
                 # Print summary
                 print(f"\n{'='*80}")
@@ -2686,7 +2712,8 @@ def train_with_curriculum(
             controlled_agent=rewards_config_name,
             show_progress=True,
             deterministic=final_eval_deterministic,
-            show_summary=True
+            show_summary=True,
+            scenario_pool="holdout",
         )
         _write_curriculum_event(
             log_path,

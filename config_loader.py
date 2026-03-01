@@ -13,6 +13,19 @@ from pathlib import Path
 class ConfigLoader:
     """Centralized configuration loader."""
     
+    # Canonical inter-faction agent keys resolved to source config directories/files.
+    _INTERFACTION_AGENT_CONFIG_MAP: Dict[str, str] = {
+        "Infantry_Troop_RangedSwarm": "Infantry_Troop_RangedSwarm",
+        "Infantry_Troop_MeleeTroop": "Infantry_Troop_MeleeSwarm",
+        "Infantry_LeaderElite_MeleeElite": "Infantry_Troop_MeleeSwarm",
+        "Infantry_Elite_MeleeElite": "Infantry_Troop_MeleeSwarm",
+        "Infantry_Elite_RangedTroop": "Infantry_Troop_RangedSwarm",
+        "Infantry_Elite_RangedElite": "Infantry_Troop_RangedSwarm",
+        "Infantry_Swarm_RangedSwarm": "Infantry_Troop_RangedTroop",
+        "Infantry_Swarm_MeleeSwarm": "Infantry_Swarm_MeleeSwarm",
+        "Infantry_Troop_RangedTroop": "Infantry_Troop_RangedTroop",
+    }
+    
     def __init__(self, root_path: str):
         """Initialize config loader.
         
@@ -203,12 +216,13 @@ class ConfigLoader:
             FileNotFoundError: If agent config file doesn't exist
             KeyError: If phase specified but not found in config
         """
-        agent_config_path = self.config_dir / "agents" / agent_key / f"{agent_key}_training_config.json"
+        resolved_agent_key = self._resolve_agent_config_key(agent_key)
+        agent_config_path = self.config_dir / "agents" / resolved_agent_key / f"{resolved_agent_key}_training_config.json"
         
         if not agent_config_path.exists():
             raise FileNotFoundError(
                 f"Agent training config not found: {agent_config_path}\n"
-                f"Expected path: config/agents/{agent_key}/{agent_key}_training_config.json"
+                f"Expected path: config/agents/{resolved_agent_key}/{resolved_agent_key}_training_config.json"
             )
         
         try:
@@ -219,7 +233,7 @@ class ConfigLoader:
                     if phase not in config:
                         available_phases = [k for k in config.keys() if not k.startswith('_')]
                         raise KeyError(
-                            f"Phase '{phase}' not found in {agent_key}_training_config.json. "
+                            f"Phase '{phase}' not found in {resolved_agent_key}_training_config.json. "
                             f"Available phases: {available_phases}"
                         )
                     return config[phase]
@@ -241,17 +255,32 @@ class ConfigLoader:
         Raises:
             FileNotFoundError: If agent rewards config file doesn't exist
         """
-        agent_config_path = self.config_dir / "agents" / agent_key / f"{agent_key}_rewards_config.json"
+        resolved_agent_key = self._resolve_agent_config_key(agent_key)
+        agent_config_path = self.config_dir / "agents" / resolved_agent_key / f"{resolved_agent_key}_rewards_config.json"
         
         if not agent_config_path.exists():
             raise FileNotFoundError(
                 f"Agent rewards config not found: {agent_config_path}\n"
-                f"Expected path: config/agents/{agent_key}/{agent_key}_rewards_config.json"
+                f"Expected path: config/agents/{resolved_agent_key}/{resolved_agent_key}_rewards_config.json"
             )
         
         try:
             with open(agent_config_path, 'r', encoding='utf-8-sig') as f:
-                return json.load(f)
+                rewards_config = json.load(f)
+                if agent_key == resolved_agent_key:
+                    return rewards_config
+
+                # Inter-faction mode: expose canonical key while keeping source key.
+                if resolved_agent_key not in rewards_config:
+                    raise KeyError(
+                        f"Rewards config '{agent_config_path}' missing expected source key "
+                        f"'{resolved_agent_key}' for canonical agent '{agent_key}'. "
+                        f"Available keys: {list(rewards_config.keys())}"
+                    )
+
+                rewards_with_alias = dict(rewards_config)
+                rewards_with_alias[agent_key] = rewards_config[resolved_agent_key]
+                return rewards_with_alias
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON in {agent_config_path}: {e}")
 
@@ -342,12 +371,13 @@ class ConfigLoader:
         Raises:
             FileNotFoundError: If scenario file doesn't exist
         """
-        scenario_path = self.config_dir / "agents" / agent_key / "scenarios" / f"{agent_key}_scenario_{scenario_name}.json"
+        resolved_agent_key = self._resolve_agent_config_key(agent_key)
+        scenario_path = self.config_dir / "agents" / resolved_agent_key / "scenarios" / f"{resolved_agent_key}_scenario_{scenario_name}.json"
         
         if not scenario_path.exists():
             raise FileNotFoundError(
                 f"Agent scenario not found: {scenario_path}\n"
-                f"Expected path: config/agents/{agent_key}/scenarios/{agent_key}_scenario_{scenario_name}.json"
+                f"Expected path: config/agents/{resolved_agent_key}/scenarios/{resolved_agent_key}_scenario_{scenario_name}.json"
             )
         
         try:
@@ -355,6 +385,29 @@ class ConfigLoader:
                 return json.load(f)
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON in {scenario_path}: {e}")
+
+    def _resolve_agent_config_key(self, agent_key: str) -> str:
+        """Resolve canonical inter-faction key to concrete config directory key."""
+        direct_path = self.config_dir / "agents" / agent_key
+        if direct_path.exists():
+            return agent_key
+
+        if agent_key in self._INTERFACTION_AGENT_CONFIG_MAP:
+            mapped_agent_key = self._INTERFACTION_AGENT_CONFIG_MAP[agent_key]
+            mapped_path = self.config_dir / "agents" / mapped_agent_key
+            if not mapped_path.exists():
+                raise FileNotFoundError(
+                    f"Configured inter-faction mapping points to missing agent config directory: "
+                    f"{mapped_path} (from key '{agent_key}')"
+                )
+            return mapped_agent_key
+
+        available_agents = sorted([p.name for p in (self.config_dir / "agents").iterdir() if p.is_dir()])
+        raise FileNotFoundError(
+            f"No config directory found for agent key '{agent_key}'. "
+            f"Also no inter-faction mapping is defined for this key. "
+            f"Available config agent directories: {available_agents}"
+        )
 
 # Global instance for easy access
 _config_loader = None

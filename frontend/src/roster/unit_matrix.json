@@ -1,0 +1,380 @@
+{
+  "version": 1,
+  "generated_at": "2026-02-28T19:31:38.241589+00:00",
+  "source": "frontend/src/roster/*/units/*.ts",
+  "rows": [
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Aggressor",
+      "agent_key": "Infantry_Elite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 33,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "storm_bolter"
+      ],
+      "special_rules": [
+        "Close-quarter firepower"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "AssaultIntercessor",
+      "agent_key": "Infantry_Troop_MeleeTroop",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Troop",
+      "value": 18,
+      "melee_weapons": [
+        "assault_intercessor_chainsword"
+      ],
+      "ranged_weapons": [
+        "bolt_pistol"
+      ],
+      "special_rules": [
+        "Targeted Intercession"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "AssaultIntercessorJumpPack",
+      "agent_key": "Infantry_Troop_MeleeTroop",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Troop",
+      "value": 17,
+      "melee_weapons": [
+        "assault_intercessor_chainsword"
+      ],
+      "ranged_weapons": [
+        "heavy_bolt_pistol"
+      ],
+      "special_rules": [
+        "Hammer of wrath"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "AssaultIntercessorJumpPackPlasmaPistol",
+      "agent_key": "Infantry_Troop_MeleeTroop",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Troop",
+      "value": 19,
+      "melee_weapons": [
+        "assault_intercessor_chainsword"
+      ],
+      "ranged_weapons": [
+        "plasma_pistol_standard",
+        "plasma_pistol_supercharge"
+      ],
+      "special_rules": [
+        "Hammer of wrath"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "agent_key": "Infantry_Troop_MeleeTroop",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Troop",
+      "value": 20,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "hand_flamer"
+      ],
+      "special_rules": [
+        "Hammer of wrath"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "AssaultIntercessorSergeant",
+      "agent_key": "Infantry_Troop_MeleeTroop",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Troop",
+      "value": 18,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "plasma_pistol_standard",
+        "plasma_pistol_supercharge"
+      ],
+      "special_rules": [
+        "Targeted Intercession"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Captain Gravis",
+      "agent_key": "Infantry_LeaderElite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "LeaderElite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 80,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "master_crafted_boltgun"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "HeavyIntercessor",
+      "agent_key": "Infantry_Elite_RangedTroop",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Ranged",
+      "target_type": "Troop",
+      "value": 19,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "heavy_bolt_rifle",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "HeavyIntercessorHeavyBolter",
+      "agent_key": "Infantry_Elite_RangedTroop",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Ranged",
+      "target_type": "Troop",
+      "value": 24,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "heavy_bolter",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Intercessor",
+      "agent_key": "Infantry_Troop_RangedSwarm",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Ranged",
+      "target_type": "Swarm",
+      "value": 18,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "bolt_rifle",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "IntercessorGrenadeLauncher",
+      "agent_key": "Infantry_Troop_RangedSwarm",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Ranged",
+      "target_type": "Swarm",
+      "value": 20,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "astartes_grenade_launcher_frag",
+        "astartes_grenade_launcher_krak",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "IntercessorSergeant",
+      "agent_key": "Infantry_Troop_RangedSwarm",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Ranged",
+      "target_type": "Swarm",
+      "value": 21,
+      "melee_weapons": [
+        "intercessor_sergeant_power_fist"
+      ],
+      "ranged_weapons": [
+        "plasma_pistol_standard",
+        "plasma_pistol_supercharge"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Terminator",
+      "agent_key": "Infantry_Elite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 36,
+      "melee_weapons": [
+        "thunder_hammer_terminator"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Terminator",
+      "agent_key": "Infantry_Elite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 33,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "storm_bolter"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Terminator",
+      "agent_key": "Infantry_Elite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 38,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "assault_cannon"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Carnifex",
+      "agent_key": "Infantry_Elite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 125,
+      "melee_weapons": [
+        "monstrous_scything_talons"
+      ],
+      "ranged_weapons": [
+        "venom_cannon"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Genestealer",
+      "agent_key": "Infantry_Troop_MeleeTroop",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Troop",
+      "value": 19,
+      "melee_weapons": [
+        "rending_claws"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "GenestealerPrime",
+      "agent_key": "Infantry_Elite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 90,
+      "melee_weapons": [
+        "rending_claws_prime"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Hormagaunt",
+      "agent_key": "Infantry_Swarm_MeleeSwarm",
+      "type": "Infantry",
+      "tanking_type": "Swarm",
+      "attack_type": "Melee",
+      "target_type": "Swarm",
+      "value": 7,
+      "melee_weapons": [
+        "scything_talons"
+      ],
+      "ranged_weapons": [],
+      "special_rules": [
+        "Bounding Leap"
+      ]
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Termagant",
+      "agent_key": "Infantry_Swarm_RangedSwarm",
+      "type": "Infantry",
+      "tanking_type": "Swarm",
+      "attack_type": "Ranged",
+      "target_type": "Swarm",
+      "value": 6,
+      "melee_weapons": [
+        "flesh_hooks"
+      ],
+      "ranged_weapons": [
+        "fleshborer"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Tyranid Warrior Ranged",
+      "agent_key": "Infantry_Troop_RangedTroop",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Ranged",
+      "target_type": "Troop",
+      "value": 24,
+      "melee_weapons": [
+        "rending_claws_warrior"
+      ],
+      "ranged_weapons": [
+        "deathspitter"
+      ],
+      "special_rules": [
+        "Adaptable Predators"
+      ]
+    }
+  ]
+}
