@@ -21,7 +21,7 @@ def main() -> int:
         print(
             "❌ Missing unit agent matrix file: "
             f"{matrix_path}\n"
-            "Run: python scripts/generate_unit_agent_matrix.py"
+            "Run: python scripts/unit_matrix_generate.py"
         )
         return 1
 

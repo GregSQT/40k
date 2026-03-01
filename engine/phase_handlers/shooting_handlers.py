@@ -137,6 +137,47 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     return False
 
 
+def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
+    """Return source UNIT_RULES.ruleId that grants/owns the effect; None if absent."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        source_rule_id = require_key(rule, "ruleId")
+        if source_rule_id == effect_rule_id:
+            return source_rule_id
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if effect_rule_id in granted_rule_ids:
+            return source_rule_id
+    return None
+
+
+def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any]) -> bool:
+    """Return True if unit is allowed to shoot after advance with this weapon."""
+    if _weapon_has_assault_rule(weapon):
+        return True
+    return _unit_has_rule(unit, "shoot_after_advance")
+
+
+def _can_unit_advance_in_shoot_phase(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    """
+    Return True only when unit can still advance in current shooting activation.
+
+    No fallback: _can_advance must be initialized during activation start.
+    """
+    if "_can_advance" not in unit:
+        raise KeyError(f"Unit missing required '_can_advance' field: unit_id={unit.get('id')}")
+    if "id" not in unit:
+        raise KeyError(f"Unit missing required 'id' field: {unit}")
+    has_advanced = str(unit["id"]) in require_key(game_state, "units_advanced")
+    return bool(unit["_can_advance"]) and not has_advanced
+
+
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Return True if unit coordinates are inside any objective hex."""
     unit_col, unit_row = require_unit_position(unit, game_state)
@@ -268,11 +309,10 @@ def weapon_availability_check(
                 can_use = False
                 reason = "Cannot shoot after advance (weapon_rule=0)"
             else:
-                # arg1=1 AND arg2=1 -> ✅ Weapon MUST have ASSAULT rule OR unit must have shoot_after_advance
-                has_shoot_after_advance = _unit_has_rule(unit, "shoot_after_advance")
-                if not _weapon_has_assault_rule(weapon) and not has_shoot_after_advance:
+                # arg1=1 AND arg2=1 -> ✅ Weapon MUST have ASSAULT or unit shoot_after_advance
+                if not _can_unit_shoot_after_advance_with_weapon(unit, weapon):
                     can_use = False
-                    reason = "No ASSAULT rule or shoot_after_advance (cannot shoot after advancing)"
+                    reason = "Cannot shoot after advance without ASSAULT or shoot_after_advance"
         
         # Check arg3 (adjacent_status)
         if can_use and adjacent_status == 1:
@@ -1339,7 +1379,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         game_state["active_shooting_unit"] = unit_id
         
         # unit.CAN_ADVANCE = true?
-        can_advance = unit.get("_can_advance", False)
+        can_advance = _can_unit_advance_in_shoot_phase(unit, game_state)
         if can_advance:
             # YES -> Only action available is advance
             # Return signal to allow advance action (handled by frontend/action handler)
@@ -1381,7 +1421,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
     if not usable_weapons:
         # No usable weapons under current rules -> treat as no valid actions
-        can_advance = unit.get("_can_advance", False)
+        can_advance = _can_unit_advance_in_shoot_phase(unit, game_state)
         if can_advance:
             unit["valid_target_pool"] = []
             unit["_current_shoot_nb"] = require_key(unit, "SHOOT_LEFT")
@@ -2687,7 +2727,8 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                 return _handle_shooting_end_activation(game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1)
         
         # For human players: allow advance mode instead of ending activation
-        if selected_weapon and unit["SHOOT_LEFT"] == current_weapon_nb:
+        # only if unit has not already advanced in this shooting phase.
+        if selected_weapon and unit["SHOOT_LEFT"] == current_weapon_nb and str(unit_id) not in require_key(game_state, "units_advanced"):
             # No targets at activation - return signal to allow advance mode
             return True, {
                 "waiting_for_player": True,
@@ -2848,6 +2889,82 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
     current_player = require_key(game_state, "current_player")
     is_learning_agent_turn = current_player == 1
+
+    def _assert_gym_waiting_state_is_actionable(result_payload: Dict[str, Any]) -> None:
+        """
+        In gym mode, waiting_for_player must expose a directly executable gym choice.
+        Otherwise, it creates an unrecoverable loop (no matching action in ActionDecoder).
+        """
+        if not is_gym_training:
+            return
+        if not result_payload.get("waiting_for_player"):
+            return
+
+        has_target_choices = (
+            isinstance(result_payload.get("valid_targets"), list)
+            and len(result_payload["valid_targets"]) > 0
+        ) or (
+            isinstance(result_payload.get("blinking_units"), list)
+            and len(result_payload["blinking_units"]) > 0
+        )
+        has_advance_choice = bool(result_payload.get("allow_advance")) or bool(result_payload.get("can_advance"))
+        requires_manual_weapon_selection = bool(result_payload.get("weapon_selection_required"))
+
+        if requires_manual_weapon_selection or not (has_target_choices or has_advance_choice):
+            shoot_pool = require_key(game_state, "shoot_activation_pool")
+            shoot_pool_head = [str(uid) for uid in shoot_pool[:3]]
+            units_advanced = require_key(game_state, "units_advanced")
+            active_unit_name = unit.get("name") or unit.get("unitType") or "unknown"
+            selected_weapon_idx = unit.get("selectedRngWeaponIndex")
+            selected_weapon_name = None
+            selected_weapon_rules = None
+            selected_weapon_shot = None
+            if isinstance(selected_weapon_idx, int):
+                rng_weapons = require_key(unit, "RNG_WEAPONS")
+                if 0 <= selected_weapon_idx < len(rng_weapons):
+                    selected_weapon = rng_weapons[selected_weapon_idx]
+                    selected_weapon_name = selected_weapon.get("display_name")
+                    selected_weapon_rules = selected_weapon.get("WEAPON_RULES")
+                    selected_weapon_shot = selected_weapon.get("shot")
+            valid_targets = result_payload.get("valid_targets")
+            blinking_units = result_payload.get("blinking_units")
+            valid_targets_count = len(valid_targets) if isinstance(valid_targets, list) else 0
+            blinking_units_count = len(blinking_units) if isinstance(blinking_units, list) else 0
+            first_valid_targets = valid_targets[:3] if isinstance(valid_targets, list) else []
+            first_blinking_units = blinking_units[:3] if isinstance(blinking_units, list) else []
+            raise RuntimeError(
+                "Non-actionable waiting_for_player in gym shooting flow: "
+                f"episode={game_state.get('episode_number')}, "
+                f"turn={game_state.get('turn')}, "
+                f"phase={game_state.get('phase')}, "
+                f"current_player={game_state.get('current_player')}, "
+                f"unit_id={unit_id_str}, unit_name={active_unit_name}, "
+                f"unit_player={unit.get('player')}, "
+                f"active_shooting_unit={game_state.get('active_shooting_unit')}, "
+                f"action_type={action_type}, "
+                f"result_action={result_payload.get('action')}, "
+                f"context={result_payload.get('context')}, "
+                f"waiting_for_player={result_payload.get('waiting_for_player')}, "
+                f"weapon_selection_required={requires_manual_weapon_selection}, "
+                f"allow_advance={result_payload.get('allow_advance')}, "
+                f"can_advance={result_payload.get('can_advance')}, "
+                f"valid_targets_count={valid_targets_count}, "
+                f"first_valid_targets={first_valid_targets}, "
+                f"blinking_units_count={blinking_units_count}, "
+                f"first_blinking_units={first_blinking_units}, "
+                f"shoot_left={unit.get('SHOOT_LEFT')}, "
+                f"current_shoot_nb={unit.get('_current_shoot_nb')}, "
+                f"selected_rng_weapon_index={selected_weapon_idx}, "
+                f"selected_weapon_name={selected_weapon_name}, "
+                f"selected_weapon_rules={selected_weapon_rules}, "
+                f"selected_weapon_shot={selected_weapon_shot}, "
+                f"unit_can_advance={unit.get('_can_advance')}, "
+                f"unit_can_shoot={unit.get('_can_shoot')}, "
+                f"unit_advanced={unit_id_str in units_advanced}, "
+                f"shoot_pool_size={len(shoot_pool)}, "
+                f"shoot_pool_head={shoot_pool_head}, "
+                f"player_types={game_state.get('player_types')}"
+            )
     
     # STRICT AI_TURN: shoot/advance must ALWAYS follow activation start
     # No shooting/advance allowed for a different unit while one is active
@@ -2913,6 +3030,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 return True, result
             # Normal flow: valid targets available
             execution_result = _shooting_unit_execution_loop(game_state, unit_id, config)
+            if isinstance(execution_result, tuple) and len(execution_result) == 2:
+                success, loop_result = execution_result
+                if success and isinstance(loop_result, dict):
+                    _assert_gym_waiting_state_is_actionable(loop_result)
+                return success, loop_result
             return execution_result
         # If no success and no error handled above, return the result (may contain other errors)
         return False, result
@@ -2978,6 +3100,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # Ensure all_attack_results is surfaced for step_logger (training uses returned result)
         if isinstance(execution_result, tuple) and len(execution_result) == 2:
             success, result = execution_result
+            if success and isinstance(result, dict):
+                _assert_gym_waiting_state_is_actionable(result)
             if success and isinstance(result, dict) and "all_attack_results" not in result:
                 shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
                 if shoot_attack_results:
@@ -3044,6 +3168,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             game_state["config"]["game_settings"]["autoSelectWeapon"] = action["autoSelectWeapon"]
 
         result = _shooting_unit_execution_loop(game_state, unit_id, config)
+        if isinstance(result, tuple) and len(result) == 2:
+            success, loop_result = result
+            if success and isinstance(loop_result, dict):
+                _assert_gym_waiting_state_is_actionable(loop_result)
+            return success, loop_result
         return result
 
     elif action_type == "wait" or action_type == "skip":
@@ -3303,8 +3432,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if has_advanced:
             from engine.utils.weapon_helpers import get_selected_ranged_weapon
             selected_weapon = get_selected_ranged_weapon(unit)
-            can_shoot_after_advance = _unit_has_rule(unit, "shoot_after_advance")
-            if not selected_weapon or (not _weapon_has_assault_rule(selected_weapon) and not can_shoot_after_advance):
+            if not selected_weapon or not _can_unit_shoot_after_advance_with_weapon(unit, selected_weapon):
                 return False, {"error": "cannot_shoot_after_advance_without_assault", "unitId": unit_id_str}
         
         # PISTOL RULE VALIDATION: Block shooting non-PISTOL weapons when adjacent to enemy
@@ -3355,7 +3483,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             unit["valid_target_pool"] = []
             
             # Check if unit can advance
-            can_advance = unit.get("_can_advance", False)
+            can_advance = _can_unit_advance_in_shoot_phase(unit, game_state)
             if can_advance:
                 # Return signal to allow advance action (EMPTY_TARGET_HANDLING)
                 return True, {
@@ -3611,7 +3739,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             unit["valid_target_pool"] = updated_pool
             if not updated_pool:
                 game_state["active_shooting_unit"] = unit_id
-                can_advance = unit.get("_can_advance", False)
+                can_advance = _can_unit_advance_in_shoot_phase(unit, game_state)
                 if can_advance:
                     return True, {
                         "success": True,
@@ -3954,8 +4082,19 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Positions captured before damage (target may be removed from cache if dead)
     attack_log_part = attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']
     shot_rule_marker = ""
-    if str(unit_id) in require_key(game_state, "units_fled") and _unit_has_rule(shooter, "shoot_after_flee"):
-        shot_rule_marker = " (SHOOT AFTER FLED)"
+    shooter_id_str = str(unit_id)
+    if shooter_id_str in require_key(game_state, "units_fled"):
+        source_rule_id = _get_source_unit_rule_id_for_effect(shooter, "shoot_after_flee")
+        if source_rule_id is not None:
+            shot_rule_marker = f" ({source_rule_id.upper()})"
+    else:
+        if shooter_id_str in require_key(game_state, "units_advanced"):
+            from engine.utils.weapon_helpers import get_selected_ranged_weapon
+            selected_weapon = get_selected_ranged_weapon(shooter)
+            if selected_weapon and not _weapon_has_assault_rule(selected_weapon):
+                source_rule_id = _get_source_unit_rule_id_for_effect(shooter, "shoot_after_advance")
+                if source_rule_id is not None:
+                    shot_rule_marker = f" ({source_rule_id.upper()})"
     enhanced_message = (
         f"Unit {unit_id} ({shooter_col}, {shooter_row}) SHOT{shot_rule_marker} "
         f"Unit {target_id} ({target_col}, {target_row}){weapon_suffix} : {attack_log_part}"
@@ -4259,9 +4398,19 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             wound_roll = random.randint(1, 6)
             wound_success = wound_roll >= wound_target
             if can_reroll_failed_wound_on_objective:
-                wound_log_suffix = "(REROLL TO WOUND ON OBJECTIVE)"
+                source_rule_id = _get_source_unit_rule_id_for_effect(attacker, "reroll_towound_target_on_objective")
+                if source_rule_id is None:
+                    raise ValueError(
+                        f"Attacker {attacker_id} rerolled wound on objective without source unit rule"
+                    )
+                wound_log_suffix = f"({source_rule_id.upper()})"
             else:
-                wound_log_suffix = "(REROLL 1 TO WOUND)"
+                source_rule_id = _get_source_unit_rule_id_for_effect(attacker, "reroll_1_towound")
+                if source_rule_id is None:
+                    raise ValueError(
+                        f"Attacker {attacker_id} rerolled wound roll of 1 without source unit rule"
+                    )
+                wound_log_suffix = f"({source_rule_id.upper()})"
     
     if not wound_success:
         # FAIL case
@@ -4516,6 +4665,16 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     orig_col, orig_row = require_unit_position(unit, game_state)
     is_gym_training = bool(config.get("gym_training_mode", False))
     is_pve_ai = bool(config.get("pve_mode", False)) and int(unit["player"]) == 2
+    unit_id_str = str(unit_id)
+
+    # Hard invariant: at most one ADVANCE per unit in shooting phase.
+    if unit_id_str in require_key(game_state, "units_advanced"):
+        success, result = _handle_shooting_end_activation(
+            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+        )
+        result["advance_rejected"] = True
+        result["skip_reason"] = "cannot_advance_twice_in_shoot_phase"
+        return success, result
     
     # CRITICAL: Cannot advance if unit has already shot -> SKIP (unit cannot act)
     has_shot = _unit_has_shot_with_any_weapon(unit)
@@ -4543,7 +4702,12 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
 
     # CRITICAL: Cannot advance if unit is adjacent to enemy -> SKIP (unit cannot act)
     # Pool is source of truth: if can_advance is False, unit cannot advance
-    can_advance = unit["_can_advance"] if "_can_advance" in unit else None
+    can_advance = require_key(unit, "_can_advance")
+    if not isinstance(can_advance, bool):
+        raise TypeError(
+            f"unit['_can_advance'] must be bool "
+            f"(got {type(can_advance).__name__}) for unit_id={unit_id_str}"
+        )
     if can_advance is False:
         if game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log

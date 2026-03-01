@@ -60,11 +60,18 @@ class PvEController:
             if debug_mode:
                 print(f"DEBUG: MaskablePPO import successful")
             
-            macro_config = self._load_macro_controller_config()
+            macro_config = self._load_macro_controller_config(game_state)
             self.macro_model_key = require_key(macro_config, "macro_model_key")
-            micro_only_mode = require_key(macro_config, "micro_only_mode")
-            if not isinstance(micro_only_mode, bool):
-                raise ValueError(f"micro_only_mode must be boolean (got {type(micro_only_mode).__name__})")
+            pve_controller_mode = require_key(macro_config, "pve_controller_mode")
+            if not isinstance(pve_controller_mode, str):
+                raise ValueError(
+                    f"pve_controller_mode must be string (got {type(pve_controller_mode).__name__})"
+                )
+            if pve_controller_mode not in {"micro_only", "macro_micro"}:
+                raise ValueError(
+                    f"Invalid pve_controller_mode '{pve_controller_mode}'. "
+                    f"Allowed: ['micro_only', 'macro_micro']"
+                )
             config = get_config_loader()
             models_root = config.get_models_root()
             macro_model_storage_key = config._resolve_agent_config_key(self.macro_model_key)
@@ -76,7 +83,7 @@ class PvEController:
             if debug_mode:
                 print(f"DEBUG: Macro model path: {macro_model_path}")
                 print(f"DEBUG: Macro model exists: {os.path.exists(macro_model_path)}")
-            macro_disabled = micro_only_mode and debug_mode
+            macro_disabled = pve_controller_mode == "micro_only"
             if not macro_disabled:
                 if not os.path.exists(macro_model_path):
                     raise FileNotFoundError(f"Macro model required for PvE mode not found: {macro_model_path}")
@@ -87,7 +94,7 @@ class PvEController:
                 self.macro_model = None
                 self.ai_model = None
                 if not self.quiet:
-                    print("PvE: Macro disabled for Debug mode (micro_only_mode=true)")
+                    print("PvE: Macro disabled (pve_controller_mode='micro_only')")
             
             # Wrap engine with ActionMasker for micro models (action space = 13)
             def mask_fn(env):
@@ -733,13 +740,26 @@ class PvEController:
             raise ValueError("No objectives available for macro target selection")
         return int(best_index)
 
-    def _load_macro_controller_config(self) -> Dict[str, Any]:
-        """Load macro controller config from config paths."""
+    def _load_macro_controller_config(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
+        """Load macro controller config from context-specific config paths."""
         from config_loader import get_config_loader
         config_loader = get_config_loader()
         core_config = config_loader.load_config("config", force_reload=False)
         paths = require_key(core_config, "paths")
-        macro_config_path = require_key(paths, "macro_controller_config")
+        gym_training_mode = require_key(game_state, "gym_training_mode")
+        if not isinstance(gym_training_mode, bool):
+            raise ValueError(
+                f"gym_training_mode must be boolean (got {type(gym_training_mode).__name__})"
+            )
+        if gym_training_mode:
+            macro_config_path = require_key(paths, "macro_controller_config_training")
+        else:
+            macro_config_path = require_key(paths, "macro_controller_config_app")
+        if not isinstance(macro_config_path, str) or not macro_config_path:
+            raise ValueError(
+                f"Invalid macro controller config path for gym_training_mode={gym_training_mode}: "
+                f"{macro_config_path}"
+            )
         full_path = Path(config_loader.root_path) / macro_config_path
         if not full_path.exists():
             raise FileNotFoundError(f"Macro controller config not found: {full_path}")

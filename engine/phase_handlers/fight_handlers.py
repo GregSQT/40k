@@ -51,6 +51,26 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     return False
 
 
+def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
+    """Return source UNIT_RULES.ruleId that grants/owns the effect; None if absent."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        source_rule_id = require_key(rule, "ruleId")
+        if source_rule_id == effect_rule_id:
+            return source_rule_id
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if effect_rule_id in granted_rule_ids:
+            return source_rule_id
+    return None
+
+
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Return True if unit coordinates are inside any objective hex."""
     unit_col, unit_row = require_unit_position(unit, game_state)
@@ -1799,9 +1819,19 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                 wound_roll = random.randint(1, 6)
                 wound_success = wound_roll >= wound_target
                 if can_reroll_failed_wound_on_objective:
-                    wound_log_suffix = "(REROLL TO WOUND ON OBJECTIVE)"
+                    source_rule_id = _get_source_unit_rule_id_for_effect(attacker, "reroll_towound_target_on_objective")
+                    if source_rule_id is None:
+                        raise ValueError(
+                            f"Attacker {attacker_id} rerolled wound on objective without source unit rule"
+                        )
+                    wound_log_suffix = f"({source_rule_id.upper()})"
                 else:
-                    wound_log_suffix = "(REROLL 1 TO WOUND)"
+                    source_rule_id = _get_source_unit_rule_id_for_effect(attacker, "reroll_1_towound")
+                    if source_rule_id is None:
+                        raise ValueError(
+                            f"Attacker {attacker_id} rerolled wound roll of 1 without source unit rule"
+                        )
+                    wound_log_suffix = f"({source_rule_id.upper()})"
 
         if not wound_success:
             # FAIL TO WOUND case

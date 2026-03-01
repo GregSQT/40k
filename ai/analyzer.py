@@ -896,6 +896,7 @@ def parse_step_log(filepath: str) -> Dict:
             'MOVE': 0, 'SHOOT': 0, 'CHARGE': 0, 'FIGHT': 0
         },
         'advance_after_shoot': {1: 0, 2: 0},
+        'advance_twice_in_shoot_phase': {1: 0, 2: 0},
         'position_log_mismatch': {
             'move': {'total': 0, 'mismatch': 0, 'missing': 0},
             'advance': {'total': 0, 'mismatch': 0, 'missing': 0},
@@ -963,6 +964,7 @@ def parse_step_log(filepath: str) -> Dict:
                 'MOVE': None, 'SHOOT': None, 'CHARGE': None, 'FIGHT': None
             },
             'advance_after_shoot': {1: None, 2: None},
+            'advance_twice_in_shoot_phase': {1: None, 2: None},
             'damage_missing_unit_hp': {1: None, 2: None},
             'damage_exceeds_hp': {1: None, 2: None},
             'unit_revived': {1: None, 2: None},
@@ -1369,9 +1371,9 @@ def parse_step_log(filepath: str) -> Dict:
                 # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
                 # by treating dead units as alive.
-                if re.search(r'\bSHOT(?:\s+\(SHOOT AFTER FLED\))?\s+(?:at\s+)?Unit\s+(\d+)', action_desc, re.IGNORECASE):
+                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+(\d+)', action_desc, re.IGNORECASE):
                     target_match = re.search(
-                        r'\bSHOT(?:\s+\(SHOOT AFTER FLED\))?\s+(?:at\s+)?Unit\s+(\d+)',
+                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+(\d+)',
                         action_desc,
                         re.IGNORECASE
                     )
@@ -1504,7 +1506,7 @@ def parse_step_log(filepath: str) -> Dict:
 
                 # Determine action type and validate rules
                 is_shoot_action = re.search(
-                    r'\bSHOT(?:\s+\(SHOOT AFTER FLED\))?\s+(?:at\s+)?Unit\s+\d+',
+                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+\d+',
                     action_desc,
                     re.IGNORECASE
                 ) is not None
@@ -1512,13 +1514,13 @@ def parse_step_log(filepath: str) -> Dict:
                     last_shoot_shooter_id = None
                     last_shoot_weapon = None
                     last_shoot_target_id = None
-                if re.search(r'\bSHOT(?:\s+\(SHOOT AFTER FLED\))?\s+(?:at\s+)?Unit\s+\d+', action_desc, re.IGNORECASE):
+                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+\d+', action_desc, re.IGNORECASE):
                         action_type = 'shoot'
                         stats['shoot_vs_wait']['shoot'] += 1
                         stats['shoot_vs_wait_by_player'][player]['shoot'] += 1
                         shooter_match = re.search(r'Unit (\d+)\s*\((\d+),\s*(\d+)\)', action_desc)
                         target_match = re.search(
-                            r'\bSHOT(?:\s+\(SHOOT AFTER FLED\))?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
+                            r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
                             action_desc,
                             re.IGNORECASE
                         )
@@ -1603,10 +1605,9 @@ def parse_step_log(filepath: str) -> Dict:
 
                             # RULE METRICS: Targeted Intercession granted reroll mechanics (shooting)
                             shooter_unit_type_for_reroll = require_key(unit_types, shooter_id)
-                            if re.search(r'\(REROLL 1 TO WOUND\)', action_desc, re.IGNORECASE):
+                            if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
                                 key = ("reroll_1_towound", shooter_unit_type_for_reroll)
                                 stats['special_rule_usage'][key][player] += 1
-                            if re.search(r'\(REROLL TO WOUND ON OBJECTIVE\)', action_desc, re.IGNORECASE):
                                 key = ("reroll_towound_target_on_objective", shooter_unit_type_for_reroll)
                                 stats['special_rule_usage'][key][player] += 1
 
@@ -1858,20 +1859,18 @@ def parse_step_log(filepath: str) -> Dict:
                                         stats['first_error_lines']['shoot_invalid'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # Track shots after advance
-                            shot_after_advance_allowed_by_assault = False
-                            if weapon_found and weapon_info_matched:
-                                weapon_rules_for_advance = require_key(weapon_info_matched, "rules")
-                                shot_after_advance_allowed_by_assault = "ASSAULT" in weapon_rules_for_advance
                             if shooter_id in units_advanced:
                                 stats['shots_after_advance'][player] += 1
-                                shooter_unit_type_for_advance = require_key(unit_types, shooter_id)
-                                shooter_unit_rules_for_advance = require_key(unit_rules_by_type, shooter_unit_type_for_advance)
-                                if (
-                                    "shoot_after_advance" in shooter_unit_rules_for_advance
-                                    and not shot_after_advance_allowed_by_assault
-                                ):
-                                    key = ("shoot_after_advance", shooter_unit_type_for_advance)
-                                    stats['special_rule_usage'][key][player] += 1
+                                if weapon_found and weapon_info_matched:
+                                    weapon_rules_list = require_key(weapon_info_matched, "rules")
+                                    shooter_unit_type_for_advance = require_key(unit_types, shooter_id)
+                                    shooter_unit_rules_for_advance = require_key(unit_rules_by_type, shooter_unit_type_for_advance)
+                                    if (
+                                        "ASSAULT" not in weapon_rules_list
+                                        and "shoot_after_advance" in shooter_unit_rules_for_advance
+                                    ):
+                                        key = ("shoot_after_advance", shooter_unit_type_for_advance)
+                                        stats['special_rule_usage'][key][player] += 1
 
                             # Track weapon rule usage (ASSAULT, PISTOL)
                             if weapon_found and weapon_info_matched:
@@ -2189,6 +2188,13 @@ def parse_step_log(filepath: str) -> Dict:
                                             'line': line.strip()
                                         }
                             
+                            if phase == 'SHOOT' and advance_unit_id in units_advanced:
+                                stats['advance_twice_in_shoot_phase'][player] += 1
+                                if stats['first_error_lines']['advance_twice_in_shoot_phase'][player] is None:
+                                    stats['first_error_lines']['advance_twice_in_shoot_phase'][player] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
                             units_advanced.add(advance_unit_id)
                             
                             # RULE: Advance after shoot
@@ -2361,13 +2367,13 @@ def parse_step_log(filepath: str) -> Dict:
                                 'error': f"Advance action missing 'from/to' format: {action_desc[:100]}"
                             })
 
-                elif re.search(r"CHARGED(?:\s+\(CHARGE AFTER FLED\))?\s+Unit", action_desc):
+                elif re.search(r"CHARGED(?:\s+\([A-Za-z0-9_ ]+\))?\s+Unit", action_desc):
                         action_type = 'charge'
                         
                         # Try successful charge format:
-                        # "Unit X (col,row) CHARGED (CHARGE AFTER FLED) Unit Y (col,row) from (...) to (...)"
+                        # "Unit X (col,row) CHARGED (<UNIT_RULE_SOURCE>) Unit Y (col,row) from (...) to (...)"
                         charge_match = re.search(
-                            r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+\(CHARGE AFTER FLED\))?\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
+                            r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+\([A-Za-z0-9_ ]+\))?\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
                             action_desc
                         )
                         if charge_match:
@@ -3332,10 +3338,9 @@ def parse_step_log(filepath: str) -> Dict:
                                 weapon_display_name = weapon_match.group(1).strip()
                                 fighter_unit_type = require_key(unit_types, fighter_id)
                                 # RULE METRICS: Targeted Intercession granted reroll mechanics (fight)
-                                if re.search(r'\(REROLL 1 TO WOUND\)', action_desc, re.IGNORECASE):
+                                if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
                                     key = ("reroll_1_towound", fighter_unit_type)
                                     stats['special_rule_usage'][key][player] += 1
-                                if re.search(r'\(REROLL TO WOUND ON OBJECTIVE\)', action_desc, re.IGNORECASE):
                                     key = ("reroll_towound_target_on_objective", fighter_unit_type)
                                     stats['special_rule_usage'][key][player] += 1
                                 if fighter_unit_type:
@@ -4627,6 +4632,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_advance_after_shoot > 0 and stats['first_error_lines']['advance_after_shoot'][2]:
         first_err = stats['first_error_lines']['advance_after_shoot'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_advance_twice_shoot = stats['advance_twice_in_shoot_phase'][1]
+    bot_advance_twice_shoot = stats['advance_twice_in_shoot_phase'][2]
+    log_print(f"Advance twice in SHOOT:       {agent_advance_twice_shoot:6d}           {bot_advance_twice_shoot:6d}")
+    if agent_advance_twice_shoot > 0 and stats['first_error_lines']['advance_twice_in_shoot_phase'][1]:
+        first_err = stats['first_error_lines']['advance_twice_in_shoot_phase'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_advance_twice_shoot > 0 and stats['first_error_lines']['advance_twice_in_shoot_phase'][2]:
+        first_err = stats['first_error_lines']['advance_twice_in_shoot_phase'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_adv_over = stats['move_distance_over_limit']['advance'][1]
     bot_adv_over = stats['move_distance_over_limit']['advance'][2]
     log_print(f"Advance distance > roll:     {agent_adv_over:6d}           {bot_adv_over:6d}")
@@ -5028,6 +5042,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
         stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
         stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
+        stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
         stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
         stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
         stats['move_path_blocked']['advance'][1] + stats['move_path_blocked']['advance'][2] +
@@ -5247,6 +5262,7 @@ if __name__ == "__main__":
             stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
             stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
             stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
+            stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
             stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
             stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
             stats['move_path_blocked']['advance'][1] + stats['move_path_blocked']['advance'][2] +

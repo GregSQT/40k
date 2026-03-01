@@ -42,6 +42,26 @@ def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
             return True
     return False
 
+
+def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
+    """Return source UNIT_RULES.ruleId that grants/owns the effect; None if absent."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        source_rule_id = require_key(rule, "ruleId")
+        if source_rule_id == effect_rule_id:
+            return source_rule_id
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if effect_rule_id in granted_rule_ids:
+            return source_rule_id
+    return None
+
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Initialize charge phase and build activation pool
@@ -1730,7 +1750,12 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     target_col, target_row = require_unit_position(target_id, game_state)
     charge_rule_marker = ""
     if str(unit["id"]) in require_key(game_state, "units_fled") and _unit_has_rule(unit, "charge_after_flee"):
-        charge_rule_marker = " (CHARGE AFTER FLED)"
+        source_rule_id = _get_source_unit_rule_id_for_effect(unit, "charge_after_flee")
+        if source_rule_id is None:
+            raise ValueError(
+                f"Unit {unit['id']} charged after flee without source unit rule"
+            )
+        charge_rule_marker = f" ({source_rule_id.upper()})"
     charge_message = (
         f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker} "
         f"Unit {target_id} ({target_col}, {target_row}) from ({orig_col}, {orig_row}) "

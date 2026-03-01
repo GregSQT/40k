@@ -15,6 +15,10 @@
     "id": "closest_target_penetration",
     "description": "When this unit makes a shooting attack at the closest eligible unit, add 1 to the weapon's penetration."
   },
+  "reactive_move": {
+    "id": "reactive_move",
+    "description": "Once per turn, after an enemy unit ends a move (normal, advance or retreat) within 9\" of this unit, it can perform a normal move up to D6\"."
+  },
   "reroll_1_towound": {
     "id": "reroll_1_towound",
     "description": "When this unit makes an attack, it can reroll rolls of 1 for the wound rolls."

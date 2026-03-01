@@ -121,7 +121,12 @@ class ActionDecoder:
                     if num_targets > 0:
                         for i in range(min(5, num_targets)):
                             mask[4 + i] = True
-                can_advance = active_unit.get("_can_advance", True)
+                can_advance = require_key(active_unit, "_can_advance")
+                if not isinstance(can_advance, bool):
+                    raise TypeError(
+                        f"active_unit['_can_advance'] must be bool "
+                        f"(got {type(can_advance).__name__})"
+                    )
                 if can_advance:
                     units_advanced = require_key(game_state, "units_advanced")
                     unit_id_str = str(active_unit["id"])

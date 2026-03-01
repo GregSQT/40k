@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-02-28T19:31:38.241589+00:00",
+  "generated_at": "2026-03-01T13:32:31.164308+00:00",
   "source": "frontend/src/roster/*/units/*.ts",
   "rows": [
     {
@@ -30,7 +30,7 @@
       "tanking_type": "Troop",
       "attack_type": "Melee",
       "target_type": "Troop",
-      "value": 18,
+      "value": 17,
       "melee_weapons": [
         "assault_intercessor_chainsword"
       ],
@@ -107,7 +107,7 @@
       "tanking_type": "Troop",
       "attack_type": "Melee",
       "target_type": "Troop",
-      "value": 18,
+      "value": 22,
       "melee_weapons": [
         "power_fist"
       ],
@@ -117,6 +117,60 @@
       ],
       "special_rules": [
         "Targeted Intercession"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "AssaultTerminator",
+      "agent_key": "Infantry_Elite_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Elite",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 36,
+      "melee_weapons": [
+        "thunder_hammer_terminator"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "BloodClaw",
+      "agent_key": "Infantry_Troop_MeleeSwarm",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Swarm",
+      "value": 13,
+      "melee_weapons": [
+        "assault_intercessor_chainsword"
+      ],
+      "ranged_weapons": [
+        "bolt_pistol"
+      ],
+      "special_rules": [
+        "Berserk Charge"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "BloodClawPackLeader",
+      "agent_key": "Infantry_Troop_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 18,
+      "melee_weapons": [
+        "power_weapon_pack_leader"
+      ],
+      "ranged_weapons": [
+        "plasma_pistol_standard",
+        "plasma_pistol_supercharge"
+      ],
+      "special_rules": [
+        "Berserk Charge"
       ]
     },
     {
@@ -135,6 +189,67 @@
         "master_crafted_boltgun"
       ],
       "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "GreyHunter",
+      "agent_key": "Infantry_Troop_RangedSwarm",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Ranged",
+      "target_type": "Swarm",
+      "value": 16,
+      "melee_weapons": [
+        "astartes_chainsword"
+      ],
+      "ranged_weapons": [
+        "boltgun",
+        "bolt_pistol"
+      ],
+      "special_rules": [
+        "Cunning Hunters"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "GreyHunterPackLeader",
+      "agent_key": "Infantry_Troop_MeleeElite",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Melee",
+      "target_type": "Elite",
+      "value": 17,
+      "melee_weapons": [
+        "power_fist_pack_leader"
+      ],
+      "ranged_weapons": [
+        "boltgun",
+        "bolt_pistol"
+      ],
+      "special_rules": [
+        "Cunning Hunters"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "GreyHunterPlasmaGun",
+      "agent_key": "Infantry_Troop_RangedElite",
+      "type": "Infantry",
+      "tanking_type": "Troop",
+      "attack_type": "Ranged",
+      "target_type": "Elite",
+      "value": 18,
+      "melee_weapons": [
+        "astartes_chainsword"
+      ],
+      "ranged_weapons": [
+        "plasma_gun_standard",
+        "plasma_gun_supercharge",
+        "bolt_pistol"
+      ],
+      "special_rules": [
+        "Cunning Hunters"
+      ]
     },
     {
       "army": "SpaceMarine",
@@ -215,8 +330,8 @@
       "agent_key": "Infantry_Troop_RangedSwarm",
       "type": "Infantry",
       "tanking_type": "Troop",
-      "attack_type": "Ranged",
-      "target_type": "Swarm",
+      "attack_type": "Melee",
+      "target_type": "Elite",
       "value": 21,
       "melee_weapons": [
         "intercessor_sergeant_power_fist"
@@ -225,21 +340,6 @@
         "plasma_pistol_standard",
         "plasma_pistol_supercharge"
       ],
-      "special_rules": []
-    },
-    {
-      "army": "SpaceMarine",
-      "unit_name": "Terminator",
-      "agent_key": "Infantry_Elite_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Melee",
-      "target_type": "Elite",
-      "value": 36,
-      "melee_weapons": [
-        "thunder_hammer_terminator"
-      ],
-      "ranged_weapons": [],
       "special_rules": []
     },
     {
@@ -261,11 +361,11 @@
     },
     {
       "army": "SpaceMarine",
-      "unit_name": "Terminator",
-      "agent_key": "Infantry_Elite_MeleeElite",
+      "unit_name": "TerminatorAssaultCannon",
+      "agent_key": "Infantry_Elite_RangedElite",
       "type": "Infantry",
       "tanking_type": "Elite",
-      "attack_type": "Melee",
+      "attack_type": "Ranged",
       "target_type": "Elite",
       "value": 38,
       "melee_weapons": [

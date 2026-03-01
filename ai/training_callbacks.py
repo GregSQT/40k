@@ -178,6 +178,11 @@ class EpisodeTerminationCallback(BaseCallback):
         self.last_display_episode_count = None
         self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
         self._last_progress_line_len = 0
+        self.total_episode_actions = 0
+        self.episode_stats_count = 0
+        self.max_episode_duration_seconds = 0.0
+        self._episode_wall_start_by_env = None
+        self._episode_action_counts_by_env = None
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -189,24 +194,60 @@ class EpisodeTerminationCallback(BaseCallback):
     def _on_step(self) -> bool:
         """Track episodes and display progress."""
         self.step_count += 1
+        if not hasattr(self, 'locals'):
+            raise KeyError("EpisodeTerminationCallback missing required callback locals")
+        if 'dones' not in self.locals:
+            raise KeyError("EpisodeTerminationCallback missing required 'dones' field in callback locals")
 
-        # Detect episode completions. In vectorized training, multiple envs can end
-        # on the same callback step, so we must count all completed episodes.
+        # Track per-env episode stats from callback wall-clock and done flags.
+        dones = self.locals['dones']
+        now_perf = time.perf_counter()
+        try:
+            done_flags = [bool(d) for d in dones]
+        except TypeError:
+            done_flags = [bool(dones)]
+
+        n_envs = len(done_flags)
+        if n_envs <= 0:
+            raise ValueError("dones must contain at least one environment flag")
+        if self._episode_wall_start_by_env is None or self._episode_action_counts_by_env is None:
+            self._episode_wall_start_by_env = [now_perf] * n_envs
+            self._episode_action_counts_by_env = [0] * n_envs
+        elif (
+            len(self._episode_wall_start_by_env) != n_envs
+            or len(self._episode_action_counts_by_env) != n_envs
+        ):
+            raise ValueError(
+                "Environment count changed during training; cannot maintain per-env episode timing/action tracking"
+            )
+
+        for env_index in range(n_envs):
+            self._episode_action_counts_by_env[env_index] += 1
+
         episodes_finished = 0
-
-        # Method 1 (preferred): infos with SB3 "episode" payload.
-        if hasattr(self, 'locals') and 'infos' in self.locals:
-            infos = self.locals['infos']
-            if isinstance(infos, list):
-                episodes_finished = sum(1 for info in infos if isinstance(info, dict) and 'episode' in info)
-
-        # Method 2 (secondary): dones array when infos do not expose episode payload.
-        if episodes_finished == 0 and hasattr(self, 'locals') and 'dones' in self.locals:
-            dones = self.locals['dones']
-            try:
-                episodes_finished = int(sum(1 for d in dones if bool(d)))
-            except TypeError:
-                episodes_finished = 1 if bool(dones) else 0
+        for env_index, done in enumerate(done_flags):
+            if not done:
+                continue
+            episodes_finished += 1
+            episode_actions = int(self._episode_action_counts_by_env[env_index])
+            episode_duration_seconds = now_perf - self._episode_wall_start_by_env[env_index]
+            if episode_actions <= 0:
+                raise ValueError(
+                    f"Non-positive episode action count for env {env_index}: {episode_actions}"
+                )
+            if episode_duration_seconds < 0:
+                raise ValueError(
+                    f"Negative episode duration computed for env {env_index}: "
+                    f"start={self._episode_wall_start_by_env[env_index]}, now={now_perf}"
+                )
+            self._episode_wall_start_by_env[env_index] = now_perf
+            self._episode_action_counts_by_env[env_index] = 0
+            self.total_episode_actions += episode_actions
+            self.episode_stats_count += 1
+            self.max_episode_duration_seconds = max(
+                self.max_episode_duration_seconds,
+                episode_duration_seconds
+            )
 
         episode_ended = episodes_finished > 0
         if episode_ended:
@@ -214,9 +255,7 @@ class EpisodeTerminationCallback(BaseCallback):
 
         # Update progress display on episode end
         if episode_ended:
-            import time
             current_time = time.time()
-
             # In curriculum mode (phase_label set), progress must be phase-local.
             # Outside curriculum, keep global progress across rotations.
             if self.phase_label:
@@ -288,26 +327,20 @@ class EpisodeTerminationCallback(BaseCallback):
                     speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
                     time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
 
-                # Build learning-rate / entropy display to keep key PPO knobs visible in progress line
-                lr_display = ""
-                if hasattr(self, 'model') and self.model is not None and hasattr(self.model, 'learning_rate'):
-                    lr_value = self.model.learning_rate
-                    if callable(lr_value):
-                        progress_remaining = self.model._current_progress_remaining if hasattr(self.model, '_current_progress_remaining') else 1.0
-                        lr_value = lr_value(progress_remaining)
-                    lr_display = f" | lr = {float(lr_value):.6f}"
-
-                ent_display = ""
-                if hasattr(self, 'model') and self.model is not None and hasattr(self.model, 'ent_coef'):
-                    ent_value = self.model.ent_coef
-                    if callable(ent_value):
-                        progress_remaining = self.model._current_progress_remaining if hasattr(self.model, '_current_progress_remaining') else 1.0
-                        ent_value = ent_value(progress_remaining)
-                    ent_display = f" | ent_coef = {float(ent_value):.3f}"
+                avg_actions_value = (
+                    self.total_episode_actions / self.episode_stats_count
+                    if self.episode_stats_count > 0
+                    else 0.0
+                )
+                avg_actions_display = f" | avg actions : {avg_actions_value:.1f}"
+                max_duration_display = f" | max duration : {self.max_episode_duration_seconds:.2f}s"
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
-                progress_line = f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}{time_info}{lr_display}{ent_display}{phase_display}"
+                progress_line = (
+                    f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
+                    f"{time_info}{avg_actions_display}{max_duration_display}{phase_display}"
+                )
                 clear_padding = " " * max(0, self._last_progress_line_len - len(progress_line))
                 print(f"\r{progress_line}{clear_padding}", end='', flush=True)
                 self._last_progress_line_len = len(progress_line)

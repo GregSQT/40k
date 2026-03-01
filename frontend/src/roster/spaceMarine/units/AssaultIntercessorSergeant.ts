@@ -14,7 +14,7 @@ export class AssaultIntercessorSergeant extends SpaceMarineInfantryTroopMeleeEli
   static HP_MAX = 2; // Max hit points
   static LD = 6; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 18; // Unit value (W40K points cost)
+  static VALUE = 22; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["plasma_pistol_standard", "plasma_pistol_supercharge"];

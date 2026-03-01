@@ -1235,8 +1235,31 @@ class W40KEngine(gym.Env):
             episode = self.game_state.get("episode_number", "?")
             turn = self.game_state.get("turn", "?")
             phase = self.game_state.get("phase", "?")
+            current_scenario = require_key(self.__dict__, "_current_scenario_file")
+            scenario_name = (
+                os.path.basename(current_scenario)
+                if isinstance(current_scenario, str) and current_scenario
+                else None
+            )
             current_player = require_key(self.game_state, "current_player")
             fight_subphase = self.game_state.get("fight_subphase")
+            units = require_key(self.game_state, "units")
+            if not isinstance(units, list):
+                raise TypeError(f"game_state['units'] must be list (got {type(units).__name__})")
+            if phase == "move":
+                active_unit_id = self.game_state.get("active_movement_unit")
+            elif phase == "shoot":
+                active_unit_id = self.game_state.get("active_shooting_unit")
+            elif phase == "fight":
+                active_unit_id = self.game_state.get("active_fight_unit")
+            else:
+                active_unit_id = None
+            active_unit_name = None
+            if active_unit_id is not None:
+                active_unit_id_str = str(active_unit_id)
+                active_unit = next((u for u in units if str(require_key(u, "id")) == active_unit_id_str), None)
+                if active_unit is not None:
+                    active_unit_name = require_key(active_unit, "DISPLAY_NAME")
             move_pool = len(require_key(self.game_state, "move_activation_pool"))
             shoot_pool = len(require_key(self.game_state, "shoot_activation_pool"))
             charge_pool = len(require_key(self.game_state, "charge_activation_pool"))
@@ -1245,7 +1268,9 @@ class W40KEngine(gym.Env):
             non_active_alt_pool = len(require_key(self.game_state, "non_active_alternating_activation_pool"))
             error_msg = (
                 f"\n ❌ ERROR: Episode exceeded 1000 steps (episode={episode}, turn={turn}, "
-                f"phase={phase}, player={current_player}, fight_subphase={fight_subphase}, "
+                f"phase={phase}, scenario={scenario_name}, scenario_path={current_scenario}, "
+                f"player={current_player}, fight_subphase={fight_subphase}, "
+                f"active_unit_id={active_unit_id}, active_unit_name={active_unit_name}, "
                 f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}, "
                 f"charging_pool={charging_pool}, active_alt_pool={active_alt_pool}, "
                 f"non_active_alt_pool={non_active_alt_pool}). Forcing termination."
