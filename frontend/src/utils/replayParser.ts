@@ -253,6 +253,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const rulesStr = rulesMatch[1];
       try {
         currentEpisode.rules = JSON.parse(rulesStr);
+        if (!currentEpisode.rules) {
+          throw new Error("Replay rules parsed to an empty value");
+        }
         validateReplayRules(currentEpisode.rules, currentEpisode.episode_num);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -355,7 +358,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse MOVE actions
     const moveMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT|FLED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|REACTIVE MOVED|WAIT|FLED)/
     );
     if (moveMatch) {
       const timestamp = moveMatch[1];
@@ -367,7 +370,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const actionType = moveMatch[7];
       syncKnownUnitPosition(currentEpisode, unitId, endCol, endRow);
 
-      if (actionType === "MOVED" || actionType === "FLED") {
+      if (
+        actionType === "MOVED" ||
+        actionType === "FLED" ||
+        actionType === "REACTIVE MOVED"
+      ) {
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         let fromCol = endCol;
         let fromRow = endRow;
@@ -380,7 +387,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         }
 
         currentEpisode.actions.push({
-          type: "move",
+          type: actionType === "REACTIVE MOVED" ? "reactive_move" : "move",
           timestamp,
           turn,
           player,
@@ -464,8 +471,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
         }
       } else if (actionType === "SHOT at Unit") {
-        const targetIdMatch = trimmed.match(/SHOT at Unit (\d+)/);
-        const targetCoordsMatch = trimmed.match(/SHOT at Unit \d+\((\d+),(\d+)\)/);
+        const targetMatch = trimmed.match(/SHOT at Unit (\d+)\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
         // Try to extract detailed combat rolls from format: Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED)
@@ -481,20 +487,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
         // console.log('Parsing shoot line:', trimmed);
         // if (hitMatch) console.log('Found Hit - target:', hitMatch[1], 'roll:', hitMatch[2]);
 
-        if (targetIdMatch) {
-          const targetId = parseInt(targetIdMatch[1], 10);
-          let targetPos: { col: number; row: number } | undefined;
-          if (targetCoordsMatch) {
-            targetPos = {
-              col: parseInt(targetCoordsMatch[1], 10),
-              row: parseInt(targetCoordsMatch[2], 10),
-            };
-          } else if (currentEpisode.units[targetId]) {
-            targetPos = {
-              col: currentEpisode.units[targetId].col,
-              row: currentEpisode.units[targetId].row,
-            };
-          }
+        if (targetMatch) {
+          const targetId = parseInt(targetMatch[1], 10);
+          const targetCol = parseInt(targetMatch[2], 10);
+          const targetRow = parseInt(targetMatch[3], 10);
           const damage = damageMatch ? parseInt(damageMatch[1], 10) : 0;
 
           const action: ReplayAction = {
@@ -505,11 +501,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
             shooter_id: shooterId,
             shooter_pos: { col: shooterCol, row: shooterRow },
             target_id: targetId,
+            target_pos: { col: targetCol, row: targetRow },
             damage,
           };
-          if (targetPos) {
-            action.target_pos = targetPos;
-          }
 
           // Add detailed rolls if available (format: Hit:3+:6 means target 3+, rolled 6)
           if (hitMatch) {
@@ -889,7 +883,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           currentUnits[unitId].col = action.to.col;
           currentUnits[unitId].row = action.to.row;
         }
-      } else if (action.type === "move" && action.unit_id) {
+      } else if ((action.type === "move" || action.type === "reactive_move") && action.unit_id) {
         const unitId = action.unit_id;
         if (currentUnits[unitId] && action.to) {
           currentUnits[unitId].col = action.to.col;

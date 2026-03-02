@@ -13,6 +13,7 @@ interface GameStatusProps {
 }
 
 const PHASE_LABELS = {
+  deployment: "Deployment",
   command: "Command",
   move: "Movement",
   shoot: "Shooting",
@@ -20,10 +21,10 @@ const PHASE_LABELS = {
   fight: "Fight",
 } as const;
 
-const PLAYER_LABELS = {
+const PLAYER_LABELS: Record<1 | 2, string> = {
   1: "Player 1",
   2: "Player 2 (AI)",
-} as const;
+};
 
 export const GameStatus = memo<GameStatusProps>(
   ({
@@ -63,14 +64,23 @@ export const GameStatus = memo<GameStatusProps>(
 
     const player1HP = player1Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
     const player2HP = player2Units.reduce((total, unit) => total + (unit.HP_CUR ?? unit.HP_MAX), 0);
+    const currentPlayerLabel = (() => {
+      if (current_player === undefined) {
+        return "Unknown Player";
+      }
+      if (current_player !== 1 && current_player !== 2) {
+        throw new Error(
+          `Invalid current_player in GameStatus: ${String(current_player)}. Expected 1 or 2.`
+        );
+      }
+      return PLAYER_LABELS[current_player];
+    })();
 
     return (
       <div className="game-status">
         <div className="game-status__row">
           <span className="game-status__label">Current Player:</span>{" "}
-          <span className="game-status__value">
-            {current_player !== undefined ? PLAYER_LABELS[current_player] : "Unknown Player"}
-          </span>
+          <span className="game-status__value">{currentPlayerLabel}</span>
         </div>
 
         <div className="game-status__row">

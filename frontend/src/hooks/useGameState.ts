@@ -13,7 +13,7 @@ import type {
   Unit,
   UnitId,
 } from "../types/game";
-import { getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
+import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
 
 interface ChargeRollPopup {
   unitId: UnitId;
@@ -98,9 +98,12 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
           }
           // Get NB from selected or first weapon
           const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
+          if (!selectedWeapon) {
+            throw new Error(`Unit ${unit.id} has RNG_WEAPONS but no selectable ranged weapon`);
+          }
           return {
             ...unit,
-            SHOOT_LEFT: selectedWeapon?.NB || 0,
+            SHOOT_LEFT: getDiceAverage(selectedWeapon.NB),
             HP_CUR: unit.HP_CUR ?? unit.HP_MAX,
           };
         }),
@@ -157,7 +160,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
         }
         // Get NB from selected or first weapon
         const selectedWeapon = getSelectedRangedWeapon(unit) || unit.RNG_WEAPONS[0];
-        return { ...unit, SHOOT_LEFT: selectedWeapon?.NB || 0 };
+        if (!selectedWeapon) {
+          throw new Error(`Unit ${unit.id} has RNG_WEAPONS but no selectable ranged weapon`);
+        }
+        return { ...unit, SHOOT_LEFT: getDiceAverage(selectedWeapon.NB) };
       }),
     }));
   }, []);
@@ -169,7 +175,10 @@ export const useGameState = (initialUnits: Unit[]): UseGameStateReturn => {
       units: prev.units.map((unit) => {
         // Get NB from selected or first CC weapon
         const selectedWeapon = getSelectedMeleeWeapon(unit) || unit.CC_WEAPONS?.[0];
-        return { ...unit, ATTACK_LEFT: selectedWeapon?.NB || 0 };
+        if (!selectedWeapon) {
+          return { ...unit, ATTACK_LEFT: 0 };
+        }
+        return { ...unit, ATTACK_LEFT: getDiceAverage(selectedWeapon.NB) };
       }),
     }));
   }, []);

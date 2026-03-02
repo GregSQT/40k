@@ -461,35 +461,11 @@ export default function Board({
     };
   }, [units, boardConfig]);
 
-  // Memoize complex expressions for dependency array
-  const _unitsSignature = useMemo(
-    () =>
-      JSON.stringify(
-        units.map((u) => ({
-          id: u.id,
-          col: u.col,
-          row: u.row,
-          HP_CUR: u.HP_CUR,
-          SHOOT_LEFT: u.SHOOT_LEFT,
-          ATTACK_LEFT: u.ATTACK_LEFT,
-        }))
-      ),
-    [units]
-  );
-  const _blinkingUnitsSignature = useMemo(() => {
-    if (!blinkingUnits || blinkingUnits.length === 0) return "[]";
-    return JSON.stringify([...blinkingUnits].sort((a, b) => a - b));
-  }, [blinkingUnits]);
-
   const stableBlinkingUnits = useMemo(() => {
     if (!blinkingUnits) return undefined;
     const sorted = blinkingUnits.length > 0 ? [...blinkingUnits].sort((a, b) => a - b) : [];
     return sorted;
   }, [blinkingUnits]);
-  const _wallHexesOverrideSignature = useMemo(
-    () => JSON.stringify(wallHexesOverride),
-    [wallHexesOverride]
-  );
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -1506,8 +1482,8 @@ export default function Board({
     // Update persistent state
     objectiveControllersRef.current = updatedControllers;
 
-    // Map "command" phase to "move" for drawBoard and UnitRenderer (they don't support "command")
-    const effectivePhase = phase === "command" ? "move" : phase;
+    // Map unsupported phases for drawBoard/UnitRenderer to closest supported behavior.
+    const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;
 
     if (app.stage) {
       app.stage.removeChildren();

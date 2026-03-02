@@ -22,6 +22,7 @@ from .shared_utils import (
     ACTION, WAIT, NO, PASS, ERROR, MOVE, FLED,
     build_enemy_adjacent_hexes, update_units_cache_position, is_unit_alive,
     get_unit_position, require_unit_position,
+    maybe_resolve_reactive_move,
 )
 
 
@@ -78,10 +79,20 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     units_cache = require_key(game_state, "units_cache")
     add_debug_file_log(game_state, f"[PHASE START] E{episode} T{turn} move units_cache={units_cache}")
     
-    # Pre-compute enemy_adjacent_hexes once at phase start for current player
-    # Cache will be reused throughout the phase for all units
-    current_player = require_key(game_state, "current_player")
-    build_enemy_adjacent_hexes(game_state, current_player)
+    # Pre-compute enemy_adjacent_hexes once at phase start for all players present.
+    # Reactive movement may query adjacency from the opposing player's perspective.
+    players_present = set()
+    for cache_entry in units_cache.values():
+        player_raw = require_key(cache_entry, "player")
+        try:
+            player_int = int(player_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid player value in units_cache at movement_phase_start: {player_raw!r}"
+            ) from exc
+        players_present.add(player_int)
+    for player_int in players_present:
+        build_enemy_adjacent_hexes(game_state, player_int)
     
     # Invalidate all destination pools at the START of the phase
     # This ensures pools are clean and don't contain stale data from previous phases
@@ -1056,6 +1067,18 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     # Positions have changed, so all pools (move, charge, shoot) are now stale
     _invalidate_all_destination_pools_after_movement(game_state)
 
+    move_kind = "flee" if was_adjacent else "move"
+    reactive_result = maybe_resolve_reactive_move(
+        game_state=game_state,
+        moved_unit_id=str(unit["id"]),
+        from_col=orig_col,
+        from_row=orig_row,
+        to_col=dest_col,
+        to_row=dest_row,
+        move_kind=move_kind,
+        move_cause="normal",
+    )
+
     # Generate movement log per requested format
     if "action_logs" not in game_state:
         game_state["action_logs"] = []
@@ -1130,6 +1153,8 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "fromRow": orig_row,
         "toCol": result_to_col,  # Use unit coordinates after movement - SINGLE SOURCE OF TRUTH
         "toRow": result_to_row,  # Use unit coordinates after movement - SINGLE SOURCE OF TRUTH
+        "reactive_moves_applied": reactive_result["reactive_moves_applied"],
+        "reactive_moves_declined": reactive_result["reactive_moves_declined"],
         "activation_complete": True,
         "waiting_for_player": False,  # Movement is complete, no waiting needed
         "reset_mode": "select",

@@ -156,7 +156,7 @@ export const BoardReplay: React.FC = () => {
   // Debug mode - read from settings state
   const showHexCoordinates = settings.showDebug;
 
-  const playbackInterval = useRef<number | null>(null);
+  const playbackInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Initialize UnitFactory registry on mount
   useEffect(() => {
@@ -662,8 +662,8 @@ export const BoardReplay: React.FC = () => {
   // Add ghost unit at starting position for move actions
   // For shoot actions, compute SHOOT_LEFT for the active shooter exactly like PvP,
   // based on RNG_NB and the number of shots already fired in the current shooting phase.
-  const unitsWithGhost = currentState?.units
-    ? [...currentState.units].map((u: Unit) => {
+  const unitsWithGhost: UnitWithGhost[] = currentState?.units
+    ? [...currentState.units].map((u): UnitWithGhost => {
         // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
         // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
         if (
@@ -728,7 +728,11 @@ export const BoardReplay: React.FC = () => {
         ) {
           // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
           const selectedCcWeapon = getSelectedMeleeWeapon(u);
-          const ccNb = selectedCcWeapon?.NB || 0;
+          const ccNbRaw = selectedCcWeapon?.NB;
+          if (ccNbRaw === undefined) {
+            throw new Error(`Missing CC weapon NB for replay attacker ${u.id}`);
+          }
+          const ccNb = getDiceAverage(ccNbRaw);
           const attackerId = currentAction.attacker_id;
 
           const lastCompletedIndex = currentActionIndex - 2;
@@ -765,9 +769,13 @@ export const BoardReplay: React.FC = () => {
         return u;
       })
     : [];
-  if (currentAction?.type === "move" && currentAction?.from && currentAction.unit_id) {
+  if (
+    (currentAction?.type === "move" || currentAction?.type === "reactive_move") &&
+    currentAction?.from &&
+    currentAction.unit_id
+  ) {
     // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
+    const originalUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
     if (originalUnit) {
       unitsWithGhost.push({
         ...originalUnit,
@@ -782,7 +790,7 @@ export const BoardReplay: React.FC = () => {
   // Add ghost unit at starting position for charge actions (like move)
   if (currentAction?.type === "charge" && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
+    const originalUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
     if (originalUnit) {
       unitsWithGhost.push({
         ...originalUnit,
@@ -797,7 +805,7 @@ export const BoardReplay: React.FC = () => {
   // Add ghost unit at starting position for advance actions (like move)
   if (currentAction?.type === "advance" && currentAction?.from && currentAction.unit_id) {
     // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
+    const originalUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
     if (originalUnit) {
       unitsWithGhost.push({
         ...originalUnit,
@@ -996,6 +1004,17 @@ export const BoardReplay: React.FC = () => {
           turnNumber,
           action.player
         );
+      } else if (action.type === "reactive_move" && action.from && action.to) {
+        gameLog.addEvent({
+          type: "reactive_move",
+          message: `Unit ${action.unit_id} reactive moved from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})`,
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: "movement",
+          startHex: `(${action.from.col},${action.from.row})`,
+          endHex: `(${action.to.col},${action.to.row})`,
+          player: action.player,
+        });
       } else if (action.type === "advance" && action.from && action.to) {
         // Calculate advance roll from distance between from and to
         const fromCube = offsetToCube(action.from.col, action.from.row);
@@ -1506,7 +1525,7 @@ export const BoardReplay: React.FC = () => {
               // Map phase names to action types
               const phaseToActionTypes: Record<string, string[]> = {
                 deployment: ["deploy"],
-                move: ["move", "move_wait"],
+                move: ["move", "reactive_move", "move_wait"],
                 shoot: ["shoot", "wait", "advance"],
                 charge: ["charge", "charge_wait", "charge_fail"],
                 fight: ["fight"],
@@ -1664,28 +1683,11 @@ export const BoardReplay: React.FC = () => {
     </>
   );
 
-  const resolvedShootingTargetId =
-    currentAction?.type === "shoot"
-      ? (() => {
-          if (currentAction.target_id !== undefined) {
-            return currentAction.target_id;
-          }
-          if (currentAction.target_pos && currentState?.units) {
-            const targetUnit = currentState.units.find(
-              (u) =>
-                u.col === currentAction.target_pos!.col &&
-                u.row === currentAction.target_pos!.row &&
-                (u.HP_CUR ?? 0) > 0
-            );
-            return targetUnit ? targetUnit.id : null;
-          }
-          return null;
-        })()
-      : null;
-
   // Get shooting target ID for explosion icon and shooter ID for shooting indicator
   const shootingTargetId =
-    currentAction?.type === "shoot" ? resolvedShootingTargetId : null;
+    currentAction?.type === "shoot" && currentAction?.target_id !== undefined
+      ? currentAction.target_id
+      : null;
   const shootingUnitId =
     currentAction?.type === "shoot" && currentAction?.shooter_id !== undefined
       ? currentAction.shooter_id
@@ -1693,7 +1695,9 @@ export const BoardReplay: React.FC = () => {
 
   // Get moving unit ID for boot icon during movement phase
   const movingUnitId =
-    (currentAction?.type === "move" || currentAction?.type === "move_wait") &&
+    (currentAction?.type === "move" ||
+      currentAction?.type === "reactive_move" ||
+      currentAction?.type === "move_wait") &&
     currentAction?.unit_id
       ? currentAction.unit_id
       : null;
@@ -1754,7 +1758,7 @@ export const BoardReplay: React.FC = () => {
   // For advance actions, select the ghost unit to show advance destinations
   // Ghost unit has ID -1 (move), -2 (charge), or -3 (advance) and is at the starting position
   const replaySelectedUnitId: number | null =
-    currentAction?.type === "move"
+    currentAction?.type === "move" || currentAction?.type === "reactive_move"
       ? -1
       : currentAction?.type === "charge"
         ? (currentAction.unit_id ?? null) // Select the actual charging unit to trigger getChargeDestinations
@@ -1763,14 +1767,31 @@ export const BoardReplay: React.FC = () => {
           : currentAction?.type === "shoot"
             ? (currentAction.shooter_id ?? null)
             : null;
+  const replayCurrentPlayer: 1 | 2 | null = (() => {
+    if (!currentState) {
+      return null;
+    }
+    const candidate =
+      currentAction?.type === "move" ||
+      currentAction?.type === "reactive_move" ||
+      currentAction?.type === "shoot" ||
+      currentAction?.type === "charge" ||
+      currentAction?.type === "fight"
+        ? currentAction.player
+        : currentState.current_player;
+    if (candidate !== 1 && candidate !== 2) {
+      throw new Error(`Invalid replay current_player value: ${String(candidate)}`);
+    }
+    return candidate;
+  })();
 
   // Center column: Board
   const centerContent =
-    currentState && gameConfig ? (
+    currentState && gameConfig && replayCurrentPlayer !== null ? (
       <BoardPvp
         units={unitsWithGhost}
         selectedUnitId={replaySelectedUnitId}
-        eligibleUnitIds={unitsWithGhost.map((u: Unit) => u.id)}
+        eligibleUnitIds={unitsWithGhost.map((u) => u.id)}
         showHexCoordinates={showHexCoordinates}
         mode={currentAction?.type === "advance" ? "advancePreview" : "select"}
         movePreview={
@@ -1789,14 +1810,7 @@ export const BoardReplay: React.FC = () => {
         onStartAttackPreview={() => {}}
         onConfirmMove={() => {}}
         onCancelMove={() => {}}
-        current_player={
-          currentAction?.type === "move" ||
-          currentAction?.type === "shoot" ||
-          currentAction?.type === "charge" ||
-          currentAction?.type === "fight"
-            ? (currentAction.player as 1 | 2)
-            : currentState.current_player || 1
-        }
+        current_player={replayCurrentPlayer}
         unitsMoved={[]}
         phase={currentState.phase || "move"}
         onShoot={() => {}}
@@ -1818,13 +1832,13 @@ export const BoardReplay: React.FC = () => {
             }
 
             // Find all enemy units (units from the other player)
-            const chargingUnit = unitsWithGhost.find((u: Unit) => u.id === unitId);
+            const chargingUnit = unitsWithGhost.find((u) => u.id === unitId);
             if (!chargingUnit) {
               return [];
             }
 
             const enemyUnits = unitsWithGhost.filter(
-              (u: Unit) =>
+              (u) =>
                 u.player !== chargingUnit?.player &&
                 u.id >= 0 && // Not a ghost unit
                 u.HP_CUR > 0
@@ -1882,7 +1896,7 @@ export const BoardReplay: React.FC = () => {
               // Check if occupied by another unit (excluding the charging unit)
               if (
                 unitsWithGhost.some(
-                  (u: Unit) =>
+                  (u) =>
                     u.col === col && u.row === row && u.id !== unitId && u.id >= 0 && u.HP_CUR > 0
                 )
               ) {
@@ -1895,7 +1909,7 @@ export const BoardReplay: React.FC = () => {
             // Helper function to check if hex is adjacent to an enemy
             const isAdjacentToEnemy = (col: number, row: number): boolean => {
               const hexCube = offsetToCube(col, row);
-              return enemyUnits.some((enemy: Unit) => {
+              return enemyUnits.some((enemy) => {
                 const enemyCube = offsetToCube(enemy.col, enemy.row);
                 return cubeDistance(hexCube, enemyCube) === 1;
               });
@@ -1943,7 +1957,7 @@ export const BoardReplay: React.FC = () => {
                   // Double-check that the destination hex is not occupied
                   if (
                     !unitsWithGhost.some(
-                      (u: Unit) =>
+                      (u) =>
                         u.col === neighbor.col &&
                         u.row === neighbor.row &&
                         u.id !== unitId &&
@@ -1981,7 +1995,7 @@ export const BoardReplay: React.FC = () => {
             }
 
             // Find the advancing unit (actual unit, not ghost)
-            const advancingUnit = unitsWithGhost.find((u: Unit) => u.id === currentAction.unit_id);
+            const advancingUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
             if (!advancingUnit) {
               return [];
             }
@@ -2034,7 +2048,7 @@ export const BoardReplay: React.FC = () => {
               // Check if occupied by another unit (excluding the advancing unit)
               if (
                 unitsWithGhost.some(
-                  (u: Unit) =>
+                  (u) =>
                     u.col === col &&
                     u.row === row &&
                     u.id !== currentAction.unit_id &&
@@ -2129,7 +2143,7 @@ export const BoardReplay: React.FC = () => {
               }
 
               const advancingUnit = unitsWithGhost.find(
-                (u: Unit) => u.id === currentAction.unit_id
+                (u) => u.id === currentAction.unit_id
               );
               if (!advancingUnit) {
                 return [];
@@ -2179,7 +2193,7 @@ export const BoardReplay: React.FC = () => {
 
                 if (
                   unitsWithGhost.some(
-                    (u: Unit) =>
+                    (u) =>
                       u.col === col &&
                       u.row === row &&
                       u.id !== currentAction.unit_id &&
@@ -2259,11 +2273,14 @@ export const BoardReplay: React.FC = () => {
       <SettingsMenu
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onLogout={() => {}}
         showAdvanceWarning={false}
+        canToggleAdvanceWarning={false}
         onToggleAdvanceWarning={() => {}}
         showDebug={settings.showDebug}
         onToggleDebug={handleToggleDebug}
         autoSelectWeapon={true}
+        canToggleAutoSelectWeapon={false}
         onToggleAutoSelectWeapon={() => {}}
       />
     </>

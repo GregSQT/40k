@@ -40,11 +40,9 @@ export const GameController: React.FC<GameControllerProps> = ({ initialUnits, cl
       : location.pathname === "/game" && location.search.includes("mode=pve_old")
         ? "pve_old"
         : "pvp";
-  const _isDebugMode = gameMode === "debug";
-
   // Track UnitStatusTable collapse states
-  const [_player1Collapsed, setPlayer1Collapsed] = useState(false);
-  const [_player2Collapsed, setPlayer2Collapsed] = useState(false);
+  const [, setPlayer1Collapsed] = useState(false);
+  const [, setPlayer2Collapsed] = useState(false);
 
   // NEW: Debug mode state (shared with hex coordinates toggle)
   const [debugMode, setDebugMode] = useState(false);

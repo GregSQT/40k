@@ -1,6 +1,6 @@
 // frontend/src/utils/gameHelpers.ts
 import type { Position, Unit, UnitId } from "../types";
-import { getSelectedMeleeWeapon, getSelectedRangedWeapon } from "./weaponHelpers";
+import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "./weaponHelpers";
 
 // Wall interface for collision detection
 interface Wall {
@@ -431,7 +431,7 @@ export function calculateDamage(
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get damage from selected weapon
   const selectedWeapon =
     damageType === "ranged" ? getSelectedRangedWeapon(attacker) : getSelectedMeleeWeapon(attacker);
-  const baseDamage = selectedWeapon?.DMG || 0;
+  const baseDamage = selectedWeapon ? getDiceAverage(selectedWeapon.DMG) : 0;
 
   // You can add more complex damage calculations here
   // e.g., armor saves, weapon effectiveness, etc.

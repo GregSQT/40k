@@ -272,6 +272,41 @@ class StepLogger:
 
             return base_msg
 
+        elif action_type == "reactive_move" and details:
+            if (
+                "start_pos" in details
+                and details["start_pos"] is not None
+                and "end_pos" in details
+                and details["end_pos"] is not None
+            ):
+                start_col, start_row = details["start_pos"]
+                end_col, end_row = details["end_pos"]
+                trigger_unit_id = require_key(details, "triggered_by_unit_id")
+                trigger_to = require_key(details, "trigger_to_pos")
+                if not isinstance(trigger_to, tuple) or len(trigger_to) != 2:
+                    raise ValueError(
+                        f"reactive_move trigger_to_pos must be tuple(col,row), got {trigger_to}"
+                    )
+                trigger_to_col, trigger_to_row = trigger_to
+                range_roll = require_key(details, "range_roll")
+                if not isinstance(range_roll, int) or isinstance(range_roll, bool):
+                    raise ValueError(
+                        f"reactive_move range_roll must be int, got {type(range_roll).__name__}: {range_roll!r}"
+                    )
+                base_msg = (
+                    f"{unit_label} REACTIVE MOVED from ({start_col},{start_row}) "
+                    f"to ({end_col},{end_row}) [Roll: {range_roll}] to Unit {trigger_unit_id} "
+                    f"deplacing to ({trigger_to_col},{trigger_to_row})"
+                )
+            else:
+                raise KeyError("Reactive_move action missing required position data")
+
+            reward = details.get("reward")
+            if reward is not None:
+                base_msg += f" [R:{reward:+.1f}]"
+
+            return base_msg
+
         elif action_type == "flee" and details:
             # FLEE: Unit flees from enemy (same format as move but indicates flee)
             if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:

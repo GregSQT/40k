@@ -1,6 +1,5 @@
 {
-  "description": "config/agents/Infantry_Swarm_MeleeSwarm/Infantry_Swarm_MeleeSwarm.json",
-
+  "description": "config/agents/Infantry_Swarm_MeleeSwarm/Infantry_Swarm_MeleeSwarm_rewards_config.json",
   "Infantry_Swarm_MeleeSwarm": {
     "Unit": "######################### Infantry_Swarm_MeleeSwarm ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",

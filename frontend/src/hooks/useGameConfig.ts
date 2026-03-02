@@ -39,7 +39,7 @@ interface BoardConfig {
   hex_radius: number;
   margin: number;
   wall_hexes: [number, number][];
-  objective_hexes: [number, number][];
+  objective_hexes?: [number, number][];
   colors: {
     background: string;
     cell_even: string;
@@ -67,7 +67,7 @@ interface GameRules {
   max_turns: number;
   turn_limit_penalty: number;
   max_units_per_player: number;
-  board_size: [number, number];
+  board_size?: [number, number];
 }
 
 interface GameConfig {
@@ -82,7 +82,7 @@ interface GameConfig {
     retries: number;
     fallback_action: string;
   };
-  scoring: {
+  scoring?: {
     win_bonus: number;
     lose_penalty: number;
     survival_bonus_per_turn: number;
@@ -98,6 +98,47 @@ interface ExtendedGameConfig {
   boardSize: [number, number];
   turnPenalty: number;
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null;
+};
+
+const isBoardConfig = (value: unknown): value is BoardConfig => {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.cols !== "number" ||
+    typeof value.rows !== "number" ||
+    typeof value.hex_radius !== "number" ||
+    typeof value.margin !== "number"
+  ) {
+    return false;
+  }
+  if (!Array.isArray(value.wall_hexes)) {
+    return false;
+  }
+  if (value.objective_hexes !== undefined && !Array.isArray(value.objective_hexes)) {
+    return false;
+  }
+  if (!isRecord(value.colors)) {
+    return false;
+  }
+  return true;
+};
+
+const isGameConfig = (value: unknown): value is GameConfig => {
+  if (!isRecord(value)) return false;
+  if (!isRecord(value.game_rules)) return false;
+  if (!isRecord(value.gameplay)) return false;
+  if (!isRecord(value.ai_behavior)) return false;
+  if (typeof value.game_rules.max_turns !== "number") return false;
+  if (value.game_rules.board_size !== undefined && !Array.isArray(value.game_rules.board_size)) {
+    return false;
+  }
+  if (value.scoring !== undefined && !isRecord(value.scoring)) {
+    return false;
+  }
+  return true;
+};
 
 export const useGameConfig = (boardConfigName: string = "default"): ExtendedGameConfig => {
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
@@ -141,13 +182,19 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
           throw new Error("Game config file is empty");
         }
 
-        let boardData: Record<string, unknown>, gameData: Record<string, unknown>;
+        let boardDataRaw: unknown;
+        let gameDataRaw: unknown;
         try {
-          boardData = JSON.parse(boardResponseText);
-          gameData = JSON.parse(gameResponseText);
+          boardDataRaw = JSON.parse(boardResponseText);
+          gameDataRaw = JSON.parse(gameResponseText);
         } catch (parseError) {
           throw new Error(`Invalid JSON in config files: ${parseError}`);
         }
+
+        if (!isRecord(boardDataRaw)) {
+          throw new Error("Invalid board config root: expected object");
+        }
+        const boardData = boardDataRaw;
 
         if (!boardData[boardConfigName]) {
           console.warn(
@@ -158,15 +205,15 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
         }
 
         const configData = boardData[boardConfigName];
-        const mergedBoardConfig: BoardConfig = configData;
-
-        // Validate required properties
-        if (!configData.cols || !configData.rows || !configData.hex_radius) {
-          throw new Error(`Invalid board config: missing required properties`);
+        if (!isBoardConfig(configData)) {
+          throw new Error("Invalid board config: missing required properties");
+        }
+        if (!isGameConfig(gameDataRaw)) {
+          throw new Error("Invalid game config: missing required properties");
         }
 
-        setBoardConfig(mergedBoardConfig);
-        setGameConfig(gameData);
+        setBoardConfig(configData);
+        setGameConfig(gameDataRaw);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to load configuration";
         setError(errorMessage);

@@ -18,6 +18,7 @@ from .shared_utils import (
     update_units_cache_position, update_units_cache_hp, remove_from_units_cache,
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
+    maybe_resolve_reactive_move,
 )
 
 # ============================================================================
@@ -168,7 +169,7 @@ def _can_unit_advance_in_shoot_phase(unit: Dict[str, Any], game_state: Dict[str,
     """
     Return True only when unit can still advance in current shooting activation.
 
-    No fallback: _can_advance must be initialized during activation start.
+    Strict requirement: _can_advance must be initialized during activation start.
     """
     if "_can_advance" not in unit:
         raise KeyError(f"Unit missing required '_can_advance' field: unit_id={unit.get('id')}")
@@ -661,10 +662,21 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
-    # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for current player
-    # Cache will be reused throughout the phase for all units
+    # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for all players present.
+    # Reactive movement may query adjacency from the opposing player's perspective.
     from .shared_utils import build_enemy_adjacent_hexes
-    build_enemy_adjacent_hexes(game_state, current_player)
+    players_present = set()
+    for cache_entry in units_cache.values():
+        player_raw = require_key(cache_entry, "player")
+        try:
+            player_int = int(player_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid player value in units_cache at shooting_phase_start: {player_raw!r}"
+            ) from exc
+        players_present.add(player_int)
+    for player_int in players_present:
+        build_enemy_adjacent_hexes(game_state, player_int)
     
     # UNITS_CACHE: Verify units_cache exists (built at reset, not here - "reset only" policy)
     if "units_cache" not in game_state:
@@ -4904,6 +4916,17 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             # Positions have changed, so all pools (move, charge, shoot) are now stale
             from .movement_handlers import _invalidate_all_destination_pools_after_movement
             _invalidate_all_destination_pools_after_movement(game_state)
+
+            maybe_resolve_reactive_move(
+                game_state=game_state,
+                moved_unit_id=str(unit["id"]),
+                from_col=orig_col,
+                from_row=orig_row,
+                to_col=dest_col_int,
+                to_row=dest_row_int,
+                move_kind="advance",
+                move_cause="normal",
+            )
         
         # CRITICAL FIX: Mark unit as advanced REGARDLESS of whether it moved
         # Units must be marked as advanced even if they stay in place (for ASSAULT weapon rule)

@@ -13,7 +13,10 @@ from engine.combat_utils import (
     normalize_coordinates,
     calculate_hex_distance,
     get_hex_neighbors,
-    expected_dice_value
+    expected_dice_value,
+    resolve_dice_value,
+    get_unit_by_id,
+    set_unit_coordinates,
 )
 
 # end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
@@ -571,38 +574,669 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
     Returns:
         Set of hex coordinates adjacent to any living enemy unit
     """
-    # Require units_cache to exist
-    if "units_cache" not in game_state:
-        raise KeyError("units_cache must exist (call build_units_cache at reset)")
-    
-    enemy_adjacent_hexes = set()
-    alive_enemy_count = 0  # For debug summary only
-    player_int = int(player) if player is not None else None
-
-    # Iterate over units_cache (only living enemies: HP_CUR > 0)
-    for unit_id, entry in game_state["units_cache"].items():
-        if require_key(entry, "HP_CUR") <= 0:
-            continue  # Skip dead units
-        enemy_player = entry["player"]
-        
-        if enemy_player == player_int:
-            continue  # Skip friendly units
-        
-        alive_enemy_count += 1
-        enemy_col = entry["col"]
-        enemy_row = entry["row"]
-        
-        # Add all 6 neighbors of this enemy to the set
-        # CRITICAL: Only add neighbors that are within board bounds
-        neighbors = get_hex_neighbors(enemy_col, enemy_row)
-        for neighbor_col, neighbor_row in neighbors:
-            if (neighbor_col >= 0 and neighbor_row >= 0 and
-                neighbor_col < game_state.get("board_cols", 999999) and
-                neighbor_row < game_state.get("board_rows", 999999)):
-                enemy_adjacent_hexes.add((neighbor_col, neighbor_row))
+    enemy_adjacent_hexes = _compute_enemy_adjacent_hexes_from_units_cache(game_state, int(player))
 
     # Store result in game_state cache for reuse during phase
     cache_key = f"enemy_adjacent_hexes_player_{player}"
     game_state[cache_key] = enemy_adjacent_hexes
     
     return enemy_adjacent_hexes
+
+
+def _compute_enemy_adjacent_hexes_from_units_cache(
+    game_state: Dict[str, Any], player: int
+) -> Set[Tuple[int, int]]:
+    """
+    Compute enemy-adjacent hexes directly from current units_cache snapshot.
+    """
+    units_cache = require_key(game_state, "units_cache")
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+
+    enemy_adjacent_hexes: Set[Tuple[int, int]] = set()
+    player_int = int(player)
+    for entry in units_cache.values():
+        hp_cur = require_key(entry, "HP_CUR")
+        if hp_cur <= 0:
+            continue
+        entry_player_raw = require_key(entry, "player")
+        try:
+            entry_player = int(entry_player_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid player value in units_cache entry: {entry_player_raw!r}") from exc
+        if entry_player == player_int:
+            continue
+
+        enemy_col = require_key(entry, "col")
+        enemy_row = require_key(entry, "row")
+        for neighbor_col, neighbor_row in get_hex_neighbors(enemy_col, enemy_row):
+            if (
+                neighbor_col >= 0
+                and neighbor_row >= 0
+                and neighbor_col < board_cols
+                and neighbor_row < board_rows
+            ):
+                enemy_adjacent_hexes.add((neighbor_col, neighbor_row))
+    return enemy_adjacent_hexes
+
+
+def _get_players_present_from_units_cache(game_state: Dict[str, Any]) -> Set[int]:
+    """Return all player ids currently present in units_cache."""
+    units_cache = require_key(game_state, "units_cache")
+    players_present: Set[int] = set()
+    for cache_entry in units_cache.values():
+        player_raw = require_key(cache_entry, "player")
+        try:
+            player_int = int(player_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid player value in units_cache: {player_raw!r}"
+            ) from exc
+        players_present.add(player_int)
+    return players_present
+
+
+def _bounded_neighbors(
+    col: int, row: int, board_cols: int, board_rows: int
+) -> List[Tuple[int, int]]:
+    """Get in-bounds hex neighbors."""
+    neighbors: List[Tuple[int, int]] = []
+    for n_col, n_row in get_hex_neighbors(col, row):
+        if n_col < 0 or n_row < 0 or n_col >= board_cols or n_row >= board_rows:
+            continue
+        neighbors.append((n_col, n_row))
+    return neighbors
+
+
+def _build_enemy_adjacent_structures_from_units_cache(
+    game_state: Dict[str, Any],
+    players_present: Set[int],
+) -> Tuple[Dict[int, Dict[Tuple[int, int], int]], Dict[int, Set[Tuple[int, int]]]]:
+    """
+    Build per-player enemy-adjacent counters and sets from current units_cache snapshot.
+    """
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    units_cache = require_key(game_state, "units_cache")
+
+    counters_by_player: Dict[int, Dict[Tuple[int, int], int]] = {
+        player_int: {} for player_int in players_present
+    }
+    sets_by_player: Dict[int, Set[Tuple[int, int]]] = {
+        player_int: set() for player_int in players_present
+    }
+
+    for cache_entry in units_cache.values():
+        hp_cur = require_key(cache_entry, "HP_CUR")
+        if hp_cur <= 0:
+            continue
+        unit_player_raw = require_key(cache_entry, "player")
+        try:
+            unit_player_int = int(unit_player_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid player value in units_cache entry: {unit_player_raw!r}"
+            ) from exc
+        unit_col = require_key(cache_entry, "col")
+        unit_row = require_key(cache_entry, "row")
+        unit_neighbors = _bounded_neighbors(unit_col, unit_row, board_cols, board_rows)
+        for perspective_player in players_present:
+            if perspective_player == unit_player_int:
+                continue
+            player_counters = counters_by_player[perspective_player]
+            player_set = sets_by_player[perspective_player]
+            for neighbor in unit_neighbors:
+                if neighbor in player_counters:
+                    player_counters[neighbor] = player_counters[neighbor] + 1
+                else:
+                    player_counters[neighbor] = 1
+                player_set.add(neighbor)
+
+    return counters_by_player, sets_by_player
+
+
+def _apply_enemy_adjacent_delta_for_moved_unit(
+    counters_by_player: Dict[int, Dict[Tuple[int, int], int]],
+    sets_by_player: Dict[int, Set[Tuple[int, int]]],
+    players_present: Set[int],
+    moved_unit_player: int,
+    old_pos: Tuple[int, int],
+    new_pos: Tuple[int, int],
+    board_cols: int,
+    board_rows: int,
+) -> None:
+    """
+    Apply incremental enemy-adjacent cache update after one moved unit position change.
+    """
+    old_neighbors = _bounded_neighbors(old_pos[0], old_pos[1], board_cols, board_rows)
+    new_neighbors = _bounded_neighbors(new_pos[0], new_pos[1], board_cols, board_rows)
+
+    for perspective_player in players_present:
+        if perspective_player == moved_unit_player:
+            continue
+
+        player_counters = require_key(counters_by_player, perspective_player)
+        player_set = require_key(sets_by_player, perspective_player)
+
+        for neighbor in old_neighbors:
+            if neighbor not in player_counters:
+                raise KeyError(
+                    f"Delta update missing old neighbor {neighbor} for player {perspective_player}"
+                )
+            current_count = player_counters[neighbor]
+            if current_count <= 0:
+                raise ValueError(
+                    f"Invalid non-positive adjacency count for {neighbor} "
+                    f"(player={perspective_player}, count={current_count})"
+                )
+            if current_count == 1:
+                del player_counters[neighbor]
+                player_set.discard(neighbor)
+            else:
+                player_counters[neighbor] = current_count - 1
+
+        for neighbor in new_neighbors:
+            if neighbor in player_counters:
+                player_counters[neighbor] = player_counters[neighbor] + 1
+            else:
+                player_counters[neighbor] = 1
+            player_set.add(neighbor)
+
+
+def _unit_has_rule_effect(unit: Dict[str, Any], rule_id: str) -> bool:
+    """
+    Check if unit has rule_id directly or through grants_rule_ids.
+    """
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        direct_rule_id = require_key(rule, "ruleId")
+        if direct_rule_id == rule_id:
+            return True
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise ValueError(
+                f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if rule_id in granted_rule_ids:
+            return True
+    return False
+
+
+def _build_reactive_move_destinations_pool(
+    game_state: Dict[str, Any],
+    reactive_unit: Dict[str, Any],
+    move_range: int,
+    enemy_adjacent_hexes_override: Optional[Set[Tuple[int, int]]] = None,
+) -> List[Tuple[int, int]]:
+    """
+    Build legal reactive move destinations using BFS with movement restrictions.
+    """
+    if move_range <= 0:
+        raise ValueError(f"reactive_move move_range must be > 0, got {move_range}")
+    start_col, start_row = require_unit_position(reactive_unit, game_state)
+    start_pos = (start_col, start_row)
+
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = require_key(game_state, "wall_hexes")
+
+    reactive_player_raw = require_key(reactive_unit, "player")
+    try:
+        reactive_player = int(reactive_player_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Reactive unit {require_key(reactive_unit, 'id')} has invalid player: {reactive_player_raw!r}"
+        ) from exc
+
+    if enemy_adjacent_hexes_override is not None:
+        enemy_adjacent_hexes = enemy_adjacent_hexes_override
+    else:
+        # Use phase cache by default.
+        cache_key = f"enemy_adjacent_hexes_player_{reactive_player}"
+        if cache_key not in game_state:
+            raise KeyError(
+                f"Missing required adjacency cache '{cache_key}'. "
+                "Cache must be initialized at phase start."
+            )
+        enemy_adjacent_hexes = require_key(game_state, cache_key)
+        if not isinstance(enemy_adjacent_hexes, set):
+            raise ValueError(
+                f"Invalid adjacency cache type for '{cache_key}': "
+                f"{type(enemy_adjacent_hexes).__name__}"
+            )
+
+    # Build occupied positions from units_cache (all living units except the moving one).
+    units_cache = require_key(game_state, "units_cache")
+    reactive_unit_id = str(require_key(reactive_unit, "id"))
+    occupied_positions: Set[Tuple[int, int]] = set()
+    for unit_id, entry in units_cache.items():
+        if str(unit_id) == reactive_unit_id:
+            continue
+        entry_col = require_key(entry, "col")
+        entry_row = require_key(entry, "row")
+        occupied_positions.add((entry_col, entry_row))
+
+    wall_set: Set[Tuple[int, int]] = set()
+    for wall_hex in wall_hexes:
+        if isinstance(wall_hex, (tuple, list)) and len(wall_hex) == 2:
+            wall_col, wall_row = normalize_coordinates(wall_hex[0], wall_hex[1])
+            wall_set.add((wall_col, wall_row))
+        else:
+            raise ValueError(f"Invalid wall hex entry: {wall_hex!r}")
+
+    visited: Set[Tuple[int, int]] = {start_pos}
+    queue: List[Tuple[Tuple[int, int], int]] = [(start_pos, 0)]
+    valid_destinations: List[Tuple[int, int]] = []
+
+    while queue:
+        (cur_col, cur_row), cur_dist = queue.pop(0)
+        if cur_dist >= move_range:
+            continue
+
+        for neighbor_col, neighbor_row in get_hex_neighbors(cur_col, cur_row):
+            neighbor = (neighbor_col, neighbor_row)
+            if neighbor in visited:
+                continue
+            if neighbor_col < 0 or neighbor_row < 0 or neighbor_col >= board_cols or neighbor_row >= board_rows:
+                continue
+            if neighbor in wall_set:
+                continue
+            if neighbor in occupied_positions:
+                continue
+            if neighbor in enemy_adjacent_hexes:
+                continue
+
+            visited.add(neighbor)
+            valid_destinations.append(neighbor)
+            queue.append((neighbor, cur_dist + 1))
+
+    # Deterministic destination order.
+    valid_destinations.sort(key=lambda pos: (int(pos[0]), int(pos[1])))
+    return valid_destinations
+
+
+def _select_reactive_unit_order(
+    game_state: Dict[str, Any], eligible_units: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Order eligible reactive units according to configured reactive mode.
+    """
+    mode_raw = require_key(game_state, "reactive_mode")
+    if mode_raw not in {"micro", "macro"}:
+        raise ValueError(f"Unsupported reactive_mode: {mode_raw!r}")
+
+    if mode_raw == "micro":
+        return sorted(eligible_units, key=lambda unit: str(require_key(unit, "id")))
+
+    macro_order_raw = game_state.get("reactive_macro_order_current_window")
+    if macro_order_raw is None:
+        raise ValueError("ValueError[reactive_move.invalid_macro_order]: missing reactive_macro_order_current_window")
+    if not isinstance(macro_order_raw, list):
+        raise ValueError(
+            "ValueError[reactive_move.invalid_macro_order]: "
+            f"reactive_macro_order_current_window must be list, got {type(macro_order_raw).__name__}"
+        )
+    macro_order = [str(unit_id) for unit_id in macro_order_raw]
+    if len(macro_order) == 0:
+        raise ValueError("ValueError[reactive_move.invalid_macro_order]: macro order cannot be empty")
+
+    eligible_by_id = {str(require_key(unit, "id")): unit for unit in eligible_units}
+    ordered: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for unit_id in macro_order:
+        if unit_id in eligible_by_id and unit_id not in seen:
+            ordered.append(eligible_by_id[unit_id])
+            seen.add(unit_id)
+        elif unit_id not in eligible_by_id:
+            raise ValueError(
+                "ValueError[reactive_move.invalid_macro_order]: "
+                f"unit_id={unit_id} not eligible in current reaction window"
+            )
+
+    return ordered
+
+
+def _select_reactive_destination(
+    valid_destinations: List[Tuple[int, int]], moved_to_col: int, moved_to_row: int
+) -> Tuple[int, int]:
+    """
+    Deterministic destination policy: closest to moved enemy unit, tie-break by coordinates.
+    """
+    if not valid_destinations:
+        raise ValueError("Cannot select reactive destination from empty pool")
+    return min(
+        valid_destinations,
+        key=lambda pos: (calculate_hex_distance(pos[0], pos[1], moved_to_col, moved_to_row), pos[0], pos[1]),
+    )
+
+
+def _resolve_reactive_decision(
+    game_state: Dict[str, Any],
+    reactive_unit_id: str,
+    valid_destinations: List[Tuple[int, int]],
+    moved_to_col: int,
+    moved_to_row: int,
+) -> Tuple[str, Optional[Tuple[int, int]]]:
+    """
+    Resolve reactive decision for one unit.
+
+    Returns:
+        ("decline", None) or ("move", (col, row))
+    """
+    decision_mode = require_key(game_state, "reactive_decision_mode")
+    if decision_mode not in {"auto", "state"}:
+        raise ValueError(f"Unsupported reactive_decision_mode: {decision_mode!r}")
+
+    if decision_mode == "auto":
+        return "move", _select_reactive_destination(valid_destinations, moved_to_col, moved_to_row)
+
+    payload = require_key(game_state, "reactive_decision_payload")
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"reactive_decision_payload must be dict when decision_mode='state', got {type(payload).__name__}"
+        )
+
+    decision_entry = payload.get(reactive_unit_id)
+    if decision_entry is None:
+        raise ValueError(
+            "ValueError[reactive_move.missing_decision]: "
+            f"reactive_unit_id={reactive_unit_id} has no decision in reactive_decision_payload"
+        )
+    if not isinstance(decision_entry, dict):
+        raise ValueError(
+            "ValueError[reactive_move.invalid_decision_payload]: "
+            f"reactive_unit_id={reactive_unit_id} decision must be dict, got {type(decision_entry).__name__}"
+        )
+
+    action = require_key(decision_entry, "action")
+    if action == "decline_reactive_move":
+        # Consume decision entry once used in this window.
+        del payload[reactive_unit_id]
+        return "decline", None
+    if action != "reactive_move":
+        raise ValueError(
+            "ValueError[reactive_move.invalid_decision_action]: "
+            f"reactive_unit_id={reactive_unit_id} action={action!r}"
+        )
+
+    destination = require_key(decision_entry, "destination")
+    if isinstance(destination, dict):
+        if "col" not in destination or "row" not in destination:
+            raise KeyError(
+                "ValueError[reactive_move.invalid_destination_payload]: "
+                f"reactive_unit_id={reactive_unit_id} destination dict must have col/row"
+            )
+        dest_col, dest_row = normalize_coordinates(destination["col"], destination["row"])
+    elif isinstance(destination, (tuple, list)) and len(destination) == 2:
+        dest_col, dest_row = normalize_coordinates(destination[0], destination[1])
+    else:
+        raise ValueError(
+            "ValueError[reactive_move.invalid_destination_payload]: "
+            f"reactive_unit_id={reactive_unit_id} destination must be [col,row] or {{col,row}}, got {destination!r}"
+        )
+
+    selected_dest = (dest_col, dest_row)
+    if selected_dest not in valid_destinations:
+        raise ValueError(
+            "ValueError[reactive_move.invalid_destination]: "
+            f"reactive_unit_id={reactive_unit_id} destination={selected_dest} pool_size={len(valid_destinations)}"
+        )
+
+    del payload[reactive_unit_id]
+    return "move", selected_dest
+
+
+def refresh_all_positional_caches_after_reactive_move(
+    game_state: Dict[str, Any],
+    enemy_adjacent_sets_override: Optional[Dict[int, Set[Tuple[int, int]]]] = None,
+) -> None:
+    """
+    Centralized cache refresh after any applied reactive move.
+    """
+    # Invalidate global LoS caches.
+    game_state["los_cache"] = {}
+    game_state["hex_los_cache"] = {}
+
+    # Invalidate all destination/target pools via movement helper.
+    from .movement_handlers import _invalidate_all_destination_pools_after_movement
+    _invalidate_all_destination_pools_after_movement(game_state)
+
+    # Invalidate unit-local LoS caches.
+    for unit in require_key(game_state, "units"):
+        if "los_cache" in unit:
+            unit["los_cache"] = {}
+
+    players_present = _get_players_present_from_units_cache(game_state)
+    if enemy_adjacent_sets_override is not None:
+        for player_int in players_present:
+            if player_int not in enemy_adjacent_sets_override:
+                raise KeyError(
+                    f"Missing adjacency override for player {player_int} during reactive cache refresh"
+                )
+            override_set = require_key(enemy_adjacent_sets_override, player_int)
+            if not isinstance(override_set, set):
+                raise TypeError(
+                    f"Adjacency override for player {player_int} must be set, got {type(override_set).__name__}"
+                )
+            game_state[f"enemy_adjacent_hexes_player_{player_int}"] = set(override_set)
+        return
+
+    # Direct recompute path for external callers: recompute from units_cache snapshot.
+    for player_int in players_present:
+        game_state[f"enemy_adjacent_hexes_player_{player_int}"] = _compute_enemy_adjacent_hexes_from_units_cache(
+            game_state, player_int
+        )
+
+
+def maybe_resolve_reactive_move(
+    game_state: Dict[str, Any],
+    moved_unit_id: str,
+    from_col: int,
+    from_row: int,
+    to_col: int,
+    to_row: int,
+    move_kind: str,
+    move_cause: str,
+) -> Dict[str, Any]:
+    """
+    Resolve reactive_move window after an enemy unit has ended movement.
+    """
+    # Validate event payload.
+    moved_unit_id_str = str(moved_unit_id)
+    from_col_int, from_row_int = normalize_coordinates(from_col, from_row)
+    to_col_int, to_row_int = normalize_coordinates(to_col, to_row)
+    if move_kind not in {"move", "advance", "flee", "reposition_normal"}:
+        raise ValueError(f"Unsupported move_kind for reactive_move: {move_kind}")
+    if move_cause not in {"normal", "reactive_move"}:
+        raise ValueError(f"Unsupported move_cause for reactive_move: {move_cause}")
+
+    if move_cause == "reactive_move":
+        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False}
+
+    if require_key(game_state, "reaction_window_active"):
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        phase = game_state.get("phase", "?")
+        current_player = game_state.get("current_player", "?")
+        raise RuntimeError(
+            "RuntimeError[reactive_move.reentrance]: "
+            f"episode={episode} turn={turn} phase={phase} current_player={current_player} "
+            f"moved_unit_id={moved_unit_id_str} move_cause={move_cause} reaction_window_active=True"
+        )
+
+    moved_unit = get_unit_by_id(game_state, moved_unit_id_str)
+    if moved_unit is None:
+        raise KeyError(f"Moved unit not found for reactive_move: {moved_unit_id_str}")
+    moved_player = require_key(moved_unit, "player")
+
+    units_cache = require_key(game_state, "units_cache")
+
+    # Build reaction candidates.
+    reacted_set = require_key(game_state, "units_reacted_this_enemy_turn")
+    if not isinstance(reacted_set, set):
+        raise ValueError(
+            f"units_reacted_this_enemy_turn must be set, got {type(reacted_set).__name__}"
+        )
+
+    eligible_units: List[Dict[str, Any]] = []
+    for unit_id in units_cache.keys():
+        unit = get_unit_by_id(game_state, unit_id)
+        if unit is None:
+            raise KeyError(f"Unit {unit_id} present in units_cache but missing from game_state['units']")
+
+        unit_id_str = str(require_key(unit, "id"))
+        if not is_unit_alive(unit_id_str, game_state):
+            continue
+
+        unit_player = require_key(unit, "player")
+        if int(unit_player) == int(moved_player):
+            continue
+        if unit_id_str in reacted_set:
+            continue
+        if not _unit_has_rule_effect(unit, "reactive_move"):
+            continue
+
+        unit_col, unit_row = require_unit_position(unit, game_state)
+        if calculate_hex_distance(unit_col, unit_row, to_col_int, to_row_int) > 9:
+            continue
+
+        eligible_units.append(unit)
+
+    if not eligible_units:
+        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False}
+
+    ordered_units = _select_reactive_unit_order(game_state, eligible_units)
+    if not ordered_units:
+        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False}
+
+    # Build adjacency structures only when at least one non-reacted unit is eligible.
+    players_present = _get_players_present_from_units_cache(game_state)
+    reactive_adjacent_counts_by_player, reactive_adjacent_sets_by_player = (
+        _build_enemy_adjacent_structures_from_units_cache(game_state, players_present)
+    )
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+
+    game_state["reaction_window_active"] = True
+    game_state["last_move_event_id"] = int(require_key(game_state, "last_move_event_id")) + 1
+    applied_count = 0
+    declined_count = 0
+    try:
+        for reactive_unit in ordered_units:
+            reactive_unit_id = str(require_key(reactive_unit, "id"))
+            reactive_player_raw = require_key(reactive_unit, "player")
+            try:
+                reactive_player_int = int(reactive_player_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Reactive unit {reactive_unit_id} has invalid player: {reactive_player_raw!r}"
+                ) from exc
+            if reactive_player_int not in reactive_adjacent_sets_by_player:
+                raise KeyError(
+                    f"Missing reactive adjacency snapshot for player {reactive_player_int}"
+                )
+
+            # Each reacting unit gets its own D6 range roll.
+            move_range = resolve_dice_value("D6", "reactive_move_distance")
+            valid_destinations = _build_reactive_move_destinations_pool(
+                game_state,
+                reactive_unit,
+                move_range,
+                enemy_adjacent_hexes_override=reactive_adjacent_sets_by_player[reactive_player_int],
+            )
+            if not valid_destinations:
+                continue
+
+            decision_action, selected_dest = _resolve_reactive_decision(
+                game_state,
+                reactive_unit_id,
+                valid_destinations,
+                to_col_int,
+                to_row_int,
+            )
+            if decision_action == "decline":
+                declined_count += 1
+                if "action_logs" not in game_state:
+                    game_state["action_logs"] = []
+                game_state["action_logs"].append(
+                    {
+                        "type": "reactive_move_declined",
+                        "unitId": reactive_unit_id,
+                        "triggered_by_unit_id": moved_unit_id_str,
+                        "trigger_move_kind": move_kind,
+                        "trigger_move_cause": move_cause,
+                        "range_roll": move_range,
+                        "event_fromCol": from_col_int,
+                        "event_fromRow": from_row_int,
+                        "event_toCol": to_col_int,
+                        "event_toRow": to_row_int,
+                    }
+                )
+                continue
+
+            if selected_dest is None:
+                raise ValueError(
+                    f"Reactive move decision returned action={decision_action!r} without destination for unit {reactive_unit_id}"
+                )
+            dest_col, dest_row = selected_dest
+
+            orig_col, orig_row = require_unit_position(reactive_unit, game_state)
+            set_unit_coordinates(reactive_unit, dest_col, dest_row)
+            update_units_cache_position(game_state, reactive_unit_id, dest_col, dest_row)
+            reacted_set.add(reactive_unit_id)
+            game_state["last_move_cause"] = "reactive_move"
+            _apply_enemy_adjacent_delta_for_moved_unit(
+                counters_by_player=reactive_adjacent_counts_by_player,
+                sets_by_player=reactive_adjacent_sets_by_player,
+                players_present=players_present,
+                moved_unit_player=reactive_player_int,
+                old_pos=(orig_col, orig_row),
+                new_pos=(dest_col, dest_row),
+                board_cols=board_cols,
+                board_rows=board_rows,
+            )
+
+            # Keep action logs explicit for post-mortem analysis.
+            if "action_logs" not in game_state:
+                game_state["action_logs"] = []
+            game_state["action_logs"].append(
+                {
+                    "type": "reactive_move",
+                    "message": (
+                        f"Unit {reactive_unit_id}({dest_col},{dest_row}) MOVED from ({orig_col},{orig_row}) "
+                        f"to ({dest_col},{dest_row}) [Roll: {move_range}] "
+                        f"(Reaction move to Unit {moved_unit_id_str} moving to ({to_col_int},{to_row_int}))"
+                    ),
+                    "unitId": reactive_unit_id,
+                    "player": require_key(reactive_unit, "player"),
+                    "triggered_by_unit_id": moved_unit_id_str,
+                    "trigger_move_kind": move_kind,
+                    "trigger_move_cause": move_cause,
+                    "fromCol": orig_col,
+                    "fromRow": orig_row,
+                    "toCol": dest_col,
+                    "toRow": dest_row,
+                    "range_roll": move_range,
+                    "event_fromCol": from_col_int,
+                    "event_fromRow": from_row_int,
+                    "event_toCol": to_col_int,
+                    "event_toRow": to_row_int,
+                }
+            )
+
+            refresh_all_positional_caches_after_reactive_move(
+                game_state,
+                enemy_adjacent_sets_override=reactive_adjacent_sets_by_player,
+            )
+            applied_count += 1
+    finally:
+        game_state["reaction_window_active"] = False
+
+    return {
+        "reactive_moves_applied": applied_count,
+        "reactive_moves_declined": declined_count,
+        "triggered": applied_count > 0 or declined_count > 0,
+    }

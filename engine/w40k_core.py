@@ -337,6 +337,14 @@ class W40KEngine(gym.Env):
             "units_shot": set(),
             "units_charged": set(),
             "units_attacked": set(),
+            "units_reacted_this_enemy_turn": set(),
+            "reaction_window_active": False,
+            "last_move_event_id": 0,
+            "last_move_cause": "normal",
+            "reactive_mode": "micro",
+            "reactive_macro_order_current_window": [],
+            "reactive_decision_mode": "auto",
+            "reactive_decision_payload": {},
             
             # Phase management
             "command_activation_pool": [],
@@ -554,6 +562,14 @@ class W40KEngine(gym.Env):
             "units_charged": set(),
             "units_attacked": set(),
             "units_advanced": set(),
+            "units_reacted_this_enemy_turn": set(),
+            "reaction_window_active": False,
+            "last_move_event_id": 0,
+            "last_move_cause": "normal",
+            "reactive_mode": "micro",
+            "reactive_macro_order_current_window": [],
+            "reactive_decision_mode": "auto",
+            "reactive_decision_payload": {},
             "command_activation_pool": [],
             "move_activation_pool": [],
             "fight_subphase": None,
@@ -2017,6 +2033,72 @@ class W40KEngine(gym.Env):
                             )
                             if step_increment:
                                 self._step_calls_since_increment = 0
+
+                        # Flush side-effect reactive movement logs into step.log exactly once.
+                        action_logs = require_key(self.game_state, "action_logs")
+                        if not isinstance(action_logs, list):
+                            raise TypeError(
+                                f"game_state['action_logs'] must be a list, got {type(action_logs).__name__}"
+                            )
+                        cursor_key = "_step_logger_action_logs_cursor"
+                        if cursor_key not in self.game_state:
+                            self.game_state[cursor_key] = 0
+                        action_logs_cursor = require_key(self.game_state, cursor_key)
+                        if not isinstance(action_logs_cursor, int) or action_logs_cursor < 0:
+                            raise TypeError(
+                                f"game_state['{cursor_key}'] must be a non-negative int, "
+                                f"got {action_logs_cursor!r}"
+                            )
+
+                        for raw_log in action_logs[action_logs_cursor:]:
+                            if not isinstance(raw_log, dict):
+                                raise TypeError(
+                                    f"action_logs entry must be a dict, got {type(raw_log).__name__}"
+                                )
+                            if raw_log.get("type") != "reactive_move":
+                                continue
+
+                            reactive_unit_id = require_key(raw_log, "unitId")
+                            reactive_player = require_key(raw_log, "player")
+                            from_col = require_key(raw_log, "fromCol")
+                            from_row = require_key(raw_log, "fromRow")
+                            to_col = require_key(raw_log, "toCol")
+                            to_row = require_key(raw_log, "toRow")
+                            trigger_unit_id = require_key(raw_log, "triggered_by_unit_id")
+                            event_to_col = require_key(raw_log, "event_toCol")
+                            event_to_row = require_key(raw_log, "event_toRow")
+                            range_roll = require_key(raw_log, "range_roll")
+                            if not isinstance(range_roll, int) or isinstance(range_roll, bool):
+                                raise TypeError(
+                                    f"reactive_move range_roll must be int, got {type(range_roll).__name__}: {range_roll!r}"
+                                )
+
+                            reactive_details = {
+                                "current_turn": pre_action_turn,
+                                "current_episode": pre_action_episode,
+                                "unit_with_coords": f"{reactive_unit_id}({to_col},{to_row})",
+                                "start_pos": (from_col, from_row),
+                                "end_pos": (to_col, to_row),
+                                "col": to_col,
+                                "row": to_row,
+                                "triggered_by_unit_id": trigger_unit_id,
+                                "trigger_to_pos": (event_to_col, event_to_row),
+                                "range_roll": range_roll,
+                                "reward": 0.0,
+                            }
+
+                            self.step_logger.log_action(
+                                unit_id=reactive_unit_id,
+                                action_type="reactive_move",
+                                phase="move",
+                                player=reactive_player,
+                                success=True,
+                                step_increment=False,
+                                action_details=reactive_details,
+                                step_calls_since_last=None,
+                            )
+
+                        self.game_state[cursor_key] = len(action_logs)
             except Exception as e:
                 # CRITICAL: Logging errors must NOT interrupt action execution
                 # Log the error but continue with action processing
@@ -2294,6 +2376,12 @@ class W40KEngine(gym.Env):
                     # Turn limit reached - mark game over and stop phase progression
                     self.game_state["game_over"] = True
                     return
+
+        # Reset per-enemy-turn reactive tracking on player switch.
+        self.game_state["units_reacted_this_enemy_turn"] = set()
+        self.game_state["reactive_macro_order_current_window"] = []
+        self.game_state["reaction_window_active"] = False
+        self.game_state["reactive_decision_payload"] = {}
         
         # Reset shooting phase initialization on player switch (align with MOVE phase re-init behavior)
         self._shooting_phase_initialized = False

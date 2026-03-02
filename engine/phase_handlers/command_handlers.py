@@ -41,6 +41,10 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["units_fought"] = set()
     game_state["units_attacked"] = set()
     game_state["units_advanced"] = set()
+    game_state["units_reacted_this_enemy_turn"] = set()
+    game_state["reactive_macro_order_current_window"] = []
+    game_state["reaction_window_active"] = False
+    game_state["reactive_decision_payload"] = {}
     
     # Clear movement preview state
     game_state["valid_move_destinations_pool"] = []

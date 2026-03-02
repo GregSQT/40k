@@ -107,6 +107,12 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
   };
 
   const BoardComponent = BoardPvp;
+  const validatedCurrentPlayer = props.current_player;
+  if (validatedCurrentPlayer !== 1 && validatedCurrentPlayer !== 2) {
+    throw new Error(
+      `Invalid current_player in GameBoard: ${String(validatedCurrentPlayer)}. Expected 1 or 2.`
+    );
+  }
 
   return (
     <div className="game-board w-full flex flex-col">
@@ -120,7 +126,7 @@ export const GameBoard: React.FC<GameBoardProps> = (props) => {
         mode={props.mode || "select"}
         movePreview={props.movePreview}
         attackPreview={props.attackPreview}
-        current_player={props.current_player || 0}
+        current_player={validatedCurrentPlayer}
         unitsMoved={props.unitsMoved}
         unitsCharged={props.unitsCharged}
         unitsAttacked={props.unitsAttacked}

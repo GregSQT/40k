@@ -1206,7 +1206,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     scenario_counts: Dict[str, int] = {}
     for scenario in scenario_list:
         scenario_name = os.path.basename(scenario)
-        scenario_counts[scenario_name] = scenario_counts.get(scenario_name, 0) + 1
+        if scenario_name in scenario_counts:
+            scenario_counts[scenario_name] += 1
+        else:
+            scenario_counts[scenario_name] = 1
     unique_scenarios = sorted(scenario_counts.items(), key=lambda item: item[0])
     chunk_log(
         f"Scenarios (weighted): {len(scenario_list)} entries, "
@@ -2577,7 +2580,7 @@ def train_with_curriculum(
                     "Curriculum gate requires synchronized bot evaluation result, but run_info['last_bot_eval'] "
                     f"is missing at phase={phase_name}, phase_episodes={phase_episodes}, "
                     f"global_episodes={total_global_episodes}. "
-                    "No fallback evaluation is allowed by strict mode."
+                    "No implicit alternate evaluation is allowed by strict mode."
                 )
             last_eval_marker = run_info.get("last_bot_eval_marker")
             if last_eval_marker is None:
@@ -2585,14 +2588,14 @@ def train_with_curriculum(
                     "Curriculum gate requires synchronized bot evaluation marker, but run_info['last_bot_eval_marker'] "
                     f"is missing at phase={phase_name}, phase_episodes={phase_episodes}, "
                     f"global_episodes={total_global_episodes}. "
-                    "No fallback evaluation is allowed by strict mode."
+                    "No implicit alternate evaluation is allowed by strict mode."
                 )
             if int(last_eval_marker) != int(total_global_episodes):
                 raise RuntimeError(
                     "Curriculum gate evaluation is out of sync: "
                     f"expected marker={total_global_episodes}, got marker={last_eval_marker} "
                     f"(phase={phase_name}, phase_episodes={phase_episodes}). "
-                    "No fallback evaluation is allowed by strict mode."
+                    "No implicit alternate evaluation is allowed by strict mode."
                 )
 
             # Redraw fixed training state immediately after evaluation output.
@@ -3047,16 +3050,25 @@ def main():
             cfg = get_config_loader()
             unit_registry = UnitRegistry()
 
-            # Handle --scenario bot flag for test-only mode
+            # Test-only mode must evaluate on holdout scenarios only.
             if args.scenario == "bot":
-                # Use bot scenarios - get first one from the list
-                scenario_list = get_scenario_list_for_phase(cfg, args.agent, "bot")
-                if not scenario_list:
-                    raise FileNotFoundError(f"No bot scenarios found for agent '{args.agent}'")
-                scenario_file = scenario_list[0]
-                print(f"📋 Using bot scenario: {os.path.basename(scenario_file)}")
-            else:
-                scenario_file = get_agent_scenario_file(cfg, args.agent, args.training_config)
+                raise ValueError(
+                    "--scenario bot is not allowed in --test-only mode. "
+                    "Use holdout scenarios for evaluation."
+                )
+            holdout_scenarios = get_scenario_list_for_phase(
+                cfg,
+                args.agent,
+                args.training_config,
+                scenario_type="holdout",
+            )
+            if not holdout_scenarios:
+                raise FileNotFoundError(
+                    f"No holdout scenarios found for agent '{args.agent}' "
+                    f"and phase '{args.training_config}'"
+                )
+            scenario_file = holdout_scenarios[0]
+            print(f"📋 Using holdout scenario: {os.path.basename(scenario_file)}")
             
             # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix)
             effective_agent_key = args.rewards_config if args.rewards_config else args.agent

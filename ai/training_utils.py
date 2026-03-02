@@ -366,7 +366,7 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
 
     # Search order for training:
     # - prefer training/ when it exists
-    # - keep root as backward-compatible fallback source
+    # - keep root as backward-compatible legacy source
     search_dirs = [training_dir, scenarios_root] if has_training_dir else [scenarios_root]
 
     # If specific scenario requested, try to find it

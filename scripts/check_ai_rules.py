@@ -14,6 +14,8 @@ Purpose:
 Lines containing \"\"\" are ignored for col/row checks (to avoid flagging example code in docstrings); violations inside docstrings/strings are false negatives (accepted trade-off).
 
 NOTE: build_units_cache should be called ONLY at reset(), NOT at phase_start. Phase starts verify that units_cache exists.
+Exception: enemy_adjacent_hexes recalculation is allowed during reactive_move reaction windows
+in `maybe_resolve_reactive_move` and `refresh_all_positional_caches_after_reactive_move`.
 
 Usage:
     python scripts/check_ai_rules.py [--path PATH]
@@ -117,6 +119,11 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
     # Track whether we're inside a phase_start function (def at column 0 matching *_phase_start)
     in_phase_start = False
     phase_start_pattern = re.compile(r"def\s+(\w+_phase_start|phase_start)\s*\(")
+    current_function: Optional[str] = None
+    reactive_recalc_allowed_functions = {
+        "maybe_resolve_reactive_move",
+        "refresh_all_positional_caches_after_reactive_move",
+    }
     
     # Track whether we're inside a reset function
     in_reset = False
@@ -124,6 +131,11 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
 
     for idx, line in enumerate(lines, start=1):
         stripped = line.strip()
+
+        # Track current function name (top-level and class methods)
+        function_match = re.match(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", line)
+        if function_match:
+            current_function = function_match.group(1)
 
         # Entering phase_start: def at column 0
         if not line.startswith(" ") and not line.startswith("\t") and phase_start_pattern.search(line):
@@ -168,12 +180,21 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
                     if not call_pattern.search(code_part):
                         continue
 
-                violations.append(RuleViolation(
-                    path, idx,
-                    f"{message}. Found in non-phase_start function.",
-                    line,
-                    "cache_recalculation"
-                ))
+                if (
+                    func_name == "build_enemy_adjacent_hexes"
+                    and current_function in reactive_recalc_allowed_functions
+                ):
+                    continue
+
+                violations.append(
+                    RuleViolation(
+                        path,
+                        idx,
+                        f"{message}. Found in non-phase_start function.",
+                        line,
+                        "cache_recalculation",
+                    )
+                )
                 break
         
         # Check reset-only cache functions (should ONLY be called in reset, not phase_start)

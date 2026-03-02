@@ -174,11 +174,7 @@ export const isValidPlayerId = (id: number): id is PlayerId => {
 };
 
 // Dynamic configuration validator
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const validateDynamicConfig = (
-  boardConfig: Record<string, unknown> | null | undefined,
-  _gameConfig: Record<string, unknown> | null | undefined
-) => {
+export const validateDynamicConfig = (boardConfig: Record<string, unknown> | null | undefined) => {
   const errors: string[] = [];
 
   const cols = boardConfig?.cols as number | undefined;

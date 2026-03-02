@@ -1,0 +1,22 @@
+{
+  "faction": "spaceMarine",
+  "description": "Space Marine Army:\nSpace Wolves:\n \t1 Grey Hunter Pack Leader\n \t2 Grey Hunters\n \t2 Blood Claws\n \t2 Fenrisian Wolves",
+  "units": [
+    {
+      "unit_type": "GreyHunterPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunter",
+      "count": 2
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 2
+    }
+  ]
+}

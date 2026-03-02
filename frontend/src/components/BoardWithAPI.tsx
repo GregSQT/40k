@@ -96,8 +96,8 @@ export const BoardWithAPI: React.FC = () => {
   const [clickedUnitId, setClickedUnitId] = useState<number | null>(null);
 
   // Track UnitStatusTable collapse states
-  const [_player1Collapsed, setPlayer1Collapsed] = useState(false);
-  const [_player2Collapsed, setPlayer2Collapsed] = useState(false);
+  const [, setPlayer1Collapsed] = useState(false);
+  const [, setPlayer2Collapsed] = useState(false);
   const [deploymentRosterCollapsed, setDeploymentRosterCollapsed] = useState<Record<PlayerId, boolean>>({
     1: false,
     2: false,
@@ -116,7 +116,7 @@ export const BoardWithAPI: React.FC = () => {
   const [rosterPickerLoading, setRosterPickerLoading] = useState(false);
   const [rosterPickerError, setRosterPickerError] = useState<string | null>(null);
   const [showGameOverPopup, setShowGameOverPopup] = useState(false);
-  const isRosterSetupMode = gameMode === "test" || gameMode === "pvp" || gameMode === "pve";
+  const isRosterSetupMode = gameMode === "test" || gameMode === "pvp" || gameMode === "pve_old";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
 
   const closeRosterPicker = () => {

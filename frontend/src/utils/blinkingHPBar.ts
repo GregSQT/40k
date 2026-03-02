@@ -342,7 +342,7 @@ export function updateProbabilityDisplay(
   container: HPBlinkContainer,
   attacker: Unit | null,
   target: Unit,
-  phase: "shoot" | "fight"
+  phase: "shoot" | "fight" | "charge"
 ): void {
   const displayProbability = attacker ? calculateWoundProbability(attacker, target, phase) : 0;
 

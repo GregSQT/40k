@@ -40,7 +40,7 @@ export class GreyHunter extends SpaceMarineInfantryTroopRangedSwarm {
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
   static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - bolt rifles vs hordes
 
-  static ICON = "/icons/Intercessor.webp"; // Path relative to public folder
+  static ICON = "/icons/GreyHunter.webp"; // Path relative to public folder
   static ICON_SCALE = 1.7; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

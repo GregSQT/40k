@@ -40,7 +40,7 @@ export class GreyHunterPackLeader extends SpaceMarineInfantryTroopMeleeElite {
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
   static TARGET_TYPE = "Elite"; // RangedElite specialist - bolt rifles vs hordes
 
-  static ICON = "/icons/IntercessorSergeantPowerFist.webp"; // Path relative to public folder
+  static ICON = "/icons/GreyHunterPackLeader.webp"; // Path relative to public folder
   static ICON_SCALE = 1.7; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
+import type { DiceValue } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import { getMeleeRange } from "../utils/weaponHelpers";
@@ -30,7 +31,7 @@ let aiTurnInProgress = false;
 
 interface APIGameState {
   units: Array<{
-    id: string;
+    id: string | number;
     player: number;
     DISPLAY_NAME?: string;
     col: number;
@@ -46,11 +47,12 @@ interface APIGameState {
       code_name: string;
       display_name: string;
       RNG?: number;
-      NB: number;
+      NB: DiceValue;
       ATK: number;
       STR: number;
       AP: number;
-      DMG: number;
+      DMG: DiceValue;
+      WEAPON_RULES?: string[];
     }>;
     available_weapons?: Array<{
       index: number;
@@ -61,14 +63,16 @@ interface APIGameState {
     CC_WEAPONS: Array<{
       code_name: string;
       display_name: string;
-      NB: number;
+      NB: DiceValue;
       ATK: number;
       STR: number;
       AP: number;
-      DMG: number;
+      DMG: DiceValue;
+      WEAPON_RULES?: string[];
     }>;
     selectedRngWeaponIndex?: number;
     selectedCcWeaponIndex?: number;
+    manualWeaponSelected?: boolean;
     LD: number;
     OC: number;
     VALUE: number;
@@ -376,7 +380,12 @@ export const useEngineAPI = () => {
             id: typeof shooter.id === "string" ? parseInt(shooter.id, 10) : shooter.id,
             player: shooter.player as PlayerId,
           };
-          const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, target as Unit);
+          const targetUnit: Unit = {
+            ...target,
+            id: typeof target.id === "string" ? parseInt(target.id, 10) : target.id,
+            player: target.player as PlayerId,
+          };
+          const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, targetUnit);
           if (!preferred) {
             throw new Error(
               `No ranged weapon available for unit ${shooterUnit.id} after weapon selection`
@@ -1140,8 +1149,7 @@ export const useEngineAPI = () => {
           : unit.unitType;
 
       return {
-        id:
-          parseInt(unit.id, 10) || (typeof unit.id === "number" ? unit.id : parseInt(unit.id, 10)),
+        id: typeof unit.id === "number" ? unit.id : parseInt(unit.id, 10),
         name: displayName,
         DISPLAY_NAME: displayName,
         type: unit.unitType,
@@ -1705,7 +1713,7 @@ export const useEngineAPI = () => {
       if (!gameState) {
         throw new Error("Missing gameState while checking ASSAULT weapon availability");
       }
-      const unit = gameState.units.find((u) => parseInt(u.id, 10) === unitId);
+      const unit = gameState.units.find((u) => parseInt(String(u.id), 10) === unitId);
       if (!unit) {
         throw new Error(`Cannot find unit ${unitId} while checking ASSAULT weapon availability`);
       }
@@ -1803,7 +1811,7 @@ export const useEngineAPI = () => {
       // Find target enemy adjacent to destination
       if (!gameState) return;
 
-      const charger = gameState.units.find((u) => parseInt(u.id, 10) === numericChargerId);
+      const charger = gameState.units.find((u) => parseInt(String(u.id), 10) === numericChargerId);
       if (!charger) {
         console.error("🟠 Charger unit not found:", numericChargerId);
         return;
@@ -1879,7 +1887,12 @@ export const useEngineAPI = () => {
           id: typeof shooter.id === "string" ? parseInt(shooter.id, 10) : shooter.id,
           player: shooter.player as PlayerId,
         };
-        const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, target as Unit);
+        const targetUnit: Unit = {
+          ...target,
+          id: typeof target.id === "string" ? parseInt(target.id, 10) : target.id,
+          player: target.player as PlayerId,
+        };
+        const preferred = getPreferredRangedWeaponAgainstTarget(shooterUnit, targetUnit);
         if (!preferred) {
           return;
         }
@@ -2813,7 +2826,16 @@ export const useEngineAPI = () => {
 
           // Step 2: Check if we got a preview response requiring decision
           if (activationData.result?.waiting_for_player) {
-            let aiDecision: { action: string; unitId?: string | number } | undefined;
+            let aiDecision:
+              | {
+                  action: string;
+                  unitId?: string | number;
+                  targetId?: string | number;
+                  clickTarget?: string;
+                  destCol?: number;
+                  destRow?: number;
+                }
+              | undefined;
             const unitId =
               activationData.result?.unitId ||
               activationData.game_state?.active_movement_unit ||

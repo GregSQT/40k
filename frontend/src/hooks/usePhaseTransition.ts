@@ -25,15 +25,14 @@ interface UsePhaseTransitionParams {
 
 export const usePhaseTransition = ({
   gameState,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   boardConfig: _boardConfig,
   isUnitEligible,
   actions,
 }: UsePhaseTransitionParams) => {
+  void _boardConfig;
   // Phase completion by eligibility (NOT step counts)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const shouldTransitionPhase = useCallback(
-    (_phase: string): boolean => {
+    (): boolean => {
       const playerUnits = gameState.units.filter((u) => u.player === gameState.current_player);
       const eligibleUnits = playerUnits.filter((unit) => isUnitEligible(unit));
       return eligibleUnits.length === 0;
@@ -43,7 +42,7 @@ export const usePhaseTransition = ({
 
   // Eligibility-based phase transitions (core principle)
   useEffect(() => {
-    if (shouldTransitionPhase(gameState.phase)) {
+    if (shouldTransitionPhase()) {
       // Phase transitions based on unit eligibility only
       setTimeout(() => {
         switch (gameState.phase) {
