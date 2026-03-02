@@ -1928,6 +1928,13 @@ class W40KEngine(gym.Env):
                                         "hit_rule_modifier": attack_result.get("hit_rule_modifier"),
                                         "wound_target": attack_result["wound_target"],
                                         "save_target": attack_result["save_target"],
+                                        "save_skipped": attack_result.get("save_skipped", False),
+                                        "save_skip_reason": attack_result.get("save_skip_reason"),
+                                        "critical_wound_unmodified": attack_result.get("critical_wound_unmodified", False),
+                                        "devastating_wounds_expected": attack_result.get("devastating_wounds_expected", False),
+                                        "devastating_wounds_applied": attack_result.get("devastating_wounds_applied", False),
+                                        "devastating_wounds_flag": attack_result.get("devastating_wounds_flag", False),
+                                        "rapid_fire_bonus_shot": attack_result.get("rapid_fire_bonus_shot", False),
                                         "target_died": attack_result["target_died"],
                                         "weapon_name": attack_result["weapon_name"],
                                         "reward": step_reward if i == 0 else 0.0

@@ -5,7 +5,7 @@ import { SpaceMarineInfantryTroopMeleeTroop } from "../classes/SpaceMarineInfant
 
 export class AssaultIntercessorJumpPackPlasmaPistol extends SpaceMarineInfantryTroopMeleeTroop {
   static NAME = "AssaultIntercessorJumpPackPlasmaPistol";
-  static DISPLAY_NAME = "Assault Intercessor Jump Pack";
+  static DISPLAY_NAME = "Assault Intercessor Jump Pack (Plasma Pistol)";
   // BASE
   static MOVE = 12; // Move distance
   static T = 4; // Toughness score

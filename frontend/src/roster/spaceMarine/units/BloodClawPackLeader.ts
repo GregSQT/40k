@@ -5,7 +5,7 @@ import { SpaceMarineInfantryTroopMeleeTroop } from "../classes/SpaceMarineInfant
 
 export class BloodClawPackLeader extends SpaceMarineInfantryTroopMeleeTroop {
   static NAME = "BloodClawPackLeader";
-  static DISPLAY_NAME = "Blood Claw Pack Leader";
+  static DISPLAY_NAME = "Blood Claw (Pack Leader)";
   // BASE
   static MOVE = 7; // Move distance
   static T = 4; // Toughness score

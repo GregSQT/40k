@@ -42,6 +42,10 @@ interface ReplayAction {
   wound_roll?: number;
   save_roll?: number;
   save_target?: number;
+  save_skipped?: boolean;
+  save_skip_reason?: string;
+  devastating_wounds_applied?: boolean;
+  rapid_fire_bonus_shot?: boolean;
   reward?: number;
   // Fight action fields
   attacker_id?: number;
@@ -1060,11 +1064,15 @@ export const BoardReplay: React.FC = () => {
         const woundRoll = action.wound_roll;
         const saveRoll = action.save_roll;
         const saveTarget = action.save_target || 0;
+        const saveSkipped = action.save_skipped === true;
+        const saveSkipReason = action.save_skip_reason;
+        const rapidFireBonusShot = action.rapid_fire_bonus_shot === true;
         const damage = action.damage || 0;
 
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name if available
         const weaponName = action.weapon_name;
         const weaponSuffix = weaponName ? ` with [${weaponName}]` : "";
+        const rapidFireSuffix = rapidFireBonusShot ? " [RAPID_FIRE:X]" : "";
 
         // Determine hit target (assuming 3+ for now - could be in log later)
         const hitTarget = 3;
@@ -1106,19 +1114,27 @@ export const BoardReplay: React.FC = () => {
 
         if (hitRoll !== undefined && hitRoll < hitTarget) {
           // Hit failed
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) : FAILED !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) : FAILED !`;
         } else if (woundRoll !== undefined && woundRoll < woundTarget) {
           // Wound failed
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) : FAILED !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) : FAILED !`;
+        } else if (
+          saveSkipped &&
+          saveSkipReason === "DEVASTATING_WOUNDS" &&
+          damage > 0
+        ) {
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - DEVASTATING WOUNDS - ${damage} DAMAGE DELT !`;
+        } else if (saveSkipped && saveSkipReason === "DEVASTATING_WOUNDS") {
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - DEVASTATING WOUNDS`;
         } else if (saveRoll !== undefined && saveTarget > 0 && saveRoll >= saveTarget) {
           // Save succeeded
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) : SAVED !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) : SAVED !`;
         } else if (damage > 0) {
           // Damage dealt
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) - ${damage} DAMAGE DELT !`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) - ${damage} DAMAGE DELT !`;
         } else {
           // Fallback
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix}`;
+          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix}`;
         }
 
         // Use addEvent directly with custom formatted message to match PvP format

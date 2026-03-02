@@ -56,6 +56,8 @@ export function useGameLog(currentTurn?: number) {
       // otherwise build from flat fields (shooting handler format)
       let shootDetails = logData.shootDetails;
       if (!shootDetails && logData.hitRoll) {
+        const saveSkipped =
+          logData.saveSkipped === true && logData.saveSkipReason === "DEVASTATING_WOUNDS";
         // Build shootDetails from flat fields (shooting phase format)
         shootDetails = [
           {
@@ -67,7 +69,7 @@ export function useGameLog(currentTurn?: number) {
             damageDealt: logData.damage,
             hitResult: logData.hitRoll ? "HIT" : "MISS",
             strengthResult: logData.woundRoll ? "SUCCESS" : "FAILED",
-            saveSuccess: logData.saveRoll >= logData.saveTarget,
+            saveSuccess: !saveSkipped && logData.saveRoll >= logData.saveTarget,
             targetDied: logData.target_died || false,
           },
         ];

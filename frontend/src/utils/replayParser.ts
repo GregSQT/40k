@@ -20,6 +20,10 @@ interface ReplayAction {
   wound_roll?: number;
   save_roll?: number;
   save_target?: number;
+  save_skipped?: boolean;
+  save_skip_reason?: string;
+  devastating_wounds_applied?: boolean;
+  rapid_fire_bonus_shot?: boolean;
   reward?: number;
   // Fight action fields
   attacker_id?: number;
@@ -415,7 +419,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse SHOOT actions
     const shootMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) (SHOT at Unit|WAIT|ADVANCED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[RAPID_FIRE:X\])? at Unit)|WAIT|ADVANCED)/
     );
     if (shootMatch) {
       // Removed verbose logging
@@ -470,14 +474,16 @@ export function parse_log_file_from_text(text: string): ReplayData {
             currentEpisode.units[shooterId].row = toRow;
           }
         }
-      } else if (actionType === "SHOT at Unit") {
-        const targetMatch = trimmed.match(/SHOT at Unit (\d+)\((\d+),(\d+)\)/);
+      } else if (actionType.startsWith("SHOT")) {
+        const targetMatch = trimmed.match(/SHOT(?: \[RAPID_FIRE:X\])? at Unit (\d+)\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
         // Try to extract detailed combat rolls from format: Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED)
         const hitMatch = trimmed.match(/Hit:(\d+)\+:(\d+)/);
         const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)/);
         const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)/);
+        const saveSkippedMatch = trimmed.match(/Save:SKIPPED\(([^)]+)\)/);
+        const rapidFireMatch = trimmed.match(/\[RAPID_FIRE:X\]/);
         // Extract reward from format: [R:+53.2] or [R:-10.0]
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract weapon name from format: with [weapon_name]
@@ -516,6 +522,16 @@ export function parse_log_file_from_text(text: string): ReplayData {
           if (saveMatch) {
             action.save_target = parseInt(saveMatch[1], 10); // The target number
             action.save_roll = parseInt(saveMatch[2], 10); // The actual roll
+          }
+          if (saveSkippedMatch) {
+            action.save_skipped = true;
+            action.save_skip_reason = saveSkippedMatch[1];
+            if (saveSkippedMatch[1] === "DEVASTATING_WOUNDS") {
+              action.devastating_wounds_applied = true;
+            }
+          }
+          if (rapidFireMatch) {
+            action.rapid_fire_bonus_shot = true;
           }
           // Add reward if available
           if (rewardMatch) {

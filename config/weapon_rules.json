@@ -11,7 +11,7 @@
   },
   "DEVASTATING_WOUNDS": {
     "name": "Devastating Wounds",
-    "description": "A Critical Wound inflicts mortal wounds equal to the weapon Damage characteristic, instead of any normal damage.",
+    "description": "No saving throw can be mande against a critical wound rolled with this weapon.",
     "has_parameter": false
   },
   "EXTRA_ATTACKS": {
@@ -51,7 +51,7 @@
   },
   "RAPID_FIRE": {
     "name": "Rapid Fire",
-    "description": "Increase this weapon's Attacks by X when targeting units within half range.",
+    "description": "Increase this weapon's Attacks by X when target unit is within half range.",
     "has_parameter": true
   },
   "SUSTAINED_HITS": {

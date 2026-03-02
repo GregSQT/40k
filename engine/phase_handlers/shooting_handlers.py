@@ -112,6 +112,53 @@ def _weapon_has_heavy_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
+def _weapon_has_devastating_wounds_rule(weapon: Dict[str, Any]) -> bool:
+    """Check if weapon has DEVASTATING_WOUNDS rule."""
+    if not weapon:
+        return False
+    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
+    # Handle both ParsedWeaponRule objects and strings
+    for rule in rules:
+        if hasattr(rule, "rule"):  # ParsedWeaponRule object
+            if rule.rule == "DEVASTATING_WOUNDS":
+                return True
+        elif rule == "DEVASTATING_WOUNDS":  # String
+            return True
+    return False
+
+
+def _get_rapid_fire_parameter(weapon: Dict[str, Any]) -> Optional[int]:
+    """Return RAPID_FIRE parameter X from weapon rules, or None if absent."""
+    if not weapon:
+        return None
+    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
+    for rule in rules:
+        if hasattr(rule, "rule"):
+            if rule.rule == "RAPID_FIRE":
+                if rule.parameter is None:
+                    raise ValueError("RAPID_FIRE rule is missing required parameter")
+                try:
+                    value = int(rule.parameter)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid RAPID_FIRE parameter: {rule.parameter}") from exc
+                if value <= 0:
+                    raise ValueError(f"RAPID_FIRE parameter must be > 0, got {value}")
+                return value
+        elif isinstance(rule, str):
+            if rule == "RAPID_FIRE":
+                raise ValueError("RAPID_FIRE rule is missing required parameter")
+            if rule.startswith("RAPID_FIRE:"):
+                raw_value = rule.split(":", 1)[1]
+                try:
+                    value = int(raw_value)
+                except ValueError as exc:
+                    raise ValueError(f"Invalid RAPID_FIRE parameter: {raw_value}") from exc
+                if value <= 0:
+                    raise ValueError(f"RAPID_FIRE parameter must be > 0, got {value}")
+                return value
+    return None
+
+
 def _tracking_set_contains_unit(unit_id: Any, tracking_set: Set[Any]) -> bool:
     """Check unit membership in tracking sets with normalized string comparison."""
     unit_id_str = str(unit_id)
@@ -1351,6 +1398,13 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # PISTOL rule: Reset _shooting_with_pistol for this activation (no category restriction yet)
     # This must be done BEFORE weapon_availability_check to avoid incorrect filtering
     unit["_shooting_with_pistol"] = None
+    # RAPID_FIRE state is activation-scoped and must be reset at activation start.
+    unit["_rapid_fire_context_weapon_index"] = None
+    unit["_rapid_fire_base_nb"] = 0
+    unit["_rapid_fire_shots_fired"] = 0
+    unit["_rapid_fire_bonus_total"] = 0
+    unit["_rapid_fire_rule_value"] = 0
+    unit["_rapid_fire_bonus_shot_current"] = False
     
     # Reset weapon.shot flags for this unit at activation start
     # Each unit should be able to use all its weapons at the start of its activation
@@ -3765,6 +3819,40 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 return _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
             return False, {"error": "target_not_found", "targetId": selected_target_id, "valid_targets": updated_pool[:5]}
 
+        # RAPID_FIRE: On first shot with this weapon, add bonus shots if target is within half range.
+        # Bonus shots are flagged individually as [RAPID_FIRE:X] in logs.
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        selected_weapon = get_selected_ranged_weapon(unit)
+        if not selected_weapon:
+            raise ValueError(f"Unit {unit_id} has no selected ranged weapon before attack resolution")
+        selected_weapon_index = require_key(unit, "selectedRngWeaponIndex")
+        current_context_weapon_index = unit.get("_rapid_fire_context_weapon_index")
+        if current_context_weapon_index != selected_weapon_index:
+            unit["_rapid_fire_context_weapon_index"] = selected_weapon_index
+            unit["_rapid_fire_base_nb"] = require_key(unit, "_current_shoot_nb")
+            unit["_rapid_fire_shots_fired"] = 0
+            unit["_rapid_fire_bonus_total"] = 0
+            rapid_fire_value = _get_rapid_fire_parameter(selected_weapon)
+            unit["_rapid_fire_rule_value"] = rapid_fire_value if rapid_fire_value is not None else 0
+            if rapid_fire_value is not None:
+                shooter_col, shooter_row = require_unit_position(unit, game_state)
+                target_col, target_row = require_unit_position(target, game_state)
+                weapon_range = require_key(selected_weapon, "RNG")
+                if not isinstance(weapon_range, int):
+                    raise ValueError(f"Weapon RNG must be int for RAPID_FIRE, got {type(weapon_range).__name__}: {weapon_range}")
+                if weapon_range <= 0:
+                    raise ValueError(f"Weapon RNG must be > 0 for RAPID_FIRE, got {weapon_range}")
+                distance = _calculate_hex_distance(shooter_col, shooter_row, target_col, target_row)
+                if distance <= (weapon_range / 2):
+                    unit["SHOOT_LEFT"] += rapid_fire_value
+                    unit["_rapid_fire_bonus_total"] = rapid_fire_value
+
+        shots_fired = int(require_key(unit, "_rapid_fire_shots_fired"))
+        rapid_fire_base_nb = int(require_key(unit, "_rapid_fire_base_nb"))
+        rapid_fire_bonus_total = int(require_key(unit, "_rapid_fire_bonus_total"))
+        rapid_fire_bonus_shot_current = shots_fired >= rapid_fire_base_nb and rapid_fire_bonus_total > 0
+        unit["_rapid_fire_bonus_shot_current"] = rapid_fire_bonus_shot_current
+
         # Pool is source of truth — no redundant validation
         attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
         
@@ -3792,6 +3880,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
 
         # Update SHOOT_LEFT and continue loop per AI_TURN.md
         unit["SHOOT_LEFT"] -= 1
+        unit["_rapid_fire_shots_fired"] = int(require_key(unit, "_rapid_fire_shots_fired")) + 1
         
         # PISTOL rule: Update _shooting_with_pistol after each shot to track weapon category
         # This ensures the filter persists even if unit switches weapons
@@ -4094,6 +4183,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Positions captured before damage (target may be removed from cache if dead)
     attack_log_part = attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']
     shot_rule_marker = ""
+    rapid_fire_marker = " [RAPID_FIRE:X]" if attack_result.get("rapid_fire_bonus_shot", False) else ""
     shooter_id_str = str(unit_id)
     if shooter_id_str in require_key(game_state, "units_fled"):
         source_rule_id = _get_source_unit_rule_id_for_effect(shooter, "shoot_after_flee")
@@ -4108,7 +4198,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                 if source_rule_id is not None:
                     shot_rule_marker = f" ({source_rule_id.upper()})"
     enhanced_message = (
-        f"Unit {unit_id} ({shooter_col}, {shooter_row}) SHOT{shot_rule_marker} "
+        f"Unit {unit_id} ({shooter_col}, {shooter_row}) SHOT{shot_rule_marker}{rapid_fire_marker} "
         f"Unit {target_id} ({target_col}, {target_row}){weapon_suffix} : {attack_log_part}"
     )
 
@@ -4137,6 +4227,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "woundRoll": attack_result.get("wound_roll"),
         "saveRoll": attack_result.get("save_roll"),
         "saveTarget": attack_result.get("save_target"),
+        "saveSkipped": attack_result.get("save_skipped", False),
+        "saveSkipReason": attack_result.get("save_skip_reason"),
+        "devastatingWoundsApplied": attack_result.get("devastating_wounds_applied", False),
+        "rapidFireBonusShot": attack_result.get("rapid_fire_bonus_shot", False),
         "timestamp": "server_time",
         "action_name": action_name,
         "reward": 0.0,  # Will be updated after reward calculation
@@ -4375,10 +4469,13 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name in attack_log
     weapon_name = weapon.get("display_name", "")
     weapon_prefix = f" with [{weapon_name}]" if weapon_name else ""
+    has_devastating_wounds = _weapon_has_devastating_wounds_rule(weapon)
+    rapid_fire_bonus_shot = bool(attacker.get("_rapid_fire_bonus_shot_current", False))
+    rapid_fire_rule_marker = " [RAPID_FIRE:X]" if rapid_fire_bonus_shot else ""
     
     if not hit_success:
         # MISS case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} : MISSED !"
+        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} : MISSED !"
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -4390,6 +4487,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "save_roll": 0,
             "save_target": 0,
             "save_success": False,
+            "devastating_wounds_flag": has_devastating_wounds,
+            "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "damage": 0,
             "attack_log": attack_log,
             "weapon_name": weapon_name
@@ -4426,7 +4525,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     
     if not wound_success:
         # FAIL case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} : FAILED !"
+        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} : FAILED !"
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -4438,19 +4537,64 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "save_roll": 0,
             "save_target": 0,
             "save_success": False,
+            "devastating_wounds_flag": has_devastating_wounds,
+            "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "damage": 0,
             "attack_log": attack_log,
             "weapon_name": weapon_name
         }
     
     # WOUND -> Continue to save roll
+    critical_wound_unmodified = wound_roll == 6
+    devastating_wounds_applied = has_devastating_wounds and critical_wound_unmodified
+    if devastating_wounds_applied:
+        damage_dealt = resolve_dice_value(require_key(weapon, "DMG"), "shooting_damage")
+        target_hp = require_hp_from_cache(str(target["id"]), game_state)
+        new_hp = max(0, target_hp - damage_dealt)
+        if new_hp <= 0:
+            attack_log = (
+                f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : "
+                f"Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - "
+                f"Wound {wound_roll}({wound_target}+){wound_log_suffix} - "
+                f"Save:SKIPPED(DEVASTATING_WOUNDS) - Dmg:{damage_dealt}HP : Unit {target_id} DIED !"
+            )
+        else:
+            attack_log = (
+                f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : "
+                f"Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - "
+                f"Wound {wound_roll}({wound_target}+){wound_log_suffix} - "
+                f"Save:SKIPPED(DEVASTATING_WOUNDS) - Dmg:{damage_dealt}HP"
+            )
+        return {
+            "hit_roll": hit_roll,
+            "hit_target": hit_target,
+            "hit_rule_modifier": "HEAVY" if heavy_applied else None,
+            "hit_success": True,
+            "wound_roll": wound_roll,
+            "wound_target": wound_target,
+            "wound_success": True,
+            "save_roll": 0,
+            "save_target": 0,
+            "save_success": False,
+            "save_skipped": True,
+            "save_skip_reason": "DEVASTATING_WOUNDS",
+            "critical_wound_unmodified": True,
+            "devastating_wounds_expected": True,
+            "devastating_wounds_applied": True,
+            "devastating_wounds_flag": True,
+            "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
+            "damage": damage_dealt,
+            "attack_log": attack_log,
+            "weapon_name": weapon_name,
+        }
+
     save_roll = random.randint(1, 6)
     save_target = _calculate_save_target(target, weapon["AP"])
     save_success = save_roll >= save_target
     
     if save_success:
         # SAVE case
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) : SAVED !"
+        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) : SAVED !"
         return {
             "hit_roll": hit_roll,
             "hit_target": hit_target,
@@ -4462,6 +4606,13 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "save_roll": save_roll,
             "save_target": save_target,
             "save_success": True,
+            "save_skipped": False,
+            "save_skip_reason": None,
+            "critical_wound_unmodified": critical_wound_unmodified,
+            "devastating_wounds_expected": False,
+            "devastating_wounds_applied": False,
+            "devastating_wounds_flag": has_devastating_wounds,
+            "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "damage": 0,
             "attack_log": attack_log,
             "weapon_name": weapon_name
@@ -4474,10 +4625,10 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     
     if new_hp <= 0:
         # Target dies
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} delt : Unit {target_id} DIED !"
+        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} delt : Unit {target_id} DIED !"
     else:
         # Target survives
-        attack_log = f"Unit {attacker_id} SHOT Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DELT !"
+        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DELT !"
     
     return {
         "hit_roll": hit_roll,
@@ -4490,6 +4641,13 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         "save_roll": save_roll,
         "save_target": save_target,
         "save_success": False,  # Save failed
+        "save_skipped": False,
+        "save_skip_reason": None,
+        "critical_wound_unmodified": critical_wound_unmodified,
+        "devastating_wounds_expected": False,
+        "devastating_wounds_applied": False,
+        "devastating_wounds_flag": has_devastating_wounds,
+        "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
         "damage": damage_dealt,
         "attack_log": attack_log,
         "weapon_name": weapon_name

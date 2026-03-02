@@ -6,7 +6,7 @@ import { SpaceMarineInfantryEliteRangedTroop } from "../classes/SpaceMarineInfan
 
 export class HeavyIntercessor extends SpaceMarineInfantryEliteRangedTroop {
   static NAME = "HeavyIntercessorHeavyBolter";
-  static DISPLAY_NAME = "Heavy Intercessor Heavy Bolter";
+  static DISPLAY_NAME = "Heavy Intercessor (Heavy Bolter)";
   // BASE
   static MOVE = 5; // Move distance
   static T = 6; // Toughness score

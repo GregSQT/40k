@@ -884,6 +884,8 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_at_dead_unit': {1: 0, 2: 0},
         'shoot_over_rng_nb': {1: 0, 2: 0},
         'shoot_combi_profile_conflicts': {1: 0, 2: 0},
+        'devastating_wounds_correct': {1: 0, 2: 0},
+        'devastating_wounds_incorrect': {1: 0, 2: 0},
         'dead_unit_waiting': {1: 0, 2: 0},
         'dead_unit_skipping': {1: 0, 2: 0},
         'charge_after_flee': {1: 0, 2: 0},
@@ -963,6 +965,7 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_at_dead_unit': {1: None, 2: None},
             'shoot_over_rng_nb': {1: None, 2: None},
             'shoot_combi_profile_conflicts': {1: None, 2: None},
+            'devastating_wounds_incorrect': {1: None, 2: None},
             'dead_unit_waiting': {1: None, 2: None},
             'dead_unit_skipping': {1: None, 2: None},
             'charge_after_flee': {1: None, 2: None},
@@ -1391,9 +1394,9 @@ def parse_step_log(filepath: str) -> Dict:
                 # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
                 # by treating dead units as alive.
-                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+(\d+)', action_desc, re.IGNORECASE):
+                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)', action_desc, re.IGNORECASE):
                     target_match = re.search(
-                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+(\d+)',
+                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
                         action_desc,
                         re.IGNORECASE
                     )
@@ -1711,7 +1714,7 @@ def parse_step_log(filepath: str) -> Dict:
 
                 # Determine action type and validate rules
                 is_shoot_action = re.search(
-                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+\d+',
+                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
                     action_desc,
                     re.IGNORECASE
                 ) is not None
@@ -1719,13 +1722,13 @@ def parse_step_log(filepath: str) -> Dict:
                     last_shoot_shooter_id = None
                     last_shoot_weapon = None
                     last_shoot_target_id = None
-                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit\s+\d+', action_desc, re.IGNORECASE):
+                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+', action_desc, re.IGNORECASE):
                         action_type = 'shoot'
                         stats['shoot_vs_wait']['shoot'] += 1
                         stats['shoot_vs_wait_by_player'][player]['shoot'] += 1
                         shooter_match = re.search(r'Unit (\d+)\s*\((\d+),\s*(\d+)\)', action_desc)
                         target_match = re.search(
-                            r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
+                            r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
                             action_desc,
                             re.IGNORECASE
                         )
@@ -1950,6 +1953,31 @@ def parse_step_log(filepath: str) -> Dict:
                                         last_shoot_shooter_id = shooter_id
                                         last_shoot_weapon = weapon_name_for_limits
                                         last_shoot_target_id = target_id
+
+                            # DEVASTATING_WOUNDS checks:
+                            # Apply ONLY when log explicitly declares DW flag.
+                            # correct   = flag + wound roll 6 + no save performed (Save:SKIPPED(DEVASTATING_WOUNDS))
+                            # incorrect = flag + (wound roll < 6 OR save performed despite wound roll 6)
+                            dw_flag_match = re.search(r'\[DEVASTATING WOUNDS\]', action_desc, re.IGNORECASE)
+                            wound_roll_match = re.search(r'Wound:(\d+)\+:(\d+)', action_desc, re.IGNORECASE)
+                            save_attempt_match = re.search(r'Save:(\d+)\+:(\d+)', action_desc, re.IGNORECASE)
+                            save_skipped_dw_match = re.search(
+                                r'Save:SKIPPED\(DEVASTATING_WOUNDS\)',
+                                action_desc,
+                                re.IGNORECASE,
+                            )
+                            if dw_flag_match and wound_roll_match:
+                                wound_roll_value = int(wound_roll_match.group(2))
+                                shooter_player_for_dw = require_key(unit_player, shooter_id)
+                                if wound_roll_value == 6 and save_skipped_dw_match:
+                                    stats['devastating_wounds_correct'][shooter_player_for_dw] += 1
+                                elif wound_roll_value < 6 or (wound_roll_value == 6 and save_attempt_match):
+                                    stats['devastating_wounds_incorrect'][shooter_player_for_dw] += 1
+                                    if stats['first_error_lines']['devastating_wounds_incorrect'][shooter_player_for_dw] is None:
+                                        stats['first_error_lines']['devastating_wounds_incorrect'][shooter_player_for_dw] = {
+                                            'episode': current_episode_num,
+                                            'line': line.strip(),
+                                        }
 
                             # RULE: Shoot at engaged enemy
                             # CRITICAL: According to AI_TURN.md, PISTOL weapons CAN shoot at engaged enemies
@@ -4902,6 +4930,18 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_advance_twice_shoot > 0 and stats['first_error_lines']['advance_twice_in_shoot_phase'][2]:
         first_err = stats['first_error_lines']['advance_twice_in_shoot_phase'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_dw_correct = stats['devastating_wounds_correct'][1]
+    bot_dw_correct = stats['devastating_wounds_correct'][2]
+    log_print(f"Devastating Wounds correct:   {agent_dw_correct:10d}           {bot_dw_correct:6d}")
+    agent_dw_incorrect = stats['devastating_wounds_incorrect'][1]
+    bot_dw_incorrect = stats['devastating_wounds_incorrect'][2]
+    log_print(f"Devastating Wounds incorrect: {agent_dw_incorrect:10d}           {bot_dw_incorrect:6d}")
+    if agent_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][1]:
+        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][2]:
+        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_adv_over = stats['move_distance_over_limit']['advance'][1]
     bot_adv_over = stats['move_distance_over_limit']['advance'][2]

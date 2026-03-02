@@ -402,6 +402,10 @@ class StepLogger:
             hit_rule_modifier = details.get("hit_rule_modifier")
             wound_target = details["wound_target"]
             save_target = details["save_target"]
+            save_skipped = bool(details.get("save_skipped", False))
+            save_skip_reason = details.get("save_skip_reason")
+            devastating_wounds_flag = bool(details.get("devastating_wounds_flag", False))
+            rapid_fire_bonus_shot = bool(details.get("rapid_fire_bonus_shot", False))
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
             weapon_name = details.get("weapon_name")
@@ -414,7 +418,24 @@ class StepLogger:
             else:
                 base_msg = f"{unit_label} SHOT at {target_label}"
             hit_rule_suffix = f" {hit_rule_modifier}" if hit_rule_modifier else ""
-            detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}){hit_rule_suffix} Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+            dw_flag_suffix = " [DEVASTATING WOUNDS]" if devastating_wounds_flag else ""
+            rapid_fire_suffix = " [RAPID_FIRE:X]" if rapid_fire_bonus_shot else ""
+            if "SHOT at" in base_msg and rapid_fire_suffix:
+                base_msg = base_msg.replace("SHOT at", f"SHOT{rapid_fire_suffix} at", 1)
+            if save_skipped and save_skip_reason == "DEVASTATING_WOUNDS":
+                detail_msg = (
+                    f"{dw_flag_suffix}"
+                    f" - Hit:{hit_target}+:{hit_roll}({hit_result}){hit_rule_suffix} "
+                    f"Wound:{wound_target}+:{wound_roll}({wound_result}) "
+                    f"Save:SKIPPED(DEVASTATING_WOUNDS) Dmg:{damage}HP"
+                )
+            else:
+                detail_msg = (
+                    f"{dw_flag_suffix}"
+                    f" - Hit:{hit_target}+:{hit_roll}({hit_result}){hit_rule_suffix} "
+                    f"Wound:{wound_target}+:{wound_roll}({wound_result}) "
+                    f"Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+                )
             
             # Add reward if available
             reward = details.get("reward")

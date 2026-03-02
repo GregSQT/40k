@@ -14,6 +14,8 @@
     "Intercessor": "spaceMarine/units/Intercessor",
     "IntercessorSergeant": "spaceMarine/units/IntercessorSergeant",
     "IntercessorGrenadeLauncher": "spaceMarine/units/IntercessorGrenadeLauncher",
+    "SternguardVeteranBoltRifle": "spaceMarine/units/SternguardVeteranBoltRifle",
+    "SternguardVeteranSergeantPowerFist": "spaceMarine/units/SternguardVeteranSergeantPowerFist",
     "Carnifex": "tyranid/units/Carnifex",
     "Genestealer": "tyranid/units/Genestealer",
     "Hormagaunt": "tyranid/units/Hormagaunt",

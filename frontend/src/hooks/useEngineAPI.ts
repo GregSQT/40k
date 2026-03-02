@@ -508,6 +508,12 @@ export const useEngineAPI = () => {
                   saveRoll: logEntry.saveRoll || logEntry.save_roll || shootDetail?.saveRoll,
                   saveTarget:
                     logEntry.saveTarget || logEntry.save_target || shootDetail?.saveTarget,
+                  saveSkipped: logEntry.saveSkipped || logEntry.save_skipped || false,
+                  saveSkipReason: logEntry.saveSkipReason || logEntry.save_skip_reason,
+                  devastatingWoundsApplied:
+                    logEntry.devastatingWoundsApplied ||
+                    logEntry.devastating_wounds_applied ||
+                    false,
                   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Pass through weapon name
                   weaponName: logEntry.weaponName,
                   // Pass through shootDetails for direct use by getEventTypeClass color logic
@@ -2804,6 +2810,9 @@ export const useEngineAPI = () => {
                     woundRoll: logEntry.woundRoll,
                     saveRoll: logEntry.saveRoll,
                     saveTarget: logEntry.saveTarget,
+                    saveSkipped: logEntry.saveSkipped || false,
+                    saveSkipReason: logEntry.saveSkipReason,
+                    devastatingWoundsApplied: logEntry.devastatingWoundsApplied || false,
                     weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                     action_name: logEntry.action_name,
                     reward: logEntry.reward,
@@ -3069,6 +3078,9 @@ export const useEngineAPI = () => {
                         woundRoll: logEntry.woundRoll,
                         saveRoll: logEntry.saveRoll,
                         saveTarget: logEntry.saveTarget,
+                        saveSkipped: logEntry.saveSkipped || false,
+                        saveSkipReason: logEntry.saveSkipReason,
+                        devastatingWoundsApplied: logEntry.devastatingWoundsApplied || false,
                         weaponName: logEntry.weaponName, // MULTIPLE_WEAPONS_IMPLEMENTATION.md
                         action_name: logEntry.action_name,
                         reward: logEntry.reward,
