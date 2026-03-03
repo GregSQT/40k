@@ -406,6 +406,7 @@ class StepLogger:
             save_skip_reason = details.get("save_skip_reason")
             devastating_wounds_flag = bool(details.get("devastating_wounds_flag", False))
             rapid_fire_bonus_shot = bool(details.get("rapid_fire_bonus_shot", False))
+            rapid_fire_rule_value = details.get("rapid_fire_rule_value")
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
             weapon_name = details.get("weapon_name")
@@ -419,7 +420,14 @@ class StepLogger:
                 base_msg = f"{unit_label} SHOT at {target_label}"
             hit_rule_suffix = f" {hit_rule_modifier}" if hit_rule_modifier else ""
             dw_flag_suffix = " [DEVASTATING WOUNDS]" if devastating_wounds_flag else ""
-            rapid_fire_suffix = " [RAPID_FIRE:X]" if rapid_fire_bonus_shot else ""
+            if rapid_fire_bonus_shot:
+                if not isinstance(rapid_fire_rule_value, int) or rapid_fire_rule_value <= 0:
+                    raise ValueError(
+                        f"rapid_fire_bonus_shot=True but rapid_fire_rule_value is invalid: {rapid_fire_rule_value}"
+                    )
+                rapid_fire_suffix = f" [RAPID_FIRE:{rapid_fire_rule_value}]"
+            else:
+                rapid_fire_suffix = ""
             if "SHOT at" in base_msg and rapid_fire_suffix:
                 base_msg = base_msg.replace("SHOT at", f"SHOT{rapid_fire_suffix} at", 1)
             if save_skipped and save_skip_reason == "DEVASTATING_WOUNDS":

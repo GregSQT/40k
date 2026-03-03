@@ -917,6 +917,7 @@ class W40KEngine(gym.Env):
         semantic_action = self.action_decoder.convert_gym_action(
             action, self.game_state, action_mask=action_mask, eligible_units=eligible_units
         )
+        self.game_state["_last_semantic_action"] = copy.deepcopy(semantic_action)
         if self.game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
             episode = self.game_state.get("episode_number", "?")
@@ -947,6 +948,18 @@ class W40KEngine(gym.Env):
             success, result = action_result
         else:
             success, result = True, action_result
+        result_action = result.get("action") if isinstance(result, dict) else None
+        result_error = result.get("error") if isinstance(result, dict) else None
+        result_waiting_for_player = result.get("waiting_for_player") if isinstance(result, dict) else None
+        result_context = result.get("context") if isinstance(result, dict) else None
+        self.game_state["_last_action_debug"] = {
+            "semantic_action": self.game_state.get("_last_semantic_action"),
+            "success": success,
+            "result_action": result_action,
+            "result_error": result_error,
+            "result_waiting_for_player": result_waiting_for_player,
+            "result_context": result_context,
+        }
 
         # BUILT-IN STEP COUNTING - AFTER validation, only for successful actions
         if success:
@@ -1271,11 +1284,64 @@ class W40KEngine(gym.Env):
             else:
                 active_unit_id = None
             active_unit_name = None
+            shoot_diag = ""
             if active_unit_id is not None:
                 active_unit_id_str = str(active_unit_id)
                 active_unit = next((u for u in units if str(require_key(u, "id")) == active_unit_id_str), None)
                 if active_unit is not None:
                     active_unit_name = require_key(active_unit, "DISPLAY_NAME")
+                    if phase == "shoot":
+                        selected_weapon_index_raw = active_unit.get("selectedRngWeaponIndex")
+                        selected_weapon_index = None
+                        if selected_weapon_index_raw is not None:
+                            try:
+                                selected_weapon_index = int(selected_weapon_index_raw)
+                            except (TypeError, ValueError):
+                                selected_weapon_index = None
+
+                        selected_weapon_name = None
+                        rng_weapons = active_unit.get("RNG_WEAPONS")
+                        if (
+                            isinstance(rng_weapons, list)
+                            and selected_weapon_index is not None
+                            and 0 <= selected_weapon_index < len(rng_weapons)
+                        ):
+                            selected_weapon_name = rng_weapons[selected_weapon_index].get("display_name")
+
+                        valid_target_pool = active_unit.get("valid_target_pool")
+                        if isinstance(valid_target_pool, list):
+                            valid_target_pool_count = len(valid_target_pool)
+                            valid_target_pool_sample = valid_target_pool[:5]
+                        else:
+                            valid_target_pool_count = None
+                            valid_target_pool_sample = None
+
+                        shoot_pool_ids = [str(uid) for uid in require_key(self.game_state, "shoot_activation_pool")]
+                        units_shot = require_key(self.game_state, "units_shot")
+                        active_unit_in_units_shot = active_unit_id_str in [str(uid) for uid in units_shot]
+
+                        shoot_diag = (
+                            ", shoot_debug={"
+                            f"'active_in_pool': {active_unit_id_str in shoot_pool_ids}, "
+                            f"'active_in_units_shot': {active_unit_in_units_shot}, "
+                            f"'shoot_left': {active_unit.get('SHOOT_LEFT')}, "
+                            f"'current_shoot_nb': {active_unit.get('_current_shoot_nb')}, "
+                            f"'selected_weapon_index': {selected_weapon_index_raw}, "
+                            f"'selected_weapon_name': {selected_weapon_name}, "
+                            f"'valid_target_pool_count': {valid_target_pool_count}, "
+                            f"'valid_target_pool_sample': {valid_target_pool_sample}, "
+                            f"'shoot_activation_started': {active_unit.get('_shoot_activation_started')}, "
+                            f"'manual_weapon_selected': {active_unit.get('_manual_weapon_selected')}, "
+                            f"'shooting_with_pistol': {active_unit.get('_shooting_with_pistol')}, "
+                            f"'rapid_fire_context_weapon_index': {active_unit.get('_rapid_fire_context_weapon_index')}, "
+                            f"'rapid_fire_base_nb': {active_unit.get('_rapid_fire_base_nb')}, "
+                            f"'rapid_fire_shots_fired': {active_unit.get('_rapid_fire_shots_fired')}, "
+                            f"'rapid_fire_bonus_total': {active_unit.get('_rapid_fire_bonus_total')}, "
+                            f"'rapid_fire_rule_value': {active_unit.get('_rapid_fire_rule_value')}, "
+                            f"'rapid_fire_bonus_shot_current': {active_unit.get('_rapid_fire_bonus_shot_current')}, "
+                            f"'rapid_fire_bonus_applied_by_weapon': {active_unit.get('_rapid_fire_bonus_applied_by_weapon')}"
+                            "}"
+                        )
             move_pool = len(require_key(self.game_state, "move_activation_pool"))
             shoot_pool = len(require_key(self.game_state, "shoot_activation_pool"))
             charge_pool = len(require_key(self.game_state, "charge_activation_pool"))
@@ -1289,7 +1355,8 @@ class W40KEngine(gym.Env):
                 f"active_unit_id={active_unit_id}, active_unit_name={active_unit_name}, "
                 f"move_pool={move_pool}, shoot_pool={shoot_pool}, charge_pool={charge_pool}, "
                 f"charging_pool={charging_pool}, active_alt_pool={active_alt_pool}, "
-                f"non_active_alt_pool={non_active_alt_pool}). Forcing termination."
+                f"non_active_alt_pool={non_active_alt_pool}{shoot_diag}, "
+                f"last_action_debug={self.game_state.get('_last_action_debug')}). Forcing termination."
             )
             print(error_msg, flush=True)
             from engine.game_utils import add_debug_log
@@ -1935,6 +2002,7 @@ class W40KEngine(gym.Env):
                                         "devastating_wounds_applied": attack_result.get("devastating_wounds_applied", False),
                                         "devastating_wounds_flag": attack_result.get("devastating_wounds_flag", False),
                                         "rapid_fire_bonus_shot": attack_result.get("rapid_fire_bonus_shot", False),
+                                        "rapid_fire_rule_value": attack_result.get("rapid_fire_rule_value"),
                                         "target_died": attack_result["target_died"],
                                         "weapon_name": attack_result["weapon_name"],
                                         "reward": step_reward if i == 0 else 0.0

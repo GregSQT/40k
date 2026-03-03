@@ -921,32 +921,6 @@ export class UnitRenderer {
       borderRadius
     );
     squareBg.endFill();
-    // Clean up any existing target indicator for this unit from the container
-    // This prevents duplicate logos when re-rendering
-    if (targetContainer === uiElementsContainer) {
-      const existingElements = uiElementsContainer.children.filter(
-        (child: PIXI.DisplayObject) =>
-          child.name === `target-indicator-${unitIdNum}-bg` ||
-          child.name === `target-indicator-${unitIdNum}-text`
-      );
-      existingElements.forEach((child: PIXI.DisplayObject) => {
-        uiElementsContainer.removeChild(child);
-        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
-      });
-    } else {
-      // For stage, also clean up existing elements
-      const existingElements = app.stage.children.filter(
-        (child: PIXI.DisplayObject) =>
-          (child instanceof PIXI.Graphics || child instanceof PIXI.Text) &&
-          (child.name === `target-indicator-${unitIdNum}-bg` ||
-            child.name === `target-indicator-${unitIdNum}-text`)
-      );
-      existingElements.forEach((child: PIXI.DisplayObject) => {
-        app.stage.removeChild(child);
-        if ("destroy" in child && typeof child.destroy === "function") child.destroy();
-      });
-    }
-
     squareBg.name = `target-indicator-${unitIdNum}-bg`;
     squareBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
     targetContainer.addChild(squareBg);

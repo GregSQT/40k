@@ -4,6 +4,7 @@ game_state.py - Game state initialization and management
 """
 
 from typing import Dict, List, Any, Optional, Tuple
+import copy
 import json
 from shared.data_validation import require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
@@ -35,8 +36,8 @@ class GameStateManager:
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Create unit with AI_TURN.md compliant fields."""
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
-        rng_weapons = require_key(config, "RNG_WEAPONS")
-        cc_weapons = require_key(config, "CC_WEAPONS")
+        rng_weapons = copy.deepcopy(require_key(config, "RNG_WEAPONS"))
+        cc_weapons = copy.deepcopy(require_key(config, "CC_WEAPONS"))
         
         if not rng_weapons and not cc_weapons:
             raise ValueError(f"Unit {config.get('id', 'unknown')} must have at least RNG_WEAPONS or CC_WEAPONS")
@@ -62,7 +63,7 @@ class GameStateManager:
                 "game_state_init_attack_left",
             )
         
-        unit_rules = config["UNIT_RULES"] if "UNIT_RULES" in config else []
+        unit_rules = copy.deepcopy(config["UNIT_RULES"]) if "UNIT_RULES" in config else []
         return {
             # Identity
             "id": config["id"],
@@ -332,8 +333,8 @@ class GameStateManager:
                         raise KeyError(f"Unit missing required field '{field}': {unit_data}")
                 
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract RNG_WEAPONS and CC_WEAPONS
-                rng_weapons = require_key(full_unit_data, "RNG_WEAPONS")
-                cc_weapons = require_key(full_unit_data, "CC_WEAPONS")
+                rng_weapons = copy.deepcopy(require_key(full_unit_data, "RNG_WEAPONS"))
+                cc_weapons = copy.deepcopy(require_key(full_unit_data, "CC_WEAPONS"))
                 
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
                 if not rng_weapons and not cc_weapons:
@@ -389,7 +390,7 @@ class GameStateManager:
                     "VALUE": full_unit_data["VALUE"],
                     "ICON": full_unit_data["ICON"],
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
-                    "UNIT_RULES": require_key(full_unit_data, "UNIT_RULES"),
+                    "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left
                 }

@@ -233,6 +233,7 @@ class ActionDecoder:
             # Defense in depth: filter dead units here as safety check only
             # CRITICAL: Pool contains string IDs (normalized at creation in shooting_build_activation_pool)
             eligible = []
+            pool_unit_ids_str = [str(uid) for uid in pool_unit_ids]
             for uid in pool_unit_ids:
                 # CRITICAL: Normalize uid to string for get_unit_by_id (which normalizes both sides)
                 uid_str = str(uid)
@@ -249,6 +250,34 @@ class ActionDecoder:
                     if unit_player_int == current_player_int:
                         # AI_TURN.md: All units in pool are eligible - no SHOOT_LEFT filtering
                         eligible.append(unit)
+            active_shooting_unit = game_state.get("active_shooting_unit")
+            if active_shooting_unit is not None:
+                active_unit_id = str(active_shooting_unit)
+                if active_unit_id not in pool_unit_ids_str:
+                    raise ValueError(
+                        f"active_shooting_unit {active_unit_id} is not in shoot_activation_pool={pool_unit_ids_str}"
+                    )
+                active_unit = get_unit_by_id(active_unit_id, game_state)
+                if active_unit is None:
+                    raise ValueError(f"active_shooting_unit {active_unit_id} not found in game_state units")
+                if not is_unit_alive(active_unit_id, game_state):
+                    raise ValueError(f"active_shooting_unit {active_unit_id} is dead but still active")
+                active_cache_entry = require_key(game_state, "units_cache").get(active_unit_id)
+                if active_cache_entry is None:
+                    raise KeyError(f"Active shooting unit {active_unit_id} missing from units_cache")
+                active_player = require_key(active_cache_entry, "player")
+                try:
+                    active_player_int = int(active_player)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"Invalid player value in units_cache for active unit {active_unit_id}: {active_player}"
+                    ) from exc
+                if active_player_int != current_player_int:
+                    raise ValueError(
+                        f"active_shooting_unit {active_unit_id} belongs to player {active_player_int}, "
+                        f"current_player is {current_player_int}"
+                    )
+                return [active_unit]
             return eligible
         elif current_phase == "charge":
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool

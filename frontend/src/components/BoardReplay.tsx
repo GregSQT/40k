@@ -46,6 +46,7 @@ interface ReplayAction {
   save_skip_reason?: string;
   devastating_wounds_applied?: boolean;
   rapid_fire_bonus_shot?: boolean;
+  rapid_fire_rule_value?: number;
   reward?: number;
   // Fight action fields
   attacker_id?: number;
@@ -1072,7 +1073,13 @@ export const BoardReplay: React.FC = () => {
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name if available
         const weaponName = action.weapon_name;
         const weaponSuffix = weaponName ? ` with [${weaponName}]` : "";
-        const rapidFireSuffix = rapidFireBonusShot ? " [RAPID_FIRE:X]" : "";
+        const rapidFireRuleValue = action.rapid_fire_rule_value;
+        const rapidFireSuffix =
+          rapidFireBonusShot && typeof rapidFireRuleValue === "number"
+            ? ` [RAPID_FIRE:${rapidFireRuleValue}]`
+            : rapidFireBonusShot
+              ? " [RAPID_FIRE]"
+              : "";
 
         // Determine hit target (assuming 3+ for now - could be in log later)
         const hitTarget = 3;

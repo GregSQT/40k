@@ -742,7 +742,7 @@ def parse_step_log(filepath: str) -> Dict:
     unit_registry = UnitRegistry()
     config_loader = get_config_loader()
     unit_weapons_cache = {}  # unit_type -> list of weapons with {display_name, RNG, WEAPON_RULES, is_pistol}
-    unit_attack_limits = {}  # unit_type -> {'rng_nb_by_weapon': Dict[str, int], 'cc_nb_by_weapon': Dict[str, int]}
+    unit_attack_limits = {}  # unit_type -> {'rng_nb_by_weapon': Dict[str, int], 'cc_nb_by_weapon': Dict[str, int], 'rapid_fire_by_weapon': Dict[str, int]}
     unit_combi_by_weapon = {}  # unit_type -> {weapon_display_name: combi_key}
     unit_rules_by_type = {}  # unit_type -> set(ruleId)
     
@@ -751,6 +751,7 @@ def parse_step_log(filepath: str) -> Dict:
         rng_weapons = require_key(unit_data, "RNG_WEAPONS")
         cc_weapons = require_key(unit_data, "CC_WEAPONS")
         rng_nb_by_weapon = {}
+        rapid_fire_by_weapon = {}
         combi_by_weapon = {}
         for weapon in rng_weapons:
             if isinstance(weapon, dict):
@@ -759,6 +760,38 @@ def parse_step_log(filepath: str) -> Dict:
                     require_key(weapon, "NB"),
                     "analyzer_rng_nb",
                 )
+                weapon_rules = require_key(weapon, "WEAPON_RULES")
+                rapid_fire_value = 0
+                for rule in weapon_rules:
+                    if isinstance(rule, str) and rule.upper().startswith("RAPID_FIRE:"):
+                        _, rf_raw = rule.split(":", 1)
+                        try:
+                            rapid_fire_value = int(rf_raw)
+                        except (TypeError, ValueError) as exc:
+                            raise ValueError(
+                                f"Invalid RAPID_FIRE rule for {unit_type}/{weapon_name}: {rule}"
+                            ) from exc
+                        if rapid_fire_value <= 0:
+                            raise ValueError(
+                                f"RAPID_FIRE value must be > 0 for {unit_type}/{weapon_name}: {rapid_fire_value}"
+                            )
+                    elif hasattr(rule, "rule") and getattr(rule, "rule", None) == "RAPID_FIRE":
+                        rf_raw = getattr(rule, "parameter", None)
+                        if rf_raw is None:
+                            raise ValueError(
+                                f"RAPID_FIRE rule missing parameter for {unit_type}/{weapon_name}"
+                            )
+                        try:
+                            rapid_fire_value = int(rf_raw)
+                        except (TypeError, ValueError) as exc:
+                            raise ValueError(
+                                f"Invalid RAPID_FIRE parameter for {unit_type}/{weapon_name}: {rf_raw}"
+                            ) from exc
+                        if rapid_fire_value <= 0:
+                            raise ValueError(
+                                f"RAPID_FIRE value must be > 0 for {unit_type}/{weapon_name}: {rapid_fire_value}"
+                            )
+                rapid_fire_by_weapon[weapon_name] = rapid_fire_value
                 combi_key = weapon.get("COMBI_WEAPON")
                 if combi_key is not None:
                     combi_by_weapon[weapon_name] = combi_key
@@ -772,7 +805,8 @@ def parse_step_log(filepath: str) -> Dict:
                 )
         unit_attack_limits[unit_type] = {
             'rng_nb_by_weapon': rng_nb_by_weapon,
-            'cc_nb_by_weapon': cc_nb_by_weapon
+            'cc_nb_by_weapon': cc_nb_by_weapon,
+            'rapid_fire_by_weapon': rapid_fire_by_weapon,
         }
         weapons_info = []
         for weapon in rng_weapons:
@@ -886,6 +920,8 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_combi_profile_conflicts': {1: 0, 2: 0},
         'devastating_wounds_correct': {1: 0, 2: 0},
         'devastating_wounds_incorrect': {1: 0, 2: 0},
+        'rapid_fire_correct': {1: 0, 2: 0},
+        'rapid_fire_incorrect': {1: 0, 2: 0},
         'dead_unit_waiting': {1: 0, 2: 0},
         'dead_unit_skipping': {1: 0, 2: 0},
         'charge_after_flee': {1: 0, 2: 0},
@@ -966,6 +1002,7 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_over_rng_nb': {1: None, 2: None},
             'shoot_combi_profile_conflicts': {1: None, 2: None},
             'devastating_wounds_incorrect': {1: None, 2: None},
+            'rapid_fire_incorrect': {1: None, 2: None},
             'dead_unit_waiting': {1: None, 2: None},
             'dead_unit_skipping': {1: None, 2: None},
             'charge_after_flee': {1: None, 2: None},
@@ -1902,6 +1939,7 @@ def parse_step_log(filepath: str) -> Dict:
                                 if shooter_unit_type:
                                     limits = require_key(unit_attack_limits, shooter_unit_type)
                                     rng_nb_by_weapon = require_key(limits, "rng_nb_by_weapon")
+                                    rapid_fire_by_weapon = require_key(limits, "rapid_fire_by_weapon")
                                     weapon_name_for_limits = weapon_display_name.strip()
                                     if weapon_name_for_limits not in rng_nb_by_weapon:
                                         stats['parse_errors'].append({
@@ -1913,6 +1951,35 @@ def parse_step_log(filepath: str) -> Dict:
                                         })
                                     else:
                                         rng_nb = rng_nb_by_weapon[weapon_name_for_limits]
+                                        rapid_fire_value = rapid_fire_by_weapon.get(weapon_name_for_limits, 0)
+                                        rapid_fire_match = re.search(r'\[RAPID_FIRE:(\d+)\]', action_desc, re.IGNORECASE)
+                                        rapid_fire_bonus_for_this_shot = 0
+                                        if rapid_fire_match:
+                                            rapid_fire_logged_value = int(rapid_fire_match.group(1))
+                                            if rapid_fire_value <= 0:
+                                                stats['parse_errors'].append({
+                                                    'episode': current_episode_num,
+                                                    'turn': turn,
+                                                    'phase': phase,
+                                                    'line': line.strip(),
+                                                    'error': (
+                                                        f"RAPID_FIRE marker present for weapon without RAPID_FIRE rule: "
+                                                        f"{shooter_unit_type}/{weapon_name_for_limits}"
+                                                    )
+                                                })
+                                            elif rapid_fire_logged_value != rapid_fire_value:
+                                                stats['parse_errors'].append({
+                                                    'episode': current_episode_num,
+                                                    'turn': turn,
+                                                    'phase': phase,
+                                                    'line': line.strip(),
+                                                    'error': (
+                                                        f"RAPID_FIRE marker value mismatch for {shooter_unit_type}/{weapon_name_for_limits}: "
+                                                        f"log={rapid_fire_logged_value}, expected={rapid_fire_value}"
+                                                    )
+                                                })
+                                            else:
+                                                rapid_fire_bonus_for_this_shot = rapid_fire_value
                                         combi_key = None
                                         if shooter_unit_type in unit_combi_by_weapon:
                                             combi_by_weapon = unit_combi_by_weapon[shooter_unit_type]
@@ -1945,8 +2012,32 @@ def parse_step_log(filepath: str) -> Dict:
                                         if seq_key not in shot_sequence_counts:
                                             shot_sequence_counts[seq_key] = 0
                                         shot_sequence_counts[seq_key] += 1
-                                        if shot_sequence_counts[seq_key] > rng_nb:
-                                            shooter_player_for_stats = require_key(unit_player, shooter_id)
+                                        current_shot_index = shot_sequence_counts[seq_key]
+                                        shooter_player_for_stats = require_key(unit_player, shooter_id)
+                                        rapid_fire_bonus_window = (
+                                            rapid_fire_value > 0
+                                            and current_shot_index > rng_nb
+                                            and current_shot_index <= (rng_nb + rapid_fire_value)
+                                        )
+                                        rapid_fire_marker_valid = (
+                                            rapid_fire_match is not None
+                                            and rapid_fire_bonus_for_this_shot > 0
+                                        )
+
+                                        # RAPID_FIRE coherence metrics:
+                                        # - correct: bonus-window shot with valid RAPID_FIRE marker/value.
+                                        # - incorrect: bonus-window shot without valid marker OR marker present outside bonus window.
+                                        if rapid_fire_bonus_window and rapid_fire_marker_valid:
+                                            stats['rapid_fire_correct'][shooter_player_for_stats] += 1
+                                        elif rapid_fire_bonus_window != rapid_fire_marker_valid:
+                                            stats['rapid_fire_incorrect'][shooter_player_for_stats] += 1
+                                            if stats['first_error_lines']['rapid_fire_incorrect'][shooter_player_for_stats] is None:
+                                                stats['first_error_lines']['rapid_fire_incorrect'][shooter_player_for_stats] = {
+                                                    'episode': current_episode_num,
+                                                    'line': line.strip(),
+                                                }
+                                        max_allowed_shots = rng_nb + rapid_fire_bonus_for_this_shot
+                                        if shot_sequence_counts[seq_key] > max_allowed_shots:
                                             stats['shoot_over_rng_nb'][shooter_player_for_stats] += 1
                                             if stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] is None:
                                                 stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] = {'episode': current_episode_num, 'line': line.strip()}
@@ -4931,18 +5022,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_advance_twice_shoot > 0 and stats['first_error_lines']['advance_twice_in_shoot_phase'][2]:
         first_err = stats['first_error_lines']['advance_twice_in_shoot_phase'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_dw_correct = stats['devastating_wounds_correct'][1]
-    bot_dw_correct = stats['devastating_wounds_correct'][2]
-    log_print(f"Devastating Wounds correct:   {agent_dw_correct:10d}           {bot_dw_correct:6d}")
-    agent_dw_incorrect = stats['devastating_wounds_incorrect'][1]
-    bot_dw_incorrect = stats['devastating_wounds_incorrect'][2]
-    log_print(f"Devastating Wounds incorrect: {agent_dw_incorrect:10d}           {bot_dw_incorrect:6d}")
-    if agent_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][1]:
-        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][2]:
-        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_adv_over = stats['move_distance_over_limit']['advance'][1]
     bot_adv_over = stats['move_distance_over_limit']['advance'][2]
     log_print(f"Advance distance > roll:     {agent_adv_over:10d}           {bot_adv_over:6d}")
@@ -5158,6 +5237,33 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
                     log_print(f"  First occurrence (Episode {first_err['episode']}): {first_err['line']}")
     else:
         log_print("No weapon rule usage recorded.")
+
+    # Rule execution metrics (same section formatting)
+    agent_dw_correct = stats['devastating_wounds_correct'][1]
+    bot_dw_correct = stats['devastating_wounds_correct'][2]
+    log_print(f"{'Devastating_wounds':<28} {'GLOBAL (correct)':<60} {agent_dw_correct:10d} {bot_dw_correct:10d} {'OK':>10}")
+    agent_dw_incorrect = stats['devastating_wounds_incorrect'][1]
+    bot_dw_incorrect = stats['devastating_wounds_incorrect'][2]
+    log_print(f"{'Devastating_wounds':<28} {'GLOBAL (incorrect)':<60} {agent_dw_incorrect:10d} {bot_dw_incorrect:10d} {'INVALID':>10}")
+    if agent_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][1]:
+        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][2]:
+        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+
+    agent_rf_correct = stats['rapid_fire_correct'][1]
+    bot_rf_correct = stats['rapid_fire_correct'][2]
+    log_print(f"{'Rapid_fire':<28} {'GLOBAL (correct)':<60} {agent_rf_correct:10d} {bot_rf_correct:10d} {'OK':>10}")
+    agent_rf_incorrect = stats['rapid_fire_incorrect'][1]
+    bot_rf_incorrect = stats['rapid_fire_incorrect'][2]
+    log_print(f"{'Rapid_fire':<28} {'GLOBAL (incorrect)':<60} {agent_rf_incorrect:10d} {bot_rf_incorrect:10d} {'INVALID':>10}")
+    if agent_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][1]:
+        first_err = stats['first_error_lines']['rapid_fire_incorrect'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][2]:
+        first_err = stats['first_error_lines']['rapid_fire_incorrect'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
 
     incomplete_p1 = 0
     incomplete_p2 = 0

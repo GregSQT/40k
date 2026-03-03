@@ -24,6 +24,7 @@ interface ReplayAction {
   save_skip_reason?: string;
   devastating_wounds_applied?: boolean;
   rapid_fire_bonus_shot?: boolean;
+  rapid_fire_rule_value?: number;
   reward?: number;
   // Fight action fields
   attacker_id?: number;
@@ -419,7 +420,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse SHOOT actions
     const shootMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[RAPID_FIRE:X\])? at Unit)|WAIT|ADVANCED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[RAPID_FIRE:[^\]]+\])? at Unit)|WAIT|ADVANCED)/
     );
     if (shootMatch) {
       // Removed verbose logging
@@ -475,7 +476,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
         }
       } else if (actionType.startsWith("SHOT")) {
-        const targetMatch = trimmed.match(/SHOT(?: \[RAPID_FIRE:X\])? at Unit (\d+)\((\d+),(\d+)\)/);
+        const targetMatch = trimmed.match(/SHOT(?: \[RAPID_FIRE:[^\]]+\])? at Unit (\d+)\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
         // Try to extract detailed combat rolls from format: Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED)
@@ -483,7 +484,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)/);
         const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)/);
         const saveSkippedMatch = trimmed.match(/Save:SKIPPED\(([^)]+)\)/);
-        const rapidFireMatch = trimmed.match(/\[RAPID_FIRE:X\]/);
+        const rapidFireMatch = trimmed.match(/\[RAPID_FIRE:(\d+)\]/);
         // Extract reward from format: [R:+53.2] or [R:-10.0]
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract weapon name from format: with [weapon_name]
@@ -532,6 +533,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
           if (rapidFireMatch) {
             action.rapid_fire_bonus_shot = true;
+            action.rapid_fire_rule_value = parseInt(rapidFireMatch[1], 10);
           }
           // Add reward if available
           if (rewardMatch) {

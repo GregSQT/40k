@@ -65,6 +65,7 @@ interface DrawBoardOptions {
   blockedTargets?: Set<string>;
   coverTargets?: Set<string>;
   phase?: "move" | "shoot" | "charge" | "fight";
+  interactionPhase?: "deployment" | "command" | "move" | "shoot" | "charge" | "fight";
   selectedUnitId?: number | null;
   mode?: string;
   showHexCoordinates?: boolean;
@@ -123,6 +124,7 @@ export const drawBoard = (
       chargeCells = [],
       advanceCells = [], // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4
       phase = "move",
+      interactionPhase = phase,
       selectedUnitId = null,
       mode = "select",
       showHexCoordinates = false,
@@ -286,7 +288,7 @@ export const drawBoard = (
                 // Left click only
                 window.dispatchEvent(
                   new CustomEvent("boardHexClick", {
-                    detail: { col, row, phase, mode, selectedUnitId },
+                    detail: { col, row, phase: interactionPhase, mode, selectedUnitId },
                   })
                 );
               }

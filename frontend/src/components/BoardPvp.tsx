@@ -1320,7 +1320,6 @@ export default function Board({
     }
 
     const replayRules = (gameState as { rules?: ReplayRules } | null)?.rules;
-    let shouldApplyObjectiveControl = true;
     let tieBehavior: string | undefined;
     let controlMethod: string | undefined;
     if (replayActionIndex !== undefined && !replayRules) {
@@ -1377,19 +1376,6 @@ export default function Board({
         throw new Error(
           `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
         );
-      }
-      const startTurn = primaryObjectiveConfig.scoring.start_turn;
-      if (currentTurn < startTurn) {
-        shouldApplyObjectiveControl = false;
-      }
-
-      let expectedScoringPhase = primaryObjectiveConfig.timing.default_phase;
-      if (currentTurn === 5 && current_player === 2) {
-        expectedScoringPhase = primaryObjectiveConfig.timing.round5_second_player_phase;
-      }
-
-      if (phase !== expectedScoringPhase) {
-        shouldApplyObjectiveControl = false;
       }
       tieBehavior = primaryObjectiveConfig.control.tie_behavior;
       controlMethod = primaryObjectiveConfig.control.control_method;
@@ -1452,33 +1438,19 @@ export default function Board({
           `Unsupported objective tie behavior: ${primaryObjectiveConfig.control.tie_behavior}`
         );
       }
-      const startTurn = primaryObjectiveConfig.scoring.start_turn;
-      if (currentTurn < startTurn) {
-        shouldApplyObjectiveControl = false;
-      }
-      if (
-        currentTurn === 5 &&
-        current_player === 2 &&
-        primaryObjectiveConfig.timing.round5_second_player_phase === "fight" &&
-        phase !== "fight"
-      ) {
-        shouldApplyObjectiveControl = false;
-      }
       tieBehavior = primaryObjectiveConfig.control.tie_behavior;
       controlMethod = primaryObjectiveConfig.control.control_method;
     }
 
-    const { controlMap: objectiveControl, updatedControllers } = shouldApplyObjectiveControl
-      ? calculateObjectiveControl(
-          units,
-          objectivesOverride,
-          effectiveObjectiveHexes,
-          objectiveControllersRef.current,
-          true,
-          tieBehavior,
-          controlMethod
-        )
-      : { controlMap: {}, updatedControllers: objectiveControllersRef.current };
+    const { controlMap: objectiveControl, updatedControllers } = calculateObjectiveControl(
+      units,
+      objectivesOverride,
+      effectiveObjectiveHexes,
+      objectiveControllersRef.current,
+      true,
+      tieBehavior,
+      controlMethod
+    );
     // Update persistent state
     objectiveControllersRef.current = updatedControllers;
 
@@ -1489,6 +1461,19 @@ export default function Board({
       app.stage.removeChildren();
       if (uiElementsContainerRef.current) {
         app.stage.addChild(uiElementsContainerRef.current);
+        // Replay/PvP: clear stale transient UI markers before rendering current frame.
+        // This removes markers for units no longer present (e.g. dead targets).
+        const staleTargetMarkers = uiElementsContainerRef.current.children.filter(
+          (child: PIXI.DisplayObject) =>
+            typeof child.name === "string" &&
+            (child.name.startsWith("target-indicator-") || child.name.startsWith("charge-badge-"))
+        );
+        staleTargetMarkers.forEach((child: PIXI.DisplayObject) => {
+          uiElementsContainerRef.current?.removeChild(child);
+          if ("destroy" in child && typeof child.destroy === "function") {
+            child.destroy();
+          }
+        });
       }
     }
     drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
@@ -1506,6 +1491,7 @@ export default function Board({
       blockedTargets,
       coverTargets,
       phase: effectivePhase,
+      interactionPhase: phase,
       selectedUnitId,
       mode,
       showHexCoordinates,
