@@ -16,7 +16,6 @@ export interface GameLogEvent extends BaseLogEntry {
 interface GameLogProps {
   events: GameLogEvent[];
   maxEvents?: number;
-  getElapsedTime: (timestamp: Date) => string;
   availableHeight?: number;
   useStepNumbers?: boolean;
   currentTurn?: number;
@@ -25,7 +24,6 @@ interface GameLogProps {
 
 export const GameLog: React.FC<GameLogProps> = ({
   events,
-  getElapsedTime,
   availableHeight = 220,
   useStepNumbers = false,
   debugMode = false,
@@ -34,13 +32,6 @@ export const GameLog: React.FC<GameLogProps> = ({
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
-  const formatTime = (timestamp: Date, eventIndex?: number): string => {
-    if (useStepNumbers && eventIndex !== undefined) {
-      return `#${eventIndex + 1}`;
-    }
-    return getElapsedTime(timestamp);
-  };
 
   // Keep newest entry visible when new events arrive
   React.useEffect(() => {
@@ -141,12 +132,12 @@ export const GameLog: React.FC<GameLogProps> = ({
                     <span className={`game-log-entry__icon game-log-entry__icon--${event.type}`}>
                       {getEventIcon(event.type)}
                     </span>
-                    <span className="game-log-entry__time">
-                      {formatTime(
-                        event.timestamp,
-                        events.length - 1 - displayedEvents.findIndex((e) => e.id === event.id)
-                      )}
-                    </span>
+                    {useStepNumbers && (
+                      <span className="game-log-entry__turn">
+                        #
+                        {events.length - displayedEvents.findIndex((e) => e.id === event.id)}
+                      </span>
+                    )}
                     {event.turnNumber && (
                       <span className="game-log-entry__turn">T{event.turnNumber}</span>
                     )}

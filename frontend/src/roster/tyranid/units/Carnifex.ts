@@ -17,7 +17,7 @@ export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static VALUE = 125; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["venom_cannon"];
+  static RNG_WEAPON_CODES = ["heavy_venom_cannon"];
   static RNG_WEAPONS = getWeapons(Carnifex.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["monstrous_scything_talons"];
   static CC_WEAPONS = getWeapons(Carnifex.CC_WEAPON_CODES);

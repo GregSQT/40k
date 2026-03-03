@@ -420,14 +420,26 @@ body {
   font-size: 13px;
 }
 
-.test-start-bar {
+.board-column-overlay-anchor {
+  position: relative;
+}
+
+.test-start-overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
   justify-content: center;
   align-items: center;
-  margin: 10px 0 8px;
-  padding: 10px 0;
-  border-top: 1px solid #4b5563;
-  border-bottom: 1px solid #4b5563;
+  background: rgba(0, 0, 0, 0.38);
+  z-index: 700;
+}
+
+.test-start-modal {
+  padding: 20px 24px;
+  border-radius: 12px;
+  border: 1px solid #f59e0b;
+  background: rgba(17, 24, 39, 0.95);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
 }
 
 .test-start-bar__button {
@@ -1767,12 +1779,6 @@ textarea:focus {
   border: var(--icon-square-border-width) px solid
     rgba(139, 69, 19, var(--icon-square-border-alpha-gamelog));
   border-radius: var(--icon-square-border-radius) px;
-}
-
-.game-log-entry__time {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  font-family: "Courier New", monospace;
 }
 
 .game-log-entry__turn {

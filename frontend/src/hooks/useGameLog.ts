@@ -3,10 +3,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { GameLogEvent } from "../components/GameLog";
 import type { Unit } from "../types/game";
 
+function sanitizeGameLogMessage(message: string): string {
+  return message
+    .replace(/\s?\[R:[+-]?\d+\.?\d*\]/g, "")
+    .replace(/\s?\[FIGHT_SUBPHASE:[^\]]+\]/g, "")
+    .replace(/\s?\[FIGHT_POOLS:[^\]]+\]/g, "")
+    .trim();
+}
+
 export function useGameLog(currentTurn?: number) {
   const [events, setEvents] = useState<GameLogEvent[]>([]);
   const eventIdCounter = useRef(0);
-  const gameStartTime = useRef<Date | null>(null);
 
   const generateEventId = useCallback((): string => {
     eventIdCounter.current += 1;
@@ -17,12 +24,12 @@ export function useGameLog(currentTurn?: number) {
     (baseEntry: Record<string, unknown>) => {
       const currentTime = new Date();
 
-      if (gameStartTime.current === null) {
-        gameStartTime.current = currentTime;
-      }
-
       const newEvent: GameLogEvent = {
         ...baseEntry,
+        message:
+          typeof baseEntry.message === "string"
+            ? sanitizeGameLogMessage(baseEntry.message)
+            : baseEntry.message,
         id: generateEventId(),
         timestamp: currentTime,
         turnNumber:
@@ -297,27 +304,10 @@ export function useGameLog(currentTurn?: number) {
   const clearLog = useCallback(() => {
     setEvents([]);
     eventIdCounter.current = 0;
-    gameStartTime.current = null;
-  }, []);
-
-  const getElapsedTime = useCallback((timestamp: Date): string => {
-    if (gameStartTime.current === null) {
-      return "00:00:00";
-    }
-
-    const elapsedMs = timestamp.getTime() - gameStartTime.current.getTime();
-    const elapsedSeconds = Math.floor(elapsedMs / 1000);
-
-    const hours = Math.floor(elapsedSeconds / 3600);
-    const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-    const seconds = elapsedSeconds % 60;
-
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }, []);
 
   return {
     events,
-    getElapsedTime,
     logTurnStart,
     logPhaseChange,
     logMoveAction,

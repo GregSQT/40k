@@ -433,6 +433,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           timestamp,
           turn,
           player,
+          log_message: extractLogMessage(trimmed),
           unit_id: unitId,
           pos: { col: endCol, row: endRow },
         });
@@ -477,6 +478,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             timestamp,
             turn,
             player,
+            log_message: extractLogMessage(trimmed),
             unit_id: shooterId,
             from: { col: fromCol, row: fromRow },
             to: { col: toCol, row: toRow },
@@ -587,6 +589,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
           timestamp,
           turn,
           player,
+          log_message: extractLogMessage(trimmed),
           unit_id: shooterId,
           pos: { col: shooterCol, row: shooterRow },
         });

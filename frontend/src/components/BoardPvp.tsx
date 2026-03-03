@@ -1322,6 +1322,7 @@ export default function Board({
     const replayRules = (gameState as { rules?: ReplayRules } | null)?.rules;
     let tieBehavior: string | undefined;
     let controlMethod: string | undefined;
+    let objectiveControlStartTurn: number | undefined;
     if (replayActionIndex !== undefined && !replayRules) {
       throw new Error("Replay rules missing: objective control cannot be computed");
     }
@@ -1379,6 +1380,7 @@ export default function Board({
       }
       tieBehavior = primaryObjectiveConfig.control.tie_behavior;
       controlMethod = primaryObjectiveConfig.control.control_method;
+      objectiveControlStartTurn = primaryObjectiveConfig.scoring.start_turn;
     }
     if (replayActionIndex === undefined) {
       const livePrimaryObjective = gameState?.primary_objective as
@@ -1440,19 +1442,36 @@ export default function Board({
       }
       tieBehavior = primaryObjectiveConfig.control.tie_behavior;
       controlMethod = primaryObjectiveConfig.control.control_method;
+      objectiveControlStartTurn = primaryObjectiveConfig.scoring.start_turn;
     }
-
-    const { controlMap: objectiveControl, updatedControllers } = calculateObjectiveControl(
-      units,
-      objectivesOverride,
-      effectiveObjectiveHexes,
-      objectiveControllersRef.current,
-      true,
-      tieBehavior,
-      controlMethod
-    );
-    // Update persistent state
-    objectiveControllersRef.current = updatedControllers;
+    if (objectiveControlStartTurn === undefined || objectiveControlStartTurn === null) {
+      throw new Error("objective control start_turn is missing");
+    }
+    let objectiveControl: { [hexKey: string]: number | null } = {};
+    if (currentTurn >= objectiveControlStartTurn) {
+      const { controlMap, updatedControllers } = calculateObjectiveControl(
+        units,
+        objectivesOverride,
+        effectiveObjectiveHexes,
+        objectiveControllersRef.current,
+        true,
+        tieBehavior,
+        controlMethod
+      );
+      objectiveControl = controlMap;
+      // Update persistent state only when objective control is active.
+      objectiveControllersRef.current = updatedControllers;
+    } else if (objectivesOverride && objectivesOverride.length > 0) {
+      for (const obj of objectivesOverride) {
+        for (const hex of obj.hexes) {
+          objectiveControl[`${hex.col},${hex.row}`] = null;
+        }
+      }
+    } else {
+      for (const [col, row] of effectiveObjectiveHexes) {
+        objectiveControl[`${col},${row}`] = null;
+      }
+    }
 
     // Map unsupported phases for drawBoard/UnitRenderer to closest supported behavior.
     const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;

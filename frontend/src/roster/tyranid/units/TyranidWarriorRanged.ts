@@ -20,7 +20,7 @@ export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
   // WEAPONS
   static RNG_WEAPON_CODES = ["deathspitter"];
   static RNG_WEAPONS = getWeapons(TyranidWarriorRanged.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["rending_claws_warrior"];
+  static CC_WEAPON_CODES = ["rending_claws"];
   static CC_WEAPONS = getWeapons(TyranidWarriorRanged.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION

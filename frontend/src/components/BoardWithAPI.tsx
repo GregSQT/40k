@@ -1037,29 +1037,10 @@ export const BoardWithAPI: React.FC = () => {
         />
       </ErrorBoundary>
 
-      {isRosterSetupMode &&
-        apiProps.gameState?.phase === "deployment" &&
-        apiProps.gameState?.deployment_type === "active" &&
-        !testDeploymentStarted && (
-          <div className="test-start-bar">
-            <button
-              type="button"
-              className="test-start-bar__button"
-              onClick={() => {
-                closeRosterPicker();
-                setTestDeploymentStarted(true);
-              }}
-            >
-              Start Game!
-            </button>
-          </div>
-        )}
-
       {/* Game Log Component */}
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
         <GameLog
           events={gameLog.events}
-          getElapsedTime={gameLog.getElapsedTime}
           availableHeight={logAvailableHeight}
           currentTurn={apiProps.gameState?.currentTurn ?? 1}
           debugMode={settings.showDebug}
@@ -1073,99 +1054,120 @@ export const BoardWithAPI: React.FC = () => {
       {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.
       */}
-      <BoardPvp
-        units={apiProps.units}
-        selectedUnitId={apiProps.selectedUnitId}
-        showHexCoordinates={settings.showDebug}
-        eligibleUnitIds={apiProps.eligibleUnitIds}
-        mode={apiProps.mode}
-        movePreview={apiProps.movePreview}
-        attackPreview={apiProps.attackPreview || null}
-        targetPreview={
-          apiProps.targetPreview
-            ? {
-                targetId: apiProps.targetPreview.targetId,
-                shooterId: apiProps.targetPreview.shooterId,
-                currentBlinkStep: apiProps.targetPreview.currentBlinkStep ?? 0,
-                totalBlinkSteps: apiProps.targetPreview.totalBlinkSteps ?? 2,
-                blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
-                hitProbability: apiProps.targetPreview.hitProbability ?? 0.5,
-                woundProbability: apiProps.targetPreview.woundProbability ?? 0.5,
-                saveProbability: apiProps.targetPreview.saveProbability ?? 0.5,
-                overallProbability: apiProps.targetPreview.overallProbability ?? 0.25,
-              }
-            : null
-        }
-        blinkingUnits={apiProps.blinkingUnits}
-        blinkingAttackerId={apiProps.blinkingAttackerId}
-        isBlinkingActive={apiProps.isBlinkingActive}
-        onSelectUnit={
-          isGameOver ||
-          (isRosterSetupMode &&
-            apiProps.gameState?.phase === "deployment" &&
-            apiProps.gameState?.deployment_type === "active" &&
-            !testDeploymentStarted)
-            ? () => {}
-            : apiProps.onSelectUnit
-        }
-        onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
-        onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
-        onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}
-        onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
-        onDeployUnit={
-          isGameOver ||
-          (isRosterSetupMode &&
-            apiProps.gameState?.phase === "deployment" &&
-            apiProps.gameState?.deployment_type === "active" &&
-            !testDeploymentStarted)
-            ? () => {}
-            : apiProps.onDeployUnit
-        }
-        onConfirmMove={isGameOver ? () => {} : apiProps.onConfirmMove}
-        onCancelMove={isGameOver ? () => {} : apiProps.onCancelMove}
-        onShoot={isGameOver ? () => {} : apiProps.onShoot}
-        onSkipShoot={isGameOver ? () => {} : apiProps.onSkipShoot}
-        onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
-        onCancelTargetPreview={() => {
-          const targetPreview = apiProps.targetPreview as TargetPreview | null;
-          if (targetPreview?.blinkTimer) {
-            clearInterval(targetPreview.blinkTimer);
+      <div className="board-column-overlay-anchor">
+        <BoardPvp
+          units={apiProps.units}
+          selectedUnitId={apiProps.selectedUnitId}
+          showHexCoordinates={settings.showDebug}
+          eligibleUnitIds={apiProps.eligibleUnitIds}
+          mode={apiProps.mode}
+          movePreview={apiProps.movePreview}
+          attackPreview={apiProps.attackPreview || null}
+          targetPreview={
+            apiProps.targetPreview
+              ? {
+                  targetId: apiProps.targetPreview.targetId,
+                  shooterId: apiProps.targetPreview.shooterId,
+                  currentBlinkStep: apiProps.targetPreview.currentBlinkStep ?? 0,
+                  totalBlinkSteps: apiProps.targetPreview.totalBlinkSteps ?? 2,
+                  blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
+                  hitProbability: apiProps.targetPreview.hitProbability ?? 0.5,
+                  woundProbability: apiProps.targetPreview.woundProbability ?? 0.5,
+                  saveProbability: apiProps.targetPreview.saveProbability ?? 0.5,
+                  overallProbability: apiProps.targetPreview.overallProbability ?? 0.25,
+                }
+              : null
           }
-          // Clear target preview in engine API
-        }}
-        onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
-        onActivateFight={isGameOver ? () => {} : apiProps.onActivateFight}
-        current_player={apiProps.current_player as PlayerId}
-        unitsMoved={apiProps.unitsMoved}
-        unitsCharged={apiProps.unitsCharged}
-        unitsAttacked={apiProps.unitsAttacked}
-        unitsFled={apiProps.unitsFled}
-        phase={apiProps.phase as "deployment" | "move" | "shoot" | "charge" | "fight"}
-        fightSubPhase={apiProps.fightSubPhase}
-        onCharge={isGameOver ? () => {} : apiProps.onCharge}
-        onActivateCharge={isGameOver ? () => {} : apiProps.onActivateCharge}
-        onChargeEnemyUnit={isGameOver ? () => {} : apiProps.onChargeEnemyUnit}
-        onMoveCharger={isGameOver ? () => {} : apiProps.onMoveCharger}
-        onCancelCharge={isGameOver ? () => {} : apiProps.onCancelCharge}
-        onValidateCharge={isGameOver ? () => {} : apiProps.onValidateCharge}
-        onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
-        gameState={apiProps.gameState as GameState}
-        getChargeDestinations={apiProps.getChargeDestinations}
-        onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
-        onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
-        onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
-        getAdvanceDestinations={apiProps.getAdvanceDestinations}
-        advanceRoll={apiProps.advanceRoll}
-        advancingUnitId={apiProps.advancingUnitId}
-        advanceWarningPopup={apiProps.advanceWarningPopup}
-        onConfirmAdvanceWarning={isGameOver ? () => {} : apiProps.onConfirmAdvanceWarning}
-        onCancelAdvanceWarning={isGameOver ? () => {} : apiProps.onCancelAdvanceWarning}
-        onSkipAdvanceWarning={isGameOver ? () => {} : apiProps.onSkipAdvanceWarning}
-        showAdvanceWarningPopup={settings.showAdvanceWarning}
-        autoSelectWeapon={settings.autoSelectWeapon}
-        deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-        objectivesOverride={objectivesOverride}
-      />
+          blinkingUnits={apiProps.blinkingUnits}
+          blinkingAttackerId={apiProps.blinkingAttackerId}
+          isBlinkingActive={apiProps.isBlinkingActive}
+          onSelectUnit={
+            isGameOver ||
+            (isRosterSetupMode &&
+              apiProps.gameState?.phase === "deployment" &&
+              apiProps.gameState?.deployment_type === "active" &&
+              !testDeploymentStarted)
+              ? () => {}
+              : apiProps.onSelectUnit
+          }
+          onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
+          onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
+          onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}
+          onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
+          onDeployUnit={
+            isGameOver ||
+            (isRosterSetupMode &&
+              apiProps.gameState?.phase === "deployment" &&
+              apiProps.gameState?.deployment_type === "active" &&
+              !testDeploymentStarted)
+              ? () => {}
+              : apiProps.onDeployUnit
+          }
+          onConfirmMove={isGameOver ? () => {} : apiProps.onConfirmMove}
+          onCancelMove={isGameOver ? () => {} : apiProps.onCancelMove}
+          onShoot={isGameOver ? () => {} : apiProps.onShoot}
+          onSkipShoot={isGameOver ? () => {} : apiProps.onSkipShoot}
+          onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
+          onCancelTargetPreview={() => {
+            const targetPreview = apiProps.targetPreview as TargetPreview | null;
+            if (targetPreview?.blinkTimer) {
+              clearInterval(targetPreview.blinkTimer);
+            }
+            // Clear target preview in engine API
+          }}
+          onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
+          onActivateFight={isGameOver ? () => {} : apiProps.onActivateFight}
+          current_player={apiProps.current_player as PlayerId}
+          unitsMoved={apiProps.unitsMoved}
+          unitsCharged={apiProps.unitsCharged}
+          unitsAttacked={apiProps.unitsAttacked}
+          unitsFled={apiProps.unitsFled}
+          phase={apiProps.phase as "deployment" | "move" | "shoot" | "charge" | "fight"}
+          fightSubPhase={apiProps.fightSubPhase}
+          onCharge={isGameOver ? () => {} : apiProps.onCharge}
+          onActivateCharge={isGameOver ? () => {} : apiProps.onActivateCharge}
+          onChargeEnemyUnit={isGameOver ? () => {} : apiProps.onChargeEnemyUnit}
+          onMoveCharger={isGameOver ? () => {} : apiProps.onMoveCharger}
+          onCancelCharge={isGameOver ? () => {} : apiProps.onCancelCharge}
+          onValidateCharge={isGameOver ? () => {} : apiProps.onValidateCharge}
+          onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
+          gameState={apiProps.gameState as GameState}
+          getChargeDestinations={apiProps.getChargeDestinations}
+          onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
+          onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
+          onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
+          getAdvanceDestinations={apiProps.getAdvanceDestinations}
+          advanceRoll={apiProps.advanceRoll}
+          advancingUnitId={apiProps.advancingUnitId}
+          advanceWarningPopup={apiProps.advanceWarningPopup}
+          onConfirmAdvanceWarning={isGameOver ? () => {} : apiProps.onConfirmAdvanceWarning}
+          onCancelAdvanceWarning={isGameOver ? () => {} : apiProps.onCancelAdvanceWarning}
+          onSkipAdvanceWarning={isGameOver ? () => {} : apiProps.onSkipAdvanceWarning}
+          showAdvanceWarningPopup={settings.showAdvanceWarning}
+          autoSelectWeapon={settings.autoSelectWeapon}
+          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+          objectivesOverride={objectivesOverride}
+        />
+        {isRosterSetupMode &&
+          apiProps.gameState?.phase === "deployment" &&
+          apiProps.gameState?.deployment_type === "active" &&
+          !testDeploymentStarted && (
+            <div className="test-start-overlay">
+              <div className="test-start-modal">
+                <button
+                  type="button"
+                  className="test-start-bar__button"
+                  onClick={() => {
+                    closeRosterPicker();
+                    setTestDeploymentStarted(true);
+                  }}
+                >
+                  Start Deployment
+                </button>
+              </div>
+            </div>
+          )}
+      </div>
       <SettingsMenu
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}

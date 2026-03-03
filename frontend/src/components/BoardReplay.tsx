@@ -1101,15 +1101,19 @@ export const BoardReplay: React.FC = () => {
             : "move";
 
       if (action.type === "move" && action.from && action.to) {
-        gameLog.logMoveAction(
-          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
-          action.from.col,
-          action.from.row,
-          action.to.col,
-          action.to.row,
-          turnNumber,
-          action.player
-        );
+        const moveMessage =
+          action.log_message ||
+          `Unit ${action.unit_id}(${action.to.col},${action.to.row}) MOVED from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})`;
+        gameLog.addEvent({
+          type: "move",
+          message: moveMessage,
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: "movement",
+          startHex: `(${action.from.col},${action.from.row})`,
+          endHex: `(${action.to.col},${action.to.row})`,
+          player: action.player,
+        });
       } else if (action.type === "reactive_move" && action.from && action.to) {
         gameLog.addEvent({
           type: "reactive_move",
@@ -1124,15 +1128,12 @@ export const BoardReplay: React.FC = () => {
           player: action.player,
         });
       } else if (action.type === "advance" && action.from && action.to) {
-        // Calculate advance roll from distance between from and to
-        const fromCube = offsetToCube(action.from.col, action.from.row);
-        const toCube = offsetToCube(action.to.col, action.to.row);
-        const advanceRoll = cubeDistance(fromCube, toCube);
-
-        // Log advance actions with roll to match PvP/PvE format
+        const advanceMessage =
+          action.log_message ||
+          `Unit ${action.unit_id}(${action.to.col},${action.to.row}) ADVANCED from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})`;
         gameLog.addEvent({
           type: "advance",
-          message: `Unit ${action.unit_id} advanced from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row}) (rolled ${advanceRoll})`,
+          message: advanceMessage,
           unitId: action.unit_id!,
           turnNumber: turnNumber,
           phase: "shooting",
@@ -1141,15 +1142,21 @@ export const BoardReplay: React.FC = () => {
           player: action.player,
         });
       } else if (action.type === "move_wait" && action.pos) {
-        gameLog.logNoMoveAction(
-          { id: action.unit_id!, name: `Unit ${action.unit_id}` } as Unit,
-          turnNumber,
-          action.player
-        );
+        const moveWaitMessage =
+          action.log_message ||
+          `Unit ${action.unit_id}(${action.pos.col},${action.pos.row}) WAIT`;
+        gameLog.addEvent({
+          type: "move_wait",
+          message: moveWaitMessage,
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: "movement",
+          player: action.player,
+        });
       } else if (action.type === "wait" && action.pos) {
         gameLog.addEvent({
           type: "shoot",
-          message: `Unit ${action.unit_id} (${action.pos.col},${action.pos.row}) chose not to shoot`,
+          message: action.log_message || `Unit ${action.unit_id}(${action.pos.col},${action.pos.row}) WAIT`,
           unitId: action.unit_id!,
           turnNumber: turnNumber,
           phase: "shooting",
@@ -1313,7 +1320,7 @@ export const BoardReplay: React.FC = () => {
             : `Unit ${unitId} chose not to charge`;
         gameLog.addEvent({
           type: "charge_fail", // Use charge_fail type for light purple styling
-          message: rollMessage,
+          message: action.log_message || rollMessage,
           unitId: unitId,
           turnNumber: turnNumber,
           phase: "charge",
@@ -1479,8 +1486,6 @@ export const BoardReplay: React.FC = () => {
     enrichUnitsWithStats,
     gameLog.addEvent, // Clear and rebuild log up to current action
     gameLog.clearLog,
-    gameLog.logMoveAction,
-    gameLog.logNoMoveAction,
   ]);
 
   // Playback control component (inserted between TurnPhaseTracker and UnitStatusTable)

@@ -354,7 +354,6 @@ export const GameController: React.FC<GameControllerProps> = ({ initialUnits, cl
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
         <GameLog
           events={gameLog.events}
-          getElapsedTime={gameLog.getElapsedTime}
           availableHeight={logAvailableHeight}
           currentTurn={gameState.currentTurn ?? 1}
           debugMode={debugMode} // NEW: Pass debug mode

@@ -1431,9 +1431,15 @@ def parse_step_log(filepath: str) -> Dict:
                 # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
                 # by treating dead units as alive.
-                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)', action_desc, re.IGNORECASE):
+                if re.search(
+                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
+                    r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
+                    action_desc,
+                    re.IGNORECASE
+                ):
                     target_match = re.search(
-                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
+                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
+                        r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
                         action_desc,
                         re.IGNORECASE
                     )
@@ -1480,7 +1486,10 @@ def parse_step_log(filepath: str) -> Dict:
                         line
                     )
                     action_desc_upper = action_desc.upper()
-                    is_reactive_move = "REACTIVE MOVED" in action_desc_upper
+                    is_reactive_move = (
+                        "REACTIVE MOVED" in action_desc_upper
+                        or ("MOVED [" in action_desc_upper and " - TRIGGER: UNIT " in action_desc_upper)
+                    )
                     is_move_marker = ") MOVED" in action_desc_upper and not is_reactive_move
                     is_activation_marker = (
                         is_move_marker
@@ -1569,6 +1578,7 @@ def parse_step_log(filepath: str) -> Dict:
                 # REACTIVE MOVE metrics (normal + abnormal occurrences)
                 # Supported log examples:
                 # - "Unit X(...) REACTIVE MOVED from (...) to (...) [Roll: N]"
+                # - "Unit X(...) MOVED [PREDATOR INSTINCT] from (...) to (...) [Roll: N] - trigger: Unit Y->(a,b)"
                 # - "Unit X(...) DECLINED REACTIVE MOVE"
                 reactive_decline_match = re.search(
                     r'Unit\s+(\d+).*DECLINED\s+REACTIVE\s+MOVE',
@@ -1576,7 +1586,10 @@ def parse_step_log(filepath: str) -> Dict:
                     re.IGNORECASE
                 )
                 reactive_move_match = re.search(
-                    r'Unit\s+(\d+)\((\d+),\s*(\d+)\)\s+REACTIVE\s+MOVED\s+from\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)(?:\s+\[Roll:\s*(\d+)\])?',
+                    r'Unit\s+(\d+)\((\d+),\s*(\d+)\)\s+'
+                    r'(?:REACTIVE\s+MOVED|MOVED\s+\[[^\]]+\])\s+'
+                    r'from\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)'
+                    r'(?:\s+\[Roll:\s*(\d+)\])?',
                     action_desc,
                     re.IGNORECASE
                 )
@@ -1751,7 +1764,8 @@ def parse_step_log(filepath: str) -> Dict:
 
                 # Determine action type and validate rules
                 is_shoot_action = re.search(
-                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
+                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
+                    r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
                     action_desc,
                     re.IGNORECASE
                 ) is not None
@@ -1759,13 +1773,19 @@ def parse_step_log(filepath: str) -> Dict:
                     last_shoot_shooter_id = None
                     last_shoot_weapon = None
                     last_shoot_target_id = None
-                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+', action_desc, re.IGNORECASE):
+                if re.search(
+                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
+                    r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
+                    action_desc,
+                    re.IGNORECASE
+                ):
                         action_type = 'shoot'
                         stats['shoot_vs_wait']['shoot'] += 1
                         stats['shoot_vs_wait_by_player'][player]['shoot'] += 1
                         shooter_match = re.search(r'Unit (\d+)\s*\((\d+),\s*(\d+)\)', action_desc)
                         target_match = re.search(
-                            r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
+                            r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
+                            r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
                             action_desc,
                             re.IGNORECASE
                         )
@@ -1951,7 +1971,7 @@ def parse_step_log(filepath: str) -> Dict:
                                         })
                                     else:
                                         rng_nb = rng_nb_by_weapon[weapon_name_for_limits]
-                                        rapid_fire_value = rapid_fire_by_weapon.get(weapon_name_for_limits, 0)
+                                        rapid_fire_value = require_key(rapid_fire_by_weapon, weapon_name_for_limits)
                                         rapid_fire_match = re.search(r'\[RAPID(?: |_)?FIRE:(\d+)\]', action_desc, re.IGNORECASE)
                                         rapid_fire_bonus_for_this_shot = 0
                                         if rapid_fire_match:
@@ -2690,13 +2710,15 @@ def parse_step_log(filepath: str) -> Dict:
                                 'error': f"Advance action missing 'from/to' format: {action_desc[:100]}"
                             })
 
-                elif re.search(r"CHARGED(?:\s+\([A-Za-z0-9_ ]+\))?\s+Unit", action_desc):
+                elif re.search(r"CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))?\s+Unit", action_desc):
                         action_type = 'charge'
                         
                         # Try successful charge format:
                         # "Unit X (col,row) CHARGED (<UNIT_RULE_SOURCE>) Unit Y (col,row) from (...) to (...)"
+                        # or
+                        # "Unit X (col,row) CHARGED [UNIT_RULE_SOURCE] Unit Y (col,row) from (...) to (...)"
                         charge_match = re.search(
-                            r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+\([A-Za-z0-9_ ]+\))?\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
+                            r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))?\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
                             action_desc
                         )
                         if charge_match:
@@ -3009,7 +3031,11 @@ def parse_step_log(filepath: str) -> Dict:
                                     'error': f"Charge action missing expected format: {action_desc[:100]}"
                                 })
 
-                elif "MOVED from" in action_desc or "FLED from" in action_desc:
+                elif (
+                    "MOVED from" in action_desc
+                    or ("MOVED [" in action_desc and " - trigger: Unit " not in action_desc)
+                    or "FLED from" in action_desc
+                ):
                         action_type = 'move'
                         
                         # CRITICAL: Detect explicit FLED actions first
@@ -3156,7 +3182,10 @@ def parse_step_log(filepath: str) -> Dict:
                                 stats['sample_actions']['move'] = line.strip()
                             continue  # Skip normal move processing for FLED
                         
-                        move_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) MOVED from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
+                        move_match = re.search(
+                            r'Unit (\d+)\((\d+),\s*(\d+)\)\s+MOVED(?:\s+\[[^\]]+\])?\s+from\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)',
+                            action_desc
+                        )
                         if move_match:
                             move_unit_id = move_match.group(1)
                             start_col = int(move_match.group(4))
@@ -5528,7 +5557,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("SUMMARY")
     log_print("=" * 80)
     def summary_icon(is_warning: bool) -> str:
-        return "⚠️ " if is_warning else "✅"
+        return "⚠️" if is_warning else "✅"
 
     long_episode_warn = (max_duration is not None and avg_duration is not None and max_duration > avg_duration * 3)
     actions_episode_warn = (max_length is not None and avg_length is not None and max_length > avg_length * 3)
