@@ -11,7 +11,7 @@ CREATED_STASH=0
 
 usage() {
   cat <<'EOF'
-Usage: update_nas_app.sh [--branch <name>] [--no-stash] [--app-dir <path>]
+Usage: nas_update_app.sh [--branch <name>] [--no-stash] [--app-dir <path>]
 
 Options:
   --branch <name>   Git branch to pull (default: main)
@@ -100,6 +100,20 @@ echo "==> Health checks"
 sudo "$DOCKER_BIN" compose ps
 curl -fsS http://127.0.0.1:5001/api/health || true
 curl -I http://127.0.0.1:8081 || true
+
+echo "==> Validate required backend config files inside container"
+REQUIRED_CONFIG_FILES=(
+  "/app/config/scenario_game.json"
+  "/app/config/unit_rules.json"
+)
+for required_file in "${REQUIRED_CONFIG_FILES[@]}"; do
+  if sudo "$DOCKER_BIN" exec wh40k-backend test -f "$required_file"; then
+    echo "OK: found $required_file"
+  else
+    echo "ERROR: missing required file in backend container: $required_file" >&2
+    exit 1
+  fi
+done
 
 echo "==> Recent stash entries"
 git stash list | head -n 3 || true
