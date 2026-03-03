@@ -258,7 +258,11 @@ class StepLogger:
                             f.write(f"[STEP_LOGGER DEBUG] Unit {unit_id}: unit_coords={unit_coords} start_pos=({start_col},{start_row}) end_pos=({end_col},{end_row}) unit_with_coords={details.get('unit_with_coords')} col={details.get('col')} row={details.get('row')}\n")
                     except Exception:
                         pass  # Don't fail if logging fails
-                base_msg = f"{unit_label} MOVED from ({start_col},{start_row}) to ({end_col},{end_row})"
+                is_fly_move = details.get("is_fly_move") is True
+                if is_fly_move:
+                    base_msg = f"{unit_label} MOVED [FLY] from ({start_col},{start_row}) to ({end_col},{end_row})"
+                else:
+                    base_msg = f"{unit_label} MOVED from ({start_col},{start_row}) to ({end_col},{end_row})"
             elif "col" in details and "row" in details:
                 # Use destination coordinates from mirror_action
                 base_msg = f"{unit_label} MOVED to ({details['col']},{details['row']})"
@@ -268,7 +272,7 @@ class StepLogger:
             # Add position reward if available (like shooting reward)
             reward = details.get("reward")
             if reward is not None:
-                base_msg += f" [R:{reward:+.1f}]"
+                base_msg += f"[R:{reward:+.1f}]"
 
             return base_msg
 
@@ -293,10 +297,15 @@ class StepLogger:
                     raise ValueError(
                         f"reactive_move range_roll must be int, got {type(range_roll).__name__}: {range_roll!r}"
                     )
+                ability_display_name = require_key(details, "ability_display_name")
+                if not isinstance(ability_display_name, str) or not ability_display_name.strip():
+                    raise ValueError(
+                        f"reactive_move ability_display_name must be non-empty for unit {unit_id}, got {ability_display_name!r}"
+                    )
                 base_msg = (
-                    f"{unit_label} REACTIVE MOVED from ({start_col},{start_row}) "
-                    f"to ({end_col},{end_row}) [Roll: {range_roll}] to Unit {trigger_unit_id} "
-                    f"deplacing to ({trigger_to_col},{trigger_to_row})"
+                    f"{unit_label} MOVED [{ability_display_name.strip().upper()}] from ({start_col},{start_row}) "
+                    f"to ({end_col},{end_row}) [Roll: {range_roll}] - trigger: Unit {trigger_unit_id}"
+                    f"->({trigger_to_col},{trigger_to_row})"
                 )
             else:
                 raise KeyError("Reactive_move action missing required position data")
@@ -413,37 +422,69 @@ class StepLogger:
             target_coords = details.get("target_coords")
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             target_label = f"Unit {target_id}{target_coords_str}"
+            ability_display_name = details.get("ability_display_name")
+            wound_ability_display_name = details.get("wound_ability_display_name")
+            ap_modifier_ability_display_name = details.get("ap_modifier_ability_display_name")
             
             if weapon_name:
                 base_msg = f"{unit_label} SHOT at {target_label} with [{weapon_name}]"
             else:
                 base_msg = f"{unit_label} SHOT at {target_label}"
-            hit_rule_suffix = f" {hit_rule_modifier}" if hit_rule_modifier else ""
-            dw_flag_suffix = " [DEVASTATING WOUNDS]" if devastating_wounds_flag else ""
+            if isinstance(ability_display_name, str) and ability_display_name.strip():
+                base_msg = base_msg.replace(
+                    " SHOT at ",
+                    f" SHOT [{ability_display_name.strip().upper()}] at ",
+                    1,
+                )
+            hit_target_base = details.get("hit_target_base")
+            hit_rule_suffix = f" [{hit_rule_modifier}]" if hit_rule_modifier else ""
             if rapid_fire_bonus_shot:
                 if not isinstance(rapid_fire_rule_value, int) or rapid_fire_rule_value <= 0:
                     raise ValueError(
                         f"rapid_fire_bonus_shot=True but rapid_fire_rule_value is invalid: {rapid_fire_rule_value}"
                     )
-                rapid_fire_suffix = f" [RAPID_FIRE:{rapid_fire_rule_value}]"
+                rapid_fire_suffix = f" [RAPID FIRE:{rapid_fire_rule_value}]"
             else:
                 rapid_fire_suffix = ""
-            if "SHOT at" in base_msg and rapid_fire_suffix:
-                base_msg = base_msg.replace("SHOT at", f"SHOT{rapid_fire_suffix} at", 1)
-            if save_skipped and save_skip_reason == "DEVASTATING_WOUNDS":
-                detail_msg = (
-                    f"{dw_flag_suffix}"
-                    f" - Hit:{hit_target}+:{hit_roll}({hit_result}){hit_rule_suffix} "
-                    f"Wound:{wound_target}+:{wound_roll}({wound_result}) "
-                    f"Save:SKIPPED(DEVASTATING_WOUNDS) Dmg:{damage}HP"
-                )
+            if rapid_fire_suffix:
+                if " SHOT [" in base_msg:
+                    base_msg = base_msg.replace(" SHOT [", f" SHOT{rapid_fire_suffix} [", 1)
+                elif " SHOT at " in base_msg:
+                    base_msg = base_msg.replace(" SHOT at ", f" SHOT{rapid_fire_suffix} at ", 1)
+            hit_result_display = "HIT" if hit_result == "HIT" else "FAIL"
+            if hit_rule_modifier == "HEAVY" and isinstance(hit_target_base, int):
+                hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
-                detail_msg = (
-                    f"{dw_flag_suffix}"
-                    f" - Hit:{hit_target}+:{hit_roll}({hit_result}){hit_rule_suffix} "
-                    f"Wound:{wound_target}+:{wound_roll}({wound_result}) "
-                    f"Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
+                hit_target_display = f"{hit_target}+"
+            detail_parts = [f"Hit:{hit_target_display}:{hit_roll}({hit_result_display}){hit_rule_suffix}"]
+            if hit_result == "HIT":
+                wound_suffix = ""
+                if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip():
+                    wound_suffix = f" [{wound_ability_display_name.strip().upper()}]"
+                wound_result_display = (
+                    "WOUND" if wound_result in ("WOUND", "SUCCESS") else "FAIL"
                 )
+                detail_parts.append(
+                    f"Wound:{wound_target}+:{wound_roll}({wound_result_display}){wound_suffix}"
+                )
+                if wound_result in ("WOUND", "SUCCESS"):
+                    if save_skipped and save_skip_reason == "DEVASTATING_WOUNDS":
+                        detail_parts.append("Save:SKIPPED")
+                        if devastating_wounds_flag:
+                            detail_parts.append("[DEVASTATING WOUNDS]")
+                        detail_parts.append(f"Dmg:{damage}HP")
+                    else:
+                        save_result_display = "SAVED" if save_result == "SAVED" else "FAIL"
+                        save_part = f"Save:{save_target}+:{save_roll}({save_result_display})"
+                        if (
+                            isinstance(ap_modifier_ability_display_name, str)
+                            and ap_modifier_ability_display_name.strip()
+                        ):
+                            save_part += f" [{ap_modifier_ability_display_name.strip().upper()}]"
+                        detail_parts.append(save_part)
+                        if save_result_display == "FAIL":
+                            detail_parts.append(f"Dmg:{damage}HP")
+            detail_msg = f" - {' '.join(detail_parts)}"
             
             # Add reward if available
             reward = details.get("reward")
@@ -523,10 +564,22 @@ class StepLogger:
                     target_label = f"Unit {target_id}{target_coords_str}"
                     # Include charge roll (2d6) if available
                     charge_roll = details.get("charge_roll")
+                    ability_display_name = details.get("ability_display_name")
+                    ability_suffix = (
+                        f" [{ability_display_name.strip().upper()}]"
+                        if isinstance(ability_display_name, str) and ability_display_name.strip()
+                        else ""
+                    )
                     if charge_roll is not None:
-                        base_msg = f"{unit_label} CHARGED {target_label} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll:{charge_roll}]"
+                        base_msg = (
+                            f"{unit_label} CHARGED{ability_suffix} {target_label} "
+                            f"from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {charge_roll}]"
+                        )
                     else:
-                        base_msg = f"{unit_label} CHARGED {target_label} from ({start_col},{start_row}) to ({end_col},{end_row})"
+                        base_msg = (
+                            f"{unit_label} CHARGED{ability_suffix} {target_label} "
+                            f"from ({start_col},{start_row}) to ({end_col},{end_row})"
+                        )
                 else:
                     base_msg = f"{unit_label} CHARGED Unit {target_id}"
             else:
@@ -543,21 +596,45 @@ class StepLogger:
             # Charge failed because roll was too low
             target_id = require_key(details, "target_id")
             charge_roll = details.get("charge_roll")
-            charge_failed_reason = require_key(details, "charge_failed_reason")
-            
-            # Get start and end positions for format: "from (x,y) to (a,b)"
-            if "start_pos" in details and details["start_pos"] is not None and "end_pos" in details and details["end_pos"] is not None:
-                start_col, start_row = details["start_pos"]
-                end_col, end_row = details["end_pos"]
-                base_msg = f"{unit_label} FAILED CHARGE Unit {target_id} from ({start_col},{start_row}) to ({end_col},{end_row})"
-            else:
-                raise KeyError("Charge_fail action missing required position data")
+            require_key(details, "charge_failed_reason")
+            if charge_roll is None:
+                raise KeyError("Charge_fail action missing required charge_roll")
+            if not isinstance(charge_roll, int) or isinstance(charge_roll, bool):
+                raise ValueError(
+                    f"charge_roll must be int for charge_fail, got {type(charge_roll).__name__}: {charge_roll!r}"
+                )
+            target_coords = details.get("target_coords")
+            if target_coords is None:
+                raise KeyError("Charge_fail action missing required target_coords")
+            if not isinstance(target_coords, tuple) or len(target_coords) != 2:
+                raise ValueError(
+                    f"Charge_fail target_coords must be tuple(col,row), got {target_coords!r}"
+                )
+            target_col, target_row = target_coords
+            base_msg = (
+                f"{unit_label} FAILED CHARGE to unit {target_id}({target_col},{target_row}) "
+                f"[Roll: {charge_roll}]"
+            )
 
-            # Add reward if available (should be negative penalty)
+            return base_msg
+
+        elif action_type == "charge_impact" and details:
+            target_id = require_key(details, "target_id")
+            roll_value = require_key(details, "impact_roll")
+            threshold = require_key(details, "impact_threshold")
+            mortal_wounds = require_key(details, "mortal_wounds")
+            ability_display_name = require_key(details, "ability_display_name")
+            if not isinstance(ability_display_name, str) or not ability_display_name.strip():
+                raise ValueError(
+                    f"charge_impact ability_display_name must be non-empty for unit {unit_id}"
+                )
+            base_msg = (
+                f"Unit {unit_id} IMPACT [{ability_display_name.strip().upper()}] Unit {target_id}: "
+                f"Roll {roll_value}({threshold}+) - {mortal_wounds}MW"
+            )
             reward = details.get("reward")
             if reward is not None:
                 base_msg += f" [R:{reward:+.1f}]"
-
             return base_msg
 
         elif action_type == "combat":
@@ -582,6 +659,7 @@ class StepLogger:
             hit_target = details["hit_target"]
             wound_target = details["wound_target"]
             save_target = details["save_target"]
+            wound_ability_display_name = details.get("wound_ability_display_name")
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
             weapon_name = details.get("weapon_name")
@@ -590,7 +668,7 @@ class StepLogger:
             target_label = f"Unit {target_id}{target_coords_str}"
             
             if weapon_name:
-                base_msg = f"{unit_label} ATTACKED {target_label} with [{weapon_name}]"
+                base_msg = f"{unit_label} FOUGHT {target_label} with [{weapon_name}]"
             else:
                 base_msg = f"{unit_label} FOUGHT {target_label}"
             
@@ -599,10 +677,15 @@ class StepLogger:
             
             # Only show wound if hit succeeded
             if hit_result == "HIT":
-                detail_parts.append(f"Wound:{wound_target}+:{wound_roll}({wound_result})")
+                wound_suffix = (
+                    f" [{wound_ability_display_name.strip().upper()}]"
+                    if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip()
+                    else ""
+                )
+                detail_parts.append(f"Wound:{wound_target}+:{wound_roll}({wound_result}){wound_suffix}")
                 
                 # Only show save if wound succeeded  
-                if wound_result == "WOUND":
+                if wound_result in ("WOUND", "SUCCESS"):
                     detail_parts.append(f"Save:{save_target}+:{save_roll}({save_result})")
                     
                     # Show damage if save failed (even if damage is 0, it should be logged)

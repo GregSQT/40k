@@ -10,24 +10,16 @@
  * - No duplicate Python armory needed - parsed at runtime
  */
 
-import type { Weapon } from "../../types/game";
+import type { DiceValue, Weapon } from "../../types/game";
 
+const D3: DiceValue = "D3";
+//const D6: DiceValue = "D6";
 // ============================================================================
 // TYRANID WEAPONS
 // ============================================================================
 
 export const TYRANID_ARMORY: Record<string, Weapon> = {
   // Ranged Weapons
-  fleshborer: {
-    display_name: "Fleshborer",
-    RNG: 18,
-    NB: 1,
-    ATK: 4,
-    STR: 5,
-    AP: 0,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
   deathspitter: {
     display_name: "Deathspitter",
     RNG: 24,
@@ -38,51 +30,37 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     DMG: 1,
     WEAPON_RULES: [],
   },
-  venom_cannon: {
-    display_name: "Venom Cannon",
-    RNG: 24,
-    NB: 6,
+  fleshborer: {
+    display_name: "Fleshborer",
+    RNG: 18,
+    NB: 1,
     ATK: 4,
-    STR: 7,
-    AP: -2,
+    STR: 5,
+    AP: 0,
     DMG: 1,
+    WEAPON_RULES: ["ASSAULT"],
+  },
+  heavy_venom_cannon: {
+    display_name: "Heavy Venom Cannon",
+    RNG: 36,
+    NB: D3,
+    ATK: 4,
+    STR: 9,
+    AP: -2,
+    DMG: 3,
     WEAPON_RULES: [],
   },
 
-  // Melee Weapons
-  rending_claws: {
-    display_name: "Rending Claws",
-    NB: 4,
-    ATK: 2,
-    STR: 4,
-    AP: -2,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  rending_claws_warrior: {
-    display_name: "Rending Claws",
-    NB: 5,
-    ATK: 3,
-    STR: 5,
-    AP: -1,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  rending_claws_prime: {
-    display_name: "Rending Claws",
-    NB: 5,
-    ATK: 2,
-    STR: 6,
-    AP: -2,
-    DMG: 2,
-    WEAPON_RULES: [],
-  },
-  scything_talons: {
-    display_name: "Scything Talons",
-    NB: 3,
+  // #########################################################################################
+  // #################################### Melee Weapons ######################################
+  // #########################################################################################
+
+  blinding_venom: {
+    display_name: "Blinding Venom",
+    NB: 1,
     ATK: 4,
     STR: 3,
-    AP: -1,
+    AP: 0,
     DMG: 1,
     WEAPON_RULES: [],
   },
@@ -102,6 +80,42 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
     STR: 9,
     AP: -2,
     DMG: 3,
+    WEAPON_RULES: [],
+  },
+  rending_claws: {
+    display_name: "Rending Claws",
+    NB: 4,
+    ATK: 2,
+    STR: 4,
+    AP: -2,
+    DMG: 1,
+    WEAPON_RULES: [],
+  },
+  rending_claws_prime: {
+    display_name: "Rending Claws",
+    NB: 5,
+    ATK: 2,
+    STR: 6,
+    AP: -2,
+    DMG: 2,
+    WEAPON_RULES: ["DEVASTATING_WOUNDS", "TWIN_LINKED"],
+  },
+  bio_weapons: {
+    display_name: "Bio-Weapons",
+    NB: 5,
+    ATK: 3,
+    STR: 5,
+    AP: -1,
+    DMG: 1,
+    WEAPON_RULES: [],
+  },
+  scything_talons: {
+    display_name: "Scything Talons",
+    NB: 3,
+    ATK: 4,
+    STR: 3,
+    AP: -1,
+    DMG: 1,
     WEAPON_RULES: [],
   },
 };

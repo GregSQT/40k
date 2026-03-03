@@ -23,6 +23,12 @@ export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static CC_WEAPON_CODES = ["flesh_hooks"];
   static CC_WEAPONS = getWeapons(Termagant.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [{ ruleId: "reactive_move", displayName: "Skulking Horrors" }];
+
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "termagant"}];
+
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
   static MOVE_TYPE = "Infantry"; // Standard infantry movement

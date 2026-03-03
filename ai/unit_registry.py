@@ -238,13 +238,39 @@ class UnitRegistry:
         else:
             properties["UNIT_RULES"] = []
 
+        # Pattern 1b: UNIT_KEYWORDS (optional)
+        unit_keywords_match = re.search(
+            r'static\s+UNIT_KEYWORDS(?:\s*:\s*[^=]+)?\s*=\s*\[([\s\S]*?)\]\s*;',
+            content,
+            re.MULTILINE
+        )
+        if unit_keywords_match:
+            keywords_block = unit_keywords_match.group(1).strip()
+            unit_keywords = []
+            if keywords_block:
+                keyword_objects = re.findall(r'\{([\s\S]*?)\}', keywords_block)
+            else:
+                keyword_objects = []
+
+            for keyword_object in keyword_objects:
+                keyword_id_match = re.search(r'keywordId\s*:\s*["\']([^"\']+)["\']', keyword_object)
+                if not keyword_id_match:
+                    raise ValueError("UNIT_KEYWORDS must contain objects with keywordId")
+                keyword_id = keyword_id_match.group(1)
+                if not keyword_id or not keyword_id.strip():
+                    raise ValueError("UNIT_KEYWORDS keywordId cannot be empty")
+                unit_keywords.append({"keywordId": keyword_id})
+            properties["UNIT_KEYWORDS"] = unit_keywords
+        else:
+            properties["UNIT_KEYWORDS"] = []
+
         # Pattern 2: Static properties simples (HP_MAX, MOVE, etc.)
         static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
         matches = re.findall(static_pattern, content)
         
         for prop_name, prop_value in matches:
-            # Skip RNG_WEAPONS/CC_WEAPONS and UNIT_RULES (handled separately)
-            if prop_name in ["RNG_WEAPONS", "CC_WEAPONS", "UNIT_RULES"]:
+            # Skip RNG_WEAPONS/CC_WEAPONS, UNIT_RULES, UNIT_KEYWORDS (handled separately)
+            if prop_name in ["RNG_WEAPONS", "CC_WEAPONS", "UNIT_RULES", "UNIT_KEYWORDS"]:
                 continue
             
             # Clean up the value

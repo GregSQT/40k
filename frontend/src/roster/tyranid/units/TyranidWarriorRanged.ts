@@ -37,6 +37,9 @@ export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
     },
   ];
 
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "synapse"}, { keywordId: "tyranid warrior with ranged bio-weapon"}];
+
   // ICON
   static ICON = "/icons/WarriorRanged.webp"; // Path relative to public folder
   static ICON_SCALE = 2.2; // Size of the icon

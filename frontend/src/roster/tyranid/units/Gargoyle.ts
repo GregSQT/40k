@@ -3,13 +3,13 @@
 import { getWeapons } from "../armory";
 import { TyranidInfantrySwarmMeleeSwarm } from "../classes/TyranidInfantrySwarmMeleeSwarm";
 
-export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
-  static NAME = "Hormagaunt";
-  static DISPLAY_NAME = "Hormagaunt";
+export class Gargoyle extends TyranidInfantrySwarmMeleeSwarm {
+  static NAME = "Gargoyle";
+  static DISPLAY_NAME = "Gargoyle";
   // BASE
-  static MOVE = 10; // Move distance
+  static MOVE = 12; // Move distance
   static T = 3; // Toughness score
-  static ARMOR_SAVE = 5; // Armor save score
+  static ARMOR_SAVE = 6; // Armor save score
   static INVUL_SAVE = 7; // Armor invulnerable save score (7+ = no invul)
   static HP_MAX = 1; // Max hit points
   static LD = 8; // Leadership score
@@ -17,16 +17,16 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static VALUE = 7; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES: string[] = [];
-  static RNG_WEAPONS = getWeapons(Hormagaunt.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["scything_talons"];
-  static CC_WEAPONS = getWeapons(Hormagaunt.CC_WEAPON_CODES);
+  static RNG_WEAPON_CODES = ["fleshborer"];
+  static RNG_WEAPONS = getWeapons(Gargoyle.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["blinding_venom"];
+  static CC_WEAPONS = getWeapons(Gargoyle.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "charge_after_advance", displayName: "Bounding Leap" }];
+  static UNIT_RULES = [{ ruleId: "move_after_shouting", displayName: "Winged Swarm" }];
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "hormagaunt"}];
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "gargoyle"}];
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
@@ -34,10 +34,10 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
   // ICON
-  static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
+  static ICON = "/icons/Gargoyle.webp"; // Path relative to public folder
   static ICON_SCALE = 1.2; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, Hormagaunt.HP_MAX, startPos);
+    super(name, Gargoyle.HP_MAX, startPos);
   }
 }

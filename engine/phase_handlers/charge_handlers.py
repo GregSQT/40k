@@ -15,13 +15,17 @@ from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
     get_hex_neighbors,
-    expected_dice_value
+    expected_dice_value,
+    resolve_dice_value,
 )
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
     update_units_cache_position, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
 )
+
+CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
+CHARGE_IMPACT_MORTAL_WOUNDS = 1
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     """Check if unit has a specific direct or granted rule effect by ruleId."""
@@ -60,6 +64,40 @@ def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: st
             )
         if effect_rule_id in granted_rule_ids:
             return source_rule_id
+    return None
+
+
+def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
+    """Return source UNIT_RULES.displayName for an effect rule; None if absent."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        source_rule_id = require_key(rule, "ruleId")
+        if source_rule_id == effect_rule_id:
+            display_name = require_key(rule, "displayName")
+            if not isinstance(display_name, str) or not display_name.strip():
+                unit_id = require_key(unit, "id")
+                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+                raise ValueError(
+                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
+                )
+            return display_name.strip().upper()
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if effect_rule_id in granted_rule_ids:
+            display_name = require_key(rule, "displayName")
+            if not isinstance(display_name, str) or not display_name.strip():
+                unit_id = require_key(unit, "id")
+                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+                raise ValueError(
+                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
+                )
+            return display_name.strip().upper()
     return None
 
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -1749,13 +1787,23 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
     target_col, target_row = require_unit_position(target_id, game_state)
     charge_rule_marker = ""
+    charge_ability_display_name = None
     if str(unit["id"]) in require_key(game_state, "units_fled") and _unit_has_rule(unit, "charge_after_flee"):
-        source_rule_id = _get_source_unit_rule_id_for_effect(unit, "charge_after_flee")
-        if source_rule_id is None:
+        source_rule_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_flee")
+        if source_rule_display_name is None:
             raise ValueError(
                 f"Unit {unit['id']} charged after flee without source unit rule"
             )
-        charge_rule_marker = f" ({source_rule_id.upper()})"
+        charge_rule_marker = f" [{source_rule_display_name}]"
+        charge_ability_display_name = source_rule_display_name
+    elif str(unit["id"]) in require_key(game_state, "units_advanced") and _unit_has_rule(unit, "charge_after_advance"):
+        source_rule_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_advance")
+        if source_rule_display_name is None:
+            raise ValueError(
+                f"Unit {unit['id']} charged after advance without source unit rule"
+            )
+        charge_rule_marker = f" [{source_rule_display_name}]"
+        charge_ability_display_name = source_rule_display_name
     charge_message = (
         f"Unit {unit['id']} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker} "
         f"Unit {target_id} ({target_col}, {target_row}) from ({orig_col}, {orig_row}) "
@@ -1775,12 +1823,50 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         "toRow": dest_row,
         "targetId": target_id,
         "charge_roll": charge_roll,
+        "ability_display_name": charge_ability_display_name,
         "timestamp": "server_time",
         "action_name": action_name,
         "reward": round(action_reward, 2),
         "is_ai_action": unit["player"] == 1
     })
     add_console_log(game_state, charge_message)
+
+    if _unit_has_rule(unit, "charge_impact"):
+        impact_ability_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_impact")
+        if impact_ability_display_name is None:
+            unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+            raise ValueError(
+                f"Unit {unit['id']} ({unit_name}) triggered charge_impact without source rule displayName"
+            )
+        impact_roll = resolve_dice_value("D6", "charge_impact_roll")
+        if impact_roll >= CHARGE_IMPACT_TRIGGER_THRESHOLD:
+            mortal_wounds = CHARGE_IMPACT_MORTAL_WOUNDS
+            target_hp = require_hp_from_cache(str(target_id), game_state)
+            new_target_hp = max(0, target_hp - mortal_wounds)
+            update_units_cache_hp(game_state, str(target_id), new_target_hp)
+        else:
+            mortal_wounds = 0
+        impact_message = (
+            f"Unit {unit['id']} IMPACT [{impact_ability_display_name}] Unit {target_id}: "
+            f"Roll {impact_roll}({CHARGE_IMPACT_TRIGGER_THRESHOLD}+) - {mortal_wounds}MW"
+        )
+        game_state["action_logs"].append({
+            "type": "charge_impact",
+            "message": impact_message,
+            "turn": current_turn,
+            "phase": "charge",
+            "unitId": unit["id"],
+            "targetId": target_id,
+            "player": unit["player"],
+            "impact_roll": impact_roll,
+            "impact_threshold": CHARGE_IMPACT_TRIGGER_THRESHOLD,
+            "mortal_wounds": mortal_wounds,
+            "ability_display_name": impact_ability_display_name,
+            "reward": 0.0,
+            "timestamp": "server_time",
+            "is_ai_action": unit["player"] == 1,
+        })
+        add_console_log(game_state, impact_message)
 
     # Clear preview
     charge_clear_preview(game_state)
@@ -1806,6 +1892,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         "toCol": dest_col,
         "toRow": dest_row,
         "charge_roll": charge_roll,
+        "ability_display_name": charge_ability_display_name,
         "charge_succeeded": True,  # For metrics tracking - successful charge
         "activation_complete": True
     })

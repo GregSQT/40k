@@ -47,11 +47,13 @@ interface ReplayAction {
   devastating_wounds_applied?: boolean;
   rapid_fire_bonus_shot?: boolean;
   rapid_fire_rule_value?: number;
+  heavy_applied?: boolean;
   reward?: number;
   // Fight action fields
   attacker_id?: number;
   attacker_pos?: { col: number; row: number };
   hit_target?: number;
+  hit_target_base?: number;
   hit_result?: string;
   wound_target?: number;
   wound_result?: string;
@@ -483,6 +485,46 @@ export const BoardReplay: React.FC = () => {
       return parsed;
     };
 
+    const isScoringWindowAction = (
+      action: ReplayAction,
+      actionIndex: number,
+      turn: number,
+      player: number
+    ): boolean => {
+      if (turn < primaryObjectiveConfig.scoring.start_turn) {
+        return false;
+      }
+
+      if (
+        player === 2 &&
+        turn === 5 &&
+        primaryObjectiveConfig.timing.round5_second_player_phase === "fight"
+      ) {
+        if (action.type !== "fight") {
+          return false;
+        }
+        for (let i = 0; i < actionIndex; i++) {
+          const previousAction = currentEpisode.actions[i];
+          const previousTurn = parseTurnValue(previousAction.turn);
+          if (
+            previousTurn === turn &&
+            previousAction.player === player &&
+            previousAction.type === "fight"
+          ) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      if (actionIndex === 0) {
+        return true;
+      }
+      const previousAction = currentEpisode.actions[actionIndex - 1];
+      const previousTurn = parseTurnValue(previousAction.turn);
+      return previousTurn !== turn || previousAction.player !== player;
+    };
+
     const objectiveControllers: Record<string, number | null> = {};
     const controlMethod = primaryObjectiveConfig.control.control_method;
 
@@ -617,18 +659,16 @@ export const BoardReplay: React.FC = () => {
         throw new Error(`Missing replay state for action index ${i}`);
       }
 
-      if (player === 1 && !scoredTurns.has(`1-${turn}`)) {
-        victoryPoints[1] += computeScoreForTurn(stateBeforeAction as ReplayGameState, 1, turn);
-        scoredTurns.add(`1-${turn}`);
-      }
-
-      if (player === 2 && !scoredTurns.has(`2-${turn}`)) {
-        if (turn === 5 && primaryObjectiveConfig.timing.round5_second_player_phase === "fight") {
-          lastTurn5StateForP2 = stateAfterAction as ReplayGameState;
-        } else {
-          victoryPoints[2] += computeScoreForTurn(stateBeforeAction as ReplayGameState, 2, turn);
-          scoredTurns.add(`2-${turn}`);
+      if (isScoringWindowAction(action, i, turn, player) && !scoredTurns.has(`${player}-${turn}`)) {
+        if (player !== 1 && player !== 2) {
+          throw new Error(`Unsupported player id in replay action: ${player}`);
         }
+        victoryPoints[player] += computeScoreForTurn(
+          stateBeforeAction as ReplayGameState,
+          player as 1 | 2,
+          turn
+        );
+        scoredTurns.add(`${player}-${turn}`);
       }
 
       if (turn === 5 && player === 2) {
@@ -833,6 +873,67 @@ export const BoardReplay: React.FC = () => {
     // Track persistent objective control and log changes (replay mode)
     const objectiveControllers: Record<string, number | null> = {};
     const rules = currentEpisode.initial_state.rules;
+    const parseTurnValue = (turnValue: string): number => {
+      const parsed = parseInt(turnValue.replace("T", ""), 10);
+      if (Number.isNaN(parsed)) {
+        throw new Error(`Invalid turn value in replay action: ${turnValue}`);
+      }
+      return parsed;
+    };
+    const isObjectiveScoringWindow = (
+      action: ReplayAction,
+      actionIndex: number,
+      turnNumber: number
+    ): boolean => {
+      if (!rules) {
+        throw new Error("Replay rules missing: cannot determine objective scoring window");
+      }
+      const primaryObjective = rules.primary_objective;
+      const primaryObjectiveConfig = Array.isArray(primaryObjective)
+        ? (() => {
+            if (primaryObjective.length !== 1) {
+              throw new Error("Replay rules primary_objective must contain exactly one config");
+            }
+            return primaryObjective[0];
+          })()
+        : primaryObjective;
+      if (!primaryObjectiveConfig) {
+        throw new Error("Replay rules primary_objective is null");
+      }
+      if (turnNumber < primaryObjectiveConfig.scoring.start_turn) {
+        return false;
+      }
+
+      const player = action.player;
+      if (
+        player === 2 &&
+        turnNumber === 5 &&
+        primaryObjectiveConfig.timing.round5_second_player_phase === "fight"
+      ) {
+        if (action.type !== "fight") {
+          return false;
+        }
+        for (let i = 0; i < actionIndex; i++) {
+          const previousAction = currentEpisode.actions[i];
+          const previousTurn = parseTurnValue(previousAction.turn);
+          if (
+            previousTurn === turnNumber &&
+            previousAction.player === player &&
+            previousAction.type === "fight"
+          ) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      if (actionIndex === 0) {
+        return true;
+      }
+      const previousAction = currentEpisode.actions[actionIndex - 1];
+      const previousTurn = parseTurnValue(previousAction.turn);
+      return previousTurn !== turnNumber || previousAction.player !== player;
+    };
     const logObjectiveControlChanges = (
       units: Unit[],
       objectives: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>,
@@ -1012,7 +1113,9 @@ export const BoardReplay: React.FC = () => {
       } else if (action.type === "reactive_move" && action.from && action.to) {
         gameLog.addEvent({
           type: "reactive_move",
-          message: `Unit ${action.unit_id} reactive moved from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})`,
+          message:
+            action.log_message ||
+            `Unit ${action.unit_id} reactive moved from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})`,
           unitId: action.unit_id!,
           turnNumber: turnNumber,
           phase: "movement",
@@ -1060,13 +1163,19 @@ export const BoardReplay: React.FC = () => {
         const targetPos = action.target_pos || { col: 0, row: 0 };
 
         // Reconstruct message in the same format as shooting_handlers.py
-        let message = "";
+        let message = action.log_message || "";
         const hitRoll = action.hit_roll;
         const woundRoll = action.wound_roll;
         const saveRoll = action.save_roll;
         const saveTarget = action.save_target || 0;
+        const hitTarget = action.hit_target || 3;
+        const hitTargetBase = action.hit_target_base;
+        const woundTarget = action.wound_target || 4;
         const saveSkipped = action.save_skipped === true;
         const saveSkipReason = action.save_skip_reason;
+        const devastatingWoundsApplied =
+          action.devastating_wounds_applied === true ||
+          saveSkipReason === "DEVASTATING_WOUNDS";
         const rapidFireBonusShot = action.rapid_fire_bonus_shot === true;
         const damage = action.damage || 0;
 
@@ -1076,14 +1185,15 @@ export const BoardReplay: React.FC = () => {
         const rapidFireRuleValue = action.rapid_fire_rule_value;
         const rapidFireSuffix =
           rapidFireBonusShot && typeof rapidFireRuleValue === "number"
-            ? ` [RAPID_FIRE:${rapidFireRuleValue}]`
+            ? ` [RAPID FIRE:${rapidFireRuleValue}]`
             : rapidFireBonusShot
-              ? " [RAPID_FIRE]"
+              ? " [RAPID FIRE]"
               : "";
-
-        // Determine hit target (assuming 3+ for now - could be in log later)
-        const hitTarget = 3;
-        const woundTarget = 4; // Assuming 4+ for now
+        const heavySuffix = action.heavy_applied ? " [HEAVY]" : "";
+        const hitTargetDisplay =
+          action.heavy_applied && typeof hitTargetBase === "number"
+            ? `${hitTargetBase}+->${hitTarget}+`
+            : `${hitTarget}+`;
 
         // Check if THIS shot killed the target by comparing HP before and after
         // Get target's HP from state BEFORE and AFTER this action
@@ -1119,29 +1229,29 @@ export const BoardReplay: React.FC = () => {
               ]
             : undefined;
 
-        if (hitRoll !== undefined && hitRoll < hitTarget) {
-          // Hit failed
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) : FAILED !`;
-        } else if (woundRoll !== undefined && woundRoll < woundTarget) {
-          // Wound failed
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) : FAILED !`;
-        } else if (
-          saveSkipped &&
-          saveSkipReason === "DEVASTATING_WOUNDS" &&
-          damage > 0
-        ) {
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - DEVASTATING WOUNDS - ${damage} DAMAGE DELT !`;
-        } else if (saveSkipped && saveSkipReason === "DEVASTATING_WOUNDS") {
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - DEVASTATING WOUNDS`;
-        } else if (saveRoll !== undefined && saveTarget > 0 && saveRoll >= saveTarget) {
-          // Save succeeded
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) : SAVED !`;
-        } else if (damage > 0) {
-          // Damage dealt
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix} : Hit ${hitRoll}(${hitTarget}+) - Wound ${woundRoll}(${woundTarget}+) - Save ${saveRoll}(${saveTarget}+) - ${damage} DAMAGE DELT !`;
-        } else {
-          // Fallback
-          message = `Unit ${shooterId} (${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} Unit ${targetId} (${targetPos.col},${targetPos.row})${weaponSuffix}`;
+        if (!message) {
+          if (hitRoll !== undefined && hitRoll < hitTarget) {
+            // Hit failed
+          message = `Unit ${shooterId}(${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} at Unit ${targetId}(${targetPos.col},${targetPos.row})${weaponSuffix} - Hit:${hitTargetDisplay}:${hitRoll}(FAIL)${heavySuffix}`;
+          } else if (woundRoll !== undefined && woundRoll < woundTarget) {
+            // Wound failed
+          message = `Unit ${shooterId}(${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} at Unit ${targetId}(${targetPos.col},${targetPos.row})${weaponSuffix} - Hit:${hitTargetDisplay}:${hitRoll}(HIT)${heavySuffix} Wound:${woundTarget}+:${woundRoll}(FAIL)`;
+          } else if (
+            saveSkipped && devastatingWoundsApplied && damage > 0
+          ) {
+          message = `Unit ${shooterId}(${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} at Unit ${targetId}(${targetPos.col},${targetPos.row})${weaponSuffix} - Hit:${hitTargetDisplay}:${hitRoll}(HIT)${heavySuffix} Wound:${woundTarget}+:${woundRoll}(SUCCESS) Save:SKIPPED [DEVASTATING WOUNDS] Dmg:${damage}HP`;
+          } else if (saveSkipped && devastatingWoundsApplied) {
+          message = `Unit ${shooterId}(${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} at Unit ${targetId}(${targetPos.col},${targetPos.row})${weaponSuffix} - Hit:${hitTargetDisplay}:${hitRoll}(HIT)${heavySuffix} Wound:${woundTarget}+:${woundRoll}(SUCCESS) Save:SKIPPED [DEVASTATING WOUNDS]`;
+          } else if (saveRoll !== undefined && saveTarget > 0 && saveRoll >= saveTarget) {
+            // Save succeeded
+          message = `Unit ${shooterId}(${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} at Unit ${targetId}(${targetPos.col},${targetPos.row})${weaponSuffix} - Hit:${hitTargetDisplay}:${hitRoll}(HIT)${heavySuffix} Wound:${woundTarget}+:${woundRoll}(WOUND) Save:${saveTarget}+:${saveRoll}(SAVED)`;
+          } else if (damage > 0) {
+            // Damage dealt
+          message = `Unit ${shooterId}(${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} at Unit ${targetId}(${targetPos.col},${targetPos.row})${weaponSuffix} - Hit:${hitTargetDisplay}:${hitRoll}(HIT)${heavySuffix} Wound:${woundTarget}+:${woundRoll}(WOUND) Save:${saveTarget}+:${saveRoll}(FAIL) Dmg:${damage}HP`;
+          } else {
+            // Fallback
+          message = `Unit ${shooterId}(${shooterPos.col},${shooterPos.row}) SHOT${rapidFireSuffix} at Unit ${targetId}(${targetPos.col},${targetPos.row})${weaponSuffix}`;
+          }
         }
 
         // Use addEvent directly with custom formatted message to match PvP format
@@ -1182,7 +1292,9 @@ export const BoardReplay: React.FC = () => {
 
         gameLog.addEvent({
           type: "charge",
-          message: `Unit ${unitId}(${action.to.col},${action.to.row}) CHARGED Unit ${targetId}(${targetPos.col},${targetPos.row}) from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})${rollInfo}`,
+          message:
+            action.log_message ||
+            `Unit ${unitId}(${action.to.col},${action.to.row}) CHARGED Unit ${targetId}(${targetPos.col},${targetPos.row}) from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})${rollInfo}`,
           unitId: unitId,
           targetId: targetId,
           turnNumber: turnNumber,
@@ -1217,7 +1329,21 @@ export const BoardReplay: React.FC = () => {
           : `Unit ${unitId} FAILED charge (Roll: ${chargeRollValue})`;
         gameLog.addEvent({
           type: "charge_fail", // Use charge_fail type for light purple styling
-          message: rollMessage,
+          message: action.log_message || rollMessage,
+          unitId: unitId,
+          targetId: targetId,
+          turnNumber: turnNumber,
+          phase: "charge",
+          player: action.player,
+        });
+      } else if (action.type === "charge_impact") {
+        const unitId = action.unit_id!;
+        const targetId = action.target_id;
+        gameLog.addEvent({
+          type: "charge_impact",
+          message:
+            action.log_message ||
+            `Unit ${unitId} IMPACT Unit ${targetId} : ${action.damage ?? 0}MW`,
           unitId: unitId,
           targetId: targetId,
           turnNumber: turnNumber,
@@ -1235,8 +1361,10 @@ export const BoardReplay: React.FC = () => {
         const weaponSuffix = weaponName ? ` with [${weaponName}]` : "";
 
         // Build message based on combat results
-        let message = `Unit ${attackerId} (${attackerPos.col},${attackerPos.row}) FOUGHT Unit ${targetId}${weaponSuffix}`;
-        if (action.hit_roll !== undefined) {
+        let message =
+          action.log_message ||
+          `Unit ${attackerId} (${attackerPos.col},${attackerPos.row}) FOUGHT Unit ${targetId}${weaponSuffix}`;
+        if (!action.log_message && action.hit_roll !== undefined) {
           const hitResult =
             action.hit_result || (action.hit_roll >= (action.hit_target || 3) ? "HIT" : "MISS");
           message += ` : Hit ${action.hit_roll}(${action.hit_target || 3}+)`;
@@ -1328,7 +1456,11 @@ export const BoardReplay: React.FC = () => {
       const stateAfterAction = currentEpisode.states[i];
       const objectives =
         stateAfterAction?.objectives || currentEpisode.initial_state.objectives || [];
-      if (objectives.length > 0 && stateAfterAction?.units) {
+      if (
+        objectives.length > 0 &&
+        stateAfterAction?.units &&
+        isObjectiveScoringWindow(action, i, turnNumber)
+      ) {
         const enrichedObjectiveUnits = enrichUnitsWithStats(stateAfterAction.units as Unit[]);
         logObjectiveControlChanges(
           enrichedObjectiveUnits,
@@ -1550,7 +1682,7 @@ export const BoardReplay: React.FC = () => {
                 deployment: ["deploy"],
                 move: ["move", "reactive_move", "move_wait"],
                 shoot: ["shoot", "wait", "advance"],
-                charge: ["charge", "charge_wait", "charge_fail"],
+                charge: ["charge", "charge_wait", "charge_fail", "charge_impact"],
                 fight: ["fight"],
               };
 

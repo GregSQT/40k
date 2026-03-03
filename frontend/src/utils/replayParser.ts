@@ -7,6 +7,7 @@ interface ReplayAction {
   timestamp: string;
   turn: string;
   player: number;
+  log_message?: string;
   unit_id?: number;
   from?: { col: number; row: number };
   to?: { col: number; row: number };
@@ -17,7 +18,10 @@ interface ReplayAction {
   target_pos?: { col: number; row: number };
   damage?: number;
   hit_roll?: number;
+  hit_target?: number;
+  hit_target_base?: number;
   wound_roll?: number;
+  wound_target?: number;
   save_roll?: number;
   save_target?: number;
   save_skipped?: boolean;
@@ -25,7 +29,9 @@ interface ReplayAction {
   devastating_wounds_applied?: boolean;
   rapid_fire_bonus_shot?: boolean;
   rapid_fire_rule_value?: number;
+  heavy_applied?: boolean;
   reward?: number;
+  move_mode?: string;
   // Fight action fields
   attacker_id?: number;
   attacker_pos?: { col: number; row: number };
@@ -158,6 +164,15 @@ interface ReplayData {
 
 export function parse_log_file_from_text(text: string): ReplayData {
   const lines = text.split("\n");
+  const extractLogMessage = (line: string): string => {
+    const entryMatch = line.match(
+      /^\[[^\]]+\]\s(?:E\d+\s+)?T\d+\sP\d+\s[A-Z_]+\s:\s(.+?)\s\[(?:SUCCESS|FAILED)\]$/
+    );
+    if (!entryMatch) {
+      return line.trim();
+    }
+    return entryMatch[1].replace(/\s?\[R:[+-]?\d+\.?\d*\]$/, "").trim();
+  };
   const parsePoolList = (value: string, label: string): number[] => {
     if (value === "") {
       return [];
@@ -363,7 +378,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse MOVE actions
     const moveMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|REACTIVE MOVED|WAIT|FLED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED(?: \[[^\]]+\])?(?: \[FLY\])?|REACTIVE MOVED|WAIT|FLED)/
     );
     if (moveMatch) {
       const timestamp = moveMatch[1];
@@ -373,10 +388,15 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const endCol = parseInt(moveMatch[5], 10);
       const endRow = parseInt(moveMatch[6], 10);
       const actionType = moveMatch[7];
+      const isFlyMove = actionType.includes("[FLY]");
+      const isReactiveMove =
+        actionType.startsWith("REACTIVE MOVED") ||
+        (actionType.startsWith("MOVED [") && trimmed.includes(" - trigger: Unit "));
       syncKnownUnitPosition(currentEpisode, unitId, endCol, endRow);
 
       if (
         actionType === "MOVED" ||
+        actionType.startsWith("MOVED [") ||
         actionType === "FLED" ||
         actionType === "REACTIVE MOVED"
       ) {
@@ -392,13 +412,15 @@ export function parse_log_file_from_text(text: string): ReplayData {
         }
 
         currentEpisode.actions.push({
-          type: actionType === "REACTIVE MOVED" ? "reactive_move" : "move",
+          type: isReactiveMove ? "reactive_move" : "move",
           timestamp,
           turn,
           player,
           unit_id: unitId,
           from: { col: fromCol, row: fromRow },
           to: { col: endCol, row: endRow },
+          log_message: extractLogMessage(trimmed),
+          ...(isFlyMove ? { move_mode: "fly" } : {}),
         });
 
         if (currentEpisode.units[unitId]) {
@@ -420,7 +442,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse SHOOT actions
     const shootMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[RAPID_FIRE:[^\]]+\])? at Unit)|WAIT|ADVANCED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[[^\]]+\])*(?: \[RAPID(?: |_)?FIRE:[^\]]+\])? at Unit)|WAIT|ADVANCED)/
     );
     if (shootMatch) {
       // Removed verbose logging
@@ -476,15 +498,17 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
         }
       } else if (actionType.startsWith("SHOT")) {
-        const targetMatch = trimmed.match(/SHOT(?: \[RAPID_FIRE:[^\]]+\])? at Unit (\d+)\((\d+),(\d+)\)/);
+        const targetMatch = trimmed.match(/SHOT(?: \[[^\]]+\])*(?: \[RAPID(?: |_)?FIRE:[^\]]+\])? at Unit (\d+)\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
         // Try to extract detailed combat rolls from format: Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED)
-        const hitMatch = trimmed.match(/Hit:(\d+)\+:(\d+)/);
+        const hitMatch = trimmed.match(/Hit:(\d+)\+(?:->(\d+)\+)?:(\d+)/);
         const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)/);
         const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)/);
-        const saveSkippedMatch = trimmed.match(/Save:SKIPPED\(([^)]+)\)/);
-        const rapidFireMatch = trimmed.match(/\[RAPID_FIRE:(\d+)\]/);
+        const saveSkippedMatch = trimmed.match(/Save:SKIPPED(?:\(([^)]+)\))?/);
+        const rapidFireMatch = trimmed.match(/\[RAPID(?: |_)?FIRE:(\d+)\]/);
+        const devastatingWoundsMatch = trimmed.match(/\[DEVASTATING WOUNDS\]/);
+        const heavyMatch = trimmed.match(/\[HEAVY\]/);
         // Extract reward from format: [R:+53.2] or [R:-10.0]
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract weapon name from format: with [weapon_name]
@@ -505,6 +529,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             timestamp,
             turn,
             player,
+            log_message: extractLogMessage(trimmed),
             shooter_id: shooterId,
             shooter_pos: { col: shooterCol, row: shooterRow },
             target_id: targetId,
@@ -514,11 +539,18 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
           // Add detailed rolls if available (format: Hit:3+:6 means target 3+, rolled 6)
           if (hitMatch) {
-            action.hit_roll = parseInt(hitMatch[2], 10); // The actual roll
-            action.save_target = parseInt(hitMatch[1], 10); // Will be overridden by save target if present
+            if (hitMatch[2]) {
+              action.hit_target_base = parseInt(hitMatch[1], 10);
+              action.hit_target = parseInt(hitMatch[2], 10);
+              action.hit_roll = parseInt(hitMatch[3], 10);
+            } else {
+              action.hit_target = parseInt(hitMatch[1], 10);
+              action.hit_roll = parseInt(hitMatch[3], 10);
+            }
           }
           if (woundMatch) {
-            action.wound_roll = parseInt(woundMatch[2], 10); // The actual roll
+            action.wound_target = parseInt(woundMatch[1], 10);
+            action.wound_roll = parseInt(woundMatch[2], 10);
           }
           if (saveMatch) {
             action.save_target = parseInt(saveMatch[1], 10); // The target number
@@ -527,13 +559,16 @@ export function parse_log_file_from_text(text: string): ReplayData {
           if (saveSkippedMatch) {
             action.save_skipped = true;
             action.save_skip_reason = saveSkippedMatch[1];
-            if (saveSkippedMatch[1] === "DEVASTATING_WOUNDS") {
+            if (saveSkippedMatch[1] === "DEVASTATING_WOUNDS" || devastatingWoundsMatch) {
               action.devastating_wounds_applied = true;
             }
           }
           if (rapidFireMatch) {
             action.rapid_fire_bonus_shot = true;
             action.rapid_fire_rule_value = parseInt(rapidFireMatch[1], 10);
+          }
+          if (heavyMatch) {
+            action.heavy_applied = true;
           }
           // Add reward if available
           if (rewardMatch) {
@@ -562,10 +597,33 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Parse CHARGE actions
     // Format: [timestamp] T1 P0 CHARGE : Unit 2(9, 6) CHARGED Unit 8 from (7, 13) to (9, 6) [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 1(19, 15) WAIT [SUCCESS]
-    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED CHARGE Unit 7 from (23,6) to (a,b) [R:+0.0] [SUCCESS] [STEP: YES]
-    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED] (old format)
+    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23,6) FAILED CHARGE to unit 7(21,10) [Roll: 5] [SUCCESS]
+    // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED] (legacy format)
+    const chargeImpactMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+) IMPACT(?: \[[^\]]+\])? Unit (\d+): Roll (\d+)\((\d+)\+\) - (\d+)MW/
+    );
+    if (chargeImpactMatch) {
+      const timestamp = chargeImpactMatch[1];
+      const turn = chargeImpactMatch[2];
+      const player = parseInt(chargeImpactMatch[3], 10);
+      const unitId = parseInt(chargeImpactMatch[4], 10);
+      const targetId = parseInt(chargeImpactMatch[5], 10);
+      currentEpisode.actions.push({
+        type: "charge_impact",
+        timestamp,
+        turn,
+        player,
+        unit_id: unitId,
+        target_id: targetId,
+        damage: parseInt(chargeImpactMatch[8], 10),
+        charge_roll: parseInt(chargeImpactMatch[6], 10),
+        log_message: extractLogMessage(trimmed),
+      });
+      continue;
+    }
+
     const chargeMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED Unit|WAIT|FAILED CHARGE Unit|FAILED charge to unit)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED(?: \[[^\]]+\])? Unit|WAIT|FAILED CHARGE to unit|FAILED charge to unit)/
     );
     if (chargeMatch) {
       const timestamp = chargeMatch[1];
@@ -577,9 +635,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const actionType = chargeMatch[7];
       syncKnownUnitPosition(currentEpisode, unitId, unitCol, unitRow);
 
-      if (actionType === "CHARGED Unit") {
+      if (actionType.startsWith("CHARGED")) {
         // Parse target unit and positions
-        const targetMatch = trimmed.match(/CHARGED Unit (\d+)\((\d+),(\d+)\)/);
+        const targetMatch = trimmed.match(/CHARGED(?: \[[^\]]+\])? Unit (\d+)\((\d+),(\d+)\)/);
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         const toMatch = trimmed.match(/to \((\d+),(\d+)\)/);
         // Parse actual charge roll (2d6) if available: [Roll:X]
@@ -620,6 +678,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             timestamp,
             turn,
             player,
+            log_message: extractLogMessage(trimmed),
             unit_id: unitId,
             target_id: targetId,
             target_pos: { col: targetCol, row: targetRow },
@@ -643,29 +702,31 @@ export function parse_log_file_from_text(text: string): ReplayData {
           timestamp,
           turn,
           player,
+          log_message: extractLogMessage(trimmed),
           unit_id: unitId,
           pos: { col: unitCol, row: unitRow },
           charge_roll: 0, // Unknown roll, but too low
           charge_success: false,
         });
-      } else if (actionType === "FAILED CHARGE Unit" || actionType === "FAILED charge to unit") {
-        // FAILED charge - parse target and positions (new format) or roll (old format)
+      } else if (actionType === "FAILED CHARGE to unit" || actionType === "FAILED charge to unit") {
+        // FAILED charge - parse target/roll from current format, or from legacy format.
         let targetId: number | undefined;
         let chargeRoll: number = 0;
         let failedReason: string = "roll_too_low";
         let fromPos: { col: number; row: number } | undefined;
         let toPos: { col: number; row: number } | undefined;
+        let targetPos: { col: number; row: number } | undefined;
 
-        // Try new format first: "FAILED CHARGE Unit X from (x,y) to (a,b)"
+        // Current format: "FAILED CHARGE to unit X(col,row) [Roll: Y]"
         const newFormatMatch = trimmed.match(
-          /FAILED CHARGE Unit (\d+) from \((\d+),(\d+)\) to \((\d+),(\d+)\)/
+          /FAILED CHARGE to unit (\d+)\((\d+),(\d+)\)\s+\[Roll:\s*(\d+)\]/
         );
         if (newFormatMatch) {
           targetId = parseInt(newFormatMatch[1], 10);
-          fromPos = { col: parseInt(newFormatMatch[2], 10), row: parseInt(newFormatMatch[3], 10) };
-          toPos = { col: parseInt(newFormatMatch[4], 10), row: parseInt(newFormatMatch[5], 10) };
+          targetPos = { col: parseInt(newFormatMatch[2], 10), row: parseInt(newFormatMatch[3], 10) };
+          chargeRoll = parseInt(newFormatMatch[4], 10);
         } else {
-          // Fallback to old format: "FAILED charge to unit X [Roll:Y] [FAILED: reason]"
+          // Legacy format: "FAILED charge to unit X [Roll:Y] [FAILED: reason]"
           const targetMatch = trimmed.match(/FAILED charge to unit (\d+)/);
           const rollMatch = trimmed.match(/\[Roll:(\d+)\]/);
           const failedReasonMatch = trimmed.match(/\[FAILED: (.+?)\]/);
@@ -680,8 +741,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
           timestamp,
           turn,
           player,
+          log_message: extractLogMessage(trimmed),
           unit_id: unitId,
           target_id: targetId,
+          target_pos: targetPos,
           pos: { col: unitCol, row: unitRow }, // Position actuelle de l'unité (from regex match)
           from: fromPos, // Position de départ (new format)
           to: toPos, // Position de destination prévue (new format)
@@ -697,9 +760,9 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     // Parse FIGHT actions
-    // Format: [timestamp] T1 P0 FIGHT : Unit 2(9, 6) ATTACKED Unit 8 with [weapon] - Hit:3+:2(MISS) [SUCCESS]
+    // Format: [timestamp] T1 P0 FIGHT : Unit 2(9,6) FOUGHT Unit 8(9,7) with [weapon] - Hit:3+:2(MISS) [SUCCESS]
     const fightMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED Unit (\d+)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) (?:ATTACKED|FOUGHT) Unit (\d+)/
     );
     if (fightMatch) {
       const timestamp = fightMatch[1];
@@ -737,6 +800,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         timestamp,
         turn,
         player,
+        log_message: extractLogMessage(trimmed),
         attacker_id: attackerId,
         attacker_pos: { col: attackerCol, row: attackerRow },
         target_id: targetId,

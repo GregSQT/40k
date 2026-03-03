@@ -1705,12 +1705,14 @@ class W40KEngine(gym.Env):
                                     f"result=({dest_col},{dest_row}) actual=({actual_col},{actual_row})"
                                 )
                             end_pos = (actual_col, actual_row)
+                            is_fly_move = require_key(result, "is_fly_move")
                             action_details.update({
                                 "start_pos": start_pos,
                                 "end_pos": end_pos,
                                 "col": actual_col,
                                 "row": actual_row,
-                                "unit_with_coords": f"{unit_id}({actual_col},{actual_row})"
+                                "unit_with_coords": f"{unit_id}({actual_col},{actual_row})",
+                                "is_fly_move": is_fly_move,
                             })
                             
 
@@ -1804,6 +1806,7 @@ class W40KEngine(gym.Env):
                                 "start_pos": start_pos,
                                 "end_pos": end_pos,
                                 "charge_roll": result.get("charge_roll"),  # Add the actual 2d6 roll
+                                "ability_display_name": result.get("ability_display_name"),
                                 "unit_with_coords": f"{unit_id}({dest_col},{dest_row})"  # CRITICAL FIX: Update with correct destination coordinates
                             })
 
@@ -1871,6 +1874,7 @@ class W40KEngine(gym.Env):
                             if target_id:
                                 target_unit = self._get_unit_by_id(str(target_id))
                                 if target_unit:
+                                    action_details["target_coords"] = require_unit_position(target_unit, self.game_state)
                                     action_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
 
                             # Add reward and log for failed charge action
@@ -1991,6 +1995,7 @@ class W40KEngine(gym.Env):
                                         "hit_result": "HIT" if attack_result["hit_success"] else "MISS",
                                         "wound_result": "WOUND" if attack_result["wound_success"] else "FAIL",
                                         "save_result": "SAVED" if attack_result["save_success"] else "FAIL",
+                                        "hit_target_base": attack_result.get("hit_target_base"),
                                         "hit_target": attack_result["hit_target"],
                                         "hit_rule_modifier": attack_result.get("hit_rule_modifier"),
                                         "wound_target": attack_result["wound_target"],
@@ -2001,6 +2006,9 @@ class W40KEngine(gym.Env):
                                         "devastating_wounds_expected": attack_result.get("devastating_wounds_expected", False),
                                         "devastating_wounds_applied": attack_result.get("devastating_wounds_applied", False),
                                         "devastating_wounds_flag": attack_result.get("devastating_wounds_flag", False),
+                                        "ability_display_name": attack_result.get("ability_display_name"),
+                                        "wound_ability_display_name": attack_result.get("wound_ability_display_name"),
+                                        "ap_modifier_ability_display_name": attack_result.get("ap_modifier_ability_display_name"),
                                         "rapid_fire_bonus_shot": attack_result.get("rapid_fire_bonus_shot", False),
                                         "rapid_fire_rule_value": attack_result.get("rapid_fire_rule_value"),
                                         "target_died": attack_result["target_died"],
@@ -2130,48 +2138,71 @@ class W40KEngine(gym.Env):
                                 raise TypeError(
                                     f"action_logs entry must be a dict, got {type(raw_log).__name__}"
                                 )
-                            if raw_log.get("type") != "reactive_move":
-                                continue
+                            raw_type = raw_log.get("type")
+                            if raw_type == "reactive_move":
+                                reactive_unit_id = require_key(raw_log, "unitId")
+                                reactive_player = require_key(raw_log, "player")
+                                from_col = require_key(raw_log, "fromCol")
+                                from_row = require_key(raw_log, "fromRow")
+                                to_col = require_key(raw_log, "toCol")
+                                to_row = require_key(raw_log, "toRow")
+                                trigger_unit_id = require_key(raw_log, "triggered_by_unit_id")
+                                event_to_col = require_key(raw_log, "event_toCol")
+                                event_to_row = require_key(raw_log, "event_toRow")
+                                range_roll = require_key(raw_log, "range_roll")
+                                if not isinstance(range_roll, int) or isinstance(range_roll, bool):
+                                    raise TypeError(
+                                        f"reactive_move range_roll must be int, got {type(range_roll).__name__}: {range_roll!r}"
+                                    )
 
-                            reactive_unit_id = require_key(raw_log, "unitId")
-                            reactive_player = require_key(raw_log, "player")
-                            from_col = require_key(raw_log, "fromCol")
-                            from_row = require_key(raw_log, "fromRow")
-                            to_col = require_key(raw_log, "toCol")
-                            to_row = require_key(raw_log, "toRow")
-                            trigger_unit_id = require_key(raw_log, "triggered_by_unit_id")
-                            event_to_col = require_key(raw_log, "event_toCol")
-                            event_to_row = require_key(raw_log, "event_toRow")
-                            range_roll = require_key(raw_log, "range_roll")
-                            if not isinstance(range_roll, int) or isinstance(range_roll, bool):
-                                raise TypeError(
-                                    f"reactive_move range_roll must be int, got {type(range_roll).__name__}: {range_roll!r}"
+                                reactive_details = {
+                                    "current_turn": pre_action_turn,
+                                    "current_episode": pre_action_episode,
+                                    "unit_with_coords": f"{reactive_unit_id}({to_col},{to_row})",
+                                    "start_pos": (from_col, from_row),
+                                    "end_pos": (to_col, to_row),
+                                    "col": to_col,
+                                    "row": to_row,
+                                    "triggered_by_unit_id": trigger_unit_id,
+                                    "trigger_to_pos": (event_to_col, event_to_row),
+                                    "range_roll": range_roll,
+                                    "ability_display_name": require_key(raw_log, "ability_display_name"),
+                                    "reward": 0.0,
+                                }
+
+                                self.step_logger.log_action(
+                                    unit_id=reactive_unit_id,
+                                    action_type="reactive_move",
+                                    phase="move",
+                                    player=reactive_player,
+                                    success=True,
+                                    step_increment=False,
+                                    action_details=reactive_details,
+                                    step_calls_since_last=None,
                                 )
-
-                            reactive_details = {
-                                "current_turn": pre_action_turn,
-                                "current_episode": pre_action_episode,
-                                "unit_with_coords": f"{reactive_unit_id}({to_col},{to_row})",
-                                "start_pos": (from_col, from_row),
-                                "end_pos": (to_col, to_row),
-                                "col": to_col,
-                                "row": to_row,
-                                "triggered_by_unit_id": trigger_unit_id,
-                                "trigger_to_pos": (event_to_col, event_to_row),
-                                "range_roll": range_roll,
-                                "reward": 0.0,
-                            }
-
-                            self.step_logger.log_action(
-                                unit_id=reactive_unit_id,
-                                action_type="reactive_move",
-                                phase="move",
-                                player=reactive_player,
-                                success=True,
-                                step_increment=False,
-                                action_details=reactive_details,
-                                step_calls_since_last=None,
-                            )
+                            elif raw_type == "charge_impact":
+                                impact_unit_id = require_key(raw_log, "unitId")
+                                impact_player = require_key(raw_log, "player")
+                                impact_details = {
+                                    "current_turn": pre_action_turn,
+                                    "current_episode": pre_action_episode,
+                                    "target_id": require_key(raw_log, "targetId"),
+                                    "impact_roll": require_key(raw_log, "impact_roll"),
+                                    "impact_threshold": require_key(raw_log, "impact_threshold"),
+                                    "mortal_wounds": require_key(raw_log, "mortal_wounds"),
+                                    "ability_display_name": require_key(raw_log, "ability_display_name"),
+                                    "reward": require_key(raw_log, "reward"),
+                                }
+                                self.step_logger.log_action(
+                                    unit_id=impact_unit_id,
+                                    action_type="charge_impact",
+                                    phase="charge",
+                                    player=impact_player,
+                                    success=True,
+                                    step_increment=False,
+                                    action_details=impact_details,
+                                    step_calls_since_last=None,
+                                )
 
                         self.game_state[cursor_key] = len(action_logs)
             except Exception as e:

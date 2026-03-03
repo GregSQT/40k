@@ -26,6 +26,30 @@ from .shared_utils import (
 )
 
 
+def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
+    """
+    Return True if UNIT_KEYWORDS contains keyword_id.
+
+    UNIT_KEYWORDS entries must be objects with a `keywordId` field.
+    """
+    unit_keywords = unit.get("UNIT_KEYWORDS")
+    if unit_keywords is None:
+        return False
+    if not isinstance(unit_keywords, list):
+        raise ValueError(
+            f"UNIT_KEYWORDS must be a list for unit {unit.get('id')}, got {type(unit_keywords).__name__}"
+        )
+    for keyword_entry in unit_keywords:
+        if not isinstance(keyword_entry, dict):
+            raise ValueError(
+                f"UNIT_KEYWORDS entries must be objects for unit {unit.get('id')}: {keyword_entry!r}"
+            )
+        keyword_value = keyword_entry.get("keywordId")
+        if keyword_value == keyword_id:
+            return True
+    return False
+
+
 def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any]) -> None:
     """
     Invalidate all destination pools after any unit movement.
@@ -151,10 +175,25 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if cache_entry["player"] != current_player:
             continue  # Wrong player (Skip, no log)
 
-        # Check if unit has at least one adjacent hex that is not occupied and not adjacent to enemy
+        # Check if unit has at least one legal destination.
+        # FLY units can ignore path blockers (walls/units) while moving, so eligibility
+        # must not be limited to adjacent traversable hexes.
+        unit_obj = get_unit_by_id(game_state, unit_id)
+        if unit_obj is None:
+            raise ValueError(f"Unit {unit_id} not found in game_state while building move eligibility")
+        has_fly_keyword = _unit_has_keyword(unit_obj, "fly")
+
+        # Normalize MOVE to int for range checks
+        move_range_raw = require_key(unit_obj, "MOVE")
+        try:
+            move_range = int(move_range_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid MOVE value for unit {unit_id}: {move_range_raw!r}") from exc
+        if move_range <= 0:
+            continue
+
         # This ensures the unit can actually move
         unit_col, unit_row = require_unit_position(unit_id, game_state)
-        neighbors = get_hex_neighbors(unit_col, unit_row)
         
         # Pre-compute occupied positions and enemy adjacent hexes for this check
         occupied_positions = set()
@@ -174,31 +213,53 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         enemy_adjacent_hexes = game_state[cache_key]
         
         has_valid_adjacent_hex = False
-        for neighbor_pos in neighbors:
-            # get_hex_neighbors() already returns (int, int) tuples, use directly
-            neighbor_col, neighbor_row = neighbor_pos
-            
-            # Check bounds
-            if (neighbor_col < 0 or neighbor_row < 0 or
-                neighbor_col >= game_state["board_cols"] or
-                neighbor_row >= game_state["board_rows"]):
-                continue
-            
-            # Check wall
-            if neighbor_pos in game_state["wall_hexes"]:
-                continue
-            
-            # Check occupied
-            if neighbor_pos in occupied_positions:
-                continue
-            
-            # Check adjacent to enemy
-            if neighbor_pos in enemy_adjacent_hexes:
-                continue
-            
-            # Found a valid adjacent hex
-            has_valid_adjacent_hex = True
-            break
+        if has_fly_keyword:
+            board_cols = game_state["board_cols"]
+            board_rows = game_state["board_rows"]
+            for candidate_col in range(board_cols):
+                for candidate_row in range(board_rows):
+                    candidate_pos = (candidate_col, candidate_row)
+                    if candidate_pos == (unit_col, unit_row):
+                        continue
+                    if calculate_hex_distance(unit_col, unit_row, candidate_col, candidate_row) > move_range:
+                        continue
+                    if candidate_pos in game_state["wall_hexes"]:
+                        continue
+                    if candidate_pos in occupied_positions:
+                        continue
+                    if candidate_pos in enemy_adjacent_hexes:
+                        continue
+                    has_valid_adjacent_hex = True
+                    break
+                if has_valid_adjacent_hex:
+                    break
+        else:
+            neighbors = get_hex_neighbors(unit_col, unit_row)
+            for neighbor_pos in neighbors:
+                # get_hex_neighbors() already returns (int, int) tuples, use directly
+                neighbor_col, neighbor_row = neighbor_pos
+                
+                # Check bounds
+                if (neighbor_col < 0 or neighbor_row < 0 or
+                    neighbor_col >= game_state["board_cols"] or
+                    neighbor_row >= game_state["board_rows"]):
+                    continue
+                
+                # Check wall
+                if neighbor_pos in game_state["wall_hexes"]:
+                    continue
+                
+                # Check occupied
+                if neighbor_pos in occupied_positions:
+                    continue
+                
+                # Check adjacent to enemy
+                if neighbor_pos in enemy_adjacent_hexes:
+                    continue
+                
+                # Found a valid adjacent hex
+                has_valid_adjacent_hex = True
+                break
         
         if not has_valid_adjacent_hex:
             continue  # Unit cannot move (no valid adjacent hex)
@@ -768,6 +829,35 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
 
+    has_fly_keyword = _unit_has_keyword(unit, "fly")
+
+    # FLY units ignore walls/units during traversal but still respect destination rules.
+    # We can directly evaluate all in-range hexes as reachable.
+    if has_fly_keyword:
+        board_cols = game_state["board_cols"]
+        board_rows = game_state["board_rows"]
+        valid_destinations: List[Tuple[int, int]] = []
+        for candidate_col in range(board_cols):
+            for candidate_row in range(board_rows):
+                candidate_pos = (candidate_col, candidate_row)
+                if candidate_pos == start_pos:
+                    continue
+                if calculate_hex_distance(start_col, start_row, candidate_col, candidate_row) > move_range:
+                    continue
+                if _is_valid_destination(
+                    game_state,
+                    candidate_col,
+                    candidate_row,
+                    unit,
+                    {},
+                    enemy_adjacent_hexes,
+                    occupied_positions,
+                ):
+                    valid_destinations.append(candidate_pos)
+        game_state["valid_move_destinations_pool"] = valid_destinations
+        _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)} [FLY]")
+        return valid_destinations
+
     # BFS pathfinding to find all reachable hexes
     visited = {start_pos: 0}  # {(col, row): distance_from_start}
     queue = [(start_pos, 0)]  # [(position, distance)]
@@ -1087,9 +1177,16 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     action_reward = 0.0
     action_name = "FLEE" if was_adjacent else "MOVE"
     
+    is_fly_move = _unit_has_keyword(unit, "fly")
+    movement_message = (
+        f"Unit {unit['id']} moved [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+        if is_fly_move
+        else f"Unit {unit['id']} ({orig_col}, {orig_row}) MOVED to ({dest_col}, {dest_row})"
+    )
+
     game_state["action_logs"].append({
         "type": "move",
-        "message": f"Unit {unit['id']} ({orig_col}, {orig_row}) MOVED to ({dest_col}, {dest_row})",
+        "message": movement_message,
         "turn": game_state["current_turn"] if "current_turn" in game_state else 1,
         "phase": "move",
         "unitId": unit["id"],
@@ -1102,7 +1199,8 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "timestamp": "server_time",
         "action_name": action_name,  # NEW: For debug display
         "reward": round(action_reward, 2),  # NEW: Calculated reward
-        "is_ai_action": unit["player"] == 2  # FIXED: PvE AI is player 2 (was P0/P1, now P1/P2)
+        "is_ai_action": unit["player"] == 2,  # FIXED: PvE AI is player 2 (was P0/P1, now P1/P2)
+        "is_fly_move": is_fly_move,
     })
     
     # Clear preview
@@ -1155,6 +1253,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "toRow": result_to_row,  # Use unit coordinates after movement - SINGLE SOURCE OF TRUTH
         "reactive_moves_applied": reactive_result["reactive_moves_applied"],
         "reactive_moves_declined": reactive_result["reactive_moves_declined"],
+        "is_fly_move": is_fly_move,
         "activation_complete": True,
         "waiting_for_player": False,  # Movement is complete, no waiting needed
         "reset_mode": "select",

@@ -35,7 +35,10 @@
     "id": "shoot_after_flee",
     "description": "Allows a unit to shoot in a turn in which it fell back."
   },
-
+  "move_after_shouting": {
+    "id": "move_after_shouting",
+    "description": "This unit can make a normal move up to 6\" after shouting if it is not adjacent to an enemy unit. If it does so, this unit will not be able to charge until the end of the turn"
+  },
 
 
 

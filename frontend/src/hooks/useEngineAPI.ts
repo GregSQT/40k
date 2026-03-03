@@ -496,7 +496,7 @@ export const useEngineAPI = () => {
                   message: logEntry.message,
                   turn: logEntry.turn,
                   phase: logEntry.phase,
-                  shooterId: logEntry.shooterId || logEntry.attackerId, // shooting uses shooterId, fight uses attackerId
+                  shooterId: logEntry.shooterId || logEntry.attackerId || logEntry.unitId, // shooting/fight/other events
                   targetId: logEntry.targetId,
                   player: logEntry.player,
                   // Extract damage/target_died from shootDetails if present (fight), otherwise use flat fields (shooting)

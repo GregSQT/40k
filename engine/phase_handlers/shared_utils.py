@@ -765,6 +765,42 @@ def _unit_has_rule_effect(unit: Dict[str, Any], rule_id: str) -> bool:
     return False
 
 
+def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
+    """
+    Return source UNIT_RULES.displayName that grants/owns the effect; None if absent.
+    """
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        source_rule_id = require_key(rule, "ruleId")
+        if source_rule_id == effect_rule_id:
+            display_name = require_key(rule, "displayName")
+            if not isinstance(display_name, str) or not display_name.strip():
+                unit_id = require_key(unit, "id")
+                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+                raise ValueError(
+                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
+                )
+            return display_name.strip().upper()
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise ValueError(
+                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if effect_rule_id in granted_rule_ids:
+            display_name = require_key(rule, "displayName")
+            if not isinstance(display_name, str) or not display_name.strip():
+                unit_id = require_key(unit, "id")
+                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+                raise ValueError(
+                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
+                )
+            return display_name.strip().upper()
+    return None
+
+
 def _build_reactive_move_destinations_pool(
     game_state: Dict[str, Any],
     reactive_unit: Dict[str, Any],
@@ -1188,6 +1224,14 @@ def maybe_resolve_reactive_move(
             update_units_cache_position(game_state, reactive_unit_id, dest_col, dest_row)
             reacted_set.add(reactive_unit_id)
             game_state["last_move_cause"] = "reactive_move"
+            ability_display_name = _get_source_unit_rule_display_name_for_effect(
+                reactive_unit, "reactive_move"
+            )
+            if ability_display_name is None:
+                unit_name = reactive_unit.get("DISPLAY_NAME") or reactive_unit.get("unitType") or "UNKNOWN"
+                raise ValueError(
+                    f"Unit {reactive_unit_id} ({unit_name}) triggered reactive_move without source rule displayName"
+                )
             _apply_enemy_adjacent_delta_for_moved_unit(
                 counters_by_player=reactive_adjacent_counts_by_player,
                 sets_by_player=reactive_adjacent_sets_by_player,
@@ -1206,12 +1250,13 @@ def maybe_resolve_reactive_move(
                 {
                     "type": "reactive_move",
                     "message": (
-                        f"Unit {reactive_unit_id}({dest_col},{dest_row}) MOVED from ({orig_col},{orig_row}) "
-                        f"to ({dest_col},{dest_row}) [Roll: {move_range}] "
-                        f"(Reaction move to Unit {moved_unit_id_str} moving to ({to_col_int},{to_row_int}))"
+                        f"Unit {reactive_unit_id}({dest_col},{dest_row}) MOVED [{ability_display_name}] "
+                        f"from ({orig_col},{orig_row}) to ({dest_col},{dest_row}) [Roll: {move_range}] "
+                        f"- trigger: Unit {moved_unit_id_str}->({to_col_int},{to_row_int})"
                     ),
                     "unitId": reactive_unit_id,
                     "player": require_key(reactive_unit, "player"),
+                    "ability_display_name": ability_display_name,
                     "triggered_by_unit_id": moved_unit_id_str,
                     "trigger_move_kind": move_kind,
                     "trigger_move_cause": move_cause,

@@ -38,6 +38,7 @@ export interface BaseLogEntry {
     | "shoot"
     | "combat"
     | "charge"
+    | "charge_impact"
     | "charge_fail"
     | "death"
     | "turn_change"
@@ -344,6 +345,8 @@ export function getEventIcon(type: string): string {
       return "◎"; // Target circle for shooting
     case "charge":
       return "⚡"; // Lightning for charge
+    case "charge_impact":
+      return "⚡"; // Lightning for charge impact
     case "charge_fail":
       return "⚡"; // Lightning (same, but will have red background)
     case "combat":
@@ -390,6 +393,8 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       }
       return "game-log-entry--shoot-failed"; // Light blue - failed during hit or wound rolls
     case "charge":
+      return "game-log-entry--charge";
+    case "charge_impact":
       return "game-log-entry--charge";
     case "charge_fail":
       return "game-log-entry--charge-fail";

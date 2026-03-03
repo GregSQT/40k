@@ -81,7 +81,7 @@ export function useGameLog(currentTurn?: number) {
         turnNumber: logData.turn, // Use backend data, but addEvent will override with live turn
         phase: logData.phase,
         player: logData.player,
-        unitId: parseInt(logData.shooterId, 10),
+        unitId: parseInt(logData.shooterId || logData.attackerId || logData.unitId, 10),
         targetId: parseInt(logData.targetId, 10),
         reward: logData.reward,
         action_name: logData.action_name,

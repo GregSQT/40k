@@ -205,6 +205,40 @@ def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: st
     return None
 
 
+def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
+    """Return source UNIT_RULES.displayName for an effect rule; None if absent."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule in unit_rules:
+        source_rule_id = require_key(rule, "ruleId")
+        if source_rule_id == effect_rule_id:
+            display_name = require_key(rule, "displayName")
+            if not isinstance(display_name, str) or not display_name.strip():
+                unit_id = require_key(unit, "id")
+                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+                raise ValueError(
+                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
+                )
+            return display_name.strip().upper()
+        granted_rule_ids = rule.get("grants_rule_ids")
+        if granted_rule_ids is None:
+            continue
+        if not isinstance(granted_rule_ids, list):
+            raise TypeError(
+                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
+                f"{type(granted_rule_ids).__name__}"
+            )
+        if effect_rule_id in granted_rule_ids:
+            display_name = require_key(rule, "displayName")
+            if not isinstance(display_name, str) or not display_name.strip():
+                unit_id = require_key(unit, "id")
+                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+                raise ValueError(
+                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
+                )
+            return display_name.strip().upper()
+    return None
+
+
 def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any]) -> bool:
     """Return True if unit is allowed to shoot after advance with this weapon."""
     if _weapon_has_assault_rule(weapon):
@@ -3831,7 +3865,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             return False, {"error": "target_not_found", "targetId": selected_target_id, "valid_targets": updated_pool[:5]}
 
         # RAPID_FIRE: On first shot with this weapon, add bonus shots if target is within half range.
-        # Bonus shots are flagged individually as [RAPID_FIRE:<value>] in logs.
+        # Bonus shots are flagged individually as [RAPID FIRE:<value>] in logs.
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
         if not selected_weapon:
@@ -4217,8 +4251,9 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     # Enhanced message format including shooter position and weapon name per movement phase integration
     # Positions captured before damage (target may be removed from cache if dead)
-    attack_log_part = attack_result['attack_log'].split(' : ', 1)[1] if ' : ' in attack_result['attack_log'] else attack_result['attack_log']
+    attack_log_part = attack_result["attack_log"]
     shot_rule_marker = ""
+    shot_rule_ability_display_name = None
     rapid_fire_marker = ""
     if attack_result.get("rapid_fire_bonus_shot", False):
         rapid_fire_rule_value = attack_result.get("rapid_fire_rule_value")
@@ -4226,23 +4261,25 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             raise ValueError(
                 f"rapid_fire_bonus_shot=True but rapid_fire_rule_value is invalid: {rapid_fire_rule_value}"
             )
-        rapid_fire_marker = f" [RAPID_FIRE:{rapid_fire_rule_value}]"
+        rapid_fire_marker = f" [RAPID FIRE:{rapid_fire_rule_value}]"
     shooter_id_str = str(unit_id)
     if shooter_id_str in require_key(game_state, "units_fled"):
-        source_rule_id = _get_source_unit_rule_id_for_effect(shooter, "shoot_after_flee")
-        if source_rule_id is not None:
-            shot_rule_marker = f" ({source_rule_id.upper()})"
+        source_rule_display_name = _get_source_unit_rule_display_name_for_effect(shooter, "shoot_after_flee")
+        if source_rule_display_name is not None:
+            shot_rule_marker = f" [{source_rule_display_name}]"
+            shot_rule_ability_display_name = source_rule_display_name
     else:
         if shooter_id_str in require_key(game_state, "units_advanced"):
             from engine.utils.weapon_helpers import get_selected_ranged_weapon
             selected_weapon = get_selected_ranged_weapon(shooter)
             if selected_weapon and not _weapon_has_assault_rule(selected_weapon):
-                source_rule_id = _get_source_unit_rule_id_for_effect(shooter, "shoot_after_advance")
-                if source_rule_id is not None:
-                    shot_rule_marker = f" ({source_rule_id.upper()})"
+                source_rule_display_name = _get_source_unit_rule_display_name_for_effect(shooter, "shoot_after_advance")
+                if source_rule_display_name is not None:
+                    shot_rule_marker = f" [{source_rule_display_name}]"
+                    shot_rule_ability_display_name = source_rule_display_name
     enhanced_message = (
-        f"Unit {unit_id} ({shooter_col}, {shooter_row}) SHOT{shot_rule_marker}{rapid_fire_marker} "
-        f"Unit {target_id} ({target_col}, {target_row}){weapon_suffix} : {attack_log_part}"
+        f"Unit {unit_id}({shooter_col},{shooter_row}) SHOT{shot_rule_marker}{rapid_fire_marker} "
+        f"at Unit {target_id}({target_col},{target_row}){weapon_suffix} - {attack_log_part}"
     )
 
     # CRITICAL FIX: Append action_log BEFORE reward calculation
@@ -4273,6 +4310,9 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "saveSkipped": attack_result.get("save_skipped", False),
         "saveSkipReason": attack_result.get("save_skip_reason"),
         "devastatingWoundsApplied": attack_result.get("devastating_wounds_applied", False),
+        "ability_display_name": shot_rule_ability_display_name,
+        "wound_ability_display_name": attack_result.get("wound_ability_display_name"),
+        "ap_modifier_ability_display_name": attack_result.get("ap_modifier_ability_display_name"),
         "rapidFireBonusShot": attack_result.get("rapid_fire_bonus_shot", False),
         "rapidFireRuleValue": attack_result.get("rapid_fire_rule_value"),
         "timestamp": "server_time",
@@ -4507,7 +4547,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     else:
         hit_target = base_hit_target
     hit_target_display = f"{hit_target}+"
-    heavy_log_suffix = " HEAVY" if heavy_applied else ""
+    hit_target_display_with_heavy = f"{base_hit_target}+->{hit_target}+" if heavy_applied else hit_target_display
+    heavy_log_suffix = " [HEAVY]" if heavy_applied else ""
     hit_success = hit_roll >= hit_target
     
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name in attack_log
@@ -4520,13 +4561,14 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         raise ValueError(
             f"rapid_fire_bonus_shot=True but _rapid_fire_rule_value is invalid: {rapid_fire_rule_value}"
         )
-    rapid_fire_rule_marker = f" [RAPID_FIRE:{rapid_fire_rule_value}]" if rapid_fire_bonus_shot else ""
+    rapid_fire_rule_marker = f" [RAPID FIRE:{rapid_fire_rule_value}]" if rapid_fire_bonus_shot else ""
     
     if not hit_success:
         # MISS case
-        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} : MISSED !"
+        attack_log = f"Hit:{hit_target_display_with_heavy}:{hit_roll}(FAIL){heavy_log_suffix}"
         return {
             "hit_roll": hit_roll,
+            "hit_target_base": base_hit_target,
             "hit_target": hit_target,
             "hit_rule_modifier": "HEAVY" if heavy_applied else None,
             "hit_success": False,
@@ -4549,6 +4591,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     wound_target = _calculate_wound_target(weapon["STR"], target["T"])
     wound_success = wound_roll >= wound_target
     wound_log_suffix = ""
+    wound_ability_display_name = None
     if not wound_success:
         can_reroll_failed_wound_on_objective = (
             _unit_has_rule(attacker, "reroll_towound_target_on_objective")
@@ -4559,25 +4602,35 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             wound_roll = random.randint(1, 6)
             wound_success = wound_roll >= wound_target
             if can_reroll_failed_wound_on_objective:
-                source_rule_id = _get_source_unit_rule_id_for_effect(attacker, "reroll_towound_target_on_objective")
-                if source_rule_id is None:
+                source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
+                    attacker, "reroll_towound_target_on_objective"
+                )
+                if source_rule_display_name is None:
                     raise ValueError(
                         f"Attacker {attacker_id} rerolled wound on objective without source unit rule"
                     )
-                wound_log_suffix = f"({source_rule_id.upper()})"
+                wound_ability_display_name = source_rule_display_name
+                wound_log_suffix = f" [{source_rule_display_name}]"
             else:
-                source_rule_id = _get_source_unit_rule_id_for_effect(attacker, "reroll_1_towound")
-                if source_rule_id is None:
+                source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
+                    attacker, "reroll_1_towound"
+                )
+                if source_rule_display_name is None:
                     raise ValueError(
                         f"Attacker {attacker_id} rerolled wound roll of 1 without source unit rule"
                     )
-                wound_log_suffix = f"({source_rule_id.upper()})"
+                wound_ability_display_name = source_rule_display_name
+                wound_log_suffix = f" [{source_rule_display_name}]"
     
     if not wound_success:
         # FAIL case
-        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} : FAILED !"
+        attack_log = (
+            f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
+            f"Wound:{wound_target}+:{wound_roll}(FAIL){wound_log_suffix}"
+        )
         return {
             "hit_roll": hit_roll,
+            "hit_target_base": base_hit_target,
             "hit_target": hit_target,
             "hit_rule_modifier": "HEAVY" if heavy_applied else None,
             "hit_success": True,  # Hit succeeded to reach wound roll
@@ -4591,6 +4644,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
             "damage": 0,
+            "wound_ability_display_name": wound_ability_display_name,
+            "ap_modifier_ability_display_name": None,
             "attack_log": attack_log,
             "weapon_name": weapon_name
         }
@@ -4604,20 +4659,19 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         new_hp = max(0, target_hp - damage_dealt)
         if new_hp <= 0:
             attack_log = (
-                f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : "
-                f"Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - "
-                f"Wound {wound_roll}({wound_target}+){wound_log_suffix} - "
-                f"Save:SKIPPED(DEVASTATING_WOUNDS) - Dmg:{damage_dealt}HP : Unit {target_id} DIED !"
+                f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
+                f"Wound:{wound_target}+:{wound_roll}(SUCCESS){wound_log_suffix} "
+                f"Save:SKIPPED [DEVASTATING WOUNDS] Dmg:{damage_dealt}HP"
             )
         else:
             attack_log = (
-                f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : "
-                f"Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - "
-                f"Wound {wound_roll}({wound_target}+){wound_log_suffix} - "
-                f"Save:SKIPPED(DEVASTATING_WOUNDS) - Dmg:{damage_dealt}HP"
+                f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
+                f"Wound:{wound_target}+:{wound_roll}(SUCCESS){wound_log_suffix} "
+                f"Save:SKIPPED [DEVASTATING WOUNDS] Dmg:{damage_dealt}HP"
             )
         return {
             "hit_roll": hit_roll,
+            "hit_target_base": base_hit_target,
             "hit_target": hit_target,
             "hit_rule_modifier": "HEAVY" if heavy_applied else None,
             "hit_success": True,
@@ -4636,19 +4690,66 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
             "damage": damage_dealt,
+            "wound_ability_display_name": wound_ability_display_name,
+            "ap_modifier_ability_display_name": None,
             "attack_log": attack_log,
             "weapon_name": weapon_name,
         }
 
     save_roll = random.randint(1, 6)
-    save_target = _calculate_save_target(target, weapon["AP"])
+    effective_ap = require_key(weapon, "AP")
+    ap_modifier_ability_display_name = None
+    if _unit_has_rule(attacker, "closest_target_penetration"):
+        valid_target_ids = shooting_build_valid_target_pool(game_state, str(attacker_id))
+        if valid_target_ids:
+            attacker_col, attacker_row = require_unit_position(attacker, game_state)
+            min_distance = None
+            target_distance = None
+            target_id_str = str(target_id)
+            for candidate_id in valid_target_ids:
+                candidate_unit = _get_unit_by_id(game_state, candidate_id)
+                if not candidate_unit:
+                    continue
+                candidate_col, candidate_row = require_unit_position(candidate_unit, game_state)
+                candidate_distance = _calculate_hex_distance(
+                    attacker_col, attacker_row, candidate_col, candidate_row
+                )
+                if min_distance is None or candidate_distance < min_distance:
+                    min_distance = candidate_distance
+                if str(candidate_unit["id"]) == target_id_str:
+                    target_distance = candidate_distance
+            if (
+                min_distance is not None
+                and target_distance is not None
+                and target_distance == min_distance
+            ):
+                source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
+                    attacker, "closest_target_penetration"
+                )
+                if source_rule_display_name is None:
+                    raise ValueError(
+                        f"Attacker {attacker_id} applied closest_target_penetration without source unit rule"
+                    )
+                ap_modifier_ability_display_name = source_rule_display_name
+                effective_ap = effective_ap - 1
+    save_target = _calculate_save_target(target, effective_ap)
+    save_log_suffix = (
+        f" [{ap_modifier_ability_display_name}]"
+        if isinstance(ap_modifier_ability_display_name, str) and ap_modifier_ability_display_name.strip()
+        else ""
+    )
     save_success = save_roll >= save_target
     
     if save_success:
         # SAVE case
-        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) : SAVED !"
+        attack_log = (
+            f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
+            f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
+            f"Save:{save_target}+:{save_roll}(SAVED){save_log_suffix}"
+        )
         return {
             "hit_roll": hit_roll,
+            "hit_target_base": base_hit_target,
             "hit_target": hit_target,
             "hit_rule_modifier": "HEAVY" if heavy_applied else None,
             "hit_success": True,  # Hit succeeded
@@ -4667,6 +4768,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
             "damage": 0,
+            "wound_ability_display_name": wound_ability_display_name,
+            "ap_modifier_ability_display_name": ap_modifier_ability_display_name,
             "attack_log": attack_log,
             "weapon_name": weapon_name
         }
@@ -4678,13 +4781,22 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     
     if new_hp <= 0:
         # Target dies
-        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} delt : Unit {target_id} DIED !"
+        attack_log = (
+            f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
+            f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
+            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP"
+        )
     else:
         # Target survives
-        attack_log = f"Unit {attacker_id} SHOT{rapid_fire_rule_marker} Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target_display}){heavy_log_suffix} - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DELT !"
+        attack_log = (
+            f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
+            f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
+            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP"
+        )
     
     return {
         "hit_roll": hit_roll,
+        "hit_target_base": base_hit_target,
         "hit_target": hit_target,
         "hit_rule_modifier": "HEAVY" if heavy_applied else None,
         "hit_success": True,  # Hit succeeded
@@ -4703,6 +4815,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
         "rapid_fire_rule_value": rapid_fire_rule_value,
         "damage": damage_dealt,
+        "wound_ability_display_name": wound_ability_display_name,
+        "ap_modifier_ability_display_name": ap_modifier_ability_display_name,
         "attack_log": attack_log,
         "weapon_name": weapon_name
     }

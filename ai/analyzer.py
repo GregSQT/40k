@@ -1431,9 +1431,9 @@ def parse_step_log(filepath: str) -> Dict:
                 # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
                 # by treating dead units as alive.
-                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)', action_desc, re.IGNORECASE):
+                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)', action_desc, re.IGNORECASE):
                     target_match = re.search(
-                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
+                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
                         action_desc,
                         re.IGNORECASE
                     )
@@ -1454,8 +1454,8 @@ def parse_step_log(filepath: str) -> Dict:
                                 line, dead_units_current_episode, unit_hp, unit_types, unit_positions, unit_deaths, stats
                             )
                 
-                if 'attacked unit' in action_desc.lower():
-                    target_match = re.search(r'ATTACKED Unit (\d+)', action_desc, re.IGNORECASE)
+                if 'attacked unit' in action_desc.lower() or 'fought unit' in action_desc.lower():
+                    target_match = re.search(r'(?:ATTACKED|FOUGHT) Unit (\d+)', action_desc, re.IGNORECASE)
                     if target_match:
                         target_id = target_match.group(1)
                         damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
@@ -1751,7 +1751,7 @@ def parse_step_log(filepath: str) -> Dict:
 
                 # Determine action type and validate rules
                 is_shoot_action = re.search(
-                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
+                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
                     action_desc,
                     re.IGNORECASE
                 ) is not None
@@ -1759,13 +1759,13 @@ def parse_step_log(filepath: str) -> Dict:
                     last_shoot_shooter_id = None
                     last_shoot_weapon = None
                     last_shoot_target_id = None
-                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+', action_desc, re.IGNORECASE):
+                if re.search(r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+', action_desc, re.IGNORECASE):
                         action_type = 'shoot'
                         stats['shoot_vs_wait']['shoot'] += 1
                         stats['shoot_vs_wait_by_player'][player]['shoot'] += 1
                         shooter_match = re.search(r'Unit (\d+)\s*\((\d+),\s*(\d+)\)', action_desc)
                         target_match = re.search(
-                            r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID_FIRE:[^\]]+\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
+                            r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\))?(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
                             action_desc,
                             re.IGNORECASE
                         )
@@ -1952,7 +1952,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     else:
                                         rng_nb = rng_nb_by_weapon[weapon_name_for_limits]
                                         rapid_fire_value = rapid_fire_by_weapon.get(weapon_name_for_limits, 0)
-                                        rapid_fire_match = re.search(r'\[RAPID_FIRE:(\d+)\]', action_desc, re.IGNORECASE)
+                                        rapid_fire_match = re.search(r'\[RAPID(?: |_)?FIRE:(\d+)\]', action_desc, re.IGNORECASE)
                                         rapid_fire_bonus_for_this_shot = 0
                                         if rapid_fire_match:
                                             rapid_fire_logged_value = int(rapid_fire_match.group(1))
@@ -1963,7 +1963,7 @@ def parse_step_log(filepath: str) -> Dict:
                                                     'phase': phase,
                                                     'line': line.strip(),
                                                     'error': (
-                                                        f"RAPID_FIRE marker present for weapon without RAPID_FIRE rule: "
+                                                        f"RAPID FIRE marker present for weapon without RAPID_FIRE rule: "
                                                         f"{shooter_unit_type}/{weapon_name_for_limits}"
                                                     )
                                                 })
@@ -1974,7 +1974,7 @@ def parse_step_log(filepath: str) -> Dict:
                                                     'phase': phase,
                                                     'line': line.strip(),
                                                     'error': (
-                                                        f"RAPID_FIRE marker value mismatch for {shooter_unit_type}/{weapon_name_for_limits}: "
+                                                        f"RAPID FIRE marker value mismatch for {shooter_unit_type}/{weapon_name_for_limits}: "
                                                         f"log={rapid_fire_logged_value}, expected={rapid_fire_value}"
                                                     )
                                                 })
@@ -2047,16 +2047,12 @@ def parse_step_log(filepath: str) -> Dict:
 
                             # DEVASTATING_WOUNDS checks:
                             # Apply ONLY when log explicitly declares DW flag.
-                            # correct   = flag + wound roll 6 + no save performed (Save:SKIPPED(DEVASTATING_WOUNDS))
+                            # correct   = flag + wound roll 6 + no save performed (Save:SKIPPED)
                             # incorrect = flag + (wound roll < 6 OR save performed despite wound roll 6)
                             dw_flag_match = re.search(r'\[DEVASTATING WOUNDS\]', action_desc, re.IGNORECASE)
                             wound_roll_match = re.search(r'Wound:(\d+)\+:(\d+)', action_desc, re.IGNORECASE)
                             save_attempt_match = re.search(r'Save:(\d+)\+:(\d+)', action_desc, re.IGNORECASE)
-                            save_skipped_dw_match = re.search(
-                                r'Save:SKIPPED\(DEVASTATING_WOUNDS\)',
-                                action_desc,
-                                re.IGNORECASE,
-                            )
+                            save_skipped_dw_match = re.search(r'Save:SKIPPED(?:\([^)]+\))?', action_desc, re.IGNORECASE)
                             if dw_flag_match and wound_roll_match:
                                 wound_roll_value = int(wound_roll_match.group(2))
                                 shooter_player_for_dw = require_key(unit_player, shooter_id)
@@ -2162,7 +2158,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     stats['first_error_lines']['shoot_at_engaged_enemy'][player] = {'episode': current_episode_num, 'line': line.strip()}
 
                             # Track PISTOL weapon shots (for statistics)
-                            heavy_applied_in_log = " HEAVY " in action_desc.upper()
+                            heavy_applied_in_log = re.search(r'(?:\[\s*HEAVY\s*\]|\sHEAVY\s)', action_desc, re.IGNORECASE) is not None
                             if weapon_match and target_pos and weapon_found:
                                 distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
                                 
@@ -2984,16 +2980,18 @@ def parse_step_log(filepath: str) -> Dict:
                                 stats['sample_actions']['charge'] = line.strip()
                         else:
                             # Check if it's a FAILED charge (valid format, just failed)
-                            # Format: Unit X(col,row) FAILED CHARGE unit Y from (a,b) to (c,d)
-                            failed_charge_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) FAILED CHARGE unit (\d+) from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)', action_desc)
+                            # Current format: Unit X(col,row) FAILED CHARGE to unit Y(col,row) [Roll: N]
+                            failed_charge_match = re.search(
+                                r'Unit (\d+)\((\d+),\s*(\d+)\) FAILED CHARGE to unit (\d+)\((\d+),\s*(\d+)\)',
+                                action_desc,
+                                re.IGNORECASE
+                            )
                             if failed_charge_match:
                                 # Extract failed charge data (for potential future analysis)
                                 failed_charge_unit_id = failed_charge_match.group(1)
                                 failed_charge_target_id = failed_charge_match.group(4)
-                                start_col = int(failed_charge_match.group(5))
-                                start_row = int(failed_charge_match.group(6))
-                                dest_col = int(failed_charge_match.group(7))
-                                dest_row = int(failed_charge_match.group(8))
+                                target_col = int(failed_charge_match.group(5))
+                                target_row = int(failed_charge_match.group(6))
                                 
                                 # Note: Failed charges don't move units, so we don't update unit_positions
                                 # But we could track failed charge attempts for statistics if needed
@@ -3614,11 +3612,14 @@ def parse_step_log(filepath: str) -> Dict:
                                     'error': f"Move action missing 'from/to' format: {action_desc[:100]}"
                                 })
 
-                elif "ATTACKED Unit" in action_desc:
+                elif "ATTACKED Unit" in action_desc or "FOUGHT Unit" in action_desc:
                         action_type = 'fight'
                         units_fought.add(unit_id) if 'unit_id' in locals() else None
                         
-                        fight_match = re.search(r'Unit (\d+)\((\d+),\s*(\d+)\) ATTACKED Unit (\d+)\((\d+),\s*(\d+)\)', action_desc)
+                        fight_match = re.search(
+                            r'Unit (\d+)\((\d+),\s*(\d+)\) (?:ATTACKED|FOUGHT) Unit (\d+)\((\d+),\s*(\d+)\)',
+                            action_desc
+                        )
                         if fight_match:
                             fighter_id = fight_match.group(1)
                             fighter_col = int(fight_match.group(2))
