@@ -1,5 +1,6 @@
 services:
   backend:
+    user: "0:0"
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,7 +12,7 @@ services:
       PYTHONUNBUFFERED: "1"
       W40K_DEBUG: "false"
     volumes:
-      - ${SYNO_CONFIG_PATH:?Set SYNO_CONFIG_PATH in your environment}:/app/config
+      - ${SYNO_CONFIG_PATH:?Set SYNO_CONFIG_PATH in your environment}/users.db:/app/config/users.db
       - ${SYNO_MODELS_PATH:?Set SYNO_MODELS_PATH in your environment}:/app/ai/models
       - ${SYNO_RUNTIME_PATH:?Set SYNO_RUNTIME_PATH in your environment}:/app/runtime
     healthcheck:
