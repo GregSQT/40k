@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { saveAuthSession } from "../auth/authStorage";
 
-const API_BASE = "http://localhost:5001/api";
+const API_BASE = "/api";
 
 type AuthMode = "login" | "register";
 

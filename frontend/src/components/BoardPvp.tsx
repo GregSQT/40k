@@ -2315,7 +2315,7 @@ export default function Board({
     setWeaponSelectionMenu(null);
 
     try {
-      const API_BASE = "http://localhost:5001/api";
+      const API_BASE = "/api";
       const response = await fetch(`${API_BASE}/game/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

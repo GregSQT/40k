@@ -10,7 +10,7 @@ RUN cd /workspace/frontend && npm ci
 COPY . /workspace
 
 # build sans typecheck bloquant
-RUN cd /workspace/frontend && npx vite build
+RUN cd /workspace/frontend && VITE_API_URL=/api npx vite build
 
 FROM nginx:1.27-alpine
 

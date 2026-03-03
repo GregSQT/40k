@@ -187,7 +187,7 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     const loadAvailableFiles = async () => {
       try {
-        const response = await fetch("http://localhost:5001/api/replay/list");
+        const response = await fetch("/api/replay/list");
         if (response.ok) {
           const data = await response.json();
           setAvailableLogFiles(data.logs || []);
@@ -204,7 +204,7 @@ export const BoardReplay: React.FC = () => {
   useEffect(() => {
     const loadDefaultLog = async () => {
       try {
-        const response = await fetch("http://localhost:5001/api/replay/default");
+        const response = await fetch("/api/replay/default");
         if (!response.ok) {
           // Silent fail - file might not exist, user can still browse manually
           console.log("No default step.log found, user can browse manually");
@@ -293,7 +293,7 @@ export const BoardReplay: React.FC = () => {
     try {
       // Load file content from server
       const response = await fetch(
-        `http://localhost:5001/api/replay/file/${encodeURIComponent(filename)}`
+        `/api/replay/file/${encodeURIComponent(filename)}`
       );
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`);
