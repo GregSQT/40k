@@ -416,6 +416,8 @@ class StepLogger:
             devastating_wounds_flag = bool(details.get("devastating_wounds_flag", False))
             rapid_fire_bonus_shot = bool(details.get("rapid_fire_bonus_shot", False))
             rapid_fire_rule_value = details.get("rapid_fire_rule_value")
+            hazardous_test_required = bool(details.get("hazardous_test_required", False))
+            hazardous_test_roll = details.get("hazardous_test_roll")
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
             weapon_name = details.get("weapon_name")
@@ -485,6 +487,12 @@ class StepLogger:
                         if save_result_display == "FAIL":
                             detail_parts.append(f"Dmg:{damage}HP")
             detail_msg = f" - {' '.join(detail_parts)}"
+            if hazardous_test_required:
+                if not isinstance(hazardous_test_roll, int) or hazardous_test_roll < 1 or hazardous_test_roll > 6:
+                    raise ValueError(
+                        f"hazardous_test_required=True but hazardous_test_roll is invalid: {hazardous_test_roll}"
+                    )
+                detail_msg += f" [HAZARDOUS] Roll:{hazardous_test_roll}"
             
             # Add reward if available
             reward = details.get("reward")
@@ -492,6 +500,16 @@ class StepLogger:
                 detail_msg += f" [R:{reward:+.1f}]"
             
             return base_msg + detail_msg
+
+        elif action_type == "hazardous":
+            unit_with_coords = details.get("unit_with_coords")
+            if not isinstance(unit_with_coords, str) or not unit_with_coords:
+                raise KeyError("Hazardous action missing required unit_with_coords")
+            hazardous_self_died = bool(details.get("hazardous_self_died", False))
+            hazardous_mortal_wounds = details.get("hazardous_mortal_wounds", 0)
+            if hazardous_self_died:
+                return f"Unit {unit_with_coords} was DESTROYED [HAZARDOUS]"
+            return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds [HAZARDOUS]"
             
         elif action_type == "shoot_individual":
             # Individual shot within multi-shot sequence

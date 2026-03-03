@@ -1952,7 +1952,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     if target_died:
         game_state["action_logs"].append({
             "type": "death",
-            "message": f"Unit {target_id} was destroyed",
+            "message": f"Unit {target_id} was DESTROYED",
             "turn": game_state["turn"],
             "phase": "fight",
             "targetId": target_id,

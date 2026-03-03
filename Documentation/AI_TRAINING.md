@@ -173,7 +173,7 @@ The log captures:
 - **Red**: Damage dealt to target
 
 *Death:*
-- **Black**: Unit destroyed (separate event after damage)
+- **Black**: Unit DESTROYED (separate event after damage)
 
 **Episode Information:**
 - Bot opponent name (e.g., GreedyBot, RandomBot)

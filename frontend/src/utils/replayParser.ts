@@ -30,6 +30,10 @@ interface ReplayAction {
   rapid_fire_bonus_shot?: boolean;
   rapid_fire_rule_value?: number;
   heavy_applied?: boolean;
+  hazardous_test_roll?: number;
+  hazardous_triggered?: boolean;
+  hazardous_self_died?: boolean;
+  hazardous_mortal_wounds?: number;
   reward?: number;
   move_mode?: string;
   // Fight action fields
@@ -441,6 +445,32 @@ export function parse_log_file_from_text(text: string): ReplayData {
       continue;
     }
 
+    const hazardousResultMatch = trimmed.match(
+      /\[([^\]]+)\]\s(?:E\d+\s+)?(T\d+)\sP(\d+)\sSHOOT\s:\sUnit\s(\d+)\((\d+),(\d+)\)\s(SUFFERS\s3\sMortal\sWounds\s\[HAZARDOUS\]|was\sDESTROYED\s\[HAZARDOUS\])/
+    );
+    if (hazardousResultMatch) {
+      const timestamp = hazardousResultMatch[1];
+      const turn = hazardousResultMatch[2];
+      const player = parseInt(hazardousResultMatch[3], 10);
+      const unitId = parseInt(hazardousResultMatch[4], 10);
+      const unitCol = parseInt(hazardousResultMatch[5], 10);
+      const unitRow = parseInt(hazardousResultMatch[6], 10);
+      const outcome = hazardousResultMatch[7];
+      currentEpisode.actions.push({
+        type: "hazardous",
+        timestamp,
+        turn,
+        player,
+        unit_id: unitId,
+        pos: { col: unitCol, row: unitRow },
+        hazardous_triggered: true,
+        hazardous_self_died: outcome.includes("was DESTROYED"),
+        hazardous_mortal_wounds: 3,
+        log_message: extractLogMessage(trimmed),
+      });
+      continue;
+    }
+
     // Parse SHOOT actions
     const shootMatch = trimmed.match(
       /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[[^\]]+\])*(?: \[RAPID(?: |_)?FIRE:[^\]]+\])? at Unit)|WAIT|ADVANCED)/
@@ -511,6 +541,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         const rapidFireMatch = trimmed.match(/\[RAPID(?: |_)?FIRE:(\d+)\]/);
         const devastatingWoundsMatch = trimmed.match(/\[DEVASTATING WOUNDS\]/);
         const heavyMatch = trimmed.match(/\[HEAVY\]/);
+        const hazardousRollMatch = trimmed.match(/\[HAZARDOUS\]\s+Roll:(\d+)/i);
         // Extract reward from format: [R:+53.2] or [R:-10.0]
         const rewardMatch = trimmed.match(/\[R:([+-]?\d+\.?\d*)\]/);
         // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Extract weapon name from format: with [weapon_name]
@@ -571,6 +602,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
           if (heavyMatch) {
             action.heavy_applied = true;
+          }
+          if (hazardousRollMatch) {
+            action.hazardous_test_roll = parseInt(hazardousRollMatch[1], 10);
+            action.hazardous_triggered = action.hazardous_test_roll === 1;
           }
           // Add reward if available
           if (rewardMatch) {
@@ -1016,6 +1051,21 @@ export function parse_log_file_from_text(text: string): ReplayData {
           if (hpAfter <= 0 && wasAlive) {
             currentUnits[targetId].isJustKilled = true;
             unitsToRemove.add(targetId);
+          }
+        }
+      } else if (action.type === "hazardous" && action.unit_id !== undefined) {
+        const unitId = action.unit_id;
+        const hazardousDamage = action.hazardous_mortal_wounds || 0;
+        if (currentUnits[unitId] && hazardousDamage > 0) {
+          const wasAlive = currentUnits[unitId].HP_CUR > 0;
+          currentUnits[unitId].HP_CUR -= hazardousDamage;
+          if (currentUnits[unitId].HP_CUR < 0) {
+            currentUnits[unitId].HP_CUR = 0;
+          }
+          const hpAfter = currentUnits[unitId].HP_CUR;
+          if (hpAfter <= 0 && wasAlive) {
+            currentUnits[unitId].isJustKilled = true;
+            unitsToRemove.add(unitId);
           }
         }
       } else if (action.type === "fight" && action.target_id !== undefined) {

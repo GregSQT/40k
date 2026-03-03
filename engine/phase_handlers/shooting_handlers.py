@@ -127,6 +127,20 @@ def _weapon_has_devastating_wounds_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
+def _weapon_has_hazardous_rule(weapon: Dict[str, Any]) -> bool:
+    """Check if weapon has HAZARDOUS rule."""
+    if not weapon:
+        return False
+    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
+    for rule in rules:
+        if hasattr(rule, "rule"):  # ParsedWeaponRule object
+            if rule.rule == "HAZARDOUS":
+                return True
+        elif rule == "HAZARDOUS":  # String
+            return True
+    return False
+
+
 def _get_rapid_fire_parameter(weapon: Dict[str, Any]) -> Optional[int]:
     """Return RAPID_FIRE parameter X from weapon rules, or None if absent."""
     if not weapon:
@@ -4213,6 +4227,30 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
 
     # Store pre-damage HP in attack_result for reward calculation
     attack_result["target_hp_before_damage"] = target_hp_before_damage
+
+    hazardous_test_required = bool(attack_result.get("hazardous_test_required", False))
+    hazardous_test_roll = attack_result.get("hazardous_test_roll")
+    hazardous_triggered = bool(attack_result.get("hazardous_triggered", False))
+    hazardous_mortal_wounds = 0
+    hazardous_self_died = False
+    if hazardous_test_required:
+        if not isinstance(hazardous_test_roll, int) or hazardous_test_roll < 1 or hazardous_test_roll > 6:
+            raise ValueError(
+                f"Invalid hazardous_test_roll for shooter {unit_id}: {hazardous_test_roll}"
+            )
+    if hazardous_triggered:
+        shooter_id_str = str(unit_id)
+        shooter_hp_before_hazardous = require_hp_from_cache(shooter_id_str, game_state)
+        hazardous_mortal_wounds = 3
+        shooter_new_hp = max(0, shooter_hp_before_hazardous - hazardous_mortal_wounds)
+        update_units_cache_hp(game_state, shooter_id_str, shooter_new_hp)
+        hazardous_self_died = not is_unit_alive(shooter_id_str, game_state)
+        if hazardous_self_died:
+            _remove_dead_unit_from_pools(game_state, unit_id)
+            update_los_cache_after_target_death(game_state, unit_id)
+            _invalidate_los_cache_for_unit(game_state, unit_id)
+    attack_result["hazardous_mortal_wounds"] = hazardous_mortal_wounds
+    attack_result["hazardous_self_died"] = hazardous_self_died
     
     # Store detailed log for frontend display with location data
     if "action_logs" not in game_state:
@@ -4315,6 +4353,11 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         "ap_modifier_ability_display_name": attack_result.get("ap_modifier_ability_display_name"),
         "rapidFireBonusShot": attack_result.get("rapid_fire_bonus_shot", False),
         "rapidFireRuleValue": attack_result.get("rapid_fire_rule_value"),
+        "hazardousTestRequired": hazardous_test_required,
+        "hazardousTestRoll": hazardous_test_roll,
+        "hazardousTriggered": hazardous_triggered,
+        "hazardousMortalWounds": hazardous_mortal_wounds,
+        "hazardousSelfDied": hazardous_self_died,
         "timestamp": "server_time",
         "action_name": action_name,
         "reward": 0.0,  # Will be updated after reward calculation
@@ -4323,6 +4366,33 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     # Append the shoot log entry immediately
     game_state["action_logs"].append(shoot_log_entry)
+    if hazardous_triggered:
+        if hazardous_self_died:
+            hazardous_message = f"Unit {unit_id}({shooter_col},{shooter_row}) was DESTROYED [HAZARDOUS]"
+            game_state["action_logs"].append({
+                "type": "death",
+                "message": hazardous_message,
+                "turn": game_state["turn"],
+                "phase": "shoot",
+                "targetId": unit_id,
+                "unitId": unit_id,
+                "player": shooter["player"],
+                "timestamp": "server_time",
+            })
+        else:
+            hazardous_message = (
+                f"Unit {unit_id}({shooter_col},{shooter_row}) SUFFERS "
+                f"{hazardous_mortal_wounds} Mortal Wounds [HAZARDOUS]"
+            )
+            game_state["action_logs"].append({
+                "type": "reactive_move",
+                "message": hazardous_message,
+                "turn": game_state["turn"],
+                "phase": "shoot",
+                "unitId": unit_id,
+                "player": shooter["player"],
+                "timestamp": "server_time",
+            })
     add_console_log(game_state, enhanced_message)
     
     # DEBUG: Log shooting attack execution
@@ -4489,7 +4559,7 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     if attack_result.get("target_died", False):
         game_state["action_logs"].append({
             "type": "death",
-            "message": f"Unit {target_id} was destroyed",
+            "message": f"Unit {target_id} was DESTROYED",
             "turn": game_state["turn"],
             "phase": "shoot",
             "targetId": target_id,
@@ -4555,6 +4625,10 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     weapon_name = weapon.get("display_name", "")
     weapon_prefix = f" with [{weapon_name}]" if weapon_name else ""
     has_devastating_wounds = _weapon_has_devastating_wounds_rule(weapon)
+    has_hazardous = _weapon_has_hazardous_rule(weapon)
+    hazardous_roll = random.randint(1, 6) if has_hazardous else None
+    hazardous_triggered = has_hazardous and hazardous_roll == 1
+    hazardous_log_suffix = f" [HAZARDOUS] Roll:{hazardous_roll}" if has_hazardous else ""
     rapid_fire_bonus_shot = bool(attacker.get("_rapid_fire_bonus_shot_current", False))
     rapid_fire_rule_value = int(require_key(attacker, "_rapid_fire_rule_value"))
     if rapid_fire_bonus_shot and rapid_fire_rule_value <= 0:
@@ -4565,7 +4639,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     
     if not hit_success:
         # MISS case
-        attack_log = f"Hit:{hit_target_display_with_heavy}:{hit_roll}(FAIL){heavy_log_suffix}"
+        attack_log = f"Hit:{hit_target_display_with_heavy}:{hit_roll}(FAIL){heavy_log_suffix}{hazardous_log_suffix}"
         return {
             "hit_roll": hit_roll,
             "hit_target_base": base_hit_target,
@@ -4581,6 +4655,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "devastating_wounds_flag": False,
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
+            "hazardous_test_required": has_hazardous,
+            "hazardous_test_roll": hazardous_roll,
+            "hazardous_triggered": hazardous_triggered,
             "damage": 0,
             "attack_log": attack_log,
             "weapon_name": weapon_name
@@ -4626,7 +4703,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         # FAIL case
         attack_log = (
             f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
-            f"Wound:{wound_target}+:{wound_roll}(FAIL){wound_log_suffix}"
+            f"Wound:{wound_target}+:{wound_roll}(FAIL){wound_log_suffix}{hazardous_log_suffix}"
         )
         return {
             "hit_roll": hit_roll,
@@ -4643,6 +4720,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "devastating_wounds_flag": False,
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
+            "hazardous_test_required": has_hazardous,
+            "hazardous_test_roll": hazardous_roll,
+            "hazardous_triggered": hazardous_triggered,
             "damage": 0,
             "wound_ability_display_name": wound_ability_display_name,
             "ap_modifier_ability_display_name": None,
@@ -4661,13 +4741,13 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             attack_log = (
                 f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
                 f"Wound:{wound_target}+:{wound_roll}(SUCCESS){wound_log_suffix} "
-                f"Save:SKIPPED [DEVASTATING WOUNDS] Dmg:{damage_dealt}HP"
+                f"Save:SKIPPED [DEVASTATING WOUNDS] Dmg:{damage_dealt}HP{hazardous_log_suffix}"
             )
         else:
             attack_log = (
                 f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
                 f"Wound:{wound_target}+:{wound_roll}(SUCCESS){wound_log_suffix} "
-                f"Save:SKIPPED [DEVASTATING WOUNDS] Dmg:{damage_dealt}HP"
+                f"Save:SKIPPED [DEVASTATING WOUNDS] Dmg:{damage_dealt}HP{hazardous_log_suffix}"
             )
         return {
             "hit_roll": hit_roll,
@@ -4689,6 +4769,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "devastating_wounds_flag": True,
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
+            "hazardous_test_required": has_hazardous,
+            "hazardous_test_roll": hazardous_roll,
+            "hazardous_triggered": hazardous_triggered,
             "damage": damage_dealt,
             "wound_ability_display_name": wound_ability_display_name,
             "ap_modifier_ability_display_name": None,
@@ -4745,7 +4828,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         attack_log = (
             f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
             f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
-            f"Save:{save_target}+:{save_roll}(SAVED){save_log_suffix}"
+            f"Save:{save_target}+:{save_roll}(SAVED){save_log_suffix}{hazardous_log_suffix}"
         )
         return {
             "hit_roll": hit_roll,
@@ -4767,6 +4850,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "devastating_wounds_flag": False,
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
+            "hazardous_test_required": has_hazardous,
+            "hazardous_test_roll": hazardous_roll,
+            "hazardous_triggered": hazardous_triggered,
             "damage": 0,
             "wound_ability_display_name": wound_ability_display_name,
             "ap_modifier_ability_display_name": ap_modifier_ability_display_name,
@@ -4784,14 +4870,14 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         attack_log = (
             f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
             f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
-            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP"
+            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP{hazardous_log_suffix}"
         )
     else:
         # Target survives
         attack_log = (
             f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
             f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
-            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP"
+            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP{hazardous_log_suffix}"
         )
     
     return {
@@ -4814,6 +4900,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         "devastating_wounds_flag": False,
         "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
         "rapid_fire_rule_value": rapid_fire_rule_value,
+        "hazardous_test_required": has_hazardous,
+        "hazardous_test_roll": hazardous_roll,
+        "hazardous_triggered": hazardous_triggered,
         "damage": damage_dealt,
         "wound_ability_display_name": wound_ability_display_name,
         "ap_modifier_ability_display_name": ap_modifier_ability_display_name,

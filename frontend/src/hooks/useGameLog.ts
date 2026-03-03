@@ -291,7 +291,7 @@ export function useGameLog(currentTurn?: number) {
     (unit: Unit, turnNumber: number, phase: string = "unknown", player?: number) => {
       addEvent({
         type: "death",
-        message: `${getUnitDisplayName(unit)} was destroyed`,
+        message: `${getUnitDisplayName(unit)} was DESTROYED`,
         unitId: unit.id,
         turnNumber: currentTurn ?? turnNumber,
         phase,

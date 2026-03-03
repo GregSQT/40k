@@ -1,5 +1,6 @@
 // frontend/src/components/UnitStatusTable.tsx
 import { memo, useMemo, useState } from "react";
+import weaponRules from "../../../config/weapon_rules.json";
 import type { Unit, UnitId } from "../types/game";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
@@ -7,6 +8,15 @@ const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
   adaptable_predators: "This unit can shoot and charge in a turn in which it fell back.",
   shoot_after_flee: "Allows a unit to shoot in a turn in which it fell back.",
   charge_after_flee: "Allows a unit to charge in a turn in which it fell back.",
+};
+
+const getWeaponRuleDisplay = (ruleId: string): { displayName: string; tooltipText: string } => {
+  const [baseRuleId, parameter] = ruleId.split(":");
+  const ruleData = weaponRules[baseRuleId as keyof typeof weaponRules];
+  const baseDisplayName = ruleData?.name ?? baseRuleId;
+  const displayName = parameter ? `${baseDisplayName}:${parameter}` : baseDisplayName;
+  const tooltipText = ruleData?.description ?? ruleId;
+  return { displayName, tooltipText };
 };
 
 interface UnitStatusTableProps {
@@ -431,10 +441,25 @@ const UnitRow = memo<UnitRowProps>(
                         }}
                       >
                         <td
-                          className="unit-status-cell"
-                          style={{ padding: "4px 8px", textAlign: "right", fontSize: "12px" }}
+                          className="unit-status-cell unit-status-cell--type"
+                          style={{
+                            padding: "4px 8px",
+                            textAlign: "left",
+                            fontSize: "12px",
+                            overflow: "visible",
+                            textOverflow: "clip",
+                          }}
                         >
                           {weapon.display_name}
+                          {weapon.WEAPON_RULES?.map((ruleId) => {
+                            const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
+                            return (
+                              <span key={`${unit.id}-rng-${idx}-${ruleId}`} className="rule-badge-wrapper">
+                                <span className="rule-badge">{displayName}</span>
+                                <span className="rule-tooltip">{tooltipText}</span>
+                              </span>
+                            );
+                          })}
                           {idx === (unit.selectedRngWeaponIndex ?? 0) && (
                             <span
                               style={{ marginLeft: "8px", color: "#64c8ff", fontSize: "0.9em" }}
@@ -656,10 +681,25 @@ const UnitRow = memo<UnitRowProps>(
                         }}
                       >
                         <td
-                          className="unit-status-cell"
-                          style={{ padding: "4px 8px", textAlign: "right", fontSize: "12px" }}
+                          className="unit-status-cell unit-status-cell--type"
+                          style={{
+                            padding: "4px 8px",
+                            textAlign: "left",
+                            fontSize: "12px",
+                            overflow: "visible",
+                            textOverflow: "clip",
+                          }}
                         >
                           {weapon.display_name}
+                          {weapon.WEAPON_RULES?.map((ruleId) => {
+                            const { displayName, tooltipText } = getWeaponRuleDisplay(ruleId);
+                            return (
+                              <span key={`${unit.id}-cc-${idx}-${ruleId}`} className="rule-badge-wrapper">
+                                <span className="rule-badge">{displayName}</span>
+                                <span className="rule-tooltip">{tooltipText}</span>
+                              </span>
+                            );
+                          })}
                           {idx === (unit.selectedCcWeaponIndex ?? 0) && (
                             <span
                               style={{ marginLeft: "8px", color: "#ff96c8", fontSize: "0.9em" }}

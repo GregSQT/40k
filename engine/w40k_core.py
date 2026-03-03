@@ -2011,6 +2011,11 @@ class W40KEngine(gym.Env):
                                         "ap_modifier_ability_display_name": attack_result.get("ap_modifier_ability_display_name"),
                                         "rapid_fire_bonus_shot": attack_result.get("rapid_fire_bonus_shot", False),
                                         "rapid_fire_rule_value": attack_result.get("rapid_fire_rule_value"),
+                                        "hazardous_test_required": attack_result.get("hazardous_test_required", False),
+                                        "hazardous_test_roll": attack_result.get("hazardous_test_roll"),
+                                        "hazardous_triggered": attack_result.get("hazardous_triggered", False),
+                                        "hazardous_mortal_wounds": attack_result.get("hazardous_mortal_wounds", 0),
+                                        "hazardous_self_died": attack_result.get("hazardous_self_died", False),
                                         "target_died": attack_result["target_died"],
                                         "weapon_name": attack_result["weapon_name"],
                                         "reward": step_reward if i == 0 else 0.0
@@ -2046,6 +2051,22 @@ class W40KEngine(gym.Env):
                                     )
                                     if step_increment:
                                         self._step_calls_since_increment = 0
+                                    if (
+                                        action_type == "shoot"
+                                        and attack_result.get("hazardous_triggered", False)
+                                    ):
+                                        hazardous_details = dict(attack_details)
+                                        hazardous_details["reward"] = None
+                                        self.step_logger.log_action(
+                                            unit_id=actual_shooter_id,
+                                            action_type="hazardous",
+                                            phase=pre_action_phase,
+                                            player=require_key(actual_shooter_unit, "player"),
+                                            success=True,
+                                            step_increment=False,
+                                            action_details=hazardous_details,
+                                            step_calls_since_last=None,
+                                        )
                                 
                                 # Clear attack results after logging to prevent duplicate log entries
                                 if action_type == "shoot" and "shoot_attack_results" in self.game_state:

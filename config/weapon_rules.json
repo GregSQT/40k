@@ -21,7 +21,7 @@
   },
   "HAZARDOUS": {
     "name": "Hazardous",
-    "description": "After the bearer shoots or fights, roll one Hazardous test (one D6). If the roll is 1, the beared is destroyed.",
+    "description": "After the bearer shoots or fights, roll one Hazardous test (one D6). If the roll is 1, the beared suffers 3 Mortal Wounds.",
     "has_parameter": false
   },
   "HEAVY": {

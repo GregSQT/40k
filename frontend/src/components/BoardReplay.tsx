@@ -48,6 +48,10 @@ interface ReplayAction {
   rapid_fire_bonus_shot?: boolean;
   rapid_fire_rule_value?: number;
   heavy_applied?: boolean;
+  hazardous_test_roll?: number;
+  hazardous_triggered?: boolean;
+  hazardous_self_died?: boolean;
+  hazardous_mortal_wounds?: number;
   reward?: number;
   // Fight action fields
   attacker_id?: number;
@@ -1096,7 +1100,7 @@ export const BoardReplay: React.FC = () => {
         ? "fight"
         : action.type.includes("charge")
           ? "charge"
-          : action.type.includes("shoot") || action.type === "advance"
+          : action.type.includes("shoot") || action.type === "advance" || action.type === "hazardous"
             ? "shoot"
             : "move";
 
@@ -1162,6 +1166,30 @@ export const BoardReplay: React.FC = () => {
           phase: "shooting",
           player: action.player,
         });
+      } else if (action.type === "hazardous" && action.unit_id && action.pos) {
+        if (action.hazardous_self_died) {
+          gameLog.addEvent({
+            type: "death",
+            message:
+              action.log_message ||
+              `Unit ${action.unit_id}(${action.pos.col},${action.pos.row}) was DESTROYED [HAZARDOUS]`,
+            unitId: action.unit_id,
+            turnNumber: turnNumber,
+            phase: "shooting",
+            player: action.player,
+          });
+        } else {
+          gameLog.addEvent({
+            type: "reactive_move",
+            message:
+              action.log_message ||
+              `Unit ${action.unit_id}(${action.pos.col},${action.pos.row}) SUFFERS 3 Mortal Wounds [HAZARDOUS]`,
+            unitId: action.unit_id,
+            turnNumber: turnNumber,
+            phase: "shooting",
+            player: action.player,
+          });
+        }
       } else if (action.type === "shoot") {
         // Parse shooting details from log format to match PvP mode
         const shooterId = action.shooter_id!;
@@ -1686,7 +1714,7 @@ export const BoardReplay: React.FC = () => {
               const phaseToActionTypes: Record<string, string[]> = {
                 deployment: ["deploy"],
                 move: ["move", "reactive_move", "move_wait"],
-                shoot: ["shoot", "wait", "advance"],
+                shoot: ["shoot", "wait", "advance", "hazardous"],
                 charge: ["charge", "charge_wait", "charge_fail", "charge_impact"],
                 fight: ["fight"],
               };
