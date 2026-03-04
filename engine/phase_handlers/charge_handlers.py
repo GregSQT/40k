@@ -20,7 +20,7 @@ from engine.combat_utils import (
 )
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
-    update_units_cache_position, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
+    update_units_cache_position, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,

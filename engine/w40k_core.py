@@ -920,9 +920,19 @@ class W40KEngine(gym.Env):
             
             return observation, 0.0, terminated, False, info
         
+        # Normalize raw action once and keep it in game_state for deterministic
+        # policy-driven rule-choice resolution in gym training mode.
+        action_int = self.action_decoder.normalize_action_input(
+            raw_action=action,
+            phase=require_key(self.game_state, "phase"),
+            source="w40k_core.step",
+            action_space_size=len(action_mask),
+        )
+        self.game_state["_last_raw_action_int"] = action_int
+
         # Convert gym integer action to semantic action (reuse precomputed mask+eligible_units)
         semantic_action = self.action_decoder.convert_gym_action(
-            action, self.game_state, action_mask=action_mask, eligible_units=eligible_units
+            action_int, self.game_state, action_mask=action_mask, eligible_units=eligible_units
         )
         self.game_state["_last_semantic_action"] = copy.deepcopy(semantic_action)
         if self.game_state.get("debug_mode", False):
@@ -1482,6 +1492,9 @@ class W40KEngine(gym.Env):
 
     def _is_player_human(self, player: int) -> bool:
         """Return True when player is controlled by a human."""
+        # Training mode is fully programmatic: never block on manual rule choices.
+        if self.gym_training_mode:
+            return False
         player_types = self.game_state.get("player_types")
         if isinstance(player_types, dict) and str(player) in player_types:
             return player_types[str(player)] == "human"
@@ -1740,6 +1753,31 @@ class W40KEngine(gym.Env):
         """
         Select one rule-choice option for AI players using trained policy.
         """
+        options = require_key(prompt, "options")
+        if not isinstance(options, list) or not options:
+            raise ValueError(f"AI rule choice requires non-empty options list, got: {options!r}")
+
+        if self.gym_training_mode:
+            raw_action_int = require_key(self.game_state, "_last_raw_action_int")
+            if not isinstance(raw_action_int, int):
+                raise TypeError(
+                    f"game_state['_last_raw_action_int'] must be int during gym training rule choice, "
+                    f"got {type(raw_action_int).__name__}"
+                )
+            if raw_action_int < 0:
+                raise ValueError(
+                    f"game_state['_last_raw_action_int'] must be >= 0 during gym training rule choice, "
+                    f"got {raw_action_int}"
+                )
+            selected_option_index = raw_action_int % len(options)
+            selected_option = options[selected_option_index]
+            selected_display_rule_id = require_key(selected_option, "display_rule_id")
+            if not isinstance(selected_display_rule_id, str) or not selected_display_rule_id.strip():
+                raise ValueError(
+                    f"Invalid display_rule_id in selected training rule choice option: {selected_option!r}"
+                )
+            return selected_display_rule_id.strip()
+
         if not hasattr(self, "pve_controller"):
             raise RuntimeError("AI rule choice requires pve_controller to be initialized")
         if not self.pve_controller.is_ready_for_decision():
