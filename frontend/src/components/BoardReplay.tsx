@@ -74,6 +74,8 @@ interface ReplayAction {
   charge_success?: boolean;
   // Advance action fields
   advance_roll?: number;
+  // Rule choice fields
+  selected_rule_name?: string;
 }
 
 interface PrimaryObjectiveRule {
@@ -1129,6 +1131,21 @@ export const BoardReplay: React.FC = () => {
           phase: "movement",
           startHex: `(${action.from.col},${action.from.row})`,
           endHex: `(${action.to.col},${action.to.row})`,
+          player: action.player,
+        });
+      } else if (action.type === "rule_choice" && action.pos) {
+        const selectedRuleLabel =
+          typeof action.selected_rule_name === "string" && action.selected_rule_name.trim().length > 0
+            ? action.selected_rule_name.trim()
+            : "UNKNOWN";
+        gameLog.addEvent({
+          type: "rule_choice",
+          message:
+            action.log_message ||
+            `Unit ${action.unit_id}(${action.pos.col},${action.pos.row}) chose [${selectedRuleLabel}]`,
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: "rule_choice",
           player: action.player,
         });
       } else if (action.type === "advance" && action.from && action.to) {

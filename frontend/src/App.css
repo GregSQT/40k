@@ -1809,6 +1809,12 @@ textarea:focus {
   border-radius: 0;
 }
 
+.game-log-entry__icon--rule_choice {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
 .game-log-entry__icon--shoot {
   background: rgba(var(--icon-shoot-bg-rgb), var(--icon-square-bg-alpha-gamelog));
   border: var(--icon-square-border-width) px solid
@@ -1958,6 +1964,11 @@ textarea:focus {
 .game-log-entry--reactive-move {
   border-left-color: #dc2626;
   background: rgba(220, 38, 38, 0.45);
+}
+
+.game-log-entry--rule-choice {
+  border-left-color: #6b7280;
+  background: rgba(107, 114, 128, 0.45);
 }
 
 .game-log-entry--charge {

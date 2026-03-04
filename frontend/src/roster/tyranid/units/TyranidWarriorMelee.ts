@@ -15,7 +15,7 @@ export class TyranidWarriorMelee extends TyranidInfantryTroopMeleeTroop {
   static HP_MAX = 3; // Max hit points
   static LD = 7; // Leadership score
   static OC = 2; // Operative Control
-  static VALUE = 24; // Unit value (W40K points cost)
+  static VALUE = 32; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES: string[] = [];

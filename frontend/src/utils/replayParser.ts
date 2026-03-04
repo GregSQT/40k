@@ -57,6 +57,8 @@ interface ReplayAction {
   charge_failed_reason?: string;
   // Advance action fields
   advance_roll?: number;
+  // Rule choice fields
+  selected_rule_name?: string;
 }
 
 interface PrimaryObjectiveRule {
@@ -794,6 +796,34 @@ export function parse_log_file_from_text(text: string): ReplayData {
         // CRITICAL: Unit position stays at unitCol/unitRow (from regex match) - no movement on failed charge
         // The unit position is already correct from the regex match, no need to update
       }
+      continue;
+    }
+
+    // Parse RULE CHOICE actions
+    // Format: [timestamp] E1 T1 P1 FIGHT : Unit 3(7,12) chose [ADRENALISED ONSLAUGHT] [SUCCESS]
+    const ruleChoiceMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) (\w+) : Unit (\d+)\((\d+),\s*(\d+)\) chose \[([^\]]+)\] \[(SUCCESS|FAILED)\]/
+    );
+    if (ruleChoiceMatch) {
+      const timestamp = ruleChoiceMatch[1];
+      const turn = ruleChoiceMatch[2];
+      const player = parseInt(ruleChoiceMatch[3], 10);
+      const unitId = parseInt(ruleChoiceMatch[5], 10);
+      const unitCol = parseInt(ruleChoiceMatch[6], 10);
+      const unitRow = parseInt(ruleChoiceMatch[7], 10);
+      const selectedRuleName = ruleChoiceMatch[8].trim();
+      syncKnownUnitPosition(currentEpisode, unitId, unitCol, unitRow);
+
+      currentEpisode.actions.push({
+        type: "rule_choice",
+        timestamp,
+        turn,
+        player,
+        unit_id: unitId,
+        pos: { col: unitCol, row: unitRow },
+        selected_rule_name: selectedRuleName,
+        log_message: extractLogMessage(trimmed),
+      });
       continue;
     }
 

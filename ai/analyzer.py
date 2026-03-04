@@ -772,6 +772,17 @@ def parse_step_log(filepath: str) -> Dict:
     unit_attack_limits = {}  # unit_type -> {'rng_nb_by_weapon': Dict[str, int], 'cc_nb_by_weapon': Dict[str, int], 'rapid_fire_by_weapon': Dict[str, int]}
     unit_combi_by_weapon = {}  # unit_type -> {weapon_display_name: combi_key}
     unit_rules_by_type = {}  # unit_type -> set(ruleId)
+    unit_choice_effect_to_source_rules: Dict[str, Dict[str, Set[str]]] = {}
+    display_rule_name_to_ids: Dict[str, Set[str]] = {}
+
+    for display_rule_id, rule_cfg in all_unit_rules_config.items():
+        rule_name_raw = rule_cfg.get("name")
+        if not isinstance(rule_name_raw, str) or not rule_name_raw.strip():
+            continue
+        normalized_rule_name = rule_name_raw.strip().upper()
+        if normalized_rule_name not in display_rule_name_to_ids:
+            display_rule_name_to_ids[normalized_rule_name] = set()
+        display_rule_name_to_ids[normalized_rule_name].add(display_rule_id)
     
     # Load weapons for each unit type
     for unit_type, unit_data in unit_registry.units.items():
@@ -849,6 +860,7 @@ def parse_step_log(filepath: str) -> Dict:
         unit_combi_by_weapon[unit_type] = combi_by_weapon
         unit_rules = require_key(unit_data, "UNIT_RULES")
         expanded_rule_ids = set()
+        choice_effect_to_source_rules_for_unit: Dict[str, Set[str]] = {}
         for rule in unit_rules:
             direct_rule_id = require_key(rule, "ruleId")
             expanded_rule_ids.add(resolve_effect_rule_id_to_technical(direct_rule_id))
@@ -862,8 +874,13 @@ def parse_step_log(filepath: str) -> Dict:
                     f"{type(granted_rule_ids).__name__}"
                 )
             for granted_rule_id in granted_rule_ids:
-                expanded_rule_ids.add(resolve_effect_rule_id_to_technical(str(granted_rule_id)))
+                granted_rule_technical = resolve_effect_rule_id_to_technical(str(granted_rule_id))
+                expanded_rule_ids.add(granted_rule_technical)
+                if granted_rule_technical not in choice_effect_to_source_rules_for_unit:
+                    choice_effect_to_source_rules_for_unit[granted_rule_technical] = set()
+                choice_effect_to_source_rules_for_unit[granted_rule_technical].add(direct_rule_id)
         unit_rules_by_type[unit_type] = expanded_rule_ids
+        unit_choice_effect_to_source_rules[unit_type] = choice_effect_to_source_rules_for_unit
 
     # Build rule_id -> set of unit_types that have this rule (for validity check in output)
     rule_to_units: Dict[str, Set[str]] = {}
@@ -982,6 +999,15 @@ def parse_step_log(filepath: str) -> Dict:
             2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0}
         },
         'special_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule_id, unit_type) -> {1: count, 2: count}
+        'rule_choice_usage': defaultdict(
+            lambda: {
+                'correct': {1: 0, 2: 0},
+                'missing': {1: 0, 2: 0},
+                'mismatch': {1: 0, 2: 0},
+            }
+        ),  # (technical_rule_id, unit_type) -> status -> {1,2}
+        'rule_choice_selection_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (technical_rule_id, unit_type) -> {1,2}
+        'rule_choice_selection_invalid': {1: 0, 2: 0},
         'reactive_move_stats': {
             1: {'applied': 0, 'declined': 0, 'abnormal': 0},
             2: {'applied': 0, 'declined': 0, 'abnormal': 0},
@@ -1060,6 +1086,9 @@ def parse_step_log(filepath: str) -> Dict:
             'reactive_move_into_wall': {1: None, 2: None},
             'reactive_move_path_blocked': {1: None, 2: None},
             'reactive_move_distance_over_roll': {1: None, 2: None},
+            'rule_choice_selection_invalid': {1: None, 2: None},
+            'rule_choice_usage_missing': {1: None, 2: None},
+            'rule_choice_usage_mismatch': {1: None, 2: None},
             'move_adjacent_before_non_flee': {1: None, 2: None},
             'move_distance_over_limit': {
                 'move': {1: None, 2: None},
@@ -1159,6 +1188,7 @@ def parse_step_log(filepath: str) -> Dict:
     episode_victory_points = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
     scored_turns: Set[Tuple[str, int, int]] = set()
     primary_objective_configs: List[Dict[str, Any]] = []
+    selected_choice_by_unit_source: Dict[str, Dict[str, str]] = {}
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -1225,6 +1255,7 @@ def parse_step_log(filepath: str) -> Dict:
                 episode_victory_points = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
                 scored_turns = set()
                 primary_objective_configs = []
+                selected_choice_by_unit_source = {}
                 continue
 
             # Skip header lines
@@ -1453,6 +1484,11 @@ def parse_step_log(filepath: str) -> Dict:
                 success = match.group(5) == 'SUCCESS'
                 step_marker_present = match.group(6) is not None
                 step_inc = match.group(6) == 'YES' if step_marker_present else True
+                rule_choice_line_match = re.match(
+                    r'Unit (\d+)\((\d+),\s*(\d+)\) chose \[([^\]]+)\]',
+                    action_desc,
+                    re.IGNORECASE,
+                )
 
                 # CRITICAL: Apply damage regardless of STEP marker
                 # Non-step lines still contain real attacks/shots and can kill units.
@@ -1512,7 +1548,118 @@ def parse_step_log(filepath: str) -> Dict:
                         current_episode_num,
                         line
                     )
+                    if rule_choice_line_match:
+                        chosen_unit_id = rule_choice_line_match.group(1)
+                        chosen_player = (
+                            int(unit_player[chosen_unit_id])
+                            if chosen_unit_id in unit_player
+                            else int(player)
+                        )
+                        chosen_rule_label = rule_choice_line_match.group(4).strip().upper()
+                        display_rule_ids = display_rule_name_to_ids.get(chosen_rule_label, set())
+                        if len(display_rule_ids) != 1:
+                            stats['rule_choice_selection_invalid'][chosen_player] += 1
+                            if stats['first_error_lines']['rule_choice_selection_invalid'][chosen_player] is None:
+                                stats['first_error_lines']['rule_choice_selection_invalid'][chosen_player] = {
+                                    'episode': current_episode_num,
+                                    'line': line.strip()
+                                }
+                            stats['parse_errors'].append({
+                                'episode': current_episode_num,
+                                'turn': turn,
+                                'phase': phase,
+                                'line': line.strip(),
+                                'error': (
+                                    f"Rule choice label '{chosen_rule_label}' is "
+                                    f"{'unknown' if len(display_rule_ids) == 0 else 'ambiguous'}"
+                                )
+                            })
+                        else:
+                            selected_display_rule_id = next(iter(display_rule_ids))
+                            selected_technical_rule_id = resolve_effect_rule_id_to_technical(
+                                selected_display_rule_id
+                            )
+                            chosen_unit_type = require_key(unit_types, chosen_unit_id)
+                            effect_to_sources_for_unit = unit_choice_effect_to_source_rules.get(
+                                chosen_unit_type, {}
+                            )
+                            source_rule_ids = effect_to_sources_for_unit.get(
+                                selected_technical_rule_id, set()
+                            )
+                            if not source_rule_ids:
+                                stats['rule_choice_selection_invalid'][chosen_player] += 1
+                                if stats['first_error_lines']['rule_choice_selection_invalid'][chosen_player] is None:
+                                    stats['first_error_lines']['rule_choice_selection_invalid'][chosen_player] = {
+                                        'episode': current_episode_num,
+                                        'line': line.strip()
+                                    }
+                                stats['parse_errors'].append({
+                                    'episode': current_episode_num,
+                                    'turn': turn,
+                                    'phase': phase,
+                                    'line': line.strip(),
+                                    'error': (
+                                        f"Rule choice '{selected_technical_rule_id}' does not belong to "
+                                        f"any choice source for unit type {chosen_unit_type}"
+                                    )
+                                })
+                            else:
+                                if chosen_unit_id not in selected_choice_by_unit_source:
+                                    selected_choice_by_unit_source[chosen_unit_id] = {}
+                                for source_rule_id in source_rule_ids:
+                                    selected_choice_by_unit_source[chosen_unit_id][source_rule_id] = (
+                                        selected_technical_rule_id
+                                    )
+                                key = (selected_technical_rule_id, chosen_unit_type)
+                                stats['rule_choice_selection_usage'][key][chosen_player] += 1
                     action_desc_upper = action_desc.upper()
+                    if not rule_choice_line_match:
+                        actor_unit_type = require_key(unit_types, actor_id)
+                        actor_player = (
+                            int(unit_player[actor_id]) if actor_id in unit_player else int(player)
+                        )
+                        effect_to_sources_for_unit = unit_choice_effect_to_source_rules.get(
+                            actor_unit_type, {}
+                        )
+                        if effect_to_sources_for_unit:
+                            bracket_labels = re.findall(r'\[([^\]]+)\]', action_desc)
+                            for raw_bracket_label in bracket_labels:
+                                normalized_label = raw_bracket_label.strip().upper()
+                                candidate_display_rule_ids = display_rule_name_to_ids.get(
+                                    normalized_label, set()
+                                )
+                                for candidate_display_rule_id in candidate_display_rule_ids:
+                                    candidate_technical_rule_id = resolve_effect_rule_id_to_technical(
+                                        candidate_display_rule_id
+                                    )
+                                    if candidate_technical_rule_id not in effect_to_sources_for_unit:
+                                        continue
+                                    source_rule_ids = effect_to_sources_for_unit[candidate_technical_rule_id]
+                                    selected_sources = selected_choice_by_unit_source.get(actor_id, {})
+                                    has_matching_source = any(
+                                        selected_sources.get(source_rule_id) == candidate_technical_rule_id
+                                        for source_rule_id in source_rule_ids
+                                    )
+                                    has_any_selection_for_sources = any(
+                                        source_rule_id in selected_sources for source_rule_id in source_rule_ids
+                                    )
+                                    usage_key = (candidate_technical_rule_id, actor_unit_type)
+                                    if has_matching_source:
+                                        stats['rule_choice_usage'][usage_key]['correct'][actor_player] += 1
+                                    elif has_any_selection_for_sources:
+                                        stats['rule_choice_usage'][usage_key]['mismatch'][actor_player] += 1
+                                        if stats['first_error_lines']['rule_choice_usage_mismatch'][actor_player] is None:
+                                            stats['first_error_lines']['rule_choice_usage_mismatch'][actor_player] = {
+                                                'episode': current_episode_num,
+                                                'line': line.strip()
+                                            }
+                                    else:
+                                        stats['rule_choice_usage'][usage_key]['missing'][actor_player] += 1
+                                        if stats['first_error_lines']['rule_choice_usage_missing'][actor_player] is None:
+                                            stats['first_error_lines']['rule_choice_usage_missing'][actor_player] = {
+                                                'episode': current_episode_num,
+                                                'line': line.strip()
+                                            }
                     is_reactive_move = (
                         "REACTIVE MOVED" in action_desc_upper
                         or ("MOVED [" in action_desc_upper and " - TRIGGER: UNIT " in action_desc_upper)
@@ -1576,6 +1723,8 @@ def parse_step_log(filepath: str) -> Dict:
                 last_player = player
 
                 if phase != last_phase:
+                    if phase == 'COMMAND':
+                        selected_choice_by_unit_source = {}
                     if phase == 'MOVE':
                         # Reset snapshot at the start of each MOVE phase
                         positions_at_move_phase_start = {}
@@ -5259,6 +5408,50 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"{rule_id:<40} {unit_type:<55} {p1:10d} {p2:10d} {validite:>10}")
     else:
         log_print("No special rule usage recorded.")
+
+    log_print("\n  Rule-choice compliance (selected option vs used option)")
+    log_print(f"  {'Rule':<36} {'Unit':<36} {'P1 OK':>8} {'P2 OK':>8} {'P1 MISS':>8} {'P2 MISS':>8} {'P1 BAD':>8} {'P2 BAD':>8}")
+    rule_choice_usage = require_key(stats, 'rule_choice_usage')
+    rule_choice_selection_usage = require_key(stats, 'rule_choice_selection_usage')
+    rule_choice_keys = sorted(
+        set(rule_choice_usage.keys()) | set(rule_choice_selection_usage.keys())
+    )
+    if rule_choice_keys:
+        for (rule_id, unit_type) in rule_choice_keys:
+            status_counts = rule_choice_usage.get(
+                (rule_id, unit_type),
+                {'correct': {1: 0, 2: 0}, 'missing': {1: 0, 2: 0}, 'mismatch': {1: 0, 2: 0}},
+            )
+            ok_counts = require_key(status_counts, 'correct')
+            missing_counts = require_key(status_counts, 'missing')
+            mismatch_counts = require_key(status_counts, 'mismatch')
+            log_print(
+                f"  {rule_id:<36} {unit_type:<36} "
+                f"{require_key(ok_counts, 1):8d} {require_key(ok_counts, 2):8d} "
+                f"{require_key(missing_counts, 1):8d} {require_key(missing_counts, 2):8d} "
+                f"{require_key(mismatch_counts, 1):8d} {require_key(mismatch_counts, 2):8d}"
+            )
+        selection_invalid = require_key(stats, 'rule_choice_selection_invalid')
+        if selection_invalid[1] > 0 and stats['first_error_lines']['rule_choice_selection_invalid'][1]:
+            first_err = stats['first_error_lines']['rule_choice_selection_invalid'][1]
+            log_print(f"  First invalid selection P1 (Episode {first_err['episode']}): {first_err['line']}")
+        if selection_invalid[2] > 0 and stats['first_error_lines']['rule_choice_selection_invalid'][2]:
+            first_err = stats['first_error_lines']['rule_choice_selection_invalid'][2]
+            log_print(f"  First invalid selection P2 (Episode {first_err['episode']}): {first_err['line']}")
+        if stats['first_error_lines']['rule_choice_usage_missing'][1]:
+            first_err = stats['first_error_lines']['rule_choice_usage_missing'][1]
+            log_print(f"  First missing choice usage P1 (Episode {first_err['episode']}): {first_err['line']}")
+        if stats['first_error_lines']['rule_choice_usage_missing'][2]:
+            first_err = stats['first_error_lines']['rule_choice_usage_missing'][2]
+            log_print(f"  First missing choice usage P2 (Episode {first_err['episode']}): {first_err['line']}")
+        if stats['first_error_lines']['rule_choice_usage_mismatch'][1]:
+            first_err = stats['first_error_lines']['rule_choice_usage_mismatch'][1]
+            log_print(f"  First wrong choice usage P1 (Episode {first_err['episode']}): {first_err['line']}")
+        if stats['first_error_lines']['rule_choice_usage_mismatch'][2]:
+            first_err = stats['first_error_lines']['rule_choice_usage_mismatch'][2]
+            log_print(f"  First wrong choice usage P2 (Episode {first_err['episode']}): {first_err['line']}")
+    else:
+        log_print("  No rule-choice usage recorded.")
 
     # WEAPONS RULES USAGE (by rule and weapon+unit)
     active_debug_section = "1.8"

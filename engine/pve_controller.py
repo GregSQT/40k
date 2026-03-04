@@ -280,6 +280,93 @@ class PvEController:
             print(f"🔍 [AI_DECISION] Final semantic_action: {semantic_action}")
         return semantic_action
 
+    def _evaluate_rule_choice_option_value(
+        self, unit_id: str, game_state: Dict[str, Any], engine
+    ) -> float:
+        """
+        Evaluate one rule-choice option using the policy value head.
+
+        The selected option is expected to already be applied in game_state before this call.
+        """
+        micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(unit_id, game_state)
+        unit_observation = engine.build_observation_for_unit(str(unit_id))
+        unit_observation = self._normalize_obs_for_inference(unit_observation, micro_model_path)
+        obs_tensor, _ = micro_model.policy.obs_to_tensor(unit_observation)
+        with torch.no_grad():
+            value_tensor = micro_model.policy.predict_values(obs_tensor)
+        value_array = value_tensor.detach().cpu().numpy().reshape(-1)
+        if value_array.size != 1:
+            raise ValueError(
+                f"Expected scalar policy value for rule choice evaluation, got shape {value_array.shape}"
+            )
+        option_value = float(value_array[0])
+        if np.isnan(option_value):
+            raise ValueError("Policy value for rule choice evaluation is NaN")
+        return option_value
+
+    def select_rule_choice_with_policy(
+        self, prompt: Dict[str, Any], game_state: Dict[str, Any], engine
+    ) -> str:
+        """
+        Select one rule-choice option with trained policy evaluation.
+
+        Strategy:
+        - Simulate each candidate option by setting `_selected_granted_rule_id`.
+        - Build the unit observation for that simulated state.
+        - Score with the micro-policy value head.
+        - Pick the option with the highest value (deterministic tie-break by display_rule_id).
+        """
+        if not self.micro_models:
+            raise RuntimeError("Micro models not loaded for policy-based rule choice")
+
+        options = require_key(prompt, "options")
+        if not isinstance(options, list) or not options:
+            raise ValueError(f"Rule choice prompt requires non-empty options list, got: {options!r}")
+        unit_id = str(require_key(prompt, "unit_id"))
+        rule_id = require_key(prompt, "rule_id")
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            raise ValueError(f"Rule choice prompt requires non-empty rule_id, got: {rule_id!r}")
+
+        unit = engine._get_unit_by_id(unit_id)
+        if unit is None:
+            raise KeyError(f"Cannot evaluate rule choice: unit {unit_id} not found")
+        unit_rules = require_key(unit, "UNIT_RULES")
+        if not isinstance(unit_rules, list):
+            raise TypeError(f"UNIT_RULES must be a list for unit {unit_id}")
+
+        source_rule_entry = None
+        for unit_rule in unit_rules:
+            if require_key(unit_rule, "ruleId") == rule_id:
+                source_rule_entry = unit_rule
+                break
+        if source_rule_entry is None:
+            raise KeyError(f"Rule '{rule_id}' not found in UNIT_RULES for unit {unit_id}")
+
+        previous_selected_rule_id = source_rule_entry.get("_selected_granted_rule_id")
+        option_scores: List[Tuple[str, float]] = []
+        try:
+            for option in options:
+                display_rule_id = require_key(option, "display_rule_id")
+                if not isinstance(display_rule_id, str) or not display_rule_id.strip():
+                    raise ValueError(f"Invalid display_rule_id in rule choice option: {option!r}")
+                normalized_display_rule_id = display_rule_id.strip()
+                source_rule_entry["_selected_granted_rule_id"] = normalized_display_rule_id
+                option_value = self._evaluate_rule_choice_option_value(unit_id, game_state, engine)
+                option_scores.append((normalized_display_rule_id, option_value))
+        finally:
+            source_rule_entry["_selected_granted_rule_id"] = previous_selected_rule_id
+
+        if not option_scores:
+            raise ValueError(f"No option scores computed for prompt: {prompt!r}")
+
+        best_value = max(score for _, score in option_scores)
+        best_display_rule_ids = [
+            display_rule_id for display_rule_id, score in option_scores if score == best_value
+        ]
+        if not best_display_rule_ids:
+            raise ValueError(f"No best option found despite computed scores: {option_scores!r}")
+        return sorted(best_display_rule_ids)[0]
+
     def _build_macro_vector(self, macro_obs: Dict[str, Any], max_units: int, max_objectives: int) -> np.ndarray:
         """
         Build macro observation vector compatible with MacroTrainingWrapper.

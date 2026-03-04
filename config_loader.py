@@ -16,12 +16,12 @@ class ConfigLoader:
     # Canonical inter-faction agent keys resolved to source config directories/files.
     _INTERFACTION_AGENT_CONFIG_MAP: Dict[str, str] = {
         "Infantry_Troop_RangedSwarm": "Infantry_Troop_RangedSwarm",
-        "Infantry_Troop_MeleeTroop": "Infantry_Troop_MeleeSwarm",
-        "Infantry_LeaderElite_MeleeElite": "Infantry_Troop_MeleeSwarm",
-        "Infantry_Elite_MeleeElite": "Infantry_Troop_MeleeSwarm",
-        "Infantry_Elite_RangedTroop": "Infantry_Troop_RangedSwarm",
-        "Infantry_Elite_RangedElite": "Infantry_Troop_RangedSwarm",
-        "Infantry_Swarm_RangedSwarm": "Infantry_Troop_RangedTroop",
+        "Infantry_Troop_MeleeTroop": "Infantry_Troop_MeleeTroop",
+        "Infantry_LeaderElite_MeleeElite": "Infantry_LeaderElite_MeleeElite",
+        "Infantry_Elite_MeleeElite": "Infantry_Elite_MeleeElite",
+        "Infantry_Elite_RangedTroop": "Infantry_Elite_RangedTroop",
+        "Infantry_Elite_RangedElite": "Infantry_Elite_RangedElite",
+        "Infantry_Swarm_RangedSwarm": "Infantry_Swarm_RangedSwarm",
         "Infantry_Swarm_MeleeSwarm": "Infantry_Swarm_MeleeSwarm",
         "Infantry_Troop_RangedTroop": "Infantry_Troop_RangedTroop",
     }

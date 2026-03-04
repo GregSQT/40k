@@ -1635,6 +1635,83 @@ class W40KEngine(gym.Env):
                 }
             )
 
+    def _record_rule_choice_action_log(self, prompt: Dict[str, Any], selected_display_rule_id: str) -> None:
+        """Record one rule choice in action_logs and step.log."""
+        unit_id = str(require_key(prompt, "unit_id"))
+        prompt_player = int(require_key(prompt, "player"))
+        registry = self._get_unit_rule_registry()
+        if selected_display_rule_id not in registry:
+            raise KeyError(
+                f"Unknown selected display rule id '{selected_display_rule_id}' in rule choice log"
+            )
+        selected_rule_cfg = registry[selected_display_rule_id]
+        selected_rule_name = require_key(selected_rule_cfg, "name")
+        if not isinstance(selected_rule_name, str) or not selected_rule_name.strip():
+            raise ValueError(
+                f"Rule '{selected_display_rule_id}' must define non-empty 'name' for rule choice logging"
+            )
+        selected_rule_name_upper = selected_rule_name.strip().upper()
+        unit = self._get_unit_by_id(unit_id)
+        if unit is None:
+            raise KeyError(f"Cannot record rule choice log: unit {unit_id} not found")
+        unit_col, unit_row = require_unit_position(unit, self.game_state)
+        message = f"Unit {unit_id}({unit_col},{unit_row}) chose [{selected_rule_name_upper}]"
+
+        action_logs = self.game_state.get("action_logs")
+        if not isinstance(action_logs, list):
+            raise TypeError(
+                f"game_state['action_logs'] must be a list before rule choice logging, got {type(action_logs).__name__}"
+            )
+        action_logs.append(
+            {
+                "type": "rule_choice",
+                "message": message,
+                "unitId": unit_id,
+                "player": prompt_player,
+                "col": unit_col,
+                "row": unit_row,
+                "selectedRuleId": selected_display_rule_id,
+                "selectedRuleName": selected_rule_name_upper,
+                "ruleId": require_key(prompt, "rule_id"),
+                "trigger": require_key(prompt, "trigger"),
+                "phase": prompt.get("phase"),
+            }
+        )
+
+        # write to step.log immediately because select_rule_choice bypasses normal step logger flow
+        if self.step_logger and self.step_logger.enabled:
+            try:
+                phase_raw = prompt.get("phase")
+                if not isinstance(phase_raw, str) or not phase_raw.strip():
+                    phase_for_log = str(require_key(self.game_state, "phase"))
+                else:
+                    phase_for_log = phase_raw.strip()
+                current_turn = require_key(self.game_state, "turn")
+                current_episode = require_key(self.game_state, "episode_number")
+                self.step_logger.log_action(
+                    unit_id=unit_id,
+                    action_type="rule_choice",
+                    phase=phase_for_log,
+                    player=prompt_player,
+                    success=True,
+                    step_increment=False,
+                    action_details={
+                        "current_turn": current_turn,
+                        "current_episode": current_episode,
+                        "unit_with_coords": f"{unit_id}({unit_col},{unit_row})",
+                        "selected_rule_name": selected_rule_name_upper,
+                        "reward": 0.0,
+                    },
+                    step_calls_since_last=None,
+                )
+            except Exception as e:
+                from engine.game_utils import add_console_log
+                add_console_log(
+                    self.game_state,
+                    f"[STEP LOGGER ERROR] Rule choice logging failed but action continues - "
+                    f"{type(e).__name__}: {str(e)}"
+                )
+
     def _apply_rule_choice_selection(
         self, prompt: Dict[str, Any], selected_display_rule_id: str
     ) -> None:
@@ -1655,8 +1732,23 @@ class W40KEngine(gym.Env):
         for rule in unit_rules:
             if require_key(rule, "ruleId") == rule_id:
                 rule["_selected_granted_rule_id"] = selected_display_rule_id
+                self._record_rule_choice_action_log(prompt, selected_display_rule_id)
                 return
         raise KeyError(f"Rule '{rule_id}' not found in UNIT_RULES for unit {unit_id}")
+
+    def _select_ai_rule_choice_option(self, prompt: Dict[str, Any]) -> str:
+        """
+        Select one rule-choice option for AI players using trained policy.
+        """
+        if not hasattr(self, "pve_controller"):
+            raise RuntimeError("AI rule choice requires pve_controller to be initialized")
+        if not self.pve_controller.is_ready_for_decision():
+            raise RuntimeError("AI rule choice requires loaded micro models in pve_controller")
+        return self.pve_controller.select_rule_choice_with_policy(
+            prompt=prompt,
+            game_state=self.game_state,
+            engine=self,
+        )
 
     def _emit_next_rule_choice_prompt_if_needed(self) -> Optional[Dict[str, Any]]:
         """Return waiting payload for next human prompt, auto-resolving AI prompts."""
@@ -1683,8 +1775,8 @@ class W40KEngine(gym.Env):
                     "player": prompt_player,
                 }
 
-            # AI/auto side: deterministic first option.
-            selected_display_rule_id = require_key(options[0], "display_rule_id")
+            # AI side: policy-based option selection (no heuristic fallback).
+            selected_display_rule_id = self._select_ai_rule_choice_option(prompt)
             self._apply_rule_choice_selection(prompt, selected_display_rule_id)
             queue.pop(0)
             self.game_state["active_rule_choice_prompt"] = None

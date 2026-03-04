@@ -35,6 +35,7 @@ export interface BaseLogEntry {
   type:
     | "move"
     | "reactive_move"
+    | "rule_choice"
     | "shoot"
     | "combat"
     | "charge"
@@ -341,6 +342,8 @@ export function getEventIcon(type: string): string {
       return "→"; // Arrow for movement
     case "reactive_move":
       return "⚠️"; // Yellow warning triangle for reactive movement
+    case "rule_choice":
+      return "⚠️"; // Same icon as reactive movement
     case "shoot":
       return "◎"; // Target circle for shooting
     case "charge":
@@ -376,6 +379,8 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       return "game-log-entry--move";
     case "reactive_move":
       return "game-log-entry--reactive-move";
+    case "rule_choice":
+      return "game-log-entry--rule-choice";
     case "shoot":
       // Check shootDetails for actual shooting results
       // Note: Death is handled by separate 'death' event type, not here

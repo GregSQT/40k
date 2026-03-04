@@ -747,6 +747,12 @@ class StepLogger:
             if reason:
                 return f"{unit_label} SKIP ({reason})"
             return f"{unit_label} SKIP"
+
+        elif action_type == "rule_choice":
+            selected_rule_name = details.get("selected_rule_name")
+            if not isinstance(selected_rule_name, str) or not selected_rule_name.strip():
+                raise KeyError("Rule_choice action missing required selected_rule_name")
+            return f"{unit_label} chose [{selected_rule_name.strip().upper()}]"
             
         elif action_type == "combat_individual":
             # Individual attack within multi-attack sequence

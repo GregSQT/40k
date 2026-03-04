@@ -1,0 +1,10 @@
+{
+  "faction": "tyranid",
+  "description": "Tyranid army:\n4 Tyranid Warriors (Melee)",
+  "units": [
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 14
+    }
+  ]
+}
