@@ -354,6 +354,21 @@ class ConfigLoader:
                 raise KeyError(f"Rule '{rule_id}' missing required 'id' field")
             if str(rule_data["id"]) != str(rule_id):
                 raise ValueError(f"Rule id mismatch: key '{rule_id}' != rule.id '{rule_data['id']}'")
+            if "name" in rule_data:
+                name_value = rule_data["name"]
+                if not isinstance(name_value, str) or not name_value.strip():
+                    raise ValueError(f"Rule '{rule_id}' has invalid 'name': {name_value!r}")
+            if "alias" in rule_data:
+                alias_value = rule_data["alias"]
+                if not isinstance(alias_value, str) or not alias_value.strip():
+                    raise ValueError(f"Rule '{rule_id}' has invalid 'alias': {alias_value!r}")
+                alias_rule_id = alias_value.strip()
+                if alias_rule_id not in unit_rules:
+                    raise KeyError(
+                        f"Rule '{rule_id}' alias '{alias_rule_id}' is missing in config/unit_rules.json"
+                    )
+                if alias_rule_id == str(rule_id):
+                    raise ValueError(f"Rule '{rule_id}' cannot alias itself")
 
         self._cache[cache_key] = unit_rules
         return unit_rules

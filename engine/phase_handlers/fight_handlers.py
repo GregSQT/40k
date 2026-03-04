@@ -28,81 +28,25 @@ from .shared_utils import (
     update_units_cache_hp, remove_from_units_cache,
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
+    unit_has_rule_effect as shared_unit_has_rule_effect,
+    get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
+    get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
 )
 
 
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     """Check if unit has a specific direct or granted rule effect by ruleId."""
-    unit_rules = require_key(unit, "UNIT_RULES")
-    for rule in unit_rules:
-        direct_rule_id = require_key(rule, "ruleId")
-        if direct_rule_id == rule_id:
-            return True
-        granted_rule_ids = rule.get("grants_rule_ids")
-        if granted_rule_ids is None:
-            continue
-        if not isinstance(granted_rule_ids, list):
-            raise TypeError(
-                f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
-                f"{type(granted_rule_ids).__name__}"
-            )
-        if rule_id in granted_rule_ids:
-            return True
-    return False
+    return shared_unit_has_rule_effect(unit, rule_id)
 
 
 def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
     """Return source UNIT_RULES.ruleId that grants/owns the effect; None if absent."""
-    unit_rules = require_key(unit, "UNIT_RULES")
-    for rule in unit_rules:
-        source_rule_id = require_key(rule, "ruleId")
-        if source_rule_id == effect_rule_id:
-            return source_rule_id
-        granted_rule_ids = rule.get("grants_rule_ids")
-        if granted_rule_ids is None:
-            continue
-        if not isinstance(granted_rule_ids, list):
-            raise TypeError(
-                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
-                f"{type(granted_rule_ids).__name__}"
-            )
-        if effect_rule_id in granted_rule_ids:
-            return source_rule_id
-    return None
+    return shared_get_source_unit_rule_id_for_effect(unit, effect_rule_id)
 
 
 def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
     """Return source UNIT_RULES.displayName for an effect rule; None if absent."""
-    unit_rules = require_key(unit, "UNIT_RULES")
-    for rule in unit_rules:
-        source_rule_id = require_key(rule, "ruleId")
-        if source_rule_id == effect_rule_id:
-            display_name = require_key(rule, "displayName")
-            if not isinstance(display_name, str) or not display_name.strip():
-                unit_id = require_key(unit, "id")
-                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
-                raise ValueError(
-                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
-                )
-            return display_name.strip().upper()
-        granted_rule_ids = rule.get("grants_rule_ids")
-        if granted_rule_ids is None:
-            continue
-        if not isinstance(granted_rule_ids, list):
-            raise TypeError(
-                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
-                f"{type(granted_rule_ids).__name__}"
-            )
-        if effect_rule_id in granted_rule_ids:
-            display_name = require_key(rule, "displayName")
-            if not isinstance(display_name, str) or not display_name.strip():
-                unit_id = require_key(unit, "id")
-                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
-                raise ValueError(
-                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
-                )
-            return display_name.strip().upper()
-    return None
+    return shared_get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
 
 
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
@@ -1824,23 +1768,50 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     save_success = False
     damage_dealt = 0
     target_died = False
+    hit_ability_display_name = None
     wound_ability_display_name = None
+    save_ability_display_name = None
 
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name in attack_log
     weapon_name = weapon.get("display_name", "")
     weapon_prefix = f" with [{weapon_name}]" if weapon_name else ""
     
     # Hit roll -> hit_roll >= weapon.ATK
-    hit_roll = random.randint(1, 6)
+    initial_hit_roll = random.randint(1, 6)
+    hit_roll = initial_hit_roll
     hit_target = weapon["ATK"]
+    can_reroll_hit_ones = hit_roll == 1 and _unit_has_rule(attacker, "reroll_1_tohit_fight")
+    hit_log_suffix = ""
+    if can_reroll_hit_ones:
+        source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
+            attacker, "reroll_1_tohit_fight"
+        )
+        if source_rule_display_name is None:
+            raise ValueError(
+                f"Attacker {attacker_id} rerolled hit roll of 1 without source unit rule"
+            )
+        hit_ability_display_name = source_rule_display_name
+        hit_log_suffix = f" [{source_rule_display_name}]"
+        hit_roll = random.randint(1, 6)
     hit_success = hit_roll >= hit_target
 
     if not hit_success:
         # MISS case
-        attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) : MISSED !"
+        if can_reroll_hit_ones:
+            attack_log = (
+                f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                f"Hit {initial_hit_roll}->{hit_roll}({hit_target}+){hit_log_suffix} : MISSED !"
+            )
+        else:
+            attack_log = (
+                f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                f"Hit {hit_roll}({hit_target}+) : MISSED !"
+            )
     else:
         # HIT -> Continue to wound roll
         wound_roll = random.randint(1, 6)
+        initial_wound_roll = wound_roll
+        wound_rerolled = False
         wound_target = _calculate_wound_target(weapon["STR"], target["T"])
         wound_success = wound_roll >= wound_target
         wound_log_suffix = ""
@@ -1852,6 +1823,7 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
             can_reroll_wound_ones = wound_roll == 1 and _unit_has_rule(attacker, "reroll_1_towound")
             if can_reroll_failed_wound_on_objective or can_reroll_wound_ones:
                 wound_roll = random.randint(1, 6)
+                wound_rerolled = True
                 wound_success = wound_roll >= wound_target
                 if can_reroll_failed_wound_on_objective:
                     source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
@@ -1876,16 +1848,58 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
 
         if not wound_success:
             # FAIL TO WOUND case
-            attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} : FAILED !"
+            if can_reroll_hit_ones:
+                hit_log_value = f"{initial_hit_roll}->{hit_roll}"
+            else:
+                hit_log_value = str(hit_roll)
+            if wound_rerolled:
+                wound_log_value = f"{initial_wound_roll}->{wound_roll}"
+            else:
+                wound_log_value = str(wound_roll)
+            attack_log = (
+                f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
+                f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} : FAILED !"
+            )
         else:
             # WOUND -> Continue to save roll
+            if wound_rerolled:
+                wound_log_value = f"{initial_wound_roll}->{wound_roll}"
+            else:
+                wound_log_value = str(wound_roll)
             save_roll = random.randint(1, 6)
+            initial_save_roll = save_roll
+            save_log_suffix = ""
+            if save_roll == 1 and _unit_has_rule(target, "reroll_1_save_fight"):
+                source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
+                    target, "reroll_1_save_fight"
+                )
+                if source_rule_display_name is None:
+                    raise ValueError(
+                        f"Target {target_id} rerolled save roll of 1 without source unit rule"
+                    )
+                save_ability_display_name = source_rule_display_name
+                save_log_suffix = f" [{source_rule_display_name}]"
+                save_roll = random.randint(1, 6)
             save_target = _calculate_save_target(target, weapon["AP"])
             save_success = save_roll >= save_target
+            if save_ability_display_name is not None:
+                save_log_value = f"{initial_save_roll}->{save_roll}"
+            else:
+                save_log_value = str(save_roll)
 
             if save_success:
                 # SAVED case
-                attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) : SAVED !"
+                if can_reroll_hit_ones:
+                    hit_log_value = f"{initial_hit_roll}->{hit_roll}"
+                else:
+                    hit_log_value = str(hit_roll)
+                attack_log = (
+                    f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                    f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
+                    f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} - "
+                    f"Save {save_log_value}({save_target}+){save_log_suffix} : SAVED !"
+                )
             else:
                 # DAMAGE case - apply damage. HP_CUR single write path: update_units_cache_hp only (Phase 2: from cache)
                 damage_dealt = resolve_dice_value(require_key(weapon, "DMG"), "fight_damage")
@@ -1906,9 +1920,29 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Invalidate cache for dead unit
                     from engine.ai.weapon_selector import invalidate_cache_for_unit
                     invalidate_cache_for_unit(cache, str(target["id"]))
-                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} dealt : Unit {target_id} DIED !"
+                    if can_reroll_hit_ones:
+                        hit_log_value = f"{initial_hit_roll}->{hit_roll}"
+                    else:
+                        hit_log_value = str(hit_roll)
+                    attack_log = (
+                        f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                        f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
+                        f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} - "
+                        f"Save {save_log_value}({save_target}+){save_log_suffix} - "
+                        f"{damage_dealt} dealt : Unit {target_id} DIED !"
+                    )
                 else:
-                    attack_log = f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : Hit {hit_roll}({hit_target}+) - Wound {wound_roll}({wound_target}+){wound_log_suffix} - Save {save_roll}({save_target}+) - {damage_dealt} DAMAGE DEALT !"
+                    if can_reroll_hit_ones:
+                        hit_log_value = f"{initial_hit_roll}->{hit_roll}"
+                    else:
+                        hit_log_value = str(hit_roll)
+                    attack_log = (
+                        f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                        f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
+                        f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} - "
+                        f"Save {save_log_value}({save_target}+){save_log_suffix} - "
+                        f"{damage_dealt} DAMAGE DEALT !"
+                    )
 
     # AI_TURN.md COMPLIANCE: Log ALL attacks to action_logs (not just damage)
     if "action_logs" not in game_state:
@@ -1945,6 +1979,8 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
             "targetDied": target_died
         }],
         "wound_ability_display_name": wound_ability_display_name,
+        "hit_ability_display_name": hit_ability_display_name,
+        "save_ability_display_name": save_ability_display_name,
         "timestamp": "server_time"
     })
 
@@ -1974,6 +2010,8 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         "damage": damage_dealt,
         "target_died": target_died,
         "wound_ability_display_name": wound_ability_display_name,
+        "hit_ability_display_name": hit_ability_display_name,
+        "save_ability_display_name": save_ability_display_name,
         "attack_log": attack_log,
         "weapon_name": weapon_name,  # MULTIPLE_WEAPONS_IMPLEMENTATION.md
         "target_coords": target_coords

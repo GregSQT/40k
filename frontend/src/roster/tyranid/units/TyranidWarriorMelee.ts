@@ -18,7 +18,7 @@ export class TyranidWarriorMelee extends TyranidInfantryTroopMeleeTroop {
   static VALUE = 24; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = [];
+  static RNG_WEAPON_CODES: string[] = [];
   static RNG_WEAPONS = getWeapons(TyranidWarriorMelee.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["bio_weapon_warrior"];
   static CC_WEAPONS = getWeapons(TyranidWarriorMelee.CC_WEAPON_CODES);
@@ -33,7 +33,16 @@ export class TyranidWarriorMelee extends TyranidInfantryTroopMeleeTroop {
     {
       ruleId: "adrenalised_onslaught",
       displayName: "Adrenalised Onslaught",
-      grants_rule_ids: ["reroll_1_tohit_fight", "reroll_1_save_fight"],
+      grants_rule_ids: [
+        "aggression_imperative",
+        "preservation_imperative",
+      ],
+      usage: "or",
+      choice_timing: {
+        trigger: "phase_start",
+        phase: "fight",
+        active_player_scope: "both",
+      },
     },
   ];
 

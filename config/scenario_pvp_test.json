@@ -3,31 +3,38 @@
   "units": [
     {
       "id": 1,
-      "unit_type": "IntercessorSergeant",
+      "unit_type": "TyranidWarriorMelee",
       "player": 1,
-      "col": 14,
-      "row": 14
-    },
-    {
-      "id": 2,
-      "unit_type": "Gargoyle",
-      "player": 1,
-      "col": 20,
+      "col": 11,
       "row": 7
     },
     {
+      "id": 2,
+      "unit_type": "TyranidWarriorMelee",
+      "player": 1,
+      "col": 6,
+      "row": 12
+    },
+    {
       "id": 3,
-      "unit_type": "IntercessorTest",
+      "unit_type": "TyranidWarriorMelee",
       "player": 2,
       "col": 10,
       "row": 6
     },
     {
       "id": 4,
-      "unit_type": "IntercessorTest",
+      "unit_type": "TyranidWarriorMelee",
       "player": 2,
       "col": 4,
       "row": 13
+    },
+    {
+      "id": 5,
+      "unit_type": "IntercessorTest",
+      "player": 2,
+      "col": 4,
+      "row": 14
     }
   ],
   "objectives": [

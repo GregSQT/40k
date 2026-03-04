@@ -1,6 +1,6 @@
 // frontend/src/components/BoardWithAPI.tsx
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import "../App.css";
 import { clearAuthSession, getAuthSession } from "../auth/authStorage";
@@ -9,6 +9,7 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState } from "../types/game";
+import unitRulesConfig from "../../../config/unit_rules.json";
 import BoardPvp from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -16,6 +17,21 @@ import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import { UnitStatusTable } from "./UnitStatusTable";
+
+type RuleChoicePrompt = {
+  trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+  phase?: "command" | "move" | "shoot" | "charge" | "fight";
+  player: number;
+  unit_id: string;
+  rule_id: string;
+  display_name: string;
+  usage: "or" | "unique";
+  options: Array<{
+    display_rule_id: string;
+    technical_rule_id: string;
+    label: string;
+  }>;
+};
 
 export const BoardWithAPI: React.FC = () => {
   const authSession = getAuthSession();
@@ -115,6 +131,11 @@ export const BoardWithAPI: React.FC = () => {
   const [rosterPickerHoveredDescription, setRosterPickerHoveredDescription] = useState<string>("");
   const [rosterPickerLoading, setRosterPickerLoading] = useState(false);
   const [rosterPickerError, setRosterPickerError] = useState<string | null>(null);
+  const [ruleChoiceHoveredDescription, setRuleChoiceHoveredDescription] = useState<string>("");
+  const [ruleChoiceFocusedUnitId, setRuleChoiceFocusedUnitId] = useState<string | null>(null);
+  const [ruleChoicePopupPosition, setRuleChoicePopupPosition] = useState({ x: 140, y: 120 });
+  const [isDraggingRuleChoicePopup, setIsDraggingRuleChoicePopup] = useState(false);
+  const ruleChoiceDragOffsetRef = useRef({ x: 0, y: 0 });
   const [showGameOverPopup, setShowGameOverPopup] = useState(false);
   const isRosterSetupMode = gameMode === "test" || gameMode === "pvp" || gameMode === "pve_old";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
@@ -159,6 +180,89 @@ export const BoardWithAPI: React.FC = () => {
   };
 
   const isGameOver = apiProps.gameState?.game_over === true;
+  const activeRuleChoicePrompt = (apiProps.ruleChoicePrompt as RuleChoicePrompt | null) ?? null;
+  const pendingRuleChoiceQueue = (
+    (apiProps.gameState as GameState & { pending_rule_choice_queue?: RuleChoicePrompt[] } | null)
+      ?.pending_rule_choice_queue ?? []
+  ).filter((entry): entry is RuleChoicePrompt => {
+    return (
+      typeof entry?.unit_id === "string" &&
+      typeof entry?.display_name === "string" &&
+      Array.isArray(entry?.options)
+    );
+  });
+  const ruleChoicePrompts = (() => {
+    const map = new Map<string, RuleChoicePrompt>();
+    if (activeRuleChoicePrompt) {
+      map.set(`${activeRuleChoicePrompt.unit_id}:${activeRuleChoicePrompt.rule_id}`, activeRuleChoicePrompt);
+    }
+    for (const queueEntry of pendingRuleChoiceQueue) {
+      map.set(`${queueEntry.unit_id}:${queueEntry.rule_id}`, queueEntry);
+    }
+    return Array.from(map.values());
+  })();
+  const focusedRuleChoicePrompt =
+    (ruleChoiceFocusedUnitId
+      ? ruleChoicePrompts.find((prompt) => prompt.unit_id === ruleChoiceFocusedUnitId)
+      : null) ?? activeRuleChoicePrompt;
+  const ruleDescriptionById = useMemo(() => {
+    const rawConfig = unitRulesConfig as Record<string, unknown>;
+    const descriptions: Record<string, string> = {};
+    for (const [entryKey, entryValue] of Object.entries(rawConfig)) {
+      if (typeof entryValue !== "object" || entryValue === null) {
+        throw new Error(`Invalid unit_rules.json entry '${entryKey}': expected an object`);
+      }
+      const record = entryValue as Record<string, unknown>;
+      const id = record.id;
+      const description = record.description;
+      if (typeof id !== "string" || id.trim() === "") {
+        throw new Error(`Invalid unit_rules.json entry '${entryKey}': missing non-empty 'id'`);
+      }
+      if (typeof description !== "string" || description.trim() === "") {
+        throw new Error(`Invalid unit_rules.json entry '${entryKey}': missing non-empty 'description'`);
+      }
+      descriptions[id] = description;
+    }
+    return descriptions;
+  }, []);
+  const getRuleDescription = (ruleId: string): string => {
+    const description = ruleDescriptionById[ruleId];
+    if (typeof description !== "string" || description.trim() === "") {
+      throw new Error(`Missing description for rule id '${ruleId}' in config/unit_rules.json`);
+    }
+    return description;
+  };
+
+  useEffect(() => {
+    if (!activeRuleChoicePrompt) {
+      setRuleChoiceFocusedUnitId(null);
+      setRuleChoiceHoveredDescription("");
+      return;
+    }
+    setRuleChoiceFocusedUnitId(activeRuleChoicePrompt.unit_id);
+  }, [activeRuleChoicePrompt]);
+
+  useEffect(() => {
+    if (!isDraggingRuleChoicePopup) {
+      return;
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      setRuleChoicePopupPosition({
+        x: event.clientX - ruleChoiceDragOffsetRef.current.x,
+        y: event.clientY - ruleChoiceDragOffsetRef.current.y,
+      });
+    };
+    const onMouseUp = () => {
+      setIsDraggingRuleChoicePopup(false);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [isDraggingRuleChoicePopup]);
+
   useEffect(() => {
     if (isGameOver) {
       setShowGameOverPopup(true);
@@ -823,6 +927,64 @@ export const BoardWithAPI: React.FC = () => {
     );
   })();
 
+  const unitsById = new Map((apiProps.gameState?.units ?? []).map((unit) => [String(unit.id), unit]));
+  const getRulePromptUnitLabel = (prompt: RuleChoicePrompt): string => {
+    const unit = unitsById.get(prompt.unit_id);
+    if (!unit) {
+      return `Unite #${prompt.unit_id} - ${prompt.display_name}`;
+    }
+    return `${unit.DISPLAY_NAME || unit.id} #${unit.id} - ${prompt.display_name}`;
+  };
+  const getRulePromptPlayerClass = (prompt: RuleChoicePrompt): string => {
+    const unit = unitsById.get(prompt.unit_id);
+    if (!unit) {
+      return "";
+    }
+    if (unit.player === 1) {
+      return "rule-choice-group__unit-btn--player1";
+    }
+    if (unit.player === 2) {
+      return "rule-choice-group__unit-btn--player2";
+    }
+    return "";
+  };
+  const getRulePromptDescription = (): string => {
+    if (ruleChoiceHoveredDescription) {
+      return ruleChoiceHoveredDescription;
+    }
+    return "";
+  };
+  const getRuleChoiceMomentLabel = (prompt: RuleChoicePrompt): string => {
+    if (prompt.phase === "command") return "Command Phase";
+    if (prompt.phase === "move") return "Move Phase";
+    if (prompt.phase === "shoot") return "Shoot Phase";
+    if (prompt.phase === "charge") return "Charge Phase";
+    if (prompt.phase === "fight") return "Fight Phase";
+    if (prompt.trigger === "on_deploy") return "On Deploy";
+    if (prompt.trigger === "turn_start") return "Turn Start";
+    if (prompt.trigger === "player_turn_start") return "Player Turn Start";
+    if (prompt.trigger === "phase_start") return "Phase Start";
+    if (prompt.trigger === "activation_start") return "Activation Start";
+    throw new Error(`Unknown rule choice trigger context: ${JSON.stringify(prompt)}`);
+  };
+  const onRuleChoiceTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    ruleChoiceDragOffsetRef.current = {
+      x: event.clientX - ruleChoicePopupPosition.x,
+      y: event.clientY - ruleChoicePopupPosition.y,
+    };
+    setIsDraggingRuleChoicePopup(true);
+  };
+  const highlightedRuleChoiceUnitId = (() => {
+    if (ruleChoiceFocusedUnitId === null) {
+      return null;
+    }
+    const parsed = parseInt(ruleChoiceFocusedUnitId, 10);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return parsed;
+  })();
+
   const rightColumnContent = (
     <>
       {gameConfig ? (
@@ -988,6 +1150,87 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       )}
+      {activeRuleChoicePrompt && (
+        <div className="rule-choice-overlay">
+          <div
+            className="deployment-panel__picker deployment-panel__picker--draggable"
+            style={{ left: `${ruleChoicePopupPosition.x}px`, top: `${ruleChoicePopupPosition.y}px` }}
+          >
+            <button
+              type="button"
+              className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
+              onMouseDown={onRuleChoiceTitleMouseDown}
+            >
+              Capacity choice - {getRuleChoiceMomentLabel(activeRuleChoicePrompt)}{" "}
+              {isDraggingRuleChoicePopup ? "(drag...)" : ""}
+            </button>
+            <div className="deployment-panel__picker-content">
+              <div className="deployment-panel__picker-list">
+                {ruleChoicePrompts.map((prompt) => {
+                  const isFocused = focusedRuleChoicePrompt?.unit_id === prompt.unit_id;
+                  const isActivePrompt = isFocused;
+                  return (
+                    <div key={`${prompt.unit_id}:${prompt.rule_id}`} className="rule-choice-group">
+                      <div className="rule-choice-group__row">
+                        <div className="rule-choice-group__unit-col">
+                          <button
+                            type="button"
+                            className={`deployment-panel__picker-item rule-choice-group__unit-btn ${getRulePromptPlayerClass(prompt)} ${isFocused ? "deployment-panel__picker-item--active" : ""}`}
+                            onMouseEnter={() =>
+                              setRuleChoiceHoveredDescription(getRuleDescription(prompt.rule_id))
+                            }
+                            onMouseLeave={() => setRuleChoiceHoveredDescription("")}
+                            onClick={() => {
+                              setRuleChoiceFocusedUnitId(prompt.unit_id);
+                            }}
+                          >
+                            {getRulePromptUnitLabel(prompt)}
+                          </button>
+                        </div>
+                        <div className="rule-choice-group__options-col">
+                          <div className="rule-choice-group__options">
+                            {prompt.options.map((option) => (
+                              <button
+                                type="button"
+                                key={option.display_rule_id}
+                                className={`deployment-panel__picker-item rule-choice-group__option ${!isActivePrompt ? "rule-choice-group__option--inactive" : ""}`}
+                                onMouseEnter={() =>
+                                  setRuleChoiceHoveredDescription(getRuleDescription(option.display_rule_id))
+                                }
+                                onMouseLeave={() => setRuleChoiceHoveredDescription("")}
+                                onBlur={() => setRuleChoiceHoveredDescription("")}
+                                onClick={() => {
+                                  if (!isActivePrompt) {
+                                    return;
+                                  }
+                                  apiProps.onSelectRuleChoice(prompt, option.display_rule_id);
+                                }}
+                                aria-disabled={!isActivePrompt}
+                                title={
+                                  isActivePrompt
+                                    ? `Selectionner ${option.label}`
+                                    : "Cette unite sera proposee quand ce sera son tour de choix"
+                                }
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="deployment-panel__picker-tooltip">
+                {focusedRuleChoicePrompt
+                  ? getRulePromptDescription()
+                  : "Aucun choix de regle actif"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI Error Display */}
       {aiError && (
@@ -1009,7 +1252,8 @@ export const BoardWithAPI: React.FC = () => {
         <UnitStatusTable
           units={apiProps.gameState?.units ?? []}
           player={1}
-          selectedUnitId={apiProps.selectedUnitId ?? null}
+          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}
           onSelectUnit={(unitId) => {
             apiProps.onSelectUnit(unitId);
@@ -1025,7 +1269,8 @@ export const BoardWithAPI: React.FC = () => {
         <UnitStatusTable
           units={apiProps.gameState?.units ?? []}
           player={2}
-          selectedUnitId={apiProps.selectedUnitId ?? null}
+          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
+          guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}
           onSelectUnit={(unitId) => {
             apiProps.onSelectUnit(unitId);
@@ -1057,7 +1302,8 @@ export const BoardWithAPI: React.FC = () => {
       <div className="board-column-overlay-anchor">
         <BoardPvp
           units={apiProps.units}
-          selectedUnitId={apiProps.selectedUnitId}
+          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId}
+          ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
           showHexCoordinates={settings.showDebug}
           eligibleUnitIds={apiProps.eligibleUnitIds}
           mode={apiProps.mode}

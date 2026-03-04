@@ -178,6 +178,45 @@ class UnitRegistry:
     def _extract_static_properties(self, content: str, faction_name: str) -> Dict:
         """Extract all static properties from TypeScript class, including weapons."""
         properties = {}
+
+        def _extract_top_level_object_bodies(block: str) -> List[str]:
+            """Extract top-level object bodies from a JS/TS array literal body."""
+            object_bodies: List[str] = []
+            depth = 0
+            object_start = -1
+            in_string = False
+            string_delimiter = ""
+            escape_next = False
+            for idx, ch in enumerate(block):
+                if escape_next:
+                    escape_next = False
+                    continue
+                if in_string:
+                    if ch == "\\":
+                        escape_next = True
+                        continue
+                    if ch == string_delimiter:
+                        in_string = False
+                    continue
+                if ch in {"'", '"'}:
+                    in_string = True
+                    string_delimiter = ch
+                    continue
+                if ch == "{":
+                    if depth == 0:
+                        object_start = idx + 1
+                    depth += 1
+                    continue
+                if ch == "}":
+                    if depth <= 0:
+                        raise ValueError("Unbalanced braces in UNIT_RULES declaration")
+                    depth -= 1
+                    if depth == 0:
+                        object_bodies.append(block[object_start:idx])
+                        object_start = -1
+            if depth != 0:
+                raise ValueError("Unbalanced braces in UNIT_RULES declaration")
+            return object_bodies
         
         # Try to import get_weapons, but continue if it fails (standalone mode)
         try:
@@ -196,7 +235,7 @@ class UnitRegistry:
             rules_block = unit_rules_match.group(1).strip()
             unit_rules = []
             if rules_block:
-                rule_objects = re.findall(r'\{([\s\S]*?)\}', rules_block)
+                rule_objects = _extract_top_level_object_bodies(rules_block)
                 if not rule_objects:
                     raise ValueError("UNIT_RULES must contain objects with ruleId and displayName")
             else:
@@ -228,11 +267,82 @@ class UnitRegistry:
                                 f"(missing in config/unit_rules.json)"
                             )
 
+                usage_match = re.search(r'usage\s*:\s*["\']([^"\']+)["\']', rule_object)
+                usage_value = None
+                if usage_match:
+                    usage_value = usage_match.group(1).strip().lower()
+                    if usage_value not in {"and", "or", "unique", "always"}:
+                        raise ValueError(
+                            f"Invalid usage '{usage_value}' in UNIT_RULES for '{rule_id}'. "
+                            "Allowed values: and, or, unique, always"
+                        )
+
+                choice_timing_match = re.search(r'choice_timing\s*:\s*\{([\s\S]*?)\}', rule_object)
+                choice_timing_value = None
+                if choice_timing_match:
+                    choice_timing_block = choice_timing_match.group(1)
+                    trigger_match = re.search(r'trigger\s*:\s*["\']([^"\']+)["\']', choice_timing_block)
+                    if not trigger_match:
+                        raise ValueError(
+                            f"UNIT_RULES choice_timing for '{rule_id}' must define trigger"
+                        )
+                    trigger_value = trigger_match.group(1).strip()
+                    allowed_triggers = {
+                        "on_deploy",
+                        "turn_start",
+                        "player_turn_start",
+                        "phase_start",
+                        "activation_start",
+                    }
+                    if trigger_value not in allowed_triggers:
+                        raise ValueError(
+                            f"Invalid choice_timing.trigger '{trigger_value}' for '{rule_id}'. "
+                            f"Allowed values: {sorted(allowed_triggers)}"
+                        )
+                    choice_timing_value = {"trigger": trigger_value}
+
+                    phase_match = re.search(r'phase\s*:\s*["\']([^"\']+)["\']', choice_timing_block)
+                    if phase_match:
+                        phase_value = phase_match.group(1).strip()
+                        allowed_phases = {"command", "move", "shoot", "charge", "fight"}
+                        if phase_value not in allowed_phases:
+                            raise ValueError(
+                                f"Invalid choice_timing.phase '{phase_value}' for '{rule_id}'. "
+                                f"Allowed values: {sorted(allowed_phases)}"
+                            )
+                        choice_timing_value["phase"] = phase_value
+
+                    active_player_scope_match = re.search(
+                        r'active_player_scope\s*:\s*["\']([^"\']+)["\']', choice_timing_block
+                    )
+                    if active_player_scope_match:
+                        active_player_scope_value = active_player_scope_match.group(1).strip()
+                        allowed_active_player_scope = {"owner", "opponent", "both"}
+                        if active_player_scope_value not in allowed_active_player_scope:
+                            raise ValueError(
+                                f"Invalid choice_timing.active_player_scope '{active_player_scope_value}' for '{rule_id}'. "
+                                f"Allowed values: {sorted(allowed_active_player_scope)}"
+                            )
+                        choice_timing_value["active_player_scope"] = active_player_scope_value
+
+                    if trigger_value in {"phase_start", "activation_start"} and "phase" not in choice_timing_value:
+                        raise ValueError(
+                            f"choice_timing.phase is required for trigger '{trigger_value}' in rule '{rule_id}'"
+                        )
+                    if trigger_value == "phase_start" and "active_player_scope" not in choice_timing_value:
+                        raise ValueError(
+                            f"choice_timing.active_player_scope is required for trigger '{trigger_value}' in rule '{rule_id}'"
+                        )
+
                 unit_rule_entry = {
                     "ruleId": rule_id,
                     "displayName": display_name,
                     "grants_rule_ids": grants_rule_ids,
                 }
+                if usage_value is not None:
+                    unit_rule_entry["usage"] = usage_value
+                if choice_timing_value is not None:
+                    unit_rule_entry["choice_timing"] = choice_timing_value
                 unit_rules.append(unit_rule_entry)
             properties["UNIT_RULES"] = unit_rules
         else:

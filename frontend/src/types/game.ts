@@ -85,6 +85,12 @@ export interface UnitRule {
   ruleId: string;
   displayName: string;
   grants_rule_ids?: string[];
+  usage?: "and" | "or" | "unique" | "always";
+  choice_timing?: {
+    trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+    phase?: "command" | "move" | "shoot" | "charge" | "fight";
+    active_player_scope?: "owner" | "opponent" | "both";
+  };
 }
 
 export interface UnitKeyword {

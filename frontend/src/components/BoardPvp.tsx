@@ -151,6 +151,7 @@ type Mode =
 type BoardProps = {
   units: Unit[];
   selectedUnitId: number | null;
+  ruleChoiceHighlightedUnitId?: number | null;
   eligibleUnitIds: number[];
   showHexCoordinates?: boolean;
   shootingActivationQueue?: Unit[];
@@ -232,6 +233,7 @@ type BoardProps = {
 export default function Board({
   units,
   selectedUnitId,
+  ruleChoiceHighlightedUnitId = null,
   eligibleUnitIds,
   showHexCoordinates = false,
   shootingActivationQueue,
@@ -1170,13 +1172,14 @@ export default function Board({
 
     const appendShootingPreviewCells = (source: { unit: Unit; fromCol: number; fromRow: number }) => {
       if (!source.unit.RNG_WEAPONS || source.unit.RNG_WEAPONS.length === 0) {
-        throw new Error(
-          `Unit ${source.unit.id} (${source.unit.type || "unknown"}) has no ranged weapons for shooting phase preview`
-        );
+        return;
       }
 
       const centerCube = offsetToCube(source.fromCol, source.fromRow);
       const range = getMaxRangedRange(source.unit);
+      if (range <= 0) {
+        return;
+      }
       const coverPathHexes = new Set<string>();
       const enemyUnits = units.filter((u) => u.player !== source.unit.player);
       const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
@@ -1693,6 +1696,7 @@ export default function Board({
         mode,
         current_player,
         selectedUnitId,
+        ruleChoiceHighlightedUnitId,
         unitsMoved,
         unitsCharged,
         unitsAttacked,
@@ -2281,6 +2285,7 @@ export default function Board({
     // Essential dependencies - all values used in the effect
     units.length,
     selectedUnitId,
+    ruleChoiceHighlightedUnitId,
     mode,
     phase,
     boardConfig,

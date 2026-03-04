@@ -54,17 +54,65 @@
     "id": "adaptable_predators",
     "description": "Tyranid Warrior (range) : This unit can shoot and charge in a turn in which it fell back."
   },
+  "adaptable_predators_shoot_after_flee": {
+    "id": "adaptable_predators_shoot_after_flee",
+    "name": "Shoot After Flee (Adaptable Predators)",
+    "alias": "shoot_after_flee",
+    "description": "Display rule for Adaptable Predators: allows shooting after fleeing."
+  },
+  "adaptable_predators_charge_after_flee": {
+    "id": "adaptable_predators_charge_after_flee",
+    "name": "Charge After Flee (Adaptable Predators)",
+    "alias": "charge_after_flee",
+    "description": "Display rule for Adaptable Predators: allows charging after fleeing."
+  },
   "adrenalised_onslaught": {
     "id": "adrenalised_onslaught",
-    "description": "Tyranid Warrior (melee) : At the beginning of the fight phase, you can select one of the following ability to apply to this unit until the end of the phase : ."
+    "description": "Tyranid Warrior (melee) : At the beginning of the fight phase, you can select one of the following ability to apply to this unit until the end of the phase :"
+  },
+  "aggression_imperative": {
+    "id": "aggression_imperative",
+    "name": "Aggression Imperative",
+    "alias": "reroll_1_tohit_fight",
+    "description": "During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the hit rolls."
+  },
+  "preservation_imperative": {
+    "id": "preservation_imperative",
+    "name": "Preservation Imperative",
+    "alias": "reroll_1_save_fight",
+    "description": "During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the save rolls."
   },
   "cunning_hunters": {
     "id": "cunning_hunters",
     "description": "Grey Hunters : This unit can shoot in a turn in which it fell back or advanced."
   },
+  "cunning_hunters_shoot_after_advance": {
+    "id": "cunning_hunters_shoot_after_advance",
+    "name": "Shoot After Advance (Cunning Hunters)",
+    "alias": "shoot_after_advance",
+    "description": "Display rule for Cunning Hunters: allows shooting after advance."
+  },
+  "cunning_hunters_shoot_after_flee": {
+    "id": "cunning_hunters_shoot_after_flee",
+    "name": "Shoot After Flee (Cunning Hunters)",
+    "alias": "shoot_after_flee",
+    "description": "Display rule for Cunning Hunters: allows shooting after fleeing."
+  },
   "targeted_intercession": {
     "id": "targeted_intercession",
     "description": "Assault Interecessor : When this unit makes an attack, it can reroll rolls of 1 for the wound rolls. If the target is on an objective, it can reroll the wound rolls."
+  },
+  "targeted_intercession_reroll_1_towound": {
+    "id": "targeted_intercession_reroll_1_towound",
+    "name": "Reroll 1 To Wound (Targeted Intercession)",
+    "alias": "reroll_1_towound",
+    "description": "Display rule for Targeted Intercession: reroll 1 on wound rolls."
+  },
+  "targeted_intercession_reroll_towound_target_on_objective": {
+    "id": "targeted_intercession_reroll_towound_target_on_objective",
+    "name": "Reroll To Wound on Objective (Targeted Intercession)",
+    "alias": "reroll_towound_target_on_objective",
+    "description": "Display rule for Targeted Intercession: reroll wound rolls against targets on objective."
   }
   
 }

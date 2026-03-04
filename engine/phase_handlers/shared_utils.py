@@ -33,6 +33,136 @@ FLED = "FLED"
 ADVANCE = "ADVANCE"
 NOT_REMOVED = "NOT_REMOVED"
 
+ALLOWED_CHOICE_TIMING_TRIGGERS = {
+    "on_deploy",
+    "turn_start",
+    "player_turn_start",
+    "phase_start",
+    "activation_start",
+}
+ALLOWED_CHOICE_TIMING_PHASES = {"command", "move", "shoot", "charge", "fight"}
+ALLOWED_CHOICE_TIMING_ACTIVE_PLAYER_SCOPE = {"owner", "opponent", "both"}
+
+
+def _validate_choice_timing_object(choice_timing: Dict[str, Any], context: str) -> None:
+    """Validate one choice_timing object from UNIT_RULES."""
+    trigger_value = require_key(choice_timing, "trigger")
+    if not isinstance(trigger_value, str) or trigger_value not in ALLOWED_CHOICE_TIMING_TRIGGERS:
+        raise ValueError(
+            f"{context}: invalid choice_timing.trigger '{trigger_value}'. "
+            f"Allowed values: {sorted(ALLOWED_CHOICE_TIMING_TRIGGERS)}"
+        )
+
+    if "phase" in choice_timing:
+        phase_value = choice_timing["phase"]
+        if not isinstance(phase_value, str) or phase_value not in ALLOWED_CHOICE_TIMING_PHASES:
+            raise ValueError(
+                f"{context}: invalid choice_timing.phase '{phase_value}'. "
+                f"Allowed values: {sorted(ALLOWED_CHOICE_TIMING_PHASES)}"
+            )
+    elif trigger_value in {"phase_start", "activation_start"}:
+        raise KeyError(f"{context}: choice_timing.phase is required for trigger '{trigger_value}'")
+
+    if "active_player_scope" in choice_timing:
+        active_player_scope_value = choice_timing["active_player_scope"]
+        if (
+            not isinstance(active_player_scope_value, str)
+            or active_player_scope_value not in ALLOWED_CHOICE_TIMING_ACTIVE_PLAYER_SCOPE
+        ):
+            raise ValueError(
+                f"{context}: invalid choice_timing.active_player_scope '{active_player_scope_value}'. "
+                f"Allowed values: {sorted(ALLOWED_CHOICE_TIMING_ACTIVE_PLAYER_SCOPE)}"
+            )
+    elif trigger_value == "phase_start":
+        raise KeyError(f"{context}: choice_timing.active_player_scope is required for trigger 'phase_start'")
+
+
+def rebuild_choice_timing_index(game_state: Dict[str, Any]) -> None:
+    """
+    Rebuild choice timing index from currently deployed living units.
+
+    Index structure:
+    game_state["choice_timing_index"] = {
+        "on_deploy": [entry, ...],
+        "turn_start": [entry, ...],
+        "player_turn_start": [entry, ...],
+        "phase_start": [entry, ...],
+        "activation_start": [entry, ...],
+    }
+    """
+    units = require_key(game_state, "units")
+    if not isinstance(units, list):
+        raise TypeError(f"game_state['units'] must be a list, got {type(units).__name__}")
+
+    choice_timing_index: Dict[str, List[Dict[str, Any]]] = {
+        trigger: [] for trigger in ALLOWED_CHOICE_TIMING_TRIGGERS
+    }
+    for unit in units:
+        unit_id = str(require_key(unit, "id"))
+        unit_player_raw = require_key(unit, "player")
+        try:
+            unit_player = int(unit_player_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid player for unit {unit_id}: {unit_player_raw!r}") from exc
+
+        # Only index deployed units (active deployment keeps undeployed units at -1,-1).
+        unit_col, unit_row = get_unit_coordinates(unit)
+        if unit_col < 0 or unit_row < 0:
+            continue
+
+        if not is_unit_alive(unit_id, game_state):
+            continue
+
+        unit_rules = require_key(unit, "UNIT_RULES")
+        if not isinstance(unit_rules, list):
+            raise TypeError(f"Unit {unit_id} UNIT_RULES must be list, got {type(unit_rules).__name__}")
+
+        for rule in unit_rules:
+            rule_id = require_key(rule, "ruleId")
+            display_name = require_key(rule, "displayName")
+            if not isinstance(display_name, str) or not display_name.strip():
+                raise ValueError(f"Unit {unit_id} rule '{rule_id}' has invalid displayName")
+
+            choice_timing = rule.get("choice_timing")
+            if choice_timing is None:
+                continue
+            if not isinstance(choice_timing, dict):
+                raise TypeError(
+                    f"Unit {unit_id} rule '{rule_id}' choice_timing must be object, "
+                    f"got {type(choice_timing).__name__}"
+                )
+
+            _validate_choice_timing_object(choice_timing, f"Unit {unit_id} rule '{rule_id}'")
+            trigger_value = require_key(choice_timing, "trigger")
+
+            grants_rule_ids = rule.get("grants_rule_ids")
+            if grants_rule_ids is None:
+                grants_rule_ids = []
+            if not isinstance(grants_rule_ids, list):
+                raise TypeError(
+                    f"Unit {unit_id} rule '{rule_id}' grants_rule_ids must be list, "
+                    f"got {type(grants_rule_ids).__name__}"
+                )
+            usage_value = rule.get("usage")
+            if usage_value is not None:
+                if not isinstance(usage_value, str) or usage_value not in {"and", "or", "unique", "always"}:
+                    raise ValueError(
+                        f"Unit {unit_id} rule '{rule_id}' has invalid usage '{usage_value}'"
+                    )
+
+            entry = {
+                "unit_id": unit_id,
+                "unit_player": unit_player,
+                "rule_id": rule_id,
+                "display_name": display_name.strip(),
+                "grants_rule_ids": [str(rule_ref) for rule_ref in grants_rule_ids],
+                "usage": usage_value,
+                "choice_timing": dict(choice_timing),
+            }
+            choice_timing_index[trigger_value].append(entry)
+
+    game_state["choice_timing_index"] = choice_timing_index
+
 
 # =============================================================================
 # UNITS_CACHE - Single source of truth for position, HP, player of living units
@@ -748,19 +878,10 @@ def _unit_has_rule_effect(unit: Dict[str, Any], rule_id: str) -> bool:
     Check if unit has rule_id directly or through grants_rule_ids.
     """
     unit_rules = require_key(unit, "UNIT_RULES")
+    target_effect_rule_id = _resolve_effect_rule_id_to_technical(rule_id)
     for rule in unit_rules:
-        direct_rule_id = require_key(rule, "ruleId")
-        if direct_rule_id == rule_id:
-            return True
-        granted_rule_ids = rule.get("grants_rule_ids")
-        if granted_rule_ids is None:
-            continue
-        if not isinstance(granted_rule_ids, list):
-            raise ValueError(
-                f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
-                f"{type(granted_rule_ids).__name__}"
-            )
-        if rule_id in granted_rule_ids:
+        resolved_effect_ids = _resolve_unit_rule_entry_effect_rule_ids(rule)
+        if target_effect_rule_id in resolved_effect_ids:
             return True
     return False
 
@@ -769,35 +890,138 @@ def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_r
     """
     Return source UNIT_RULES.displayName that grants/owns the effect; None if absent.
     """
+    source_rule_id = get_source_unit_rule_id_for_effect(unit, effect_rule_id)
+    if source_rule_id is None:
+        return None
+
     unit_rules = require_key(unit, "UNIT_RULES")
     for rule in unit_rules:
-        source_rule_id = require_key(rule, "ruleId")
-        if source_rule_id == effect_rule_id:
-            display_name = require_key(rule, "displayName")
-            if not isinstance(display_name, str) or not display_name.strip():
-                unit_id = require_key(unit, "id")
-                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
-                raise ValueError(
-                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
-                )
-            return display_name.strip().upper()
-        granted_rule_ids = rule.get("grants_rule_ids")
-        if granted_rule_ids is None:
+        direct_rule_id = require_key(rule, "ruleId")
+        if direct_rule_id != source_rule_id:
             continue
-        if not isinstance(granted_rule_ids, list):
+        display_name = require_key(rule, "displayName")
+        if not isinstance(display_name, str) or not display_name.strip():
+            unit_id = require_key(unit, "id")
+            unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
             raise ValueError(
-                f"UNIT_RULES entry for '{source_rule_id}' has invalid grants_rule_ids type: "
-                f"{type(granted_rule_ids).__name__}"
+                f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
             )
-        if effect_rule_id in granted_rule_ids:
-            display_name = require_key(rule, "displayName")
-            if not isinstance(display_name, str) or not display_name.strip():
-                unit_id = require_key(unit, "id")
-                unit_name = unit.get("DISPLAY_NAME") or unit.get("unitType") or "UNKNOWN"
+        return display_name.strip().upper()
+    raise KeyError(f"Rule '{source_rule_id}' missing from UNIT_RULES for unit {require_key(unit, 'id')}")
+
+
+_unit_rules_registry_cache: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _get_unit_rules_registry() -> Dict[str, Dict[str, Any]]:
+    """Load and cache rule registry from config/unit_rules.json."""
+    global _unit_rules_registry_cache
+    if _unit_rules_registry_cache is not None:
+        return _unit_rules_registry_cache
+    from config_loader import get_config_loader
+    registry = get_config_loader().load_unit_rules_config()
+    _unit_rules_registry_cache = registry
+    return registry
+
+
+def _resolve_effect_rule_id_to_technical(rule_id: str, visited: Optional[Set[str]] = None) -> str:
+    """Resolve a rule id to technical effect id by following optional alias chain."""
+    if not isinstance(rule_id, str) or not rule_id.strip():
+        raise ValueError(f"rule_id must be a non-empty string, got {rule_id!r}")
+    normalized_rule_id = rule_id.strip()
+    registry = _get_unit_rules_registry()
+    if normalized_rule_id not in registry:
+        raise KeyError(f"Unknown rule id '{normalized_rule_id}' in config/unit_rules.json")
+
+    if visited is None:
+        visited = set()
+    if normalized_rule_id in visited:
+        raise ValueError(f"Rule alias cycle detected while resolving '{normalized_rule_id}'")
+    visited.add(normalized_rule_id)
+
+    rule_config = registry[normalized_rule_id]
+    alias_value = rule_config.get("alias")
+    if alias_value is None:
+        return normalized_rule_id
+    if not isinstance(alias_value, str) or not alias_value.strip():
+        raise ValueError(
+            f"Rule '{normalized_rule_id}' has invalid alias in config/unit_rules.json: {alias_value!r}"
+        )
+    return _resolve_effect_rule_id_to_technical(alias_value.strip(), visited)
+
+
+def _resolve_unit_rule_entry_effect_rule_ids(rule_entry: Dict[str, Any]) -> Set[str]:
+    """Resolve direct and granted rule ids from one UNIT_RULES entry to technical effect ids."""
+    direct_rule_id = require_key(rule_entry, "ruleId")
+    if not isinstance(direct_rule_id, str) or not direct_rule_id.strip():
+        raise ValueError(f"UNIT_RULES.ruleId must be non-empty string, got {direct_rule_id!r}")
+
+    resolved_rule_ids: Set[str] = {_resolve_effect_rule_id_to_technical(direct_rule_id)}
+    usage_value = rule_entry.get("usage")
+    if usage_value is not None:
+        if not isinstance(usage_value, str):
+            raise ValueError(f"UNIT_RULES usage must be string, got {usage_value!r}")
+        usage_value = usage_value.strip().lower()
+    if usage_value not in {None, "and", "or", "unique", "always"}:
+        raise ValueError(f"Invalid UNIT_RULES usage value: {usage_value!r}")
+    granted_rule_ids = rule_entry.get("grants_rule_ids")
+    if granted_rule_ids is None:
+        return resolved_rule_ids
+    if not isinstance(granted_rule_ids, list):
+        raise ValueError(
+            f"UNIT_RULES entry for '{direct_rule_id}' has invalid grants_rule_ids type: "
+            f"{type(granted_rule_ids).__name__}"
+        )
+    # always/and: all granted rules are active
+    if usage_value in {None, "and", "always"}:
+        for granted_rule_id in granted_rule_ids:
+            if not isinstance(granted_rule_id, str) or not granted_rule_id.strip():
                 raise ValueError(
-                    f"Unit {unit_id} ({unit_name}) has rule '{source_rule_id}' missing non-empty displayName"
+                    f"UNIT_RULES entry for '{direct_rule_id}' has invalid granted rule id: {granted_rule_id!r}"
                 )
-            return display_name.strip().upper()
+            resolved_rule_ids.add(_resolve_effect_rule_id_to_technical(granted_rule_id))
+        return resolved_rule_ids
+
+    # or/unique: only selected grant is active
+    selected_granted_rule_id = rule_entry.get("_selected_granted_rule_id")
+    if selected_granted_rule_id is None:
+        return resolved_rule_ids
+    if not isinstance(selected_granted_rule_id, str) or not selected_granted_rule_id.strip():
+        raise ValueError(
+            f"UNIT_RULES entry for '{direct_rule_id}' has invalid _selected_granted_rule_id: "
+            f"{selected_granted_rule_id!r}"
+        )
+    if selected_granted_rule_id not in granted_rule_ids:
+        raise ValueError(
+            f"UNIT_RULES entry for '{direct_rule_id}' has selected rule "
+            f"'{selected_granted_rule_id}' not present in grants_rule_ids"
+        )
+    selected_technical_rule_id = _resolve_effect_rule_id_to_technical(selected_granted_rule_id)
+    resolved_rule_ids.add(selected_technical_rule_id)
+    return resolved_rule_ids
+
+def get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
+    """Return source UNIT_RULES.ruleId for a technical effect rule."""
+    unit_rules = require_key(unit, "UNIT_RULES")
+    target_effect_rule_id = _resolve_effect_rule_id_to_technical(effect_rule_id)
+    for rule in unit_rules:
+        source_rule_id = require_key(rule, "ruleId")
+        resolved_effect_ids = _resolve_unit_rule_entry_effect_rule_ids(rule)
+        if target_effect_rule_id in resolved_effect_ids:
+            return source_rule_id
+    return None
+
+
+def unit_has_rule_effect(unit: Dict[str, Any], rule_id: str) -> bool:
+    """Public helper for effect check with display->technical rule mapping."""
+    return _unit_has_rule_effect(unit, rule_id)
+
+
+def get_source_unit_rule_display_name_for_effect(
+    unit: Dict[str, Any], effect_rule_id: str
+) -> Optional[str]:
+    """Public helper returning source display name for a technical effect rule."""
+    return _get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
     return None
 
 

@@ -29,7 +29,7 @@ from engine.w40k_core import W40KEngine
 from main import load_config
 from shared.data_validation import require_key
 from engine.combat_utils import resolve_dice_value
-from engine.phase_handlers.shared_utils import build_units_cache
+from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
 
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
 PBKDF2_ITERATIONS = 200000
@@ -1708,6 +1708,7 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
 
     # Rebuild cache from updated units list.
     build_units_cache(game_state)
+    rebuild_choice_timing_index(game_state)
     units_cache = require_key(game_state, "units_cache")
     game_state["units_cache_prev"] = {
         uid: {

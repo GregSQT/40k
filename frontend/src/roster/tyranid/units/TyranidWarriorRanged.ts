@@ -33,7 +33,11 @@ export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
     {
       ruleId: "adaptable_predators",
       displayName: "Adaptable Predators",
-      grants_rule_ids: ["shoot_after_flee", "charge_after_flee"],
+      grants_rule_ids: [
+        "adaptable_predators_shoot_after_flee",
+        "adaptable_predators_charge_after_flee",
+      ],
+      usage: "and",
     },
   ];
 
@@ -41,7 +45,7 @@ export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "tyranid warrior with ranged bio-weapon"}];
 
   // ICON
-  static ICON = "/icons/WarriorRanged.webp"; // Path relative to public folder
+  static ICON = "/icons/TyranidWarriorRanged.webp"; // Path relative to public folder
   static ICON_SCALE = 2.2; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

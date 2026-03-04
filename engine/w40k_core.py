@@ -22,7 +22,12 @@ from engine.combat_utils import calculate_hex_distance, normalize_coordinates, r
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
 
 # units_cache helpers (single source of truth for position/HP of living units)
-from engine.phase_handlers.shared_utils import build_units_cache, is_unit_alive, require_unit_position
+from engine.phase_handlers.shared_utils import (
+    build_units_cache,
+    rebuild_choice_timing_index,
+    is_unit_alive,
+    require_unit_position,
+)
 
 # Import shared utilities FIRST (no circular dependencies)
 from engine.game_utils import get_unit_by_id
@@ -649,6 +654,7 @@ class W40KEngine(gym.Env):
         
         # Build units_cache once after all units are initialized (single source of truth)
         build_units_cache(self.game_state)
+        rebuild_choice_timing_index(self.game_state)
         
         # Initialize units_cache_prev for first step (Phase 2: units_cache always exists after reset)
         uc = require_key(self.game_state, "units_cache")
@@ -699,6 +705,7 @@ class W40KEngine(gym.Env):
                     )
             # Rebuild cache after forcing active-deployment units to (-1, -1).
             build_units_cache(self.game_state)
+            rebuild_choice_timing_index(self.game_state)
             uc = require_key(self.game_state, "units_cache")
             self.game_state["units_cache_prev"] = {
                 uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
@@ -1438,6 +1445,314 @@ class W40KEngine(gym.Env):
             import traceback
             traceback.print_exc()
             return False, {"error": "ai_decision_failed", "message": str(e)}
+
+    def _initialize_rule_choice_runtime_state(self) -> None:
+        """Initialize in-memory state for timing-based rule choices."""
+        if "pending_rule_choice_queue" not in self.game_state:
+            self.game_state["pending_rule_choice_queue"] = []
+        if "active_rule_choice_prompt" not in self.game_state:
+            self.game_state["active_rule_choice_prompt"] = None
+        if "_choice_timing_fired_events" not in self.game_state:
+            self.game_state["_choice_timing_fired_events"] = set()
+
+    def _get_unit_rule_registry(self) -> Dict[str, Dict[str, Any]]:
+        """Return config/unit_rules.json registry."""
+        from config_loader import get_config_loader
+        return get_config_loader().load_unit_rules_config()
+
+    def _resolve_rule_id_to_technical(self, rule_id: str, visited: Optional[Set[str]] = None) -> str:
+        """Resolve display rule id to technical rule id via optional alias chain."""
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            raise ValueError(f"rule_id must be non-empty string, got {rule_id!r}")
+        normalized_rule_id = rule_id.strip()
+        registry = self._get_unit_rule_registry()
+        if normalized_rule_id not in registry:
+            raise KeyError(f"Unknown rule id '{normalized_rule_id}' in config/unit_rules.json")
+        if visited is None:
+            visited = set()
+        if normalized_rule_id in visited:
+            raise ValueError(f"Rule alias cycle detected while resolving '{normalized_rule_id}'")
+        visited.add(normalized_rule_id)
+        alias_rule_id = registry[normalized_rule_id].get("alias")
+        if alias_rule_id is None:
+            return normalized_rule_id
+        if not isinstance(alias_rule_id, str) or not alias_rule_id.strip():
+            raise ValueError(f"Rule '{normalized_rule_id}' has invalid alias: {alias_rule_id!r}")
+        return self._resolve_rule_id_to_technical(alias_rule_id.strip(), visited)
+
+    def _is_player_human(self, player: int) -> bool:
+        """Return True when player is controlled by a human."""
+        player_types = self.game_state.get("player_types")
+        if isinstance(player_types, dict) and str(player) in player_types:
+            return player_types[str(player)] == "human"
+        if player == 2 and (self.is_pve_mode or self.is_test_mode or self.is_debug_mode):
+            return False
+        return True
+
+    def _clear_turn_scoped_rule_choices(self) -> None:
+        """Clear non-unique chosen options at command phase start."""
+        units = require_key(self.game_state, "units")
+        for unit in units:
+            unit_rules = require_key(unit, "UNIT_RULES")
+            for rule in unit_rules:
+                usage_value = rule.get("usage")
+                if usage_value == "or" and "_selected_granted_rule_id" in rule:
+                    del rule["_selected_granted_rule_id"]
+
+    def _enqueue_rule_choice_candidates(
+        self,
+        trigger: str,
+        event_phase: Optional[str] = None,
+        activation_unit_id: Optional[str] = None,
+        event_player: Optional[int] = None,
+    ) -> None:
+        """Collect all choice prompts matching one timing event and append them to queue."""
+        self._initialize_rule_choice_runtime_state()
+        if "choice_timing_index" not in self.game_state:
+            rebuild_choice_timing_index(self.game_state)
+
+        choice_timing_index = require_key(self.game_state, "choice_timing_index")
+        trigger_entries = choice_timing_index.get(trigger, [])
+        if not isinstance(trigger_entries, list):
+            raise TypeError(f"choice_timing_index['{trigger}'] must be a list")
+
+        current_turn = int(require_key(self.game_state, "turn"))
+        current_player = int(require_key(self.game_state, "current_player"))
+        owner_event_player = current_player if event_player is None else int(event_player)
+        fired_events = require_key(self.game_state, "_choice_timing_fired_events")
+        if not isinstance(fired_events, set):
+            raise TypeError("_choice_timing_fired_events must be a set")
+
+        registry = self._get_unit_rule_registry()
+        queue = require_key(self.game_state, "pending_rule_choice_queue")
+        if not isinstance(queue, list):
+            raise TypeError("pending_rule_choice_queue must be a list")
+
+        for entry in trigger_entries:
+            unit_id = str(require_key(entry, "unit_id"))
+            rule_id = require_key(entry, "rule_id")
+            usage_value = entry.get("usage")
+
+            # No choice prompt for always-active or additive rules.
+            if usage_value in (None, "and", "always"):
+                continue
+            if usage_value not in {"or", "unique"}:
+                raise ValueError(f"Invalid usage '{usage_value}' for rule choice entry {entry}")
+
+            if trigger == "activation_start":
+                if activation_unit_id is None or str(activation_unit_id) != unit_id:
+                    continue
+            if trigger == "on_deploy":
+                if activation_unit_id is None or str(activation_unit_id) != unit_id:
+                    continue
+
+            choice_timing = require_key(entry, "choice_timing")
+            if not isinstance(choice_timing, dict):
+                raise TypeError(f"choice_timing must be object in entry {entry}")
+            if trigger in {"phase_start", "activation_start"}:
+                required_phase = require_key(choice_timing, "phase")
+                if required_phase != event_phase:
+                    continue
+
+            unit_player = int(require_key(entry, "unit_player"))
+            if trigger == "phase_start":
+                active_player_scope = require_key(choice_timing, "active_player_scope")
+            else:
+                active_player_scope = choice_timing.get("active_player_scope", "owner")
+            if active_player_scope == "owner" and unit_player != owner_event_player:
+                continue
+            if active_player_scope == "opponent" and unit_player == owner_event_player:
+                continue
+            if active_player_scope not in {"owner", "opponent", "both"}:
+                raise ValueError(
+                    f"Invalid active_player_scope '{active_player_scope}' in choice_timing"
+                )
+
+            unit = self._get_unit_by_id(unit_id)
+            if unit is None:
+                continue
+            if not is_unit_alive(unit_id, self.game_state):
+                continue
+
+            unit_rules = require_key(unit, "UNIT_RULES")
+            source_rule_entry = None
+            for rule in unit_rules:
+                if require_key(rule, "ruleId") == rule_id:
+                    source_rule_entry = rule
+                    break
+            if source_rule_entry is None:
+                continue
+
+            if usage_value == "unique" and source_rule_entry.get("_selected_granted_rule_id") is not None:
+                continue
+
+            grants_rule_ids = require_key(entry, "grants_rule_ids")
+            if not isinstance(grants_rule_ids, list):
+                raise TypeError(f"grants_rule_ids must be list for rule choice entry {entry}")
+            if len(grants_rule_ids) < 2:
+                continue
+
+            event_key = (
+                f"{trigger}|{current_turn}|{event_phase or '-'}|{owner_event_player}|"
+                f"{unit_id}|{rule_id}"
+            )
+            if event_key in fired_events:
+                continue
+            fired_events.add(event_key)
+
+            options: List[Dict[str, str]] = []
+            for granted_display_rule_id_raw in grants_rule_ids:
+                granted_display_rule_id = str(granted_display_rule_id_raw)
+                if granted_display_rule_id not in registry:
+                    raise KeyError(
+                        f"Unknown granted display rule id '{granted_display_rule_id}' "
+                        f"for unit {unit_id} rule '{rule_id}'"
+                    )
+                granted_rule_cfg = registry[granted_display_rule_id]
+                option_label = require_key(granted_rule_cfg, "name")
+                if not isinstance(option_label, str) or not option_label.strip():
+                    raise ValueError(
+                        f"Rule '{granted_display_rule_id}' must define non-empty 'name' for choice label"
+                    )
+                options.append(
+                    {
+                        "display_rule_id": granted_display_rule_id,
+                        "technical_rule_id": self._resolve_rule_id_to_technical(granted_display_rule_id),
+                        "label": option_label.strip(),
+                    }
+                )
+
+            queue.append(
+                {
+                    "trigger": trigger,
+                    "phase": event_phase,
+                    "player": unit_player,
+                    "unit_id": unit_id,
+                    "rule_id": rule_id,
+                    "display_name": require_key(entry, "display_name"),
+                    "usage": usage_value,
+                    "options": options,
+                }
+            )
+
+    def _apply_rule_choice_selection(
+        self, prompt: Dict[str, Any], selected_display_rule_id: str
+    ) -> None:
+        """Apply one selected option to unit rule runtime state."""
+        unit_id = str(require_key(prompt, "unit_id"))
+        rule_id = require_key(prompt, "rule_id")
+        options = require_key(prompt, "options")
+        allowed_display_rule_ids = {require_key(opt, "display_rule_id") for opt in options}
+        if selected_display_rule_id not in allowed_display_rule_ids:
+            raise ValueError(
+                f"Invalid selected display rule '{selected_display_rule_id}' for prompt {prompt}"
+            )
+
+        unit = self._get_unit_by_id(unit_id)
+        if unit is None:
+            raise KeyError(f"Cannot apply rule choice: unit {unit_id} not found")
+        unit_rules = require_key(unit, "UNIT_RULES")
+        for rule in unit_rules:
+            if require_key(rule, "ruleId") == rule_id:
+                rule["_selected_granted_rule_id"] = selected_display_rule_id
+                return
+        raise KeyError(f"Rule '{rule_id}' not found in UNIT_RULES for unit {unit_id}")
+
+    def _emit_next_rule_choice_prompt_if_needed(self) -> Optional[Dict[str, Any]]:
+        """Return waiting payload for next human prompt, auto-resolving AI prompts."""
+        self._initialize_rule_choice_runtime_state()
+        queue = require_key(self.game_state, "pending_rule_choice_queue")
+        if not isinstance(queue, list):
+            raise TypeError("pending_rule_choice_queue must be a list")
+
+        while queue:
+            prompt = queue[0]
+            prompt_player = int(require_key(prompt, "player"))
+            options = require_key(prompt, "options")
+            if not isinstance(options, list) or not options:
+                queue.pop(0)
+                continue
+
+            if self._is_player_human(prompt_player):
+                self.game_state["active_rule_choice_prompt"] = prompt
+                return {
+                    "action": "waiting_for_rule_choice",
+                    "waiting_for_player": True,
+                    "rule_choice_prompt": prompt,
+                    "unitId": require_key(prompt, "unit_id"),
+                    "player": prompt_player,
+                }
+
+            # AI/auto side: deterministic first option.
+            selected_display_rule_id = require_key(options[0], "display_rule_id")
+            self._apply_rule_choice_selection(prompt, selected_display_rule_id)
+            queue.pop(0)
+            self.game_state["active_rule_choice_prompt"] = None
+
+        self.game_state["active_rule_choice_prompt"] = None
+        return None
+
+    def _handle_select_rule_choice_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Apply player's explicit rule-choice selection."""
+        self._initialize_rule_choice_runtime_state()
+        active_prompt = self.game_state.get("active_rule_choice_prompt")
+        if active_prompt is None:
+            return False, {"error": "no_active_rule_choice_prompt"}
+        queue = require_key(self.game_state, "pending_rule_choice_queue")
+        if not isinstance(queue, list):
+            raise TypeError("pending_rule_choice_queue must be a list")
+
+        selected_display_rule_id_raw = action.get("selectedRuleId")
+        if not isinstance(selected_display_rule_id_raw, str) or not selected_display_rule_id_raw.strip():
+            raise ValueError("select_rule_choice action requires non-empty 'selectedRuleId'")
+        selected_display_rule_id = selected_display_rule_id_raw.strip()
+
+        action_unit_id = str(require_key(action, "unitId"))
+        selected_prompt = active_prompt
+        prompt_unit_id = str(require_key(active_prompt, "unit_id"))
+        if action_unit_id != prompt_unit_id:
+            matching_prompt = None
+            for queued_prompt in queue:
+                if str(require_key(queued_prompt, "unit_id")) == action_unit_id:
+                    matching_prompt = queued_prompt
+                    break
+            if matching_prompt is None:
+                return False, {
+                    "error": "rule_choice_wrong_unit",
+                    "expected_unit_id": prompt_unit_id,
+                    "received_unit_id": action_unit_id,
+                }
+            selected_prompt = matching_prompt
+
+        expected_player = int(require_key(selected_prompt, "player"))
+        if "player" in action and int(action["player"]) != expected_player:
+            return False, {
+                "error": "rule_choice_wrong_player",
+                "expected_player": expected_player,
+                "received_player": int(action["player"]),
+            }
+
+        self._apply_rule_choice_selection(selected_prompt, selected_display_rule_id)
+        selected_prompt_unit_id = str(require_key(selected_prompt, "unit_id"))
+        if queue and queue[0] == selected_prompt:
+            queue.pop(0)
+        else:
+            queue[:] = [prompt for prompt in queue if prompt != selected_prompt]
+        self.game_state["active_rule_choice_prompt"] = None
+
+        next_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
+        if next_prompt_result is not None:
+            return True, next_prompt_result
+
+        return True, {
+            "action": "select_rule_choice",
+            "waiting_for_player": False,
+            "unitId": selected_prompt_unit_id,
+            "player": expected_player,
+            "ruleId": require_key(selected_prompt, "rule_id"),
+            "selectedRuleId": selected_display_rule_id,
+            "success": True,
+        }
     
     
     def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -1447,6 +1762,23 @@ class W40KEngine(gym.Env):
         """
         if self.game_state.get("game_over", False):
             return False, {"error": "game_over", "winner": self.game_state.get("winner")}
+
+        self._initialize_rule_choice_runtime_state()
+
+        # Rule-choice submission action is processed before phase handlers.
+        if action.get("action") == "select_rule_choice":
+            return self._handle_select_rule_choice_action(action)
+
+        # Block gameplay actions while an explicit choice prompt is pending.
+        active_prompt = self.game_state.get("active_rule_choice_prompt")
+        if active_prompt is not None:
+            return True, {
+                "action": "waiting_for_rule_choice",
+                "waiting_for_player": True,
+                "rule_choice_prompt": active_prompt,
+                "unitId": require_key(active_prompt, "unit_id"),
+                "player": int(require_key(active_prompt, "player")),
+            }
 
         current_phase = self.game_state["phase"]
         
@@ -1469,6 +1801,18 @@ class W40KEngine(gym.Env):
             pre_action_player = require_key(pre_unit, "player")
             if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
                 pre_action_positions[str(unit_id)] = require_unit_position(pre_unit, self.game_state)
+
+        # Activation-start choice trigger happens before the unit activation resolves.
+        if action.get("action") == "activate_unit" and unit_id is not None:
+            self._enqueue_rule_choice_candidates(
+                trigger="activation_start",
+                event_phase=current_phase,
+                activation_unit_id=str(unit_id),
+                event_player=int(require_key(self.game_state, "current_player")),
+            )
+            choice_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
+            if choice_prompt_result is not None:
+                return True, choice_prompt_result
 
         # Handle special "advance_phase" action when pool is empty
         if action.get("action") == "advance_phase":
@@ -1579,7 +1923,9 @@ class W40KEngine(gym.Env):
                     "advance_select_destination",  # Intermediate action
                     "empty_target_advance_available",  # Intermediate action
                     "advance_cancelled",  # Intermediate action
-                    "waiting_for_movement_choice"  # Intermediate action
+                    "waiting_for_movement_choice",  # Intermediate action
+                    "waiting_for_rule_choice",  # Intermediate action
+                    "select_rule_choice",  # Meta action (not in step.log contract)
                 ]
                 
                 if action_type in skip_logging_action_types:
@@ -2244,6 +2590,7 @@ class W40KEngine(gym.Env):
         # CRITICAL: This must happen AFTER logging to allow logging of actions before phase transitions
         max_cascade = 10  # Prevent infinite loops
         cascade_count = 0
+        started_phases: List[str] = []
         while success and result.get("phase_complete") and result.get("next_phase") and cascade_count < max_cascade:
             next_phase = result["next_phase"]
             current_phase = self.game_state.get("phase", "unknown")
@@ -2270,6 +2617,7 @@ class W40KEngine(gym.Env):
                 phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
             elif next_phase == "command":
                 phase_init_result = command_handlers.command_phase_start(self.game_state)
+                self._clear_turn_scoped_rule_choices()
             elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
             elif next_phase == "charge":
@@ -2278,6 +2626,7 @@ class W40KEngine(gym.Env):
                 phase_init_result = fight_handlers.fight_phase_start(self.game_state)
             elif next_phase == "move":
                 phase_init_result = movement_handlers.movement_phase_start(self.game_state)
+            started_phases.append(next_phase)
 
             if _cascade_t0 is not None:
                 _cascade_dur = time.perf_counter() - _cascade_t0
@@ -2320,6 +2669,46 @@ class W40KEngine(gym.Env):
             result["winner"] = winner
             if win_method is not None:
                 result["win_method"] = win_method
+
+        # Queue timing-based choice prompts after successful state transitions/actions.
+        if success:
+            current_player_for_event = int(require_key(self.game_state, "current_player"))
+            if result.get("action") == "deploy_unit" and result.get("unitId") is not None:
+                deployed_unit_id = str(result["unitId"])
+                deployed_unit = self._get_unit_by_id(deployed_unit_id)
+                deployed_player = (
+                    int(require_key(deployed_unit, "player"))
+                    if deployed_unit is not None
+                    else current_player_for_event
+                )
+                self._enqueue_rule_choice_candidates(
+                    trigger="on_deploy",
+                    activation_unit_id=deployed_unit_id,
+                    event_player=deployed_player,
+                )
+
+            for started_phase in started_phases:
+                if started_phase == "command":
+                    self._enqueue_rule_choice_candidates(
+                        trigger="turn_start",
+                        event_phase=started_phase,
+                        event_player=current_player_for_event,
+                    )
+                    self._enqueue_rule_choice_candidates(
+                        trigger="player_turn_start",
+                        event_phase=started_phase,
+                        event_player=current_player_for_event,
+                    )
+
+                self._enqueue_rule_choice_candidates(
+                    trigger="phase_start",
+                    event_phase=started_phase,
+                    event_player=current_player_for_event,
+                )
+
+            choice_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
+            if choice_prompt_result is not None:
+                return True, choice_prompt_result
 
         return success, result
     

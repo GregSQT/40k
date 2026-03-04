@@ -27,7 +27,11 @@ export class AssaultIntercessorSergeant extends SpaceMarineInfantryTroopMeleeEli
     {
       ruleId: "targeted_intercession",
       displayName: "Targeted Intercession",
-      grants_rule_ids: ["reroll_1_towound", "reroll_towound_target_on_objective"],
+      grants_rule_ids: [
+        "targeted_intercession_reroll_1_towound",
+        "targeted_intercession_reroll_towound_target_on_objective",
+      ],
+      usage: "and",
     },
   ];
 

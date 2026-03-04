@@ -7,7 +7,7 @@ from typing import Dict, Any, Tuple, List, Optional
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
-from engine.phase_handlers.shared_utils import update_units_cache_position
+from engine.phase_handlers.shared_utils import update_units_cache_position, rebuild_choice_timing_index
 
 
 def deployment_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -133,6 +133,7 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
 
     set_unit_coordinates(unit, dest_col, dest_row)
     update_units_cache_position(game_state, unit_id, dest_col, dest_row)
+    rebuild_choice_timing_index(game_state)
     _mark_deployed(deployment_state, unit_id, int(current_deployer))
 
     next_deployer = _resolve_next_deployer_after_success(deployment_state, int(current_deployer))

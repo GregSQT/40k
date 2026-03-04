@@ -895,11 +895,18 @@ body {
 .deployment-panel__picker-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 1500;
+  background: rgba(0, 0, 0, 0.68);
+  z-index: 30000;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.rule-choice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30000;
+  pointer-events: none;
 }
 
 .deployment-panel__picker-dismiss {
@@ -921,10 +928,28 @@ body {
   z-index: 1;
 }
 
+.deployment-panel__picker--draggable {
+  position: fixed;
+  width: min(860px, 94vw);
+  margin: 0;
+  pointer-events: auto;
+}
+
 .deployment-panel__picker-title {
   font-size: 15px;
   font-weight: 700;
   margin-bottom: 10px;
+}
+
+.deployment-panel__picker-title--draggable {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: move;
+  user-select: none;
 }
 
 .deployment-panel__picker-loading {
@@ -979,6 +1004,77 @@ body {
   font-size: 13px;
   color: #cbd5e1;
   white-space: pre-wrap;
+}
+
+.deployment-panel__picker-item--active {
+  border-color: #7cbbff;
+  box-shadow: 0 0 0 1px rgba(124, 187, 255, 0.4);
+}
+
+.rule-choice-group {
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px;
+  background: rgba(2, 6, 23, 0.35);
+}
+
+.rule-choice-group__row {
+  display: grid;
+  grid-template-columns: minmax(240px, 40%) 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.rule-choice-group__unit-col {
+  display: flex;
+  align-items: flex-start;
+}
+
+.rule-choice-group__options-col {
+  display: flex;
+  align-items: flex-start;
+}
+
+.rule-choice-group__unit-btn {
+  font-weight: 700;
+  width: 100%;
+}
+
+.rule-choice-group__unit-btn--player1 {
+  background: var(--hp-bar-player1);
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.rule-choice-group__unit-btn--player1:hover {
+  background: #1d4ed8;
+}
+
+.rule-choice-group__unit-btn--player2 {
+  background: var(--hp-bar-player2);
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.rule-choice-group__unit-btn--player2:hover {
+  background: #b91c1c;
+}
+
+.rule-choice-group__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.rule-choice-group__option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rule-choice-group__option--inactive {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .deployment-panel__picker-actions {

@@ -100,6 +100,7 @@ interface UnitRendererProps {
   mode: string;
   current_player: 1 | 2;
   selectedUnitId: number | null;
+  ruleChoiceHighlightedUnitId?: number | null;
   unitsMoved: number[];
   unitsCharged?: number[];
   unitsAttacked?: number[];
@@ -392,6 +393,7 @@ export class UnitRenderer {
       app,
       isPreview,
       selectedUnitId,
+      ruleChoiceHighlightedUnitId,
       unitsMoved,
       unitsCharged,
       unitsAttacked,
@@ -667,6 +669,21 @@ export class UnitRenderer {
     }
 
     app.stage.addChild(unitCircle);
+
+    const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
+    const isRuleChoiceHighlighted =
+      ruleChoiceHighlightedUnitId !== null &&
+      Number.isFinite(unitIdNum) &&
+      Number.isFinite(ruleChoiceHighlightedUnitId) &&
+      unitIdNum === ruleChoiceHighlightedUnitId;
+    if (isRuleChoiceHighlighted) {
+      const markerCircle = new PIXI.Graphics();
+      markerCircle.lineStyle(borderWidth + 2, 0xffd700, 0.95);
+      markerCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO + 5);
+      markerCircle.zIndex = iconZIndex + 1;
+      markerCircle.eventMode = "none";
+      app.stage.addChild(markerCircle);
+    }
   }
 
   private renderUnitIcon(iconZIndex: number): void {

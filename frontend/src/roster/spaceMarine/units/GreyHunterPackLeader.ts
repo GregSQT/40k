@@ -28,7 +28,11 @@ export class GreyHunterPackLeader extends SpaceMarineInfantryTroopMeleeElite {
     {
       ruleId: "cunning_hunters",
       displayName: "Cunning Hunters",
-      grants_rule_ids: ["shoot_after_advance", "shoot_after_flee"],
+      grants_rule_ids: [
+        "cunning_hunters_shoot_after_advance",
+        "cunning_hunters_shoot_after_flee",
+      ],
+      usage: "and",
     },
   ];
 

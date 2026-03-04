@@ -89,6 +89,12 @@ interface APIGameState {
       ruleId: string;
       displayName: string;
       grants_rule_ids?: string[];
+      usage?: "and" | "or" | "unique" | "always";
+      choice_timing?: {
+        trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+        phase?: "command" | "move" | "shoot" | "charge" | "fight";
+        active_player_scope?: "owner" | "opponent" | "both";
+      };
     }>;
     UNIT_KEYWORDS: Array<{
       keywordId: string;
@@ -135,6 +141,8 @@ interface APIGameState {
   }>;
   game_over?: boolean;
   winner?: number | null;
+  pending_rule_choice_queue?: RuleChoicePrompt[];
+  active_rule_choice_prompt?: RuleChoicePrompt | null;
 }
 
 interface ArmyListItem {
@@ -142,6 +150,23 @@ interface ArmyListItem {
   name: string;
   faction: string;
   description: string;
+}
+
+interface RuleChoiceOption {
+  display_rule_id: string;
+  technical_rule_id: string;
+  label: string;
+}
+
+interface RuleChoicePrompt {
+  trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+  phase?: "command" | "move" | "shoot" | "charge" | "fight";
+  player: number;
+  unit_id: string;
+  rule_id: string;
+  display_name: string;
+  usage: "or" | "unique";
+  options: RuleChoiceOption[];
 }
 
 export const useEngineAPI = () => {
@@ -218,9 +243,11 @@ export const useEngineAPI = () => {
     unitId: number;
     targetId: number;
   } | null>(null);
+  const [ruleChoicePrompt, setRuleChoicePrompt] = useState<RuleChoicePrompt | null>(null);
 
   // Track last action to detect activate_unit in shoot phase
   const lastActionRef = useRef<{ action: string; phase: string; unitId?: string } | null>(null);
+  const ruleChoicePreviousSelectedUnitIdRef = useRef<number | null>(null);
 
   // Load config values
   useEffect(() => {
@@ -278,7 +305,9 @@ export const useEngineAPI = () => {
           debug_mode: isDebugMode,
           mode_code: requestedModeCode,
         };
-        if (isTestMode || isPvEMode) {
+        if (isTestMode) {
+          requestPayload.scenario_file = "config/scenario_pvp_test.json";
+        } else if (isPvEMode) {
           requestPayload.scenario_file = "config/scenario_test.json";
         } else if (isPvEOldMode) {
           requestPayload.scenario_file = "config/scenario_pve.json";
@@ -305,7 +334,7 @@ export const useEngineAPI = () => {
         const data = await response.json();
         if (data.success) {
           const expectedPlayer2Type: "human" | "ai" =
-            isDebugMode || isPvEMode || isPvEOldMode || isTestMode ? "ai" : "human";
+            isDebugMode || isPvEMode || isPvEOldMode ? "ai" : "human";
           const player2Type = data.game_state?.player_types?.["2"];
           if (player2Type !== expectedPlayer2Type) {
             throw new Error(
@@ -531,6 +560,39 @@ export const useEngineAPI = () => {
         // DEBUG: Log full response structure to understand blinking data location
 
         if (data.success) {
+          if (
+            data.result?.action === "waiting_for_rule_choice" &&
+            data.result?.waiting_for_player === true &&
+            data.result?.rule_choice_prompt
+          ) {
+            if (ruleChoicePreviousSelectedUnitIdRef.current === null) {
+              ruleChoicePreviousSelectedUnitIdRef.current = selectedUnitId;
+            }
+            setRuleChoicePrompt(data.result.rule_choice_prompt as RuleChoicePrompt);
+            if (data.result?.unitId) {
+              setSelectedUnitId(parseInt(data.result.unitId, 10));
+            }
+            setGameState(data.game_state);
+            return;
+          }
+          if (data.result?.action === "select_rule_choice") {
+            setRuleChoicePrompt(null);
+            if (data.game_state?.active_rule_choice_prompt == null) {
+              setSelectedUnitId(ruleChoicePreviousSelectedUnitIdRef.current);
+              ruleChoicePreviousSelectedUnitIdRef.current = null;
+            }
+          }
+          if (
+            data.result?.action !== "waiting_for_rule_choice" &&
+            data.game_state?.active_rule_choice_prompt == null
+          ) {
+            setRuleChoicePrompt(null);
+            if (ruleChoicePreviousSelectedUnitIdRef.current !== null) {
+              setSelectedUnitId(ruleChoicePreviousSelectedUnitIdRef.current);
+              ruleChoicePreviousSelectedUnitIdRef.current = null;
+            }
+          }
+
           // CRITICAL: Handle empty activation pools before other processing
           if (
             data.game_state?.phase === "shoot" &&
@@ -1105,6 +1167,7 @@ export const useEngineAPI = () => {
     },
     [
       gameState,
+      selectedUnitId,
       advanceWarningPopup,
       blinkingUnits.blinkTimer,
       blinkingUnits.unitIds,
@@ -1152,6 +1215,53 @@ export const useEngineAPI = () => {
           !Array.isArray(rule.grants_rule_ids)
         ) {
           throw new Error(`API ERROR: Unit ${unit.id} has invalid grants_rule_ids in UNIT_RULES`);
+        }
+        if ("usage" in rule && rule.usage !== undefined) {
+          if (!["and", "or", "unique", "always"].includes(String(rule.usage))) {
+            throw new Error(`API ERROR: Unit ${unit.id} has invalid usage in UNIT_RULES`);
+          }
+        }
+        if ("choice_timing" in rule && rule.choice_timing !== undefined) {
+          const timing = rule.choice_timing;
+          if (!timing || typeof timing !== "object") {
+            throw new Error(`API ERROR: Unit ${unit.id} has invalid choice_timing in UNIT_RULES`);
+          }
+          const trigger = (timing as { trigger?: unknown }).trigger;
+          if (
+            typeof trigger !== "string" ||
+            !["on_deploy", "turn_start", "player_turn_start", "phase_start", "activation_start"].includes(
+              trigger
+            )
+          ) {
+            throw new Error(`API ERROR: Unit ${unit.id} has invalid choice_timing.trigger in UNIT_RULES`);
+          }
+          const phase = (timing as { phase?: unknown }).phase;
+          if (
+            phase !== undefined &&
+            (typeof phase !== "string" || !["command", "move", "shoot", "charge", "fight"].includes(phase))
+          ) {
+            throw new Error(`API ERROR: Unit ${unit.id} has invalid choice_timing.phase in UNIT_RULES`);
+          }
+          const activePlayerScope = (timing as { active_player_scope?: unknown }).active_player_scope;
+          if (
+            activePlayerScope !== undefined &&
+            (typeof activePlayerScope !== "string" ||
+              !["owner", "opponent", "both"].includes(activePlayerScope))
+          ) {
+            throw new Error(
+              `API ERROR: Unit ${unit.id} has invalid choice_timing.active_player_scope in UNIT_RULES`
+            );
+          }
+          if (trigger === "phase_start" && activePlayerScope === undefined) {
+            throw new Error(
+              `API ERROR: Unit ${unit.id} choice_timing.active_player_scope is required for trigger '${trigger}'`
+            );
+          }
+          if (["phase_start", "activation_start"].includes(trigger) && phase === undefined) {
+            throw new Error(
+              `API ERROR: Unit ${unit.id} choice_timing.phase is required for trigger '${trigger}'`
+            );
+          }
         }
       }
       for (const keyword of unit.UNIT_KEYWORDS) {
@@ -1486,6 +1596,18 @@ export const useEngineAPI = () => {
       setMode("select");
     },
     [executeAction, gameState]
+  );
+
+  const handleSelectRuleChoice = useCallback(
+    async (prompt: RuleChoicePrompt, selectedDisplayRuleId: string) => {
+      await executeAction({
+        action: "select_rule_choice",
+        unitId: prompt.unit_id,
+        player: prompt.player,
+        selectedRuleId: selectedDisplayRuleId,
+      });
+    },
+    [executeAction]
   );
 
   const handleConfirmMove = useCallback(async () => {
@@ -2207,6 +2329,8 @@ export const useEngineAPI = () => {
       objectives: gameState.objectives,
       game_over: gameState.game_over,
       winner: gameState.winner,
+      pending_rule_choice_queue: gameState.pending_rule_choice_queue,
+      active_rule_choice_prompt: gameState.active_rule_choice_prompt,
     };
   }, [
     gameState,
@@ -2279,6 +2403,8 @@ export const useEngineAPI = () => {
       blinkingAttackerId: null,
       isBlinkingActive: false,
       blinkVersion: 0,
+      ruleChoicePrompt: null,
+      onSelectRuleChoice: async (_prompt: RuleChoicePrompt, _selectedDisplayRuleId: string) => {},
       // blinkState removed - blinking is handled locally in UnitRenderer
       fightSubPhase: null,
       executeAITurn: async () => {},
@@ -2352,6 +2478,8 @@ export const useEngineAPI = () => {
     blinkingAttackerId: blinkingUnits.attackerId ?? null,
     isBlinkingActive: isBlinkingActiveMemo,
     blinkVersion,
+    ruleChoicePrompt,
+    onSelectRuleChoice: handleSelectRuleChoice,
     // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display
     chargingUnitId: failedChargeRoll ? failedChargeRoll.unitId : null,

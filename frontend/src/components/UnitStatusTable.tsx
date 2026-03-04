@@ -1,5 +1,5 @@
 // frontend/src/components/UnitStatusTable.tsx
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import weaponRules from "../../../config/weapon_rules.json";
 import type { Unit, UnitId } from "../types/game";
 
@@ -23,6 +23,7 @@ interface UnitStatusTableProps {
   units: Unit[];
   player: 1 | 2;
   selectedUnitId: UnitId | null;
+  guidedFocusUnitId?: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
   gameMode?: "pvp" | "pvp_old" | "debug" | "pve" | "pve_old" | "test" | "training";
@@ -769,6 +770,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     units,
     player,
     selectedUnitId,
+    guidedFocusUnitId = null,
     clickedUnitId,
     onSelectUnit,
     gameMode = "pvp",
@@ -783,6 +785,13 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     const [expandedUnits, setExpandedUnits] = useState<Set<UnitId>>(new Set());
     const [expandedRanged, setExpandedRanged] = useState<Set<UnitId>>(new Set());
     const [expandedMelee, setExpandedMelee] = useState<Set<UnitId>>(new Set());
+    const guidedLayoutSnapshotRef = useRef<{
+      isCollapsed: boolean;
+      expandedUnits: Set<UnitId>;
+      expandedRanged: Set<UnitId>;
+      expandedMelee: Set<UnitId>;
+    } | null>(null);
+    const guidedAppliedRef = useRef(false);
 
     const toggleUnitExpand = (unitId: UnitId) => {
       setExpandedUnits((prev) => {
@@ -847,6 +856,74 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     const playerUnits = useMemo(() => {
       return units.filter((unit) => unit.player === player && (unit.HP_CUR ?? unit.HP_MAX) > 0);
     }, [units, player]);
+
+    useEffect(() => {
+      const targetUnitInThisTable =
+        guidedFocusUnitId !== null &&
+        playerUnits.some((unit) => String(unit.id) === String(guidedFocusUnitId));
+
+      if (targetUnitInThisTable) {
+        if (guidedLayoutSnapshotRef.current === null) {
+          guidedLayoutSnapshotRef.current = {
+            isCollapsed,
+            expandedUnits: new Set(expandedUnits),
+            expandedRanged: new Set(expandedRanged),
+            expandedMelee: new Set(expandedMelee),
+          };
+        }
+        if (isCollapsed) {
+          setIsCollapsed(false);
+          onCollapseChange?.(false);
+        }
+        setExpandedUnits((prev) => {
+          if (prev.has(guidedFocusUnitId)) {
+            return prev;
+          }
+          const next = new Set(prev);
+          next.add(guidedFocusUnitId);
+          return next;
+        });
+        setExpandedRanged((prev) => {
+          if (prev.has(guidedFocusUnitId)) {
+            return prev;
+          }
+          const next = new Set(prev);
+          next.add(guidedFocusUnitId);
+          return next;
+        });
+        setExpandedMelee((prev) => {
+          if (prev.has(guidedFocusUnitId)) {
+            return prev;
+          }
+          const next = new Set(prev);
+          next.add(guidedFocusUnitId);
+          return next;
+        });
+        guidedAppliedRef.current = true;
+        return;
+      }
+
+      if (!guidedAppliedRef.current || guidedLayoutSnapshotRef.current === null) {
+        return;
+      }
+
+      const snapshot = guidedLayoutSnapshotRef.current;
+      setIsCollapsed(snapshot.isCollapsed);
+      onCollapseChange?.(snapshot.isCollapsed);
+      setExpandedUnits(new Set(snapshot.expandedUnits));
+      setExpandedRanged(new Set(snapshot.expandedRanged));
+      setExpandedMelee(new Set(snapshot.expandedMelee));
+      guidedLayoutSnapshotRef.current = null;
+      guidedAppliedRef.current = false;
+    }, [
+      guidedFocusUnitId,
+      playerUnits,
+      isCollapsed,
+      expandedUnits,
+      expandedRanged,
+      expandedMelee,
+      onCollapseChange,
+    ]);
 
     const getPlayerTypeLabel = (playerNumber: 1 | 2): string => {
       if (gameMode === "training") {

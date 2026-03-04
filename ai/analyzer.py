@@ -741,6 +741,33 @@ def parse_step_log(filepath: str) -> Dict:
     
     unit_registry = UnitRegistry()
     config_loader = get_config_loader()
+    all_unit_rules_config = config_loader.load_unit_rules_config()
+
+    def resolve_effect_rule_id_to_technical(rule_id: str, visited: Optional[Set[str]] = None) -> str:
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            raise ValueError(f"Invalid rule id for analyzer resolution: {rule_id!r}")
+        normalized_rule_id = rule_id.strip()
+        if normalized_rule_id not in all_unit_rules_config:
+            raise KeyError(
+                f"Unknown rule id '{normalized_rule_id}' while resolving unit rules in analyzer"
+            )
+        if visited is None:
+            visited = set()
+        if normalized_rule_id in visited:
+            raise ValueError(
+                f"Rule alias cycle detected in config/unit_rules.json for '{normalized_rule_id}'"
+            )
+        visited.add(normalized_rule_id)
+        rule_config = all_unit_rules_config[normalized_rule_id]
+        alias = rule_config.get("alias")
+        if alias is None:
+            return normalized_rule_id
+        if not isinstance(alias, str) or not alias.strip():
+            raise ValueError(
+                f"Rule '{normalized_rule_id}' has invalid alias in config/unit_rules.json: {alias!r}"
+            )
+        return resolve_effect_rule_id_to_technical(alias.strip(), visited)
+
     unit_weapons_cache = {}  # unit_type -> list of weapons with {display_name, RNG, WEAPON_RULES, is_pistol}
     unit_attack_limits = {}  # unit_type -> {'rng_nb_by_weapon': Dict[str, int], 'cc_nb_by_weapon': Dict[str, int], 'rapid_fire_by_weapon': Dict[str, int]}
     unit_combi_by_weapon = {}  # unit_type -> {weapon_display_name: combi_key}
@@ -824,7 +851,7 @@ def parse_step_log(filepath: str) -> Dict:
         expanded_rule_ids = set()
         for rule in unit_rules:
             direct_rule_id = require_key(rule, "ruleId")
-            expanded_rule_ids.add(direct_rule_id)
+            expanded_rule_ids.add(resolve_effect_rule_id_to_technical(direct_rule_id))
             if "grants_rule_ids" in rule:
                 granted_rule_ids = rule["grants_rule_ids"]
             else:
@@ -835,7 +862,7 @@ def parse_step_log(filepath: str) -> Dict:
                     f"{type(granted_rule_ids).__name__}"
                 )
             for granted_rule_id in granted_rule_ids:
-                expanded_rule_ids.add(str(granted_rule_id))
+                expanded_rule_ids.add(resolve_effect_rule_id_to_technical(str(granted_rule_id)))
         unit_rules_by_type[unit_type] = expanded_rule_ids
 
     # Build rule_id -> set of unit_types that have this rule (for validity check in output)
