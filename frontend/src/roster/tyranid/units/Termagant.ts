@@ -27,7 +27,7 @@ export class Termagant extends TyranidInfantrySwarmRangedSwarm {
   static UNIT_RULES = [{ ruleId: "reactive_move", displayName: "Skulking Horrors" }];
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "termagant"}];
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "termagant"}];
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile

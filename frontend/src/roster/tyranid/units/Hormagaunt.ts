@@ -26,7 +26,7 @@ export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
   static UNIT_RULES = [{ ruleId: "charge_after_advance", displayName: "Bounding Leap" }];
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "hormagaunt"}];
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "hormagaunt"}];
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile

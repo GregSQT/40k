@@ -19,6 +19,14 @@
     "id": "reactive_move",
     "description": "Once per turn, after an enemy unit ends a move (normal, advance or retreat) within 9\" of this unit, it can perform a normal move up to D6\"."
   },
+  "reroll_1_save_fight": {
+    "id": "reroll_1_save_fight",
+    "description": "During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the save rolls."
+  },
+  "reroll_1_tohit_fight": {
+    "id": "reroll_1_tohit_fight",
+    "description": "During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the hit rolls."
+  },
   "reroll_1_towound": {
     "id": "reroll_1_towound",
     "description": "When this unit makes an attack, it can reroll rolls of 1 for the wound rolls."
@@ -45,6 +53,10 @@
   "adaptable_predators": {
     "id": "adaptable_predators",
     "description": "Tyranid Warrior (range) : This unit can shoot and charge in a turn in which it fell back."
+  },
+  "adrenalised_onslaught": {
+    "id": "adrenalised_onslaught",
+    "description": "Tyranid Warrior (melee) : At the beginning of the fight phase, you can select one of the following ability to apply to this unit until the end of the phase : ."
   },
   "cunning_hunters": {
     "id": "cunning_hunters",

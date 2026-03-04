@@ -26,7 +26,7 @@ export class Gargoyle extends TyranidInfantrySwarmMeleeSwarm {
   static UNIT_RULES = [{ ruleId: "move_after_shouting", displayName: "Winged Swarm" }];
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "gargoyle"}];
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "gargoyle"}];
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile

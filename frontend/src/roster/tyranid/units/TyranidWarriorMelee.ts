@@ -1,0 +1,50 @@
+// frontend/src/roster/tyranid/units/TyranidWarriorRanged.ts
+//
+
+import { getWeapons } from "../armory";
+import { TyranidInfantryTroopMeleeTroop } from "../classes/TyranidInfantryTroopMeleeTroop";
+
+export class TyranidWarriorMelee extends TyranidInfantryTroopMeleeTroop {
+  static NAME = "TyranidWarriorMelee";
+  static DISPLAY_NAME = "Tyranid Warrior (Melee)";
+  // BASE
+  static MOVE = 6; // Move distance
+  static T = 5; // Toughness score
+  static ARMOR_SAVE = 4; // Armor save score
+  static INVUL_SAVE = 7; // Armor invulnerable save score (7+ = no invul)
+  static HP_MAX = 3; // Max hit points
+  static LD = 7; // Leadership score
+  static OC = 2; // Operative Control
+  static VALUE = 24; // Unit value (W40K points cost)
+
+  // WEAPONS
+  static RNG_WEAPON_CODES = [];
+  static RNG_WEAPONS = getWeapons(TyranidWarriorMelee.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["bio_weapon_warrior"];
+  static CC_WEAPONS = getWeapons(TyranidWarriorMelee.CC_WEAPON_CODES);
+
+  // AI CLASSIFICATION
+  static TANKING_LEVEL = "Troop"; // Troop: 3 wounds, 4+ save
+  static MOVE_TYPE = "Infantry"; // Standard infantry movement
+  static TARGET_TYPE = "Troop"; // RangedTroop specialist - anti-infantry
+
+  // UNIT RULES
+  static UNIT_RULES = [
+    {
+      ruleId: "adrenalised_onslaught",
+      displayName: "Adrenalised Onslaught",
+      grants_rule_ids: ["reroll_1_tohit_fight", "reroll_1_save_fight"],
+    },
+  ];
+
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "tyranid warrior with melee bio-weapon"}];
+
+  // ICON
+  static ICON = "/icons/TyranidWarriorMelee.webp"; // Path relative to public folder
+  static ICON_SCALE = 2.2; // Size of the icon
+
+  constructor(name: string, startPos: [number, number]) {
+    super(name, TyranidWarriorMelee.HP_MAX, startPos);
+  }
+}

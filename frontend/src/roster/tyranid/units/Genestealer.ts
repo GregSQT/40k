@@ -22,6 +22,9 @@ export class Genestealer extends TyranidInfantryTroopMeleeTroop {
   static CC_WEAPON_CODES = ["rending_claws"];
   static CC_WEAPONS = getWeapons(Genestealer.CC_WEAPON_CODES);
 
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "genestealer"}];
+
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Troop"; // // Troop: 2 wounds, 3+ save / 5+ Invu
   static MOVE_TYPE = "Infantry"; // Fast infantry movement

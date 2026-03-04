@@ -55,6 +55,15 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
   // #################################### Melee Weapons ######################################
   // #########################################################################################
 
+  bio_weapon_warrior: {
+    display_name: "Bio-Weapon",
+    NB: 6,
+    ATK: 3,
+    STR: 5,
+    AP: -2,
+    DMG: 1,
+    WEAPON_RULES: ["TWIN_LINKED"],
+  },
   blinding_venom: {
     display_name: "Blinding Venom",
     NB: 1,

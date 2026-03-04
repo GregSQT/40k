@@ -5,7 +5,7 @@ import { getWeapons } from "../armory";
 import { TyranidInfantryTroopRangedTroop } from "../classes/TyranidInfantryTroopRangedTroop";
 
 export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
-  static NAME = "Tyranid Warrior Ranged";
+  static NAME = "TyranidWarriorRanged";
   static DISPLAY_NAME = "Tyranid Warrior (Ranged)";
   // BASE
   static MOVE = 6; // Move distance
@@ -38,7 +38,7 @@ export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
   ];
 
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "synapse"}, { keywordId: "tyranid warrior with ranged bio-weapon"}];
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "tyranid warrior with ranged bio-weapon"}];
 
   // ICON
   static ICON = "/icons/WarriorRanged.webp"; // Path relative to public folder

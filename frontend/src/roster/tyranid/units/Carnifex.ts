@@ -21,7 +21,10 @@ export class Carnifex extends TyranidInfantryEliteMeleeElite {
   static RNG_WEAPONS = getWeapons(Carnifex.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["monstrous_scything_talons"];
   static CC_WEAPONS = getWeapons(Carnifex.CC_WEAPON_CODES);
-
+    
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "monster"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "carnifex"}];
+  
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite"; // Elite: 8 wounds, 2+ save - heavy armor
   static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
