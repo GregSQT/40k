@@ -2023,9 +2023,11 @@ def parse_step_log(filepath: str) -> Dict:
                                                     }
                                                 combi_conflicts_seen.add(conflict_key)
                                         seq_key = (current_episode_num, turn, shooter_id, weapon_name_for_limits)
+                                        # RAPID FIRE shot sequencing is per shooter+weapon context.
+                                        # Target switches during the same weapon activation are valid and
+                                        # must NOT reset the sequence index.
                                         if (last_shoot_shooter_id != shooter_id or
-                                                last_shoot_weapon != weapon_name_for_limits or
-                                                last_shoot_target_id != target_id):
+                                                last_shoot_weapon != weapon_name_for_limits):
                                             shot_sequence_counts[seq_key] = 0
                                         elif step_marker_present and step_inc:
                                             shot_sequence_counts[seq_key] = 0
@@ -5274,26 +5276,28 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{'Devastating_wounds':<28} {'GLOBAL (correct)':<60} {agent_dw_correct:10d} {bot_dw_correct:10d} {'OK':>10}")
     agent_dw_incorrect = stats['devastating_wounds_incorrect'][1]
     bot_dw_incorrect = stats['devastating_wounds_incorrect'][2]
-    log_print(f"{'Devastating_wounds':<28} {'GLOBAL (incorrect)':<60} {agent_dw_incorrect:10d} {bot_dw_incorrect:10d} {'INVALID':>10}")
-    if agent_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][1]:
-        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][2]:
-        first_err = stats['first_error_lines']['devastating_wounds_incorrect'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if (agent_dw_incorrect + bot_dw_incorrect) > 0:
+        log_print(f"{'Devastating_wounds':<28} {'GLOBAL (incorrect)':<60} {agent_dw_incorrect:10d} {bot_dw_incorrect:10d} {'INVALID':>10}")
+        if agent_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][1]:
+            first_err = stats['first_error_lines']['devastating_wounds_incorrect'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][2]:
+            first_err = stats['first_error_lines']['devastating_wounds_incorrect'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
 
     agent_rf_correct = stats['rapid_fire_correct'][1]
     bot_rf_correct = stats['rapid_fire_correct'][2]
     log_print(f"{'Rapid_fire':<28} {'GLOBAL (correct)':<60} {agent_rf_correct:10d} {bot_rf_correct:10d} {'OK':>10}")
     agent_rf_incorrect = stats['rapid_fire_incorrect'][1]
     bot_rf_incorrect = stats['rapid_fire_incorrect'][2]
-    log_print(f"{'Rapid_fire':<28} {'GLOBAL (incorrect)':<60} {agent_rf_incorrect:10d} {bot_rf_incorrect:10d} {'INVALID':>10}")
-    if agent_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][1]:
-        first_err = stats['first_error_lines']['rapid_fire_incorrect'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][2]:
-        first_err = stats['first_error_lines']['rapid_fire_incorrect'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if (agent_rf_incorrect + bot_rf_incorrect) > 0:
+        log_print(f"{'Rapid_fire':<28} {'GLOBAL (incorrect)':<60} {agent_rf_incorrect:10d} {bot_rf_incorrect:10d} {'INVALID':>10}")
+        if agent_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][1]:
+            first_err = stats['first_error_lines']['rapid_fire_incorrect'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][2]:
+            first_err = stats['first_error_lines']['rapid_fire_incorrect'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
 
     incomplete_p1 = 0
     incomplete_p2 = 0

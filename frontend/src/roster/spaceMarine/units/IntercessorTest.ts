@@ -4,8 +4,8 @@
 import { getWeapons } from "../armory";
 import { SpaceMarineInfantryTroopRangedSwarm } from "../classes/SpaceMarineInfantryTroopRangedSwarm";
 
-export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
-  static NAME = "Intercessor";
+export class IntercessorTest extends SpaceMarineInfantryTroopRangedSwarm {
+  static NAME = "IntercessorTest";
   static DISPLAY_NAME = "Intercessor";
   // BASE
   static MOVE = 6; // Move distance
@@ -19,9 +19,9 @@ export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol"];
-  static RNG_WEAPONS = getWeapons(Intercessor.RNG_WEAPON_CODES);
+  static RNG_WEAPONS = getWeapons(IntercessorTest.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["close_combat_weapon"];
-  static CC_WEAPONS = getWeapons(Intercessor.CC_WEAPON_CODES);
+  static CC_WEAPONS = getWeapons(IntercessorTest.CC_WEAPON_CODES);
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
@@ -32,6 +32,6 @@ export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
   static ICON_SCALE = 1.7; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, Intercessor.HP_MAX, startPos);
+    super(name, IntercessorTest.HP_MAX, startPos);
   }
 }
