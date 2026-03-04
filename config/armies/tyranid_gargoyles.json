@@ -1,0 +1,10 @@
+{
+  "faction": "tyranid",
+  "description": "Tyranid army:\n14 Gargoyles",
+  "units": [
+    {
+      "unit_type": "Gargoyle",
+      "count": 14
+    }
+  ]
+}

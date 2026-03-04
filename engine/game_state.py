@@ -64,6 +64,7 @@ class GameStateManager:
             )
         
         unit_rules = copy.deepcopy(config["UNIT_RULES"]) if "UNIT_RULES" in config else []
+        unit_keywords = copy.deepcopy(require_key(config, "UNIT_KEYWORDS"))
         return {
             # Identity
             "id": config["id"],
@@ -96,6 +97,7 @@ class GameStateManager:
             "ICON": config["ICON"],
             "ICON_SCALE": config["ICON_SCALE"],
             "UNIT_RULES": unit_rules,
+            "UNIT_KEYWORDS": unit_keywords,
             
             # AI_TURN.md action tracking fields
             "SHOOT_LEFT": shoot_left,
@@ -108,7 +110,7 @@ class GameStateManager:
         required_uppercase = {
             "HP_CUR", "HP_MAX", "MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE",
             "RNG_WEAPONS", "CC_WEAPONS",
-            "LD", "OC", "VALUE", "ICON", "ICON_SCALE", "UNIT_RULES",
+            "LD", "OC", "VALUE", "ICON", "ICON_SCALE", "UNIT_RULES", "UNIT_KEYWORDS",
             "SHOOT_LEFT", "ATTACK_LEFT"
         }
         
@@ -391,6 +393,7 @@ class GameStateManager:
                     "ICON": full_unit_data["ICON"],
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
+                    "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left
                 }

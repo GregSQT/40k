@@ -147,6 +147,10 @@ class PvEController:
     # ============================================================================
     # AI DECISION MAKING
     # ============================================================================
+
+    def is_ready_for_decision(self) -> bool:
+        """Return whether PvE controller has the required models for inference."""
+        return bool(self.micro_models)
     
     def make_ai_decision(self, game_state: Dict[str, Any], engine) -> Dict[str, Any]:
         """

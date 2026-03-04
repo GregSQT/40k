@@ -990,6 +990,11 @@ def _remove_dead_unit_from_pools(game_state: Dict[str, Any], dead_unit_id: str) 
     if "charge_activation_pool" in game_state:
         game_state["charge_activation_pool"] = [uid for uid in game_state["charge_activation_pool"] if str(uid) != unit_id_str]
 
+    # If the dead unit was currently active for shooting, clear active selector immediately.
+    active_shooting_unit = game_state.get("active_shooting_unit")
+    if active_shooting_unit is not None and str(active_shooting_unit) == unit_id_str:
+        del game_state["active_shooting_unit"]
+
 
 def _rebuild_los_cache_for_unit(game_state: Dict[str, Any], unit_id: str) -> None:
     """
@@ -3961,6 +3966,19 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         if "target_died" not in actual_attack_result:
             actual_attack_result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
         game_state["shoot_attack_results"].append(actual_attack_result)
+
+        # HAZARDOUS critical failure (roll=1) can kill the shooter: activation must stop immediately.
+        if bool(actual_attack_result.get("hazardous_self_died", False)):
+            return _handle_shooting_end_activation(
+                game_state,
+                unit,
+                ACTION,
+                1,
+                SHOOTING,
+                SHOOTING,
+                1,
+                include_attack_results=True,
+            )
 
         # Update SHOOT_LEFT and continue loop per AI_TURN.md
         unit["SHOOT_LEFT"] -= 1

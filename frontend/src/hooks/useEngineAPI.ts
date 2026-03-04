@@ -90,6 +90,9 @@ interface APIGameState {
       displayName: string;
       grants_rule_ids?: string[];
     }>;
+    UNIT_KEYWORDS: Array<{
+      keywordId: string;
+    }>;
   }>;
   current_player: number;
   phase: string;
@@ -1133,6 +1136,9 @@ export const useEngineAPI = () => {
       if (!unit.UNIT_RULES || !Array.isArray(unit.UNIT_RULES)) {
         throw new Error(`API ERROR: Unit ${unit.id} missing required UNIT_RULES array`);
       }
+      if (!unit.UNIT_KEYWORDS || !Array.isArray(unit.UNIT_KEYWORDS)) {
+        throw new Error(`API ERROR: Unit ${unit.id} missing required UNIT_KEYWORDS array`);
+      }
       for (const rule of unit.UNIT_RULES) {
         if (!rule || typeof rule !== "object") {
           throw new Error(`API ERROR: Unit ${unit.id} has invalid UNIT_RULES entry`);
@@ -1146,6 +1152,11 @@ export const useEngineAPI = () => {
           !Array.isArray(rule.grants_rule_ids)
         ) {
           throw new Error(`API ERROR: Unit ${unit.id} has invalid grants_rule_ids in UNIT_RULES`);
+        }
+      }
+      for (const keyword of unit.UNIT_KEYWORDS) {
+        if (!keyword || typeof keyword !== "object" || typeof keyword.keywordId !== "string") {
+          throw new Error(`API ERROR: Unit ${unit.id} has invalid UNIT_KEYWORDS entry`);
         }
       }
 
@@ -1184,6 +1195,7 @@ export const useEngineAPI = () => {
         ATTACK_LEFT: unit.ATTACK_LEFT,
         available_weapons: unit.available_weapons,
         UNIT_RULES: unit.UNIT_RULES,
+        UNIT_KEYWORDS: unit.UNIT_KEYWORDS,
       };
     });
   }, []);

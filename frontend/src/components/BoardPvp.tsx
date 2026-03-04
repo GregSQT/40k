@@ -937,6 +937,10 @@ export default function Board({
 
         const centerCol = selectedUnit.col;
         const centerRow = selectedUnit.row;
+        const selectedUnitKeywords = selectedUnit.UNIT_KEYWORDS;
+        const hasFlyKeyword =
+          Array.isArray(selectedUnitKeywords) &&
+          selectedUnitKeywords.some((entry) => entry.keywordId === "fly");
 
         // Use cube coordinate system for proper hex neighbors
         const cubeDirections = [
@@ -984,68 +988,90 @@ export default function Board({
           }
         }
 
-        const visited = new Map<string, number>();
-        const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
-
-        while (queue.length > 0) {
-          const next = queue.shift();
-          if (!next) continue;
-          const [col, row, steps] = next;
-          const key = `${col},${row}`;
-
-          if (visited.has(key) && steps >= visited.get(key)!) {
-            continue;
-          }
-
-          visited.set(key, steps);
-
-          // ⛔ Skip forbidden positions completely - don't expand from them
-          if (forbiddenSet.has(key) && steps > 0) {
-            continue;
-          }
-
-          const blocked = aliveUnits.some(
-            (u) => u.col === col && u.row === row && u.id !== selectedUnit.id
-          );
-
-          if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
-            availableCells.push({ col, row });
-          }
-
-          if (steps >= selectedUnit.MOVE) {
-            continue;
-          }
-
-          // Use cube coordinates for proper hex neighbors
-          const currentCube = offsetToCube(col, row);
-          for (const [dx, dy, dz] of cubeDirections) {
-            const neighborCube = {
-              x: currentCube.x + dx,
-              y: currentCube.y + dy,
-              z: currentCube.z + dz,
-            };
-
-            // Convert back to offset coordinates
-            const ncol = neighborCube.x;
-            const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
-
-            const nkey = `${ncol},${nrow}`;
-            const nextSteps = steps + 1;
-
-            if (
-              ncol >= 0 &&
-              ncol < BOARD_COLS &&
-              nrow >= 0 &&
-              nrow < BOARD_ROWS &&
-              nextSteps <= selectedUnit.MOVE &&
-              !forbiddenSet.has(nkey)
-            ) {
-              const nblocked = aliveUnits.some(
-                (u) => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id
+        if (hasFlyKeyword) {
+          // FLY: ignore walls/occupancy/enemy-adjacency during traversal.
+          // Only destination legality applies (same restriction as engine-side destination checks).
+          for (let col = 0; col < BOARD_COLS; col++) {
+            for (let row = 0; row < BOARD_ROWS; row++) {
+              const key = `${col},${row}`;
+              if (col === centerCol && row === centerRow) {
+                continue;
+              }
+              if (cubeDistance(offsetToCube(centerCol, centerRow), offsetToCube(col, row)) > selectedUnit.MOVE) {
+                continue;
+              }
+              const blocked = aliveUnits.some(
+                (u) => u.col === col && u.row === row && u.id !== selectedUnit.id
               );
+              if (!blocked && !forbiddenSet.has(key)) {
+                availableCells.push({ col, row });
+              }
+            }
+          }
+        } else {
+          const visited = new Map<string, number>();
+          const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
 
-              if (!nblocked && (!visited.has(nkey) || visited.get(nkey)! > nextSteps)) {
-                queue.push([ncol, nrow, nextSteps]);
+          while (queue.length > 0) {
+            const next = queue.shift();
+            if (!next) continue;
+            const [col, row, steps] = next;
+            const key = `${col},${row}`;
+
+            if (visited.has(key) && steps >= visited.get(key)!) {
+              continue;
+            }
+
+            visited.set(key, steps);
+
+            // ⛔ Skip forbidden positions completely - don't expand from them
+            if (forbiddenSet.has(key) && steps > 0) {
+              continue;
+            }
+
+            const blocked = aliveUnits.some(
+              (u) => u.col === col && u.row === row && u.id !== selectedUnit.id
+            );
+
+            if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
+              availableCells.push({ col, row });
+            }
+
+            if (steps >= selectedUnit.MOVE) {
+              continue;
+            }
+
+            // Use cube coordinates for proper hex neighbors
+            const currentCube = offsetToCube(col, row);
+            for (const [dx, dy, dz] of cubeDirections) {
+              const neighborCube = {
+                x: currentCube.x + dx,
+                y: currentCube.y + dy,
+                z: currentCube.z + dz,
+              };
+
+              // Convert back to offset coordinates
+              const ncol = neighborCube.x;
+              const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
+
+              const nkey = `${ncol},${nrow}`;
+              const nextSteps = steps + 1;
+
+              if (
+                ncol >= 0 &&
+                ncol < BOARD_COLS &&
+                nrow >= 0 &&
+                nrow < BOARD_ROWS &&
+                nextSteps <= selectedUnit.MOVE &&
+                !forbiddenSet.has(nkey)
+              ) {
+                const nblocked = aliveUnits.some(
+                  (u) => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id
+                );
+
+                if (!nblocked && (!visited.has(nkey) || visited.get(nkey)! > nextSteps)) {
+                  queue.push([ncol, nrow, nextSteps]);
+                }
               }
             }
           }
@@ -1629,8 +1655,14 @@ export default function Board({
         (phase === "move" || phase === "shoot") &&
         movePreview !== null &&
         unit.id === movePreview.unitId;
+      const unitCacheEntry = gameState?.units_cache?.[String(unit.id)] ?? null;
+      const isDeadInCache = unitCacheEntry === null && !!gameState?.units_cache;
+      const isHazardousDeathGhost =
+        phase === "shoot" &&
+        selectedUnitId === unit.id &&
+        isDeadInCache;
 
-      const unitToRender = isChargeOrigin || isMoveOriginGhost
+      const unitToRender = isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost
         ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
         : unit;
 

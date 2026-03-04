@@ -87,6 +87,10 @@ export interface UnitRule {
   grants_rule_ids?: string[];
 }
 
+export interface UnitKeyword {
+  keywordId: string;
+}
+
 export interface DeploymentState {
   current_deployer: PlayerId;
   deployable_units: Record<string, UnitId[]>;
@@ -133,6 +137,7 @@ export interface Unit {
   ATTACK_LEFT?: number;
   hasChargedThisTurn?: boolean;
   UNIT_RULES?: UnitRule[];
+  UNIT_KEYWORDS?: UnitKeyword[];
 }
 
 export interface SingleShotState {

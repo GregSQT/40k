@@ -492,9 +492,10 @@ export class UnitRenderer {
     let finalBorderColor = borderColor;
     let circleAlpha = 1.0;
     if (unitWithFlags.isGhost) {
-      finalUnitColor = 0x666666; // Medium grey fill
-      finalBorderColor = 0x888888; // Lighter grey border
-      circleAlpha = 0.6;
+      // Ghost uses move-preview icon palette, but darker.
+      finalUnitColor = this.getCSSColor("--icon-move-bg-color");
+      finalBorderColor = this.getCSSColor("--icon-move-color");
+      circleAlpha = 0.45;
     }
 
     // Just-killed unit styling (show as grey ghost before removal)
@@ -714,8 +715,8 @@ export class UnitRenderer {
 
         // Ghost unit rendering (for replay move visualization)
         if (unitWithFlags.isGhost) {
-          sprite.alpha = 0.5;
-          sprite.tint = 0x666666;
+          sprite.alpha = 0.42;
+          sprite.tint = this.getCSSColor("--icon-move-color");
         }
 
         // Just-killed unit rendering (show as dark grey before removal)
@@ -780,8 +781,8 @@ export class UnitRenderer {
     let textColor = 0xffffff;
     let textAlpha = 1.0;
     if (unitWithFlags.isGhost) {
-      textColor = 0x999999;
-      textAlpha = 0.7;
+      textColor = this.getCSSColor("--icon-move-color");
+      textAlpha = 0.65;
     }
 
     // Just-killed unit styling

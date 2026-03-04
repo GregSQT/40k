@@ -537,8 +537,8 @@ def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
     
     return agent_keys
 
-def initialize_engine():
-    """Initialize the W40K engine with configuration."""
+def initialize_engine(scenario_file: str = None, debug_mode: bool = False):
+    """Initialize the W40K engine for PvP mode with configurable scenario."""
     global engine
     try:
         # Change to project root directory for config loading
@@ -546,8 +546,11 @@ def initialize_engine():
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
         
-        # Define scenario file path for game/API mode
-        scenario_file = os.path.join("config", "scenario_game.json")
+        # Define scenario file path for game/API mode (default if not provided)
+        if scenario_file is None:
+            scenario_file = os.path.join("config", "scenario_game.json")
+        elif not isinstance(scenario_file, str):
+            raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 
         # Verify scenario file exists - no fallback
         if not os.path.exists(scenario_file):
@@ -675,7 +678,8 @@ def initialize_engine():
             active_agents=None,
             scenario_file=scenario_file,
             unit_registry=unit_registry,
-            quiet=True
+            quiet=True,
+            debug_mode=debug_mode
         )
         
         # CRITICAL FIX: Add rewards_configs to game_state after engine creation
@@ -1248,14 +1252,20 @@ def start_game():
         
         # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
         if test_mode:
-            print("DEBUG: Initializing engine for Test mode")
-            if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
-                return jsonify({"success": False, "error": "Test engine initialization failed"}), 500
+            print("DEBUG: Initializing engine for PvP Test mode")
+            if scenario_file is None:
+                scenario_file = os.path.join("config", "scenario_pvp_test.json")
+            if not initialize_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+                return jsonify({"success": False, "error": "PvP Test engine initialization failed"}), 500
+            # PvP test mode must remain human vs human.
+            engine.is_pve_mode = False
+            engine.is_test_mode = False
+            engine.is_debug_mode = False
         elif requested_mode == "pvp":
-            print("DEBUG: Initializing engine for PvP mode (copied from Test mode)")
-            if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+            print("DEBUG: Initializing engine for PvP mode")
+            if not initialize_engine(scenario_file=scenario_file, debug_mode=debug_mode):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
-            # PvP must remain human vs human even if initialization reuses Test flow.
+            # PvP must remain human vs human.
             engine.is_pve_mode = False
             engine.is_test_mode = False
             engine.is_debug_mode = False

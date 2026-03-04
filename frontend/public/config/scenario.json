@@ -10,7 +10,7 @@
     },
     {
       "id": 2,
-      "unit_type": "IntercessorGrenadeLauncher",
+      "unit_type": "Gargoyle",
       "player": 1,
       "col": 20,
       "row": 7

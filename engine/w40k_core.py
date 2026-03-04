@@ -1421,8 +1421,8 @@ class W40KEngine(gym.Env):
             if not has_eligible_ai:
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "no_eligible_ai_units_in_pool", "pool_checked": pool_to_check}
         
-        # Check AI model availability
-        if not hasattr(self, '_ai_model') or not self._ai_model:
+        # Check PvE controller readiness without coupling to controller mode.
+        if not hasattr(self, "pve_controller") or not self.pve_controller.is_ready_for_decision():
             return False, {"error": "ai_model_not_loaded"}
         
         # Make AI decision - replaces human click
