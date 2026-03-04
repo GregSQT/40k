@@ -17,14 +17,14 @@
     },
     {
       "id": 3,
-      "unit_type": "Intercessor",
+      "unit_type": "IntercessorTest",
       "player": 2,
       "col": 10,
       "row": 6
     },
     {
       "id": 4,
-      "unit_type": "Intercessor",
+      "unit_type": "IntercessorTest",
       "player": 2,
       "col": 4,
       "row": 13

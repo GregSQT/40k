@@ -209,7 +209,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     display_name: "Plasma Pistol (Supercharge)",
     COMBI_WEAPON: "plasma_pistol",
     RNG: 12,
-    NB: 20,
+    NB: 1,
     ATK: 3,
     STR: 8,
     AP: -3,
