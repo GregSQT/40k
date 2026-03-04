@@ -23,6 +23,9 @@ export class HeavyIntercessorHeavyBolter extends SpaceMarineInfantryEliteRangedT
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(HeavyIntercessorHeavyBolter.CC_WEAPON_CODES);
 
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "heavy intercessor squad"}];
+  
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite"; // Elite: 3+ wounds, 3+ save + invul
   static MOVE_TYPE = "Infantry"; // Standard infantry movement

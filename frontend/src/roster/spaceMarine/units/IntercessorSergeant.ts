@@ -23,6 +23,9 @@ export class IntercessorSergeant extends SpaceMarineInfantryTroopMeleeElite {
   static CC_WEAPON_CODES = ["intercessor_sergeant_power_fist"];
   static CC_WEAPONS = getWeapons(IntercessorSergeant.CC_WEAPON_CODES);
 
+    // UNIT KEYWORDS
+    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "intercessor squad"}];
+
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
   static MOVE_TYPE = "Infantry"; // Standard infantry movement

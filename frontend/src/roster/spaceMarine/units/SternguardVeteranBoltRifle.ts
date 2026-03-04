@@ -23,6 +23,9 @@ export class SternguardVeteranBoltRifle extends SpaceMarineInfantryTroopRangedSw
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(SternguardVeteranBoltRifle.CC_WEAPON_CODES);
 
+    // UNIT KEYWORDS
+    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "sternguard veteran squad"}];
+
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
   static MOVE_TYPE = "Infantry"; // Standard infantry movement

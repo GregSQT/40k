@@ -23,6 +23,9 @@ export class CaptainGravis extends SpaceMarineInfantryLeaderEliteMeleeElite {
   static CC_WEAPON_CODES = ["power_fist"];
   static CC_WEAPONS = getWeapons(CaptainGravis.CC_WEAPON_CODES);
 
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "captain"}];
+
   // AI CLASSIFICATION
   static TANKING_LEVEL = "LeaderElite"; // LeaderElite: 6+ wounds, 3+ save + invul
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
