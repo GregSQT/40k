@@ -1915,6 +1915,52 @@ textarea:focus {
   flex: 1;
 }
 
+.game-log-rule-ref {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.game-log-rule-ref__button {
+  border: none;
+  background: transparent;
+  color: #fde68a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font: inherit;
+  padding: 0 1px;
+  margin: 0;
+}
+
+.game-log-rule-ref__button--active {
+  color: #facc15;
+}
+
+.game-log-rule-ref__tooltip {
+  z-index: 99999;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.game-log-rule-ref__tooltip--floating {
+  position: fixed;
+}
+
+.game-log-rule-ref__tooltip--above {
+  transform: translateY(-100%);
+}
+
 /* Outcome badges for shooting / combat */
 .game-log-entry__outcome {
   font-size: 11px;

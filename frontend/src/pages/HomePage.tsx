@@ -20,25 +20,19 @@ export default function HomePage() {
           PvE Game
         </Link>
         <Link
-          to="/game?mode=pve_old"
-          className="px-6 py-3 bg-cyan-700 text-white rounded-lg hover:bg-cyan-600 inline-block"
+          to="/game?mode=pve_test"
+          className="px-6 py-3 bg-fuchsia-700 text-white rounded-lg hover:bg-fuchsia-600 inline-block"
         >
-          PvE Old Game
+          PvE Test Game
         </Link>
         <Link
-          to="/game?mode=test"
+          to="/game?mode=pvp_test"
           className="px-6 py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-500 inline-block"
         >
-          Test Game
+          PvP Test Game
         </Link>
         <Link
-          to="/game?mode=debug"
-          className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-500 inline-block"
-        >
-          Debug Game
-        </Link>
-        <Link
-          to="/replay"
+          to="/game?mode=replay"
           className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-500 inline-block"
         >
           Replay

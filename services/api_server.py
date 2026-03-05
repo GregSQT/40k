@@ -244,9 +244,9 @@ def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
     if mode in allowed_modes:
         return True
     # Backward compatibility for stale permissions snapshots.
-    if mode == "pvp_old" and "pvp" in allowed_modes:
+    if mode == "pvp_test" and "test" in allowed_modes:
         return True
-    if mode == "pve_old" and "pve" in allowed_modes:
+    if mode == "pve_test" and "test" in allowed_modes:
         return True
     return False
 
@@ -320,7 +320,7 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
-            ("pve_old", "Player vs Environment (Old)"),
+            ("pve_test", "Player vs Environment Test"),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
@@ -328,15 +328,7 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
-            ("pvp_old", "Player vs Player (Old)"),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
-            ("debug", "Debug Mode"),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
-            ("test", "Test Mode"),
+            ("pvp_test", "Player vs Player Test"),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO options (code, label) VALUES (?, ?)",
@@ -366,30 +358,20 @@ def initialize_auth_db() -> None:
             "SELECT id FROM game_modes WHERE code = ?",
             ("pve",),
         ).fetchone()
-        pve_old_row = cursor.execute(
+        pve_test_row = cursor.execute(
             "SELECT id FROM game_modes WHERE code = ?",
-            ("pve_old",),
+            ("pve_test",),
         ).fetchone()
         pvp_row = cursor.execute(
             "SELECT id FROM game_modes WHERE code = ?",
             ("pvp",),
         ).fetchone()
-        pvp_old_row = cursor.execute(
+        pvp_test_row = cursor.execute(
             "SELECT id FROM game_modes WHERE code = ?",
-            ("pvp_old",),
+            ("pvp_test",),
         ).fetchone()
-        if pve_row is None or pve_old_row is None or pvp_row is None or pvp_old_row is None:
+        if pve_row is None or pve_test_row is None or pvp_row is None or pvp_test_row is None:
             raise RuntimeError("Failed to seed required game modes")
-        debug_row = cursor.execute(
-            "SELECT id FROM game_modes WHERE code = ?",
-            ("debug",),
-        ).fetchone()
-        test_row = cursor.execute(
-            "SELECT id FROM game_modes WHERE code = ?",
-            ("test",),
-        ).fetchone()
-        if debug_row is None or test_row is None:
-            raise RuntimeError("Failed to seed required admin game modes")
 
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
@@ -397,7 +379,7 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (profile_id, pve_old_row["id"]),
+            (profile_id, pve_test_row["id"]),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
@@ -405,7 +387,7 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (profile_id, pvp_old_row["id"]),
+            (profile_id, pvp_test_row["id"]),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
@@ -413,7 +395,7 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (admin_profile_id, pve_old_row["id"]),
+            (admin_profile_id, pve_test_row["id"]),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
@@ -421,15 +403,7 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (admin_profile_id, pvp_old_row["id"]),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (admin_profile_id, debug_row["id"]),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (admin_profile_id, test_row["id"]),
+            (admin_profile_id, pvp_test_row["id"]),
         )
 
         warning_option_row = cursor.execute(
@@ -1221,17 +1195,19 @@ def start_game():
         scenario_file = data.get('scenario_file', None)
 
         requested_mode = "pvp"
-        if test_mode:
-            requested_mode = "test"
-        elif debug_mode:
-            requested_mode = "debug"
-        elif mode_code is not None:
-            allowed_mode_codes = {"pvp", "pvp_old", "pve", "pve_old"}
+        if mode_code is not None:
+            allowed_mode_codes = {"pvp", "pve", "pvp_test", "pve_test"}
             if mode_code not in allowed_mode_codes:
                 raise ValueError(f"Unsupported mode_code '{mode_code}'. Allowed values: {sorted(allowed_mode_codes)}")
             requested_mode = mode_code
+        elif test_mode:
+            # Legacy compatibility: previous frontend used test_mode for this PvP test flow.
+            requested_mode = "pvp_test"
         elif pve_mode:
-            requested_mode = "pve_old"
+            # Legacy compatibility for older frontend payloads.
+            requested_mode = "pve"
+        elif debug_mode:
+            raise ValueError("Legacy debug_mode payload is no longer supported")
 
         connection = _get_auth_db_connection()
         try:
@@ -1251,7 +1227,7 @@ def start_game():
             ), 403
         
         # CRITICAL: Always reinitialize engine based on requested mode to prevent mode contamination
-        if test_mode:
+        if requested_mode == "pvp_test":
             print("DEBUG: Initializing engine for PvP Test mode")
             if scenario_file is None:
                 scenario_file = os.path.join("config", "scenario_pvp_test.json")
@@ -1273,13 +1249,15 @@ def start_game():
             print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
             if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
                 return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
-        elif requested_mode == "pve_old":
-            print("DEBUG: Initializing engine for PvE mode")
-            if not initialize_pve_engine(scenario_file=scenario_file, debug_mode=debug_mode):
-                return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
+        elif requested_mode == "pve_test":
+            print("DEBUG: Initializing engine for PvE Test mode")
+            if scenario_file is None:
+                scenario_file = os.path.join("config", "scenario_pve_test.json")
+            if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+                return jsonify({"success": False, "error": "PvE Test engine initialization failed"}), 500
         else:
             print("DEBUG: Initializing engine for PvP mode")
-            if not initialize_engine():
+            if not initialize_engine(scenario_file=scenario_file, debug_mode=debug_mode):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
             # Ensure PvE mode is explicitly disabled for PvP
             engine.is_pve_mode = False
@@ -1316,11 +1294,9 @@ def start_game():
 
         mode_labels = {
             "pvp": "PvP",
-            "pvp_old": "PvP Old",
-            "pve_old": "PvE Old",
+            "pvp_test": "PvP Test",
+            "pve_test": "PvE Test",
             "pve": "PvE",
-            "test": "Test",
-            "debug": "Debug",
         }
         mode_label = mode_labels.get(requested_mode)
         if mode_label is None:
@@ -1647,7 +1623,7 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     requested_player = action.get("player")
     if requested_player is not None:
         current_mode_code = getattr(engine_instance, "current_mode_code", None)
-        allowed_multi_player_roster_modes = {"test", "pvp", "pve"}
+        allowed_multi_player_roster_modes = {"pvp_test", "pvp", "pve", "pve_test"}
         player_types = game_state.get("player_types")
         legacy_human_vs_human_setup = (
             isinstance(player_types, dict)

@@ -49,16 +49,12 @@ export const BoardWithAPI: React.FC = () => {
   const location = useLocation();
   const gameMode = location.pathname.includes("/replay")
     ? "training"
-    : location.pathname === "/game" && location.search.includes("mode=debug")
-      ? "debug"
-      : location.pathname === "/game" && location.search.includes("mode=test")
-        ? "test"
+    : location.pathname === "/game" && location.search.includes("mode=pvp_test")
+        ? "pvp_test"
+      : location.pathname === "/game" && location.search.includes("mode=pve_test")
+        ? "pve"
       : location.pathname === "/game" && location.search.includes("mode=pve")
-        ? "test"
-      : location.pathname === "/game" && location.search.includes("mode=pvp_old")
-        ? "pvp_old"
-      : location.pathname === "/game" && location.search.includes("mode=pve_old")
-        ? "pve_old"
+        ? "pve"
         : "pvp";
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
@@ -137,7 +133,7 @@ export const BoardWithAPI: React.FC = () => {
   const [isDraggingRuleChoicePopup, setIsDraggingRuleChoicePopup] = useState(false);
   const ruleChoiceDragOffsetRef = useRef({ x: 0, y: 0 });
   const [showGameOverPopup, setShowGameOverPopup] = useState(false);
-  const isRosterSetupMode = gameMode === "test" || gameMode === "pvp" || gameMode === "pve_old";
+  const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
 
   const closeRosterPicker = () => {

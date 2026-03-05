@@ -895,10 +895,49 @@ def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_r
         return None
 
     unit_rules = require_key(unit, "UNIT_RULES")
+    registry = _get_unit_rules_registry()
+    target_effect_rule_id = _resolve_effect_rule_id_to_technical(effect_rule_id)
     for rule in unit_rules:
         direct_rule_id = require_key(rule, "ruleId")
         if direct_rule_id != source_rule_id:
             continue
+        usage_value = rule.get("usage")
+        if usage_value is not None:
+            if not isinstance(usage_value, str):
+                raise ValueError(f"Unit rule '{source_rule_id}' has invalid usage: {usage_value!r}")
+            normalized_usage = usage_value.strip().lower()
+        else:
+            normalized_usage = None
+        if normalized_usage in {"or", "unique"}:
+            selected_granted_rule_id = rule.get("_selected_granted_rule_id")
+            if selected_granted_rule_id is None:
+                raise ValueError(
+                    f"Unit {require_key(unit, 'id')} rule '{source_rule_id}' requires "
+                    "_selected_granted_rule_id for usage 'or/unique'"
+                )
+            if not isinstance(selected_granted_rule_id, str) or not selected_granted_rule_id.strip():
+                raise ValueError(
+                    f"Unit {require_key(unit, 'id')} rule '{source_rule_id}' has invalid "
+                    f"_selected_granted_rule_id: {selected_granted_rule_id!r}"
+                )
+            selected_rule_id = selected_granted_rule_id.strip()
+            if selected_rule_id not in registry:
+                raise KeyError(
+                    f"Unknown selected granted rule id '{selected_rule_id}' in config/unit_rules.json"
+                )
+            selected_rule_config = registry[selected_rule_id]
+            selected_rule_name = selected_rule_config.get("name")
+            if not isinstance(selected_rule_name, str) or not selected_rule_name.strip():
+                raise ValueError(
+                    f"Rule '{selected_rule_id}' must define non-empty 'name' for selected rule display"
+                )
+            selected_technical_rule_id = _resolve_effect_rule_id_to_technical(selected_rule_id)
+            if selected_technical_rule_id != target_effect_rule_id:
+                raise ValueError(
+                    f"Selected rule '{selected_rule_id}' resolves to '{selected_technical_rule_id}', "
+                    f"but requested effect is '{target_effect_rule_id}'"
+                )
+            return selected_rule_name.strip().upper()
         display_name = require_key(rule, "displayName")
         if not isinstance(display_name, str) or not display_name.strip():
             unit_id = require_key(unit, "id")

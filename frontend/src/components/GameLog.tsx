@@ -1,8 +1,144 @@
 // frontend/src/components/GameLog.tsx
 // frontend/src/components/GameLog.tsx
 import React from "react";
+import { createPortal } from "react-dom";
 import type { BaseLogEntry, ShootDetail } from "../../../shared/gameLogStructure.ts";
 import { getEventIcon, getEventTypeClass } from "../../../shared/gameLogStructure.ts";
+import unitRulesConfig from "../../../config/unit_rules.json";
+import weaponRulesConfig from "../../../config/weapon_rules.json";
+
+const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
+
+const normalizeRuleLookupKey = (value: string): string => {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[:]+/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+};
+
+const requireNonEmptyString = (value: unknown, errorMessage: string): string => {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(errorMessage);
+  }
+  return value.trim();
+};
+
+const setRuleDescription = (
+  descriptions: Map<string, string>,
+  rawLookupKey: string,
+  description: string,
+  allowOverride: boolean
+): void => {
+  const lookupKey = normalizeRuleLookupKey(rawLookupKey);
+  if (lookupKey === "") {
+    throw new Error("Rule lookup key cannot be empty");
+  }
+  if (allowOverride || !descriptions.has(lookupKey)) {
+    descriptions.set(lookupKey, description);
+  }
+};
+
+const resolveRuleDescription = (
+  tokenLabel: string,
+  ruleDescriptionByLookup: Map<string, string>
+): string | undefined => {
+  const direct = ruleDescriptionByLookup.get(normalizeRuleLookupKey(tokenLabel));
+  if (direct) {
+    return direct;
+  }
+  const parameterizedMatch = tokenLabel.match(/^(.+?)(?:\s*[: ]\s*\d+\+?)$/);
+  if (parameterizedMatch) {
+    return ruleDescriptionByLookup.get(normalizeRuleLookupKey(parameterizedMatch[1]));
+  }
+  return undefined;
+};
+
+const RuleReferenceTag: React.FC<{ label: string; description: string }> = ({ label, description }) => {
+  const [isTooltipPinned, setIsTooltipPinned] = React.useState(false);
+  const [isTooltipHovered, setIsTooltipHovered] = React.useState(false);
+  const buttonRef = React.useRef<HTMLButtonElement | null>(null);
+  const [tooltipCoords, setTooltipCoords] = React.useState<{ left: number; top: number; placeAbove: boolean }>({
+    left: 0,
+    top: 0,
+    placeAbove: false,
+  });
+  const tooltipVisible = isTooltipPinned || isTooltipHovered;
+  const updateTooltipPosition = React.useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) {
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const tooltipWidth = 320;
+    const horizontalPadding = 10;
+    const left = Math.max(
+      horizontalPadding,
+      Math.min(rect.left, viewportWidth - tooltipWidth - horizontalPadding)
+    );
+    const preferAbove = rect.bottom > viewportHeight - 180;
+    const top = preferAbove ? rect.top - 8 : rect.bottom + 8;
+    setTooltipCoords({ left, top, placeAbove: preferAbove });
+  }, []);
+
+  React.useEffect(() => {
+    if (!tooltipVisible) {
+      return;
+    }
+    updateTooltipPosition();
+    const handleViewportChange = () => {
+      updateTooltipPosition();
+    };
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+    return () => {
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
+    };
+  }, [tooltipVisible, updateTooltipPosition]);
+
+  return (
+    <span className="game-log-rule-ref">
+      <button
+        ref={buttonRef}
+        type="button"
+        className={`game-log-rule-ref__button ${tooltipVisible ? "game-log-rule-ref__button--active" : ""}`}
+        onMouseEnter={() => {
+          setIsTooltipHovered(true);
+          updateTooltipPosition();
+        }}
+        onMouseLeave={() => setIsTooltipHovered(false)}
+        onFocus={() => {
+          setIsTooltipHovered(true);
+          updateTooltipPosition();
+        }}
+        onBlur={() => setIsTooltipHovered(false)}
+        onClick={() => {
+          updateTooltipPosition();
+          setIsTooltipPinned((prev) => !prev);
+        }}
+        aria-label={`Afficher la description de la regle ${label}`}
+      >
+        [{label}]
+      </button>
+      {tooltipVisible &&
+        createPortal(
+          <span
+            className={`game-log-rule-ref__tooltip game-log-rule-ref__tooltip--floating ${
+              tooltipCoords.placeAbove ? "game-log-rule-ref__tooltip--above" : ""
+            }`}
+            style={{ left: `${tooltipCoords.left}px`, top: `${tooltipCoords.top}px` }}
+          >
+            {description}
+          </span>,
+          document.body
+        )}
+    </span>
+  );
+};
 
 // Use shared interface as base, add frontend-specific fields
 export interface GameLogEvent extends BaseLogEntry {
@@ -29,6 +165,94 @@ export const GameLog: React.FC<GameLogProps> = ({
   debugMode = false,
 }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
+  const ruleDescriptionByLookup = React.useMemo(() => {
+    const descriptions = new Map<string, string>();
+
+    // 1) Unit rules have priority over weapon rules on collisions.
+    const rawUnitRules = unitRulesConfig as Record<string, unknown>;
+    for (const [entryKey, entryValue] of Object.entries(rawUnitRules)) {
+      if (typeof entryValue !== "object" || entryValue === null) {
+        throw new Error(`Invalid unit_rules.json entry '${entryKey}': expected object`);
+      }
+      const ruleEntry = entryValue as Record<string, unknown>;
+      const id = requireNonEmptyString(
+        ruleEntry.id,
+        `Invalid unit_rules.json entry '${entryKey}': missing non-empty 'id'`
+      );
+      const description = requireNonEmptyString(
+        ruleEntry.description,
+        `Invalid unit_rules.json entry '${entryKey}': missing non-empty 'description'`
+      );
+      setRuleDescription(descriptions, entryKey, description, true);
+      setRuleDescription(descriptions, id, description, true);
+      if (typeof ruleEntry.name === "string" && ruleEntry.name.trim() !== "") {
+        setRuleDescription(descriptions, ruleEntry.name, description, true);
+      }
+      if (typeof ruleEntry.alias === "string" && ruleEntry.alias.trim() !== "") {
+        setRuleDescription(descriptions, ruleEntry.alias, description, true);
+      }
+    }
+
+    // 2) Weapon rules are fallback candidates only (no override).
+    const rawWeaponRules = weaponRulesConfig as Record<string, unknown>;
+    for (const [entryKey, entryValue] of Object.entries(rawWeaponRules)) {
+      if (typeof entryValue !== "object" || entryValue === null) {
+        throw new Error(`Invalid weapon_rules.json entry '${entryKey}': expected object`);
+      }
+      const ruleEntry = entryValue as Record<string, unknown>;
+      const description = requireNonEmptyString(
+        ruleEntry.description,
+        `Invalid weapon_rules.json entry '${entryKey}': missing non-empty 'description'`
+      );
+      const name = requireNonEmptyString(
+        ruleEntry.name,
+        `Invalid weapon_rules.json entry '${entryKey}': missing non-empty 'name'`
+      );
+      setRuleDescription(descriptions, entryKey, description, false);
+      setRuleDescription(descriptions, name, description, false);
+    }
+
+    return descriptions;
+  }, []);
+
+  const renderMessageWithRuleDescriptions = React.useCallback(
+    (message: string): React.ReactNode => {
+      const nodes: React.ReactNode[] = [];
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      RULE_TOKEN_REGEX.lastIndex = 0;
+
+      for (;;) {
+        match = RULE_TOKEN_REGEX.exec(message);
+        if (match === null) {
+          break;
+        }
+        const [fullToken, tokenLabel] = match;
+        if (match.index > lastIndex) {
+          nodes.push(message.slice(lastIndex, match.index));
+        }
+        const description = resolveRuleDescription(tokenLabel, ruleDescriptionByLookup);
+        if (description) {
+          nodes.push(
+            <RuleReferenceTag
+              key={`${match.index}-${tokenLabel}`}
+              label={tokenLabel}
+              description={description}
+            />
+          );
+        } else {
+          nodes.push(fullToken);
+        }
+        lastIndex = RULE_TOKEN_REGEX.lastIndex;
+      }
+
+      if (lastIndex < message.length) {
+        nodes.push(message.slice(lastIndex));
+      }
+      return nodes;
+    },
+    [ruleDescriptionByLookup]
+  );
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
@@ -148,7 +372,9 @@ export const GameLog: React.FC<GameLogProps> = ({
                         {event.player === 1 ? "P1" : "P2"}
                       </span>
                     )}
-                    <span className="game-log-entry__message">{event.message}</span>
+                    <span className="game-log-entry__message">
+                      {renderMessageWithRuleDescriptions(event.message)}
+                    </span>
                     {outcomeLabel && outcomeClass && (
                       <span
                         className={`game-log-entry__outcome game-log-entry__outcome--${outcomeClass}`}

@@ -26,7 +26,7 @@ interface UnitStatusTableProps {
   guidedFocusUnitId?: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
-  gameMode?: "pvp" | "pvp_old" | "debug" | "pve" | "pve_old" | "test" | "training";
+  gameMode?: "pvp" | "pvp_test" | "pve" | "training";
   isReplay?: boolean;
   victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;
@@ -931,7 +931,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
           return playerNumber === 2 ? "Player 2 - Bot" : "Player 1 - AI";
         }
         return playerNumber === 2 ? "Player 1 - AI" : "Player 2 - Bot";
-      } else if (gameMode === "debug" || gameMode === "pve" || gameMode === "pve_old" || gameMode === "test") {
+      } else if (gameMode === "pve") {
         return playerNumber === 1 ? "Player 1 - Human" : "Player 2 - AI";
       } else {
         // pvp

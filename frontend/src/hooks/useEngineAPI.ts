@@ -267,50 +267,38 @@ export const useEngineAPI = () => {
         gameInitialized.current = true;
         setLoading(true);
 
-        // Detect Debug/PvE mode from URL
+        // Detect active game mode from URL
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get("mode");
-        const isDebugMode = mode === "debug";
         const isPvEMode = mode === "pve";
-        const isPvEOldMode = mode === "pve_old";
-        const isTestMode = mode === "test";
-        const isPvPOldMode = mode === "pvp_old";
-        const requestedModeCode = isPvPOldMode
-          ? "pvp_old"
-          : isPvEOldMode
-            ? "pve_old"
-            : isPvEMode
-              ? "pve"
+        const isPvETestMode = mode === "pve_test";
+        const isPvPTestMode = mode === "pvp_test";
+        const requestedModeCode = isPvETestMode
+          ? "pve_test"
+          : isPvEMode
+            ? "pve"
+            : isPvPTestMode
+              ? "pvp_test"
               : "pvp";
 
         console.log(
           `Starting game in ${
-            isDebugMode
-              ? "Debug"
-              : isTestMode
-                ? "Test"
-                : isPvEMode
-                  ? "PvE"
-                  : isPvEOldMode
-                    ? "PvE Old"
-                  : isPvPOldMode
-                    ? "PvP Old"
-                    : "PvP"
+            isPvPTestMode ? "PvP Test" : isPvETestMode ? "PvE Test" : isPvEMode ? "PvE" : "PvP"
           } mode`
         );
 
         const requestPayload: Record<string, unknown> = {
-          pve_mode: isPvEMode,
-          test_mode: isTestMode,
-          debug_mode: isDebugMode,
+          pve_mode: isPvEMode || isPvETestMode,
+          test_mode: false,
+          debug_mode: false,
           mode_code: requestedModeCode,
         };
-        if (isTestMode) {
+        if (isPvPTestMode) {
           requestPayload.scenario_file = "config/scenario_pvp_test.json";
+        } else if (isPvETestMode) {
+          requestPayload.scenario_file = "config/scenario_pve_test.json";
         } else if (isPvEMode) {
           requestPayload.scenario_file = "config/scenario_test.json";
-        } else if (isPvEOldMode) {
-          requestPayload.scenario_file = "config/scenario_pve.json";
         }
 
         const authSession = getAuthSession();
@@ -334,7 +322,7 @@ export const useEngineAPI = () => {
         const data = await response.json();
         if (data.success) {
           const expectedPlayer2Type: "human" | "ai" =
-            isDebugMode || isPvEMode || isPvEOldMode ? "ai" : "human";
+            isPvEMode || isPvETestMode ? "ai" : "human";
           const player2Type = data.game_state?.player_types?.["2"];
           if (player2Type !== expectedPlayer2Type) {
             throw new Error(
@@ -345,15 +333,11 @@ export const useEngineAPI = () => {
           const startedMode =
             requestedModeCode === "pve"
               ? "PvE"
-              : requestedModeCode === "pve_old"
-                ? "PvE Old"
-                : data.game_state.debug_mode
-                  ? "Debug"
-                  : data.game_state.test_mode
-                    ? "Test"
-                    : data.game_state.pve_mode
-                      ? "PvE"
-                      : "PvP";
+              : requestedModeCode === "pve_test"
+                  ? "PvE Test"
+                : requestedModeCode === "pvp_test"
+                  ? "PvP Test"
+                : "PvP";
           console.log(`Game started successfully in ${startedMode} mode`);
         } else {
           throw new Error(data.error || "Failed to start game");

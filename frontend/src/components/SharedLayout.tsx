@@ -18,46 +18,32 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
   const location = useLocation();
 
   const getButtonClass = (path: string) => {
-    const isDebugMode = location.pathname === "/game" && location.search.includes("mode=debug");
-    const isTestMode = location.pathname === "/game" && location.search.includes("mode=test");
+    const isPvPTestMode = location.pathname === "/game" && location.search.includes("mode=pvp_test");
     const isPvEMode = location.pathname === "/game" && location.search.includes("mode=pve");
-    const isPvEOldMode = location.pathname === "/game" && location.search.includes("mode=pve_old");
-    const isPvPOldMode = location.pathname === "/game" && location.search.includes("mode=pvp_old");
+    const isPvETestMode = location.pathname === "/game" && location.search.includes("mode=pve_test");
 
     // Handle PvE mode detection via query parameter
     if (path === "/game?mode=pve") {
       return `nav-button ${isPvEMode ? "nav-button--active" : "nav-button--inactive"}`;
     }
 
-    // Handle PvE old mode detection via query parameter
-    if (path === "/game?mode=pve_old") {
-      return `nav-button ${isPvEOldMode ? "nav-button--active" : "nav-button--inactive"}`;
+    // Handle PvE test mode detection via query parameter
+    if (path === "/game?mode=pve_test") {
+      return `nav-button ${isPvETestMode ? "nav-button--active" : "nav-button--inactive"}`;
     }
 
-    // Handle Debug mode detection via query parameter
-    if (path === "/game?mode=debug") {
-      return `nav-button ${isDebugMode ? "nav-button--active" : "nav-button--inactive"}`;
+    // Handle PvP Test mode detection via query parameter
+    if (path === "/game?mode=pvp_test") {
+      return `nav-button ${isPvPTestMode ? "nav-button--active" : "nav-button--inactive"}`;
     }
 
-    // Handle Test mode detection via query parameter
-    if (path === "/game?mode=test") {
-      return `nav-button ${isTestMode ? "nav-button--active" : "nav-button--inactive"}`;
-    }
-
-    // Handle PvP old mode detection via query parameter
-    if (path === "/game?mode=pvp_old") {
-      return `nav-button ${isPvPOldMode ? "nav-button--active" : "nav-button--inactive"}`;
-    }
-
-    // Handle PvP mode - only active when on /game WITHOUT Debug/PvE mode
+    // Handle PvP mode - only active when on /game without explicit mode.
     if (path === "/game") {
       const isPvPMode =
         location.pathname === "/game" &&
-        !isDebugMode &&
-        !isTestMode &&
+        !isPvPTestMode &&
         !isPvEMode &&
-        !isPvEOldMode &&
-        !isPvPOldMode;
+        !isPvETestMode;
       return `nav-button ${isPvPMode ? "nav-button--active" : "nav-button--inactive"}`;
     }
 
@@ -84,13 +70,6 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
         </button>
         <button
           type="button"
-          onClick={() => (window.location.href = "/game?mode=pvp_old")}
-          className={getButtonClass("/game?mode=pvp_old")}
-        >
-          PvP Old
-        </button>
-        <button
-          type="button"
           onClick={() => (window.location.href = "/game?mode=pve")}
           className={getButtonClass("/game?mode=pve")}
         >
@@ -98,28 +77,21 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
         </button>
         <button
           type="button"
-          onClick={() => (window.location.href = "/game?mode=pve_old")}
-          className={getButtonClass("/game?mode=pve_old")}
+          onClick={() => (window.location.href = "/game?mode=pvp_test")}
+          className={getButtonClass("/game?mode=pvp_test")}
         >
-          PvE Old
+          PvP Test
         </button>
         <button
           type="button"
-          onClick={() => (window.location.href = "/game?mode=test")}
-          className={getButtonClass("/game?mode=test")}
+          onClick={() => (window.location.href = "/game?mode=pve_test")}
+          className={getButtonClass("/game?mode=pve_test")}
         >
-          Test
+          PvE Test
         </button>
         <button
           type="button"
-          onClick={() => (window.location.href = "/game?mode=debug")}
-          className={getButtonClass("/game?mode=debug")}
-        >
-          Debug
-        </button>
-        <button
-          type="button"
-          onClick={() => (window.location.href = "/replay")}
+          onClick={() => (window.location.href = "/game?mode=replay")}
           className={getButtonClass("/replay")}
         >
           Replay
