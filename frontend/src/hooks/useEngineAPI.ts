@@ -123,7 +123,6 @@ interface APIGameState {
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
-  test_mode?: boolean;
   player_types?: Record<string, "human" | "ai">;
   deployment_type?: "random" | "fixed" | "active";
   deployment_state?: {
@@ -289,8 +288,6 @@ export const useEngineAPI = () => {
 
         const requestPayload: Record<string, unknown> = {
           pve_mode: isPvEMode || isPvETestMode,
-          test_mode: false,
-          debug_mode: false,
           mode_code: requestedModeCode,
         };
         if (isPvPTestMode) {
@@ -2286,7 +2283,6 @@ export const useEngineAPI = () => {
       maxTurns: maxTurnsFromConfig,
       unitChargeRolls: {},
       pve_mode: gameState.pve_mode,
-      test_mode: gameState.test_mode,
       player_types: gameState.player_types,
       deployment_type: gameState.deployment_type,
       deployment_state: memoizedDeploymentState,

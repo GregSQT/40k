@@ -133,7 +133,7 @@ export const BoardWithAPI: React.FC = () => {
   const [isDraggingRuleChoicePopup, setIsDraggingRuleChoicePopup] = useState(false);
   const ruleChoiceDragOffsetRef = useRef({ x: 0, y: 0 });
   const [showGameOverPopup, setShowGameOverPopup] = useState(false);
-  const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp";
+  const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
 
   const closeRosterPicker = () => {

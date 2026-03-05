@@ -101,9 +101,7 @@ def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: W4
     Ensure player_types is present in both engine.game_state and serialized response.
     """
     is_pve_mode = bool(getattr(engine_instance, "is_pve_mode", False))
-    is_test_mode = bool(getattr(engine_instance, "is_test_mode", False))
-    is_debug_mode = bool(getattr(engine_instance, "is_debug_mode", False))
-    player_types = _build_player_types(is_pve_mode or is_test_mode or is_debug_mode)
+    player_types = _build_player_types(is_pve_mode)
     engine_instance.game_state["player_types"] = player_types
     serializable_state["player_types"] = player_types
 
@@ -511,7 +509,7 @@ def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
     
     return agent_keys
 
-def initialize_engine(scenario_file: str = None, debug_mode: bool = False):
+def initialize_engine(scenario_file: str = None):
     """Initialize the W40K engine for PvP mode with configurable scenario."""
     global engine
     try:
@@ -652,8 +650,7 @@ def initialize_engine(scenario_file: str = None, debug_mode: bool = False):
             active_agents=None,
             scenario_file=scenario_file,
             unit_registry=unit_registry,
-            quiet=True,
-            debug_mode=debug_mode
+            quiet=True
         )
         
         # CRITICAL FIX: Add rewards_configs to game_state after engine creation
@@ -675,8 +672,15 @@ def initialize_engine(scenario_file: str = None, debug_mode: bool = False):
         print(f"❌ Full traceback: {traceback.format_exc()}")
         return False
 
-def initialize_pve_engine(scenario_file: str = None, debug_mode: bool = False):
-    """Initialize the W40K engine for PvE mode with AI Player 2."""
+def initialize_pve_engine(scenario_file: str = None):
+    """
+    Backward-compatible wrapper kept for callers that still import this symbol.
+    PvE initialization is handled by initialize_test_engine.
+    """
+    return initialize_test_engine(scenario_file=scenario_file)
+
+def initialize_test_engine(scenario_file: str = None):
+    """Initialize the W40K engine for PvE mode with configurable scenario."""
     global engine
     try:
         # Change to project root directory for config loading
@@ -684,166 +688,7 @@ def initialize_pve_engine(scenario_file: str = None, debug_mode: bool = False):
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
         
-        # Define scenario file path for game/API mode (default if not provided)
-        if scenario_file is None:
-            scenario_file = os.path.join("config", "scenario_game.json")
-        elif not isinstance(scenario_file, str):
-            raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
-
-        # Verify scenario file exists - no fallback
-        if not os.path.exists(scenario_file):
-            raise FileNotFoundError(
-                f"Game scenario file not found: {scenario_file}\n"
-                f"This file is required for the API server.\n"
-                f"Training scenarios are in config/agents/<agent>/scenarios/"
-            )
-
-        # Initialize unit registry
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
-        
-        from config_loader import get_config_loader
-        config_loader = get_config_loader()
-        board_config = config_loader.get_board_config()
-        game_config = config_loader.get_game_config()
-        
-        from engine.game_state import GameStateManager
-        scenario_manager = GameStateManager({"board": {}}, unit_registry)
-        scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
-        scenario_units = require_key(scenario_result, "units")
-        scenario_primary_objective_ids = scenario_result.get("primary_objectives")
-        scenario_primary_objective_id = scenario_result.get("primary_objective")
-        scenario_wall_hexes = scenario_result.get("wall_hexes")
-        scenario_objectives = scenario_result.get("objectives")
-        scenario_deployment_type = scenario_result.get("deployment_type")
-        scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
-        scenario_deployment_zone = scenario_result.get("deployment_zone")
-        scenario_deployment_pools = scenario_result.get("deployment_pools")
-        
-        if scenario_primary_objective_ids is not None:
-            if not isinstance(scenario_primary_objective_ids, list):
-                raise TypeError("primary_objectives must be a list of objective IDs")
-            if not scenario_primary_objective_ids:
-                raise ValueError("primary_objectives list cannot be empty")
-            primary_objective_config = [
-                config_loader.load_primary_objective_config(obj_id)
-                for obj_id in scenario_primary_objective_ids
-            ]
-        elif scenario_primary_objective_id is not None:
-            primary_objective_config = config_loader.load_primary_objective_config(
-                scenario_primary_objective_id
-            )
-        else:
-            primary_objective_config = None
-        
-        config = {
-            "board": board_config,
-            "game_rules": require_key(game_config, "game_rules"),
-            "units": scenario_units,
-            "primary_objective": primary_objective_config,
-            "scenario_wall_hexes": scenario_wall_hexes,
-            "scenario_objectives": scenario_objectives,
-            "deployment_type": scenario_deployment_type,
-            "deployment_type_by_player": scenario_deployment_type_by_player,
-            "deployment_zone": scenario_deployment_zone,
-            "deployment_pools": scenario_deployment_pools
-        }
-        
-        # Determine which agents are in the scenario
-        agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
-        if not agent_keys:
-            raise ValueError("No agents found in scenario")
-        
-        print(f"DEBUG: Found {len(agent_keys)} unique agent(s) in scenario: {agent_keys}")
-        
-        # For PvE mode, load configs for all agents
-        all_rewards_configs = {}
-        all_training_configs = {}
-        
-        for agent_key in agent_keys:
-            try:
-                agent_rewards = config_loader.load_agent_rewards_config(agent_key)
-                # Load entire config file (contains "default" and "debug" phases)
-                agent_training_full = config_loader.load_agent_training_config(agent_key)
-                
-                # Store agent-specific configs
-                all_rewards_configs[agent_key] = agent_rewards
-                all_training_configs[agent_key] = agent_training_full  # Store full config for engine
-                
-                print(f"✅ Loaded configs for agent: {agent_key}")
-            except FileNotFoundError as e:
-                raise FileNotFoundError(
-                    f"Missing config for agent '{agent_key}' found in scenario.\n{e}\n"
-                    f"Create required files:\n"
-                    f"  - config/agents/{agent_key}/{agent_key}_rewards_config.json\n"
-                    f"  - config/agents/{agent_key}/{agent_key}_training_config.json"
-                )
-        
-        # Use first agent's training config for observation params
-        first_agent = list(agent_keys)[0]
-        training_config_default = config_loader.load_agent_training_config(first_agent, "default")
-        
-        # Create engine with PvE configuration - set pve_mode in config
-        config["pve_mode"] = True
-        config["rewards_configs"] = all_rewards_configs  # Multi-agent support
-        config["training_configs"] = all_training_configs  # Multi-agent support
-        config["agent_keys"] = list(agent_keys)  # Track which agents are active
-        config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
-        
-        # CRITICAL FIX: Add observation_params from training_config "default" phase
-        obs_params = training_config_default.get("observation_params", {})
-        
-        # Validation stricte: obs_size DOIT être présent
-        if "obs_size" not in obs_params:
-            raise KeyError(
-                f"training_config missing required 'obs_size' in observation_params. "
-                f"Must be defined in training_config.json 'default' phase. "
-                f"Config: {first_agent}"
-            )
-        
-        config["observation_params"] = obs_params  # Inclut obs_size validé
-        
-        engine = W40KEngine(
-            config=config,
-            rewards_config="default",
-            training_config_name="default",
-            controlled_agent=first_agent,
-            active_agents=None,
-            scenario_file=scenario_file,
-            unit_registry=unit_registry,
-            quiet=True,
-            debug_mode=debug_mode
-        )
-        
-        # CRITICAL FIX: Add rewards_configs to game_state after engine creation
-        engine.game_state["rewards_configs"] = all_rewards_configs
-        engine.game_state["agent_keys"] = list(agent_keys)
-        
-        # Restore original working directory
-        os.chdir(original_cwd)
-        
-        print("✅ W40K Engine initialized successfully (PvE mode)")
-        return True
-    except Exception as e:
-        # Restore original working directory on error
-        if 'original_cwd' in locals():
-            os.chdir(original_cwd)
-        print(f"❌ Failed to initialize PvE engine: {e}")
-        print(f"❌ Exception type: {type(e).__name__}")
-        import traceback
-        print(f"❌ Full traceback: {traceback.format_exc()}")
-        return False
-
-def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
-    """Initialize the W40K engine for Test mode (isolated from PvE)."""
-    global engine
-    try:
-        # Change to project root directory for config loading
-        original_cwd = os.getcwd()
-        project_root = os.path.join(os.path.dirname(__file__), '..')
-        os.chdir(os.path.abspath(project_root))
-        
-        # Define scenario file path for test mode (default if not provided)
+        # Define scenario file path for PvE mode (default if not provided)
         if scenario_file is None:
             scenario_file = os.path.join("config", "scenario_test.json")
         elif not isinstance(scenario_file, str):
@@ -852,8 +697,8 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
         # Verify scenario file exists - no fallback
         if not os.path.exists(scenario_file):
             raise FileNotFoundError(
-                f"Test scenario file not found: {scenario_file}\n"
-                f"This file is required for Test mode.\n"
+                f"PvE scenario file not found: {scenario_file}\n"
+                f"This file is required for PvE mode.\n"
                 f"Create it from config/scenario_pve.json or another scenario."
             )
 
@@ -915,7 +760,7 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
         
         print(f"DEBUG: Found {len(agent_keys)} unique agent(s) in scenario: {agent_keys}")
         
-        # For Test mode, load configs for all agents (same agents as PvE)
+        # For PvE mode, load configs for all agents.
         all_rewards_configs = {}
         all_training_configs = {}
         
@@ -942,9 +787,8 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
         first_agent = list(agent_keys)[0]
         training_config_default = config_loader.load_agent_training_config(first_agent, "default")
         
-        # Test mode config: keep PvE behavior, add test_mode flag for isolation
+        # PvE mode configuration
         config["pve_mode"] = True
-        config["test_mode"] = True
         config["rewards_configs"] = all_rewards_configs  # Multi-agent support
         config["training_configs"] = all_training_configs  # Multi-agent support
         config["agent_keys"] = list(agent_keys)  # Track which agents are active
@@ -971,25 +815,22 @@ def initialize_test_engine(scenario_file: str = None, debug_mode: bool = False):
             active_agents=None,
             scenario_file=scenario_file,
             unit_registry=unit_registry,
-            quiet=True,
-            debug_mode=debug_mode
+            quiet=True
         )
         
         # CRITICAL FIX: Add rewards_configs to game_state after engine creation
         engine.game_state["rewards_configs"] = all_rewards_configs
         engine.game_state["agent_keys"] = list(agent_keys)
-        engine.is_test_mode = True
-        
         # Restore original working directory
         os.chdir(original_cwd)
         
-        print("✅ W40K Engine initialized successfully (Test mode)")
+        print("✅ W40K Engine initialized successfully (PvE mode)")
         return True
     except Exception as e:
         # Restore original working directory on error
         if 'original_cwd' in locals():
             os.chdir(original_cwd)
-        print(f"❌ Failed to initialize Test engine: {e}")
+        print(f"❌ Failed to initialize PvE engine: {e}")
         print(f"❌ Exception type: {type(e).__name__}")
         import traceback
         print(f"❌ Full traceback: {traceback.format_exc()}")
@@ -1180,17 +1021,11 @@ def start_game():
         data = request.get_json() or {}
         if "pve_mode" in data and not isinstance(data["pve_mode"], bool):
             raise ValueError(f"pve_mode must be boolean (got {type(data['pve_mode']).__name__})")
-        if "test_mode" in data and not isinstance(data["test_mode"], bool):
-            raise ValueError(f"test_mode must be boolean (got {type(data['test_mode']).__name__})")
-        if "debug_mode" in data and not isinstance(data["debug_mode"], bool):
-            raise ValueError(f"debug_mode must be boolean (got {type(data['debug_mode']).__name__})")
         if "mode_code" in data and data["mode_code"] is not None and not isinstance(data["mode_code"], str):
             raise ValueError(f"mode_code must be string or null (got {type(data['mode_code']).__name__})")
         if "scenario_file" in data and data["scenario_file"] is not None and not isinstance(data["scenario_file"], str):
             raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
         pve_mode = data.get('pve_mode', False)
-        test_mode = data.get('test_mode', False)
-        debug_mode = data.get('debug_mode', False)
         mode_code = data.get('mode_code', None)
         scenario_file = data.get('scenario_file', None)
 
@@ -1200,14 +1035,8 @@ def start_game():
             if mode_code not in allowed_mode_codes:
                 raise ValueError(f"Unsupported mode_code '{mode_code}'. Allowed values: {sorted(allowed_mode_codes)}")
             requested_mode = mode_code
-        elif test_mode:
-            # Legacy compatibility: previous frontend used test_mode for this PvP test flow.
-            requested_mode = "pvp_test"
         elif pve_mode:
-            # Legacy compatibility for older frontend payloads.
             requested_mode = "pve"
-        elif debug_mode:
-            raise ValueError("Legacy debug_mode payload is no longer supported")
 
         connection = _get_auth_db_connection()
         try:
@@ -1231,38 +1060,32 @@ def start_game():
             print("DEBUG: Initializing engine for PvP Test mode")
             if scenario_file is None:
                 scenario_file = os.path.join("config", "scenario_pvp_test.json")
-            if not initialize_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+            if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP Test engine initialization failed"}), 500
             # PvP test mode must remain human vs human.
             engine.is_pve_mode = False
-            engine.is_test_mode = False
-            engine.is_debug_mode = False
         elif requested_mode == "pvp":
             print("DEBUG: Initializing engine for PvP mode")
-            if not initialize_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+            if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
             # PvP must remain human vs human.
             engine.is_pve_mode = False
-            engine.is_test_mode = False
-            engine.is_debug_mode = False
         elif requested_mode == "pve":
             print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
-            if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+            if not initialize_test_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
         elif requested_mode == "pve_test":
             print("DEBUG: Initializing engine for PvE Test mode")
             if scenario_file is None:
                 scenario_file = os.path.join("config", "scenario_pve_test.json")
-            if not initialize_test_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+            if not initialize_test_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvE Test engine initialization failed"}), 500
         else:
             print("DEBUG: Initializing engine for PvP mode")
-            if not initialize_engine(scenario_file=scenario_file, debug_mode=debug_mode):
+            if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
             # Ensure PvE mode is explicitly disabled for PvP
             engine.is_pve_mode = False
-            engine.is_test_mode = False
-            engine.is_debug_mode = False
         engine.current_mode_code = requested_mode
         
         print("DEBUG: About to call engine.reset()")
@@ -1280,7 +1103,6 @@ def start_game():
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(dict(engine.game_state))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
-        engine.is_debug_mode = debug_mode
         _attach_player_types(serializable_state, engine)
 
         # Add max_turns from game config
@@ -1290,7 +1112,6 @@ def start_game():
 
         # Add mode flags to response
         serializable_state["pve_mode"] = getattr(engine, 'is_pve_mode', False)
-        serializable_state["test_mode"] = getattr(engine, 'is_test_mode', False)
 
         mode_labels = {
             "pvp": "PvP",
@@ -1696,12 +1517,8 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         for uid, entry in units_cache.items()
     }
 
-    # If AI player roster changed, reload micro models so PvE/Test AI can act with new unit types.
-    ai_enabled = bool(
-        getattr(engine_instance, "is_pve_mode", False)
-        or getattr(engine_instance, "is_test_mode", False)
-        or getattr(engine_instance, "is_debug_mode", False)
-    )
+    # If AI player roster changed, reload micro models so PvE AI can act with new unit types.
+    ai_enabled = bool(getattr(engine_instance, "is_pve_mode", False))
     if ai_enabled and target_deployer == 2:
         engine_instance.pve_controller.load_ai_model_for_pve(game_state, engine_instance)
 

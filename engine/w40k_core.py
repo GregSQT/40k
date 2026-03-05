@@ -1498,7 +1498,7 @@ class W40KEngine(gym.Env):
         player_types = self.game_state.get("player_types")
         if isinstance(player_types, dict) and str(player) in player_types:
             return player_types[str(player)] == "human"
-        if player == 2 and (self.is_pve_mode or self.is_test_mode or self.is_debug_mode):
+        if player == 2 and self.is_pve_mode:
             return False
         return True
 

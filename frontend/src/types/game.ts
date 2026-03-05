@@ -264,7 +264,6 @@ export interface GameState {
   fightActivePlayer?: PlayerId;
   unitChargeRolls?: Record<UnitId, number>;
   pve_mode?: boolean; // Add PvE mode flag
-  test_mode?: boolean;
   player_types?: Record<string, "human" | "ai">;
   deployment_type?: "random" | "fixed" | "active";
   deployment_state?: DeploymentState;
