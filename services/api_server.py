@@ -100,8 +100,14 @@ def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: W4
     """
     Ensure player_types is present in both engine.game_state and serialized response.
     """
-    is_pve_mode = bool(getattr(engine_instance, "is_pve_mode", False))
-    player_types = _build_player_types(is_pve_mode)
+    current_mode_code = getattr(engine_instance, "current_mode_code", None)
+    if not isinstance(current_mode_code, str) or not current_mode_code:
+        raise ValueError("engine.current_mode_code is required to derive player_types")
+    if current_mode_code not in {"pvp", "pvp_test", "pve", "pve_test"}:
+        raise ValueError(f"Unsupported current_mode_code for player_types: {current_mode_code}")
+    # Strict mode gate: only PvE modes allow AI orchestration for player 2.
+    is_ai_enabled = current_mode_code in {"pve", "pve_test"}
+    player_types = _build_player_types(is_ai_enabled)
     engine_instance.game_state["player_types"] = player_types
     serializable_state["player_types"] = player_types
 

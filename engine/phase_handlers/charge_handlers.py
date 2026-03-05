@@ -1779,7 +1779,9 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
                 f"Unit {unit['id']} ({unit_name}) triggered charge_impact without source rule displayName"
             )
         impact_roll = resolve_dice_value("D6", "charge_impact_roll")
+        impact_hit_result = "FAIL"
         if impact_roll >= CHARGE_IMPACT_TRIGGER_THRESHOLD:
+            impact_hit_result = "HIT"
             mortal_wounds = CHARGE_IMPACT_MORTAL_WOUNDS
             target_hp = require_hp_from_cache(str(target_id), game_state)
             new_target_hp = max(0, target_hp - mortal_wounds)
@@ -1787,9 +1789,12 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         else:
             mortal_wounds = 0
         impact_message = (
-            f"Unit {unit['id']} IMPACT [{impact_ability_display_name}] Unit {target_id}: "
-            f"Roll {impact_roll}({CHARGE_IMPACT_TRIGGER_THRESHOLD}+) - {mortal_wounds}MW"
+            f"Unit {unit['id']}({dest_col},{dest_row}) IMPACTED [{impact_ability_display_name}] "
+            f"Unit {target_id}({target_col},{target_row}) - "
+            f"Hit:{CHARGE_IMPACT_TRIGGER_THRESHOLD}+:{impact_roll}({impact_hit_result})"
         )
+        if impact_hit_result == "HIT":
+            impact_message += f" Wound:AUTO Save:NONE[MW] Dmg:{mortal_wounds}HP"
         game_state["action_logs"].append({
             "type": "charge_impact",
             "message": impact_message,
@@ -1800,8 +1805,13 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "player": unit["player"],
             "impact_roll": impact_roll,
             "impact_threshold": CHARGE_IMPACT_TRIGGER_THRESHOLD,
+            "impact_hit_result": impact_hit_result,
             "mortal_wounds": mortal_wounds,
             "ability_display_name": impact_ability_display_name,
+            "attackerCol": dest_col,
+            "attackerRow": dest_row,
+            "targetCol": target_col,
+            "targetRow": target_row,
             "reward": 0.0,
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,

@@ -1273,11 +1273,21 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     action_name = "FLEE" if was_adjacent else "MOVE"
     
     is_fly_move = _unit_has_keyword(unit, "fly")
-    movement_message = (
-        f"Unit {unit['id']} moved [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
-        if is_fly_move
-        else f"Unit {unit['id']} ({orig_col}, {orig_row}) MOVED to ({dest_col}, {dest_row})"
-    )
+    if was_adjacent:
+        if is_fly_move:
+            movement_message = (
+                f"Unit {unit['id']} FLED [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+            )
+        else:
+            movement_message = (
+                f"Unit {unit['id']} FLED from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+            )
+    else:
+        movement_message = (
+            f"Unit {unit['id']} MOVED [FLY] from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+            if is_fly_move
+            else f"Unit {unit['id']} MOVED from ({orig_col},{orig_row}) to ({dest_col},{dest_row})"
+        )
 
     game_state["action_logs"].append({
         "type": "move",

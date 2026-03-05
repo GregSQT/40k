@@ -349,7 +349,7 @@ export function getEventIcon(type: string): string {
     case "charge":
       return "⚡"; // Lightning for charge
     case "charge_impact":
-      return "⚡"; // Lightning for charge impact
+      return "💥"; // Explosion for charge impact
     case "charge_fail":
       return "⚡"; // Lightning (same, but will have red background)
     case "combat":
@@ -400,7 +400,17 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
     case "charge":
       return "game-log-entry--charge";
     case "charge_impact":
-      return "game-log-entry--charge";
+      {
+        const message = event.message || "";
+        const damageMatch = message.match(/Dmg:(\d+)HP/i);
+        if (damageMatch) {
+          const damage = parseInt(damageMatch[1], 10);
+          if (damage > 0) {
+            return "game-log-entry--charge-impact-damage";
+          }
+        }
+        return "game-log-entry--charge-impact-failed";
+      }
     case "charge_fail":
       return "game-log-entry--charge-fail";
     case "combat":

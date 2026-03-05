@@ -363,7 +363,7 @@ def test_basic_functionality():
         print(f"   Result: {result}")
         
         # Debug state after each action
-        print(f"   Units moved after action: {engine.game_state['units_moved']}")
+        print(f"   Units MOVED after action: {engine.game_state['units_moved']}")
         print(f"   Move activation pool: {engine.game_state['move_activation_pool']}")
         print(f"   Current player: {engine.game_state['current_player']}")
         for unit in engine.game_state["units"]:

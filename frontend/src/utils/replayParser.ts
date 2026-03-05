@@ -640,14 +640,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Or: [timestamp] T1 P0 CHARGE : Unit 2(23,6) FAILED CHARGE to unit 7(21,10) [Roll: 5] [SUCCESS]
     // Or: [timestamp] T1 P0 CHARGE : Unit 2(23, 6) FAILED charge to unit 7 [Roll:5] [FAILED: roll_too_low] [FAILED] (legacy format)
     const chargeImpactMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+) IMPACT(?: \[[^\]]+\])? Unit (\d+): Roll (\d+)\((\d+)\+\) - (\d+)MW/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) IMPACTED \[([^\]]+)\] Unit (\d+)\((\d+),(\d+)\) - Hit:(\d+)\+:(\d+)\((HIT|FAIL)\)(?: Wound:AUTO Save:NONE\[MW\] Dmg:(\d+)HP)?/
     );
     if (chargeImpactMatch) {
       const timestamp = chargeImpactMatch[1];
       const turn = chargeImpactMatch[2];
       const player = parseInt(chargeImpactMatch[3], 10);
       const unitId = parseInt(chargeImpactMatch[4], 10);
-      const targetId = parseInt(chargeImpactMatch[5], 10);
+      const unitCol = parseInt(chargeImpactMatch[5], 10);
+      const unitRow = parseInt(chargeImpactMatch[6], 10);
+      const targetId = parseInt(chargeImpactMatch[8], 10);
+      const targetCol = parseInt(chargeImpactMatch[9], 10);
+      const targetRow = parseInt(chargeImpactMatch[10], 10);
+      syncKnownUnitPosition(currentEpisode, unitId, unitCol, unitRow);
+      syncKnownUnitPosition(currentEpisode, targetId, targetCol, targetRow);
       currentEpisode.actions.push({
         type: "charge_impact",
         timestamp,
@@ -655,8 +661,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
         player,
         unit_id: unitId,
         target_id: targetId,
-        damage: parseInt(chargeImpactMatch[8], 10),
-        charge_roll: parseInt(chargeImpactMatch[6], 10),
+        damage: chargeImpactMatch[14] ? parseInt(chargeImpactMatch[14], 10) : 0,
+        charge_roll: parseInt(chargeImpactMatch[12], 10),
+        hit_target: parseInt(chargeImpactMatch[11], 10),
+        hit_result: chargeImpactMatch[13],
         log_message: extractLogMessage(trimmed),
       });
       continue;

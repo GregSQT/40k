@@ -646,16 +646,30 @@ class StepLogger:
             target_id = require_key(details, "target_id")
             roll_value = require_key(details, "impact_roll")
             threshold = require_key(details, "impact_threshold")
+            hit_result = require_key(details, "impact_hit_result")
             mortal_wounds = require_key(details, "mortal_wounds")
             ability_display_name = require_key(details, "ability_display_name")
+            target_coords = require_key(details, "target_coords")
+            if not isinstance(target_coords, tuple) or len(target_coords) != 2:
+                raise ValueError(
+                    f"charge_impact target_coords must be tuple(col,row), got {target_coords!r}"
+                )
+            target_col, target_row = target_coords
+            if not isinstance(hit_result, str) or hit_result not in ("HIT", "FAIL"):
+                raise ValueError(
+                    f"charge_impact impact_hit_result must be 'HIT' or 'FAIL', got {hit_result!r}"
+                )
             if not isinstance(ability_display_name, str) or not ability_display_name.strip():
                 raise ValueError(
                     f"charge_impact ability_display_name must be non-empty for unit {unit_id}"
                 )
             base_msg = (
-                f"Unit {unit_id} IMPACT [{ability_display_name.strip().upper()}] Unit {target_id}: "
-                f"Roll {roll_value}({threshold}+) - {mortal_wounds}MW"
+                f"{unit_label} IMPACTED [{ability_display_name.strip().upper()}] "
+                f"Unit {target_id}({target_col},{target_row}) - "
+                f"Hit:{threshold}+:{roll_value}({hit_result})"
             )
+            if hit_result == "HIT":
+                base_msg += f" Wound:AUTO Save:NONE[MW] Dmg:{mortal_wounds}HP"
             reward = details.get("reward")
             if reward is not None:
                 base_msg += f" [R:{reward:+.1f}]"

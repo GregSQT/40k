@@ -49,6 +49,17 @@ def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_r
     return shared_get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
 
 
+def _is_ai_controlled_fight_unit(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """Return True when the unit owner is AI based on strict player_types mapping."""
+    player_types = require_key(game_state, "player_types")
+    if not isinstance(player_types, dict):
+        raise TypeError(f"game_state['player_types'] must be a dict, got {type(player_types).__name__}")
+    unit_player = str(require_key(unit, "player"))
+    if unit_player not in player_types:
+        raise KeyError(f"Missing player_types entry for player {unit_player}")
+    return player_types[unit_player] == "ai"
+
+
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Return True if unit coordinates are inside any objective hex."""
     unit_col, unit_row = require_unit_position(unit, game_state)
@@ -612,7 +623,11 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # Extract unit if not provided
     if unit is None:
         if "unitId" not in action:
-            is_gym_training = config.get("gym_training_mode", False)
+            is_gym_training = require_key(config, "gym_training_mode")
+            if not isinstance(is_gym_training, bool):
+                raise TypeError(
+                    f"config['gym_training_mode'] must be bool, got {type(is_gym_training).__name__}"
+                )
             if not is_gym_training:
                 return False, {
                     "error": "unit_id_required",
@@ -653,13 +668,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             "current_pool": current_pool
         }
 
-    # Check for gym training mode and PvE AI mode
-    is_gym_training = config.get("gym_training_mode", False)
-    is_pve_ai = config.get("pve_mode", False) and unit and unit.get("player") == 2
+    # Check actor controller type from strict game_state player mapping.
+    is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
 
-    # GYM TRAINING / PvE AI: Auto-activate unit if not already active
+    # AI-controlled unit: auto-activate unit if not already active
     active_fight_unit = game_state.get("active_fight_unit")
-    if (is_gym_training or is_pve_ai) and not active_fight_unit and action_type == "fight":
+    if is_ai_controlled and not active_fight_unit and action_type == "fight":
         activation_result = _handle_fight_unit_activation(game_state, unit, config)
         if not activation_result[0]:
             return activation_result  # Activation failed
@@ -682,17 +696,20 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         if "targetId" not in action:
             valid_targets = game_state["valid_fight_targets"] if "valid_fight_targets" in game_state else []
             if valid_targets:
-                if is_pve_ai:
-                    # Use AI target selection for PvE AI
+                if is_ai_controlled:
+                    # Use AI target selection for AI-controlled players only.
                     target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets)
                     if target_id:
                         action["targetId"] = target_id
                     else:
                         raise ValueError(f"AI target selection failed for unit {unit_id}")
                 else:
-                    # Auto-select first target (gym training, bots, etc.)
-                    first_target = valid_targets[0]
-                    action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+                    return False, {
+                        "error": "target_id_required",
+                        "unitId": unit_id,
+                        "phase": "fight",
+                        "message": "targetId is required for human-controlled fight attack"
+                    }
             else:
                 # CRITICAL: Rebuild valid_targets if empty - valid_fight_targets may have been cleared
                 # But only if unit has attacks remaining
@@ -1014,17 +1031,12 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
 
         return True, result
 
-    # Check for PvE AI or gym training auto-execution (similar to shooting phase)
-    is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
-    is_gym_training = config.get("gym_training_mode", False) and unit and unit["player"] == 1
+    # Check for AI auto-execution (similar to shooting phase)
+    is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
     
-    if (is_pve_ai or is_gym_training) and valid_targets:
-        # AUTO-FIGHT: PvE AI or gym training auto-selects target and executes attack
-        if is_pve_ai:
-            target_id = _ai_select_fight_target(game_state, unit_id, valid_targets)
-        else:
-            # Gym training: select first target
-            target_id = valid_targets[0] if valid_targets else None
+    if is_ai_controlled and valid_targets:
+        # AUTO-FIGHT: AI-controlled player auto-selects target and executes attack.
+        target_id = _ai_select_fight_target(game_state, unit_id, valid_targets)
         if target_id:
             # Execute fight attack directly and return result
             return _handle_fight_attack(game_state, unit, target_id, config)
@@ -1288,14 +1300,11 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
 
         if valid_targets_after:
             # More attacks and targets available
-            # Auto-continue attack loop for gym training, PvE AI, and bots (all non-human players)
-            is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
-            is_pve_ai = config.get("pve_mode", False) and unit and unit["player"] == 2
-            # Bots (player 2) should also auto-continue attacks like gym training
-            is_bot = unit and unit["player"] == 2 and not is_pve_ai
+            # Auto-continue only for AI-controlled players.
+            is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
 
-            if is_gym_training or is_pve_ai or is_bot:
-                # GYM TRAINING / PvE AI: Auto-continue attack loop until ATTACK_LEFT = 0 or no targets
+            if is_ai_controlled:
+                # AI path: auto-continue attack loop until ATTACK_LEFT = 0 or no targets.
                 # Select next target (use AI selection logic)
                 next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets_after)
                 if next_target_id:

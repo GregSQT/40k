@@ -2,6 +2,7 @@
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
 import { clearAuthSession, getAuthSession } from "../auth/authStorage";
 import { useEngineAPI } from "../hooks/useEngineAPI";
@@ -9,7 +10,6 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState } from "../types/game";
-import unitRulesConfig from "../../../config/unit_rules.json";
 import BoardPvp from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -59,6 +59,10 @@ export const BoardWithAPI: React.FC = () => {
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
+      return false;
+    }
+    // Strict guard: AI orchestration is only valid in PvE routes.
+    if (gameMode !== "pve") {
       return false;
     }
     return Object.values(playerTypes).some((playerType) => playerType === "ai");
@@ -1157,8 +1161,7 @@ export const BoardWithAPI: React.FC = () => {
               className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
               onMouseDown={onRuleChoiceTitleMouseDown}
             >
-              Capacity choice - {getRuleChoiceMomentLabel(activeRuleChoicePrompt)}{" "}
-              {isDraggingRuleChoicePopup ? "(drag...)" : ""}
+              {`Capacity choice - ${getRuleChoiceMomentLabel(activeRuleChoicePrompt)}${isDraggingRuleChoicePopup ? " (drag...)" : ""}`}
             </button>
             <div className="deployment-panel__picker-content">
               <div className="deployment-panel__picker-list">

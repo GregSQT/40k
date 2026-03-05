@@ -119,8 +119,8 @@ export function useGameLog(currentTurn?: number) {
     (phase: string, player: number, turnNumber: number) => {
       addEvent({
         type: "phase_change",
-        message: `Player ${player} ${phase} phase`,
-        phase,
+        message: `Player ${player} ${phase.toUpperCase()} PHASE`,
+        phase: phase.toUpperCase(),
         turnNumber: currentTurn ?? turnNumber,
       });
     },
@@ -139,10 +139,10 @@ export function useGameLog(currentTurn?: number) {
     ) => {
       addEvent({
         type: "move",
-        message: `${getUnitDisplayName(unit)} moved from (${startCol},${startRow}) to (${endCol},${endRow})`,
+        message: `${getUnitDisplayName(unit)} MOVED from (${startCol},${startRow}) to (${endCol},${endRow})`,
         unitId: unit.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "movement",
+        phase: "MOVE",
         startHex: `(${startCol},${startRow})`,
         endHex: `(${endCol},${endRow})`,
         player: player ?? unit.player,
@@ -155,10 +155,10 @@ export function useGameLog(currentTurn?: number) {
     (unit: Unit, turnNumber: number, player?: number) => {
       addEvent({
         type: "move",
-        message: `${getUnitDisplayName(unit)} chose not to move`,
+        message: `${getUnitDisplayName(unit)} WAIT`,
         unitId: unit.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "movement",
+        phase: "MOVE",
         player: player ?? unit.player,
       });
     },
@@ -169,10 +169,10 @@ export function useGameLog(currentTurn?: number) {
     (unit: Unit, turnNumber: number, player?: number) => {
       addEvent({
         type: "move_cancel",
-        message: `${getUnitDisplayName(unit)} movement cancelled`,
+        message: `${getUnitDisplayName(unit)} CANCELLED MOVE`,
         unitId: unit.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "movement",
+        phase: "MOVE",
         player: player ?? unit.player,
       });
     },
@@ -193,7 +193,7 @@ export function useGameLog(currentTurn?: number) {
         unitId: shooter.id,
         targetId: target.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "shooting",
+        phase: "SHOOT",
         shootDetails,
         player: player ?? shooter.player,
       });
@@ -214,11 +214,11 @@ export function useGameLog(currentTurn?: number) {
     ) => {
       addEvent({
         type: "charge",
-        message: `${getUnitDisplayName(unit)} charged ${getUnitDisplayName(target)}`,
+        message: `${getUnitDisplayName(unit)} CHARGED ${getUnitDisplayName(target)}`,
         unitId: unit.id,
         targetId: target.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "charge",
+        phase: "CHARGE",
         startHex: `(${startCol}, ${startRow})`,
         endHex: `(${endCol}, ${endRow})`,
         player: player ?? unit.player,
@@ -231,10 +231,10 @@ export function useGameLog(currentTurn?: number) {
     (unit: Unit, turnNumber: number, player?: number) => {
       addEvent({
         type: "charge_cancel",
-        message: `${getUnitDisplayName(unit)} charge cancelled`,
+        message: `${getUnitDisplayName(unit)} CANCELLED CHARGE`,
         unitId: unit.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "charge",
+        phase: "CHARGE",
         player: player ?? unit.player,
       });
     },
@@ -253,10 +253,10 @@ export function useGameLog(currentTurn?: number) {
     ) => {
       addEvent({
         type: "advance",
-        message: `${getUnitDisplayName(unit)} advanced from (${startCol}, ${startRow}) to (${endCol}, ${endRow})`,
+        message: `${getUnitDisplayName(unit)} ADVANCED from (${startCol}, ${startRow}) to (${endCol}, ${endRow})`,
         unitId: unit.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "shooting",
+        phase: "SHOOT",
         startHex: `(${startCol}, ${startRow})`,
         endHex: `(${endCol}, ${endRow})`,
         player: player ?? unit.player,
@@ -275,11 +275,11 @@ export function useGameLog(currentTurn?: number) {
     ) => {
       addEvent({
         type: "combat",
-        message: `${getUnitDisplayName(attacker)} attacked ${getUnitDisplayName(target)} in combat`,
+        message: `${getUnitDisplayName(attacker)} FOUGHT ${getUnitDisplayName(target)}`,
         unitId: attacker.id,
         targetId: target.id,
         turnNumber: currentTurn ?? turnNumber,
-        phase: "combat",
+        phase: "FIGHT",
         shootDetails: combatDetails,
         player: player ?? attacker.player,
       });

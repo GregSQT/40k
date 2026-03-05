@@ -828,6 +828,7 @@ export default function Board({
 
     // Fight preview: fightTargets for red outline on enemies within fight range
     let fightTargets: Unit[] = [];
+    const fightPreviewCells: { col: number; row: number }[] = [];
     if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
       const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
 
@@ -849,6 +850,15 @@ export default function Board({
           u.HP_CUR > 0 &&
           cubeDistance(c1, offsetToCube(u.col, u.row)) <= fightRange
       );
+
+      // Fight preview requirement: show adjacent hexes around active unit in red.
+      for (let col = 0; col < BOARD_COLS; col++) {
+        for (let row = 0; row < BOARD_ROWS; row++) {
+          if (cubeDistance(c1, offsetToCube(col, row)) === 1) {
+            fightPreviewCells.push({ col, row });
+          }
+        }
+      }
     }
 
     // ✅ SIMPLIFIED SHOOTING PREVIEW - No animations to prevent re-render loop
@@ -1147,7 +1157,7 @@ export default function Board({
         };
       }
 
-      if (mode === "attackPreview" && attackPreview) {
+      if (phase === "shoot" && mode === "attackPreview" && attackPreview) {
         const attackPreviewUnit = units.find((u) => u.id === attackPreview.unitId);
         if (!attackPreviewUnit || attackPreviewUnit.id !== selectedUnitId) {
           return null;
@@ -1250,6 +1260,9 @@ export default function Board({
     const shootingPreviewSource = resolveShootingPreviewSource();
     if (shootingPreviewSource) {
       appendShootingPreviewCells(shootingPreviewSource);
+    }
+    if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
+      attackCells.push(...fightPreviewCells);
     }
 
     // ✅ DRAW BOARD ONCE with populated availableCells

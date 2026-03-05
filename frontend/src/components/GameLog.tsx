@@ -231,6 +231,24 @@ export const GameLog: React.FC<GameLogProps> = ({
       setRuleDescription(descriptions, name, description, false);
     }
 
+    // Explicit labels used in logs that must always expose tooltips.
+    const chargeImpactDescription = descriptions.get(normalizeRuleLookupKey("charge_impact"));
+    if (chargeImpactDescription) {
+      setRuleDescription(descriptions, "HAMMER OF WRATH", chargeImpactDescription, false);
+    }
+    setRuleDescription(
+      descriptions,
+      "FLY",
+      "FLY: this unit can ignore walls and units during movement pathing, but must still end on a legal destination.",
+      false
+    );
+    setRuleDescription(
+      descriptions,
+      "MW",
+      "Mortal Wound: degat direct qui contourne les jets de sauvegarde.",
+      false
+    );
+
     return descriptions;
   }, []);
 

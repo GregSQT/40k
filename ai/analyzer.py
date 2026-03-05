@@ -1542,15 +1542,16 @@ def parse_step_log(filepath: str) -> Dict:
                             )
                 
                 # CHARGE IMPACT mortal wounds:
-                # "Unit X IMPACT [...] Unit Y: Roll N(T+) - ZMW"
+                # "Unit X(c,r) IMPACTED [...] Unit Y(c,r) - Hit:T+:N(HIT|FAIL) Wound:AUTO Save:NONE[MW] Dmg:ZHP"
                 impact_damage_match = re.search(
-                    r'IMPACT\s+\[[^\]]+\]\s+Unit\s+(\d+):\s+Roll\s+\d+\(\d+\+\)\s+-\s+(\d+)MW',
+                    r'IMPACTED\s+\[[^\]]+\]\s+Unit\s+(\d+)\(\d+,\d+\)\s+-\s+Hit:\d+\+:\d+\((?:HIT|FAIL)\)(?:\s+Wound:AUTO\s+Save:NONE\[MW\]\s+Dmg:(\d+)HP)?',
                     action_desc,
                     re.IGNORECASE
                 )
                 if impact_damage_match:
                     target_id = impact_damage_match.group(1)
-                    damage = int(impact_damage_match.group(2))
+                    damage_group = impact_damage_match.group(2)
+                    damage = int(damage_group) if damage_group is not None else 0
                     if damage > 0:
                         _apply_damage_and_handle_death(
                             target_id, damage, player, turn, phase, line_number, current_episode_num,

@@ -1829,6 +1829,13 @@ textarea:focus {
   border-radius: var(--icon-square-border-radius) px;
 }
 
+.game-log-entry__icon--charge_impact {
+  background: rgba(var(--icon-charge-bg-rgb), var(--icon-square-bg-alpha-gamelog));
+  border: var(--icon-square-border-width) px solid
+    rgba(var(--icon-charge-bg-rgb), var(--icon-square-border-alpha-gamelog));
+  border-radius: var(--icon-square-border-radius) px;
+}
+
 .game-log-entry__icon--charge_fail {
   background: rgba(
     153,
@@ -1940,15 +1947,16 @@ textarea:focus {
 .game-log-rule-ref__tooltip {
   z-index: 99999;
   min-width: 220px;
-  max-width: 320px;
-  padding: 8px 10px;
+  max-width: 600px;
+  padding: 6px 8px;
   border-radius: 6px;
-  background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(250, 204, 21, 0.45);
-  color: #f8fafc;
-  font-size: 12px;
-  line-height: 1.35;
+  background: rgba(20, 20, 20, 0.98);
+  border: 2px solid #4caf50;
+  color: #b6f7c9;
+  font-size: 0.9em;
+  line-height: 1.4;
   white-space: normal;
+  overflow-wrap: break-word;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
   pointer-events: none;
 }
@@ -2020,6 +2028,16 @@ textarea:focus {
 .game-log-entry--charge {
   border-left-color: #9966cc; /* Purple - successful charge */
   background: rgba(109, 76, 190, 0.45); /* Violet encore un peu plus foncé pour charge réussie */
+}
+
+.game-log-entry--charge-impact-damage {
+  border-left-color: #9966cc;
+  background: rgba(72, 45, 145, 0.65); /* Darker than charge successful background */
+}
+
+.game-log-entry--charge-impact-failed {
+  border-left-color: #9966cc;
+  background: rgba(192, 132, 252, 0.35); /* Base violet charge, lighter when impact fails */
 }
 
 .game-log-entry--charge-fail {

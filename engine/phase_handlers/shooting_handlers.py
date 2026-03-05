@@ -1131,18 +1131,15 @@ def _is_ai_controlled_shooting_unit(
     """
     Determine whether the active shooting unit is AI-controlled.
 
-    Preferred source of truth is game_state.player_types.
-    Secondary path keeps existing non-UI training behavior for gym/pve only.
+    Source of truth is game_state.player_types.
     """
-    player_types = game_state.get("player_types")
-    if player_types is not None:
-        player_type = player_types.get(str(require_key(unit, "player")))
-        if player_type is None:
-            raise KeyError(f"Missing player_types entry for player {require_key(unit, 'player')}")
-        return player_type == "ai"
-    is_pve_ai = config.get("pve_mode", False) and unit["player"] == 2
-    is_gym_training = config.get("gym_training_mode", False)
-    return is_pve_ai or is_gym_training
+    player_types = require_key(game_state, "player_types")
+    if not isinstance(player_types, dict):
+        raise TypeError(f"game_state['player_types'] must be a dict, got {type(player_types).__name__}")
+    unit_player = str(require_key(unit, "player"))
+    if unit_player not in player_types:
+        raise KeyError(f"Missing player_types entry for player {unit_player}")
+    return player_types[unit_player] == "ai"
 
 
 def _should_auto_activate_next_shooting_unit(

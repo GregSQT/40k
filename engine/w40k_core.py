@@ -1929,6 +1929,7 @@ class W40KEngine(gym.Env):
         pre_action_turn = self.game_state.get("turn", 1)
         pre_action_episode = self.game_state.get("episode_number", 1)  # CRITICAL: Capture episode BEFORE action execution
         pre_action_logs_len = 0
+        early_logged_action_log_ids: Set[int] = set()
         action_logs_for_cursor = require_key(self.game_state, "action_logs")
         if not isinstance(action_logs_for_cursor, list):
             raise TypeError(
@@ -2085,6 +2086,9 @@ class W40KEngine(gym.Env):
                         )
                     raw_type = raw_log.get("type")
                     if raw_type == "reactive_move":
+                        # Keep reactive moves in standard flush order (after triggering MOVE/FLED log).
+                        continue
+                    if raw_type == "reactive_move":
                         reactive_unit_id = require_key(raw_log, "unitId")
                         reactive_player = require_key(raw_log, "player")
                         from_col = require_key(raw_log, "fromCol")
@@ -2132,8 +2136,13 @@ class W40KEngine(gym.Env):
                             "target_id": require_key(raw_log, "targetId"),
                             "impact_roll": require_key(raw_log, "impact_roll"),
                             "impact_threshold": require_key(raw_log, "impact_threshold"),
+                            "impact_hit_result": require_key(raw_log, "impact_hit_result"),
                             "mortal_wounds": require_key(raw_log, "mortal_wounds"),
                             "ability_display_name": require_key(raw_log, "ability_display_name"),
+                            "target_coords": (
+                                require_key(raw_log, "targetCol"),
+                                require_key(raw_log, "targetRow"),
+                            ),
                             "reward": require_key(raw_log, "reward"),
                         }
                         self.step_logger.log_action(
@@ -2146,6 +2155,7 @@ class W40KEngine(gym.Env):
                             action_details=impact_details,
                             step_calls_since_last=None,
                         )
+                        early_logged_action_log_ids.add(id(raw_log))
                     elif raw_type == "charge":
                         charge_unit_id = require_key(raw_log, "unitId")
                         charge_player = require_key(raw_log, "player")
@@ -2168,8 +2178,12 @@ class W40KEngine(gym.Env):
                         if charge_target_id is not None:
                             target_unit = self._get_unit_by_id(str(charge_target_id))
                             if target_unit is not None:
-                                charge_details["target_coords"] = require_unit_position(target_unit, self.game_state)
                                 charge_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+                                target_col = target_unit.get("col")
+                                target_row = target_unit.get("row")
+                                if target_col is not None and target_row is not None:
+                                    target_col_int, target_row_int = normalize_coordinates(target_col, target_row)
+                                    charge_details["target_coords"] = (target_col_int, target_row_int)
                         self.step_logger.log_action(
                             unit_id=charge_unit_id,
                             action_type="charge",
@@ -2181,6 +2195,7 @@ class W40KEngine(gym.Env):
                             step_calls_since_last=self._step_calls_since_increment,
                         )
                         self._step_calls_since_increment = 0
+                        early_logged_action_log_ids.add(id(raw_log))
                     elif raw_type == "charge_fail":
                         charge_fail_unit_id = require_key(raw_log, "unitId")
                         charge_fail_player = require_key(raw_log, "player")
@@ -2200,8 +2215,12 @@ class W40KEngine(gym.Env):
                         if charge_fail_target_id is not None:
                             target_unit = self._get_unit_by_id(str(charge_fail_target_id))
                             if target_unit is not None:
-                                charge_fail_details["target_coords"] = require_unit_position(target_unit, self.game_state)
                                 charge_fail_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+                                target_col = target_unit.get("col")
+                                target_row = target_unit.get("row")
+                                if target_col is not None and target_row is not None:
+                                    target_col_int, target_row_int = normalize_coordinates(target_col, target_row)
+                                    charge_fail_details["target_coords"] = (target_col_int, target_row_int)
                         self.step_logger.log_action(
                             unit_id=charge_fail_unit_id,
                             action_type="charge_fail",
@@ -2213,9 +2232,7 @@ class W40KEngine(gym.Env):
                             step_calls_since_last=self._step_calls_since_increment,
                         )
                         self._step_calls_since_increment = 0
-
-                # Mark early action_logs as consumed to prevent duplicate flush below.
-                pre_action_logs_len = len(action_logs_early)
+                        early_logged_action_log_ids.add(id(raw_log))
                 
                 # Skip logging for system actions and intermediate actions
                 skip_logging_action_types = [
@@ -2712,6 +2729,8 @@ class W40KEngine(gym.Env):
                                 raise TypeError(
                                     f"action_logs entry must be a dict, got {type(raw_log).__name__}"
                                 )
+                            if id(raw_log) in early_logged_action_log_ids:
+                                continue
                             raw_type = raw_log.get("type")
                             if raw_type == "reactive_move":
                                 reactive_unit_id = require_key(raw_log, "unitId")
@@ -2763,8 +2782,13 @@ class W40KEngine(gym.Env):
                                     "target_id": require_key(raw_log, "targetId"),
                                     "impact_roll": require_key(raw_log, "impact_roll"),
                                     "impact_threshold": require_key(raw_log, "impact_threshold"),
+                                    "impact_hit_result": require_key(raw_log, "impact_hit_result"),
                                     "mortal_wounds": require_key(raw_log, "mortal_wounds"),
                                     "ability_display_name": require_key(raw_log, "ability_display_name"),
+                                    "target_coords": (
+                                        require_key(raw_log, "targetCol"),
+                                        require_key(raw_log, "targetRow"),
+                                    ),
                                     "reward": require_key(raw_log, "reward"),
                                 }
                                 self.step_logger.log_action(
@@ -2800,8 +2824,12 @@ class W40KEngine(gym.Env):
                                 if charge_target_id is not None:
                                     target_unit = self._get_unit_by_id(str(charge_target_id))
                                     if target_unit is not None:
-                                        charge_details["target_coords"] = require_unit_position(target_unit, self.game_state)
                                         charge_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+                                        target_col = target_unit.get("col")
+                                        target_row = target_unit.get("row")
+                                        if target_col is not None and target_row is not None:
+                                            target_col_int, target_row_int = normalize_coordinates(target_col, target_row)
+                                            charge_details["target_coords"] = (target_col_int, target_row_int)
 
                                 self.step_logger.log_action(
                                     unit_id=charge_unit_id,
@@ -2834,8 +2862,12 @@ class W40KEngine(gym.Env):
                                 if charge_fail_target_id is not None:
                                     target_unit = self._get_unit_by_id(str(charge_fail_target_id))
                                     if target_unit is not None:
-                                        charge_fail_details["target_coords"] = require_unit_position(target_unit, self.game_state)
                                         charge_fail_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+                                        target_col = target_unit.get("col")
+                                        target_row = target_unit.get("row")
+                                        if target_col is not None and target_row is not None:
+                                            target_col_int, target_row_int = normalize_coordinates(target_col, target_row)
+                                            charge_fail_details["target_coords"] = (target_col_int, target_row_int)
 
                                 self.step_logger.log_action(
                                     unit_id=charge_fail_unit_id,
