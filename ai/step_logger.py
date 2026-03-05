@@ -171,6 +171,8 @@ class StepLogger:
                         raise KeyError(f"Unit {unit['id']} missing required 'row' field")
                     if "player" not in unit:
                         raise KeyError(f"Unit {unit['id']} missing required 'player' field")
+                    if "HP_MAX" not in unit:
+                        raise KeyError(f"Unit {unit['id']} missing required 'HP_MAX' field")
 
                 f.write(episode_marker)
 
@@ -213,7 +215,11 @@ class StepLogger:
                     display_name = unit.get("DISPLAY_NAME")
                     display_suffix = f" [{display_name}]" if isinstance(display_name, str) and display_name.strip() else ""
                     player_name = f"P{unit['player']}"
-                    f.write(f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: Starting position ({unit['col']},{unit['row']})\n")
+                    hp_max = require_key(unit, "HP_MAX")
+                    f.write(
+                        f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: "
+                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}\n"
+                    )
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
             
@@ -303,7 +309,7 @@ class StepLogger:
                         f"reactive_move ability_display_name must be non-empty for unit {unit_id}, got {ability_display_name!r}"
                     )
                 base_msg = (
-                    f"{unit_label} MOVED [{ability_display_name.strip().upper()}] from ({start_col},{start_row}) "
+                    f"{unit_label} REACTIVE MOVED [{ability_display_name.strip().upper()}] from ({start_col},{start_row}) "
                     f"to ({end_col},{end_row}) [Roll: {range_roll}] - trigger: Unit {trigger_unit_id}"
                     f"->({trigger_to_col},{trigger_to_row})"
                 )
@@ -506,9 +512,9 @@ class StepLogger:
             if not isinstance(unit_with_coords, str) or not unit_with_coords:
                 raise KeyError("Hazardous action missing required unit_with_coords")
             hazardous_self_died = bool(details.get("hazardous_self_died", False))
-            hazardous_mortal_wounds = details.get("hazardous_mortal_wounds", 0)
             if hazardous_self_died:
                 return f"Unit {unit_with_coords} was DESTROYED [HAZARDOUS]"
+            hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds [HAZARDOUS]"
             
         elif action_type == "shoot_individual":

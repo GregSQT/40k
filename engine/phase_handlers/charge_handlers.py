@@ -440,7 +440,6 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
                     return _handle_skip_action(game_state, unit, had_valid_destinations=False)
                 target_id = selected_target["id"]
                 if game_state.get("debug_mode", False):
-                    from engine.game_utils import add_debug_file_log
                     episode = game_state.get("episode_number", "?")
                     turn = game_state.get("turn", "?")
                     add_debug_file_log(

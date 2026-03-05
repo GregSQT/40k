@@ -518,9 +518,9 @@ def initialize_engine(scenario_file: str = None):
         project_root = os.path.join(os.path.dirname(__file__), '..')
         os.chdir(os.path.abspath(project_root))
         
-        # Define scenario file path for game/API mode (default if not provided)
+        # Define scenario file path for PvP mode (default if not provided)
         if scenario_file is None:
-            scenario_file = os.path.join("config", "scenario_game.json")
+            scenario_file = os.path.join("config", "scenario_pvp.json")
         elif not isinstance(scenario_file, str):
             raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 
@@ -690,7 +690,7 @@ def initialize_test_engine(scenario_file: str = None):
         
         # Define scenario file path for PvE mode (default if not provided)
         if scenario_file is None:
-            scenario_file = os.path.join("config", "scenario_test.json")
+            scenario_file = os.path.join("config", "scenario_pve.json")
         elif not isinstance(scenario_file, str):
             raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 

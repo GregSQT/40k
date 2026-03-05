@@ -295,7 +295,7 @@ export const useEngineAPI = () => {
         } else if (isPvETestMode) {
           requestPayload.scenario_file = "config/scenario_pve_test.json";
         } else if (isPvEMode) {
-          requestPayload.scenario_file = "config/scenario_test.json";
+          requestPayload.scenario_file = "config/scenario_pve.json";
         }
 
         const authSession = getAuthSession();

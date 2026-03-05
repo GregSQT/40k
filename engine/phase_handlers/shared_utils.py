@@ -1513,7 +1513,7 @@ def maybe_resolve_reactive_move(
                 {
                     "type": "reactive_move",
                     "message": (
-                        f"Unit {reactive_unit_id}({dest_col},{dest_row}) MOVED [{ability_display_name}] "
+                        f"Unit {reactive_unit_id}({dest_col},{dest_row}) REACTIVE MOVED [{ability_display_name}] "
                         f"from ({orig_col},{orig_row}) to ({dest_col},{dest_row}) [Roll: {move_range}] "
                         f"- trigger: Unit {moved_unit_id_str}->({to_col_int},{to_row_int})"
                     ),

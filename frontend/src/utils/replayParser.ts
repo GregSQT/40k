@@ -320,7 +320,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Unit starting positions
     const unitStart = trimmed.match(
-      /Unit (\d+) \((.+?)\) P(\d+): Starting position \((-?\d+),\s*(-?\d+)\)/
+      /Unit (\d+) \((.+?)\)(?: \[[^\]]+\])? P(\d+): Starting position \((-?\d+),\s*(-?\d+)\),\s*HP_MAX=(\d+)/
     );
     if (unitStart) {
       const unitId = parseInt(unitStart[1], 10);
@@ -328,10 +328,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const player = parseInt(unitStart[3], 10);
       const col = parseInt(unitStart[4], 10);
       const row = parseInt(unitStart[5], 10);
-
-      // Determine HP based on unit type
-      const unitHP =
-        unitType === "Termagant" || unitType === "Hormagaunt" || unitType === "Genestealer" ? 1 : 2;
+      const unitHP = parseInt(unitStart[6], 10);
+      if (Number.isNaN(unitHP) || unitHP <= 0) {
+        throw new Error(`Invalid HP_MAX in step.log unit start line: ${trimmed}`);
+      }
 
       currentEpisode.units[unitId] = {
         id: unitId,

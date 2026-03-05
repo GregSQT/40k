@@ -1635,7 +1635,10 @@ def parse_step_log(filepath: str) -> Dict:
                                     if candidate_technical_rule_id not in effect_to_sources_for_unit:
                                         continue
                                     source_rule_ids = effect_to_sources_for_unit[candidate_technical_rule_id]
-                                    selected_sources = selected_choice_by_unit_source.get(actor_id, {})
+                                    if actor_id in selected_choice_by_unit_source:
+                                        selected_sources = selected_choice_by_unit_source[actor_id]
+                                    else:
+                                        selected_sources = {}
                                     has_matching_source = any(
                                         selected_sources.get(source_rule_id) == candidate_technical_rule_id
                                         for source_rule_id in source_rule_ids
@@ -1763,7 +1766,7 @@ def parse_step_log(filepath: str) -> Dict:
                 )
                 reactive_move_match = re.search(
                     r'Unit\s+(\d+)\((\d+),\s*(\d+)\)\s+'
-                    r'(?:REACTIVE\s+MOVED|MOVED\s+\[[^\]]+\])\s+'
+                    r'(?:REACTIVE\s+MOVED(?:\s+\[[^\]]+\])?|MOVED\s+\[[^\]]+\])\s+'
                     r'from\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)'
                     r'(?:\s+\[Roll:\s*(\d+)\])?',
                     action_desc,

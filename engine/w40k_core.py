@@ -787,13 +787,17 @@ class W40KEngine(gym.Env):
             episode_units = []
             for uid, entry in uc.items():
                 unit = unit_by_id.get(uid)
-                unit_type = unit.get("unitType", "Unknown") if unit else "Unknown"
+                if unit is None:
+                    raise ValueError(f"units_cache contains unknown unit id {uid}")
+                unit_type = require_key(unit, "unitType")
+                hp_max = require_key(unit, "HP_MAX")
                 episode_units.append({
                     "id": uid,
                     "col": entry["col"],
                     "row": entry["row"],
                     "player": entry["player"],
                     "unitType": unit_type,
+                    "HP_MAX": hp_max,
                 })
             self.step_logger.log_episode_start(
                 episode_units,
@@ -1525,7 +1529,11 @@ class W40KEngine(gym.Env):
             rebuild_choice_timing_index(self.game_state)
 
         choice_timing_index = require_key(self.game_state, "choice_timing_index")
-        trigger_entries = choice_timing_index.get(trigger, [])
+        if trigger in choice_timing_index:
+            trigger_entries = choice_timing_index[trigger]
+        else:
+            # Missing trigger entry means no rule choice is registered for this timing event.
+            trigger_entries = []
         if not isinstance(trigger_entries, list):
             raise TypeError(f"choice_timing_index['{trigger}'] must be a list")
 
@@ -1813,7 +1821,7 @@ class W40KEngine(gym.Env):
                     "player": prompt_player,
                 }
 
-            # AI side: policy-based option selection (no heuristic fallback).
+            # AI side: policy-based option selection (no heuristic default behavior).
             selected_display_rule_id = self._select_ai_rule_choice_option(prompt)
             self._apply_rule_choice_selection(prompt, selected_display_rule_id)
             queue.pop(0)
@@ -2490,7 +2498,11 @@ class W40KEngine(gym.Env):
                                         "hazardous_test_required": attack_result.get("hazardous_test_required", False),
                                         "hazardous_test_roll": attack_result.get("hazardous_test_roll"),
                                         "hazardous_triggered": attack_result.get("hazardous_triggered", False),
-                                        "hazardous_mortal_wounds": attack_result.get("hazardous_mortal_wounds", 0),
+                                        "hazardous_mortal_wounds": (
+                                            attack_result["hazardous_mortal_wounds"]
+                                            if "hazardous_mortal_wounds" in attack_result
+                                            else 0
+                                        ),
                                         "hazardous_self_died": attack_result.get("hazardous_self_died", False),
                                         "target_died": attack_result["target_died"],
                                         "weapon_name": attack_result["weapon_name"],
