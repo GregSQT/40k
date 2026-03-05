@@ -22,6 +22,7 @@ from .shared_utils import (
     ACTION, WAIT, NO, PASS, ERROR, MOVE, FLED,
     build_enemy_adjacent_hexes, update_units_cache_position, is_unit_alive,
     get_unit_position, require_unit_position,
+    update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
 )
 
@@ -83,6 +84,8 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
     # Clear global target pool cache (shooting_handlers)
     from .shooting_handlers import _target_pool_cache
     _target_pool_cache.clear()
+
+    # Enemy adjacency caches are updated incrementally at movement execution time.
     
 
 def _log_movement_debug(game_state: Dict[str, Any], function_name: str, unit_id: str, message: str) -> None:
@@ -519,9 +522,6 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     # Normalize coordinates to int - raises error if invalid
     dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
 
-    # Adjacency check is done in build_valid_destinations_pool via enemy_adjacent_hexes.
-    # The pool should already exclude all hexes adjacent to enemies, so no redundant check here.
-
     # Store original position
     orig_col, orig_row = require_unit_position(unit, game_state)
 
@@ -551,13 +551,25 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
             from engine.game_utils import add_console_log, safe_print
             add_console_log(game_state, log_msg)
             safe_print(game_state, log_msg)
-            import logging
-            logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
-            logging.info(log_msg)
             return False, {
                 "error": "destination_occupied",
                 "occupant_id": other_id,
                 "destination": (dest_col_int, dest_row_int)
+            }
+
+    # Re-validate destination against current enemy positions at execution time.
+    # Reactive moves can change board state between pool build and destination commit.
+    unit_player_int = int(require_key(unit, "player"))
+    for enemy_id, cache_entry in units_cache.items():
+        enemy_player_int = int(require_key(cache_entry, "player"))
+        if enemy_player_int == unit_player_int:
+            continue
+        enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+        if calculate_hex_distance(dest_col_int, dest_row_int, enemy_col, enemy_row) <= 1:
+            return False, {
+                "error": "destination_adjacent_to_enemy",
+                "enemy_id": enemy_id,
+                "destination": (dest_col_int, dest_row_int),
             }
 
     # Execute movement - position assignment
@@ -580,6 +592,17 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
 
     # Update units_cache after position change
     update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
+
+    # Keep enemy adjacency caches synchronized incrementally with the move.
+    moved_unit_player = int(require_key(unit, "player"))
+    update_enemy_adjacent_caches_after_unit_move(
+        game_state,
+        moved_unit_player=moved_unit_player,
+        old_col=orig_col,
+        old_row=orig_row,
+        new_col=dest_col_int,
+        new_row=dest_row_int,
+    )
 
     # Apply AI_TURN.md tracking
     # Normalize unit ID to string for consistent storage (units_fled stores strings)
@@ -690,35 +713,21 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     # Normalize coordinates to int - raises error if invalid
     unit_col, unit_row = require_unit_position(unit, game_state)
 
-    # Optimization: For CC_RNG=1 (most common), check 6 neighbors directly
+    # Use the same metric as analyzer and other handlers: hex distance.
+    # This avoids classification drift between "move" and "flee" caused by
+    # coordinate-neighbor interpretation differences.
     result = False
-    if cc_range == 1:
-        hex_neighbors = set(get_hex_neighbors(unit_col, unit_row))
-        units_cache = require_key(game_state, "units_cache")
-        unit_player = int(unit["player"]) if unit["player"] is not None else None
-        for enemy_id, cache_entry in units_cache.items():
-            # Normalize player values to int for consistent comparison (handles int/string mismatches)
-            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-            if enemy_player != unit_player:
-                # Normalize coordinates to int - raises error if invalid
-                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
-                enemy_pos = (enemy_col, enemy_row)
-                if enemy_pos in hex_neighbors:
-                    result = True
-                    break
-    else:
-        # For longer ranges, use proper hex distance calculation
-        units_cache = require_key(game_state, "units_cache")
-        unit_player = int(unit["player"]) if unit["player"] is not None else None
-        for enemy_id, cache_entry in units_cache.items():
-            # Normalize player values to int for consistent comparison (handles int/string mismatches)
-            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-            if enemy_player != unit_player:
-                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
-                hex_dist = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
-                if hex_dist <= cc_range:
-                    result = True
-                    break
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    for enemy_id, cache_entry in units_cache.items():
+        # Normalize player values to int for consistent comparison (handles int/string mismatches)
+        enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+        if enemy_player != unit_player:
+            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            hex_dist = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+            if hex_dist <= cc_range:
+                result = True
+                break
     
     # Log adjacency check result
     _log_movement_debug(game_state, "is_adjacent_to_enemy", str(unit["id"]), f"ADJACENT" if result else "NOT_ADJACENT")
@@ -831,18 +840,70 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     has_fly_keyword = _unit_has_keyword(unit, "fly")
 
+    # Generic cache-coherence diagnostics (debug mode only):
+    # compare precomputed enemy adjacency cache vs. fresh reconstruction from units_cache.
+    if game_state.get("debug_mode", False):
+        expected_enemy_adjacent_hexes: Set[Tuple[int, int]] = set()
+        board_cols = require_key(game_state, "board_cols")
+        board_rows = require_key(game_state, "board_rows")
+        current_player_int = int(current_player)
+        for enemy_id, enemy_entry in units_cache.items():
+            enemy_player_raw = require_key(enemy_entry, "player")
+            enemy_player_int = int(enemy_player_raw)
+            if enemy_player_int == current_player_int:
+                continue
+            enemy_hp = require_key(enemy_entry, "HP_CUR")
+            if enemy_hp <= 0:
+                continue
+            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            for neighbor_col, neighbor_row in get_hex_neighbors(enemy_col, enemy_row):
+                if (
+                    neighbor_col < 0
+                    or neighbor_row < 0
+                    or neighbor_col >= board_cols
+                    or neighbor_row >= board_rows
+                ):
+                    continue
+                expected_enemy_adjacent_hexes.add((neighbor_col, neighbor_row))
+
+        cache_missing = expected_enemy_adjacent_hexes - enemy_adjacent_hexes
+        cache_extra = enemy_adjacent_hexes - expected_enemy_adjacent_hexes
+        if cache_missing or cache_extra:
+            # TEMPORARY LOG: diagnostic for stale enemy adjacency cache investigation.
+            from engine.game_utils import add_debug_file_log
+            episode = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            max_examples = 8
+            missing_examples = sorted(cache_missing)[:max_examples]
+            extra_examples = sorted(cache_extra)[:max_examples]
+            add_debug_file_log(
+                game_state,
+                f"[TEMPORARY LOG][MOVE CACHE MISMATCH] E{episode} T{turn} Unit {unit_id}: "
+                f"player={current_player_int} "
+                f"cached={len(enemy_adjacent_hexes)} expected={len(expected_enemy_adjacent_hexes)} "
+                f"missing={len(cache_missing)} extra={len(cache_extra)} "
+                f"missing_examples={missing_examples} extra_examples={extra_examples}",
+            )
+
     # FLY units ignore walls/units during traversal but still respect destination rules.
     # We can directly evaluate all in-range hexes as reachable.
     if has_fly_keyword:
         board_cols = game_state["board_cols"]
         board_rows = game_state["board_rows"]
         valid_destinations: List[Tuple[int, int]] = []
+        fly_rejected_same_hex = 0
+        fly_rejected_out_of_range = 0
+        fly_rejected_wall = 0
+        fly_rejected_occupied = 0
+        fly_rejected_enemy_adjacent = 0
         for candidate_col in range(board_cols):
             for candidate_row in range(board_rows):
                 candidate_pos = (candidate_col, candidate_row)
                 if candidate_pos == start_pos:
+                    fly_rejected_same_hex += 1
                     continue
                 if calculate_hex_distance(start_col, start_row, candidate_col, candidate_row) > move_range:
+                    fly_rejected_out_of_range += 1
                     continue
                 if _is_valid_destination(
                     game_state,
@@ -854,8 +915,30 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     occupied_positions,
                 ):
                     valid_destinations.append(candidate_pos)
+                elif candidate_pos in game_state["wall_hexes"]:
+                    fly_rejected_wall += 1
+                elif candidate_pos in occupied_positions:
+                    fly_rejected_occupied += 1
+                elif candidate_pos in enemy_adjacent_hexes:
+                    fly_rejected_enemy_adjacent += 1
         game_state["valid_move_destinations_pool"] = valid_destinations
         _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)} [FLY]")
+        if game_state.get("debug_mode", False):
+            # TEMPORARY LOG: diagnostic summary for FLY move-pool construction.
+            from engine.game_utils import add_debug_file_log
+            episode = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            add_debug_file_log(
+                game_state,
+                f"[TEMPORARY LOG][MOVE POOL SUMMARY] E{episode} T{turn} Unit {unit_id} [FLY]: "
+                f"start=({start_col},{start_row}) move_range={move_range} "
+                f"valid={len(valid_destinations)} "
+                f"reject_same_hex={fly_rejected_same_hex} "
+                f"reject_out_of_range={fly_rejected_out_of_range} "
+                f"reject_wall={fly_rejected_wall} "
+                f"reject_occupied={fly_rejected_occupied} "
+                f"reject_enemy_adjacent={fly_rejected_enemy_adjacent}",
+            )
         return valid_destinations
 
     # BFS pathfinding to find all reachable hexes
@@ -916,6 +999,18 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     game_state["valid_move_destinations_pool"] = valid_destinations
 
     _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)}")
+    if game_state.get("debug_mode", False):
+        # TEMPORARY LOG: diagnostic summary for BFS move-pool construction.
+        from engine.game_utils import add_debug_file_log
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        add_debug_file_log(
+            game_state,
+            f"[TEMPORARY LOG][MOVE POOL SUMMARY] E{episode} T{turn} Unit {unit_id}: "
+            f"start=({start_col},{start_row}) move_range={move_range} "
+            f"visited={len(visited)} valid={len(valid_destinations)} "
+            f"blocked_enemy_adjacent={blocked_enemy_adjacent_count}",
+        )
 
     return valid_destinations
 

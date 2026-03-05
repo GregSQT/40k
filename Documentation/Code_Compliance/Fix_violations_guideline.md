@@ -1,13 +1,16 @@
 # CONSIGNE OPTIMISÉE - Résolution autonome des violations de règles de jeu
 
+> Guideline / prompt pour automatiser les correctifs. À utiliser avec l’analyzer et le hidden_action_finder (voir [GAME_Analyzer.md](GAME_Analyzer.md), [Hidden_action_finder.md](Hidden_action_finder.md)).
+
 ## WORKFLOW ITÉRATIF
 
 ### Phase 1 : EXÉCUTION & ANALYSE INITIALE
-1. Exécuter : `python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --rewards-config SpaceMarine_Infantry_Troop_RangedSwarm --scenario bot --test-only --step --test-episodes 15 2>&1 | tee movement_debug.log ; python ai/analyzer.py step.log ; python check/hidden_action_finder.py`
+1. Exécuter : `python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --rewards-config SpaceMarine_Infantry_Troop_RangedSwarm --scenario bot --test-only --step --test-episodes 15 2>&1 | tee movement_debug.log ; python ai/analyzer.py step.log ; python ai/hidden_action_finder.py`
 
 2. Analyser les résultats dans cet ordre de priorité :
    - **FATAL ERRORS** (ValueError, exceptions) → STOP, fix immédiat
-   - **Résumé de `ai/analyzer.py`** : compter les violations de règles (par catégorie) — voir [ANALYZER.md](ANALYZER.md)
+   - **Résumé de `ai/analyzer.py`** : compter les violations de règles (par catégorie) — voir [GAME_Analyzer.md](GAME_Analyzer.md)
+   - **Output de `ai/hidden_action_finder.py`** : mouvements/attaques non logués — voir [Hidden_action_finder.md](Hidden_action_finder.md)
    - **Patterns récurrents** : si >50% des violations sont du même type → investiguer ce type en priorité
    - **Priorité des violations** :
      1. **UNIT POSITION COLLISIONS** (2+ unités sur même hex) → CRITIQUE
@@ -153,5 +156,4 @@ Résultat : [réduction % ou "stagnant"]
   - États du jeu non synchronisés (flags, pools)
   - Logique de filtrage incomplète dans les pools de validité
 - Toujours vérifier `AI_TURN.md` pour confirmer que c'est bien une violation
-- Certaines "violations" peuvent être des faux positifs du parser `ai/analyzer.py`
-
+- Certaines "violations" peuvent être des faux positifs du parser `ai/analyzer.py` — voir [GAME_Analyzer.md](GAME_Analyzer.md)

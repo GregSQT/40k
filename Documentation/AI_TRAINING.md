@@ -1,15 +1,10 @@
 # AI_TRAINING.md
-## PPO Training Configuration Guide - Streamlined Edition
+## Guide training et tuning — référence unique
 
-> **📍 Purpose**: Configure and monitor PPO training for W40K tactical AI
+> **📍 Purpose** : Ce document est la **référence unique** pour tout ce qui concerne l’entraînement et le tuning : architecture du pipeline, configuration, monitoring, métriques, hyperparamètres, anti-overfitting, dépannage.
 >
-> **Status**: January 2025 - Configuration-focused edition (Updated: Weighted training bots 20/40/40, stronger Greedy/Defensive randomness=0.10)
->
-> **⚠️ UPDATE**: Metrics section updated to reflect actual logged metrics:
-> - Added `0_critical/` dashboard documentation (primary monitoring interface)
-> - Corrected bot evaluation namespace: `bot_eval/` (not `eval/`)
-> - Removed outdated `eval/mean_reward` and `eval/mean_ep_length` metrics
-> - Added `game_critical/` metrics reference
+> **Moteur de jeu** : voir [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md).  
+> **Métriques détaillées et tuning ciblé** : voir [AI_METRICS.md](AI_METRICS.md) (inclut le guide de tuning rapide).
 
 ---
 
@@ -19,6 +14,14 @@
   - [Run Training](#run-training)
   - [Continue Existing Model](#continue-existing-model)
   - [Key Paths](#key-paths)
+- [Training pipeline (architecture)](#-training-pipeline-architecture)
+  - [Point d’entrée et CLI](#point-dentrée-et-cli)
+  - [Chargement de la config](#chargement-de-la-config)
+  - [Création de l’environnement](#création-de-lenvironnement)
+  - [Modèle et boucle d’entraînement](#modèle-et-boucle-dentraînement)
+- [Macro Training Status](#-macro-training-status)
+  - [Implémenté aujourd'hui](#implémente-aujourdhui)
+  - [Recommandations / non implémenté](#recommandations--non-implémente)
 - [Replay Mode](#-replay-mode)
   - [Overview](#overview)
   - [Generating Replay Logs](#generating-replay-logs)
@@ -37,7 +40,7 @@
   - [TensorBoard Metrics](#tensorboard-metrics)
   - [Success Indicators](#success-indicators)
   - [Red Flags (Training Collapse)](#red-flags-training-collapse)
-- [Advanced Metrics & Optimization](#-advanced-metrics--optimization) → **See [AI_METRICS.md](AI_METRICS.md)**
+- [Métriques avancées et tuning](#-métriques-avancées-et-tuning)
 - [Bot Evaluation System](#-bot-evaluation-system)
   - [Bot Types](#bot-types)
   - [Evaluation Commands](#evaluation-commands)
@@ -61,6 +64,7 @@
 - [Troubleshooting](#-troubleshooting)
   - [Common Errors](#common-errors)
   - [Performance Issues](#performance-issues)
+- [Évolutions prévues : League / curriculum training](#évolutions-prévues--league--curriculum-training)
 - [Advanced Topics (External References)](#-advanced-topics-external-references)
 - [Quick Reference Cheat Sheet](#-quick-reference-cheat-sheet)
 - [Summary](#-summary)
@@ -71,23 +75,103 @@
 
 ### Run Training
 ```bash
-# From project root
-python ai/train.py --config default      # Standard training (5000 episodes)
-python ai/train.py --config debug        # Fast testing (50 episodes)
-python ai/train.py --step                # Enable step logging for replay viewer
+# From project root (--agent obligatoire pour entraînement ciblé)
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot   # Entraînement standard
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --step  # + step logging (step.log)
+python ai/train.py --agent <agent_key> --scenario bot --test-only --step --test-episodes 50   # Test rapide avec logs
 ```
 
 ### Continue Existing Model
 ```bash
-python ai/train.py --config default --model ./models/ppo_checkpoint.zip
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append
 ```
+(Le chemin du modèle est dérivé de l’agent : `ai/models/<agent_key>/model_<agent_key>.zip`.)
 
 ### Key Paths
 - **Training Configs**: `config/agents/<agent_name>/<agent_name>_training_config.json`
-- **Reward Configs**: `rewards_master.json`
-- **Models**: `./models/` (checkpoints saved here)
+- **Reward Configs**: `config/agents/<agent_name>/<agent_name>_rewards_config.json` (par agent)
+- **Models**: `ai/models/<agent_key>/model_<agent_key>.zip`
 - **Logs**: `./tensorboard/` (TensorBoard data)
-- **Step Logs**: `train_step.log` (detailed action logs for replay viewer)
+- **Step Logs**: `step.log` (généré avec `--step` ; utilisé par l’analyzer et le replay viewer)
+- **Agent inheritance metadata**: `inherits_from` dans `config/agents/<agent_name>/<agent_name>_training_config.json`
+
+---
+
+## 🏗️ TRAINING PIPELINE (ARCHITECTURE)
+
+Cette section décrit comment le training est structuré (qui appelle quoi). Pour la config des paramètres, voir les sections suivantes.
+
+### Point d’entrée et CLI
+
+- **Script** : `ai/train.py`. Tous les modes (entraînement, test-only, macro, orchestrate, convert-steplog) partent de ce script.
+- **Arguments essentiels** :
+  - `--agent <agent_key>` : agent à entraîner (obligatoire pour training ciblé). Détermine le dossier de config et le chemin du modèle.
+  - `--training-config <name>` : clé du bloc dans `*_training_config.json` (ex. `default`, `debug`).
+  - `--rewards-config <name>` : en pratique le même que `--agent` ou un alias ; utilisé comme `rewards_config_name` et pour charger `*_rewards_config.json`.
+  - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un ou plusieurs bots (RandomBot, GreedyBot, DefensiveBot).
+- **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--test-episodes N`, `--append` (reprendre un modèle existant), `--new-model` (partir de zéro).
+
+### Chargement de la config
+
+- **config_loader** (`config_loader.py`) :
+  - `load_agent_training_config(agent_key, training_config_name)` → charge `config/agents/<agent>/<agent>_training_config.json` et retourne le bloc demandé (ex. `default`). Gère `inherits_from` (héritage vers un autre dossier d’agent).
+  - `load_agent_rewards_config(agent_key)` → charge `config/agents/<agent>/<agent>_rewards_config.json`.
+  - `get_models_root()` → racine des modèles (ex. `ai/models/`).
+- **UnitRegistry** (`ai/unit_registry.py`) : mappe `unit_type` (ex. type d’unité du scénario) vers `model_key` (clé d’agent pour charger le bon micro-modèle). Requis pour créer le moteur et les wrappers (BotControlledEnv, macro).
+
+### Création de l’environnement
+
+1. **Moteur de base** : `W40KEngine` (`engine/w40k_core.py`) avec :
+   - `rewards_config=rewards_config_name`, `training_config_name=...`, `controlled_agent=controlled_agent_key`,
+   - `scenario_file` ou `scenario_files` (liste pour tirage aléatoire),
+   - `unit_registry=unit_registry`, `gym_training_mode=True`.
+2. **Step logger** (si `--step`) : `StepLogger("step.log", ...)` attaché à `base_env.step_logger` ; désactivé pour les envs vectorisés (SubprocVecEnv).
+3. **ActionMasker** : wrapper SB3 `ActionMasker(base_env, mask_fn)` avec `mask_fn(env) = env.get_action_mask()` pour MaskablePPO.
+4. **Adversaire** :
+   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)`. Les bots sont instanciés à partir de `training_config` (ratios, randomness) ou par défaut (RandomBot, GreedyBot, DefensiveBot avec randomness 0.10).
+   - **Self-play** : `SelfPlayWrapper(masked_env, ...)` (autre joueur = copie du modèle, mise à jour périodique).
+5. **Monitor** : `Monitor(wrapped_env)` pour les stats d’épisode (reward, length) utilisées par TensorBoard et les callbacks.
+
+Pour l’entraînement vectorisé, `make_training_env()` dans `ai/training_utils.py` encapsule cette construction (W40KEngine → ActionMasker → BotControlledEnv ou SelfPlayWrapper → Monitor).
+
+### Modèle et boucle d’entraînement
+
+- **Modèle** : `MaskablePPO` (sb3_contrib). Chargement depuis `ai/models/<agent_key>/model_<agent_key>.zip` ; sauvegarde via callbacks (CheckpointCallback) et à la fin de l’entraînement.
+- **Callbacks** (définis dans `train.py`, paramétrés par `training_config["callback_params"]`) : sauvegarde de checkpoints, évaluation périodique contre les bots (`BotEvaluationCallback` : `bot_eval_freq`, `bot_eval_intermediate`), logging TensorBoard.
+- **Boucle** : `model.learn(total_timesteps=...)` (ou équivalent selon le mode). Chaque step : `action = model.predict(obs, action_masks=mask)` puis `env.step(action)`.
+
+**Références code** : `ai/train.py`, `ai/training_utils.py` (`make_training_env`), `ai/env_wrappers.py` (BotControlledEnv, SelfPlayWrapper), `engine/w40k_core.py` (W40KEngine).
+
+---
+
+## 🧭 MACRO TRAINING STATUS
+
+### Implémente aujourd'hui
+
+Cette section couvre uniquement ce qui est actuellement supporté côté code.
+
+- **Entrée CLI unique** : `ai/train.py` gère les modes macro et micro.
+- **Wrappers macro** : `ai/macro_training_env.py` (`MacroTrainingWrapper`, `MacroVsBotWrapper`).
+- **Config macro** : `config/agents/MacroController/MacroController_training_config.json`.
+- **Scénarios macro** : `config/agents/MacroController/scenarios/*.json`.
+- **Modes d'évaluation macro** :
+  - `--macro-eval-mode micro` : macro vs pipeline micro.
+  - `--macro-eval-mode bot` : macro vs bots d'évaluation.
+- **Lancement macro (exemple)** :
+  ```bash
+  python ai/train.py --agent MacroController --training-config default --rewards-config MacroController --scenario all --new
+  ```
+
+### Recommandations / non implémente
+
+> **⚠️ IMPORTANT**
+> Les éléments ci-dessous sont des recommandations de design/process et ne sont pas garantis comme implémentés partout.
+> Le document détaillé a été déplacé vers `Documentation/TODO/Macro_agent.md`.
+
+- Structuration macro complète en `scenarios/training` + `scenarios/holdout`.
+- Couverture de scénarios plus large (volumétrie et variété topologique).
+- Stratégie “1 macro-agent par armée”.
+- Pipeline de validation robuste orienté holdout + multi-bots + fenêtre temporelle.
 
 ---
 
@@ -97,11 +181,11 @@ python ai/train.py --config default --model ./models/ppo_checkpoint.zip
 The Replay Mode allows you to visualize training episodes step-by-step in the frontend. This is invaluable for understanding agent behavior and debugging tactical decisions.
 
 ### Generating Replay Logs
-During training or evaluation, a `train_step.log` file is generated containing detailed action logs:
+During training or evaluation with `--step`, a `step.log` file is generated containing detailed action logs:
 
 ```bash
 # Training with step logging enabled
-python ai/train.py --config default --step
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --step
 ```
 
 The log captures:
@@ -120,7 +204,7 @@ The log captures:
 
 2. **Navigate to Replay Mode**:
    - Click the "Replay" tab in the frontend
-   - Click "Browse" to select your `train_step.log` file
+   - Click "Browse" to select your `step.log` (or `train_step.log` if the API expects that name)
 
 3. **Select an Episode**:
    - Use the dropdown to select an episode
@@ -183,7 +267,7 @@ The log captures:
 
 ### Log Format Reference
 
-The `train_step.log` uses this format:
+The `step.log` uses this format:
 
 ```
 [HH:MM:SS] === EPISODE START ===
@@ -223,7 +307,7 @@ The `train_step.log` uses this format:
 ### Unified Training (No Curriculum)
 
 > **IMPORTANT**: This project uses **unified training from the start** - NO curriculum learning.
-> See [RL_TRAINING_ROADMAP.md](RL_TRAINING_ROADMAP.md) for detailed rationale.
+> See the "Unified Training" and "Reward Design" sections below for rationale.
 
 **Why NOT Curriculum Learning?**
 
@@ -258,7 +342,7 @@ Research and testing show curriculum learning **fails** for tactical games like 
 - Objectives active from episode 1
 - Single reward configuration, no phased weights
 
-**Current Reward Structure** (from `rewards_master.json`):
+**Current Reward Structure** (from `config/agents/<agent>/<agent>_rewards_config.json`):
 ```json
 {
   "SpaceMarineRanged": {
@@ -310,8 +394,25 @@ This naturally encourages:
 
 Training configs are per-agent at: `config/agents/<agent_name>/<agent_name>_training_config.json`
 
+### Agent Inheritance (EXPLICIT)
+
+> **🚨 CRITICAL - AGENT INHERITANCE IS EXPLICIT**
+>
+> Il n'y a plus de mapping hardcodé dans `config_loader.py` pour rediriger un agent vers un autre.
+> La résolution se fait uniquement via le champ `inherits_from` défini dans le
+> `*_training_config.json` de l'agent demandé.
+>
+> Si `inherits_from` est renseigné, l'entraînement/chargement utilise les configs du dossier parent.
+> Un **gros WARNING** est affiché au runtime pour signaler clairement la redirection.
+
+Règles:
+- `inherits_from: null` → pas d'héritage, l'agent charge son propre dossier.
+- `inherits_from: "<AgentKeyParent>"` → héritage explicite vers `config/agents/<AgentKeyParent>/`.
+- Valeur invalide (vide, auto-référence, dossier parent absent) → erreur explicite (fail fast).
+
 ```json
 {
+  "inherits_from": null,
   "default": {
     "total_episodes": 5000,              // How many episodes to train
     "max_turns_per_episode": 5,          // Game length limit
@@ -365,11 +466,11 @@ Training configs are per-agent at: `config/agents/<agent_name>/<agent_name>_trai
 
 ---
 
-### rewards_master.json Structure
+### Agent rewards_config.json Structure
 
-Each unit archetype has a single reward profile. No phased profiles.
+Chaque agent a son fichier `config/agents/<agent>/<agent>_rewards_config.json`. Les récompenses sont par type d’unité / archétype dans ce fichier.
 
-**Reward Categories** (from `rewards_master.json`):
+**Reward Categories** (exemple, depuis un rewards_config d’agent) :
 
 ```json
 {
@@ -419,7 +520,7 @@ Each unit archetype has a single reward profile. No phased profiles.
 
 ## 📊 MONITORING TRAINING
 
-> **💡 TIP:** This section provides quick-start monitoring guidance. For comprehensive metric analysis, troubleshooting patterns, and hyperparameter tuning, see [AI_METRICS.md](AI_METRICS.md)
+> **💡 TIP:** Monitoring de base ci-dessous. Pour le tuning (quoi modifier selon les métriques) et l’analyse experte des métriques, voir [AI_METRICS.md](AI_METRICS.md) (inclut le guide de tuning rapide).
 
 ### TensorBoard Metrics
 
@@ -444,7 +545,7 @@ Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essent
 **✅ Healthy Training:** All `0_critical/` metrics trending toward targets
 **⚠️ Red Flag:** Any metric outside range for 200+ episodes needs intervention
 
-**For detailed metric analysis**, see [AI_METRICS.md](AI_METRICS.md#-start-here-0_critical-dashboard)
+**Pour le détail des métriques et le tuning**, voir [AI_METRICS.md](AI_METRICS.md).
 
 ---
 
@@ -500,19 +601,11 @@ Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essent
 
 ---
 
-## 📊 ADVANCED METRICS & OPTIMIZATION
+## 📊 MÉTRIQUES AVANCÉES ET TUNING
 
-For deep metrics analysis, pattern recognition, and optimization strategies, see the dedicated guide:
+Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicateurs de succès, red flags). Pour aller plus loin :
 
-**👉 [AI_METRICS.md](AI_METRICS.md) - Training Optimization Through Metrics Analysis**
-
-This comprehensive guide covers:
-- **Deep metric explanations** - What each metric really means and how to interpret it
-- **Pattern library** - Good/bad training patterns with real numbers and fixes
-- **Diagnostic workflows** - Step-by-step decision trees for troubleshooting
-- **Hyperparameter tuning** - Metric-based adjustment strategies
-- **Case studies** - Real training runs with problems, diagnoses, and solutions
-- **Quick diagnostic reference** - Fast symptom-to-fix lookup table
+- **[AI_METRICS.md](AI_METRICS.md)** — Métriques et tuning : guide de tuning rapide (tableau, problèmes courants, matrice métrique → paramètres, actions correctives, n_envs, workflow) + analyse experte (explication détaillée de chaque métrique, patterns, arbres de décision, études de cas). **À utiliser pour « quoi changer quand ça va mal » et pour le diagnostic avancé.**
 
 ---
 
@@ -541,11 +634,13 @@ This comprehensive guide covers:
 ### Evaluation Commands
 
 ```bash
-# Automatic evaluation during training (configured in training_config.json)
-python ai/train.py --config default  # bot_eval_freq: 200 episodes, 30 per bot
+# Automatic evaluation during training (configured in training_config callback_params)
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot
+# bot_eval_freq, bot_eval_intermediate are in callback_params (e.g. 200 episodes, 30 per bot)
 
-# Manual evaluation after training
-python ai/evaluation.py --model ./models/ppo_checkpoint.zip --opponent tactical --episodes 20
+# Manual evaluation (test-only, no training)
+python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episodes 20
+# Uses model at ai/models/<agent_key>/model_<agent_key>.zip
 ```
 
 **Eval parameters** (`callback_params`): `bot_eval_freq` (how often), `bot_eval_intermediate` (episodes per bot — 30 recommended for stable estimates without long runs).
@@ -605,7 +700,7 @@ DefensiveBot(randomness=0.15) # 15% chance of random action
 
 ### Solution 2: Balanced Reward Penalties (Reduce Over-Aggression)
 
-**Location**: `rewards_master.json`
+**Location**: `config/agents/<agent>/<agent>_rewards_config.json`
 
 **Problem**: Overly harsh penalties force hyper-aggressive play that becomes predictable.
 
@@ -687,13 +782,13 @@ combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
 #### Starting Fresh Training
 
 ```bash
-python ai/train.py --config default
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot
 ```
 
 The new settings will automatically be used if:
-- Bot randomness is configured in `evaluation_bots.py`
-- Reward penalties are balanced in agent's rewards config
-- Evaluation weights are updated in `train.py`
+- Bot randomness is configured in `evaluation_bots.py` and referenced in training config / train.py
+- Reward penalties are balanced in the agent's `*_rewards_config.json`
+- Evaluation weights are set in the bot evaluation callback (train.py / bot_evaluation.py)
 
 #### Continue Existing Training
 
@@ -863,7 +958,7 @@ This forces continuous adaptation and prevents exploitation strategies.
 
 ```bash
 # Force CPU usage
-python ai/train.py --config default --device cpu
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --device cpu
 ```
 
 ---
@@ -886,8 +981,8 @@ python ai/train.py --config default --device cpu
 - **Fix**: Train new model from scratch or update observation_params
 
 **Error**: `Reward key not found: SpaceMarineXXX`
-- **Cause**: Unit archetype not defined in rewards_master.json
-- **Fix**: Add the missing reward profile to rewards_master.json
+- **Cause**: Unit archetype not defined in the agent rewards config
+- **Fix**: Add the missing reward profile to `config/agents/<agent>/<agent>_rewards_config.json`
 
 **Error**: `CUDA out of memory`
 - **Cause**: Batch size too large for GPU
@@ -936,25 +1031,25 @@ python ai/train.py --config default --device cpu
 ## 📝 QUICK REFERENCE CHEAT SHEET
 
 ```bash
-# Training Commands
-python ai/train.py --config debug           # Fast test (50 episodes)
-python ai/train.py --config default         # Standard training (5000 episodes)
-python ai/train.py --config default --model X  # Continue from checkpoint
-python ai/train.py --config default --step  # With step logging for replay
-python ai/train.py --device cpu             # Force CPU
+# Training commands (replace <agent_key> e.g. Infantry_Troop_RangedTroop)
+python ai/train.py --agent <agent_key> --training-config debug --rewards-config <agent_key> --scenario bot    # Fast test
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot  # Standard training
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append  # Continue from checkpoint
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --step    # With step logging
+python ai/train.py --agent <agent_key> --scenario bot --device cpu   # Force CPU
+
+# Evaluation (no training)
+python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episodes 20
 
 # Monitoring
-tensorboard --logdir=./tensorboard/         # View training metrics
+tensorboard --logdir=./tensorboard/
 
-# Evaluation
-python ai/evaluation.py --model X --opponent tactical --episodes 20
-
-# Key Paths
+# Key paths
 config/agents/<agent>/<agent>_training_config.json  # Training parameters
-rewards_master.json                         # Reward definitions
-./models/                                   # Saved checkpoints
-./tensorboard/                              # TensorBoard logs
-train_step.log                              # Step log for replay viewer
+config/agents/<agent>/<agent>_rewards_config.json   # Reward definitions (per agent)
+ai/models/<agent_key>/model_<agent_key>.zip         # Saved model
+./tensorboard/                                      # TensorBoard logs
+step.log                                            # Step log (with --step) for analyzer & replay viewer
 
 # Success Criteria (5000 episodes)
 vs Random: 90%+
@@ -964,22 +1059,266 @@ vs Tactical: 55%+
 
 ---
 
+## Évolutions prévues : League / curriculum training
+
+> Ce bloc reprend l’ancien **LEAGUE_CURRICULUM_TRAINING_PLAN.md** fusionné ici. Il décrit l’évolution prévue du pipeline (curriculum puis league) ; non implémenté à ce jour.
+
+### Objectif
+
+Mettre en place un pipeline d'entraînement progressif qui:
+
+1. apprend d'abord des fondamentaux contre bots scriptés,
+2. injecte ensuite progressivement des adversaires IA entraînés,
+3. améliore la robustesse sans introduire de workaround ni de logique implicite.
+
+Ce plan vise à réduire les oscillations de performance et à éviter les plateaux observés en fin de run.
+
+---
+
+### Pourquoi changer le pipeline actuel
+
+Constat sur les runs récents:
+
+- l'effondrement brutal a été corrigé,
+- la performance oscille encore fortement,
+- la progression en fin de training devient faible.
+
+Cause probable:
+
+- l'agent apprend dans un environnement trop bruité/non stationnaire (adversaires variés + randomness),
+- sans curriculum explicite contre des adversaires entraînés.
+
+Le passage à un league training progressif permet:
+
+- une montée en difficulté contrôlée,
+- une meilleure généralisation,
+- une robustesse plus stable en évaluation.
+
+---
+
+### Principe retenu (version simple et robuste)
+
+#### Phase 1 - Bots only
+
+- Entraîner uniquement contre bots scriptés.
+- Critère de passage vers phase 2 basé sur la performance robuste en évaluation.
+
+#### Phase 2 - Mix progressif bots/agents
+
+- Début: 80% bots / 20% agents entraînés.
+- Fin: 20% bots / 80% agents entraînés.
+- Progression linéaire des ratios sur la durée de la phase 2.
+
+Ce design ne dépend pas d'un Elo/PFSP au départ (volontairement simple).
+
+---
+
+### Schéma de configuration JSON proposé
+
+À ajouter dans les profils d'entraînement (`default`, `stabilize`) de
+`config/agents/<agent>/<agent>_training_config.json`.
+
+#### Exemple phase 1 (`default`)
+
+```json
+"curriculum": {
+  "enabled": true,
+  "phase_id": 1,
+  "advance_to_phase2": {
+    "metric": "bot_eval/combined",
+    "threshold": 0.75,
+    "worst_bot_metric": "bot_eval/worst_bot_score",
+    "worst_bot_threshold": 0.60,
+    "max_drawdown": 0.08,
+    "min_evals": 5,
+    "require_consecutive": 3
+  }
+}
+```
+
+#### Exemple phase 2 (`stabilize`)
+
+```json
+"curriculum": {
+  "enabled": true,
+  "phase_id": 2,
+  "league_opponent_deterministic": true,
+  "opponent_mix": {
+    "bot_ratio": { "start": 0.80, "end": 0.20 },
+    "trained_agent_ratio": { "start": 0.20, "end": 0.80 }
+  },
+  "trained_opponent_pool": {
+    "strategy": "recent_snapshots",
+    "max_models": 8,
+    "include_best_robust": true,
+    "include_best_model": true,
+    "include_recent_checkpoints": true
+  }
+}
+```
+
+---
+
+### Mise en pratique dans les scripts
+
+#### 1) `ai/train.py`
+
+**À ajouter**
+
+- Lecture stricte de `training_config["curriculum"]`.
+- Validation stricte des champs requis selon `phase_id`.
+- Construction d'un `opponent_selector`:
+  - phase 1: bots uniquement,
+  - phase 2: bots + modèles entraînés selon ratio courant.
+
+**Logique ratio en phase 2**
+
+```python
+progress = episodes_trained / total_episodes_phase2
+bot_ratio = bot_start + (bot_end - bot_start) * progress
+agent_ratio = 1.0 - bot_ratio
+```
+
+**Construction du pool d'adversaires entraînés**
+
+Depuis `ai/models/<agent_key>/`:
+
+- `best_robust_model.zip`,
+- `best_model.zip`,
+- checkpoints récents (`ppo_checkpoint_*`), triés et limités à `max_models`.
+
+Si aucun modèle éligible alors erreur explicite (pas de fallback silencieux).
+
+**Politique de rétention des checkpoints (important)**
+
+Les checkpoints `ppo_checkpoint_*` servent à:
+
+- constituer le pool league d'adversaires entraînés,
+- reprendre un run depuis un point intermédiaire,
+- diagnostiquer une régression tardive (rollback ciblé).
+
+Recommandation:
+
+- ajouter un flag de config explicite (ex: `retain_training_checkpoints`) pour conserver/supprimer les checkpoints en fin de run,
+- ne pas hardcoder la suppression dans le script quand la league est activée.
+
+---
+
+#### 2) `ai/env_wrappers.py`
+
+**Nouveau wrapper recommandé: `LeagueControlledEnv`**
+
+Rôle:
+
+- à chaque `reset()`, tirer un type d'adversaire selon les ratios courants:
+  - bot scripté,
+  - agent entraîné.
+- exécuter ensuite le tour adverse avec l'interface actuelle (`predict(..., action_masks=...)`).
+
+Comportement attendu:
+
+- deterministic piloté par config (`league_opponent_deterministic`) pour les adversaires entraînés,
+- conservation du comportement bots existant.
+
+---
+
+#### 3) `ai/training_callbacks.py`
+
+**Gate de transition phase 1 -> phase 2**
+
+Ajouter un callback de validation de passage:
+
+- lit la métrique cible (`bot_eval/combined`),
+- vérifie `threshold`, `min_evals`, `require_consecutive`,
+- vérifie un second garde-fou: `worst_bot_score >= worst_bot_threshold`,
+- vérifie une borne de régression: `drawdown <= max_drawdown`,
+- stoppe proprement la phase 1 quand le critère est rempli.
+
+Pas de bascule implicite sans conditions validées.
+
+---
+
+#### 4) `ai/bot_evaluation.py`
+
+Le pipeline actuel (normalisation éval via `vec_normalize_eval`) reste valide.
+
+Recommandation:
+
+- conserver un set d'évaluation fixe bots,
+- ajouter ensuite un set d'évaluation league séparé,
+- ne pas réutiliser exactement le même pool pour train et eval finale.
+
+---
+
+### Plan d'intégration recommandé
+
+**Étape 1 - Infra minimale (sans changer les métriques)**
+
+- Ajouter `curriculum` en config.
+- Implémenter validation des clés.
+- Ajouter `LeagueControlledEnv`.
+- Ajouter construction du pool d'adversaires entraînés.
+
+**Étape 2 - Transition contrôlée**
+
+- Activer gate phase 1 -> phase 2.
+- Démarrer la phase 2 avec ratio 80/20 et progression linéaire.
+
+**Étape 3 - Stabilisation et mesure**
+
+- Suivre:
+  - `bot_eval/combined`,
+  - `bot_eval/worst_bot_score`,
+  - `0_critical/b_win_rate_100ep`,
+  - `0_critical/g_approx_kl`,
+  - `0_critical/f_clip_fraction`.
+
+---
+
+### Critères de succès
+
+Le changement est considéré positif si:
+
+1. disparition des régressions fortes en fin de run,
+2. hausse du `worst_bot_score` moyen,
+3. variance réduite sur `combined` à budget d'épisodes comparable,
+4. amélioration de la robustesse inter-runs (moins de dépendance seed).
+
+---
+
+### Risques et mitigations
+
+- **Risque:** surapprentissage à la league locale.
+  - **Mitigation:** conserver 20% bots en fin de phase 2.
+
+- **Risque:** non-stationnarité trop forte.
+  - **Mitigation:** pool borné (`max_models`) + snapshots figés.
+
+- **Risque:** complexité de debug.
+  - **Mitigation:** logs explicites par épisode:
+    - type d'adversaire tiré,
+    - identifiant du modèle adverse,
+    - ratio courant bots/agents.
+
+---
+
+### Décision
+
+Approche recommandée: **implémenter une v1 simple sans Elo/PFSP**, puis ajouter un rating seulement si nécessaire.
+
+Ce plan donne un gain robuste à coût d'implémentation maîtrisé, compatible avec l'architecture actuelle.
+
+---
+
 ## 🎯 SUMMARY
 
-**This guide focuses on WHAT TO CONFIGURE, not how the system works internally.**
+**Ce document est la référence unique pour tout le training et le tuning** : pipeline, configs, monitoring, hyperparamètres, anti-overfitting, dépannage.
 
-**Key Principle**: Train with full game complexity from the start - NO curriculum learning.
+**Principe clé** : entraînement en complexité complète dès le début (pas de curriculum).
 
-**For implementation details:**
-- Observation system → `w40k_core.py`
-- Reward logic → `reward_mapper.py`
-- Training loop → `ai/train.py`
-- Game rules → `AI_TURN.md`, `AI_IMPLEMENTATION.md`
+**Tout ce qui concerne training / tuning** : dans ce document (AI_TRAINING.md). Compléments :
+- **Métriques et tuning (quoi changer, diagnostic)** → [AI_METRICS.md](AI_METRICS.md)
+- **Moteur de jeu** → [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md), `engine/w40k_core.py`
+- **Règles de tour** → [AI_TURN.md](AI_TURN.md)
 
-**For training configuration:**
-- Read this document (AI_TRAINING.md)
-- Modify agent training config and `rewards_master.json`
-- Monitor TensorBoard metrics
-- Adjust hyperparameters based on observed behavior
-
-**Remember**: Training is iterative. Start with debug config, validate quickly, then scale up.
+En pratique : modifier les configs agent (`*_training_config.json`, `*_rewards_config.json`), surveiller TensorBoard, ajuster les hyperparamètres selon les métriques (voir AI_METRICS). Entraînement itératif : commencer en config debug, valider, puis monter en charge.

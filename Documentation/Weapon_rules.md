@@ -1,7 +1,9 @@
 # Weapons System - Complete Documentation
 
-**Last Updated**: 2025-12-15  
-**Status**: Production - Phase 1 Complete, Phase 2 Pending
+**Last Updated**: 2026-02-04  
+**Status**: Production - Rules registry complete, gameplay effects partially implemented
+
+**Dans l’index doc** : [Documentation/README.md](README.md) (section « Systèmes de jeu et référence métier »). Vue d’ensemble du package `engine/weapons/` dans [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md) (section weapons/).
 
 ---
 
@@ -113,7 +115,7 @@ unit = {
 
 Weapon rules add special abilities to weapons (e.g., bonus shots, auto-hits, restrictions).
 
-**Status**: ✅ Phase 1 Complete (infrastructure), Phase 2 Pending (rule effects)
+**Status**: ✅ Registry/validation complete, ⚙️ gameplay effects partially implemented
 
 ### Rule Format
 
@@ -129,20 +131,48 @@ Rules use string format: `"RULE_NAME"` or `"RULE_NAME:X"`
 - `RAPID_FIRE:1` - Parameterized rule (X=1)
 - `ASSAULT` - Non-parameterized rule
 
-### Available Rules
+### Available Rules (current configuration)
 
 Defined in `config/weapon_rules.json`:
 
 | Rule | Parameter | Description |
 |------|-----------|-------------|
-| `RAPID_FIRE` | ✅ X | Make X additional attacks when target within half range |
-| `ASSAULT` | ❌ | No penalty when shooting after advancing/falling back |
-| `HEAVY` | ❌ | Subtract 1 from hit rolls if shooter moved this turn |
-| `MELTA` | ✅ X | Roll 2d6 for damage, pick highest within X hexes |
-| `BLAST` | ❌ | Cannot target units in melee combat |
-| `PISTOL` | ❌ | Can fire even if shooter in melee range |
-| `GRENADE` | ❌ | Only one per unit per phase |
-| `TORRENT` | ❌ | Automatically hits (no hit roll required) |
+| `ANTI_VEHICLE` | ✅ X | Critical wound on wound roll X+ against matching keyword |
+| `ASSAULT` | ❌ | Weapon can shoot after advance |
+| `DEVASTATING_WOUNDS` | ❌ | Critical wound skips save |
+| `EXTRA_ATTACKS` | ❌ | Weapon can be used in addition to other attacks |
+| `HAZARDOUS` | ❌ | Hazardous test after shooting/fighting; on 1 suffer 3 MW |
+| `HEAVY` | ❌ | +1 to hit when bearer remained stationary |
+| `IGNORES_COVER` | ❌ | Target cannot benefit from cover |
+| `LETHAL_HITS` | ❌ | Critical hit automatically wounds |
+| `MELTA` | ✅ X | Increase damage by X within half range |
+| `PISTOL` | ❌ | Can shoot while engaged, with pistol targeting restrictions |
+| `RAPID_FIRE` | ✅ X | Increase attacks by X within half range |
+| `SUSTAINED_HITS` | ✅ X | Critical hit scores X additional hits |
+| `TORRENT` | ❌ | Attacks auto-hit |
+| `TWIN_LINKED` | ❌ | Re-roll wound roll |
+
+### Gameplay Effect Coverage (engine status)
+
+Current implemented effects in gameplay (mainly `engine/phase_handlers/shooting_handlers.py`):
+
+- ✅ `ASSAULT` (shoot-after-advance eligibility)
+- ✅ `PISTOL` (engagement exception + pistol/non-pistol category restrictions)
+- ✅ `HEAVY` (+1 to hit when stationary)
+- ✅ `RAPID_FIRE:X` (bonus shots at half range)
+- ✅ `DEVASTATING_WOUNDS` (critical wound bypasses save)
+- ✅ `HAZARDOUS` (hazardous test and self-damage handling)
+
+Configured but not yet implemented as dedicated gameplay effects:
+
+- `ANTI_VEHICLE:X`
+- `EXTRA_ATTACKS`
+- `IGNORES_COVER`
+- `LETHAL_HITS`
+- `MELTA:X`
+- `SUSTAINED_HITS:X`
+- `TORRENT`
+- `TWIN_LINKED`
 
 ### Rule Validation
 
@@ -184,15 +214,20 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 };
 ```
 
-### Phase 2: Rule Implementation
+### Roadmap: Remaining Rule Implementations
 
-**Not yet implemented** - rule logic will be added in Phase 2.
+Already implemented:
+- `RAPID_FIRE`, `ASSAULT`, `PISTOL`, `HEAVY`, `DEVASTATING_WOUNDS`, `HAZARDOUS`
 
-**Planned integration points**:
-- `RAPID_FIRE` → Modify shot count in `shooting_handlers.py`
-- `MELTA` → Modify damage in attack sequence
-- `BLAST` → Modify target validation
-- `ASSAULT` → Modify eligibility checks
+Remaining planned integration points:
+- `MELTA` → Damage modification within half range
+- `LETHAL_HITS` → Auto-wound on critical hit
+- `SUSTAINED_HITS` → Additional hits on critical hit
+- `TWIN_LINKED` → Wound re-roll handling
+- `IGNORES_COVER` → Save/cover interaction
+- `ANTI_VEHICLE` → Conditional critical wound threshold
+- `EXTRA_ATTACKS` → Additional attack sequence handling
+- `TORRENT` → Auto-hit attack flow
 
 ---
 
@@ -431,13 +466,13 @@ interface Unit {
 **Weapon Display Components**:
 - `UnitCard` - Shows unit with weapons
 - `UnitStatusTable` - Expandable weapon list
-- `WeaponRuleTooltip` - (Phase 2) Rule descriptions
+- `GameLog` rule tags - Hover/click description tooltip for bracketed rule mentions
 
 **UI Requirements**:
 - Show all weapons (expandable list)
 - Highlight selected weapon
 - Display weapon rules as badges
-- Click rule badge → show description tooltip (Phase 2)
+- Rule mentions in combat logs can display description tooltips
 
 ---
 
@@ -553,11 +588,9 @@ print(f'Loaded {len(rules)} rules')
 - Validation (fail-fast)
 - Documentation
 
-### 🔜 Phase 2 Pending
-- Weapon rule effects in gameplay
-- Frontend weapon rule display
-- Rule tooltips
-- Additional rules
+### 🔜 Remaining Work
+- Implement missing configured weapon effects in gameplay
+- Extend dedicated UI/UX for weapon rules outside combat log where needed
 
 ---
 
@@ -566,7 +599,7 @@ print(f'Loaded {len(rules)} rules')
 - `AI_IMPLEMENTATION.md` - Core coding rules
 - `AI_TURN.md` - Game logic rules
 - `CONFIG_FILES.md` - Configuration reference
-- `ARMORY_REFACTOR.md` - Original armory architecture
+- Architecture armurerie : voir section Armory Files et Backend Implementation dans ce document
 
 ---
 

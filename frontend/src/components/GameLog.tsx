@@ -2,10 +2,14 @@
 // frontend/src/components/GameLog.tsx
 import React from "react";
 import { createPortal } from "react-dom";
-import type { BaseLogEntry, ShootDetail } from "../../../shared/gameLogStructure.ts";
-import { getEventIcon, getEventTypeClass } from "../../../shared/gameLogStructure.ts";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import weaponRulesConfig from "../../../config/weapon_rules.json";
+import {
+  type BaseLogEntry,
+  getEventIcon,
+  getEventTypeClass,
+  type ShootDetail,
+} from "../../../shared/gameLogStructure.ts";
 
 const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
 
@@ -42,7 +46,8 @@ const setRuleDescription = (
 
 const resolveRuleDescription = (
   tokenLabel: string,
-  ruleDescriptionByLookup: Map<string, string>
+  ruleDescriptionByLookup: Map<string, string>,
+  ruleHintByLabel?: Record<string, string>
 ): string | undefined => {
   const direct = ruleDescriptionByLookup.get(normalizeRuleLookupKey(tokenLabel));
   if (direct) {
@@ -50,7 +55,20 @@ const resolveRuleDescription = (
   }
   const parameterizedMatch = tokenLabel.match(/^(.+?)(?:\s*[: ]\s*\d+\+?)$/);
   if (parameterizedMatch) {
-    return ruleDescriptionByLookup.get(normalizeRuleLookupKey(parameterizedMatch[1]));
+    const parameterizedDescription = ruleDescriptionByLookup.get(
+      normalizeRuleLookupKey(parameterizedMatch[1])
+    );
+    if (parameterizedDescription) {
+      return parameterizedDescription;
+    }
+  }
+  if (ruleHintByLabel) {
+    for (const [hintLabel, hintedRuleId] of Object.entries(ruleHintByLabel)) {
+      if (normalizeRuleLookupKey(hintLabel) !== normalizeRuleLookupKey(tokenLabel)) {
+        continue;
+      }
+      return ruleDescriptionByLookup.get(normalizeRuleLookupKey(hintedRuleId));
+    }
   }
   return undefined;
 };
@@ -148,6 +166,7 @@ export interface GameLogEvent extends BaseLogEntry {
   actionName?: string;
   is_ai_action?: boolean;
   reward?: number;
+  ruleHintByLabel?: Record<string, string>;
 }
 interface GameLogProps {
   events: GameLogEvent[];
@@ -216,7 +235,7 @@ export const GameLog: React.FC<GameLogProps> = ({
   }, []);
 
   const renderMessageWithRuleDescriptions = React.useCallback(
-    (message: string): React.ReactNode => {
+    (message: string, ruleHintByLabel?: Record<string, string>): React.ReactNode => {
       const nodes: React.ReactNode[] = [];
       let lastIndex = 0;
       let match: RegExpExecArray | null;
@@ -231,7 +250,7 @@ export const GameLog: React.FC<GameLogProps> = ({
         if (match.index > lastIndex) {
           nodes.push(message.slice(lastIndex, match.index));
         }
-        const description = resolveRuleDescription(tokenLabel, ruleDescriptionByLookup);
+        const description = resolveRuleDescription(tokenLabel, ruleDescriptionByLookup, ruleHintByLabel);
         if (description) {
           nodes.push(
             <RuleReferenceTag
@@ -373,7 +392,7 @@ export const GameLog: React.FC<GameLogProps> = ({
                       </span>
                     )}
                     <span className="game-log-entry__message">
-                      {renderMessageWithRuleDescriptions(event.message)}
+                      {renderMessageWithRuleDescriptions(event.message, event.ruleHintByLabel)}
                     </span>
                     {outcomeLabel && outcomeClass && (
                       <span

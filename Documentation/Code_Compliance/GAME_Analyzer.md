@@ -139,8 +139,9 @@ En fin de rapport, un résumé affiche :
 ## Intégration au workflow
 
 **Documentation :**
-- [fix_game_rules_violations.md](fix_game_rules_violations.md) : workflow de validation des règles
-- [AI_TURN.md](AI_TURN.md) : règles du jeu
+- [Fix_violations_guideline.md](Fix_violations_guideline.md) : guideline / prompt pour automatiser les correctifs
+- [Hidden_action_finder.md](Hidden_action_finder.md) : détection des actions non loguées (step.log vs debug.log)
+- [../AI_TURN.md](../AI_TURN.md) : règles du jeu
 
 **Fichiers de config :**
 - `config/unit_rules.json` : règles d'unités

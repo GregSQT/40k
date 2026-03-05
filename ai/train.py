@@ -2762,7 +2762,7 @@ def start_multi_agent_orchestration(config, total_episodes: int, training_config
 
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
-    parser = argparse.ArgumentParser(description="Train W40K AI following AI_GAME_OVERVIEW.md specifications")
+    parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
     parser.add_argument("--training-config", required=True,
                        help="Training configuration to use from config/training_config.json")
     parser.add_argument("--rewards-config", required=True,
@@ -2830,7 +2830,7 @@ def main():
         config.load_agent_training_config = _load_with_overrides
         print(f"⚙️  Param overrides: {len(args.param)} parameter(s) will override config file")
 
-    print("🎮 W40K AI Training - Following AI_GAME_OVERVIEW.md specifications")
+    print("🎮 W40K AI Training (AI_TURN.md / AI_IMPLEMENTATION.md)")
     print("=" * 70)
     print(f"Training config: {args.training_config}")
     print(f"Rewards config: {args.rewards_config}")

@@ -82,12 +82,9 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
 
             # Parse MOVE actions
             move_match = re.search(
-                r'\[([^\]]+)\] (T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|WAIT)',
+                r'\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) (MOVED|FLED|WAIT|REACTIVE MOVED)',
                 line
             )
-            # Debug: log lines that contain MOVE but don't match
-            if "MOVE" in line and not move_match:
-                print(f"DEBUG: MOVE line didn't match regex: {line[:100]}")
             if move_match:
                 timestamp = move_match.group(1)
                 turn = move_match.group(2)
@@ -97,7 +94,7 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
                 end_row = int(move_match.group(6))
                 action_type = move_match.group(7)
 
-                if action_type == "MOVED":
+                if action_type in ("MOVED", "FLED", "REACTIVE MOVED"):
                     # Extract from position
                     from_match = re.search(r'from \((\d+),(\d+)\)', line)
                     if from_match:
@@ -113,8 +110,11 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
                             from_col = end_col
                             from_row = end_row
 
+                    parsed_move_type = "flee" if action_type == "FLED" else "move"
+                    if action_type == "REACTIVE MOVED":
+                        parsed_move_type = "reactive_move"
                     current_episode['actions'].append({
-                        'type': 'move',
+                        'type': parsed_move_type,
                         'timestamp': timestamp,
                         'turn': turn,
                         'player': player,
@@ -122,12 +122,6 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
                         'from': {'col': from_col, 'row': from_row},
                         'to': {'col': end_col, 'row': end_row}
                     })
-                    # Debug: only log first 5 and last 5 moves per episode, with episode/turn info
-                    episode_num = current_episode.get('episode_num', '?')
-                    move_count = len([a for a in current_episode['actions'] if a['type'] == 'move'])
-                    if move_count <= 5 or move_count > len([a for a in current_episode['actions'] if a['type'] == 'move']) - 5:
-                        print(f"DEBUG: E{episode_num} {turn} P{player} - Unit {unit_id}: from ({from_col},{from_row}) to ({end_col},{end_row})")
-
                     # Update unit position (create entry if doesn't exist)
                     if unit_id not in current_episode['units']:
                         current_episode['units'][unit_id] = {
@@ -228,15 +222,6 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
     # Add last episode
     if current_episode and current_episode['actions']:
         episodes.append(current_episode)
-
-    # Debug: count move actions per episode
-    total_moves = 0
-    for ep in episodes:
-        ep_moves = len([a for a in ep['actions'] if a['type'] == 'move'])
-        total_moves += ep_moves
-        if ep_moves > 0:
-            print(f"DEBUG: Episode {ep['episode_num']}: {ep_moves} move actions")
-    print(f"DEBUG: Total move actions across all episodes: {total_moves}")
 
     return episodes
 

@@ -24,7 +24,7 @@ This document describes all configuration files used in the W40K game engine.
 
 **Status**: ✅ Implemented (Phase 1)
 
-**Design**: See [WEAPON_RULES_DESIGN.md](WEAPON_RULES_DESIGN.md) for complete design specification.
+**Design**: Structure documentée dans la section Weapon Rules ci-dessus ; pas de document WEAPON_RULES_DESIGN.md séparé actuellement.
 
 ### Structure
 
@@ -206,7 +206,7 @@ See training config files for complete field list.
 
 **Purpose**: Define all weapons for a faction (SINGLE SOURCE OF TRUTH).
 
-**Status**: See [ARMORY_REFACTOR.md](../ARMORY_REFACTOR.md) for complete documentation.
+**Status**: Voir [Weapon_rules.md](Weapon_rules.md) pour l’architecture armurerie et le parsing.
 
 ### Example
 
@@ -225,7 +225,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 };
 ```
 
-**Python Integration**: Parsed by `engine/armory_parser.py` at runtime.
+**Python Integration**: Parsed by `engine/weapons/parser.py` (ArmoryParser) at runtime.
 
 ---
 
@@ -234,7 +234,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 When adding new configuration files:
 
 1. ✅ Document structure in this file
-2. ✅ Use `require_key()` and `require_present()` from `shared/data_validation.py`
+2. ✅ Use `require_key()` and `require_present()` from `shared/data_validation.py` (module de validation stricte)
 3. ✅ Validate on load (fail-fast)
 4. ✅ No silent defaults - raise errors for missing required fields
 5. ✅ Run `python scripts/check_ai_rules.py` after implementation
@@ -244,6 +244,6 @@ When adding new configuration files:
 ## Related Documentation
 
 - [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md) - Core coding rules
-- [WEAPON_RULES_DESIGN.md](WEAPON_RULES_DESIGN.md) - Weapon rules system design
-- [ARMORY_REFACTOR.md](../ARMORY_REFACTOR.md) - Armory system architecture
+- [Weapon_rules.md](Weapon_rules.md) - Weapon system and armory architecture
+- [Code_Compliance/AI_RULES_checker.md](Code_Compliance/AI_RULES_checker.md) - Script check_ai_rules.py (conformité AI_TURN / coding_practices)
 

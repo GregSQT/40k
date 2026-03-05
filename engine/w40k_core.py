@@ -1025,17 +1025,19 @@ class W40KEngine(gym.Env):
             if unit_id is None:
                 raise ValueError(f"result missing 'unitId' field for replay logger. result keys: {list(result.keys())}")
 
-            valid_action_types = ["move", "shoot", "charge", "charge_fail", "combat", "wait"]
+            valid_action_types = ["move", "flee", "shoot", "charge", "charge_fail", "combat", "wait"]
             if action_type in valid_action_types and unit_id and unit_id != "none" and unit_id != "SYSTEM":
                 updated_unit = self._get_unit_by_id(str(unit_id)) if unit_id else None
                 if updated_unit:
                     current_turn = self.game_state.get("current_turn", 1)
                     step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
 
-                    if action_type == "move":
+                    if action_type == "move" or action_type == "flee":
                         # CRITICAL: No defaults - require explicit coordinates
                         if str(unit_id) not in pre_action_positions:
-                            raise ValueError(f"Replay logger move missing start position in pre_action_positions: unit_id={unit_id}")
+                            raise ValueError(
+                                f"Replay logger {action_type} missing start position in pre_action_positions: unit_id={unit_id}"
+                            )
                         start_pos = pre_action_positions[str(unit_id)]
                         # Use result destination
                         if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
@@ -1043,7 +1045,7 @@ class W40KEngine(gym.Env):
                             dest_row = result.get("toRow")
                         else:
                             raise ValueError(
-                                f"Replay logger move missing destination in result: unit_id={unit_id}, result keys={list(result.keys())}"
+                                f"Replay logger {action_type} missing destination in result: unit_id={unit_id}, result keys={list(result.keys())}"
                             )
                         self.replay_logger.log_move(
                             updated_unit,
@@ -1926,6 +1928,13 @@ class W40KEngine(gym.Env):
         pre_action_player = self.game_state["current_player"]
         pre_action_turn = self.game_state.get("turn", 1)
         pre_action_episode = self.game_state.get("episode_number", 1)  # CRITICAL: Capture episode BEFORE action execution
+        pre_action_logs_len = 0
+        action_logs_for_cursor = require_key(self.game_state, "action_logs")
+        if not isinstance(action_logs_for_cursor, list):
+            raise TypeError(
+                f"game_state['action_logs'] must be a list before action execution, got {type(action_logs_for_cursor).__name__}"
+            )
+        pre_action_logs_len = len(action_logs_for_cursor)
         pre_action_positions = {}
         # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
         if "unitId" not in action:
@@ -2054,6 +2063,159 @@ class W40KEngine(gym.Env):
                 elif action_type == "fight":
                     # "fight" is not a valid action_type - handlers must return "combat" or "wait"
                     raise ValueError(f"Invalid action_type 'fight' in result. Handlers must set proper action ('combat' or 'wait'). result keys: {list(result.keys())}")
+
+                # Flush critical handler-side action logs immediately, independently of result.action routing.
+                # This guarantees CHARGE/REACTIVE events are persisted even if action routing is skipped/invalid.
+                action_logs_early = require_key(self.game_state, "action_logs")
+                if not isinstance(action_logs_early, list):
+                    raise TypeError(
+                        f"game_state['action_logs'] must be a list, got {type(action_logs_early).__name__}"
+                    )
+                if pre_action_logs_len < 0:
+                    raise ValueError(f"pre_action_logs_len must be >= 0, got {pre_action_logs_len}")
+                if pre_action_logs_len > len(action_logs_early):
+                    raise ValueError(
+                        f"pre_action_logs_len ({pre_action_logs_len}) cannot exceed current action_logs length ({len(action_logs_early)})"
+                    )
+
+                for raw_log in action_logs_early[pre_action_logs_len:]:
+                    if not isinstance(raw_log, dict):
+                        raise TypeError(
+                            f"action_logs entry must be a dict, got {type(raw_log).__name__}"
+                        )
+                    raw_type = raw_log.get("type")
+                    if raw_type == "reactive_move":
+                        reactive_unit_id = require_key(raw_log, "unitId")
+                        reactive_player = require_key(raw_log, "player")
+                        from_col = require_key(raw_log, "fromCol")
+                        from_row = require_key(raw_log, "fromRow")
+                        to_col = require_key(raw_log, "toCol")
+                        to_row = require_key(raw_log, "toRow")
+                        trigger_unit_id = require_key(raw_log, "triggered_by_unit_id")
+                        event_to_col = require_key(raw_log, "event_toCol")
+                        event_to_row = require_key(raw_log, "event_toRow")
+                        range_roll = require_key(raw_log, "range_roll")
+                        if not isinstance(range_roll, int) or isinstance(range_roll, bool):
+                            raise TypeError(
+                                f"reactive_move range_roll must be int, got {type(range_roll).__name__}: {range_roll!r}"
+                            )
+                        reactive_details = {
+                            "current_turn": pre_action_turn,
+                            "current_episode": pre_action_episode,
+                            "unit_with_coords": f"{reactive_unit_id}({to_col},{to_row})",
+                            "start_pos": (from_col, from_row),
+                            "end_pos": (to_col, to_row),
+                            "col": to_col,
+                            "row": to_row,
+                            "triggered_by_unit_id": trigger_unit_id,
+                            "trigger_to_pos": (event_to_col, event_to_row),
+                            "range_roll": range_roll,
+                            "ability_display_name": require_key(raw_log, "ability_display_name"),
+                            "reward": 0.0,
+                        }
+                        self.step_logger.log_action(
+                            unit_id=reactive_unit_id,
+                            action_type="reactive_move",
+                            phase="move",
+                            player=reactive_player,
+                            success=True,
+                            step_increment=False,
+                            action_details=reactive_details,
+                            step_calls_since_last=None,
+                        )
+                    elif raw_type == "charge_impact":
+                        impact_unit_id = require_key(raw_log, "unitId")
+                        impact_player = require_key(raw_log, "player")
+                        impact_details = {
+                            "current_turn": pre_action_turn,
+                            "current_episode": pre_action_episode,
+                            "target_id": require_key(raw_log, "targetId"),
+                            "impact_roll": require_key(raw_log, "impact_roll"),
+                            "impact_threshold": require_key(raw_log, "impact_threshold"),
+                            "mortal_wounds": require_key(raw_log, "mortal_wounds"),
+                            "ability_display_name": require_key(raw_log, "ability_display_name"),
+                            "reward": require_key(raw_log, "reward"),
+                        }
+                        self.step_logger.log_action(
+                            unit_id=impact_unit_id,
+                            action_type="charge_impact",
+                            phase="charge",
+                            player=impact_player,
+                            success=True,
+                            step_increment=False,
+                            action_details=impact_details,
+                            step_calls_since_last=None,
+                        )
+                    elif raw_type == "charge":
+                        charge_unit_id = require_key(raw_log, "unitId")
+                        charge_player = require_key(raw_log, "player")
+                        charge_to_col = require_key(raw_log, "toCol")
+                        charge_to_row = require_key(raw_log, "toRow")
+                        charge_from_col = require_key(raw_log, "fromCol")
+                        charge_from_row = require_key(raw_log, "fromRow")
+                        charge_target_id = raw_log.get("targetId")
+                        charge_details = {
+                            "current_turn": pre_action_turn,
+                            "current_episode": pre_action_episode,
+                            "target_id": charge_target_id,
+                            "start_pos": (charge_from_col, charge_from_row),
+                            "end_pos": (charge_to_col, charge_to_row),
+                            "charge_roll": raw_log.get("charge_roll"),
+                            "ability_display_name": raw_log.get("ability_display_name"),
+                            "unit_with_coords": f"{charge_unit_id}({charge_to_col},{charge_to_row})",
+                            "reward": require_key(raw_log, "reward"),
+                        }
+                        if charge_target_id is not None:
+                            target_unit = self._get_unit_by_id(str(charge_target_id))
+                            if target_unit is not None:
+                                charge_details["target_coords"] = require_unit_position(target_unit, self.game_state)
+                                charge_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+                        self.step_logger.log_action(
+                            unit_id=charge_unit_id,
+                            action_type="charge",
+                            phase="charge",
+                            player=charge_player,
+                            success=True,
+                            step_increment=True,
+                            action_details=charge_details,
+                            step_calls_since_last=self._step_calls_since_increment,
+                        )
+                        self._step_calls_since_increment = 0
+                    elif raw_type == "charge_fail":
+                        charge_fail_unit_id = require_key(raw_log, "unitId")
+                        charge_fail_player = require_key(raw_log, "player")
+                        charge_fail_target_id = raw_log.get("targetId")
+                        charge_fail_col, charge_fail_row = require_unit_position(charge_fail_unit_id, self.game_state)
+                        charge_fail_details = {
+                            "current_turn": pre_action_turn,
+                            "current_episode": pre_action_episode,
+                            "target_id": charge_fail_target_id,
+                            "charge_roll": raw_log.get("charge_roll"),
+                            "charge_failed_reason": raw_log.get("charge_failed_reason"),
+                            "start_pos": (charge_fail_col, charge_fail_row),
+                            "end_pos": (charge_fail_col, charge_fail_row),
+                            "unit_with_coords": f"{charge_fail_unit_id}({charge_fail_col},{charge_fail_row})",
+                            "reward": 0.0,
+                        }
+                        if charge_fail_target_id is not None:
+                            target_unit = self._get_unit_by_id(str(charge_fail_target_id))
+                            if target_unit is not None:
+                                charge_fail_details["target_coords"] = require_unit_position(target_unit, self.game_state)
+                                charge_fail_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+                        self.step_logger.log_action(
+                            unit_id=charge_fail_unit_id,
+                            action_type="charge_fail",
+                            phase="charge",
+                            player=charge_fail_player,
+                            success=False,
+                            step_increment=True,
+                            action_details=charge_fail_details,
+                            step_calls_since_last=self._step_calls_since_increment,
+                        )
+                        self._step_calls_since_increment = 0
+
+                # Mark early action_logs as consumed to prevent duplicate flush below.
+                pre_action_logs_len = len(action_logs_early)
                 
                 # Skip logging for system actions and intermediate actions
                 skip_logging_action_types = [
@@ -2269,119 +2431,9 @@ class W40KEngine(gym.Env):
                         # shoot actions now use all_attack_results (like combat) - handled in specialized block above
                         # charge and combat have specialized logging with early return
                         action_logged = False
-                        if action_type == "charge":
-                            # Add charge-specific data with position info for step logger
-                            # CRITICAL: No defaults - require explicit coordinates
-                            if str(unit_id) not in pre_action_positions:
-                                raise ValueError(f"Charge action missing start position in pre_action_positions: unit_id={unit_id}")
-                            start_pos = pre_action_positions[str(unit_id)]
-                            # Get destination from result (populated by charge handler)
-                            if isinstance(result, dict) and result.get("toCol") is not None and result.get("toRow") is not None:
-                                dest_col = result.get("toCol")
-                                dest_row = result.get("toRow")
-                            else:
-                                raise ValueError(
-                                    f"Charge action missing destination in result: unit_id={unit_id}, result keys={list(result.keys()) if isinstance(result, dict) else []}"
-                                )
-                            end_pos = (dest_col, dest_row)
-                            target_id_from_result = result.get("targetId")
-                            action_details.update({
-                                "target_id": target_id_from_result,
-                                "start_pos": start_pos,
-                                "end_pos": end_pos,
-                                "charge_roll": result.get("charge_roll"),  # Add the actual 2d6 roll
-                                "ability_display_name": result.get("ability_display_name"),
-                                "unit_with_coords": f"{unit_id}({dest_col},{dest_row})"  # CRITICAL FIX: Update with correct destination coordinates
-                            })
-
-                            # Add reward and log for charge action
-                            step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
-                            action_details["reward"] = step_reward
-                            
-                            # CRITICAL FIX: Get target coordinates from game_state
-                            # Target position should not change during charge execution
-                            # Capture coordinates immediately after getting targetId from result
-                            target_id = action_details.get("target_id")
-                            if target_id:
-                                target_unit = self._get_unit_by_id(str(target_id))
-                                if target_unit:
-                                    # Capture target coordinates - these should be stable (targets don't move during opponent's turn)
-                                    action_details["target_coords"] = require_unit_position(target_unit, self.game_state)
-                                    action_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
-
-                            # Déterminer step_increment selon le type d'action et success
-                            # Pour les actions qui incrémentent episode_steps (ligne 642), step_increment = success
-                            step_increment = success
-                            step_calls = self._step_calls_since_increment if step_increment else None
-                            self.step_logger.log_action(
-                                unit_id=updated_unit["id"],
-                                action_type=action_type,
-                                phase=pre_action_phase,
-                                player=require_key(updated_unit, "player"),
-                                success=success,
-                                step_increment=step_increment,
-                                action_details=action_details,
-                                step_calls_since_last=step_calls
-                            )
-                            if step_increment:
-                                self._step_calls_since_increment = 0
-                            action_logged = True
-
-                        elif action_type == "charge_fail":
-                            # Add charge_fail-specific data for step logger
-                            # CRITICAL: No defaults - require explicit coordinates
-                            if str(unit_id) not in pre_action_positions:
-                                raise ValueError(f"Charge_fail missing start position in pre_action_positions: unit_id={unit_id}")
-                            start_pos = pre_action_positions[str(unit_id)]
-                            # For failed charges, end_pos is the intended destination (from result)
-                            end_pos = result.get("end_pos")
-                            if end_pos is None:
-                                # Unit didn't move, so end_pos should equal start_pos, but we require explicit value
-                                raise ValueError(
-                                    f"Charge_fail missing end_pos: result.end_pos={result.get('end_pos')}, unit_id={unit_id}"
-                                )
-                            
-                            # CRITICAL: No default values - require explicit charge_failed_reason
-                            charge_failed_reason = result.get("charge_failed_reason")
-                            if charge_failed_reason is None:
-                                raise ValueError(f"Charge_fail missing charge_failed_reason: unit_id={unit_id}, result keys={list(result.keys())}")
-                            
-                            action_details.update({
-                                "target_id": result.get("targetId"),
-                                "charge_roll": result.get("charge_roll"),
-                                "charge_failed_reason": charge_failed_reason,
-                                "start_pos": start_pos,  # Position actuelle (from) - unit didn't move
-                                "end_pos": end_pos,  # Destination prévue (to)
-                                "unit_with_coords": f"{unit_id}({start_pos[0]},{start_pos[1]})"  # CRITICAL FIX: Unit didn't move, use start_pos
-                            })
-                            target_id = action_details.get("target_id")
-                            if target_id:
-                                target_unit = self._get_unit_by_id(str(target_id))
-                                if target_unit:
-                                    action_details["target_coords"] = require_unit_position(target_unit, self.game_state)
-                                    action_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
-
-                            # Add reward and log for failed charge action
-                            step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
-                            action_details["reward"] = step_reward
-
-                            # Déterminer step_increment selon le type d'action et success
-                            # Pour charge_fail, step_increment = success (False car action échouée)
-                            # Mais selon AI_TURN.md, les actions échouées n'incrémentent pas episode_steps (ligne 642)
-                            step_increment = success
-                            step_calls = self._step_calls_since_increment if step_increment else None
-                            self.step_logger.log_action(
-                                unit_id=updated_unit["id"],
-                                action_type=action_type,
-                                phase=pre_action_phase,
-                                player=require_key(updated_unit, "player"),
-                                success=success,
-                                step_increment=step_increment,
-                                action_details=action_details,
-                                step_calls_since_last=step_calls
-                            )
-                            if step_increment:
-                                self._step_calls_since_increment = 0
+                        if action_type in ["charge", "charge_fail"]:
+                            # Charge events are logged from action_logs flush below.
+                            # Single path avoids divergence between direct logging and handler-side logs.
                             action_logged = True
 
                         # If handler returned attack results, ensure we log them even if action_type was mutated
@@ -2444,7 +2496,8 @@ class W40KEngine(gym.Env):
                                         add_console_log(self.game_state, warning_msg)
                                         safe_print(self.game_state, warning_msg)
                                     
-                                    # Get actual shooter unit for coordinates
+                                    # Get actual shooter unit for coordinates.
+                                    # Shooter may be absent from units_cache after HAZARDOUS self-destruction.
                                     actual_shooter_unit = self._get_unit_by_id(str(actual_shooter_id)) if actual_shooter_id else updated_unit
                                     target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
                                     target_coords = None
@@ -2452,21 +2505,36 @@ class W40KEngine(gym.Env):
                                         target_coords = require_key(attack_result, "target_coords")
                                     elif action_type == "shoot":
                                         target_coords = require_key(attack_result, "target_coords")
-                                    
-                                    # CRITICAL FIX: Use CURRENT position from game_state for combat actions
-                                    # Units do NOT move during FIGHT phase, so use current position from game_state
-                                    # This ensures accurate position logging after movements in previous phases
-                                    if not actual_shooter_unit:
-                                        raise ValueError(
-                                            f"Attack logging missing shooter unit: shooterId={actual_shooter_id}, unit_id={unit_id}"
-                                        )
-                                    # Use current position from game_state (source of truth)
-                                    unit_col, unit_row = require_unit_position(actual_shooter_unit, self.game_state)
+                                    if actual_shooter_unit is not None:
+                                        # Use units_cache position when shooter is alive; if shooter died (e.g. HAZARDOUS),
+                                        # fall back to attack-time coordinates captured by shooting handler.
+                                        try:
+                                            unit_col, unit_row = require_unit_position(actual_shooter_unit, self.game_state)
+                                            shooter_player_for_log = require_key(actual_shooter_unit, "player")
+                                            shooter_display_name_for_log = actual_shooter_unit.get("DISPLAY_NAME")
+                                        except ValueError:
+                                            shooter_coords = require_key(attack_result, "shooter_coords")
+                                            if not isinstance(shooter_coords, tuple) or len(shooter_coords) != 2:
+                                                raise ValueError(
+                                                    f"attack_result.shooter_coords must be tuple(col,row), got {shooter_coords!r}"
+                                                )
+                                            unit_col, unit_row = shooter_coords
+                                            shooter_player_for_log = require_key(attack_result, "shooter_player")
+                                            shooter_display_name_for_log = attack_result.get("shooter_display_name")
+                                    else:
+                                        shooter_coords = require_key(attack_result, "shooter_coords")
+                                        if not isinstance(shooter_coords, tuple) or len(shooter_coords) != 2:
+                                            raise ValueError(
+                                                f"attack_result.shooter_coords must be tuple(col,row), got {shooter_coords!r}"
+                                            )
+                                        unit_col, unit_row = shooter_coords
+                                        shooter_player_for_log = require_key(attack_result, "shooter_player")
+                                        shooter_display_name_for_log = attack_result.get("shooter_display_name")
                                     
                                     attack_details = {
                                         "current_turn": pre_action_turn,
                                         "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
-                                        "unit_display_name": actual_shooter_unit.get("DISPLAY_NAME"),
+                                        "unit_display_name": shooter_display_name_for_log,
                                         "unit_with_coords": f"{actual_shooter_id}({unit_col},{unit_row})",
                                         "action": action,
                                         "target_id": target_id,
@@ -2531,7 +2599,7 @@ class W40KEngine(gym.Env):
                                         unit_id=actual_shooter_id,  # CRITICAL: Use actual shooter ID from attack_result
                                         action_type=action_type,
                                         phase=pre_action_phase,
-                                        player=require_key(actual_shooter_unit, "player"),
+                                        player=shooter_player_for_log,
                                         success=success,
                                         step_increment=step_increment,
                                         action_details=attack_details,
@@ -2549,7 +2617,7 @@ class W40KEngine(gym.Env):
                                             unit_id=actual_shooter_id,
                                             action_type="hazardous",
                                             phase=pre_action_phase,
-                                            player=require_key(actual_shooter_unit, "player"),
+                                            player=shooter_player_for_log,
                                             success=True,
                                             step_increment=False,
                                             action_details=hazardous_details,
@@ -2626,23 +2694,20 @@ class W40KEngine(gym.Env):
                             if step_increment:
                                 self._step_calls_since_increment = 0
 
-                        # Flush side-effect reactive movement logs into step.log exactly once.
+                        # Flush handler-side action_logs into step.log exactly once.
                         action_logs = require_key(self.game_state, "action_logs")
                         if not isinstance(action_logs, list):
                             raise TypeError(
                                 f"game_state['action_logs'] must be a list, got {type(action_logs).__name__}"
                             )
-                        cursor_key = "_step_logger_action_logs_cursor"
-                        if cursor_key not in self.game_state:
-                            self.game_state[cursor_key] = 0
-                        action_logs_cursor = require_key(self.game_state, cursor_key)
-                        if not isinstance(action_logs_cursor, int) or action_logs_cursor < 0:
-                            raise TypeError(
-                                f"game_state['{cursor_key}'] must be a non-negative int, "
-                                f"got {action_logs_cursor!r}"
+                        if pre_action_logs_len < 0:
+                            raise ValueError(f"pre_action_logs_len must be >= 0, got {pre_action_logs_len}")
+                        if pre_action_logs_len > len(action_logs):
+                            raise ValueError(
+                                f"pre_action_logs_len ({pre_action_logs_len}) cannot exceed current action_logs length ({len(action_logs)})"
                             )
 
-                        for raw_log in action_logs[action_logs_cursor:]:
+                        for raw_log in action_logs[pre_action_logs_len:]:
                             if not isinstance(raw_log, dict):
                                 raise TypeError(
                                     f"action_logs entry must be a dict, got {type(raw_log).__name__}"
@@ -2712,8 +2777,78 @@ class W40KEngine(gym.Env):
                                     action_details=impact_details,
                                     step_calls_since_last=None,
                                 )
+                            elif raw_type == "charge":
+                                charge_unit_id = require_key(raw_log, "unitId")
+                                charge_player = require_key(raw_log, "player")
 
-                        self.game_state[cursor_key] = len(action_logs)
+                                charge_to_col = require_key(raw_log, "toCol")
+                                charge_to_row = require_key(raw_log, "toRow")
+                                charge_from_col = require_key(raw_log, "fromCol")
+                                charge_from_row = require_key(raw_log, "fromRow")
+                                charge_target_id = raw_log.get("targetId")
+                                charge_details = {
+                                    "current_turn": pre_action_turn,
+                                    "current_episode": pre_action_episode,
+                                    "target_id": charge_target_id,
+                                    "start_pos": (charge_from_col, charge_from_row),
+                                    "end_pos": (charge_to_col, charge_to_row),
+                                    "charge_roll": raw_log.get("charge_roll"),
+                                    "ability_display_name": raw_log.get("ability_display_name"),
+                                    "unit_with_coords": f"{charge_unit_id}({charge_to_col},{charge_to_row})",
+                                    "reward": require_key(raw_log, "reward"),
+                                }
+                                if charge_target_id is not None:
+                                    target_unit = self._get_unit_by_id(str(charge_target_id))
+                                    if target_unit is not None:
+                                        charge_details["target_coords"] = require_unit_position(target_unit, self.game_state)
+                                        charge_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+
+                                self.step_logger.log_action(
+                                    unit_id=charge_unit_id,
+                                    action_type="charge",
+                                    phase="charge",
+                                    player=charge_player,
+                                    success=True,
+                                    step_increment=True,
+                                    action_details=charge_details,
+                                    step_calls_since_last=self._step_calls_since_increment,
+                                )
+                                self._step_calls_since_increment = 0
+                            elif raw_type == "charge_fail":
+                                charge_fail_unit_id = require_key(raw_log, "unitId")
+                                charge_fail_player = require_key(raw_log, "player")
+
+                                charge_fail_target_id = raw_log.get("targetId")
+                                charge_fail_col, charge_fail_row = require_unit_position(charge_fail_unit_id, self.game_state)
+                                charge_fail_details = {
+                                    "current_turn": pre_action_turn,
+                                    "current_episode": pre_action_episode,
+                                    "target_id": charge_fail_target_id,
+                                    "charge_roll": raw_log.get("charge_roll"),
+                                    "charge_failed_reason": raw_log.get("charge_failed_reason"),
+                                    "start_pos": (charge_fail_col, charge_fail_row),
+                                    "end_pos": (charge_fail_col, charge_fail_row),
+                                    "unit_with_coords": f"{charge_fail_unit_id}({charge_fail_col},{charge_fail_row})",
+                                    "reward": 0.0,
+                                }
+                                if charge_fail_target_id is not None:
+                                    target_unit = self._get_unit_by_id(str(charge_fail_target_id))
+                                    if target_unit is not None:
+                                        charge_fail_details["target_coords"] = require_unit_position(target_unit, self.game_state)
+                                        charge_fail_details["target_display_name"] = target_unit.get("DISPLAY_NAME")
+
+                                self.step_logger.log_action(
+                                    unit_id=charge_fail_unit_id,
+                                    action_type="charge_fail",
+                                    phase="charge",
+                                    player=charge_fail_player,
+                                    success=False,
+                                    step_increment=True,
+                                    action_details=charge_fail_details,
+                                    step_calls_since_last=self._step_calls_since_increment,
+                                )
+                                self._step_calls_since_increment = 0
+
             except Exception as e:
                 # CRITICAL: Logging errors must NOT interrupt action execution
                 # Log the error but continue with action processing

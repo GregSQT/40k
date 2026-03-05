@@ -30,6 +30,7 @@
     "GenestealerPrime": "tyranid/units/GenestealerPrime",
     "Hormagaunt": "tyranid/units/Hormagaunt",
     "Termagant": "tyranid/units/Termagant",
+    "TyranidWarriorMelee": "tyranid/units/TyranidWarriorMelee",
     "TyranidWarriorRanged": "tyranid/units/TyranidWarriorRanged"
   }
 }

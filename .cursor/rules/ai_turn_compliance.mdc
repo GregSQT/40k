@@ -296,7 +296,7 @@ Avant de valider un changement, vérifier :
 
 - **AI_TURN.md** : Règles complètes de tour, phases, séquences
 - **AI_IMPLEMENTATION.md** : Architecture et patterns d'implémentation
-- **Validation** : `shared/validation.py` pour require_key, require_present
+- **Validation** : `shared/data_validation.py` pour require_key, require_present
 - **Script de vérification** : `scripts/check_ai_rules.py` pour détection automatique
 
 ## 📚 RÈGLES SPÉCIALISÉES PAR DOMAINE

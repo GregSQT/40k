@@ -22,7 +22,9 @@
 * Vérification occupation hex
 * Simulation de milliers de tours pour détecter erreurs
 
-## **État de complétion : ~35–40%
+**État actuel (révisé)** : Moteur stable, déploiement actif implémenté (phase deployment, deploy_unit), règles et phases cohérentes. Logs step.log et analyzer en place.
+
+**État de complétion : ~70–75%**
 
 ## Palier 1 – IA réellement apprenante (unités simples)
 
@@ -47,9 +49,11 @@
 * Logs stables et sans crash
 * Partie jouable sans erreurs critiques
 
-**État de complétion : ~50%
+**État actuel (révisé)** : PPO/MaskablePPO en place, agents par type d’unité, entraînement avec bots (Random/Greedy/Defensive), déploiement actif en training. Winrate et métriques suivies (TensorBoard, bot_eval).
 
-> Début du travail sur la zone critique des 60%.
+**État de complétion : ~60–65%**
+
+> Zone critique restante : Palier 2 (multi-figurines / cohésion).
 
 ---
 

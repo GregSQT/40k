@@ -22,6 +22,7 @@ from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
     update_units_cache_position, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
+    update_enemy_adjacent_caches_after_unit_move,
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
@@ -681,9 +682,6 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
         log_msg = f"[CHARGE ERROR] E{episode} T{turn} Unit {unit['id']} attempted to charge but has fled - REJECTED"
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
-        import logging
-        logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
-        logging.info(log_msg)
         return False, {"error": "unit_has_fled", "unitId": unit["id"], "action": "charge"}
     
     # NOTE: Pool is already built in charge_destination_selection_handler() after roll.
@@ -739,9 +737,6 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
             log_msg = f"[CHARGE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot charge to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_id}"
             add_console_log(game_state, log_msg)
             safe_print(game_state, log_msg)
-            import logging
-            logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
-            logging.info(log_msg)
             return False, {
                 "error": "charge_destination_occupied",
                 "occupant_id": check_id,
@@ -765,6 +760,15 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
 
     # Update units_cache after position change
     update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
+    moved_unit_player = int(require_key(unit, "player"))
+    update_enemy_adjacent_caches_after_unit_move(
+        game_state,
+        moved_unit_player=moved_unit_player,
+        old_col=orig_col,
+        old_row=orig_row,
+        new_col=dest_col_int,
+        new_row=dest_row_int,
+    )
 
     # AI_TURN_SHOOTING_UPDATE.md: No need to invalidate los_cache here
     # The new architecture uses unit["los_cache"] which is built at unit activation in shooting phase
@@ -773,18 +777,6 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
 
     # Mark as units_charged (NOT units_moved)
     game_state["units_charged"].add(unit["id"])
-
-    # PERFORMANCE: Invalidate enemy_adjacent_hexes cache after charge movement
-    # Unit positions have changed, so adjacent hexes need recalculation
-    # Remove cache for both players (positions affect adjacency for both sides)
-    current_player = require_key(game_state, "current_player")
-    enemy_player = 3 - current_player  # Player 1 <-> Player 2
-    cache_key_current = f"enemy_adjacent_hexes_player_{current_player}"
-    cache_key_enemy = f"enemy_adjacent_hexes_player_{enemy_player}"
-    if cache_key_current in game_state:
-        del game_state[cache_key_current]
-    if cache_key_enemy in game_state:
-        del game_state[cache_key_enemy]
 
     # CRITICAL: Invalidate all destination pools after charge movement
     # Positions have changed, so all pools (move, charge, shoot) are now stale
@@ -1407,6 +1399,11 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
+
+    # Re-evaluate adjacency at execution time.
+    # Charge pool is built earlier and board state may change before target selection.
+    if _is_adjacent_to_enemy(game_state, unit):
+        return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
     # Roll 2d6 AFTER target selection
     import random

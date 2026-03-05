@@ -31,29 +31,41 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   if (!isOpen) return null;
 
   return (
-    <button
-      type="button"
+    <div
       style={{
         position: "fixed",
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.7)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 10000,
-        border: "none",
-        cursor: "pointer",
       }}
-      onClick={onClose}
-      aria-label="Close settings"
     >
+      <button
+        type="button"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.7)",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+        }}
+        onClick={onClose}
+        aria-label="Close settings"
+      />
       <div
         role="dialog"
         aria-modal="true"
         style={{
+          position: "relative",
+          zIndex: 1,
           backgroundColor: "#1f2937",
           borderRadius: "8px",
           padding: "24px",
@@ -156,6 +168,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           </button>
         </div>
       </div>
-    </button>
+    </div>
   );
 };

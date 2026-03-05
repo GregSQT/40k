@@ -25,7 +25,6 @@
 **Related Documents:**
 - `AI_TURN.md` → Game state management (authoritative)
 - `AI_IMPLEMENTATION.md` → Handler architecture (authoritative)
-- `AI_GAME_OVERVIEW.md` → High-level game rules
 - `AI_TRAINING.md` → Training pipeline details & bot behaviors
 
 ---

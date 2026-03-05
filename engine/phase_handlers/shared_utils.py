@@ -301,6 +301,19 @@ def remove_from_units_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     
     entry = game_state["units_cache"].get(unit_id)
     if entry is not None:
+        removed_col = require_key(entry, "col")
+        removed_row = require_key(entry, "row")
+        removed_player = require_key(entry, "player")
+        removed_col_int, removed_row_int = normalize_coordinates(removed_col, removed_row)
+        removed_player_int = int(removed_player)
+
+        update_enemy_adjacent_caches_after_unit_removed(
+            game_state,
+            removed_unit_player=removed_player_int,
+            old_col=removed_col_int,
+            old_row=removed_row_int,
+        )
+
         from engine.game_utils import add_debug_file_log
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
@@ -704,13 +717,61 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
     Returns:
         Set of hex coordinates adjacent to any living enemy unit
     """
-    enemy_adjacent_hexes = _compute_enemy_adjacent_hexes_from_units_cache(game_state, int(player))
+    enemy_adjacent_counts, enemy_adjacent_hexes = _compute_enemy_adjacent_cache_for_player_from_units_cache(
+        game_state, int(player)
+    )
 
     # Store result in game_state cache for reuse during phase
     cache_key = f"enemy_adjacent_hexes_player_{player}"
+    counts_key = f"enemy_adjacent_counts_player_{player}"
     game_state[cache_key] = enemy_adjacent_hexes
+    game_state[counts_key] = enemy_adjacent_counts
     
     return enemy_adjacent_hexes
+
+
+def _compute_enemy_adjacent_cache_for_player_from_units_cache(
+    game_state: Dict[str, Any], player: int
+) -> Tuple[Dict[Tuple[int, int], int], Set[Tuple[int, int]]]:
+    """
+    Compute per-player enemy-adjacent counters and set from current units_cache.
+    """
+    units_cache = require_key(game_state, "units_cache")
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    player_int = int(player)
+
+    counts: Dict[Tuple[int, int], int] = {}
+    hexes: Set[Tuple[int, int]] = set()
+    for entry in units_cache.values():
+        hp_cur = require_key(entry, "HP_CUR")
+        if hp_cur <= 0:
+            continue
+        entry_player_raw = require_key(entry, "player")
+        try:
+            entry_player = int(entry_player_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid player value in units_cache entry: {entry_player_raw!r}") from exc
+        if entry_player == player_int:
+            continue
+
+        enemy_col = require_key(entry, "col")
+        enemy_row = require_key(entry, "row")
+        for neighbor_col, neighbor_row in get_hex_neighbors(enemy_col, enemy_row):
+            if (
+                neighbor_col < 0
+                or neighbor_row < 0
+                or neighbor_col >= board_cols
+                or neighbor_row >= board_rows
+            ):
+                continue
+            neighbor = (neighbor_col, neighbor_row)
+            if neighbor in counts:
+                counts[neighbor] = counts[neighbor] + 1
+            else:
+                counts[neighbor] = 1
+            hexes.add(neighbor)
+    return counts, hexes
 
 
 def _compute_enemy_adjacent_hexes_from_units_cache(
@@ -1290,6 +1351,7 @@ def _resolve_reactive_decision(
 
 def refresh_all_positional_caches_after_reactive_move(
     game_state: Dict[str, Any],
+    enemy_adjacent_counts_override: Optional[Dict[int, Dict[Tuple[int, int], int]]] = None,
     enemy_adjacent_sets_override: Optional[Dict[int, Set[Tuple[int, int]]]] = None,
 ) -> None:
     """
@@ -1310,24 +1372,169 @@ def refresh_all_positional_caches_after_reactive_move(
 
     players_present = _get_players_present_from_units_cache(game_state)
     if enemy_adjacent_sets_override is not None:
+        if enemy_adjacent_counts_override is None:
+            raise KeyError(
+                "enemy_adjacent_counts_override is required when enemy_adjacent_sets_override is provided"
+            )
         for player_int in players_present:
+            if player_int not in enemy_adjacent_counts_override:
+                raise KeyError(
+                    f"Missing adjacency counts override for player {player_int} during reactive cache refresh"
+                )
             if player_int not in enemy_adjacent_sets_override:
                 raise KeyError(
                     f"Missing adjacency override for player {player_int} during reactive cache refresh"
                 )
+            override_counts = require_key(enemy_adjacent_counts_override, player_int)
             override_set = require_key(enemy_adjacent_sets_override, player_int)
+            if not isinstance(override_counts, dict):
+                raise TypeError(
+                    f"Adjacency counts override for player {player_int} must be dict, got {type(override_counts).__name__}"
+                )
             if not isinstance(override_set, set):
                 raise TypeError(
                     f"Adjacency override for player {player_int} must be set, got {type(override_set).__name__}"
                 )
+            game_state[f"enemy_adjacent_counts_player_{player_int}"] = dict(override_counts)
             game_state[f"enemy_adjacent_hexes_player_{player_int}"] = set(override_set)
         return
 
     # Direct recompute path for external callers: recompute from units_cache snapshot.
     for player_int in players_present:
-        game_state[f"enemy_adjacent_hexes_player_{player_int}"] = _compute_enemy_adjacent_hexes_from_units_cache(
-            game_state, player_int
+        counts, hexes = _compute_enemy_adjacent_cache_for_player_from_units_cache(game_state, player_int)
+        game_state[f"enemy_adjacent_counts_player_{player_int}"] = counts
+        game_state[f"enemy_adjacent_hexes_player_{player_int}"] = hexes
+
+
+def update_enemy_adjacent_caches_after_unit_move(
+    game_state: Dict[str, Any],
+    moved_unit_player: int,
+    old_col: int,
+    old_row: int,
+    new_col: int,
+    new_row: int,
+) -> None:
+    """
+    Incrementally update enemy adjacency caches after one unit movement.
+    """
+    if old_col == new_col and old_row == new_row:
+        return
+
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    players_present = _get_players_present_from_units_cache(game_state)
+    if int(moved_unit_player) not in players_present:
+        raise KeyError(
+            f"Moved unit player {moved_unit_player} not present in units_cache players {sorted(players_present)}"
         )
+
+    counters_by_player: Dict[int, Dict[Tuple[int, int], int]] = {}
+    sets_by_player: Dict[int, Set[Tuple[int, int]]] = {}
+    for player_int in players_present:
+        counts_key = f"enemy_adjacent_counts_player_{player_int}"
+        set_key = f"enemy_adjacent_hexes_player_{player_int}"
+        if counts_key not in game_state:
+            raise KeyError(
+                f"Missing required adjacency counts cache '{counts_key}' before incremental update"
+            )
+        if set_key not in game_state:
+            raise KeyError(
+                f"Missing required adjacency set cache '{set_key}' before incremental update"
+            )
+        counts_value = require_key(game_state, counts_key)
+        set_value = require_key(game_state, set_key)
+        if not isinstance(counts_value, dict):
+            raise TypeError(
+                f"Adjacency counts cache '{counts_key}' must be dict, got {type(counts_value).__name__}"
+            )
+        if not isinstance(set_value, set):
+            raise TypeError(
+                f"Adjacency set cache '{set_key}' must be set, got {type(set_value).__name__}"
+            )
+        counters_by_player[player_int] = counts_value
+        sets_by_player[player_int] = set_value
+
+    _apply_enemy_adjacent_delta_for_moved_unit(
+        counters_by_player=counters_by_player,
+        sets_by_player=sets_by_player,
+        players_present=players_present,
+        moved_unit_player=int(moved_unit_player),
+        old_pos=(old_col, old_row),
+        new_pos=(new_col, new_row),
+        board_cols=board_cols,
+        board_rows=board_rows,
+    )
+
+
+def update_enemy_adjacent_caches_after_unit_removed(
+    game_state: Dict[str, Any],
+    removed_unit_player: int,
+    old_col: int,
+    old_row: int,
+) -> None:
+    """
+    Incrementally update enemy adjacency caches after one unit removal from units_cache.
+    """
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    players_present = _get_players_present_from_units_cache(game_state)
+    players_present.add(int(removed_unit_player))
+
+    counters_by_player: Dict[int, Dict[Tuple[int, int], int]] = {}
+    sets_by_player: Dict[int, Set[Tuple[int, int]]] = {}
+    for player_int in players_present:
+        counts_key = f"enemy_adjacent_counts_player_{player_int}"
+        set_key = f"enemy_adjacent_hexes_player_{player_int}"
+        if counts_key not in game_state:
+            raise KeyError(
+                f"Missing required adjacency counts cache '{counts_key}' before removal update"
+            )
+        if set_key not in game_state:
+            raise KeyError(
+                f"Missing required adjacency set cache '{set_key}' before removal update"
+            )
+        counts_value = require_key(game_state, counts_key)
+        set_value = require_key(game_state, set_key)
+        if not isinstance(counts_value, dict):
+            raise TypeError(
+                f"Adjacency counts cache '{counts_key}' must be dict, got {type(counts_value).__name__}"
+            )
+        if not isinstance(set_value, set):
+            raise TypeError(
+                f"Adjacency set cache '{set_key}' must be set, got {type(set_value).__name__}"
+            )
+        counters_by_player[player_int] = counts_value
+        sets_by_player[player_int] = set_value
+
+    for perspective_player in players_present:
+        if perspective_player == int(removed_unit_player):
+            continue
+        player_counters = require_key(counters_by_player, perspective_player)
+        player_set = require_key(sets_by_player, perspective_player)
+        for neighbor_col, neighbor_row in get_hex_neighbors(old_col, old_row):
+            if (
+                neighbor_col < 0
+                or neighbor_row < 0
+                or neighbor_col >= board_cols
+                or neighbor_row >= board_rows
+            ):
+                continue
+            neighbor = (neighbor_col, neighbor_row)
+            if neighbor not in player_counters:
+                raise KeyError(
+                    f"Removal update missing old neighbor {neighbor} for player {perspective_player}"
+                )
+            current_count = player_counters[neighbor]
+            if current_count <= 0:
+                raise ValueError(
+                    f"Invalid adjacency count while removing old unit neighborhood {neighbor} "
+                    f"(player={perspective_player}, count={current_count})"
+                )
+            if current_count == 1:
+                del player_counters[neighbor]
+                player_set.discard(neighbor)
+            else:
+                player_counters[neighbor] = current_count - 1
 
 
 def maybe_resolve_reactive_move(
@@ -1537,6 +1744,7 @@ def maybe_resolve_reactive_move(
 
             refresh_all_positional_caches_after_reactive_move(
                 game_state,
+                enemy_adjacent_counts_override=reactive_adjacent_counts_by_player,
                 enemy_adjacent_sets_override=reactive_adjacent_sets_by_player,
             )
             applied_count += 1

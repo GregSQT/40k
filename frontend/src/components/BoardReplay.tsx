@@ -29,6 +29,7 @@ interface ReplayAction {
   timestamp: string;
   turn: string;
   player: number;
+  log_message?: string;
   unit_id?: number;
   from?: { col: number; row: number };
   to?: { col: number; row: number };
@@ -129,6 +130,15 @@ interface ReplayData {
   total_episodes: number;
   episodes: ReplayEpisode[];
 }
+
+const extractSingleBracketToken = (message: string): string | null => {
+  const match = message.match(/\[([^\]]+)\]/);
+  if (!match) {
+    return null;
+  }
+  const token = match[1].trim();
+  return token.length > 0 ? token : null;
+};
 
 export const BoardReplay: React.FC = () => {
   const { gameConfig } = useGameConfig();
@@ -274,6 +284,8 @@ export const BoardReplay: React.FC = () => {
               UnitClass.RNG_WEAPONS && UnitClass.RNG_WEAPONS.length > 0 ? 0 : undefined,
             selectedCcWeaponIndex:
               UnitClass.CC_WEAPONS && UnitClass.CC_WEAPONS.length > 0 ? 0 : undefined,
+            UNIT_RULES: UnitClass.UNIT_RULES as Unit["UNIT_RULES"],
+            UNIT_KEYWORDS: UnitClass.UNIT_KEYWORDS as Unit["UNIT_KEYWORDS"],
             ICON: UnitClass.ICON || "",
             ICON_SCALE: UnitClass.ICON_SCALE || 1,
           };
@@ -1121,17 +1133,20 @@ export const BoardReplay: React.FC = () => {
           player: action.player,
         });
       } else if (action.type === "reactive_move" && action.from && action.to) {
+        const reactiveMessage =
+          action.log_message ||
+          `Unit ${action.unit_id} reactive moved from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})`;
+        const reactiveRuleLabel = extractSingleBracketToken(reactiveMessage);
         gameLog.addEvent({
           type: "reactive_move",
-          message:
-            action.log_message ||
-            `Unit ${action.unit_id} reactive moved from (${action.from.col},${action.from.row}) to (${action.to.col},${action.to.row})`,
+          message: reactiveMessage,
           unitId: action.unit_id!,
           turnNumber: turnNumber,
           phase: "movement",
           startHex: `(${action.from.col},${action.from.row})`,
           endHex: `(${action.to.col},${action.to.row})`,
           player: action.player,
+          ruleHintByLabel: reactiveRuleLabel ? { [reactiveRuleLabel]: "reactive_move" } : undefined,
         });
       } else if (action.type === "rule_choice" && action.pos) {
         const selectedRuleLabel =

@@ -333,7 +333,7 @@ Renommer le fichier (ex: `.mdc.bak`) ou ajuster les globs.
 
 - **AI_TURN.md** : Règles de tour, phases, séquences
 - **AI_IMPLEMENTATION.md** : Architecture et patterns
-- **Documentation/CHECK_AI_RULES.md** : Script de vérification automatique
+- **Documentation/Code_Compliance/AI_RULES_checker.md** : Script de vérification automatique
 - **shared/validation** : `require_key`, `require_present`
 - **scripts/test_cursor_rules.py** : Validation de la configuration des règles
 - **scripts/check_ai_rules.py** : Vérification automatique (caches, coordonnées, fallbacks, etc.)

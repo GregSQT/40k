@@ -68,7 +68,7 @@
   },
   "adrenalised_onslaught": {
     "id": "adrenalised_onslaught",
-    "description": "Tyranid Warrior (melee) : At the beginning of the fight phase, you can select one of the following ability to apply to this unit until the end of the phase :"
+    "description": "Tyranid Warrior (melee) : At the beginning of the fight phase, you can select one of the following ability to apply to this unit until the end of the phase :\n Aggression Imperative : During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the hit rolls.\n Preservation Imperative : During the fight phase, when this unit makes an attack, it can reroll rolls of 1 for the save rolls."
   },
   "aggression_imperative": {
     "id": "aggression_imperative",

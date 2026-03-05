@@ -1,4 +1,7 @@
-# Macro Agent (Reference Unique)
+# [TODO] Macro Agent (Reference Unique)
+
+> Ce document contient des recommandations et des cibles de design macro qui ne sont pas toutes garanties comme implémentees.
+> Le statut "implémente aujourd'hui" est maintenant maintenu dans `Documentation/AI_TRAINING.md` (section "Macro Training Status").
 
 ## Objectif
 
@@ -375,4 +378,3 @@ python ai/analyzer.py step.log
 - **Non**: evaluation uniquement sur scenarios train
 
 Ce cadre maximise la probabilite d'obtenir une policy macro a la fois efficace, stable et maintenable.
-

@@ -18,6 +18,7 @@ from .shared_utils import (
     update_units_cache_position, update_units_cache_hp, remove_from_units_cache,
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
+    update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
@@ -4081,9 +4082,6 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         log_msg = f"[CRITICAL ID BUG] E{episode} T{turn} shooting_attack_controller: unit_id={unit_id_str} but shooter.id={shooter_id_str} - ID MISMATCH!"
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
-        import logging
-        logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
-        logging.info(log_msg)
     
     # CRITICAL DEBUG: Log unit details for weapon/type mismatch detection
     # This helps identify if the wrong unit is being retrieved
@@ -4108,6 +4106,10 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     attack_result = _attack_sequence_rng(shooter, target, game_state)
     attack_result["target_hp_before_damage"] = target_hp_before_damage
     attack_result["target_coords"] = (target_col, target_row)
+    # Preserve shooter metadata before potential hazardous self-destruction removes it from units_cache.
+    attack_result["shooter_coords"] = (shooter_col, shooter_row)
+    attack_result["shooter_player"] = require_key(shooter, "player")
+    attack_result["shooter_display_name"] = shooter.get("DISPLAY_NAME")
     
     # AI_TURN.md ligne 521: Concatenate Return to TOTAL_ACTION log
     if "TOTAL_ATTACK_LOG" not in shooter:
@@ -4245,9 +4247,6 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             log_msg = f"[CRITICAL WEAPON BUG] E{episode} T{turn} shooting_attack_controller: Unit {unit_id} (type={shooter_unit_type}, player={shooter.get('player')}) using weapon={weapon_name} - WEAPON/TYPE MISMATCH!"
             add_console_log(game_state, log_msg)
             safe_print(game_state, log_msg)
-            import logging
-            logging.basicConfig(filename='step.log', level=logging.INFO, format='%(message)s')
-            logging.info(log_msg)
     
     # Enhanced message format including shooter position and weapon name per movement phase integration
     # Positions captured before damage (target may be removed from cache if dead)
@@ -5089,15 +5088,11 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         result["skip_reason"] = "cannot_advance_after_shooting"
         return success, result
 
-    # CRITICAL: Cannot advance if unit is adjacent to enemy -> SKIP (unit cannot act)
-    # Pool is source of truth: if can_advance is False, unit cannot advance
-    can_advance = require_key(unit, "_can_advance")
-    if not isinstance(can_advance, bool):
-        raise TypeError(
-            f"unit['_can_advance'] must be bool "
-            f"(got {type(can_advance).__name__}) for unit_id={unit_id_str}"
-        )
-    if can_advance is False:
+    # Re-evaluate adjacency on current board state right before advance execution.
+    # Reactive moves may have changed engagement after activation start.
+    unit_is_adjacent_now = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+    unit["_can_advance"] = not unit_is_adjacent_now
+    if unit_is_adjacent_now:
         if game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
             episode = game_state.get("episode_number", "?")
@@ -5117,7 +5112,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 game_state,
                 f"[ADVANCE DEBUG] E{episode} T{turn} _handle_advance_action: "
                 f"Unit {unit_id_str} at ({orig_col},{orig_row}) advance blocked "
-                f"(adjacent_enemies={adjacent_enemies})"
+                f"(adjacent_enemies={adjacent_enemies}, dynamic_recheck=True)"
             )
         success, result = _handle_shooting_end_activation(
             game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
@@ -5125,7 +5120,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         result["advance_rejected"] = True
         result["skip_reason"] = "cannot_advance_adjacent_to_enemy"
         return success, result
-    
+
     if game_state.get("debug_mode", False):
         from engine.game_utils import add_debug_file_log
         episode = game_state.get("episode_number", "?")
@@ -5205,6 +5200,22 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if (dest_col, dest_row) not in valid_destinations:
             return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
         
+        # Re-validate destination against current enemy positions at commit time.
+        # This protects against stale pools when board state changed during activation.
+        unit_player_int = int(require_key(unit, "player"))
+        units_cache = require_key(game_state, "units_cache")
+        for enemy_id, cache_entry in units_cache.items():
+            enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+            if enemy_player == unit_player_int:
+                continue
+            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            if _calculate_hex_distance(dest_col, dest_row, enemy_col, enemy_row) <= 1:
+                return False, {
+                    "error": "advance_destination_adjacent_to_enemy",
+                    "enemy_id": enemy_id,
+                    "destination": (dest_col, dest_row),
+                }
+
         # CRITICAL: Final occupation check IMMEDIATELY before position assignment
         # This prevents race conditions where multiple units select the same destination
         # before any of them have moved. Must check JUST before assignment, not earlier.
@@ -5275,6 +5286,15 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         
         # Update units_cache after position change (advance)
         update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
+        moved_unit_player = int(require_key(unit, "player"))
+        update_enemy_adjacent_caches_after_unit_move(
+            game_state,
+            moved_unit_player=moved_unit_player,
+            old_col=orig_col,
+            old_row=orig_row,
+            new_col=dest_col_int,
+            new_row=dest_row_int,
+        )
         
         # Check if unit actually moved (for cache invalidation and logging)
         actually_moved = (orig_col != dest_col) or (orig_row != dest_row)

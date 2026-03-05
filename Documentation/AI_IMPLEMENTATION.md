@@ -31,13 +31,13 @@ Usage:
         Run the script and block merges on non-zero exit.
 
 ## DATA AND CONFIGURATION VALIDATION
-- Module: shared/validation.py
+- Module: shared/data_validation.py
 - Helpers:
     require_present(value, name) → raises if None
     require_key(mapping, key) → raises if key missing
 
 Examples:
-    from shared.validation import require_key, require_present
+    from shared.data_validation import require_key, require_present
 
     learning_rate = require_key(training_config, "learning_rate")
     agent_name = require_present(raw_agent_name, "agent_name")
@@ -62,6 +62,7 @@ Rules:
   - [weapons/](#weapons---weapon-system)
   - [pve_controller.py](#pve_controllerpy---pve-ai-opponent)
   - [phase_handlers/](#phase_handlers---phase-specific-logic)
+- [Rule System and Logging Patterns](#rule-system-and-logging-patterns)
 - [How Everything Works Together](#how-everything-works-together)
   - [Complete Request Flow](#complete-request-flow-agentstepaction)
   - [Episode Lifecycle](#complete-episode-lifecycle)
@@ -94,7 +95,7 @@ The `game_state` dictionary exists only in `W40KEngine` (in `w40k_core.py`). All
 - **Position updates** : After any move (MOVE, ADVANCE, CHARGE, FLED), call `update_units_cache_position(game_state, unit_id, col, row)`.
 - **Snapshot** : `game_state["units_cache_prev"]` is a copy of `units_cache` at the **start** of each `step()`, used for movement-direction features (observation).
 
-See `Documentation/unit_cache21.md` for the full implementation plan.
+Les détails d’implémentation (build, update, lecture HP, mort) sont décrits dans la section « Units cache & HP_CUR » ci-dessus et dans AI_TURN.md.
 
 ### Sequential Unit Activation
 
@@ -158,6 +159,7 @@ engine/
 │   ├── parser.py            # Parse TypeScript armory files
 │   └── rules.py             # Weapon rules system
 └── phase_handlers/          # Phase-specific logic
+    ├── deployment_handlers.py  # Deployment phase (active placement)
     ├── movement_handlers.py
     ├── shooting_handlers.py
     ├── charge_handlers.py
@@ -177,18 +179,21 @@ engine/
 - `validate_compliance()` - Check AI_TURN.md compliance
 
 **Phase Processing:**
+- `_process_deployment_phase()` - Delegate to deployment_handlers (when deployment_type == "active")
 - `_process_movement_phase()` - Delegate to movement_handlers
 - `_process_shooting_phase()` - Delegate to shooting_handlers
 - `_process_charge_phase()` - Delegate to charge_handlers
 - `_process_fight_phase()` - Delegate to fight_handlers
 
 **Phase Initialization:**
+- `_deployment_phase_init()` - Build deployment pools, deployable units (when active)
 - `_movement_phase_init()` - Build move_activation_pool
 - `_shooting_phase_init()` - Build shoot_activation_pool
 - `_charge_phase_init()` - Build charge_activation_pool
 - `_fight_phase_init()` - Build fight activation pools
 
 **Game Flow:**
+- When scenario has `deployment_type == "active"`: match starts in `phase = "deployment"`; after all units placed, transition to command/move.
 - `_advance_to_fight_phase()` - Transition move→shoot→charge→fight
 - `_advance_to_next_player()` - Switch players, reset tracking
 - `_tracking_cleanup()` - Clear phase tracking sets
@@ -486,11 +491,228 @@ Each handler module implements complete phase logic:
 - Attack resolution
 - Fight subphase management
 
+**deployment_handlers.py** (phase déploiement actif, implémentée):
+- Quand `deployment_type == "active"` dans le scénario, le match démarre en `phase = "deployment"`.
+- **État** : `game_state["deployment_state"]` contient `current_deployer`, `deployable_units_by_player`, `deployed_units`, `deployment_pools_by_player`, `deployment_complete`. Unités non placées : `col = -1`, `row = -1`.
+- **Action** : `deploy_unit { unitId, col, row }` — validation stricte (hex dans zone, non mur, non occupé), puis mise à jour position et ajout à `deployed_units`.
+- **Ordre** : déploiement alterné P1 puis P2 (ou un joueur seul jusqu’à épuisement si l’autre n’a plus d’unités à déployer). Fin de phase quand toutes les unités sont placées → transition vers phase suivante (command ou move).
+- **Sources** : `config/board_config.json`, `config/deployment/hammer.json`, scénario (units, deployment_zone, deployment_type). Action mask strict pour le RL ; pas de fallback ni placement automatique.
+
 **Handler Pattern:**
 - Receive game_state as parameter
 - Return results without storing state
 - Pure delegation from engine
 - Implement AI_TURN.md rules exactly
+
+---
+
+## Rule System and Logging Patterns
+
+This section documents how unit rules are declared, resolved, selected at runtime, and logged consistently across backend/frontend/analyzer.
+
+### 1) Rule Data Model
+
+Two complementary layers are used:
+
+- **Global rule registry**: `config/unit_rules.json`
+  - Canonical key/ID: `id`
+  - User-facing name (optional): `name`
+  - Technical indirection (optional): `alias`
+  - Human description: `description`
+- **Unit-attached rules**: `UNIT_RULES` on each unit definition
+  - `ruleId`: source rule attached to the unit
+  - `displayName`: source label shown in UI/logs for direct rules
+  - `grants_rule_ids` (optional): sub-rules granted by the source rule
+  - `usage` (optional): `and`, `or`, `unique`, `always`
+  - `choice_timing` (optional): prompt timing for player choice
+
+Design intent:
+- `unit_rules.json` is the global dictionary for descriptions and alias chains.
+- `UNIT_RULES` is the unit runtime contract (what this unit has, and how it is activated).
+
+### 1.b) Weapon Rule Data Model
+
+Weapon rules are defined and validated through a dedicated registry:
+
+- **Global weapon rule registry**: `config/weapon_rules.json`
+  - Canonical key: rule ID (for example `RAPID_FIRE`, `HEAVY`, `DEVASTATING_WOUNDS`)
+  - `name`: display name
+  - `description`: human description
+  - `has_parameter`: whether the rule requires a numeric parameter (`RAPID_FIRE:1`, `SUSTAINED_HITS:2`, etc.)
+- **Weapon-attached rules**: `WEAPON_RULES` on each armory weapon entry
+  - Static form: `"HEAVY"`, `"PISTOL"`, `"HAZARDOUS"`
+  - Parameterized form: `"RAPID_FIRE:1"`, `"SUSTAINED_HITS:1"`
+
+Runtime pipeline:
+
+- `engine/weapons/parser.py` parses TypeScript armories and loads rule strings.
+- `engine/weapons/rules.py` validates every `WEAPON_RULES` entry against `weapon_rules.json` (fail-fast).
+- Invalid/missing/parameter-mismatch rules raise immediately (no silent fallback).
+
+This guarantees that rule IDs used in gameplay, frontend rendering, replay parsing, and analyzer checks all come from one canonical registry.
+
+### 2) Resolution Pattern (Direct + Alias + Granted Rules)
+
+Central helpers are implemented in `engine/phase_handlers/shared_utils.py`:
+
+- `_resolve_effect_rule_id_to_technical(rule_id)`:
+  - Resolves alias chains to the technical effect rule ID.
+  - Fails fast on unknown ID, invalid alias, or alias cycles.
+- `_resolve_unit_rule_entry_effect_rule_ids(rule_entry)`:
+  - Computes active effect IDs for one `UNIT_RULES` entry.
+  - For `and/always`: all granted IDs are active.
+  - For `or/unique`: only `_selected_granted_rule_id` is active.
+- `unit_has_rule_effect(unit, rule_id)`:
+  - Public check used by handlers.
+- `get_source_unit_rule_id_for_effect(unit, effect_rule_id)`:
+  - Maps a technical effect back to its source `UNIT_RULES.ruleId`.
+- `get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)`:
+  - Returns the display label to log.
+  - For `or/unique`, returns the selected child rule display name (from `unit_rules.json` `name`) instead of the parent display name.
+
+This ensures logs and behavior reflect the effective selected capability (for example, `Aggression Imperative` instead of the parent `Adrenalised Onslaught`).
+
+### 3) Runtime Choice Flow (Rule prompts)
+
+At runtime, rule choices are indexed and prompted via `choice_timing`:
+
+- Index build: `rebuild_choice_timing_index(game_state)` in `shared_utils.py`
+- Queue + prompt lifecycle: managed in `engine/w40k_core.py`
+- Selection application:
+  - `_apply_rule_choice_selection(...)` stores `_selected_granted_rule_id`
+  - Active effects immediately reflect the selected rule via shared resolution helpers
+
+AI choice paths:
+- **Gym/training mode**: deterministic selection from policy action integer in `w40k_core.py`.
+- **PvE mode**: value-based policy selection in `engine/pve_controller.py` (`select_rule_choice_with_policy`).
+
+No heuristic fallback is used for rule selection.
+
+### 4) Logging Surfaces and Contracts
+
+#### A) Backend `action_logs` (runtime event bus to frontend)
+
+Handlers append structured events into `game_state["action_logs"]`.
+Example reactive move payload (from `shared_utils.py`):
+
+```python
+{
+    "type": "reactive_move",
+    "message": "Unit 15(1,6) REACTIVE MOVED [SKULKING HORRORS] from (2,2) to (1,6) [Roll: 5] - trigger: Unit 2->(1,10)",
+    "unitId": 15,
+    "player": 2,
+    "ability_display_name": "SKULKING HORRORS",
+    "fromCol": 2,
+    "fromRow": 2,
+    "toCol": 1,
+    "toRow": 6,
+    "range_roll": 5,
+    "event_toCol": 1,
+    "event_toRow": 10
+}
+```
+
+Frontend (`useEngineAPI.ts` -> `useGameLog.ts`) dispatches/consumes these entries to render combat log events.
+
+#### B) Combat log (frontend UI)
+
+The combat log shows `action_logs[].message` (after light sanitization, e.g. reward token cleanup).
+Rule tags like `[AGGRESSION IMPERATIVE]` are interactive and resolve descriptions from `unit_rules.json`.
+
+Weapon rule tags are also interactive and resolved from `weapon_rules.json` (with unit-rule priority on collisions).
+
+Reactive move example in combat log:
+
+```text
+Unit 15(1,6) REACTIVE MOVED [SKULKING HORRORS] from (2,2) to (1,6) [Roll: 5] - trigger: Unit 2->(1,10)
+```
+
+#### C) `step.log` (replay/analyzer canonical trace)
+
+`ai/step_logger.py` formats replay lines with turn/player/phase envelope:
+
+```text
+[06:55:38] E11 T1 P2 MOVE : Unit 15(1,6) REACTIVE MOVED [SKULKING HORRORS] from (2,2) to (1,6) [Roll: 5] - trigger: Unit 2->(1,10) [R:+0.0] [SUCCESS]
+```
+
+Rule choice lines are also explicit:
+
+```text
+[HH:MM:SS] E# T# P# FIGHT : Unit 3(7,12) chose [ADRENALISED ONSLAUGHT] [SUCCESS]
+```
+
+#### C.1) Shooting/Weapon Rule Log Contract
+
+For ranged attacks, logs are intentionally deterministic and stage-based:
+
+- If **Hit fails**: only `Hit` is logged.
+- If **Wound fails**: `Hit` + `Wound`.
+- If **Save succeeds**: `Hit` + `Wound` + `Save` (no damage).
+- If **Save fails**: `Hit` + `Wound` + `Save` + `Dmg`.
+- If **DEVASTATING_WOUNDS** applies (critical wound): `Save:SKIPPED [DEVASTATING WOUNDS]`.
+
+Canonical examples:
+
+```text
+Unit 15(9,6) SHOT [RAPID FIRE:1] at Unit 18(11,6) with [Bolt Pistol] - Hit:3+:4(HIT) Wound:4+:5(WOUND) Save:3+:2(FAIL) Dmg:1HP
+Unit 2(23,10) SHOT at Unit 7(12,2) with [Sternguard Bolt Rifle] - Hit:3+:5(HIT) Wound:4+:6(SUCCESS) Save:SKIPPED [DEVASTATING WOUNDS] Dmg:2HP
+Unit 2(23,10) SHOT at Unit 7(12,2) with [Heavy Bolter] - Hit:3+->2+:4(HIT) [HEAVY] Wound:3+:5(SUCCESS) Save:3+:2(FAIL) Dmg:2HP
+```
+
+HAZARDOUS contract:
+
+- Every hazardous shot line carries: `[HAZARDOUS] Roll:<1..6>`.
+- On roll `1`, a dedicated follow-up line is emitted:
+  - Survived: `Unit X(c,r) SUFFERS 3 Mortal Wounds [HAZARDOUS]`
+  - Dead: `Unit X(c,r) was DESTROYED [HAZARDOUS]`
+
+This split keeps shot resolution and side-effect resolution parseable and robust for replay/analyzer.
+
+#### D) Analyzer expectations (`ai/analyzer.py`)
+
+Analyzer parses:
+- reactive move occurrences (`REACTIVE MOVED`, trigger, roll),
+- rule-choice selection lines (`chose [RULE]`),
+- bracketed rule usage in combat actions (`[...]`).
+
+It tracks rule-choice compliance:
+- `correct`: used effect matches selected choice,
+- `missing`: effect used without prior choice,
+- `mismatch`: used effect differs from selected choice.
+
+Weapon-rule-specific checks include:
+
+- **RAPID FIRE coherence**:
+  - marker/value consistency (`[RAPID FIRE:n]` must match weapon config),
+  - bonus shot window consistency (marker only on bonus shots),
+  - shot count cap (`rng_nb + rapid_fire_bonus`).
+- **DEVASTATING WOUNDS coherence**:
+  - only counted when `[DEVASTATING WOUNDS]` flag is present,
+  - `correct` requires wound roll `6` and `Save:SKIPPED`,
+  - `incorrect` captures flagged non-critical or flagged critical-with-save cases.
+
+### 5) Log Naming and Pattern Guidelines
+
+When adding new rule-driven effects:
+
+- Always include explicit rule label in message, in square brackets: `[RULE NAME]`.
+- Keep event message deterministic and parseable (stable wording).
+- For side-effect actions (reactive move, charge impact, rule choice), append structured entries to `action_logs` and flush to `step.log`.
+- Prefer one canonical phrasing per action type to keep replay/analyzer parsing robust.
+- For parameterized weapon rules in display/logs, include the resolved value (`[RAPID FIRE:1]`, not placeholder `X`).
+- Keep internal identifiers unchanged (`RAPID_FIRE`, `DEVASTATING_WOUNDS`) and normalize only display/parsing text.
+
+Recommended pattern:
+
+```text
+Unit <id>(<col>,<row>) <ACTION VERB> [<RULE NAME>] <details...>
+```
+
+This keeps UI tooltips, replay parsing, and analyzer checks aligned on the same textual contract.
+
+---
+
+**Reactive move (unit rule)** : la règle `reactive_move` est une règle d’unité (déplacement réactif après mouvement ennemi). Spécification complète (objectif, game_state, éligibilité, résolution, caches, erreurs, flux, tests, plan d’implémentation) : **[Unit_rules.md](Unit_rules.md)** section « 10) Specification : reactive_move ».
 
 ---
 
@@ -1079,7 +1301,7 @@ Overall 4.7x training speedup (66 → 311 it/s). Debug config (50 episodes) runs
 2. [AI_TRAINING.md](AI_TRAINING.md) - PPO training integration
 3. [AI_OBSERVATION.md](AI_OBSERVATION.md) - Egocentric observation system
 4. [AI_TARGET_SELECTION.md](AI_TARGET_SELECTION.md) - Target selection and prioritization
-5. [WEAPONS.md](WEAPONS.md) - Weapons system technical documentation
+5. [Weapon_rules.md](Weapon_rules.md) - Weapons system technical documentation
 
 ---
 

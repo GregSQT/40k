@@ -7,24 +7,14 @@ Place this file in the PROJECT ROOT directory.
 
 import json
 import os
+import logging
 from typing import Dict, Any, Optional
 from pathlib import Path
 
 class ConfigLoader:
     """Centralized configuration loader."""
     
-    # Canonical inter-faction agent keys resolved to source config directories/files.
-    _INTERFACTION_AGENT_CONFIG_MAP: Dict[str, str] = {
-        "Infantry_Troop_RangedSwarm": "Infantry_Troop_RangedSwarm",
-        "Infantry_Troop_MeleeTroop": "Infantry_Troop_MeleeTroop",
-        "Infantry_LeaderElite_MeleeElite": "Infantry_LeaderElite_MeleeElite",
-        "Infantry_Elite_MeleeElite": "Infantry_Elite_MeleeElite",
-        "Infantry_Elite_RangedTroop": "Infantry_Elite_RangedTroop",
-        "Infantry_Elite_RangedElite": "Infantry_Elite_RangedElite",
-        "Infantry_Swarm_RangedSwarm": "Infantry_Swarm_RangedSwarm",
-        "Infantry_Swarm_MeleeSwarm": "Infantry_Swarm_MeleeSwarm",
-        "Infantry_Troop_RangedTroop": "Infantry_Troop_RangedTroop",
-    }
+    _LOGGER = logging.getLogger(__name__)
     
     def __init__(self, root_path: str):
         """Initialize config loader.
@@ -402,27 +392,77 @@ class ConfigLoader:
             raise RuntimeError(f"Invalid JSON in {scenario_path}: {e}")
 
     def _resolve_agent_config_key(self, agent_key: str) -> str:
-        """Resolve canonical inter-faction key to concrete config directory key."""
+        """Resolve agent config directory using explicit inherits_from metadata."""
         direct_path = self.config_dir / "agents" / agent_key
-        if direct_path.exists():
+        if not direct_path.exists():
+            available_agents = sorted([p.name for p in (self.config_dir / "agents").iterdir() if p.is_dir()])
+            raise FileNotFoundError(
+                f"No config directory found for agent key '{agent_key}'. "
+                f"Available config agent directories: {available_agents}"
+            )
+
+        training_config_path = direct_path / f"{agent_key}_training_config.json"
+        if not training_config_path.exists():
+            raise FileNotFoundError(
+                f"Agent training config not found for inheritance resolution: {training_config_path}\n"
+                f"Expected path: config/agents/{agent_key}/{agent_key}_training_config.json"
+            )
+
+        try:
+            with open(training_config_path, "r", encoding="utf-8-sig") as f:
+                training_config = json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {training_config_path}: {e}")
+
+        inherits_from = training_config.get("inherits_from")
+        if inherits_from is None:
             return agent_key
 
-        if agent_key in self._INTERFACTION_AGENT_CONFIG_MAP:
-            mapped_agent_key = self._INTERFACTION_AGENT_CONFIG_MAP[agent_key]
-            mapped_path = self.config_dir / "agents" / mapped_agent_key
-            if not mapped_path.exists():
-                raise FileNotFoundError(
-                    f"Configured inter-faction mapping points to missing agent config directory: "
-                    f"{mapped_path} (from key '{agent_key}')"
-                )
-            return mapped_agent_key
+        if not isinstance(inherits_from, str) or not inherits_from.strip():
+            raise ValueError(
+                f"Invalid inherits_from in {training_config_path}: expected non-empty string or null, "
+                f"got {inherits_from!r}"
+            )
 
-        available_agents = sorted([p.name for p in (self.config_dir / "agents").iterdir() if p.is_dir()])
-        raise FileNotFoundError(
-            f"No config directory found for agent key '{agent_key}'. "
-            f"Also no inter-faction mapping is defined for this key. "
-            f"Available config agent directories: {available_agents}"
+        resolved_agent_key = inherits_from.strip()
+        if resolved_agent_key == agent_key:
+            raise ValueError(
+                f"Invalid inherits_from in {training_config_path}: agent cannot inherit from itself "
+                f"('{agent_key}')"
+            )
+
+        resolved_path = self.config_dir / "agents" / resolved_agent_key
+        if not resolved_path.exists():
+            raise FileNotFoundError(
+                f"Invalid inherits_from in {training_config_path}: resolved agent directory does not exist: "
+                f"{resolved_path}"
+            )
+
+        resolved_training_config_path = (
+            resolved_path / f"{resolved_agent_key}_training_config.json"
         )
+        if not resolved_training_config_path.exists():
+            raise FileNotFoundError(
+                f"Invalid inherits_from in {training_config_path}: target agent training config not found: "
+                f"{resolved_training_config_path}"
+            )
+
+        self._LOGGER.warning(
+            "\n"
+            "================================================================================\n"
+            "===================== !!! CRITICAL AGENT INHERITANCE !!! ======================\n"
+            "Requested agent key : %s\n"
+            "Inherited from      : %s\n"
+            "Loaded config dir   : config/agents/%s\n"
+            "IMPORTANT: Training/rewards/scenarios are loaded from inherited agent config.\n"
+            "================================================================================",
+            agent_key,
+            resolved_agent_key,
+            resolved_agent_key,
+        )
+
+        return resolved_agent_key
+
 
 # Global instance for easy access
 _config_loader = None

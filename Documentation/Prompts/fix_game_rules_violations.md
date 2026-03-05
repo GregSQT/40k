@@ -44,7 +44,7 @@ Ce prompt définit un workflow itératif avec checkpoints de validation stratég
 
 **En MODE AUTO : Exécution automatique autorisée**
 
-1. **Exécuter automatiquement** : `python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --rewards-config SpaceMarine_Infantry_Troop_RangedSwarm --scenario bot --test-only --step --test-episodes 15 2>&1 | tee debug.log ; python ai/analyzer.py step.log ; python check/hidden_action_finder.py`
+1. **Exécuter automatiquement** : `python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --rewards-config SpaceMarine_Infantry_Troop_RangedSwarm --scenario bot --test-only --step --test-episodes 15 2>&1 | tee debug.log ; python ai/analyzer.py step.log ; python ai/hidden_action_finder.py`
 
 2. **Analyser automatiquement** les résultats dans cet ordre de priorité :
    - **FATAL ERRORS** (ValueError, exceptions) → STOP, fix immédiat

@@ -46,6 +46,193 @@
   - [Predictive Indicators](#predictive-indicators)
 - [Case Studies](#case-studies)
 - [Quick Diagnostic Reference](#quick-diagnostic-reference)
+- [Quick Tuning Guide (résumé actionnable)](#quick-tuning-guide-résumé-actionnable) ⭐ **Tables et actions correctives**
+
+---
+
+## QUICK TUNING GUIDE (résumé actionnable)
+
+> Ce bloc reprend l’ancien **PPO_METRICS_TUNING_GUIDE.md** fusionné ici. Il donne les tableaux et actions correctives ; les sections suivantes de ce document détaillent chaque métrique et les cas d’usage.
+
+### 1. Métriques 0_critical (TensorBoard)
+
+Le namespace **`0_critical/`** regroupe les 10 métriques essentielles pour le tuning PPO. Le préfixe `0_` les fait apparaître en premier dans TensorBoard.
+
+**Organisation** :
+- **a–c** : Performance de jeu (bot_eval, win_rate, episode_reward)
+- **d–h** : Santé PPO (loss, explained_variance, clip_fraction, approx_kl, entropy)
+- **i–j** : Santé technique (gradient_norm, immediate_reward_ratio)
+
+| Métrique | Cible | Contrôle principal | Si mauvais |
+|----------|--------|---------------------|------------|
+| **a_bot_eval_combined** | >0.70 | Récompenses | Ajuster les autres métriques d’abord |
+| **b_win_rate_100ep** | >0.50 | Apprentissage | Vérifier entropy, clip_fraction |
+| **c_episode_reward_smooth** | Tendance croissante | Signal de récompense | Vérifier immediate_reward_ratio |
+| **d_loss_mean** | Tendance décroissante | Stabilité | Réduire learning_rate |
+| **e_explained_variance** | >0.30 | gamma, gae_lambda | Monter à 0.98 |
+| **f_clip_fraction** | 0.1–0.3 | **learning_rate** | Ajuster learning_rate |
+| **g_approx_kl** | <0.02 | learning_rate | Réduire lr, fixer target_kl |
+| **h_entropy_loss** | 0.5–2.0 | **ent_coef** | Augmenter ent_coef (ex. 0.3) |
+| **i_gradient_norm** | <10 | max_grad_norm | Réduire max_grad_norm, learning_rate |
+| **j_immediate_reward_ratio** | <0.90 | **gamma** | Augmenter gamma, revoir récompenses |
+
+**Interprétation rapide** :
+- **explained_variance < 0** : value function cassée, corriger en priorité (gamma, récompenses).
+- **immediate_reward_ratio > 0.9** : l’agent n’apprend que le court terme, augmenter gamma et poids win/lose.
+- **entropy_loss trop bas** : politique trop déterministe, augmenter ent_coef.
+
+### 2. Patterns de diagnostic (symptômes → cause)
+
+| Pattern | Symptômes | Diagnostic | Action |
+|--------|-----------|------------|--------|
+| **Plateau** | explained_variance OK, episode_reward plat, win_rate ~0.4 | Optimum local | ent_coef ↑, learning_rate ↑, curriculum / récompenses |
+| **Collapse** | entropy très bas, win_rate et reward chutent | Effondrement de politique | Redémarrer avec ent_coef 0.3, decay entropy |
+| **Explosion** | gradient_norm >15, clip_fraction très haut, métriques instables | Mises à jour trop grandes | learning_rate ↓, max_grad_norm ↓, target_kl 0.01 |
+| **Shortcut** | win_rate bon, bot_eval mauvais, immediate_ratio élevé | Sur-optimisation vs adversaire d’entraînement | Récompenses stratégiques, curriculum, bots plus forts |
+
+### 3. Tableau des métriques (détail)
+
+| Métrique | Ce que cela mesure | À vérifier | Paramètres à modifier |
+|----------|---------------------|------------|------------------------|
+| **episode_reward_smooth** | Récompense moyenne par épisode (lissée) | Augmentation progressive | Voir Problèmes courants |
+| **win_rate_100ep** | Taux de victoire sur 100 épisodes | Augmentation progressive | ent_coef, récompenses |
+| **bot_eval_combined** | Win rate pondéré vs Random + Greedy + Defensive | >0.55 (Phase 2), >0.70 (Phase 3) | ent_coef, target_kl, net_arch |
+| **loss_mean** | Erreur moyenne (policy + value) | Diminution progressive, pas d’oscillations | learning_rate ↓, vf_coef ↓, n_steps ↓ |
+| **explained_variance** | Variance des returns expliquée par le value model | Cible 0.3–0.5 | n_steps ↑, learning_rate ↓, net_arch ↑ |
+| **clip_fraction** | Proportion des gradients clippés | 0.10–0.30 | learning_rate ↓ si >0.25 ; clip_range ↑ si <0.1 |
+| **approx_kl** | Divergence ancienne/nouvelle politique | ~0.01 | learning_rate ↓ si >0.02 ; target_kl |
+| **entropy_loss** | Diversité des actions | Diminution progressive mais pas trop vite | **ent_coef ↑** si plateau |
+| **gradient_norm** | Norme des gradients | Pas de pics | learning_rate ↓, n_steps ↓ |
+| **immediate_reward_ratio** | Récompenses immédiates / total | Cible 0.5–0.7 | gamma ↓ si >0.9 ; win/lose ↑ |
+| **reward_victory_gap** | Écart mean_reward(gagné) − mean_reward(perdu) | 20–90 bon ; <10 problème | win/lose ↑ ou ↓ |
+
+### 4. Problèmes courants et actions
+
+#### 4.1 Plateau (bot_eval stagne, win_rate plat)
+
+**Métriques** : bot_eval_combined ~0.45–0.55, win_rate plat, episode_reward oscillant.
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | ent_coef | 0.08 → 0.10 ou 0.12 |
+| 2 | learning_rate (final) | 0.00005 → 0.00008 (si decay) |
+| 3 | target_kl | 0.02 → 0.03 ou null |
+| 4 | net_arch | [320,320] → [512,512] si 1–3 insuffisants |
+
+#### 4.2 Effondrement (bot_eval chute après un pic)
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | learning_rate | Réduire ou activer decay |
+| 2 | learning_rate (final) | Relever le plancher si besoin |
+| 3 | ent_coef | Augmenter |
+| 4 | Récompenses | Vérifier que win/lose dominent (±40) |
+
+#### 4.3 Instabilité (oscillations, collapse)
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | learning_rate | Réduire 30–50 % |
+| 2 | n_steps | 10240 → 5120 |
+| 3 | clip_range | 0.2 → 0.15 |
+| 4 | target_kl | Remettre 0.02 si null |
+
+#### 4.4 Pas d’apprentissage (rewards plats)
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | ent_coef | 0.05 → 0.12 |
+| 2 | learning_rate | Augmenter légèrement |
+| 3 | Récompenses | Vérifier intermédiaires et win/lose |
+| 4 | net_arch | [320,320] → [512,512] si explained_variance < 0.2 |
+
+#### 4.5 Myopie (optimise dégâts, pas la victoire)
+
+**Métriques** : immediate_reward_ratio > 0.9 ; bot_eval bas.
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | Récompenses | Augmenter win/lose (20 → 40 ou 50) |
+| 2 | gamma | Vérifier (0.95 adapté pour 5 tours) |
+| 3 | Récompenses | Réduire récompenses intermédiaires trop fortes |
+
+#### 4.6 Overfitting à RandomBot
+
+**Métriques** : win_rate ↑ mais bot_eval_combined ↓ ; vs_random élevé.
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | bot_training.ratios | Réduire Random (40% → 20%), augmenter Greedy/Defensive |
+| 2 | Récompenses | Équilibre win/lose vs intermédiaires |
+
+#### 4.7 Récompense non alignée avec la victoire
+
+**Métriques** : reward_victory_gap < 10.
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | Récompenses | Augmenter win/lose (40 → 50 ou 60) |
+| 2 | Récompenses | Réduire intermédiaires trop fortes |
+| 3 | Diagnostic | Vérifier immediate_reward_ratio < 0.9 |
+
+#### 4.8 Gap trop élevé (signal trop binaire)
+
+**Métriques** : reward_victory_gap > 90 ; apprentissage lent.
+
+| Action | Paramètre | Modification |
+|--------|-----------|--------------|
+| 1 | Récompenses | Réduire win/lose (50 → 40) |
+| 2 | Récompenses | Augmenter kill_target, objective_rewards |
+| 3 | Règle | Si bot_eval progresse bien → ne rien changer |
+
+### 5. Matrice : métrique → paramètres prioritaires
+
+| Problème sur métrique | 1er paramètre | 2e paramètre | 3e paramètre |
+|-----------------------|---------------|--------------|--------------|
+| episode_reward stagne | ent_coef ↑ | learning_rate ↑ | Récompenses |
+| win_rate stagne | ent_coef ↑ | bot_training.ratios | Récompenses |
+| bot_eval stagne/chute | ent_coef ↑, lr decay | target_kl | net_arch |
+| loss oscille | learning_rate ↓ | n_steps ↓ | vf_coef ↓ |
+| explained_variance bas | n_steps ↑ | learning_rate ↓ | net_arch ↑ |
+| clip_fraction trop haut | learning_rate ↓ | clip_range ↑ | — |
+| approx_kl trop haut | learning_rate ↓ | target_kl | clip_range ↓ |
+| entropy chute trop vite | ent_coef ↑ | — | — |
+| gradient_norm pics | learning_rate ↓ | n_steps ↓ | — |
+| immediate_ratio > 0.9 | win/lose ↑ | gamma ↓ | — |
+| reward_victory_gap < 10 | win/lose ↑ | Réduire intermédiaires | immediate_ratio |
+| reward_victory_gap > 90 (lent) | win/lose ↓ | Augmenter intermédiaires | — |
+
+### 6. Accélération : n_envs
+
+Pour accélérer l’entraînement, augmenter `n_envs` dans le training config :
+
+| n_envs | Effet |
+|--------|--------|
+| 1 | Défaut |
+| 2, 4, 8 | 2, 4 ou 8 processus CPU en parallèle |
+
+Quand `n_envs > 1`, le système ajuste automatiquement `n_steps` par env pour garder le même total (ex. n_envs=4 → n_steps=2560 par env, 10240 total).
+
+### 7. Règles générales (tuning)
+
+1. **Un changement à la fois** pour isoler l’effet de chaque paramètre.
+2. **Tendance > valeur absolue** pour loss_mean et explained_variance.
+3. **bot_eval_combined** : métrique principale de succès.
+4. **Récompenses** : win/lose doivent dominer (ex. ±40 vs intermédiaires ~1–3).
+
+### 8. Workflow de training (résumé)
+
+1. **Démarrage** : Surveiller explained_variance, gradient_norm. Si explained_variance < 0.3 → augmenter gamma. Si gradient_norm > 10 → réduire learning_rate.
+2. **Premiers 100 ep** : Ajuster learning_rate pour clip_fraction 0.1–0.3 ; garder entropy_loss dans 0.5–2.0.
+3. **Première bot eval (~500 ep)** : Si bot_eval < 0.4 et immediate_ratio > 0.9 → problème de récompenses. Si bot_eval < 0.4 et entropy bas → exploration.
+4. **Milieu (1000+ ep)** : win_rate_100ep et episode_reward doivent monter. Si plateau → ent_coef ou curriculum.
+5. **Évaluation finale** : Cible bot_eval_combined > 0.70.
+
+### 9. Config et références (tuning)
+
+- **Training config** : `config/agents/<agent>/<agent>_training_config.json`
+- **Récompenses** : `config/agents/<agent>/<agent>_rewards_config.json`
+- **Métriques détaillées** : sections suivantes de ce document (Why Metrics Matter, Core Metrics Explained, Pattern Library, etc.).
 
 ---
 

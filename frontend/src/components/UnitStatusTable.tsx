@@ -1,5 +1,6 @@
 // frontend/src/components/UnitStatusTable.tsx
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
 import type { Unit, UnitId } from "../types/game";
 
@@ -8,6 +9,11 @@ const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
   adaptable_predators: "This unit can shoot and charge in a turn in which it fell back.",
   shoot_after_flee: "Allows a unit to shoot in a turn in which it fell back.",
   charge_after_flee: "Allows a unit to charge in a turn in which it fell back.",
+};
+
+const getUnitRuleTooltip = (ruleId: string): string => {
+  const configDescription = unitRules[ruleId as keyof typeof unitRules]?.description;
+  return configDescription ?? UNIT_RULE_DESCRIPTIONS[ruleId] ?? ruleId;
 };
 
 const getWeaponRuleDisplay = (ruleId: string): { displayName: string; tooltipText: string } => {
@@ -167,7 +173,7 @@ const UnitRow = memo<UnitRowProps>(
                 <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                   <span>{unitName}</span>
                   {unitRules.map((rule) => {
-                    const tooltipText = UNIT_RULE_DESCRIPTIONS[rule.ruleId] ?? rule.ruleId;
+                    const tooltipText = getUnitRuleTooltip(rule.ruleId);
                     return (
                       <span key={`${unit.id}-${rule.ruleId}`} className="rule-badge-wrapper">
                         <span className="rule-badge">{rule.displayName}</span>

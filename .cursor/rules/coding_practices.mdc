@@ -90,7 +90,7 @@ distance = data.get('distance', 0)  # 0 n'a pas de sens métier
 
 # ✅ OBLIGATOIRE
 # Utiliser require_key ou require_present
-from shared.validation import require_key, require_present
+from shared.data_validation import require_key, require_present
 
 value = require_key(config, 'key')  # Lève KeyError si absent
 value = require_present(raw_value, 'value')  # Lève ValueError si None
@@ -126,7 +126,7 @@ def process_unit(unit):
         raise ValueError(f"Unit {unit.get('id')} has invalid HP_CUR: {hp}")
 
 # OU utiliser require_key
-from shared.validation import require_key
+from shared.data_validation import require_key
 hp = require_key(unit, 'HP_CUR')
 ```
 
@@ -259,6 +259,6 @@ Avant de valider un changement, vérifier :
 ## 🔗 RÉFÉRENCES
 
 - **combat_utils.py** : Fonctions de normalisation de coordonnées
-- **shared/validation.py** : `require_key`, `require_present` pour validation stricte
+- **shared/data_validation.py** : `require_key`, `require_present` pour validation stricte
 - **engine/phase_handlers/shared_utils.py** : `update_units_cache_hp`, `is_unit_alive`, `units_cache`
 - **AI_TURN.md** : Règles de conformité du jeu
