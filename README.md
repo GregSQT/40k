@@ -237,12 +237,6 @@ w40k-tactics/
 - Reward system optimization for training
 - Phase transition debugging and validation
 
-### Known Issues
-- Movement preview inconsistencies between valid destinations and clickable hexes
-- HP bar visual glitches during damage preview
-- Phase transition edge cases in specific scenarios
-- Reward configuration file resolution for training
-
 ## 📚 Documentation
 
 The project includes comprehensive documentation covering:
