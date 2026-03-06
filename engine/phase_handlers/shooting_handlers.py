@@ -4941,9 +4941,22 @@ def _handle_unit_switch_with_context(game_state: Dict[str, Any], current_unit_id
 
 def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
     """
-    Check if unit has shot with ANY weapon (any weapon.shot = 1)
-    Returns True if at least one weapon has shot flag set to 1
+    Check if unit has already fired at least one ranged attack in current activation.
+
+    Strict semantics:
+    - True as soon as one shot is fired in current weapon context
+      (`_rapid_fire_shots_fired > 0`), even if current weapon is not exhausted yet.
+    - True if any weapon is marked exhausted (`weapon["shot"] == 1`).
     """
+    if "_rapid_fire_shots_fired" in unit:
+        shots_fired_current_context = require_key(unit, "_rapid_fire_shots_fired")
+        if not isinstance(shots_fired_current_context, int):
+            raise TypeError(
+                f"unit['_rapid_fire_shots_fired'] must be int, "
+                f"got {type(shots_fired_current_context).__name__}"
+            )
+        if shots_fired_current_context > 0:
+            return True
     rng_weapons = require_key(unit, "RNG_WEAPONS")
     for weapon in rng_weapons:
         if require_key(weapon, "shot") == 1:

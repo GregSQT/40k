@@ -150,7 +150,7 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
 
             # Parse SHOOT actions
             shoot_match = re.search(
-                r'\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+), (\d+)\) (SHOT at Unit|WAIT)',
+                r'\[([^\]]+)\] (T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),\s*(\d+)\) (SHOT(?: \[[^\]]+\])*\s+Unit|WAIT)',
                 line
             )
             if shoot_match:
@@ -162,11 +162,11 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
                 shooter_row = int(shoot_match.group(6))
                 action_type = shoot_match.group(7)
 
-                if action_type == "SHOT at Unit":
+                if action_type.startswith("SHOT"):
                     # Extract target and damage
-                    target_match = re.search(r'SHOT at Unit (\d+)', line)
+                    target_match = re.search(r'SHOT(?: \[[^\]]+\])*\s+Unit (\d+)', line)
                     damage_match = re.search(r'Dmg:(\d+)HP', line)
-                    hit_match = re.search(r'Hit:(\d+)\+:(\d+)\((HIT|MISS)\)', line)
+                    hit_match = re.search(r'Hit\s+(\d+)\((\d+)\+\)', line)
 
                     if target_match:
                         target_id = int(target_match.group(1))
@@ -185,7 +185,9 @@ def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
 
                         # Add hit result if available
                         if hit_match:
-                            action['hit_result'] = hit_match.group(3)
+                            action['hit_result'] = 'HIT'
+                            if "Wound " not in line:
+                                action['hit_result'] = 'MISS'
 
                         current_episode['actions'].append(action)
 

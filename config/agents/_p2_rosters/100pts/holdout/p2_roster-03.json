@@ -1,0 +1,11 @@
+{
+  "roster_id": "p2_roster-03",
+  "source_scenario": "Infantry_Troop_RangedTroop_holdout_hard_bot-1",
+  "units": [
+    {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
+    {"id": 102, "unit_type": "AssaultTerminator", "player": 2, "col": 12, "row": 18},
+    {"id": 103, "unit_type": "AssaultTerminator", "player": 2, "col": 7, "row": 18},
+    {"id": 104, "unit_type": "AssaultIntercessorSergeant", "player": 2, "col": 3, "row": 14},
+    {"id": 105, "unit_type": "AssaultIntercessor", "player": 2, "col": 11, "row": 18}
+  ]
+}

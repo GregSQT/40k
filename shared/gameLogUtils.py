@@ -4,13 +4,23 @@ shared/gameLogUtils.py
 Shared game log message formatting functions ONLY
 Extracted from PvP useGameLog.ts - preserves exact format
 
-These functions provide identical message formatting for both PvP and training systems.
-DO NOT modify these - they must match the PvP reference exactly.
+These functions produce SHORT messages (no coords, no dice details).
+Used by: gameLogStructure.py (build_entry_message), game_replay_logger.py.
+
+Example SHORT format (this module):
+  format_shooting_message(1, 11)  -> "Unit 1 SHOT Unit 11"
+  format_combat_message(1, 11)     -> "Unit 1 FOUGHT Unit 11"
+
+Example DETAILED format (engine action_logs / step.log, NOT this module):
+  "Unit 1(9,6) SHOT Unit 11(11,6) with [Heavy Bolter] - Hit 4(3+) - Wound 5(5+) - Save 4(5+) - Dmg:1HP"
+  "Unit 1(9,6) FOUGHT Unit 11(11,6) with [Astartes Chainsword] - Hit 4(3+) - Wound 5(5+) - Save 4(5+) - Dmg:1HP"
+
+DO NOT modify the short format - it must match the PvP reference exactly.
 """
 
 def format_shooting_message(shooter_id: int, target_id: int) -> str:
-    """Format shooting message exactly like PvP"""
-    return f"Unit {shooter_id} SHOT at Unit {target_id}"
+    """Format shooting message exactly like PvP (short: no coords, no weapon/dice)."""
+    return f"Unit {shooter_id} SHOT Unit {target_id}"
 
 def format_move_message(unit_id: int, start_col: int, start_row: int, end_col: int, end_row: int) -> str:
     """Format move message exactly like PvP"""
@@ -23,8 +33,8 @@ def format_no_move_message(unit_id: int) -> str:
     return f"Unit {unit_id} NO MOVE"
 
 def format_combat_message(attacker_id: int, target_id: int) -> str:
-    """Format combat message exactly like PvP"""
-    return f"Unit {attacker_id} FOUGHT unit {target_id}"
+    """Format combat message exactly like PvP (short: no coords, no weapon/dice)."""
+    return f"Unit {attacker_id} FOUGHT Unit {target_id}"
 
 def format_charge_message(unit_name: str, unit_id: int, target_name: str, target_id: int, 
                          start_col: int, start_row: int, end_col: int, end_row: int) -> str:

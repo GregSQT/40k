@@ -109,7 +109,9 @@ def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: W4
     is_ai_enabled = current_mode_code in {"pve", "pve_test"}
     player_types = _build_player_types(is_ai_enabled)
     engine_instance.game_state["player_types"] = player_types
+    engine_instance.game_state["current_mode_code"] = current_mode_code
     serializable_state["player_types"] = player_types
+    serializable_state["current_mode_code"] = current_mode_code
 
 
 def _get_auth_db_connection() -> sqlite3.Connection:

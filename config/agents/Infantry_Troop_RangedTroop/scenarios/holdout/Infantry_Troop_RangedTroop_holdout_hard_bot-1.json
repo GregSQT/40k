@@ -5,11 +5,11 @@
       {"id": 1, "unit_type": "SternguardVeteranBoltRifle", "player": 1, "col": 12, "row": 2},
       {"id": 2, "unit_type": "TyranidWarriorRanged", "player": 1, "col": 7, "row": 6},
       {"id": 3, "unit_type": "TyranidWarriorRanged", "player": 1, "col": 3, "row": 10},
-      {"id": 6, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
-      {"id": 7, "unit_type": "AssaultTerminator", "player": 2, "col": 12, "row": 18},
-      {"id": 8, "unit_type": "AssaultTerminator", "player": 2, "col": 7, "row": 18},
-      {"id": 9, "unit_type": "AssaultIntercessorSergeant", "player": 2, "col": 3, "row": 14},
-      {"id": 10, "unit_type": "AssaultIntercessor", "player": 2, "col": 11, "row": 18}
+      {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
+      {"id": 102, "unit_type": "AssaultTerminator", "player": 2, "col": 12, "row": 18},
+      {"id": 103, "unit_type": "AssaultTerminator", "player": 2, "col": 7, "row": 18},
+      {"id": 104, "unit_type": "AssaultIntercessorSergeant", "player": 2, "col": 3, "row": 14},
+      {"id": 105, "unit_type": "AssaultIntercessor", "player": 2, "col": 11, "row": 18}
       
     ],
     "wall_hexes": [

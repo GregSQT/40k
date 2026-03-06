@@ -1,0 +1,11 @@
+{
+  "roster_id": "p2_roster-05",
+  "source_scenario": "Infantry_Troop_RangedTroop_holdout_hard_bot-3",
+  "units": [
+    {"id": 101, "unit_type": "TerminatorAssaultCannon", "player": 2, "col": 18, "row": 12},
+    {"id": 102, "unit_type": "HeavyIntercessor", "player": 2, "col": 7, "row": 14},
+    {"id": 103, "unit_type": "IntercessorGrenadeLauncher", "player": 2, "col": 14, "row": 16},
+    {"id": 104, "unit_type": "Intercessor", "player": 2, "col": 1, "row": 13},
+    {"id": 105, "unit_type": "Intercessor", "player": 2, "col": 10, "row": 5}
+  ]
+}

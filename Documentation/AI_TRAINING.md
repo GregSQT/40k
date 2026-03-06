@@ -94,6 +94,9 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 - **Logs**: `./tensorboard/` (TensorBoard data)
 - **Step Logs**: `step.log` (généré avec `--step` ; utilisé par l’analyzer et le replay viewer)
 - **Agent inheritance metadata**: `inherits_from` dans `config/agents/<agent_name>/<agent_name>_training_config.json`
+- **Shared P2 rosters (100 pts)**:
+  - `config/agents/_p2_rosters/100pts/training/p2_roster-XX.json`
+  - `config/agents/_p2_rosters/100pts/holdout/p2_roster-XX.json`
 
 ---
 

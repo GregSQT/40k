@@ -289,6 +289,12 @@ class W40KEngine(gym.Env):
         # CRITICAL FIX: Update config with actual PvE mode value
         self.config["pve_mode"] = self.is_pve_mode
         self._ai_model = None
+        if not isinstance(self.is_pve_mode, bool):
+            raise TypeError(f"is_pve_mode must be bool, got {type(self.is_pve_mode).__name__}")
+        player_types = {
+            "1": "human",
+            "2": "ai" if self.is_pve_mode else "human",
+        }
 
         board_cols = self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"]
         board_rows = self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"]
@@ -319,6 +325,7 @@ class W40KEngine(gym.Env):
             # Core game state
             "units": [],
             "current_player": 1,
+            "player_types": player_types,
             "gym_training_mode": self.config["gym_training_mode"],  # Embed for handler access
             "debug_mode": self.config.get("debug_mode", False),  # Embed for handler access
             "training_config_name": training_config_name if training_config_name else "",  # NEW: For debug mode detection
@@ -543,10 +550,17 @@ class W40KEngine(gym.Env):
         
         # Increment episode number (original logic - works fine for everything except debug.log)
         self.episode_number += 1
+        if not isinstance(self.is_pve_mode, bool):
+            raise TypeError(f"is_pve_mode must be bool, got {type(self.is_pve_mode).__name__}")
+        player_types = {
+            "1": "human",
+            "2": "ai" if self.is_pve_mode else "human",
+        }
         
         # Reset game state
         self.game_state.update({
             "current_player": 1,
+            "player_types": player_types,
             "phase": "command",
             "turn": 1,
             "episode_steps": 0,

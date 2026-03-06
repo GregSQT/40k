@@ -648,15 +648,15 @@ For ranged attacks, logs are intentionally deterministic and stage-based:
 - If **Hit fails**: only `Hit` is logged.
 - If **Wound fails**: `Hit` + `Wound`.
 - If **Save succeeds**: `Hit` + `Wound` + `Save` (no damage).
-- If **Save fails**: `Hit` + `Wound` + `Save` + `Dmg`.
-- If **DEVASTATING_WOUNDS** applies (critical wound): `Save:SKIPPED [DEVASTATING WOUNDS]`.
+- If **Save fails**: `Hit` + `Wound` + `Save` + `Dmg:XHP`.
+- If **DEVASTATING_WOUNDS** applies (critical wound): `Save [DEVASTATING WOUNDS]` + `Dmg:XHP`.
 
 Canonical examples:
 
 ```text
-Unit 15(9,6) SHOT [RAPID FIRE:1] at Unit 18(11,6) with [Bolt Pistol] - Hit:3+:4(HIT) Wound:4+:5(WOUND) Save:3+:2(FAIL) Dmg:1HP
-Unit 2(23,10) SHOT at Unit 7(12,2) with [Sternguard Bolt Rifle] - Hit:3+:5(HIT) Wound:4+:6(SUCCESS) Save:SKIPPED [DEVASTATING WOUNDS] Dmg:2HP
-Unit 2(23,10) SHOT at Unit 7(12,2) with [Heavy Bolter] - Hit:3+->2+:4(HIT) [HEAVY] Wound:3+:5(SUCCESS) Save:3+:2(FAIL) Dmg:2HP
+Unit 15(9,6) SHOT [RAPID FIRE:1] Unit 18(11,6) with [Bolt Pistol] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP
+Unit 2(23,10) SHOT Unit 7(12,2) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 6(4+) - Save [DEVASTATING WOUNDS] - Dmg:2HP
+Unit 2(23,10) SHOT Unit 7(12,2) with [Heavy Bolter] - Hit 4(3+->2+) [HEAVY] - Wound 5(3+) - Save 2(3+) - Dmg:2HP
 ```
 
 HAZARDOUS contract:
@@ -683,12 +683,12 @@ It tracks rule-choice compliance:
 Weapon-rule-specific checks include:
 
 - **RAPID FIRE coherence**:
-  - marker/value consistency (`[RAPID FIRE:n]` must match weapon config),
+  - marker/value consistency (`[RAPID FIRE:n]` on bonus shots must match weapon config),
   - bonus shot window consistency (marker only on bonus shots),
   - shot count cap (`rng_nb + rapid_fire_bonus`).
 - **DEVASTATING WOUNDS coherence**:
-  - only counted when `[DEVASTATING WOUNDS]` flag is present,
-  - `correct` requires wound roll `6` and `Save:SKIPPED`,
+  - only counted when `Save [DEVASTATING WOUNDS]` is present in the log,
+  - `correct` requires wound roll `6` and no save roll (save skipped),
   - `incorrect` captures flagged non-critical or flagged critical-with-save cases.
 
 ### 5) Log Naming and Pattern Guidelines
@@ -699,7 +699,7 @@ When adding new rule-driven effects:
 - Keep event message deterministic and parseable (stable wording).
 - For side-effect actions (reactive move, charge impact, rule choice), append structured entries to `action_logs` and flush to `step.log`.
 - Prefer one canonical phrasing per action type to keep replay/analyzer parsing robust.
-- For parameterized weapon rules in display/logs, include the resolved value (`[RAPID FIRE:1]`, not placeholder `X`).
+- For weapon rules in display/logs, use the canonical tags (`[RAPID FIRE:n]`, `[HEAVY]`, `[DEVASTATING WOUNDS]`, etc.).
 - Keep internal identifiers unchanged (`RAPID_FIRE`, `DEVASTATING_WOUNDS`) and normalize only display/parsing text.
 
 Recommended pattern:

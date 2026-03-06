@@ -222,39 +222,32 @@ attack_sequence(Arg)
 ├── Hit roll → hit_roll >= selected_weapon.ATK
 │   ├── MISS
 │   │   ├── Arg = RNG ?
-│   │   │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget unit ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) : MISSED !"
+│   │   │   └── ATTACK_LOG = "Unit <activeUnit ID>(col,row) SHOT Unit <selectedTarget ID>(col,row) with [<weapon_name>] - Hit <hit roll>(<target hit roll>+)"
 │   │   └── Arg = CC ?
-│   │       └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) : MISSED !"
+│   │       └── ATTACK_LOG = "Unit <activeUnit ID>(col,row) FOUGHT Unit <selectedTarget ID>(col,row) with [<weapon_name>] - Hit <hit roll>(<target hit roll>+)"
 │   └── HIT → hits++ → Continue to wound roll
 │       └── Wound roll → wound_roll >= calculate_wound_target()
 │           ├── FAIL
 │           │   ├── Arg = RNG ?
-│           │   │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) : FAILED !"
+│           │   │   └── ATTACK_LOG = "Unit <activeUnit ID>(col,row) SHOT Unit <selectedTarget ID>(col,row) with [<weapon_name>] - Hit <hit roll>(<target hit roll>+) - Wound <wound roll>(<target wound roll>+)"
 │           │   └── Arg = CC ?
-│           │       └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) : FAILED !"
+│           │       └── ATTACK_LOG = "Unit <activeUnit ID>(col,row) FOUGHT Unit <selectedTarget ID>(col,row) with [<weapon_name>] - Hit <hit roll>(<target hit roll>+) - Wound <wound roll>(<target wound roll>+)"
 │           └── WOUND → wounds++ → Continue to save roll
 │               ├── Save roll → save_roll >= calculate_save_target()
 │               │   ├── SAVE
 │               │   │   ├── Arg = RNG ?
-│               │   │   │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) : SAVED !"
+│               │   │   │   └── ATTACK_LOG = "Unit <activeUnit ID>(col,row) SHOT Unit <selectedTarget ID>(col,row) with [<weapon_name>] - Hit <hit roll>(<target hit roll>+) - Wound <wound roll>(<target wound roll>+) - Save <save roll>(<target save roll>+)"
 │               │   │   └── Arg = CC ?
-│               │   │       └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) : SAVED !"
+│               │   │       └── ATTACK_LOG = "Unit <activeUnit ID>(col,row) FOUGHT Unit <selectedTarget ID>(col,row) with [<weapon_name>] - Hit <hit roll>(<target hit roll>+) - Wound <wound roll>(<target wound roll>+) - Save <save roll>(<target save roll>+)"
 │               │   └── FAIL → failed_saves++ → Continue to damage
 │               └── Damage application:
 │                   ├── damage_dealt = selected_weapon.DMG
 │                   ├── total_damage += damage_dealt
 │                   ├── ⚡ IMMEDIATE UPDATE: selected_target.HP_CUR -= damage_dealt
+│                   ├── ATTACK_LOG = "Unit <activeUnit ID>(col,row) SHOT Unit <selectedTarget ID>(col,row) with [<weapon_name>] - Hit <hit roll>(<target hit roll>+) - Wound <wound roll>(<target wound roll>+) - Save <save roll>(<target save roll>+) - Dmg:<DMG>HP" (Arg = RNG) or "Unit ... FOUGHT Unit ... - Hit ... - Wound ... - Save ... - Dmg:<DMG>HP" (Arg = CC)
 │                   └── selected_target.HP_CUR <= 0 ?
-│                       ├── NO
-│                           ├── Arg = RNG ?
-│                           │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> DAMAGE DELT !"
-│                           └── Arg = CC ?
-│                               └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> DAMAGE DELT !"
-│                       └── YES → current_target.alive = False
-│                           ├── Arg = RNG ?
-│                           │   └── ATTACK_LOG = "Unit <activeUnit ID> SHOT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> delt : Unit <selectedTarget ID> DIED !"
-│                           └── Arg = CC ?
-│                               └── ATTACK_LOG = "Unit <activeUnit ID> FOUGHT Unit <selectedTarget ID> with <weapon_name> : Hit <hit roll>(<target hit roll>) - Wound <wond roll>(<target wound roll>) - Save <save roll>(<target save roll>) - <DMG> delt : Unit <selectedTarget ID> DIED !"
+│                       ├── NO → (attack log only)
+│                       └── YES → current_target.alive = False; separate death log entry: "Unit <selectedTarget ID> was DESTROYED"
 └── Return: TOTAL_ATTACK_LOG
 ```
 

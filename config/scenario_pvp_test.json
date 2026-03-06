@@ -1,8 +1,8 @@
 {
   "primary_objectives": ["objectives_control"],
   "units": [
-    {"id": 1, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 6, "row": 12},
-    {"id": 2, "unit_type": "AssaultIntercessorJumpPack", "player": 1, "col": 10, "row": 6},
+    {"id": 1, "unit_type": "AssaultIntercessor", "player": 1, "col": 6, "row": 12},
+    {"id": 2, "unit_type": "GreyHunter", "player": 1, "col": 10, "row": 6},
     {"id": 11, "unit_type": "TyranidWarriorMelee", "player": 2, "col": 4, "row": 12},
     {"id": 12, "unit_type": "IntercessorTest", "player": 2, "col": 9, "row": 4}
     

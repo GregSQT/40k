@@ -1502,18 +1502,18 @@ def parse_step_log(filepath: str) -> Dict:
                 # by treating dead units as alive.
                 if re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-                    r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
+                    r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+(\d+)',
                     action_desc,
                     re.IGNORECASE
                 ):
                     target_match = re.search(
                         r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-                        r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+(\d+)',
+                        r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+(\d+)',
                         action_desc,
                         re.IGNORECASE
                     )
                     if target_match:
-                        target_id = target_match.group(1)
+                        target_id = target_match.group(2)
                         damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
                         if damage_match:
                             damage = int(damage_match.group(1))
@@ -1993,7 +1993,7 @@ def parse_step_log(filepath: str) -> Dict:
                 # Determine action type and validate rules
                 is_shoot_action = re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-                    r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
+                    r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+\d+',
                     action_desc,
                     re.IGNORECASE
                 ) is not None
@@ -2003,7 +2003,7 @@ def parse_step_log(filepath: str) -> Dict:
                     last_shoot_target_id = None
                 if re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-                    r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit\s+\d+',
+                    r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+\d+',
                     action_desc,
                     re.IGNORECASE
                 ):
@@ -2013,7 +2013,7 @@ def parse_step_log(filepath: str) -> Dict:
                         shooter_match = re.search(r'Unit (\d+)\s*\((\d+),\s*(\d+)\)', action_desc)
                         target_match = re.search(
                             r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-                            r'(?:\s+\[RAPID(?: |_)?FIRE:[^\]]+\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
+                            r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
                             action_desc,
                             re.IGNORECASE
                         )
@@ -2022,7 +2022,7 @@ def parse_step_log(filepath: str) -> Dict:
                             shooter_id = shooter_match.group(1)
                             shooter_col = int(shooter_match.group(2))
                             shooter_row = int(shooter_match.group(3))
-                            target_id = target_match.group(1)
+                            target_id = target_match.group(2)
                             units_shot.add(shooter_id)
                             stats['shoot_invalid'][player]['total'] += 1
                             _track_action_phase_accuracy(stats, "shoot", phase, current_episode_num, line)
@@ -2030,9 +2030,9 @@ def parse_step_log(filepath: str) -> Dict:
                             # CRITICAL: Update position cache with shooter position from log (source of truth)
                             _position_cache_set(unit_positions, shooter_id, shooter_col, shooter_row)
                             
-                            if target_match.group(2) and target_match.group(3):
-                                target_col = int(target_match.group(2))
-                                target_row = int(target_match.group(3))
+                            if target_match.group(3) and target_match.group(4):
+                                target_col = int(target_match.group(3))
+                                target_row = int(target_match.group(4))
                                 target_pos = (target_col, target_row)
                                 # CRITICAL: Update target position in cache from log (avoids stale positions)
                                 if target_id in unit_hp and require_key(unit_hp, target_id) > 0:
@@ -2297,14 +2297,14 @@ def parse_step_log(filepath: str) -> Dict:
 
                             # DEVASTATING_WOUNDS checks:
                             # Apply ONLY when log explicitly declares DW flag.
-                            # correct   = flag + wound roll 6 + no save performed (Save:SKIPPED)
+                            # correct   = flag + wound roll 6 + no save performed (Save [DEVASTATING WOUNDS])
                             # incorrect = flag + (wound roll < 6 OR save performed despite wound roll 6)
                             dw_flag_match = re.search(r'\[DEVASTATING WOUNDS\]', action_desc, re.IGNORECASE)
-                            wound_roll_match = re.search(r'Wound:(\d+)\+:(\d+)', action_desc, re.IGNORECASE)
-                            save_attempt_match = re.search(r'Save:(\d+)\+:(\d+)', action_desc, re.IGNORECASE)
-                            save_skipped_dw_match = re.search(r'Save:SKIPPED(?:\([^)]+\))?', action_desc, re.IGNORECASE)
+                            wound_roll_match = re.search(r'Wound\s+(\d+)\((\d+)\+\)', action_desc, re.IGNORECASE)
+                            save_attempt_match = re.search(r'Save\s+(\d+)\((\d+)\+\)', action_desc, re.IGNORECASE)
+                            save_skipped_dw_match = re.search(r'Save\s+\[DEVASTATING WOUNDS\]', action_desc, re.IGNORECASE)
                             if dw_flag_match and wound_roll_match:
-                                wound_roll_value = int(wound_roll_match.group(2))
+                                wound_roll_value = int(wound_roll_match.group(1))
                                 shooter_player_for_dw = require_key(unit_player, shooter_id)
                                 if wound_roll_value == 6 and save_skipped_dw_match:
                                     stats['devastating_wounds_correct'][shooter_player_for_dw] += 1
@@ -3896,7 +3896,7 @@ def parse_step_log(filepath: str) -> Dict:
                                     'error': f"Move action missing 'from/to' format: {action_desc[:100]}"
                                 })
 
-                elif "ATTACKED Unit" in action_desc or "FOUGHT Unit" in action_desc:
+                elif "FOUGHT Unit" in action_desc:
                         action_type = 'fight'
                         units_fought.add(unit_id) if 'unit_id' in locals() else None
                         
@@ -4509,16 +4509,23 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         durations_list = require_key(stats, 'episode_durations')
         # Create mapping from episode_num to duration for quick lookup
         durations_dict = {ep_num: duration for ep_num, duration in durations_list}
+        shared_episodes = [ep_num for ep_num, _ in lengths_list if ep_num in durations_dict]
+        if not shared_episodes:
+            raise ValueError(
+                "No shared episodes between episode_lengths and episode_durations; "
+                "cannot compute action min/max duration pairs."
+            )
+        comparable_lengths = [(ep_num, action_count) for ep_num, action_count in lengths_list if ep_num in durations_dict]
         
         # Find min and max episodes (lengths is list of (episode_num, action_count) tuples)
-        min_episode_num, min_length = min(lengths_list, key=lambda x: x[1])
-        max_episode_num, max_length = max(lengths_list, key=lambda x: x[1])
+        min_episode_num, min_length = min(comparable_lengths, key=lambda x: x[1])
+        max_episode_num, max_length = max(comparable_lengths, key=lambda x: x[1])
         max_length_episode = max_episode_num
         avg_length = sum(action_count for _, action_count in lengths_list) / len(lengths_list)
         
         # Get durations for min/max episodes
-        min_duration = require_key(durations_dict, min_episode_num)
-        max_duration = require_key(durations_dict, max_episode_num)
+        min_duration = durations_dict[min_episode_num]
+        max_duration = durations_dict[max_episode_num]
         
         min_duration_str = f"{min_duration:.2f}s"
         max_duration_str = f"{max_duration:.2f}s"
@@ -4541,16 +4548,23 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         lengths_list = require_key(stats, 'episode_lengths')
         # Create mapping from episode_num to action_count for quick lookup
         lengths_dict = {ep_num: action_count for ep_num, action_count in lengths_list}
+        shared_episodes = [ep_num for ep_num, _ in durations_list if ep_num in lengths_dict]
+        if not shared_episodes:
+            raise ValueError(
+                "No shared episodes between episode_durations and episode_lengths; "
+                "cannot compute duration min/max action pairs."
+            )
+        comparable_durations = [(ep_num, duration) for ep_num, duration in durations_list if ep_num in lengths_dict]
         
         # Find min and max episodes (durations is list of (episode_num, duration) tuples)
-        min_episode_num, min_duration = min(durations_list, key=lambda x: x[1])
-        max_episode_num, max_duration = max(durations_list, key=lambda x: x[1])
+        min_episode_num, min_duration = min(comparable_durations, key=lambda x: x[1])
+        max_episode_num, max_duration = max(comparable_durations, key=lambda x: x[1])
         max_duration_episode = max_episode_num
         avg_duration = sum(duration for _, duration in durations_list) / len(durations_list)
         
         # Get action counts for min/max episodes
-        min_actions = require_key(lengths_dict, min_episode_num)
-        max_actions = require_key(lengths_dict, max_episode_num)
+        min_actions = lengths_dict[min_episode_num]
+        max_actions = lengths_dict[max_episode_num]
         
         min_actions_str = str(min_actions)
         max_actions_str = str(max_actions)

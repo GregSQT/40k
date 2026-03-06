@@ -356,15 +356,11 @@ def parse_advances_from_step(step_log: str, episode_map: Dict[int, int]) -> List
     return advances
 
 def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Dict]:
-    """Parse SHOOT and FIGHT attacks from step.log with episode tracking
-    Now supports both old format (without E{episode}) and new format (with E{episode})
-    """
+    """Parse SHOOT and FIGHT attacks from step.log with episode tracking."""
     attacks = []
     
-    # SHOOT attacks with episode (new format)
-    shoot_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at Unit (\d+)\((\d+),(\d+)\)'
-    # SHOOT attacks without episode (old format)
-    shoot_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT at Unit (\d+)\((\d+),(\d+)\)'
+    shoot_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT(?: \[[^\]]+\])*\s+Unit (\d+)\((\d+),(\d+)\)'
+    shoot_pattern_without_ep = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) SHOT(?: \[[^\]]+\])*\s+Unit (\d+)\((\d+),(\d+)\)'
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)
         match = re.search(shoot_pattern_with_ep, line)
@@ -380,8 +376,7 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                 'line': line
             })
         else:
-            # Try without episode (old format)
-            match = re.search(shoot_pattern_old, line)
+            match = re.search(shoot_pattern_without_ep, line)
             if match:
                 episode = _get_episode_with_context(line_num, episode_map)
                 timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()
@@ -395,10 +390,8 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                     'line': line
                 })
     
-    # FIGHT attacks with episode (new format)
-    fight_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED Unit (\d+)\((\d+),(\d+)\)'
-    # FIGHT attacks without episode (old format)
-    fight_pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) ATTACKED Unit (\d+)\((\d+),(\d+)\)'
+    fight_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT Unit (\d+)\((\d+),(\d+)\)'
+    fight_pattern_without_ep = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT Unit (\d+)\((\d+),(\d+)\)'
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)
         match = re.search(fight_pattern_with_ep, line)
@@ -414,8 +407,7 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                 'line': line
             })
         else:
-            # Try without episode (old format)
-            match = re.search(fight_pattern_old, line)
+            match = re.search(fight_pattern_without_ep, line)
             if match:
                 episode = _get_episode_with_context(line_num, episode_map)
                 timestamp, turn, player, attacker, a_col, a_row, target, t_col, t_row = match.groups()

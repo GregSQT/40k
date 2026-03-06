@@ -60,6 +60,27 @@ def _is_ai_controlled_fight_unit(game_state: Dict[str, Any], unit: Dict[str, Any
     return player_types[unit_player] == "ai"
 
 
+def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:
+    """
+    Return whether fight-phase auto execution is allowed for the current mode.
+
+    PvP modes are strictly manual: no auto-activation, no auto-targeting,
+    no auto-chain execution in fight phase.
+    """
+    mode_code = game_state.get("current_mode_code")
+    if mode_code is None:
+        return True
+    if not isinstance(mode_code, str):
+        raise TypeError(
+            f"game_state['current_mode_code'] must be str when present, got {type(mode_code).__name__}"
+        )
+    if mode_code in {"pvp", "pvp_test"}:
+        return False
+    if mode_code in {"pve", "pve_test"}:
+        return True
+    raise ValueError(f"Unsupported current_mode_code for fight auto execution: {mode_code}")
+
+
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
     """Return True if unit coordinates are inside any objective hex."""
     unit_col, unit_row = require_unit_position(unit, game_state)
@@ -646,6 +667,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 unit = get_unit_by_id(game_state, unit_id)
                 if not unit:
                     return False, {"error": "unit_not_found", "unitId": unit_id, "action": action_type}
+                if not _is_ai_controlled_fight_unit(game_state, unit):
+                    return False, {
+                        "error": "unit_id_required",
+                        "action": action_type,
+                        "message": "unitId is required for human-controlled fight activation"
+                    }
                 # Remove dead units from pool
                 for dead_unit_id in set(current_pool) - set(alive_units_in_pool):
                     _remove_dead_unit_from_fight_pools(game_state, dead_unit_id)
@@ -671,9 +698,15 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     # Check actor controller type from strict game_state player mapping.
     is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
 
-    # AI-controlled unit: auto-activate unit if not already active
+    # Auto-activate unit if not already active for AI or gym-training flows.
+    is_gym_training = require_key(config, "gym_training_mode")
+    if not isinstance(is_gym_training, bool):
+        raise TypeError(
+            f"config['gym_training_mode'] must be bool, got {type(is_gym_training).__name__}"
+        )
     active_fight_unit = game_state.get("active_fight_unit")
-    if is_ai_controlled and not active_fight_unit and action_type == "fight":
+    auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
+    if (is_ai_controlled or is_gym_training) and auto_execution_allowed and not active_fight_unit and action_type == "fight":
         activation_result = _handle_fight_unit_activation(game_state, unit, config)
         if not activation_result[0]:
             return activation_result  # Activation failed
@@ -681,7 +714,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # This happens when unit has no valid targets and was auto-skipped
         if activation_result[1].get("activation_ended") or activation_result[1].get("phase_complete"):
             return activation_result
-        # Continue with fight action - targets should now be populated
+        # Root-cause fix: if auto-activation already executed attacks, do NOT
+        # continue in this same call, otherwise the same semantic action can
+        # trigger an additional attack sequence.
+        if activation_result[1].get("attack_executed") or activation_result[1].get("all_attack_results"):
+            return activation_result
+        # Otherwise continue with fight action - targets should now be populated
 
     # NOTE: AI_TURN.md line 667 specifies invalid actions should call end_activation (ERROR, 0, PASS, FIGHT)
     # We follow this rule strictly - invalid actions are not converted to valid actions
@@ -694,15 +732,21 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # Fight action with target selection
         # Auto-select target if not provided (for all modes: gym training, PvE AI, bots, etc.)
         if "targetId" not in action:
-            valid_targets = game_state["valid_fight_targets"] if "valid_fight_targets" in game_state else []
+            # Always rebuild for the current unit to avoid stale target pools
+            # from a previous active unit/subphase.
+            valid_targets = _fight_build_valid_target_pool(game_state, unit)
+            game_state["valid_fight_targets"] = valid_targets
             if valid_targets:
-                if is_ai_controlled:
+                if is_ai_controlled and auto_execution_allowed:
                     # Use AI target selection for AI-controlled players only.
                     target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets)
                     if target_id:
                         action["targetId"] = target_id
                     else:
                         raise ValueError(f"AI target selection failed for unit {unit_id}")
+                elif is_gym_training and auto_execution_allowed:
+                    first_target = valid_targets[0]
+                    action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
                 else:
                     return False, {
                         "error": "target_id_required",
@@ -735,9 +779,22 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 if valid_targets:
                     # Found targets - update game_state and continue with attack
                     game_state["valid_fight_targets"] = valid_targets
-                    # Auto-select first target (gym training, bots, etc.)
-                    first_target = valid_targets[0]
-                    action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+                    if is_ai_controlled and auto_execution_allowed:
+                        next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets)
+                        if next_target_id:
+                            action["targetId"] = next_target_id
+                        else:
+                            raise ValueError(f"AI target selection failed for unit {unit_id}")
+                    elif is_gym_training and auto_execution_allowed:
+                        first_target = valid_targets[0]
+                        action["targetId"] = first_target["id"] if isinstance(first_target, dict) else first_target
+                    else:
+                        return False, {
+                            "error": "target_id_required",
+                            "unitId": unit_id,
+                            "phase": "fight",
+                            "message": "targetId is required for human-controlled fight attack"
+                        }
                     # Continue to attack execution below (skip the PASS logic)
                 else:
                     # DEBUG: Check if unit is adjacent to enemy but not attacking
@@ -931,8 +988,10 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         nb_roll = resolve_dice_value(require_key(weapon, "NB"), "fight_nb_init")
         unit["ATTACK_LEFT"] = nb_roll
         unit["_current_fight_nb"] = nb_roll
+        unit["_fight_attacks_executed"] = 0
     else:
         unit["ATTACK_LEFT"] = 0  # Pas d'armes melee
+        unit["_fight_attacks_executed"] = 0
 
     # DEBUG: Log unit activation
     if "episode_number" in game_state and "turn" in game_state:
@@ -1034,7 +1093,8 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     # Check for AI auto-execution (similar to shooting phase)
     is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
     
-    if is_ai_controlled and valid_targets:
+    auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
+    if is_ai_controlled and auto_execution_allowed and valid_targets:
         # AUTO-FIGHT: AI-controlled player auto-selects target and executes attack.
         target_id = _ai_select_fight_target(game_state, unit_id, valid_targets)
         if target_id:
@@ -1239,6 +1299,72 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     if "fight_attack_results" not in game_state:
         game_state["fight_attack_results"] = []
 
+    if "_current_fight_nb" not in unit:
+        current_attack_left = require_key(unit, "ATTACK_LEFT")
+        if not isinstance(current_attack_left, int):
+            raise TypeError(
+                f"unit['ATTACK_LEFT'] must be int when initializing _current_fight_nb, "
+                f"got {type(current_attack_left).__name__}"
+            )
+        if current_attack_left <= 0:
+            raise ValueError(
+                f"Cannot initialize _current_fight_nb with non-positive ATTACK_LEFT: "
+                f"{current_attack_left} (unit_id={unit_id})"
+            )
+        unit["_current_fight_nb"] = current_attack_left
+
+    total_attacks_allowed = require_key(unit, "_current_fight_nb")
+    if not isinstance(total_attacks_allowed, int):
+        raise TypeError(
+            f"unit['_current_fight_nb'] must be int, got {type(total_attacks_allowed).__name__}"
+        )
+    if total_attacks_allowed <= 0:
+        raise ValueError(
+            f"unit['_current_fight_nb'] must be > 0, got {total_attacks_allowed} (unit_id={unit_id})"
+        )
+    if "_fight_attacks_executed" not in unit:
+        unit["_fight_attacks_executed"] = 0
+    attacks_executed = require_key(unit, "_fight_attacks_executed")
+    if not isinstance(attacks_executed, int):
+        raise TypeError(
+            f"unit['_fight_attacks_executed'] must be int, got {type(attacks_executed).__name__}"
+        )
+    if attacks_executed < 0:
+        raise ValueError(
+            f"unit['_fight_attacks_executed'] cannot be negative: {attacks_executed} (unit_id={unit_id})"
+        )
+    if attacks_executed >= total_attacks_allowed:
+        result = end_activation(
+            game_state, unit,
+            ACTION,        # Arg1: Log action
+            1,             # Arg2: +1 step
+            FIGHT,         # Arg3: FIGHT tracking
+            FIGHT,         # Arg4: Remove from fight pool
+            0              # Arg5: No error logging
+        )
+        game_state["active_fight_unit"] = None
+        game_state["valid_fight_targets"] = []
+        result["action"] = "combat"
+        result["phase"] = "fight"
+        result["unitId"] = unit_id
+        result["waiting_for_player"] = False
+        result["targetId"] = target_id
+        result["reason"] = "attack_cap_reached"
+        result["fight_subphase"] = require_key(game_state, "fight_subphase")
+        fight_attack_results = game_state["fight_attack_results"] if "fight_attack_results" in game_state else []
+        result["all_attack_results"] = list(fight_attack_results)
+        game_state["fight_attack_results"] = []
+        if result.get("phase_complete"):
+            phase_result = _fight_phase_complete(game_state)
+            result.update(phase_result)
+        else:
+            _toggle_fight_alternation(game_state)
+            _update_fight_subphase(game_state)
+        result["attack_cap_reached"] = True
+        result["attack_cap_total"] = total_attacks_allowed
+        result["attack_cap_executed"] = attacks_executed
+        return True, result
+
     # Execute attack sequence using selected weapon
     attack_result = _execute_fight_attack_sequence(game_state, unit, target_id)
 
@@ -1270,13 +1396,30 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
     from engine.utils.weapon_helpers import get_selected_melee_weapon
     selected_weapon = get_selected_melee_weapon(unit)
-    total_attacks = require_key(unit, "_current_fight_nb") if selected_weapon else 0
+    if selected_weapon:
+        if "_current_fight_nb" not in unit:
+            current_attack_left = require_key(unit, "ATTACK_LEFT")
+            if not isinstance(current_attack_left, int):
+                raise TypeError(
+                    f"unit['ATTACK_LEFT'] must be int when initializing _current_fight_nb, "
+                    f"got {type(current_attack_left).__name__}"
+                )
+            if current_attack_left <= 0:
+                raise ValueError(
+                    f"Cannot initialize _current_fight_nb with non-positive ATTACK_LEFT: "
+                    f"{current_attack_left} (unit_id={unit_id})"
+                )
+            unit["_current_fight_nb"] = current_attack_left
+        total_attacks = require_key(unit, "_current_fight_nb")
+    else:
+        total_attacks = 0
     
     attack_result["attackerId"] = unit_id
     attack_result["targetId"] = target_id
     attack_result["attack_number"] = total_attacks - unit["ATTACK_LEFT"]  # 1-indexed (before decrement)
     attack_result["total_attacks"] = total_attacks
     game_state["fight_attack_results"].append(attack_result)
+    unit["_fight_attacks_executed"] = attacks_executed + 1
     
     # DEBUG: Log accumulation in fight_attack_results
     if "episode_number" in game_state and "turn" in game_state:
@@ -1303,7 +1446,8 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             # Auto-continue only for AI-controlled players.
             is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
 
-            if is_ai_controlled:
+            auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
+            if is_ai_controlled and auto_execution_allowed:
                 # AI path: auto-continue attack loop until ATTACK_LEFT = 0 or no targets.
                 # Select next target (use AI selection logic)
                 next_target_id = _ai_select_fight_target(game_state, unit["id"], valid_targets_after)
@@ -1784,6 +1928,10 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name in attack_log
     weapon_name = weapon.get("display_name", "")
     weapon_prefix = f" with [{weapon_name}]" if weapon_name else ""
+    attacker_col, attacker_row = get_unit_coordinates(attacker)
+    target_col, target_row = target_coords
+    attacker_label = f"Unit {attacker_id}({attacker_col},{attacker_row})"
+    target_label = f"Unit {target_id}({target_col},{target_row})"
     
     # Hit roll -> hit_roll >= weapon.ATK
     initial_hit_roll = random.randint(1, 6)
@@ -1808,13 +1956,13 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
         # MISS case
         if can_reroll_hit_ones:
             attack_log = (
-                f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
-                f"Hit {initial_hit_roll}->{hit_roll}({hit_target}+){hit_log_suffix} : MISSED !"
+                f"{attacker_label} FOUGHT {target_label}{weapon_prefix} - "
+                f"Hit {initial_hit_roll}->{hit_roll}({hit_target}+){hit_log_suffix}"
             )
         else:
             attack_log = (
-                f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
-                f"Hit {hit_roll}({hit_target}+) : MISSED !"
+                f"{attacker_label} FOUGHT {target_label}{weapon_prefix} - "
+                f"Hit {hit_roll}({hit_target}+)"
             )
     else:
         # HIT -> Continue to wound roll
@@ -1866,9 +2014,9 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
             else:
                 wound_log_value = str(wound_roll)
             attack_log = (
-                f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                f"{attacker_label} FOUGHT {target_label}{weapon_prefix} - "
                 f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
-                f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} : FAILED !"
+                f"Wound {wound_log_value}({wound_target}+){wound_log_suffix}"
             )
         else:
             # WOUND -> Continue to save roll
@@ -1904,10 +2052,10 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                 else:
                     hit_log_value = str(hit_roll)
                 attack_log = (
-                    f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                    f"{attacker_label} FOUGHT {target_label}{weapon_prefix} - "
                     f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
                     f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} - "
-                    f"Save {save_log_value}({save_target}+){save_log_suffix} : SAVED !"
+                    f"Save {save_log_value}({save_target}+){save_log_suffix}"
                 )
             else:
                 # DAMAGE case - apply damage. HP_CUR single write path: update_units_cache_hp only (Phase 2: from cache)
@@ -1934,11 +2082,11 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                     else:
                         hit_log_value = str(hit_roll)
                     attack_log = (
-                        f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                        f"{attacker_label} FOUGHT {target_label}{weapon_prefix} - "
                         f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
                         f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} - "
                         f"Save {save_log_value}({save_target}+){save_log_suffix} - "
-                        f"{damage_dealt} dealt : Unit {target_id} DIED !"
+                        f"Dmg:{damage_dealt}HP"
                     )
                 else:
                     if can_reroll_hit_ones:
@@ -1946,11 +2094,11 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                     else:
                         hit_log_value = str(hit_roll)
                     attack_log = (
-                        f"Unit {attacker_id} ATTACKED Unit {target_id}{weapon_prefix} : "
+                        f"{attacker_label} FOUGHT {target_label}{weapon_prefix} - "
                         f"Hit {hit_log_value}({hit_target}+){hit_log_suffix} - "
                         f"Wound {wound_log_value}({wound_target}+){wound_log_suffix} - "
                         f"Save {save_log_value}({save_target}+){save_log_suffix} - "
-                        f"{damage_dealt} DAMAGE DEALT !"
+                        f"Dmg:{damage_dealt}HP"
                     )
 
     # AI_TURN.md COMPLIANCE: Log ALL attacks to action_logs (not just damage)

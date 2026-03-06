@@ -179,20 +179,6 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
     return entryMatch[1].replace(/\s?\[R:[+-]?\d+\.?\d*\]$/, "").trim();
   };
-  const parsePoolList = (value: string, label: string): number[] => {
-    if (value === "") {
-      return [];
-    }
-    const rawIds = value.split(",");
-    const parsedIds = rawIds.map((raw) => {
-      const parsed = parseInt(raw, 10);
-      if (Number.isNaN(parsed)) {
-        throw new Error(`Invalid ${label} pool id value in step.log: "${raw}"`);
-      }
-      return parsed;
-    });
-    return parsedIds;
-  };
   const episodes: ReplayEpisodeDuringParsing[] = [];
   let currentEpisode: ReplayEpisodeDuringParsing | null = null;
   const syncKnownUnitPosition = (
@@ -475,7 +461,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse SHOOT actions
     const shootMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[[^\]]+\])*(?: \[RAPID(?: |_)?FIRE:[^\]]+\])? at Unit)|WAIT|ADVANCED)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[[^\]]+\])*\s+Unit)|WAIT|ADVANCED)/
     );
     if (shootMatch) {
       // Removed verbose logging
@@ -532,14 +518,14 @@ export function parse_log_file_from_text(text: string): ReplayData {
           }
         }
       } else if (actionType.startsWith("SHOT")) {
-        const targetMatch = trimmed.match(/SHOT(?: \[[^\]]+\])*(?: \[RAPID(?: |_)?FIRE:[^\]]+\])? at Unit (\d+)\((\d+),(\d+)\)/);
+        const targetMatch = trimmed.match(/SHOT(?: \[[^\]]+\])*\s+Unit (\d+)\((\d+),(\d+)\)/);
         const damageMatch = trimmed.match(/Dmg:(\d+)HP/);
 
-        // Try to extract detailed combat rolls from format: Hit:3+:6(HIT) Wound:4+:5(SUCCESS) Save:3+:2(FAILED)
-        const hitMatch = trimmed.match(/Hit:(\d+)\+(?:->(\d+)\+)?:(\d+)/);
-        const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)/);
-        const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)/);
-        const saveSkippedMatch = trimmed.match(/Save:SKIPPED(?:\(([^)]+)\))?/);
+        // Parse detailed rolls from format: Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP
+        const hitMatch = trimmed.match(/Hit\s+(\d+)\((\d+)\+(?:->(\d+)\+)?\)/);
+        const woundMatch = trimmed.match(/Wound\s+(\d+)\((\d+)\+\)/);
+        const saveMatch = trimmed.match(/Save\s+(\d+)\((\d+)\+\)/);
+        const saveSkippedMatch = trimmed.match(/Save\s+\[DEVASTATING WOUNDS\]/);
         const rapidFireMatch = trimmed.match(/\[RAPID(?: |_)?FIRE:(\d+)\]/);
         const devastatingWoundsMatch = trimmed.match(/\[DEVASTATING WOUNDS\]/);
         const heavyMatch = trimmed.match(/\[HEAVY\]/);
@@ -574,27 +560,29 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
           // Add detailed rolls if available (format: Hit:3+:6 means target 3+, rolled 6)
           if (hitMatch) {
-            if (hitMatch[2]) {
-              action.hit_target_base = parseInt(hitMatch[1], 10);
-              action.hit_target = parseInt(hitMatch[2], 10);
-              action.hit_roll = parseInt(hitMatch[3], 10);
+            action.hit_roll = parseInt(hitMatch[1], 10);
+            if (hitMatch[3]) {
+              action.hit_target_base = parseInt(hitMatch[2], 10);
+              action.hit_target = parseInt(hitMatch[3], 10);
             } else {
-              action.hit_target = parseInt(hitMatch[1], 10);
-              action.hit_roll = parseInt(hitMatch[3], 10);
+              action.hit_target = parseInt(hitMatch[2], 10);
             }
+            action.hit_result = "HIT";
           }
           if (woundMatch) {
-            action.wound_target = parseInt(woundMatch[1], 10);
-            action.wound_roll = parseInt(woundMatch[2], 10);
+            action.wound_roll = parseInt(woundMatch[1], 10);
+            action.wound_target = parseInt(woundMatch[2], 10);
+            action.wound_result = "WOUND";
           }
           if (saveMatch) {
-            action.save_target = parseInt(saveMatch[1], 10); // The target number
-            action.save_roll = parseInt(saveMatch[2], 10); // The actual roll
+            action.save_roll = parseInt(saveMatch[1], 10);
+            action.save_target = parseInt(saveMatch[2], 10);
+            action.save_result = "SAVED";
           }
           if (saveSkippedMatch) {
             action.save_skipped = true;
-            action.save_skip_reason = saveSkippedMatch[1];
-            if (saveSkippedMatch[1] === "DEVASTATING_WOUNDS" || devastatingWoundsMatch) {
+            action.save_skip_reason = "DEVASTATING_WOUNDS";
+            if (devastatingWoundsMatch) {
               action.devastating_wounds_applied = true;
             }
           }
@@ -608,6 +596,16 @@ export function parse_log_file_from_text(text: string): ReplayData {
           if (hazardousRollMatch) {
             action.hazardous_test_roll = parseInt(hazardousRollMatch[1], 10);
             action.hazardous_triggered = action.hazardous_test_roll === 1;
+          }
+          // Infer truncated-stage outcomes from presence/absence of segments.
+          if (hitMatch && !woundMatch) {
+            action.hit_result = "MISS";
+          }
+          if (woundMatch && !saveMatch) {
+            action.wound_result = "FAIL";
+          }
+          if (saveMatch) {
+            action.save_result = damage > 0 ? "FAIL" : "SAVED";
           }
           // Add reward if available
           if (rewardMatch) {
@@ -838,7 +836,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // Parse FIGHT actions
     // Format: [timestamp] T1 P0 FIGHT : Unit 2(9,6) FOUGHT Unit 8(9,7) with [weapon] - Hit:3+:2(MISS) [SUCCESS]
     const fightMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) (?:ATTACKED|FOUGHT) Unit (\d+)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT Unit (\d+)\((\d+),(\d+)\)/
     );
     if (fightMatch) {
       const timestamp = fightMatch[1];
@@ -848,28 +846,20 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const attackerCol = parseInt(fightMatch[5], 10);
       const attackerRow = parseInt(fightMatch[6], 10);
       const targetId = parseInt(fightMatch[7], 10);
+      const targetCol = parseInt(fightMatch[8], 10);
+      const targetRow = parseInt(fightMatch[9], 10);
       syncKnownUnitPosition(currentEpisode, attackerId, attackerCol, attackerRow);
+      syncKnownUnitPosition(currentEpisode, targetId, targetCol, targetRow);
 
       // Parse weapon name if present (MULTIPLE_WEAPONS_IMPLEMENTATION.md)
       const weaponMatch = trimmed.match(/with \[([^\]]+)\]/);
       const weaponName = weaponMatch ? weaponMatch[1] : undefined;
 
-      // Parse combat details - Hit:3+:2(MISS/HIT) Wound:4+:5(SUCCESS/FAIL) Save:3+:2(FAIL) Dmg:1HP
-      const hitMatch = trimmed.match(/Hit:(\d+)\+:(\d+)\((HIT|MISS)\)/);
-      const woundMatch = trimmed.match(/Wound:(\d+)\+:(\d+)\((SUCCESS|WOUND|FAIL)\)/);
-      const saveMatch = trimmed.match(/Save:(\d+)\+:(\d+)\((FAIL|SAVED?)\)/);
+      // Parse combat details - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP
+      const hitMatch = trimmed.match(/Hit\s+(\d+)\((\d+)\+\)/);
+      const woundMatch = trimmed.match(/Wound\s+(\d+)\((\d+)\+\)/);
+      const saveMatch = trimmed.match(/Save\s+(\d+)\((\d+)\+\)/);
       const dmgMatch = trimmed.match(/Dmg:(\d+)HP/);
-      const fightSubphaseMatch = trimmed.match(/\[FIGHT_SUBPHASE:([^\]]+)\]/);
-      const fightPoolsMatch = trimmed.match(
-        /\[FIGHT_POOLS:charging=([^;\]]*);active=([^;\]]*);non_active=([^\]]*)\]/
-      );
-      if (!fightSubphaseMatch || !fightPoolsMatch) {
-        throw new Error(`Missing fight metadata in step.log line: ${trimmed}`);
-      }
-      const fightSubphase = fightSubphaseMatch[1];
-      const chargingPool = parsePoolList(fightPoolsMatch[1], "charging");
-      const activePool = parsePoolList(fightPoolsMatch[2], "active");
-      const nonActivePool = parsePoolList(fightPoolsMatch[3], "non_active");
 
       const action: ReplayAction = {
         type: "fight",
@@ -880,29 +870,26 @@ export function parse_log_file_from_text(text: string): ReplayData {
         attacker_id: attackerId,
         attacker_pos: { col: attackerCol, row: attackerRow },
         target_id: targetId,
+        target_pos: { col: targetCol, row: targetRow },
         weapon_name: weaponName, // Add weapon name for display
         damage: 0, // Will be calculated below based on combat results
-        fight_subphase: fightSubphase,
-        charging_activation_pool: chargingPool,
-        active_alternating_activation_pool: activePool,
-        non_active_alternating_activation_pool: nonActivePool,
       };
 
       // Add detailed combat rolls if available
       if (hitMatch) {
-        action.hit_target = parseInt(hitMatch[1], 10);
-        action.hit_roll = parseInt(hitMatch[2], 10);
-        action.hit_result = hitMatch[3];
+        action.hit_roll = parseInt(hitMatch[1], 10);
+        action.hit_target = parseInt(hitMatch[2], 10);
+        action.hit_result = "HIT";
       }
       if (woundMatch) {
-        action.wound_target = parseInt(woundMatch[1], 10);
-        action.wound_roll = parseInt(woundMatch[2], 10);
-        action.wound_result = woundMatch[3];
+        action.wound_roll = parseInt(woundMatch[1], 10);
+        action.wound_target = parseInt(woundMatch[2], 10);
+        action.wound_result = "WOUND";
       }
       if (saveMatch) {
-        action.save_target = parseInt(saveMatch[1], 10);
-        action.save_roll = parseInt(saveMatch[2], 10);
-        action.save_result = saveMatch[3];
+        action.save_roll = parseInt(saveMatch[1], 10);
+        action.save_target = parseInt(saveMatch[2], 10);
+        action.save_result = "SAVED";
       }
 
       // FIGHT logs don't have Dmg:XHP format - infer damage from combat results
@@ -910,14 +897,17 @@ export function parse_log_file_from_text(text: string): ReplayData {
       if (dmgMatch) {
         // If Dmg:XHP is present, use it (future-proofing)
         action.damage = parseInt(dmgMatch[1], 10);
-      } else if (
-        action.hit_result === "HIT" &&
-        (action.wound_result === "WOUND" || action.wound_result === "SUCCESS") &&
-        action.save_result === "FAIL"
-      ) {
-        // Infer damage: melee attacks typically deal 1 damage
-        // Note: This assumes CC_DMG=1, which is standard for most units
-        action.damage = 1;
+      }
+
+      // Infer truncated-stage outcomes from segment presence.
+      if (hitMatch && !woundMatch) {
+        action.hit_result = "MISS";
+      }
+      if (woundMatch && !saveMatch) {
+        action.wound_result = "FAIL";
+      }
+      if (saveMatch) {
+        action.save_result = action.damage > 0 ? "FAIL" : "SAVED";
       }
 
       currentEpisode.actions.push(action);

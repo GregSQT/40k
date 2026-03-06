@@ -7,7 +7,7 @@
  * This is the REFERENCE implementation - do not modify
  */
 export function formatShootingMessage(shooterId: number, targetId: number): string {
-  return `Unit ${shooterId} SHOT at Unit ${targetId}`;
+  return `Unit ${shooterId} SHOT Unit ${targetId}`;
 }
 
 export function formatMoveMessage(
@@ -27,7 +27,7 @@ export function formatNoMoveMessage(unitId: number): string {
 }
 
 export function formatCombatMessage(attackerId: number, targetId: number): string {
-  return `Unit ${attackerId} FOUGHT unit ${targetId}`;
+  return `Unit ${attackerId} FOUGHT Unit ${targetId}`;
 }
 
 export function formatChargeMessage(

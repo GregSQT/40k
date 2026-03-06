@@ -1,0 +1,23 @@
+{
+  "roster_id": "p2_roster-05",
+  "source_scenario": "Infantry_Troop_RangedTroop_training_bot-5",
+  "units": [
+    {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
+    {"id": 102, "unit_type": "Hormagaunt", "player": 2, "col": 18, "row": 12},
+    {"id": 103, "unit_type": "Hormagaunt", "player": 2, "col": 7, "row": 14},
+    {"id": 104, "unit_type": "Hormagaunt", "player": 2, "col": 14, "row": 16},
+    {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 1, "row": 13},
+    {"id": 106, "unit_type": "Hormagaunt", "player": 2, "col": 10, "row": 5},
+    {"id": 107, "unit_type": "Hormagaunt", "player": 2, "col": 23, "row": 6},
+    {"id": 108, "unit_type": "Hormagaunt", "player": 2, "col": 6, "row": 8},
+    {"id": 109, "unit_type": "Hormagaunt", "player": 2, "col": 8, "row": 6},
+    {"id": 110, "unit_type": "Hormagaunt", "player": 2, "col": 15, "row": 4},
+    {"id": 111, "unit_type": "Hormagaunt", "player": 2, "col": 12, "row": 2},
+    {"id": 112, "unit_type": "Hormagaunt", "player": 2, "col": 7, "row": 6},
+    {"id": 113, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 6},
+    {"id": 114, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 6},
+    {"id": 115, "unit_type": "Hormagaunt", "player": 2, "col": 21, "row": 8},
+    {"id": 116, "unit_type": "Hormagaunt", "player": 2, "col": 21, "row": 6},
+    {"id": 117, "unit_type": "Hormagaunt", "player": 2, "col": 21, "row": 4}
+  ]
+}

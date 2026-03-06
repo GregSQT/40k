@@ -373,9 +373,9 @@ def parse_action_message(message, context):
                 'endHex': f"({end_col}, {end_row})"
             })
     
-    elif "SHOT at" in message:
-        # Unit X(col, row) SHOT at Unit Y - details...
-        shoot_match = re.match(r'Unit (\d+)\([^)]+\) SHOT at Unit (\d+)', message)
+    elif "SHOT Unit" in message:
+        # Unit X(col, row) SHOT Unit Y - details...
+        shoot_match = re.match(r'Unit (\d+)\([^)]+\) SHOT(?: \[[^\]]+\])*\s+Unit (\d+)', message)
         if shoot_match:
             unit_id, target_id = shoot_match.groups()
             action_type = 'shoot'
@@ -387,8 +387,8 @@ def parse_action_message(message, context):
             })
     
     elif "FOUGHT" in message:
-        # Unit X(col, row) FOUGHT unit Y - details...
-        combat_match = re.match(r'Unit (\d+)\([^)]+\) FOUGHT unit (\d+)', message)
+        # Unit X(col, row) FOUGHT Unit Y - details...
+        combat_match = re.match(r'Unit (\d+)\([^)]+\) FOUGHT Unit (\d+)', message)
         if combat_match:
             unit_id, target_id = combat_match.groups()
             action_type = 'combat'

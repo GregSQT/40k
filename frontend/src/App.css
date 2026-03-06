@@ -1969,36 +1969,6 @@ textarea:focus {
   transform: translateY(-100%);
 }
 
-/* Outcome badges for shooting / combat */
-.game-log-entry__outcome {
-  font-size: 11px;
-  font-weight: var(--font-weight-bold);
-  padding: 1px 6px;
-  border-radius: 999px;
-  margin-left: 4px;
-  min-width: 40px;
-  text-align: center;
-  text-transform: uppercase;
-}
-
-.game-log-entry__outcome--miss {
-  color: #9ca3af;
-  background: rgba(55, 65, 81, 0.8); /* Dark gray */
-  border: 1px solid #4b5563;
-}
-
-.game-log-entry__outcome--saved {
-  color: #bfdbfe;
-  background: rgba(37, 99, 235, 0.4); /* same base bleu que l'ancien DMG */
-  border: 1px solid rgba(37, 99, 235, 0.9);
-}
-
-.game-log-entry__outcome--damage {
-  color: #dbeafe;
-  background: rgba(15, 23, 42, 0.85); /* bleu très foncé (type navy / slate) */
-  border: 1px solid rgba(15, 23, 42, 1);
-}
-
 /* Event Type Specific Styles */
 .game-log-entry--turn {
   border-left-color: var(--color-accent);

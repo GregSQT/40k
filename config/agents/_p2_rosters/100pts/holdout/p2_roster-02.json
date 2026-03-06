@@ -1,0 +1,15 @@
+{
+  "roster_id": "p2_roster-02",
+  "source_scenario": "Infantry_Troop_RangedTroop_holdout_regular_bot-2",
+  "units": [
+    {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 18, "row": 12},
+    {"id": 102, "unit_type": "Hormagaunt", "player": 2, "col": 6, "row": 8},
+    {"id": 103, "unit_type": "Hormagaunt", "player": 2, "col": 8, "row": 6},
+    {"id": 104, "unit_type": "Hormagaunt", "player": 2, "col": 15, "row": 4},
+    {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 14, "row": 7},
+    {"id": 106, "unit_type": "Hormagaunt", "player": 2, "col": 17, "row": 5},
+    {"id": 107, "unit_type": "Hormagaunt", "player": 2, "col": 3, "row": 8},
+    {"id": 108, "unit_type": "Hormagaunt", "player": 2, "col": 20, "row": 6},
+    {"id": 109, "unit_type": "Hormagaunt", "player": 2, "col": 20, "row": 4}
+  ]
+}

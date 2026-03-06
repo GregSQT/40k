@@ -414,14 +414,15 @@ class StepLogger:
             save_result = details["save_result"]
             
             hit_target = details["hit_target"]
+            hit_target_base = details.get("hit_target_base")
             hit_rule_modifier = details.get("hit_rule_modifier")
             wound_target = details["wound_target"]
             save_target = details["save_target"]
             save_skipped = bool(details.get("save_skipped", False))
             save_skip_reason = details.get("save_skip_reason")
-            devastating_wounds_flag = bool(details.get("devastating_wounds_flag", False))
             rapid_fire_bonus_shot = bool(details.get("rapid_fire_bonus_shot", False))
-            rapid_fire_rule_value = details.get("rapid_fire_rule_value")
+            assault_applied = bool(details.get("assault_applied", False))
+            pistol_applied = bool(details.get("pistol_applied", False))
             hazardous_test_required = bool(details.get("hazardous_test_required", False))
             hazardous_test_roll = details.get("hazardous_test_roll")
             
@@ -430,69 +431,55 @@ class StepLogger:
             target_coords = details.get("target_coords")
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             target_label = f"Unit {target_id}{target_coords_str}"
-            ability_display_name = details.get("ability_display_name")
             wound_ability_display_name = details.get("wound_ability_display_name")
             ap_modifier_ability_display_name = details.get("ap_modifier_ability_display_name")
             
-            if weapon_name:
-                base_msg = f"{unit_label} SHOT at {target_label} with [{weapon_name}]"
-            else:
-                base_msg = f"{unit_label} SHOT at {target_label}"
-            if isinstance(ability_display_name, str) and ability_display_name.strip():
-                base_msg = base_msg.replace(
-                    " SHOT at ",
-                    f" SHOT [{ability_display_name.strip().upper()}] at ",
-                    1,
-                )
-            hit_target_base = details.get("hit_target_base")
-            hit_rule_suffix = f" [{hit_rule_modifier}]" if hit_rule_modifier else ""
+            shot_tags = []
+            if assault_applied:
+                shot_tags.append("[ASSAULT]")
+            if pistol_applied:
+                shot_tags.append("[PISTOL]")
             if rapid_fire_bonus_shot:
+                rapid_fire_rule_value = require_key(details, "rapid_fire_rule_value")
                 if not isinstance(rapid_fire_rule_value, int) or rapid_fire_rule_value <= 0:
                     raise ValueError(
-                        f"rapid_fire_bonus_shot=True but rapid_fire_rule_value is invalid: {rapid_fire_rule_value}"
+                        "rapid_fire_bonus_shot=True requires rapid_fire_rule_value as a positive int, "
+                        f"got: {rapid_fire_rule_value}"
                     )
-                rapid_fire_suffix = f" [RAPID FIRE:{rapid_fire_rule_value}]"
+                shot_tags.append(f"[RAPID FIRE:{rapid_fire_rule_value}]")
+            shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
+            if weapon_name:
+                base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"
             else:
-                rapid_fire_suffix = ""
-            if rapid_fire_suffix:
-                if " SHOT [" in base_msg:
-                    base_msg = base_msg.replace(" SHOT [", f" SHOT{rapid_fire_suffix} [", 1)
-                elif " SHOT at " in base_msg:
-                    base_msg = base_msg.replace(" SHOT at ", f" SHOT{rapid_fire_suffix} at ", 1)
-            hit_result_display = "HIT" if hit_result == "HIT" else "FAIL"
+                base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label}"
+            hit_rule_suffix = " [HEAVY]" if hit_rule_modifier == "HEAVY" else ""
             if hit_rule_modifier == "HEAVY" and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
                 hit_target_display = f"{hit_target}+"
-            detail_parts = [f"Hit:{hit_target_display}:{hit_roll}({hit_result_display}){hit_rule_suffix}"]
+            detail_parts = [f"Hit {hit_roll}({hit_target_display}){hit_rule_suffix}"]
             if hit_result == "HIT":
                 wound_suffix = ""
                 if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip():
                     wound_suffix = f" [{wound_ability_display_name.strip().upper()}]"
-                wound_result_display = (
-                    "WOUND" if wound_result in ("WOUND", "SUCCESS") else "FAIL"
-                )
                 detail_parts.append(
-                    f"Wound:{wound_target}+:{wound_roll}({wound_result_display}){wound_suffix}"
+                    f"Wound {wound_roll}({wound_target}+){wound_suffix}"
                 )
                 if wound_result in ("WOUND", "SUCCESS"):
                     if save_skipped and save_skip_reason == "DEVASTATING_WOUNDS":
-                        detail_parts.append("Save:SKIPPED")
-                        if devastating_wounds_flag:
-                            detail_parts.append("[DEVASTATING WOUNDS]")
+                        detail_parts.append("Save [DEVASTATING WOUNDS]")
                         detail_parts.append(f"Dmg:{damage}HP")
                     else:
-                        save_result_display = "SAVED" if save_result == "SAVED" else "FAIL"
-                        save_part = f"Save:{save_target}+:{save_roll}({save_result_display})"
+                        save_part = f"Save {save_roll}({save_target}+)"
                         if (
                             isinstance(ap_modifier_ability_display_name, str)
                             and ap_modifier_ability_display_name.strip()
                         ):
                             save_part += f" [{ap_modifier_ability_display_name.strip().upper()}]"
                         detail_parts.append(save_part)
-                        if save_result_display == "FAIL":
+                        if save_result == "FAIL":
                             detail_parts.append(f"Dmg:{damage}HP")
-            detail_msg = f" - {' '.join(detail_parts)}"
+            detail_msg = f" - {' - '.join(detail_parts)}"
             if hazardous_test_required:
                 if not isinstance(hazardous_test_roll, int) or hazardous_test_roll < 1 or hazardous_test_roll > 6:
                     raise ValueError(
@@ -517,47 +504,6 @@ class StepLogger:
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds [HAZARDOUS]"
             
-        elif action_type == "shoot_individual":
-            # Individual shot within multi-shot sequence
-            if "target_id" not in details:
-                raise KeyError("Individual shot missing required target_id")
-            if "shot_number" not in details or "total_shots" not in details:
-                raise KeyError("Individual shot missing required shot_number or total_shots")
-                
-            target_id = details["target_id"]
-            shot_num = details["shot_number"]
-            total_shots = details["total_shots"]
-            
-            # Check if this shot actually fired (hit_roll > 0 means it was attempted)
-            if details.get("hit_roll") > 0:
-                hit_roll = details["hit_roll"]
-                wound_roll = details["wound_roll"]
-                save_roll = details["save_roll"]
-                damage = details["damage_dealt"]
-                hit_result = details["hit_result"]
-                wound_result = details["wound_result"]
-                save_result = details["save_result"]
-                hit_target = details["hit_target"]
-                wound_target = details["wound_target"]
-                save_target = details["save_target"]
-                
-                target_coords = details.get("target_coords")
-                target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-                base_msg = f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots})"
-                if hit_result == "MISS":
-                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
-                elif wound_result == "FAIL":
-                    # Failed wound - stop progression, don't show save/damage
-                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}(FAIL)"
-                else:
-                    # Successful wound - show full progression
-                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
-                return base_msg + detail_msg
-            else:
-                target_coords = details.get("target_coords")
-                target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-                return f"Unit {unit_id}{unit_coords} SHOT at Unit {target_id}{target_coords_str} (Shot {shot_num}/{total_shots}) - MISS"
-                
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence
             if "target_id" not in details:
@@ -684,7 +630,7 @@ class StepLogger:
             # Check if all required dice data is present - if not, return simple message
             required_fields = ["hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target"]
             if not all(field in details for field in required_fields):
-                return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (dice data incomplete)"
+                return f"Unit {unit_id}{unit_coords} FOUGHT Unit {target_id} (dice data incomplete)"
             
             # All dice data present - format detailed message
             hit_roll = details["hit_roll"]
@@ -711,7 +657,7 @@ class StepLogger:
                 base_msg = f"{unit_label} FOUGHT {target_label}"
             
             # Apply truncation logic like shooting phase - stop after first failure
-            detail_parts = [f"Hit:{hit_target}+:{hit_roll}({hit_result})"]
+            detail_parts = [f"Hit {hit_roll}({hit_target}+)"]
             
             # Only show wound if hit succeeded
             if hit_result == "HIT":
@@ -720,42 +666,22 @@ class StepLogger:
                     if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip()
                     else ""
                 )
-                detail_parts.append(f"Wound:{wound_target}+:{wound_roll}({wound_result}){wound_suffix}")
+                detail_parts.append(f"Wound {wound_roll}({wound_target}+){wound_suffix}")
                 
                 # Only show save if wound succeeded  
                 if wound_result in ("WOUND", "SUCCESS"):
-                    detail_parts.append(f"Save:{save_target}+:{save_roll}({save_result})")
+                    detail_parts.append(f"Save {save_roll}({save_target}+)")
                     
                     # Show damage if save failed (even if damage is 0, it should be logged)
                     if save_result == "FAIL":
                         detail_parts.append(f"Dmg:{damage}HP")
             
-            detail_msg = f" - {' '.join(detail_parts)}"
+            detail_msg = f" - {' - '.join(detail_parts)}"
 
             # Add reward if available
             reward = details.get("reward")
             if reward is not None:
                 detail_msg += f" [R:{reward:+.1f}]"
-
-            fight_subphase = require_key(details, "fight_subphase")
-            if fight_subphase is None:
-                raise ValueError(f"fight_subphase is None in combat log details for unit {unit_id}")
-            charging_pool = require_key(details, "charging_activation_pool")
-            active_pool = require_key(details, "active_alternating_activation_pool")
-            non_active_pool = require_key(details, "non_active_alternating_activation_pool")
-            if not isinstance(charging_pool, list):
-                raise ValueError(f"charging_activation_pool must be a list in combat log details for unit {unit_id}")
-            if not isinstance(active_pool, list):
-                raise ValueError(f"active_alternating_activation_pool must be a list in combat log details for unit {unit_id}")
-            if not isinstance(non_active_pool, list):
-                raise ValueError(f"non_active_alternating_activation_pool must be a list in combat log details for unit {unit_id}")
-            charging_pool_str = ",".join(str(uid) for uid in charging_pool)
-            active_pool_str = ",".join(str(uid) for uid in active_pool)
-            non_active_pool_str = ",".join(str(uid) for uid in non_active_pool)
-            detail_msg += (
-                f" [FIGHT_SUBPHASE:{fight_subphase}]"
-                f" [FIGHT_POOLS:charging={charging_pool_str};active={active_pool_str};non_active={non_active_pool_str}]"
-            )
 
             return base_msg + detail_msg
 
@@ -774,52 +700,6 @@ class StepLogger:
                 raise KeyError("Rule_choice action missing required selected_rule_name")
             return f"{unit_label} chose [{selected_rule_name.strip().upper()}]"
             
-        elif action_type == "combat_individual":
-            # Individual attack within multi-attack sequence
-            if "target_id" not in details:
-                raise KeyError("Individual attack missing required target_id")
-            if "attack_number" not in details or "total_attacks" not in details:
-                raise KeyError("Individual attack missing required attack_number or total_attacks")
-                
-            target_id = details["target_id"]
-            attack_num = details["attack_number"]
-            total_attacks = details["total_attacks"]
-            
-            # Check if this attack actually happened (hit_roll > 0 means it was attempted)
-            if details.get("hit_roll") > 0:
-                hit_roll = details["hit_roll"]
-                wound_roll = details["wound_roll"]
-                save_roll = details["save_roll"]
-                damage = details["damage_dealt"]
-                hit_result = details["hit_result"]
-                wound_result = details["wound_result"]
-                save_result = details["save_result"]
-                hit_target = details["hit_target"]
-                wound_target = details["wound_target"]
-                save_target = details["save_target"]
-                
-                # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
-                weapon_name = details.get("weapon_name")
-                if weapon_name:
-                    base_msg = f"Unit {unit_id}{unit_coords} ATTACKED Unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks})"
-                else:
-                    base_msg = f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks})"
-                if hit_result == "MISS":
-                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}(MISS)"
-                elif wound_result == "FAIL":
-                    # Failed wound - stop progression, don't show save/damage
-                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}(FAIL)"
-                else:
-                    # Successful wound - show full progression
-                    detail_msg = f" - Hit:{hit_target}+:{hit_roll}({hit_result}) Wound:{wound_target}+:{wound_roll}({wound_result}) Save:{save_target}+:{save_roll}({save_result}) Dmg:{damage}HP"
-                return base_msg + detail_msg
-            else:
-                weapon_name = details.get("weapon_name")
-                if weapon_name:
-                    return f"Unit {unit_id}{unit_coords} ATTACKED Unit {target_id} with [{weapon_name}] (Attack {attack_num}/{total_attacks}) - MISS"
-                else:
-                    return f"Unit {unit_id}{unit_coords} FOUGHT unit {target_id} (Attack {attack_num}/{total_attacks}) - MISS"
-                
         elif action_type == "combat_summary":
             # Summary of multi-attack sequence
             if "target_id" not in details:
