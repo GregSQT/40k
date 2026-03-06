@@ -1,0 +1,9 @@
+{
+  "roster_id": "p1_roster-02",
+  "composition": [
+    {"unit_type": "AssaultIntercessor", "count": 2},
+    {"unit_type": "BloodClaw", "count": 1},
+    {"unit_type": "Genestealer", "count": 1},
+    {"unit_type": "TyranidWarriorMelee", "count": 1}
+  ]
+}

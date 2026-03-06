@@ -1,6 +1,7 @@
 {
   "units": {
-    "Aggressor": "spaceMarine/units/Aggressor",
+    "AggressorBoltStorm": "spaceMarine/units/AggressorBoltStorm",
+    "AggressorFlamestorm": "spaceMarine/units/AggressorFlamestorm",
     "AssaultIntercessor": "spaceMarine/units/AssaultIntercessor",
     "AssaultIntercessorJumpPack": "spaceMarine/units/AssaultIntercessorJumpPack",
     "AssaultIntercessorJumpPackPlasmaPistol": "spaceMarine/units/AssaultIntercessorJumpPackPlasmaPistol",
@@ -24,6 +25,8 @@
     "SternguardVeteranSergeantPowerFist": "spaceMarine/units/SternguardVeteranSergeantPowerFist",
     "Terminator": "spaceMarine/units/Terminator",
     "TerminatorAssaultCannon": "spaceMarine/units/TerminatorAssaultCannon",
+    "TerminatorCyclone": "spaceMarine/units/TerminatorCyclone",
+    "TerminatorHeavyFlamer": "spaceMarine/units/TerminatorHeavyFlamer",
     "Carnifex": "tyranid/units/Carnifex",
     "Gargoyle": "tyranid/units/Gargoyle",
     "Genestealer": "tyranid/units/Genestealer",

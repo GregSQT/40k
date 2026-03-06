@@ -29,7 +29,7 @@ export class TerminatorAssaultCannon extends SpaceMarineInfantryEliteRangedTroop
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // MeleeElite specialist - hunt elite targets
+  static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
 
   static ICON = "/icons/TerminatorAssaultCannon.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon

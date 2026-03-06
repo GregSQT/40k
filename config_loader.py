@@ -226,12 +226,75 @@ class ConfigLoader:
                             f"Phase '{phase}' not found in {resolved_agent_key}_training_config.json. "
                             f"Available phases: {available_phases}"
                         )
-                    return config[phase]
+                    phase_config = config[phase]
+                    if not isinstance(phase_config, dict):
+                        raise TypeError(
+                            f"Invalid phase config type in {agent_config_path}: "
+                            f"phase '{phase}' must be an object, got {type(phase_config).__name__}"
+                        )
+                    return self._resolve_training_common_references(
+                        phase_config=phase_config,
+                        agent_key=resolved_agent_key,
+                        phase=phase
+                    )
                 
                 return config
                 
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON in {agent_config_path}: {e}")
+
+    def load_training_common_config(self) -> Dict[str, Any]:
+        """Load shared training defaults from config/agents/_training_common.json."""
+        cache_key = "agents::_training_common"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        common_path = self.config_dir / "agents" / "_training_common.json"
+        if not common_path.exists():
+            raise FileNotFoundError(
+                f"Shared training config not found: {common_path}\n"
+                f"Expected path: config/agents/_training_common.json"
+            )
+        try:
+            with open(common_path, "r", encoding="utf-8-sig") as f:
+                common_config = json.load(f)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {common_path}: {e}")
+
+        if not isinstance(common_config, dict):
+            raise TypeError(
+                f"Invalid shared training config format in {common_path}: "
+                f"expected JSON object, got {type(common_config).__name__}"
+            )
+        self._cache[cache_key] = common_config
+        return common_config
+
+    def _resolve_training_common_references(
+        self,
+        phase_config: Dict[str, Any],
+        agent_key: str,
+        phase: str
+    ) -> Dict[str, Any]:
+        """Resolve phase keys set to null using config/agents/_training_common.json."""
+        resolved = dict(phase_config)
+        null_keys = [k for k, v in resolved.items() if v is None]
+        if not null_keys:
+            return resolved
+
+        common_config = self.load_training_common_config()
+        for key in null_keys:
+            if key not in common_config:
+                raise KeyError(
+                    f"Training config '{agent_key}/{phase}' uses null for '{key}' "
+                    f"but config/agents/_training_common.json does not define '{key}'"
+                )
+            common_value = common_config[key]
+            if common_value is None:
+                raise ValueError(
+                    f"Invalid shared training value for '{key}' in config/agents/_training_common.json: null"
+                )
+            resolved[key] = common_value
+        return resolved
     
     def load_agent_rewards_config(self, agent_key: str) -> Dict[str, Any]:
         """Load agent-specific rewards configuration.
@@ -371,18 +434,21 @@ class ConfigLoader:
             scenario_name: Scenario name (e.g., 'phase1', 'phase2-1', 'phase2-2')
         
         Returns:
-            Scenario configuration dictionary with 'units' array
+            Scenario configuration dictionary:
+            - legacy format with 'units' array, or
+            - thin format with roster refs (scale, p1_roster_ref, p2_roster_ref)
             
         Raises:
             FileNotFoundError: If scenario file doesn't exist
         """
         resolved_agent_key = self._resolve_agent_config_key(agent_key)
-        scenario_path = self.config_dir / "agents" / resolved_agent_key / "scenarios" / f"{resolved_agent_key}_scenario_{scenario_name}.json"
-        
+        scenarios_dir = self.config_dir / "agents" / resolved_agent_key / "scenarios"
+        scenario_path = scenarios_dir / f"scenario_{scenario_name}.json"
         if not scenario_path.exists():
             raise FileNotFoundError(
                 f"Agent scenario not found: {scenario_path}\n"
-                f"Expected path: config/agents/{resolved_agent_key}/scenarios/{resolved_agent_key}_scenario_{scenario_name}.json"
+                f"Expected path:\n"
+                f"- config/agents/{resolved_agent_key}/scenarios/scenario_{scenario_name}.json"
             )
         
         try:

@@ -16,25 +16,34 @@ from typing import Dict, List, Tuple, Any, Optional, Set, Union
 DiceValue = Union[int, str]
 EXPECTED_D3 = 2.0
 EXPECTED_D6 = 3.5
+EXPECTED_2D6 = 7.0
+EXPECTED_D6_PLUS_1 = 4.5
 
 
 def resolve_dice_value(value: DiceValue, roll_context: str) -> int:
     """
     Resolve a dice expression or integer into a concrete roll.
 
-    Supported dice strings: "D3", "D6".
+    Supported dice strings: "D3", "D6", "2D6", "D6+1".
     - D3: roll a D6, divide by 2 and round up (1-3).
     - D6: roll a D6 (1-6).
+    - 2D6: roll two D6 and sum (2-12).
+    - D6+1: roll a D6 and add 1 (2-7).
     """
     if isinstance(value, int):
         return value
     if not isinstance(value, str):
         raise TypeError(f"Invalid dice value type for {roll_context}: {type(value).__name__}")
-    if value not in {"D3", "D6"}:
+    if value not in {"D3", "D6", "2D6", "D6+1"}:
         raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
 
     import random
     d6_roll = random.randint(1, 6)
+    if value == "2D6":
+        second_d6_roll = random.randint(1, 6)
+        return d6_roll + second_d6_roll
+    if value == "D6+1":
+        return d6_roll + 1
     if value == "D6":
         return d6_roll
     return (d6_roll + 1) // 2
@@ -44,9 +53,11 @@ def expected_dice_value(value: DiceValue, roll_context: str) -> float:
     """
     Resolve a dice expression or integer into its expected value (no RNG).
 
-    Supported dice strings: "D3", "D6".
+    Supported dice strings: "D3", "D6", "2D6", "D6+1".
     - D3 expected value: 2.0
     - D6 expected value: 3.5
+    - 2D6 expected value: 7.0
+    - D6+1 expected value: 4.5
     """
     if isinstance(value, int):
         return float(value)
@@ -56,6 +67,10 @@ def expected_dice_value(value: DiceValue, roll_context: str) -> float:
         return EXPECTED_D3
     if value == "D6":
         return EXPECTED_D6
+    if value == "2D6":
+        return EXPECTED_2D6
+    if value == "D6+1":
+        return EXPECTED_D6_PLUS_1
     raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
 
 # ============================================================================

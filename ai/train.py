@@ -1234,12 +1234,23 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     if "max_turns_per_episode" not in training_config:
         raise KeyError(f"max_turns_per_episode missing from {agent_key} training config phase {training_config_name}")
 
+    from ai.unit_registry import UnitRegistry
+    from engine.game_state import GameStateManager
+    unit_registry = UnitRegistry()
+
     # AUTO-CALCULATE max_steps_per_turn = num_units × num_phases
-    # Load first scenario to count units
+    # Load first scenario to count units (supports legacy and thin scenario formats)
     first_scenario = scenario_list[0]
-    with open(first_scenario, 'r') as f:
+    with open(first_scenario, "r", encoding="utf-8-sig") as f:
         scenario_data = json.load(f)
-    num_units = len(require_key(scenario_data, "units"))
+    if isinstance(scenario_data, dict) and "units" in scenario_data:
+        num_units = len(require_key(scenario_data, "units"))
+    else:
+        temp_manager = GameStateManager({"board": {}}, unit_registry)
+        scenario_result = temp_manager.load_units_from_scenario(first_scenario, unit_registry)
+        num_units = len(require_key(scenario_result, "units"))
+    if num_units <= 0:
+        raise ValueError(f"Scenario '{first_scenario}' resolved to zero units")
 
     # Import GAME_PHASES from action_decoder - single source of truth
     from engine.action_decoder import GAME_PHASES
@@ -1265,9 +1276,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     register_environment()
     
     # Create initial environment with first scenario
-    from ai.unit_registry import UnitRegistry
-    unit_registry = UnitRegistry()
-    
     # CRITICAL FIX: Use rewards_config_name for controlled_agent (includes phase suffix)
     # agent_key is the directory name for config loading
     # rewards_config_name is the SECTION NAME within the rewards file (e.g., "..._phase1")
@@ -1630,8 +1638,20 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             if not silent_chunk:
                 print(f"   VecNormalize stats saved")
     elif not os.path.exists(model_path):
+        bot_eval_callback = next(
+            (cb for cb in training_callbacks if cb.__class__.__name__ == "BotEvaluationCallback"),
+            None
+        )
+        extra_detail = ""
+        if bot_eval_callback is not None:
+            extra_detail = (
+                f" (eval_count={int(getattr(bot_eval_callback, 'eval_count', 0))}, "
+                f"eval_freq={getattr(bot_eval_callback, 'eval_freq', 'n/a')}, "
+                f"use_episode_freq={getattr(bot_eval_callback, 'use_episode_freq', 'n/a')}, "
+                f"robust_window={getattr(bot_eval_callback, 'robust_window', 'n/a')})"
+            )
         raise RuntimeError(
-            f"Robust save mode is enabled but canonical model was not produced: {model_path}"
+            f"Robust save mode is enabled but canonical model was not produced: {model_path}{extra_detail}"
         )
     if not silent_chunk:
         print(f"\n{'='*80}")
@@ -1642,14 +1662,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Run final comprehensive bot evaluation
     if EVALUATION_BOTS_AVAILABLE:
-        if 'bot_eval_final' not in training_config['callback_params']:
-            print("⚠️  Warning: 'bot_eval_final' not found in callback_params. Skipping final evaluation.")
+        n_final = require_key(training_config, "_bot_eval_final")
+        if not isinstance(n_final, int) or isinstance(n_final, bool) or n_final < 0:
+            raise ValueError(
+                f"Resolved bot_eval_final must be an integer >= 0 (got {n_final!r})"
+            )
+        if n_final <= 0:
+            if not silent_chunk:
+                print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
         else:
-            n_final = training_config['callback_params']['bot_eval_final']
-            if n_final <= 0:
-                if not silent_chunk:
-                    print("ℹ️  Final bot evaluation skipped (bot_eval_final=0)")
-            else:
                 print(f"\n{'='*80}")
                 print(f"🤖 FINAL BOT EVALUATION ({n_final} episodes per bot across all scenarios)")
                 print(f"{'='*80}\n")
@@ -1851,11 +1872,50 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     
     # Add enhanced bot evaluation callback (replaces standard EvalCallback)
     if EVALUATION_BOTS_AVAILABLE:
+        # Resolve nested callback params that can explicitly inherit from shared training config.
+        shared_training_config = cfg.load_training_common_config()
+
+        def _resolve_callback_value(key: str) -> Any:
+            value = require_key(callback_params, key)
+            if value is not None:
+                return value
+            if key not in shared_training_config:
+                raise KeyError(
+                    f"callback_params.{key} is null but config/agents/_training_common.json "
+                    f"does not define '{key}'"
+                )
+            shared_value = shared_training_config[key]
+            if shared_value is None:
+                raise ValueError(
+                    f"Invalid shared value for callback_params.{key}: "
+                    f"config/agents/_training_common.json defines null"
+                )
+            return shared_value
+
         # Read bot evaluation parameters from config
-        bot_eval_freq = require_key(callback_params, "bot_eval_freq")
-        bot_n_episodes_intermediate = require_key(callback_params, "bot_eval_intermediate")
+        bot_eval_freq = _resolve_callback_value("bot_eval_freq")
+        bot_n_episodes_intermediate = _resolve_callback_value("bot_eval_intermediate")
         bot_eval_use_episodes = require_key(callback_params, "bot_eval_use_episodes")
         eval_deterministic = require_key(callback_params, "eval_deterministic")
+        if not isinstance(bot_eval_freq, int) or isinstance(bot_eval_freq, bool) or bot_eval_freq <= 0:
+            raise ValueError(
+                f"callback_params.bot_eval_freq must be a positive integer "
+                f"(got {bot_eval_freq!r})"
+            )
+        if (
+            not isinstance(bot_n_episodes_intermediate, int)
+            or isinstance(bot_n_episodes_intermediate, bool)
+            or bot_n_episodes_intermediate <= 0
+        ):
+            raise ValueError(
+                f"callback_params.bot_eval_intermediate must be a positive integer "
+                f"(got {bot_n_episodes_intermediate!r})"
+            )
+        if not isinstance(bot_eval_use_episodes, bool):
+            raise ValueError(
+                f"callback_params.bot_eval_use_episodes must be boolean "
+                f"(got {type(bot_eval_use_episodes).__name__})"
+            )
         if not isinstance(eval_deterministic, bool):
             raise ValueError(
                 f"callback_params.eval_deterministic must be boolean "
@@ -1873,9 +1933,30 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         if save_best_robust:
             robust_window = int(require_key(callback_params, "robust_window"))
             robust_drawdown_penalty = float(require_key(callback_params, "robust_drawdown_penalty"))
+            if robust_window <= 0:
+                raise ValueError(
+                    f"callback_params.robust_window must be > 0 (got {robust_window})"
+                )
+            if bot_eval_use_episodes:
+                expected_evals = int(total_eps) // int(bot_eval_freq)
+                if expected_evals <= 0:
+                    raise ValueError(
+                        "Invalid robust-eval configuration: save_best_robust=true but no bot evaluation "
+                        f"will run in this phase (total_episodes={int(total_eps)}, "
+                        f"bot_eval_freq={int(bot_eval_freq)}). "
+                        "Reduce bot_eval_freq or increase total_episodes."
+                    )
+                if expected_evals < robust_window:
+                    raise ValueError(
+                        "Invalid robust-eval configuration: save_best_robust=true but "
+                        f"robust_window={robust_window} requires at least {robust_window} evaluations, "
+                        f"while this phase can run at most {expected_evals} "
+                        f"(total_episodes={int(total_eps)}, bot_eval_freq={int(bot_eval_freq)}). "
+                        "Reduce robust_window, reduce bot_eval_freq, or increase total_episodes."
+                    )
         
         # Store final eval count for use after training completes
-        training_config["_bot_eval_final"] = require_key(callback_params, "bot_eval_final")
+        training_config["_bot_eval_final"] = _resolve_callback_value("bot_eval_final")
         
         if not rewards_config_name:
             raise KeyError("setup_callbacks requires rewards_config_name for BotEvaluationCallback")

@@ -1,11 +1,7 @@
 {
   "roster_id": "p2_roster-02",
-  "source_scenario": "Infantry_Troop_RangedTroop_training_bot-2",
-  "units": [
-    {"id": 101, "unit_type": "AssaultIntercessorSergeant", "player": 2, "col": 18, "row": 12},
-    {"id": 102, "unit_type": "AssaultIntercessor", "player": 2, "col": 7, "row": 14},
-    {"id": 103, "unit_type": "AssaultIntercessor", "player": 2, "col": 14, "row": 16},
-    {"id": 104, "unit_type": "AssaultIntercessor", "player": 2, "col": 1, "row": 13},
-    {"id": 105, "unit_type": "AssaultIntercessor", "player": 2, "col": 10, "row": 5}
+  "composition": [
+    {"unit_type": "AssaultIntercessorSergeant", "count": 1},
+    {"unit_type": "AssaultIntercessor", "count": 4}
   ]
 }

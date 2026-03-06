@@ -69,6 +69,12 @@ export function getDiceAverage(value: DiceValue): number {
   if (value === "D6") {
     return 3.5;
   }
+  if (value === "2D6") {
+    return 7;
+  }
+  if (value === "D6+1") {
+    return 4.5;
+  }
   throw new Error(`Unsupported dice value: ${value}`);
 }
 

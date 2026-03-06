@@ -28,7 +28,9 @@ from shared.data_validation import require_key
 
 MAX_D3 = 3
 MAX_D6 = 6
-DICE_MAX_VALUES = {"D3": MAX_D3, "D6": MAX_D6}
+MAX_D6_PLUS_1 = 7
+MAX_2D6 = 12
+DICE_MAX_VALUES = {"D3": MAX_D3, "D6": MAX_D6, "D6+1": MAX_D6_PLUS_1, "2D6": MAX_2D6}
 PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
 
@@ -37,7 +39,7 @@ def max_dice_value(value: Any, context: str) -> int:
     """
     Resolve a dice value to its maximum possible roll (no RNG).
 
-    Supported dice strings: "D3", "D6".
+    Supported dice strings: "D3", "D6", "D6+1", "2D6".
     """
     if isinstance(value, int):
         return value
@@ -90,6 +92,34 @@ def _resolve_scenario_path(scenario_name: str) -> str:
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
+            sorted_matches = sorted(matches)
+            parsed_by_path: Dict[str, Any] = {}
+            for match_path in sorted_matches:
+                with open(match_path, "r", encoding="utf-8-sig") as match_file:
+                    parsed_by_path[match_path] = json.load(match_file)
+
+            objective_signature_by_path: Dict[str, Any] = {}
+            for match_path in sorted_matches:
+                payload = parsed_by_path[match_path]
+                objective_signature_by_path[match_path] = {
+                    "objectives": payload.get("objectives"),
+                    "objectives_ref": payload.get("objectives_ref"),
+                    "primary_objective": payload.get("primary_objective"),
+                    "primary_objectives": payload.get("primary_objectives"),
+                }
+
+            reference_path = sorted_matches[0]
+            reference_signature = objective_signature_by_path[reference_path]
+            same_objective_signature = all(
+                objective_signature_by_path[path] == reference_signature
+                for path in sorted_matches[1:]
+            )
+            if same_objective_signature:
+                _debug_log(
+                    f"[ANALYZER INFO] Scenario '{scenario_name}' has {len(sorted_matches)} "
+                    f"matches with identical objective signature; using canonical path: {reference_path}"
+                )
+                return reference_path
             raise ValueError(f"Ambiguous scenario path for '{scenario_name}': {matches}")
     raise FileNotFoundError(f"Scenario file not found for '{scenario_name}'")
 
@@ -103,7 +133,35 @@ def _get_objective_name_to_id_map(scenario_name: str) -> Dict[str, int]:
         scenario_data = json.load(f)
     objectives = scenario_data.get("objectives")
     if not isinstance(objectives, list) or not objectives:
-        raise ValueError(f"Scenario '{scenario_name}' missing objectives list: {scenario_path}")
+        objectives_ref = scenario_data.get("objectives_ref")
+        if not isinstance(objectives_ref, str) or not objectives_ref.strip():
+            raise ValueError(
+                f"Scenario '{scenario_name}' missing objectives list and valid objectives_ref: {scenario_path}"
+            )
+        normalized_ref = objectives_ref.strip().replace("\\", "/")
+        if normalized_ref.startswith("/") or normalized_ref.startswith("../") or "/../" in normalized_ref:
+            raise ValueError(
+                f"Scenario '{scenario_name}' has unsafe objectives_ref '{normalized_ref}': {scenario_path}"
+            )
+        if "/" in normalized_ref:
+            raise ValueError(
+                f"Scenario '{scenario_name}' objectives_ref must be filename only, got '{normalized_ref}'"
+            )
+        if not normalized_ref.endswith(".json"):
+            normalized_ref = f"{normalized_ref}.json"
+        objectives_path = os.path.join(project_root, "config", "agents", "_objectives", normalized_ref)
+        if not os.path.exists(objectives_path):
+            raise FileNotFoundError(
+                f"Scenario '{scenario_name}' objectives_ref file not found: {objectives_path}"
+            )
+        with open(objectives_path, "r", encoding="utf-8-sig") as objectives_file:
+            objectives_data = json.load(objectives_file)
+        objectives = objectives_data.get("objectives")
+        if not isinstance(objectives, list) or not objectives:
+            raise ValueError(
+                f"Scenario '{scenario_name}' objectives_ref '{normalized_ref}' missing objectives list: "
+                f"{objectives_path}"
+            )
     mapping: Dict[str, int] = {}
     for entry in objectives:
         if "id" not in entry or "name" not in entry:

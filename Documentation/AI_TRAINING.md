@@ -94,9 +94,18 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 - **Logs**: `./tensorboard/` (TensorBoard data)
 - **Step Logs**: `step.log` (généré avec `--step` ; utilisé par l’analyzer et le replay viewer)
 - **Agent inheritance metadata**: `inherits_from` dans `config/agents/<agent_name>/<agent_name>_training_config.json`
+- **Shared training defaults**: `config/agents/_training_common.json`
+- **Agent P1 rosters (100 pts)**:
+  - `config/agents/<agent_key>/rosters/100pts/training/p1_roster-XX.json`
+  - `config/agents/<agent_key>/rosters/100pts/holdout_regular/p1_roster-XX.json`
+  - `config/agents/<agent_key>/rosters/100pts/holdout_hard/p1_roster-XX.json`
 - **Shared P2 rosters (100 pts)**:
   - `config/agents/_p2_rosters/100pts/training/p2_roster-XX.json`
   - `config/agents/_p2_rosters/100pts/holdout/p2_roster-XX.json`
+- **Shared walls**:
+  - `config/agents/_walls/walls-XX.json`
+- **Shared objectives**:
+  - `config/agents/_objectives/objectives-XX.json`
 
 ---
 
@@ -121,6 +130,31 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `load_agent_rewards_config(agent_key)` → charge `config/agents/<agent>/<agent>_rewards_config.json`.
   - `get_models_root()` → racine des modèles (ex. `ai/models/`).
 - **UnitRegistry** (`ai/unit_registry.py`) : mappe `unit_type` (ex. type d’unité du scénario) vers `model_key` (clé d’agent pour charger le bon micro-modèle). Requis pour créer le moteur et les wrappers (BotControlledEnv, macro).
+
+#### Scénarios minces + rosters compacts
+
+- Un scénario peut rester en format legacy (`"units": [...]`) ou pointer vers des rosters via:
+  - `"scale"` (ex: `"100pts"`),
+  - `"p1_roster_ref"`,
+  - `"p2_roster_ref"`.
+- En holdout, `p1_roster_ref` doit être explicite et séparé par difficulté:
+  - `holdout_regular/...` pour les scénarios dans `scenarios/holdout_regular/`
+  - `holdout_hard/...` pour les scénarios dans `scenarios/holdout_hard/`
+- Pour `p1_roster_ref`, un alias explicite est supporté en training:
+  - `"training_random"` -> tirage aléatoire d’un roster dans `rosters/<scale>/training/` (liste triée avant tirage).
+- Optionnel: `"p1_roster_seed"` (int >= 0) pour forcer un tirage déterministe local du roster P1.
+- Un scénario peut aussi référencer des données de carte partagées via:
+  - `"wall_ref"` (au lieu de `"wall_hexes"`),
+  - `"objectives_ref"` (au lieu de `"objectives"` / `"objective_hexes"`).
+- Les rosters compacts utilisent ce format:
+  - `"roster_id"`: identifiant lisible (ex: `p1_roster-02`),
+  - `"composition"`: liste de `{ "unit_type": "<UnitName>", "count": <N> }`.
+- Expansion runtime:
+  - IDs P1 déterministes: `1..N`.
+  - IDs P2 déterministes: `101..(100+N2)`.
+  - Pas de `col/row` dans le roster compact: le déploiement est géré par le scénario (`deployment_type`/`deployment_zone`).
+- En training, `p1_roster_ref` peut être une liste pour tirage aléatoire par épisode; en holdout, utiliser une ref unique déterministe.
+- `step.log` journalise les rosters sélectionnés en début d’épisode (`Rosters: ...`).
 
 ### Création de l’environnement
 
@@ -171,7 +205,7 @@ Cette section couvre uniquement ce qui est actuellement supporté côté code.
 > Les éléments ci-dessous sont des recommandations de design/process et ne sont pas garantis comme implémentés partout.
 > Le document détaillé a été déplacé vers `Documentation/TODO/Macro_agent.md`.
 
-- Structuration macro complète en `scenarios/training` + `scenarios/holdout`.
+- Structuration macro complète en `scenarios/training` + `scenarios/holdout_regular` + `scenarios/holdout_hard`.
 - Couverture de scénarios plus large (volumétrie et variété topologique).
 - Stratégie “1 macro-agent par armée”.
 - Pipeline de validation robuste orienté holdout + multi-bots + fenêtre temporelle.
@@ -412,6 +446,8 @@ Règles:
 - `inherits_from: null` → pas d'héritage, l'agent charge son propre dossier.
 - `inherits_from: "<AgentKeyParent>"` → héritage explicite vers `config/agents/<AgentKeyParent>/`.
 - Valeur invalide (vide, auto-référence, dossier parent absent) → erreur explicite (fail fast).
+- Pour les paramètres communs de training: une valeur de phase à `null` (ex: `seed`, `total_episodes`)
+  est résolue via `config/agents/_training_common.json`. Si la clé manque dans ce fichier commun: erreur explicite.
 
 ```json
 {

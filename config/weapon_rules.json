@@ -9,6 +9,11 @@
     "description": " The bearer can shoot with this weapon even if he Advanced.",
     "has_parameter": false
   },
+  "BLAST": {
+    "name": "Blast",
+    "description": "Add 1 to the weapon Attacks characteristic for every 5 models in the target unit.",
+    "has_parameter": false
+  },
   "DEVASTATING_WOUNDS": {
     "name": "Devastating Wounds",
     "description": "No saving throw can be mande against a critical wound rolled with this weapon.",

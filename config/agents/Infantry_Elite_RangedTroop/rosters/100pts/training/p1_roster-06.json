@@ -1,0 +1,7 @@
+{
+  "roster_id": "p1_roster-06",
+  "composition": [
+    {"unit_type": "AggressorBoltStorm", "count": 1},
+    {"unit_type": "HeavyIntercessorHeavyBolter", "count": 2}
+  ]
+}

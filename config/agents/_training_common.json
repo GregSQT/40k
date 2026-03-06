@@ -1,0 +1,15 @@
+{
+  "seed": 100,
+  "total_episodes": 100,
+  "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
+  "max_turns_per_episode": 5,
+  "n_envs": 48,
+  "bot_eval_freq": 1000,
+  "bot_eval_freq_normal": 1000,
+  "bot_eval_intermediate": 70,
+  "bot_eval_intermediate_normal": 70,
+  "bot_eval_final": 100,
+  "bot_eval_final_normal": 100,
+  "save_best_robust": true,
+  "save_best_robust_normal": true
+}

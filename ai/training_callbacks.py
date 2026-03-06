@@ -181,8 +181,9 @@ class EpisodeTerminationCallback(BaseCallback):
         self.total_episode_actions = 0
         self.episode_stats_count = 0
         self.max_episode_duration_seconds = 0.0
-        self._episode_wall_start_by_env = None
         self._episode_action_counts_by_env = None
+        self._last_step_perf_time: Optional[float] = None
+        self._ema_env_actions_per_second: Optional[float] = None
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -199,7 +200,7 @@ class EpisodeTerminationCallback(BaseCallback):
         if 'dones' not in self.locals:
             raise KeyError("EpisodeTerminationCallback missing required 'dones' field in callback locals")
 
-        # Track per-env episode stats from callback wall-clock and done flags.
+        # Track per-env episode stats from callback done flags.
         dones = self.locals['dones']
         now_perf = time.perf_counter()
         try:
@@ -210,13 +211,25 @@ class EpisodeTerminationCallback(BaseCallback):
         n_envs = len(done_flags)
         if n_envs <= 0:
             raise ValueError("dones must contain at least one environment flag")
-        if self._episode_wall_start_by_env is None or self._episode_action_counts_by_env is None:
-            self._episode_wall_start_by_env = [now_perf] * n_envs
+        if self._last_step_perf_time is not None:
+            delta_step_seconds = now_perf - self._last_step_perf_time
+            if delta_step_seconds <= 0:
+                raise ValueError(
+                    f"Non-positive callback step delta: {delta_step_seconds} "
+                    f"(now={now_perf}, prev={self._last_step_perf_time})"
+                )
+            env_actions_per_second = n_envs / delta_step_seconds
+            if self._ema_env_actions_per_second is None:
+                self._ema_env_actions_per_second = env_actions_per_second
+            else:
+                self._ema_env_actions_per_second = (
+                    self.ema_alpha * env_actions_per_second
+                    + (1 - self.ema_alpha) * self._ema_env_actions_per_second
+                )
+        self._last_step_perf_time = now_perf
+        if self._episode_action_counts_by_env is None:
             self._episode_action_counts_by_env = [0] * n_envs
-        elif (
-            len(self._episode_wall_start_by_env) != n_envs
-            or len(self._episode_action_counts_by_env) != n_envs
-        ):
+        elif len(self._episode_action_counts_by_env) != n_envs:
             raise ValueError(
                 "Environment count changed during training; cannot maintain per-env episode timing/action tracking"
             )
@@ -230,24 +243,25 @@ class EpisodeTerminationCallback(BaseCallback):
                 continue
             episodes_finished += 1
             episode_actions = int(self._episode_action_counts_by_env[env_index])
-            episode_duration_seconds = now_perf - self._episode_wall_start_by_env[env_index]
             if episode_actions <= 0:
                 raise ValueError(
                     f"Non-positive episode action count for env {env_index}: {episode_actions}"
                 )
-            if episode_duration_seconds < 0:
-                raise ValueError(
-                    f"Negative episode duration computed for env {env_index}: "
-                    f"start={self._episode_wall_start_by_env[env_index]}, now={now_perf}"
-                )
-            self._episode_wall_start_by_env[env_index] = now_perf
+            episode_duration_seconds = None
+            if self._ema_env_actions_per_second is not None:
+                if self._ema_env_actions_per_second <= 0:
+                    raise ValueError(
+                        f"Invalid env throughput EMA: {self._ema_env_actions_per_second}"
+                    )
+                episode_duration_seconds = episode_actions / self._ema_env_actions_per_second
             self._episode_action_counts_by_env[env_index] = 0
             self.total_episode_actions += episode_actions
             self.episode_stats_count += 1
-            self.max_episode_duration_seconds = max(
-                self.max_episode_duration_seconds,
-                episode_duration_seconds
-            )
+            if episode_duration_seconds is not None:
+                self.max_episode_duration_seconds = max(
+                    self.max_episode_duration_seconds,
+                    episode_duration_seconds
+                )
 
         episode_ended = episodes_finished > 0
         if episode_ended:
@@ -1087,6 +1101,24 @@ class BotEvaluationCallback(BaseCallback):
         self.best_model_save_path = best_model_save_path
         self.metrics_tracker = metrics_tracker
         self.use_episode_freq = use_episode_freq
+        if not isinstance(self.eval_freq, int) or isinstance(self.eval_freq, bool) or self.eval_freq <= 0:
+            raise ValueError(
+                f"BotEvaluationCallback.eval_freq must be a positive integer (got {self.eval_freq!r})"
+            )
+        if (
+            not isinstance(self.n_eval_episodes, int)
+            or isinstance(self.n_eval_episodes, bool)
+            or self.n_eval_episodes <= 0
+        ):
+            raise ValueError(
+                f"BotEvaluationCallback.n_eval_episodes must be a positive integer "
+                f"(got {self.n_eval_episodes!r})"
+            )
+        if not isinstance(self.use_episode_freq, bool):
+            raise ValueError(
+                f"BotEvaluationCallback.use_episode_freq must be boolean "
+                f"(got {type(self.use_episode_freq).__name__})"
+            )
         if initial_episode_marker < 0:
             raise ValueError(
                 f"initial_episode_marker must be >= 0 (got {initial_episode_marker})"

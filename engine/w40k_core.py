@@ -140,6 +140,7 @@ class W40KEngine(gym.Env):
             # Load scenario data (units + optional terrain)
             scenario_result = self._load_units_from_scenario(scenario_file, unit_registry)
             scenario_units = scenario_result["units"]
+            scenario_roster_info = scenario_result.get("roster_info")
             scenario_primary_objective_ids = scenario_result.get("primary_objectives")
             scenario_deployment_type = scenario_result.get("deployment_type")
             scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
@@ -192,6 +193,10 @@ class W40KEngine(gym.Env):
             self._scenario_wall_hexes = scenario_wall_hexes
             self._scenario_objectives = scenario_objectives
             self._scenario_primary_objective = primary_objective_config
+            self._scenario_roster_info = scenario_roster_info
+            self._scenario_has_random_p1_roster = bool(
+                scenario_roster_info and scenario_roster_info.get("p1_ref_randomized")
+            )
 
             # Extract scenario name from file path for logging
             scenario_name = scenario_file if scenario_file else "Unknown Scenario"
@@ -236,6 +241,7 @@ class W40KEngine(gym.Env):
 
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config["rewards_config"] if "rewards_config" in config else {}
+            self._scenario_has_random_p1_roster = False
             
             # CRITICAL: Extract training_config from config dict for observation_params access
             # API server provides training_configs dict with agent keys, or training_config_name to select phase
@@ -526,14 +532,29 @@ class W40KEngine(gym.Env):
         if seed is not None:
             random.seed(seed)
 
-        # RANDOM SCENARIO SELECTION: Pick a random scenario for this episode
+        should_reload_scenario = False
         if self._random_scenario_mode and len(self._scenario_files) > 1:
             self._current_scenario_file = random.choice(self._scenario_files)
+            should_reload_scenario = True
+        elif getattr(self, "_scenario_has_random_p1_roster", False):
+            should_reload_scenario = True
+
+        # RANDOM SCENARIO SELECTION: Pick a random scenario for this episode
+        if should_reload_scenario:
             self._reload_scenario(self._current_scenario_file)
             # Rebuild reward configs for units in the new scenario (no defaults)
             from config_loader import get_config_loader
             config_loader = get_config_loader()
             reward_configs = {}
+            controlled_agent = self.config.get("controlled_agent")
+            if controlled_agent:
+                base_agent_key = controlled_agent
+                for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+                    if controlled_agent.endswith(phase_suffix):
+                        base_agent_key = controlled_agent[:-len(phase_suffix)]
+                        break
+                agent_rewards = config_loader.load_agent_rewards_config(base_agent_key)
+                reward_configs[controlled_agent] = require_key(agent_rewards, base_agent_key)
             units = require_key(self.game_state, "units")
             for unit in units:
                 unit_type = require_key(unit, "unitType")
@@ -819,7 +840,8 @@ class W40KEngine(gym.Env):
                 bot_name=bot_name,
                 walls=walls,
                 objectives=objectives,
-                primary_objective_config=self._scenario_primary_objective
+                primary_objective_config=self._scenario_primary_objective,
+                roster_info=getattr(self, "_scenario_roster_info", None)
             )
             
             # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number
@@ -3441,6 +3463,7 @@ class W40KEngine(gym.Env):
         # Load scenario data (units + optional terrain)
         scenario_result = self._load_units_from_scenario(scenario_file, self.unit_registry)
         scenario_units = scenario_result["units"]
+        scenario_roster_info = scenario_result.get("roster_info")
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
         scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
@@ -3468,13 +3491,24 @@ class W40KEngine(gym.Env):
 
         # Determine wall_hexes: use scenario if provided, otherwise use board config
         if scenario_result.get("wall_hexes") is not None:
-            self._scenario_wall_hexes = scenario_result["wall_hexes"]
+            scenario_wall_hexes = scenario_result["wall_hexes"]
         else:
             if "default" in board_config:
                 d = board_config["default"]
-                self._scenario_wall_hexes = d["wall_hexes"] if "wall_hexes" in d else []
+                scenario_wall_hexes = d["wall_hexes"] if "wall_hexes" in d else []
             else:
-                self._scenario_wall_hexes = board_config["wall_hexes"] if "wall_hexes" in board_config else []
+                scenario_wall_hexes = board_config["wall_hexes"] if "wall_hexes" in board_config else []
+
+        # Normalize walls to tuple coordinates for O(1) membership checks.
+        normalized_wall_hexes = set()
+        for raw_wall in scenario_wall_hexes:
+            if not isinstance(raw_wall, (list, tuple)) or len(raw_wall) != 2:
+                raise ValueError(
+                    f"Invalid wall hex format in scenario reload '{scenario_file}': {raw_wall!r}"
+                )
+            wall_col, wall_row = normalize_coordinates(raw_wall[0], raw_wall[1])
+            normalized_wall_hexes.add((wall_col, wall_row))
+        self._scenario_wall_hexes = sorted(normalized_wall_hexes)
 
         # Determine objectives: use scenario if provided, otherwise use board config
         if scenario_result.get("objectives") is not None:
@@ -3491,6 +3525,10 @@ class W40KEngine(gym.Env):
         self.config["deployment_zone"] = scenario_deployment_zone
         self.config["deployment_pools"] = scenario_deployment_pools
         self._scenario_primary_objective = primary_objective_config
+        self._scenario_roster_info = scenario_roster_info
+        self._scenario_has_random_p1_roster = bool(
+            scenario_roster_info and scenario_roster_info.get("p1_ref_randomized")
+        )
 
         # Extract scenario name from file path for logging
         scenario_name = scenario_file
@@ -3512,7 +3550,7 @@ class W40KEngine(gym.Env):
 
         # Update wall_hexes and objectives in game_state if present
         if "wall_hexes" in self.game_state:
-            self.game_state["wall_hexes"] = self._scenario_wall_hexes
+            self.game_state["wall_hexes"] = set(normalized_wall_hexes)
         if "objectives" in self.game_state:
             self.game_state["objectives"] = self._scenario_objectives
         if "primary_objective" in self.game_state:

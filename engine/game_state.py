@@ -6,6 +6,7 @@ game_state.py - Game state initialization and management
 from typing import Dict, List, Any, Optional, Tuple
 import copy
 import json
+from pathlib import Path
 from shared.data_validation import require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
@@ -144,12 +145,21 @@ class GameStateManager:
             except Exception as e:
                 raise ValueError(f"Failed to parse scenario file {scenario_file}: {e}")
             
+            scenario_roster_info: Optional[Dict[str, Any]] = None
             if isinstance(scenario_data, list):
                 basic_units = scenario_data
             elif isinstance(scenario_data, dict) and "units" in scenario_data:
                 basic_units = scenario_data["units"]
+            elif isinstance(scenario_data, dict) and "p1_roster_ref" in scenario_data and "p2_roster_ref" in scenario_data:
+                basic_units, scenario_roster_info = self._load_units_from_roster_refs(
+                    scenario_data=scenario_data,
+                    scenario_file=scenario_file
+                )
             else:
-                raise ValueError(f"Invalid scenario format in {scenario_file}: must have 'units' array")
+                raise ValueError(
+                    f"Invalid scenario format in {scenario_file}: must have 'units' array or "
+                    f"'p1_roster_ref'+'p2_roster_ref'"
+                )
             
             if not basic_units:
                 raise ValueError(f"Scenario file {scenario_file} contains no units")
@@ -157,7 +167,40 @@ class GameStateManager:
             deployment_zone = None
             deployment_type = "fixed"
             deployment_type_by_player: Dict[int, str] = {1: "fixed", 2: "fixed"}
+            resolved_scenario_walls = None
+            resolved_scenario_objectives = None
             if isinstance(scenario_data, dict):
+                has_wall_hexes = "wall_hexes" in scenario_data
+                has_wall_ref = "wall_ref" in scenario_data
+                if has_wall_hexes and has_wall_ref:
+                    raise ValueError(
+                        f"Scenario file {scenario_file} cannot define both 'wall_hexes' and 'wall_ref'"
+                    )
+                if has_wall_hexes:
+                    resolved_scenario_walls = require_key(scenario_data, "wall_hexes")
+                elif has_wall_ref:
+                    resolved_scenario_walls = self._load_shared_walls_from_ref(
+                        require_key(scenario_data, "wall_ref"),
+                        scenario_file
+                    )
+
+                has_objectives_inline = "objectives" in scenario_data
+                has_objective_hexes_legacy = "objective_hexes" in scenario_data
+                has_objectives_ref = "objectives_ref" in scenario_data
+                if has_objectives_ref and (has_objectives_inline or has_objective_hexes_legacy):
+                    raise ValueError(
+                        f"Scenario file {scenario_file} cannot define both objectives inline and 'objectives_ref'"
+                    )
+                if has_objectives_ref:
+                    resolved_scenario_objectives = self._load_shared_objectives_from_ref(
+                        require_key(scenario_data, "objectives_ref"),
+                        scenario_file
+                    )
+                elif has_objectives_inline:
+                    resolved_scenario_objectives = require_key(scenario_data, "objectives")
+                elif has_objective_hexes_legacy:
+                    resolved_scenario_objectives = require_key(scenario_data, "objective_hexes")
+
                 has_deployment_zone = "deployment_zone" in scenario_data
                 has_deployment_type = "deployment_type" in scenario_data
                 has_deployment_type_p1 = "deployment_type_P1" in scenario_data
@@ -200,9 +243,8 @@ class GameStateManager:
                         )
             
             wall_hex_set = set()
-            if isinstance(scenario_data, dict) and "wall_hexes" in scenario_data:
-                wall_hexes = require_key(scenario_data, "wall_hexes")
-                wall_hex_set = {(int(col), int(row)) for col, row in wall_hexes}
+            if resolved_scenario_walls is not None:
+                wall_hex_set = {(int(col), int(row)) for col, row in resolved_scenario_walls}
             
             from config_loader import get_config_loader
             config_loader = get_config_loader()
@@ -402,19 +444,11 @@ class GameStateManager:
 
             # Extract optional terrain data from scenario
             # If present in scenario, use it; otherwise return None for board config selection
-            scenario_walls = None
-            scenario_objectives = None
+            scenario_walls = resolved_scenario_walls
+            scenario_objectives = resolved_scenario_objectives
             scenario_primary_objective = None
 
             if isinstance(scenario_data, dict):
-                if "wall_hexes" in scenario_data:
-                    scenario_walls = scenario_data["wall_hexes"]
-                # Support new grouped objectives structure
-                if "objectives" in scenario_data:
-                    scenario_objectives = scenario_data["objectives"]
-                # Legacy flat list support (deprecated)
-                elif "objective_hexes" in scenario_data:
-                    scenario_objectives = scenario_data["objective_hexes"]
                 if "primary_objectives" in scenario_data:
                     scenario_primary_objective = scenario_data["primary_objectives"]
                 elif "primary_objective" in scenario_data:
@@ -448,8 +482,412 @@ class GameStateManager:
                 "deployment_zone": deployment_zone,
                 "deployment_type": deployment_type,
                 "deployment_type_by_player": deployment_type_by_player,
-                "deployment_pools": deployment_pools_serializable
+                "deployment_pools": deployment_pools_serializable,
+                "roster_info": scenario_roster_info
             }
+
+    def _load_units_from_roster_refs(
+        self,
+        scenario_data: Dict[str, Any],
+        scenario_file: str
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Load P1/P2 units from compact roster references."""
+        scale = require_key(scenario_data, "scale")
+        if not isinstance(scale, str) or not scale.strip():
+            raise ValueError(f"Scenario '{scenario_file}' has invalid 'scale': {scale!r}")
+        scale_name = scale.strip()
+
+        scenario_path = Path(scenario_file).resolve()
+        path_parts = scenario_path.parts
+        try:
+            agents_idx = path_parts.index("agents")
+            scenario_agent_key = path_parts[agents_idx + 1]
+        except Exception as e:
+            raise ValueError(
+                f"Cannot resolve agent key from scenario path '{scenario_file}': {e}"
+            )
+        if scenario_agent_key in {"_p2_rosters", "p2_rosters"}:
+            raise ValueError(
+                f"Scenario path '{scenario_file}' points to shared roster directory, not an agent scenario"
+            )
+
+        split: Optional[str] = None
+        if "/scenarios/training/" in scenario_file:
+            split = "training"
+        elif "/scenarios/holdout_regular/" in scenario_file or "/scenarios/holdout_hard/" in scenario_file:
+            split = "holdout"
+        else:
+            raise ValueError(
+                f"Scenario '{scenario_file}' must be located under scenarios/training, "
+                f"scenarios/holdout_regular, or scenarios/holdout_hard"
+            )
+        holdout_split_for_p1: Optional[str] = None
+        if split == "holdout":
+            if "/scenarios/holdout_regular/" in scenario_file:
+                holdout_split_for_p1 = "holdout_regular"
+            elif "/scenarios/holdout_hard/" in scenario_file:
+                holdout_split_for_p1 = "holdout_hard"
+            else:
+                raise ValueError(
+                    f"Holdout scenario '{scenario_file}' must be in holdout_regular/ or holdout_hard/"
+                )
+
+        p1_ref_value = require_key(scenario_data, "p1_roster_ref")
+        p2_ref_value = require_key(scenario_data, "p2_roster_ref")
+        p1_roster_seed = scenario_data.get("p1_roster_seed")
+        if p1_roster_seed is not None:
+            if not isinstance(p1_roster_seed, int) or isinstance(p1_roster_seed, bool) or p1_roster_seed < 0:
+                raise ValueError(
+                    f"Scenario '{scenario_file}' has invalid 'p1_roster_seed': {p1_roster_seed!r} "
+                    f"(expected non-negative integer)"
+                )
+
+        p1_ref, p1_ref_randomized = self._resolve_roster_ref(
+            p1_ref_value,
+            expected_split=(split if split == "training" else str(holdout_split_for_p1)),
+            scenario_file=scenario_file,
+            field_name="p1_roster_ref",
+            allow_random=(split == "training"),
+            scenario_agent_key=scenario_agent_key,
+            scale_name=scale_name,
+            roster_kind="p1",
+            random_seed=p1_roster_seed
+        )
+        p2_ref, _ = self._resolve_roster_ref(
+            p2_ref_value,
+            expected_split=split,
+            scenario_file=scenario_file,
+            field_name="p2_roster_ref",
+            allow_random=False,
+            scenario_agent_key=scenario_agent_key,
+            scale_name=scale_name,
+            roster_kind="p2",
+            random_seed=None
+        )
+
+        project_root = Path(__file__).resolve().parent.parent
+        p1_roster_path = (
+            project_root / "config" / "agents" / scenario_agent_key / "rosters" / scale_name / p1_ref
+        )
+        p2_roster_path = (
+            project_root / "config" / "agents" / "_p2_rosters" / scale_name / p2_ref
+        )
+
+        p1_roster_data = self._load_compact_roster_file(p1_roster_path, "P1")
+        p2_roster_data = self._load_compact_roster_file(p2_roster_path, "P2")
+
+        p1_units = self._expand_compact_roster_to_basic_units(
+            roster_data=p1_roster_data,
+            player=1,
+            id_start=1,
+            roster_path=str(p1_roster_path)
+        )
+        p2_units = self._expand_compact_roster_to_basic_units(
+            roster_data=p2_roster_data,
+            player=2,
+            id_start=101,
+            roster_path=str(p2_roster_path)
+        )
+
+        roster_info = {
+            "scale": scale_name,
+            "p1_roster_ref": p1_ref,
+            "p2_roster_ref": p2_ref,
+            "p1_roster_id": str(require_key(p1_roster_data, "roster_id")),
+            "p2_roster_id": str(require_key(p2_roster_data, "roster_id")),
+            "p1_ref_randomized": p1_ref_randomized
+        }
+        return p1_units + p2_units, roster_info
+
+    def _resolve_roster_ref(
+        self,
+        raw_ref: Any,
+        expected_split: str,
+        scenario_file: str,
+        field_name: str,
+        allow_random: bool,
+        scenario_agent_key: str,
+        scale_name: str,
+        roster_kind: str,
+        random_seed: Optional[int]
+    ) -> Tuple[str, bool]:
+        """Resolve roster reference to '<expected_split>/file.json'."""
+        import random
+
+        if roster_kind not in {"p1", "p2"}:
+            raise ValueError(f"Invalid roster_kind: {roster_kind!r}")
+
+        rng = random.Random(random_seed) if random_seed is not None else random
+
+        ref_value = raw_ref
+        was_randomized = False
+        if isinstance(raw_ref, str) and allow_random:
+            normalized_ref = raw_ref.strip().replace("\\", "/")
+            random_token = f"{expected_split}_random"
+            if normalized_ref == random_token:
+                project_root = Path(__file__).resolve().parent.parent
+                if roster_kind == "p1":
+                    base_dir = (
+                        project_root
+                        / "config"
+                        / "agents"
+                        / scenario_agent_key
+                        / "rosters"
+                        / scale_name
+                        / expected_split
+                    )
+                    pattern = "p1_roster-*.json"
+                else:
+                    base_dir = (
+                        project_root
+                        / "config"
+                        / "agents"
+                        / "_p2_rosters"
+                        / scale_name
+                        / expected_split
+                    )
+                    pattern = "p2_roster-*.json"
+                if not base_dir.exists():
+                    raise FileNotFoundError(
+                        f"Scenario '{scenario_file}' {field_name}={random_token!r} but directory does not exist: {base_dir}"
+                    )
+                candidates = sorted(base_dir.glob(pattern), key=lambda p: p.name)
+                if not candidates:
+                    raise FileNotFoundError(
+                        f"Scenario '{scenario_file}' {field_name}={random_token!r} but no files matching "
+                        f"{pattern} in {base_dir}"
+                    )
+                chosen = rng.choice(candidates)
+                ref_value = f"{expected_split}/{chosen.name}"
+                was_randomized = True
+
+        if isinstance(raw_ref, list):
+            if not allow_random:
+                raise ValueError(
+                    f"Scenario '{scenario_file}' field '{field_name}' cannot be a list outside training split"
+                )
+            if not raw_ref:
+                raise ValueError(
+                    f"Scenario '{scenario_file}' field '{field_name}' list cannot be empty"
+                )
+            ref_value = rng.choice(raw_ref)
+            was_randomized = True
+
+        if not isinstance(ref_value, str) or not ref_value.strip():
+            raise ValueError(
+                f"Scenario '{scenario_file}' has invalid '{field_name}': {ref_value!r}"
+            )
+
+        normalized = ref_value.strip().replace("\\", "/")
+        if normalized.startswith("../") or "/../" in normalized or normalized.startswith("/"):
+            raise ValueError(
+                f"Scenario '{scenario_file}' has unsafe roster ref in '{field_name}': {normalized}"
+            )
+
+        if "/" not in normalized:
+            raise ValueError(
+                f"Scenario '{scenario_file}' field '{field_name}' must be explicit '<split>/file.json', got '{normalized}'"
+            )
+        if not normalized.endswith(".json"):
+            normalized = f"{normalized}.json"
+
+        prefix = f"{expected_split}/"
+        if not normalized.startswith(prefix):
+            raise ValueError(
+                f"Scenario '{scenario_file}' field '{field_name}' must target '{expected_split}/...' but got '{normalized}'"
+            )
+        filename = normalized[len(prefix):]
+        project_root = Path(__file__).resolve().parent.parent
+        if roster_kind == "p1":
+            base_dir = (
+                project_root
+                / "config"
+                / "agents"
+                / scenario_agent_key
+                / "rosters"
+                / scale_name
+                / expected_split
+            )
+        else:
+            base_dir = (
+                project_root
+                / "config"
+                / "agents"
+                / "_p2_rosters"
+                / scale_name
+                / expected_split
+            )
+        direct_path = base_dir / filename
+        if direct_path.exists():
+            return normalized, was_randomized
+
+        requested_roster_id = Path(filename).stem
+        expected_roster_prefix = f"{roster_kind}_roster-"
+        if not requested_roster_id.startswith(expected_roster_prefix):
+            raise FileNotFoundError(
+                f"Scenario '{scenario_file}' references missing roster file '{normalized}' "
+                f"and roster id inference is not supported for '{requested_roster_id}'"
+            )
+
+        if not base_dir.exists():
+            raise FileNotFoundError(
+                f"Scenario '{scenario_file}' references missing roster file '{normalized}' "
+                f"and roster directory does not exist: {base_dir}"
+            )
+
+        matching_files: List[Path] = []
+        for candidate_path in sorted(base_dir.glob("*.json"), key=lambda p: p.name):
+            try:
+                with open(candidate_path, "r", encoding="utf-8-sig") as candidate_file:
+                    candidate_data = json.load(candidate_file)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in roster file {candidate_path}: {e}")
+            candidate_roster_id = require_key(candidate_data, "roster_id")
+            if not isinstance(candidate_roster_id, str):
+                raise TypeError(
+                    f"Roster file {candidate_path} has non-string roster_id: "
+                    f"{type(candidate_roster_id).__name__}"
+                )
+            if candidate_roster_id == requested_roster_id:
+                matching_files.append(candidate_path)
+
+        if len(matching_files) == 1:
+            resolved_filename = matching_files[0].name
+            return f"{expected_split}/{resolved_filename}", was_randomized
+        if len(matching_files) > 1:
+            raise ValueError(
+                f"Scenario '{scenario_file}' roster ref '{normalized}' is ambiguous by roster_id "
+                f"'{requested_roster_id}': {[str(path) for path in matching_files]}"
+            )
+        raise FileNotFoundError(
+            f"Scenario '{scenario_file}' references missing roster file '{normalized}' "
+            f"and no roster with roster_id '{requested_roster_id}' exists in {base_dir}"
+        )
+
+    def _load_shared_walls_from_ref(self, wall_ref: Any, scenario_file: str) -> List[List[int]]:
+        """Load shared wall_hexes file referenced by scenario wall_ref."""
+        wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref")
+        if not wall_path.exists():
+            raise FileNotFoundError(f"Shared walls file not found for scenario {scenario_file}: {wall_path}")
+        try:
+            with open(wall_path, "r", encoding="utf-8-sig") as f:
+                wall_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in shared walls file {wall_path}: {e}")
+        if not isinstance(wall_data, dict):
+            raise ValueError(f"Shared walls file {wall_path} must be JSON object")
+        wall_hexes = require_key(wall_data, "wall_hexes")
+        if not isinstance(wall_hexes, list):
+            raise ValueError(f"Shared walls file {wall_path} field 'wall_hexes' must be list")
+        return wall_hexes
+
+    def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
+        """Load shared objectives file referenced by scenario objectives_ref."""
+        objectives_path = self._resolve_shared_config_path(
+            "_objectives",
+            objectives_ref,
+            scenario_file,
+            "objectives_ref"
+        )
+        if not objectives_path.exists():
+            raise FileNotFoundError(
+                f"Shared objectives file not found for scenario {scenario_file}: {objectives_path}"
+            )
+        try:
+            with open(objectives_path, "r", encoding="utf-8-sig") as f:
+                objectives_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in shared objectives file {objectives_path}: {e}")
+        if not isinstance(objectives_data, dict):
+            raise ValueError(f"Shared objectives file {objectives_path} must be JSON object")
+        objectives = require_key(objectives_data, "objectives")
+        if not isinstance(objectives, list):
+            raise ValueError(f"Shared objectives file {objectives_path} field 'objectives' must be list")
+        return objectives
+
+    def _resolve_shared_config_path(
+        self,
+        shared_dir_name: str,
+        raw_ref: Any,
+        scenario_file: str,
+        field_name: str
+    ) -> Path:
+        """Resolve shared config path under config/agents/<shared_dir_name>."""
+        if not isinstance(raw_ref, str) or not raw_ref.strip():
+            raise ValueError(
+                f"Scenario '{scenario_file}' has invalid '{field_name}': {raw_ref!r}"
+            )
+        normalized = raw_ref.strip().replace("\\", "/")
+        if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
+            raise ValueError(
+                f"Scenario '{scenario_file}' has unsafe '{field_name}': {normalized}"
+            )
+        if "/" in normalized:
+            raise ValueError(
+                f"Scenario '{scenario_file}' field '{field_name}' must be filename only under {shared_dir_name}, got: {normalized}"
+            )
+        if not normalized.endswith(".json"):
+            normalized = f"{normalized}.json"
+
+        project_root = Path(__file__).resolve().parent.parent
+        return project_root / "config" / "agents" / shared_dir_name / normalized
+
+    def _load_compact_roster_file(self, roster_path: Path, roster_label: str) -> Dict[str, Any]:
+        """Load and validate compact roster JSON file."""
+        if not roster_path.exists():
+            raise FileNotFoundError(f"{roster_label} roster file not found: {roster_path}")
+        try:
+            with open(roster_path, "r", encoding="utf-8-sig") as f:
+                roster_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in {roster_label} roster file {roster_path}: {e}")
+        if not isinstance(roster_data, dict):
+            raise ValueError(
+                f"{roster_label} roster file {roster_path} must be JSON object, got {type(roster_data).__name__}"
+            )
+        require_key(roster_data, "roster_id")
+        composition = require_key(roster_data, "composition")
+        if not isinstance(composition, list) or not composition:
+            raise ValueError(f"{roster_label} roster {roster_path} must define non-empty 'composition' list")
+        return roster_data
+
+    def _expand_compact_roster_to_basic_units(
+        self,
+        roster_data: Dict[str, Any],
+        player: int,
+        id_start: int,
+        roster_path: str
+    ) -> List[Dict[str, Any]]:
+        """Expand compact composition format to basic unit entries."""
+        composition = require_key(roster_data, "composition")
+        if not isinstance(composition, list):
+            raise ValueError(f"Roster {roster_path} field 'composition' must be list")
+
+        next_id = id_start
+        expanded_units: List[Dict[str, Any]] = []
+        for idx, comp_entry in enumerate(composition):
+            if not isinstance(comp_entry, dict):
+                raise ValueError(
+                    f"Roster {roster_path} composition[{idx}] must be object, got {type(comp_entry).__name__}"
+                )
+            unit_type = require_key(comp_entry, "unit_type")
+            count = require_key(comp_entry, "count")
+            if not isinstance(unit_type, str) or not unit_type.strip():
+                raise ValueError(
+                    f"Roster {roster_path} composition[{idx}].unit_type must be non-empty string"
+                )
+            if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+                raise ValueError(
+                    f"Roster {roster_path} composition[{idx}].count must be positive int, got {count!r}"
+                )
+            for _ in range(count):
+                expanded_units.append({
+                    "id": next_id,
+                    "player": player,
+                    "unit_type": unit_type.strip()
+                })
+                next_id += 1
+        return expanded_units
     
     # ============================================================================
     # UTILITIES

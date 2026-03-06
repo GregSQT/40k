@@ -107,12 +107,18 @@ def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: s
 def _scenario_name_from_file(base_agent_key: str, scenario_file: str) -> str:
     """Build short scenario name used in logs/results."""
     basename = os.path.basename(scenario_file).replace(".json", "")
-    if not base_agent_key:
-        return basename
-    agent_prefix = f"{base_agent_key}_"
-    if basename.startswith(agent_prefix):
-        return basename[len(agent_prefix):]
-    return basename
+    parent_dir = os.path.basename(os.path.dirname(scenario_file))
+    name = basename
+    if base_agent_key:
+        agent_prefix = f"{base_agent_key}_"
+        if name.startswith(agent_prefix):
+            name = name[len(agent_prefix):]
+    if name.startswith("scenario_"):
+        name = name[len("scenario_"):]
+    bot_match = re.fullmatch(r"bot-(\d+)", name)
+    if bot_match and parent_dir in {"holdout_regular", "holdout_hard"}:
+        return f"{parent_dir}_bot-{bot_match.group(1)}"
+    return name
 
 
 def _scenario_metric_slug(scenario_name: str) -> str:
@@ -133,6 +139,8 @@ def _scenario_split_metric_key(scenario_name: str) -> Optional[str]:
       - holdout_regular_bot-<n> -> regular_bot_<n>
     """
     name = scenario_name.strip()
+    if name.startswith("scenario_"):
+        name = name[len("scenario_"):]
     training_match = re.fullmatch(r"training_bot-(\d+)", name)
     if training_match:
         return f"training_bot_{training_match.group(1)}"
@@ -235,11 +243,9 @@ def _compute_holdout_split_metrics(
     missing_regular = [name for name in regular_keys if name not in available]
     missing_hard = [name for name in hard_keys if name not in available]
     if missing_regular or missing_hard:
-        raise KeyError(
-            "Holdout split scenario names are missing from evaluation results. "
-            f"Missing regular={missing_regular}, missing hard={missing_hard}, "
-            f"available={sorted(available)}"
-        )
+        # Not enough episodes to cover every holdout split scenario.
+        # Keep evaluation running, but skip split aggregates to avoid misleading partial means.
+        return {}
 
     regular_values = [float(require_key(scenario_scores[name], "combined")) for name in regular_keys]
     hard_values = [float(require_key(scenario_scores[name], "combined")) for name in hard_keys]

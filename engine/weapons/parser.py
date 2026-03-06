@@ -50,6 +50,19 @@ class ArmoryParser:
             content = f.read()
         
         weapons = {}
+        dice_constant_map: Dict[str, str] = {}
+
+        # Parse DiceValue constants (e.g. TWO_D6 = "2D6") declared in the armory file.
+        dice_constant_pattern = r'const\s+([A-Z0-9_]+)\s*:\s*DiceValue\s*=\s*"([^"]+)"'
+        for const_match in re.finditer(dice_constant_pattern, content):
+            const_name = const_match.group(1)
+            const_value = const_match.group(2)
+            if not const_name or not const_value:
+                raise ValueError(
+                    f"Invalid DiceValue constant declaration in {armory_path}: "
+                    f"name={const_name!r} value={const_value!r}"
+                )
+            dice_constant_map[const_name] = const_value
         
         # Get weapon rules registry for validation
         rules_registry = get_weapon_rules_registry()
@@ -98,14 +111,23 @@ class ArmoryParser:
                 weapon['COMBI_WEAPON'] = combi_match.group(1)
             
             # Numeric properties: RNG, NB, ATK, STR, AP, DMG
-            # NB/DMG can be dice expressions (D3, D6) in addition to ints
+            # NB/DMG can be dice expressions (D3, D6, 2D6, D6+1) in addition to ints
             for prop in ['RNG', 'NB', 'ATK', 'STR', 'AP', 'DMG']:
                 if prop in ['NB', 'DMG']:
-                    prop_match = re.search(rf'{prop}:\s*(D[36]|-?\d+)', weapon_body)
+                    prop_match = re.search(rf'{prop}:\s*([A-Z0-9_]+|D6\+1|2D6|D[36]|-?\d+)', weapon_body)
                     if prop_match:
                         raw_value = prop_match.group(1)
-                        if raw_value in ['D3', 'D6']:
+                        if raw_value in ['D3', 'D6', '2D6', 'D6+1']:
                             weapon[prop] = raw_value
+                        elif raw_value in dice_constant_map:
+                            resolved_value = dice_constant_map[raw_value]
+                            if resolved_value not in ['D3', 'D6', '2D6', 'D6+1']:
+                                raise ValueError(
+                                    f"Weapon '{weapon.get('display_name', weapon_code)}' has unsupported "
+                                    f"{prop} DiceValue constant {raw_value}={resolved_value!r} in {armory_path}. "
+                                    "Allowed dice values: D3, D6, 2D6, D6+1."
+                                )
+                            weapon[prop] = resolved_value
                         else:
                             weapon[prop] = int(raw_value)
                 else:

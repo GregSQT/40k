@@ -16,10 +16,12 @@ import type { DiceValue, Weapon } from "../../types/game";
 
 const D3: DiceValue = "D3";
 const D6: DiceValue = "D6";
+const D6_PLUS_1: DiceValue = "D6+1";
+const TWO_D6: DiceValue = "2D6";
 export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   // #########################################################################################
   // #################################### Range Weapons ######################################
-  // #########################################################################################
+  // ########################################################################################
   assault_cannon: {
     display_name: "Assault Cannon",
     RNG: 24,
@@ -92,6 +94,28 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     DMG: 1,
     WEAPON_RULES: ["PISTOL"],
   },
+  cyclone_missile_launcher_frag: {
+    display_name: "Cyclone Missile Launcher (Frag)",
+    COMBI_WEAPON: "cyclone_missile_launcher",
+    RNG: 36,
+    NB: TWO_D6,
+    ATK: 3,
+    STR: 4,
+    AP: 0,
+    DMG: 1,
+    WEAPON_RULES: ["BLAST"],
+  },
+  cyclone_missile_launcher_krak: {
+    display_name: "Cyclone Missile Launcher (Krak)",
+    COMBI_WEAPON: "cyclone_missile_launcher",
+    RNG: 36,
+    NB: 2,
+    ATK: 3,
+    STR: 9,
+    AP: -2,
+    DMG: D6,
+    WEAPON_RULES: [],
+  },
   flamer: {
     display_name: "Flamer",
     RNG: 12,
@@ -101,6 +125,16 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     AP: 0,
     DMG: 1,
     WEAPON_RULES: ["IGNORES_COVER", "TORRENT"],
+  },
+  flamestorm_gauntlets: {
+    display_name: "Flamestorm Gauntlets",
+    RNG: 12,
+    NB: D6_PLUS_1,
+    ATK: 7,
+    STR: 4,
+    AP: 0,
+    DMG: 1,
+    WEAPON_RULES: ["IGNORES_COVER", "TORRENT", "TWIN_LINKED"],
   },
   grav_gun: {
     display_name: "Grav-gun",
@@ -117,10 +151,10 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     RNG: 12,
     NB: D6,
     ATK: 7,
-    STR: 3,
-    AP: 0,
+    STR: 5,
+    AP: -1,
     DMG: 1,
-    WEAPON_RULES: ["IGNORES_COVER", "PISTOL", "TORRENT"],
+    WEAPON_RULES: ["IGNORES_COVER", "TORRENT"],
   },
   heavy_bolt_pistol: {
     display_name: "Bolt Pistol",
@@ -150,6 +184,16 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
     STR: 5,
     AP: -1,
     DMG: 2,
+    WEAPON_RULES: ["ASSAULT", "HEAVY", "SUSTAINED_HITS:1"],
+  },
+  heavy_flamer: {
+    display_name: "Heavy Flamer",
+    RNG: 12,
+    NB: D6,
+    ATK: 7,
+    STR: 5,
+    AP: -1,
+    DMG: 1,
     WEAPON_RULES: ["ASSAULT", "HEAVY", "SUSTAINED_HITS:1"],
   },
   master_crafted_boltgun: {

@@ -134,7 +134,7 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None):
         """Log episode start with all unit starting positions, walls, and objectives"""
         if not self.enabled:
             return
@@ -178,6 +178,19 @@ class StepLogger:
 
                 if scenario_info:
                     f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
+                if roster_info:
+                    if not isinstance(roster_info, dict):
+                        raise ValueError(f"roster_info must be dict when provided, got {type(roster_info).__name__}")
+                    p1_roster_id = require_key(roster_info, "p1_roster_id")
+                    p2_roster_id = require_key(roster_info, "p2_roster_id")
+                    p1_roster_ref = require_key(roster_info, "p1_roster_ref")
+                    p2_roster_ref = require_key(roster_info, "p2_roster_ref")
+                    scale = require_key(roster_info, "scale")
+                    f.write(
+                        f"[{timestamp}] Rosters: scale={scale} "
+                        f"P1={p1_roster_id} ({p1_roster_ref}) "
+                        f"P2={p2_roster_id} ({p2_roster_ref})\n"
+                    )
 
                 if effective_bot_name:
                     f.write(f"[{timestamp}] Opponent: {effective_bot_name.capitalize()}Bot\n")
