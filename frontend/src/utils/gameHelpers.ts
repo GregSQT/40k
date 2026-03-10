@@ -127,30 +127,32 @@ function lineIntersectsWall(
   return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
 
-// 9-Point Line of Sight System
+// Hex-native Line of Sight System (center + 6 vertices)
 export function hasLineOfSight(
   fromUnit: Unit | Position,
   toUnit: Unit | Position,
-  wallHexes: [number, number][]
-): { canSee: boolean; inCover: boolean } {
+  wallHexes: [number, number][],
+  coverRatio: number,
+  losVisibilityMinRatio: number
+): { canSee: boolean; inCover: boolean; visibilityRatio: number } {
   const fromPos = "col" in fromUnit ? { col: fromUnit.col, row: fromUnit.row } : fromUnit;
   const toPos = "col" in toUnit ? { col: toUnit.col, row: toUnit.row } : toUnit;
 
   if (!wallHexes || wallHexes.length === 0) {
-    return { canSee: true, inCover: false };
+    return { canSee: true, inCover: false, visibilityRatio: 1 };
   }
 
   // Convert hex coordinates to pixel coordinates for accurate line testing
   const fromPixel = hexToPixel(fromPos.col, fromPos.row, 21);
   const toPixel = hexToPixel(toPos.col, toPos.row, 21);
 
-  // Define 9 points for each hex: center + 8 corners
+  // Define 7 points for each hex: center + 6 real hex vertices
   const getHexPoints = (centerX: number, centerY: number, radius: number) => {
     const points = [{ x: centerX, y: centerY }]; // Center point
 
-    // 8 corner points around the hex (not actual hex corners, but distributed around)
-    for (let i = 0; i < 8; i++) {
-      const angle = (i * Math.PI) / 4; // 45 degree increments
+    // 6 actual hex vertices (60 degree increments)
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * Math.PI) / 3;
       const x = centerX + radius * 0.8 * Math.cos(angle);
       const y = centerY + radius * 0.8 * Math.sin(angle);
       points.push({ x, y });
@@ -161,12 +163,11 @@ export function hasLineOfSight(
   const shooterPoints = getHexPoints(fromPixel.x, fromPixel.y, 21);
   const targetPoints = getHexPoints(toPixel.x, toPixel.y, 21);
 
-  // Check how many sight lines from shooter points can reach target points
+  // Compute visibility as a ratio of clear rays over all sampled rays.
+  // This avoids directional bias from "at least one clear ray per shooter point".
   let clearSightLines = 0;
-
+  const totalSightLines = shooterPoints.length * targetPoints.length;
   for (const shooterPoint of shooterPoints) {
-    let shooterPointHasClearLine = false;
-
     for (const targetPoint of targetPoints) {
       // Check if this line is blocked by any wall hex
       let lineBlocked = false;
@@ -179,24 +180,40 @@ export function hasLineOfSight(
       }
 
       if (!lineBlocked) {
-        shooterPointHasClearLine = true;
-        break; // This shooter point has at least one clear line to any target point
+        clearSightLines++;
       }
     }
-
-    if (shooterPointHasClearLine) {
-      clearSightLines++;
-    }
   }
 
-  // Apply your rules: 0 = blocked, 1-2 = cover, 3+ = clear
-  if (clearSightLines === 0) {
-    return { canSee: false, inCover: false };
-  } else if (clearSightLines <= 2) {
-    return { canSee: true, inCover: true };
-  } else {
-    return { canSee: true, inCover: false };
+  if (typeof coverRatio !== "number" || Number.isNaN(coverRatio) || coverRatio <= 0 || coverRatio > 1) {
+    throw new Error(`Invalid coverRatio: ${coverRatio}`);
   }
+  if (
+    typeof losVisibilityMinRatio !== "number" ||
+    Number.isNaN(losVisibilityMinRatio) ||
+    losVisibilityMinRatio <= 0 ||
+    losVisibilityMinRatio > 1
+  ) {
+    throw new Error(`Invalid losVisibilityMinRatio: ${losVisibilityMinRatio}`);
+  }
+  if (losVisibilityMinRatio >= coverRatio) {
+    throw new Error(
+      `Invalid LoS thresholds: losVisibilityMinRatio (${losVisibilityMinRatio}) must be < coverRatio (${coverRatio})`
+    );
+  }
+
+  // Visibility ratio rule:
+  // - ratio < losVisibilityMinRatio -> blocked
+  // - losVisibilityMinRatio <= ratio < coverRatio -> visible in cover (light blue)
+  // - ratio >= coverRatio -> clear visibility (blue)
+  const visibilityRatio = clearSightLines / totalSightLines;
+  if (visibilityRatio < losVisibilityMinRatio) {
+    return { canSee: false, inCover: false, visibilityRatio };
+  }
+  if (visibilityRatio < coverRatio) {
+    return { canSee: true, inCover: true, visibilityRatio };
+  }
+  return { canSee: true, inCover: false, visibilityRatio };
 }
 
 // Simple straight-line algorithm for hex grids using linear interpolation

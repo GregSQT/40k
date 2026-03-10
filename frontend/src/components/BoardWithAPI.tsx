@@ -351,11 +351,13 @@ export const BoardWithAPI: React.FC = () => {
   const [settings, setSettings] = useState(() => {
     const showAdvanceWarningStr = localStorage.getItem("showAdvanceWarning");
     const showDebugStr = localStorage.getItem("showDebug");
+    const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
     return {
       showAdvanceWarning:
         canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
       showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
+      showDebugLoS: showDebugLoSStr ? JSON.parse(showDebugLoSStr) : false,
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
     };
@@ -372,6 +374,11 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleDebug = (value: boolean) => {
     setSettings((prev) => ({ ...prev, showDebug: value }));
     localStorage.setItem("showDebug", JSON.stringify(value));
+  };
+
+  const handleToggleDebugLoS = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, showDebugLoS: value }));
+    localStorage.setItem("showDebugLoS", JSON.stringify(value));
   };
 
   const handleToggleAutoSelectWeapon = (value: boolean) => {
@@ -1370,6 +1377,7 @@ export const BoardWithAPI: React.FC = () => {
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId}
           ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
           showHexCoordinates={settings.showDebug}
+          showLosDebugOverlay={settings.showDebugLoS}
           eligibleUnitIds={apiProps.eligibleUnitIds}
           mode={apiProps.mode}
           movePreview={apiProps.movePreview}
@@ -1491,6 +1499,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleAdvanceWarning={handleToggleAdvanceWarning}
         showDebug={settings.showDebug}
         onToggleDebug={handleToggleDebug}
+        showDebugLoS={settings.showDebugLoS}
+        onToggleDebugLoS={handleToggleDebugLoS}
         autoSelectWeapon={settings.autoSelectWeapon}
         canToggleAutoSelectWeapon={canUseAutoWeaponSelection}
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}

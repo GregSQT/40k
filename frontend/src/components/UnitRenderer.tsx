@@ -419,6 +419,12 @@ export class UnitRenderer {
     // - Replay mode: blinkingUnits is undefined -> skip greying
     // - PvP mode before backend responds: blinkingUnits is [] or undefined -> skip greying
     // - PvP mode with targets: blinkingUnits has IDs -> apply greying
+    interface UnitWithFlags extends Unit {
+      isJustKilled?: boolean;
+      isGhost?: boolean;
+    }
+    const unitWithFlags = unit as UnitWithFlags;
+
     if (
       phase === "shoot" &&
       unit.player !== current_player &&
@@ -431,7 +437,7 @@ export class UnitRenderer {
           ? this.props.isShootable
           : this.props.blinkingUnits.includes(unit.id);
 
-      if (!isShootable) {
+      if (!isShootable && !unitWithFlags.isGhost) {
         const grey = 0x888888;
         const g = new PIXI.Graphics();
         g.beginFill(grey);
@@ -482,13 +488,6 @@ export class UnitRenderer {
     }
 
     const unitCircle = new PIXI.Graphics();
-
-    // Ghost unit styling (for replay move visualization)
-    interface UnitWithFlags extends Unit {
-      isJustKilled?: boolean;
-      isGhost?: boolean;
-    }
-    const unitWithFlags = unit as UnitWithFlags;
 
     let finalUnitColor = unitColor;
     let finalBorderColor = borderColor;

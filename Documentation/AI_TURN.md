@@ -434,6 +434,16 @@ end_activation(result_type, step_count, action_type, phase, remove_from_pool, in
 
 **Note**: The shooting preview displays all hexes within Line of Sight and within the selected weapon's range in blue color for both AI and Human players.
 
+**LoS ratio thresholds (config-driven):**
+- Read from `config/game_config.json` → `game_rules`:
+  - `los_visibility_min_ratio`
+  - `cover_ratio`
+- Rule:
+  - `visibility_ratio < los_visibility_min_ratio` → target/hex is **not visible**
+  - `los_visibility_min_ratio <= visibility_ratio < cover_ratio` → target/hex is **visible in cover**
+  - `visibility_ratio >= cover_ratio` → target/hex is **visible clear**
+- Constraint: `los_visibility_min_ratio < cover_ratio` (must be validated, no fallback)
+
 ---
 
 ## 🔧 SECTION 2: CORE FUNCTIONS (Reusable Building Blocks)
@@ -518,6 +528,11 @@ build_units_cache():
 ### Function: build_unit_los_cache(unit_id)
 **Purpose**: Calculer le cache LoS pour une unité spécifique  
 **Returns**: void (met à jour unit["los_cache"])
+
+**Reference (LoS definition in shooting phase):**
+- The underlying LoS computation MUST apply the shooting-phase ratio rule above
+  (via `los_visibility_min_ratio` and `cover_ratio` from `game_config.json`).
+- `unit["los_cache"]` stores visibility (`can_see`) and is used by `valid_target_pool_build`.
 
 ```javascript
 build_unit_los_cache(unit_id):
@@ -1001,7 +1016,12 @@ UNIT_ACTIVABLE_CHECK
 
 **Valid Target Requirements (ALL must be true):**
 1. **Range check**: Enemy within unit's selected_weapon.RNG hexes (varies by weapon)
-2. **Line of sight**: No wall hexes between shooter and target
+2. **Line of sight (ratio rule)**:
+   - Compute `visibility_ratio` with LoS sampling
+   - `visibility_ratio >= los_visibility_min_ratio` required for visibility
+   - Cover classification uses `cover_ratio`:
+     - `< cover_ratio` = in cover
+     - `>= cover_ratio` = clear visibility
 3. **Fight exclusion**: Enemy NOT adjacent to shooter (adjacent = melee fight)
 4. **Friendly fire prevention**: Enemy NOT adjacent to any friendly units
 

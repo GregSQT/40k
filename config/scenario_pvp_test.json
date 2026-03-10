@@ -3,7 +3,9 @@
   "units": [
     {"id": 2, "unit_type": "IntercessorSergeant", "player": 1, "col": 8, "row": 4},
     {"id": 4, "unit_type": "Intercessor", "player": 1, "col": 10, "row": 6},
-    {"id": 11, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 10, "row": 4}
+    {"id": 11, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 10, "row": 4},
+    {"id": 20, "unit_type": "Intercessor", "player": 1, "col": 14, "row": 14},
+    {"id": 12, "unit_type": "Termagant", "player": 2, "col": 11, "row": 6}
     
     
   ],

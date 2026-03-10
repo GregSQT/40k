@@ -154,6 +154,7 @@ type BoardProps = {
   ruleChoiceHighlightedUnitId?: number | null;
   eligibleUnitIds: number[];
   showHexCoordinates?: boolean;
+  showLosDebugOverlay?: boolean;
   shootingActivationQueue?: Unit[];
   activeShootingUnit?: Unit | null;
   shootingTargetId?: number | null; // For replay mode: shows explosion icon on target
@@ -236,6 +237,7 @@ export default function Board({
   ruleChoiceHighlightedUnitId = null,
   eligibleUnitIds,
   showHexCoordinates = false,
+  showLosDebugOverlay = false,
   shootingActivationQueue,
   activeShootingUnit,
   shootingTargetId,
@@ -323,7 +325,7 @@ export default function Board({
   const uiElementsContainerRef = useRef<PIXI.Container | null>(null);
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
-  const { boardConfig, loading, error } = useGameConfig();
+  const { boardConfig, gameConfig, loading, error } = useGameConfig();
   // ✅ STABLE CALLBACK REFS - Don't change on every render
   const stableCallbacks = useRef<{
     onSelectUnit: (id: number | string | null) => void;
@@ -497,6 +499,13 @@ export default function Board({
       }
       return;
     }
+    if (!gameConfig) {
+      canvasContainerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#7f1d1d;border-radius:8px;color:#fecaca;">Game configuration not loaded</div>`;
+      if (overlayRef.current) {
+        overlayRef.current.innerHTML = "";
+      }
+      return;
+    }
 
     const isNewApp = !appRef.current;
     if (isNewApp) {
@@ -646,6 +655,20 @@ export default function Board({
     if (!boardConfig.colors.eligible) {
       throw new Error("Missing required configuration value: boardConfig.colors.eligible");
     }
+    const gameRules = gameConfig.game_rules;
+    if (!gameRules) {
+      throw new Error("Missing required configuration value: gameConfig.game_rules");
+    }
+    if (typeof gameRules.cover_ratio !== "number") {
+      throw new Error("Missing required configuration value: gameConfig.game_rules.cover_ratio");
+    }
+    if (typeof gameRules.los_visibility_min_ratio !== "number") {
+      throw new Error(
+        "Missing required configuration value: gameConfig.game_rules.los_visibility_min_ratio"
+      );
+    }
+    const coverRatio = gameRules.cover_ratio;
+    const losVisibilityMinRatio = gameRules.los_visibility_min_ratio;
 
     // ✅ NOW SAFE TO ASSIGN WITH TYPE ASSERTIONS
     const ICON_SCALE = displayConfig.icon_scale!;
@@ -1113,28 +1136,28 @@ export default function Board({
     }
 
     // Attack cells: Different colors for different line of sight conditions
-    const attackCells: { col: number; row: number }[] = []; // Red = clear line of sight
+    const attackCells: { col: number; row: number }[] = []; // Blue preview cells
     const coverCells: { col: number; row: number }[] = []; // Orange = targets in cover
+    const losVisibilityRatioByHex: Map<string, number> = new Map();
     const blockedTargets: Set<string> = new Set(); // Track targets with no line of sight (no hex shown)
     const coverTargets: Set<string> = new Set(); // Track targets in cover
+    let backendShootableEnemyIds: Set<string> | null = null;
+    if (phase === "shoot" && selectedUnit) {
+      const selectedUnitTargetPool = selectedUnit.valid_target_pool;
+      if (Array.isArray(selectedUnitTargetPool)) {
+        backendShootableEnemyIds = new Set(selectedUnitTargetPool.map((id) => String(id)));
+      } else if (stableBlinkingUnits) {
+        backendShootableEnemyIds = new Set(stableBlinkingUnits.map((id) => String(id)));
+      }
+    }
+    const shootPreviewBackendIds = backendShootableEnemyIds;
     // Calculate blockedTargets for ALL enemies during shooting phase (not just preview)
     if (phase === "shoot" && selectedUnit) {
       const enemyUnits = units.filter((u) => u.player !== selectedUnit.player);
-      const centerCube = offsetToCube(selectedUnit.col, selectedUnit.row);
-
-      for (const enemy of enemyUnits) {
-        const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
-        if (distance <= (getMaxRangedRange(selectedUnit) || 0)) {
-          const lineOfSight = hasLineOfSight(
-            { col: selectedUnit.col, row: selectedUnit.row },
-            { col: enemy.col, row: enemy.row },
-            effectiveWallHexes
-          );
-
-          if (!lineOfSight.canSee) {
+      if (shootPreviewBackendIds) {
+        for (const enemy of enemyUnits) {
+          if (!shootPreviewBackendIds.has(String(enemy.id))) {
             blockedTargets.add(`${enemy.col},${enemy.row}`);
-          } else if (lineOfSight.inCover) {
-            coverTargets.add(`${enemy.col},${enemy.row}`);
           }
         }
       }
@@ -1185,73 +1208,79 @@ export default function Board({
         return;
       }
 
+      const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
+      const attackCellSet = new Set<string>();
       const centerCube = offsetToCube(source.fromCol, source.fromRow);
       const range = getMaxRangedRange(source.unit);
       if (range <= 0) {
         return;
       }
-      const coverPathHexes = new Set<string>();
-      const enemyUnits = units.filter((u) => u.player !== source.unit.player);
-      const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
 
-      for (const enemy of enemyUnits) {
-        const distance = cubeDistance(centerCube, offsetToCube(enemy.col, enemy.row));
-        if (distance > 0 && distance <= range) {
-          const lineOfSight = hasLineOfSight(
-            { col: source.fromCol, row: source.fromRow },
-            { col: enemy.col, row: enemy.row },
-            effectiveWallHexes
-          );
+      const enemyById = new Map<string, Unit>();
+      for (const enemy of units) {
+        if (enemy.player !== source.unit.player) {
+          enemyById.set(String(enemy.id), enemy);
+        }
+      }
 
-          if (!lineOfSight.canSee) {
-            blockedTargets.add(`${enemy.col},${enemy.row}`);
-          } else if (lineOfSight.inCover) {
-            coverCells.push({ col: enemy.col, row: enemy.row });
-            coverTargets.add(`${enemy.col},${enemy.row}`);
+      if (shootPreviewBackendIds) {
+        for (const enemyId of shootPreviewBackendIds) {
+          const enemy = enemyById.get(String(enemyId));
+          if (!enemy) {
+            continue;
+          }
 
-            const pathHexes: Position[] = getHexLine(
-              source.fromCol,
-              source.fromRow,
-              enemy.col,
-              enemy.row
-            );
-            pathHexes.forEach((hex) => {
-              const hexKey = `${hex.col},${hex.row}`;
-              if (!wallHexSet.has(hexKey)) {
-                coverPathHexes.add(hexKey);
-              }
-            });
-          } else {
+          const enemyKey = `${enemy.col},${enemy.row}`;
+          if (!attackCellSet.has(enemyKey)) {
+            attackCellSet.add(enemyKey);
             attackCells.push({ col: enemy.col, row: enemy.row });
+          }
+
+          const pathHexes: Position[] = getHexLine(source.fromCol, source.fromRow, enemy.col, enemy.row);
+          for (const hex of pathHexes) {
+            const isSourceHex = hex.col === source.fromCol && hex.row === source.fromRow;
+            if (isSourceHex) {
+              continue;
+            }
+            const hexKey = `${hex.col},${hex.row}`;
+            if (wallHexSet.has(hexKey)) {
+              continue;
+            }
+            if (!attackCellSet.has(hexKey)) {
+              attackCellSet.add(hexKey);
+              attackCells.push({ col: hex.col, row: hex.row });
+            }
           }
         }
       }
 
+      // Show all hexes that are geometrically visible from current shooter preview position.
       for (let col = 0; col < BOARD_COLS; col++) {
         for (let row = 0; row < BOARD_ROWS; row++) {
           const targetCube = offsetToCube(col, row);
           const dist = cubeDistance(centerCube, targetCube);
-          if (dist > 0 && dist <= range) {
-            const hexKey = `${col},${row}`;
-            const hasEnemy = units.some((u) => u.player !== source.unit.player && u.col === col && u.row === row);
-
-            if (!hasEnemy) {
-              if (coverPathHexes.has(hexKey)) {
-                coverCells.push({ col, row });
-              } else {
-                const lineOfSight = hasLineOfSight(
-                  { col: source.fromCol, row: source.fromRow },
-                  { col: col, row: row },
-                  effectiveWallHexes
-                );
-
-                if (lineOfSight.canSee && !lineOfSight.inCover) {
-                  attackCells.push({ col, row });
-                } else if (lineOfSight.canSee && lineOfSight.inCover) {
-                  coverCells.push({ col, row });
-                }
-              }
-            }
+          if (dist <= 0 || dist > range) {
+            continue;
+          }
+          const lineOfSight = hasLineOfSight(
+            { col: source.fromCol, row: source.fromRow },
+            { col, row },
+            effectiveWallHexes,
+            coverRatio,
+            losVisibilityMinRatio
+          );
+          const hexKey = `${col},${row}`;
+          losVisibilityRatioByHex.set(hexKey, lineOfSight.visibilityRatio);
+          if (!lineOfSight.canSee) {
+            continue;
+          }
+          if (lineOfSight.inCover) {
+            coverCells.push({ col, row });
+            continue;
+          }
+          if (!attackCellSet.has(hexKey)) {
+            attackCellSet.add(hexKey);
+            attackCells.push({ col, row });
           }
         }
       }
@@ -1557,6 +1586,10 @@ export default function Board({
       mode,
       showHexCoordinates,
       objectiveControl,
+      losDebugShowRatio: showLosDebugOverlay && phase === "shoot" && shootingPreviewSource !== null,
+      losDebugRatioByHex: Object.fromEntries(losVisibilityRatioByHex),
+      losDebugCoverRatio: coverRatio,
+      losDebugVisibilityMinRatio: losVisibilityMinRatio,
     });
 
     // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
@@ -1688,9 +1721,18 @@ export default function Board({
         movePreview !== null &&
         unit.id === movePreview.unitId;
 
-      const unitToRender = isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost
-        ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
-        : unit;
+      const isShootingPreviewGhost =
+        phase === "shoot" &&
+        (mode === "attackPreview" || mode === "targetPreview") &&
+        selectedUnitId !== null &&
+        unit.player !== current_player &&
+        shootPreviewBackendIds !== null &&
+        !shootPreviewBackendIds.has(String(unit.id));
+
+      const unitToRender =
+        isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost || isShootingPreviewGhost
+          ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
+          : unit;
 
       renderUnit({
         unit: unitToRender,
@@ -2319,6 +2361,8 @@ export default function Board({
     mode,
     phase,
     boardConfig,
+    gameConfig,
+    gameConfig?.game_rules,
     loading,
     error,
     activeShootingUnit,
@@ -2360,6 +2404,7 @@ export default function Board({
     shootingActivationQueue,
     showAdvanceWarningPopup,
     showHexCoordinates,
+    showLosDebugOverlay,
     shootingTargetId,
     shootingUnitId,
     targetPreview,

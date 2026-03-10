@@ -175,14 +175,21 @@ export const BoardReplay: React.FC = () => {
   // Settings preferences (from localStorage)
   const [settings, setSettings] = useState(() => {
     const showDebugStr = localStorage.getItem("showDebug");
+    const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     return {
       showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
+      showDebugLoS: showDebugLoSStr ? JSON.parse(showDebugLoSStr) : false,
     };
   });
 
   const handleToggleDebug = (value: boolean) => {
     setSettings((prev) => ({ ...prev, showDebug: value }));
     localStorage.setItem("showDebug", JSON.stringify(value));
+  };
+
+  const handleToggleDebugLoS = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, showDebugLoS: value }));
+    localStorage.setItem("showDebugLoS", JSON.stringify(value));
   };
 
   // Debug mode - read from settings state
@@ -1928,6 +1935,7 @@ export const BoardReplay: React.FC = () => {
         selectedUnitId={replaySelectedUnitId}
         eligibleUnitIds={unitsWithGhost.map((u) => u.id)}
         showHexCoordinates={showHexCoordinates}
+        showLosDebugOverlay={settings.showDebugLoS}
         mode={currentAction?.type === "advance" ? "advancePreview" : "select"}
         movePreview={
           currentAction?.type === "advance" && currentAction?.to && currentAction?.unit_id
@@ -2414,6 +2422,8 @@ export const BoardReplay: React.FC = () => {
         onToggleAdvanceWarning={() => {}}
         showDebug={settings.showDebug}
         onToggleDebug={handleToggleDebug}
+        showDebugLoS={settings.showDebugLoS}
+        onToggleDebugLoS={handleToggleDebugLoS}
         autoSelectWeapon={true}
         canToggleAutoSelectWeapon={false}
         onToggleAutoSelectWeapon={() => {}}

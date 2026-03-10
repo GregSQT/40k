@@ -70,6 +70,10 @@ interface DrawBoardOptions {
   mode?: string;
   showHexCoordinates?: boolean;
   objectiveControl?: ObjectiveControlMap; // NEW: Control status for each objective hex
+  losDebugShowRatio?: boolean;
+  losDebugRatioByHex?: Record<string, number>;
+  losDebugCoverRatio?: number;
+  losDebugVisibilityMinRatio?: number;
 }
 
 // Helper functions from Board.tsx
@@ -129,6 +133,10 @@ export const drawBoard = (
       mode = "select",
       showHexCoordinates = false,
       objectiveControl = {},
+      losDebugShowRatio = false,
+      losDebugRatioByHex = {},
+      losDebugCoverRatio = 0,
+      losDebugVisibilityMinRatio = 0,
     } = options || {};
 
     // Parse objective control colors - use same colors as player units
@@ -223,6 +231,41 @@ export const drawBoard = (
         baseCell.drawPolygon(points);
         baseCell.endFill();
         baseHexContainer.addChild(baseCell);
+
+        if (losDebugShowRatio) {
+          const losRatioValue = losDebugRatioByHex[`${col},${row}`];
+          if (losRatioValue !== undefined) {
+            if (typeof losRatioValue !== "number" || Number.isNaN(losRatioValue)) {
+              throw new Error(`Invalid LoS debug ratio at ${col},${row}`);
+            }
+            if (
+              typeof losDebugCoverRatio !== "number" ||
+              Number.isNaN(losDebugCoverRatio) ||
+              typeof losDebugVisibilityMinRatio !== "number" ||
+              Number.isNaN(losDebugVisibilityMinRatio)
+            ) {
+              throw new Error("Invalid LoS debug thresholds in drawBoard options");
+            }
+            const ratioPercent = Math.round(losRatioValue * 100);
+            const ratioColor =
+              losRatioValue < losDebugVisibilityMinRatio
+                ? 0x9ca3af
+                : losRatioValue < losDebugCoverRatio
+                  ? 0xf59e0b
+                  : 0x86efac;
+            const losRatioText = new PIXI.Text(`${ratioPercent}%`, {
+              fontSize: 8,
+              fill: ratioColor,
+              fontWeight: "bold",
+              stroke: 0x000000,
+              strokeThickness: 2,
+              align: "center",
+            });
+            losRatioText.anchor.set(0.5);
+            losRatioText.position.set(centerX, centerY + (showHexCoordinates ? 13 : 0));
+            baseHexContainer.addChild(losRatioText);
+          }
+        }
 
         // Add coordinate text when toggle is enabled
         if (showHexCoordinates) {
