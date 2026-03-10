@@ -636,7 +636,7 @@ class GameStateManager:
                         / scale_name
                         / expected_split
                     )
-                    pattern = "p1_roster-*.json"
+                    pattern = f"{expected_split}_p1_roster-*.json"
                 else:
                     base_dir = (
                         project_root

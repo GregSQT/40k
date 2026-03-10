@@ -1,0 +1,7 @@
+{
+  "roster_id": "p1_roster-02",
+  "composition": [
+    {"unit_type": "TerminatorAssaultCannon", "count": 1},
+    {"unit_type": "AggressorFlamestorm", "count": 1}
+  ]
+}

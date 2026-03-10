@@ -1,0 +1,7 @@
+{
+  "roster_id": "p1_roster-10",
+  "composition": [
+    {"unit_type": "EradicatorMultiMelta", "count": 1},
+    {"unit_type": "EradicatorMeltaRifle", "count": 2}
+  ]
+}

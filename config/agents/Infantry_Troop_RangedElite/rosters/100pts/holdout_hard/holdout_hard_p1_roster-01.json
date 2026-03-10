@@ -2,6 +2,6 @@
   "roster_id": "p1_roster-03",
   "composition": [
     {"unit_type": "Hellblaster", "count": 1},
-    {"unit_type": "HellblasterSergeant", "count": 3}
+    {"unit_type": "HellblasterSergeant", "count": 2}
   ]
 }

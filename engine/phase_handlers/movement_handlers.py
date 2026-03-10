@@ -616,7 +616,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     # When a unit moves, all LoS calculations involving that unit are now invalid
     # This prevents "shoot through wall" bugs caused by stale cache
     from .shooting_handlers import _invalidate_los_cache_for_moved_unit
-    _invalidate_los_cache_for_moved_unit(game_state, unit["id"])
+    _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
 
     # Pools are invalidated at the START of the phase, not after each movement
     # This prevents invalidating the "moved" tracking of units that just moved

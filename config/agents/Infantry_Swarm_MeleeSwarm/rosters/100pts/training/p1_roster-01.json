@@ -1,8 +1,0 @@
-{
-  "roster_id": "p1_roster-01",
-  "composition": [
-    {"unit_type": "FenrisianWolf", "count": 5},
-    {"unit_type": "Gargoyle", "count": 5},
-    {"unit_type": "Hormagaunt", "count": 5}
-  ]
-}

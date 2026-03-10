@@ -1084,7 +1084,13 @@ def _rebuild_los_cache_for_unit(game_state: Dict[str, Any], unit_id: str) -> Non
         game_state["los_cache"][reverse_key] = has_los
 
 
-def _invalidate_los_cache_for_moved_unit(game_state: Dict[str, Any], moved_unit_id: str) -> None:
+def _invalidate_los_cache_for_moved_unit(
+    game_state: Dict[str, Any],
+    moved_unit_id: str,
+    *,
+    old_col: Optional[int] = None,
+    old_row: Optional[int] = None,
+) -> None:
     """
     Invalidate LoS cache when unit moves.
     Direct field access, no state copying.
@@ -1111,10 +1117,21 @@ def _invalidate_los_cache_for_moved_unit(game_state: Dict[str, Any], moved_unit_
         for key in keys_to_remove:
             del game_state["los_cache"][key]
     
-    # CRITICAL: Also invalidate hex_los_cache (coordinate-based cache)
-    # When a unit moves, any LoS calculation involving that unit's old or new position is invalid
-    # It's simpler to clear the entire hex_los_cache than to track which entries involve the moved unit
-    if "hex_los_cache" in game_state:
+    # hex_los_cache: selective invalidation when old position known (PERF: preserves
+    # LoS between other hex pairs; full clear caused training ~0.2 ep/min)
+    if "hex_los_cache" not in game_state:
+        return
+    if old_col is not None and old_row is not None:
+        old_col_int, old_row_int = normalize_coordinates(old_col, old_row)
+        old_pos = (old_col_int, old_row_int)
+        keys_to_remove = [
+            k for k in game_state["hex_los_cache"].keys()
+            if (k[0] == old_pos or k[1] == old_pos)
+        ]
+        for k in keys_to_remove:
+            del game_state["hex_los_cache"][k]
+    else:
+        # Full clear when old position not provided (callers without coords use this path)
         game_state["hex_los_cache"] = {}
 
 
@@ -5673,7 +5690,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # The unit's position changed, so LoS cache entries are now stale
         if actually_moved:
             # CRITICAL: Invalidate LoS cache when unit advances (moves)
-            _invalidate_los_cache_for_moved_unit(game_state, unit["id"])
+            _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
             
             # AI_TURN.md STEP 4: Rebuild unit's los_cache with new position after advance
             # CRITICAL: Rebuild unit-local cache (not global cache) with new position

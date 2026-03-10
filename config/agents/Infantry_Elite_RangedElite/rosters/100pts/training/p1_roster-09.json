@@ -1,8 +1,0 @@
-{
-  "roster_id": "p1_roster-09",
-  "composition": [
-    {"unit_type": "TerminatorCyclone", "count": 1},
-    {"unit_type": "EradicatorMeltaRifle", "count": 1},
-    {"unit_type": "EradicatorMultiMelta", "count": 1}
-  ]
-}

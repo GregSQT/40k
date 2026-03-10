@@ -1109,14 +1109,28 @@ class ObservationBuilder:
             raise ValueError(f"Active unit for observation is not alive: unit_id={active_unit.get('id')}")
         
         # Build los_cache explicitly for observation (single source of truth)
+        # PERF: Only rebuild for active unit, units that moved/advanced, or units without cache.
+        # Other allies keep their los_cache from previous step - still valid.
         from engine.phase_handlers.shooting_handlers import build_unit_los_cache
         units_cache = require_key(game_state, "units_cache")
         active_player = int(active_unit["player"]) if active_unit["player"] is not None else None
         if active_player is None:
             raise ValueError(f"Active unit missing player: {active_unit}")
+        active_unit_id_str = str(active_unit["id"])
+        units_moved = game_state.get("units_moved") or set()
+        units_advanced = game_state.get("units_advanced") or set()
         for ally_id, cache_entry in units_cache.items():
-            if int(cache_entry["player"]) == active_player:
-                build_unit_los_cache(game_state, str(ally_id))
+            if int(cache_entry["player"]) != active_player:
+                continue
+            ally_id_str = str(ally_id)
+            needs_rebuild = (
+                ally_id_str == active_unit_id_str  # Active unit always needs los_cache for encoding
+                or ally_id_str in units_moved
+                or ally_id_str in units_advanced
+                or "los_cache" not in (get_unit_by_id(ally_id_str, game_state) or {})
+            )
+            if needs_rebuild:
+                build_unit_los_cache(game_state, ally_id_str)
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
         phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}

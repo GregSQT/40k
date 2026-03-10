@@ -1353,13 +1353,33 @@ def refresh_all_positional_caches_after_reactive_move(
     game_state: Dict[str, Any],
     enemy_adjacent_counts_override: Optional[Dict[int, Dict[Tuple[int, int], int]]] = None,
     enemy_adjacent_sets_override: Optional[Dict[int, Set[Tuple[int, int]]]] = None,
+    *,
+    reactive_move_old_col: Optional[int] = None,
+    reactive_move_old_row: Optional[int] = None,
+    reactive_move_new_col: Optional[int] = None,
+    reactive_move_new_row: Optional[int] = None,
 ) -> None:
     """
     Centralized cache refresh after any applied reactive move.
     """
     # Invalidate global LoS caches.
     game_state["los_cache"] = {}
-    game_state["hex_los_cache"] = {}
+    # hex_los_cache: selective invalidation when reactive move positions known (PERF)
+    if "hex_los_cache" in game_state:
+        positions_to_invalidate: List[Tuple[int, int]] = []
+        if reactive_move_old_col is not None and reactive_move_old_row is not None:
+            positions_to_invalidate.append(normalize_coordinates(reactive_move_old_col, reactive_move_old_row))
+        if reactive_move_new_col is not None and reactive_move_new_row is not None:
+            positions_to_invalidate.append(normalize_coordinates(reactive_move_new_col, reactive_move_new_row))
+        if positions_to_invalidate:
+            keys_to_remove = [
+                k for k in game_state["hex_los_cache"].keys()
+                if k[0] in positions_to_invalidate or k[1] in positions_to_invalidate
+            ]
+            for k in keys_to_remove:
+                del game_state["hex_los_cache"][k]
+        else:
+            game_state["hex_los_cache"] = {}
 
     # Invalidate all destination/target pools via movement helper.
     from .movement_handlers import _invalidate_all_destination_pools_after_movement
@@ -1746,6 +1766,10 @@ def maybe_resolve_reactive_move(
                 game_state,
                 enemy_adjacent_counts_override=reactive_adjacent_counts_by_player,
                 enemy_adjacent_sets_override=reactive_adjacent_sets_by_player,
+                reactive_move_old_col=orig_col,
+                reactive_move_old_row=orig_row,
+                reactive_move_new_col=dest_col,
+                reactive_move_new_row=dest_row,
             )
             applied_count += 1
     finally:

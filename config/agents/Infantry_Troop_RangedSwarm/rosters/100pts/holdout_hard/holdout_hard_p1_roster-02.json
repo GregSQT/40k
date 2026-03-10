@@ -2,6 +2,6 @@
   "roster_id": "p1_roster-05",
   "composition": [
     {"unit_type": "IntercessorGrenadeLauncher", "count": 1},
-    {"unit_type": "Intercessor", "count": 4}
+    {"unit_type": "Intercessor", "count": 3}
   ]
 }

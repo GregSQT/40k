@@ -8,23 +8,27 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ai.training_utils import setup_imports, get_agent_scenario_file
+from ai.training_utils import setup_imports, get_scenario_list_for_phase
 from ai.unit_registry import UnitRegistry
 from config_loader import get_config_loader
 
 
 def main():
+    agent_key = "Infantry_Swarm_MeleeSwarm"
     W40KEngine, _ = setup_imports()
     cfg = get_config_loader()
     unit_registry = UnitRegistry()
-    scenario_file = get_agent_scenario_file(
-        cfg, "SpaceMarine_Infantry_Troop_RangedSwarm", "default", "bot"
-    )
+    scenario_list = get_scenario_list_for_phase(cfg, agent_key, "default", scenario_type="training")
+    if not scenario_list:
+        scenario_list = get_scenario_list_for_phase(cfg, agent_key, "default", scenario_type="bot")
+    if not scenario_list:
+        raise FileNotFoundError(f"No scenario found for agent {agent_key}")
+    scenario_file = scenario_list[0]
 
     env = W40KEngine(
-        rewards_config="SpaceMarine_Infantry_Troop_RangedSwarm",
+        rewards_config=agent_key,
         training_config_name="default",
-        controlled_agent="SpaceMarine_Infantry_Troop_RangedSwarm",
+        controlled_agent=agent_key,
         scenario_file=scenario_file,
         unit_registry=unit_registry,
         quiet=True,
