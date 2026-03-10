@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/Aggressor.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteRangedTroop } from "../classes/SpaceMarineInfantryEliteRangedTroop";
+import { SpaceMarineInfantryEliteRangedSwarm } from "../classes/SpaceMarineInfantryEliteRangedSwarm";
 
-export class AggressorBoltStorm extends SpaceMarineInfantryEliteRangedTroop {
+export class AggressorBoltStorm extends SpaceMarineInfantryEliteRangedSwarm {
   static NAME = "AggressorBoltStorm";
   static DISPLAY_NAME = "Aggressor (Bolt Storm)";
 
@@ -35,7 +35,7 @@ export class AggressorBoltStorm extends SpaceMarineInfantryEliteRangedTroop {
   static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
 
 
-  static ICON = "/icons/AggressorBoltStorm.webp"; // Path relative to public folder
+  static ICON = "/icons/AggressorBoltstormGauntletFragstormGrenadeLauncher.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

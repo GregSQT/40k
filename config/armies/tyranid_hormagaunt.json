@@ -1,0 +1,11 @@
+{
+  "faction": "tyranid",
+  "display_name": "Hormagaunt Swarm",
+  "description": "Tyranid army:\n15 Hormagaunts",
+  "units": [
+    {
+      "unit_type": "Hormagaunt",
+      "count": 15
+    }
+  ]
+}

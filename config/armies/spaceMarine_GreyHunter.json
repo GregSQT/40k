@@ -1,0 +1,15 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Grey Hunter Pack",
+  "description": "Space Marine Army:\nGrey Hunter squad:\n \t1 Grey Hunter Pack Leader\n \t5 Grey Hunters",
+  "units": [
+    {
+      "unit_type": "GreyHunterPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunter",
+      "count": 5
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "faction": "tyranid",
+  "display_name": "Tyranid Warrior Ranged Brood",
+  "description": "Tyranid army:\n4 Tyranid Warriors (Ranged)",
+  "units": [
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 4
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Sternguard Veteran Bolt Rifle Squad",
+  "description": "Space Marine Army:\nSternguard Veterans with Bolt Rifle squad:\n \t3 Sternguard Veterans with Bolt Rifle",
+  "units": [
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 3
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schéma BDD Auth – Trazyn's Trials</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" crossorigin="anonymous"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      er: {
+        diagramPadding: 20,
+        layoutDirection: 'TB',
+        useMaxWidth: true
+      }
+    });
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+    .subtitle {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 2rem;
+    }
+    .diagram {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
+    .diagram svg { max-width: 100%; }
+  </style>
+</head>
+<body>
+  <h1>Schéma de la base d'authentification (SQLite)</h1>
+  <p class="subtitle">config/users.db – Trazyn's Trials</p>
+  <div class="diagram">
+    <pre class="mermaid">
+erDiagram
+  profiles {
+    int id PK
+    string code UK "base, admin"
+    string label
+  }
+
+  users {
+    int id PK
+    string login UK
+    string password_hash "PBKDF2-HMAC-SHA256"
+    int profile_id FK
+  }
+
+  game_modes {
+    int id PK
+    string code UK "pve, pvp, debug, test"
+    string label
+  }
+
+  options {
+    int id PK
+    string code UK "show_advance_warning, ..."
+    string label
+  }
+
+  profile_game_modes {
+    int profile_id FK
+    int game_mode_id FK
+  }
+
+  profile_options {
+    int profile_id FK
+    int option_id FK
+    int enabled "0 ou 1"
+  }
+
+  sessions {
+    string token PK
+    int user_id FK
+    string created_at
+  }
+
+  profiles ||--o{ users : "a pour"
+  profiles ||--o{ profile_game_modes : "accède aux modes"
+  game_modes ||--o{ profile_game_modes : "associé"
+  profiles ||--o{ profile_options : "accède aux options"
+  options ||--o{ profile_options : "associé"
+  users ||--o{ sessions : "possède"
+    </pre>
+  </div>
+</body>
+</html>

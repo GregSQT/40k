@@ -1389,6 +1389,13 @@ export class UnitRenderer {
     if (unit.SHOOT_LEFT === undefined || unit.SHOOT_LEFT <= 0) return;
     if (!isEligible) return;
 
+    // Backend target pool is the source of truth for "can actually shoot now".
+    // No implicit fallback: if pool is missing or empty, hide the shooting counter.
+    const validTargetPool = unit.valid_target_pool;
+    if (!Array.isArray(validTargetPool) || validTargetPool.length === 0) {
+      return;
+    }
+
     // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
     const selectedRngWeapon = getSelectedRangedWeapon(unit);
     if (!selectedRngWeapon) {
@@ -1402,7 +1409,11 @@ export class UnitRenderer {
     }
     const totalShotsValue = getDiceAverage(selectedRngWeapon.NB);
     const totalShotsLabel =
-      typeof selectedRngWeapon.NB === "number" ? `${selectedRngWeapon.NB}` : selectedRngWeapon.NB;
+      typeof unit.currentShootNb === "number" && unit.currentShootNb > 0
+        ? `${unit.currentShootNb}`
+        : typeof selectedRngWeapon.NB === "number"
+          ? `${selectedRngWeapon.NB}`
+          : selectedRngWeapon.NB;
     const shotsLeft = Number(unit.SHOOT_LEFT !== undefined ? unit.SHOOT_LEFT : totalShotsValue);
     if (Number.isNaN(shotsLeft)) {
       throw new Error(`Invalid SHOOT_LEFT for unit ${unit.id}`);
@@ -1599,6 +1610,7 @@ export class UnitRenderer {
 
     // Attack counter shows for actively fighting units in fight phase
     if (phase !== "fight") return;
+    if (unit.ATTACK_LEFT === undefined || unit.ATTACK_LEFT <= 0) return;
 
     // AI_TURN.md Lines 768, 777: ATTACK_LEFT visible during fight activation
     // Show counter for: (1) actively attacking unit (selectedUnitId in attackPreview)
@@ -1624,9 +1636,6 @@ export class UnitRenderer {
       }
 
       if (!shouldShowIfEligible || !isEligible) return;
-      if (unit.ATTACK_LEFT === undefined || unit.ATTACK_LEFT <= 0) {
-        return;
-      }
     }
 
     // NEW: Only show attack counter for units that have enemies in melee range
@@ -1660,7 +1669,11 @@ export class UnitRenderer {
     }
     const totalAttacksValue = getDiceAverage(selectedCcWeapon.NB);
     const totalAttacksLabel =
-      typeof selectedCcWeapon.NB === "number" ? `${selectedCcWeapon.NB}` : selectedCcWeapon.NB;
+      typeof unit.currentFightNb === "number" && unit.currentFightNb > 0
+        ? `${unit.currentFightNb}`
+        : typeof selectedCcWeapon.NB === "number"
+          ? `${selectedCcWeapon.NB}`
+          : selectedCcWeapon.NB;
     const attacksLeft = Number(
       unit.ATTACK_LEFT !== undefined ? unit.ATTACK_LEFT : totalAttacksValue
     );

@@ -1,0 +1,15 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Assault Intercessor Squad",
+  "description": "Space Marine Army:\nAssault Intercessor squad:\n \t1 Sergeant\n \t4 Assault Intercessors",
+  "units": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 4
+    }
+  ]
+}

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Schema_BDD_MEA_et_physique</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="memoire_fiches.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Schema_BDD_MEA_et_physique</h1>
+</header>
+<h1
+id="schéma-de-la-base-dauthentification-mea-et-modèle-physique">Schéma
+de la base d’authentification – MEA et modèle physique</h1>
+<h2 id="modèle-entité-association-mea">1. Modèle entité-association
+(MEA)</h2>
+<p>Les entités et relations ci-dessous décrivent le domaine «
+authentification et droits » de l’application. Chaque
+<strong>utilisateur</strong> est rattaché à un <strong>profil</strong>.
+Un <strong>profil</strong> a accès à des <strong>modes de jeu</strong>
+et à des <strong>options</strong> (paramètres par profil). Les
+<strong>sessions</strong> permettent d’authentifier les requêtes via un
+token.</p>
+<pre><code>┌─────────────────┐       ┌─────────────────┐
+│    PROFIL       │       │   UTILISATEUR    │
+├─────────────────┤       ├─────────────────┤
+│ id (PK)         │───1:N─│ id (PK)         │
+│ code (UK)       │       │ login (UK)       │
+│ label           │       │ password_hash    │
+└────────┬────────┘       │ profile_id (FK) │
+         │                 └────────┬────────┘
+         │ N                        │
+         │    ┌─────────────────────┼─────────────────────┐
+         │    │                     │ 1                   │
+         ▼    ▼                     ▼                     ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ PROFILE_GAME_    │  │ PROFILE_OPTIONS   │  │    SESSION        │
+│ MODES (table     │  │ (table            │  ├──────────────────┤
+│ d&#39;association)  │  │ d&#39;association)    │  │ token (PK)        │
+├──────────────────┤  ├──────────────────┤  │ user_id (FK)      │
+│ profile_id (FK)  │  │ profile_id (FK)   │  │ created_at       │
+│ game_mode_id(FK) │  │ option_id (FK)    │  └──────────────────┘
+└────────┬─────────┘  │ enabled          │
+         │ N          └────────┬─────────┘
+         │                     │ N
+         ▼                     ▼
+┌─────────────────┐   ┌─────────────────┐
+│   GAME_MODE     │   │    OPTION       │
+├─────────────────┤   ├─────────────────┤
+│ id (PK)         │   │ id (PK)         │
+│ code (UK)       │   │ code (UK)       │
+│ label           │   │ label           │
+└─────────────────┘   └─────────────────┘</code></pre>
+<p><strong>Entités :</strong></p>
+<table>
+<colgroup>
+<col style="width: 57%" />
+<col style="width: 42%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Entité</th>
+<th>Rôle</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Profil</strong></td>
+<td>Rôle utilisateur (ex. « base », « admin »). Détermine les modes de
+jeu et options accessibles.</td>
+</tr>
+<tr class="even">
+<td><strong>Utilisateur</strong></td>
+<td>Compte (login, mot de passe haché). Lié à un seul profil.</td>
+</tr>
+<tr class="odd">
+<td><strong>Session</strong></td>
+<td>Token d’authentification associé à un utilisateur (une session par
+connexion).</td>
+</tr>
+<tr class="even">
+<td><strong>ModeJeu</strong></td>
+<td>Mode de jeu (pve, pvp, pve_test, pvp_test). Référencé par les
+profils.</td>
+</tr>
+<tr class="odd">
+<td><strong>Option</strong></td>
+<td>Option applicative (ex. show_advance_warning,
+auto_weapon_selection). Référencée par les profils avec un flag
+enabled.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="modèle-physique-tables-sqlite">2. Modèle physique (tables
+SQLite)</h2>
+<p>Correspondance avec le script exécuté au démarrage de l’API
+(<code>initialize_auth_db</code> dans
+<code>services/api_server.py</code>).</p>
+<table>
+<colgroup>
+<col style="width: 23%" />
+<col style="width: 33%" />
+<col style="width: 43%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Table</th>
+<th>Colonnes</th>
+<th>Contraintes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>profiles</strong></td>
+<td>id INTEGER PK AUTOINCREMENT, code TEXT NOT NULL UNIQUE, label TEXT
+NOT NULL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td><strong>users</strong></td>
+<td>id INTEGER PK AUTOINCREMENT, login TEXT NOT NULL UNIQUE,
+password_hash TEXT NOT NULL, profile_id INTEGER NOT NULL REFERENCES
+profiles(id)</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><strong>game_modes</strong></td>
+<td>id INTEGER PK AUTOINCREMENT, code TEXT NOT NULL UNIQUE, label TEXT
+NOT NULL</td>
+<td></td>
+</tr>
+<tr class="even">
+<td><strong>options</strong></td>
+<td>id INTEGER PK AUTOINCREMENT, code TEXT NOT NULL UNIQUE, label TEXT
+NOT NULL</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><strong>profile_game_modes</strong></td>
+<td>profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE
+CASCADE, game_mode_id INTEGER NOT NULL REFERENCES game_modes(id) ON
+DELETE CASCADE</td>
+<td>UNIQUE(profile_id, game_mode_id)</td>
+</tr>
+<tr class="even">
+<td><strong>profile_options</strong></td>
+<td>profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE
+CASCADE, option_id INTEGER NOT NULL REFERENCES options(id) ON DELETE
+CASCADE, enabled INTEGER NOT NULL</td>
+<td>UNIQUE(profile_id, option_id)</td>
+</tr>
+<tr class="odd">
+<td><strong>sessions</strong></td>
+<td>token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES
+users(id) ON DELETE CASCADE, created_at TEXT NOT NULL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="intégration-au-mémoire">3. Intégration au mémoire</h2>
+<ul>
+<li><strong>Corps du mémoire (section 3.5)</strong> : insérer le schéma
+MEA (dessin ou image exportée) avec la légende « Modèle
+entité-association – Base d’authentification (config/users.db). »</li>
+<li><strong>Même section ou annexe</strong> : tableau du modèle physique
+ci-dessus (ou extrait du script SQL en annexe).</li>
+<li>Le schéma existant <code>schema_bdd_auth.html</code> (Mermaid ER)
+reste valide ; ce document fournit une version MEA « métier » en
+français et un résumé physique pour le jury.</li>
+</ul>
+</body>
+</html>

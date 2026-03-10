@@ -20,7 +20,7 @@ import shutil
 from collections import deque
 import numpy as np
 import torch
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from stable_baselines3.common.callbacks import BaseCallback
 
 from shared.data_validation import require_key
@@ -149,7 +149,8 @@ class EpisodeTerminationCallback(BaseCallback):
                  total_episodes: int = None, scenario_info: str = None,
                  disable_early_stopping: bool = False, global_start_time: float = None,
                  phase_label: Optional[str] = None,
-                 phase_episode_offset: int = 0):
+                 phase_episode_offset: int = 0,
+                 gate_display_state: Optional[Dict[str, Any]] = None):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -181,9 +182,12 @@ class EpisodeTerminationCallback(BaseCallback):
         self.total_episode_actions = 0
         self.episode_stats_count = 0
         self.max_episode_duration_seconds = 0.0
+        self.total_episode_duration_seconds = 0.0
+        self.episode_duration_stats_count = 0
         self._episode_action_counts_by_env = None
         self._last_step_perf_time: Optional[float] = None
         self._ema_env_actions_per_second: Optional[float] = None
+        self.gate_display_state = gate_display_state
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -258,6 +262,8 @@ class EpisodeTerminationCallback(BaseCallback):
             self.total_episode_actions += episode_actions
             self.episode_stats_count += 1
             if episode_duration_seconds is not None:
+                self.total_episode_duration_seconds += episode_duration_seconds
+                self.episode_duration_stats_count += 1
                 self.max_episode_duration_seconds = max(
                     self.max_episode_duration_seconds,
                     episode_duration_seconds
@@ -341,19 +347,27 @@ class EpisodeTerminationCallback(BaseCallback):
                     speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
                     time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
 
-                avg_actions_value = (
-                    self.total_episode_actions / self.episode_stats_count
-                    if self.episode_stats_count > 0
+                avg_duration_value = (
+                    self.total_episode_duration_seconds / self.episode_duration_stats_count
+                    if self.episode_duration_stats_count > 0
                     else 0.0
                 )
-                avg_actions_display = f" | avg actions : {avg_actions_value:.1f}"
-                max_duration_display = f" | max duration : {self.max_episode_duration_seconds:.2f}s"
+                duration_display = (
+                    f" | duration avg: {avg_duration_value:.2f}s"
+                    f" - max: {self.max_episode_duration_seconds:.2f}s"
+                )
+                gate_label = "Gate 🧱"
+                if self.gate_display_state is not None:
+                    label_value = self.gate_display_state.get("label")
+                    if isinstance(label_value, str) and label_value.strip():
+                        gate_label = label_value.strip()
+                gate_display = f" | {gate_label}"
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
                 progress_line = (
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                    f"{time_info}{avg_actions_display}{max_duration_display}{phase_display}"
+                    f"{time_info}{duration_display}{gate_display}{phase_display}"
                 )
                 clear_padding = " " * max(0, self._last_progress_line_len - len(progress_line))
                 print(f"\r{progress_line}{clear_padding}", end='', flush=True)
@@ -1075,6 +1089,11 @@ class BotEvaluationCallback(BaseCallback):
                  training_config_name: str = None, rewards_config_name: str = None,
                  save_best_robust: bool = False, robust_window: int = 3,
                  robust_drawdown_penalty: float = 0.5,
+                 model_gating_enabled: bool = False,
+                 model_gating_min_combined: Optional[float] = None,
+                 model_gating_min_worst_bot: Optional[float] = None,
+                 model_gating_min_worst_scenario_combined: Optional[float] = None,
+                 gate_display_state: Optional[Dict[str, Any]] = None,
                  eval_deterministic: bool = True,
                  final_summary_target_episodes: Optional[int] = None,
                  initial_episode_marker: int = 0,
@@ -1145,6 +1164,35 @@ class BotEvaluationCallback(BaseCallback):
         self.save_best_robust = save_best_robust
         self.robust_window = robust_window
         self.robust_drawdown_penalty = robust_drawdown_penalty
+        if not isinstance(model_gating_enabled, bool):
+            raise ValueError(
+                f"model_gating_enabled must be boolean (got {type(model_gating_enabled).__name__})"
+            )
+        self.model_gating_enabled = model_gating_enabled
+        self.model_gating_min_combined = model_gating_min_combined
+        self.model_gating_min_worst_bot = model_gating_min_worst_bot
+        self.model_gating_min_worst_scenario_combined = model_gating_min_worst_scenario_combined
+        if self.model_gating_enabled:
+            for metric_name, metric_value in (
+                ("model_gating_min_combined", self.model_gating_min_combined),
+                ("model_gating_min_worst_bot", self.model_gating_min_worst_bot),
+                ("model_gating_min_worst_scenario_combined", self.model_gating_min_worst_scenario_combined),
+            ):
+                if metric_value is None:
+                    raise ValueError(f"{metric_name} is required when model_gating_enabled=true")
+                if metric_value < 0.0 or metric_value > 1.0:
+                    raise ValueError(
+                        f"{metric_name} must be between 0.0 and 1.0 (got {metric_value})"
+                    )
+        self.gating_pass_count = 0
+        self.gating_fail_count = 0
+        self.last_gate_pass: Optional[bool] = None
+        self.gating_history: List[Dict[str, Any]] = []
+        self.best_gating_criteria_mean: Optional[float] = None
+        self.thresholds_ever_passed = False
+        self.gate_display_state = gate_display_state
+        if self.gate_display_state is not None:
+            self.gate_display_state["label"] = "Gate 🧱"
         self.eval_deterministic = eval_deterministic
         self.combined_history = deque(maxlen=robust_window)
         self.best_robust_score = -float("inf")
@@ -1163,6 +1211,89 @@ class BotEvaluationCallback(BaseCallback):
             }
         else:
             self.bots = {}
+
+    def _evaluate_model_gate(self, results: Dict[str, Any], eval_marker: int) -> bool:
+        """Evaluate model gating thresholds and store explicit PASS/FAIL history."""
+        if not self.model_gating_enabled:
+            self.last_gate_pass = True
+            return True
+
+        combined_score = float(require_key(results, "combined"))
+        random_score = float(require_key(results, "random"))
+        greedy_score = float(require_key(results, "greedy"))
+        defensive_score = float(require_key(results, "defensive"))
+        worst_bot_score = min(random_score, greedy_score, defensive_score)
+
+        scenario_scores = require_key(results, "scenario_scores")
+        if not isinstance(scenario_scores, dict) or not scenario_scores:
+            raise ValueError("scenario_scores must be a non-empty dict for model gating")
+        worst_scenario_combined = min(
+            float(require_key(values, "combined"))
+            for values in scenario_scores.values()
+        )
+
+        checks = [
+            (
+                "combined",
+                combined_score,
+                float(self.model_gating_min_combined),
+            ),
+            (
+                "worst_bot",
+                worst_bot_score,
+                float(self.model_gating_min_worst_bot),
+            ),
+            (
+                "worst_scenario_combined",
+                worst_scenario_combined,
+                float(self.model_gating_min_worst_scenario_combined),
+            ),
+        ]
+        gate_pass = all(actual >= threshold for _, actual, threshold in checks)
+        criteria_mean = float(np.mean([combined_score, worst_bot_score, worst_scenario_combined]))
+        has_improved_mean = False
+        if self.best_gating_criteria_mean is None or criteria_mean > self.best_gating_criteria_mean:
+            has_improved_mean = True
+            self.best_gating_criteria_mean = criteria_mean
+        self.last_gate_pass = gate_pass
+        if gate_pass:
+            self.gating_pass_count += 1
+            self.thresholds_ever_passed = True
+        else:
+            self.gating_fail_count += 1
+
+        marker_name = "episodes" if self.use_episode_freq else "timesteps"
+        check_rows: List[Dict[str, Any]] = []
+        for label, actual, threshold in checks:
+            check_rows.append(
+                {
+                    "label": label,
+                    "actual": float(actual),
+                    "threshold": float(threshold),
+                    "status": "PASS" if actual >= threshold else "FAIL",
+                }
+            )
+        self.gating_history.append(
+            {
+                "marker_name": marker_name,
+                "marker_value": int(eval_marker),
+                "status": "PASS" if gate_pass else "FAIL",
+                "criteria_mean": criteria_mean,
+                "has_improved_mean": has_improved_mean,
+                "thresholds_ever_passed": self.thresholds_ever_passed,
+                "checks": check_rows,
+            }
+        )
+        if self.gate_display_state is not None:
+            if self.thresholds_ever_passed:
+                if gate_pass or has_improved_mean:
+                    self.gate_display_state["label"] = "Gate 🏁 ✅"
+                else:
+                    self.gate_display_state["label"] = "Gate 🏁 ❌"
+            else:
+                self.gate_display_state["label"] = "Gate 🧱 ✅" if has_improved_mean else "Gate 🧱 ❌"
+
+        return gate_pass
 
     @staticmethod
     def _ensure_zip_path(model_path: str) -> str:
@@ -1318,6 +1449,7 @@ class BotEvaluationCallback(BaseCallback):
             results = self._evaluate_against_bots(eval_marker)
             self.last_eval_results = results
             self.last_eval_marker = int(eval_marker)
+            gate_pass = self._evaluate_model_gate(results, eval_marker)
 
             # Use combined metric computed by evaluate_against_bots from agent config.
             combined_win_rate = require_key(results, 'combined')
@@ -1338,7 +1470,7 @@ class BotEvaluationCallback(BaseCallback):
             self._log_scenario_scores(results)
 
             # Save best model based on combined performance
-            if combined_win_rate > self.best_combined_win_rate:
+            if gate_pass and combined_win_rate > self.best_combined_win_rate:
                 self.best_combined_win_rate = combined_win_rate
                 if self.best_model_save_path:
                     save_path = f"{self.best_model_save_path}/best_model"
@@ -1346,7 +1478,7 @@ class BotEvaluationCallback(BaseCallback):
 
             # Optional robust checkpoint selection: moving average penalized by drawdown.
             self.combined_history.append(combined_win_rate)
-            if self.save_best_robust and len(self.combined_history) >= self.robust_window:
+            if gate_pass and self.save_best_robust and len(self.combined_history) >= self.robust_window:
                 current_peak = max(self.combined_history)
                 current_drawdown = current_peak - combined_win_rate
                 moving_average = float(np.mean(self.combined_history))
@@ -1375,14 +1507,48 @@ class BotEvaluationCallback(BaseCallback):
 
     def _on_training_end(self) -> None:
         """Print robust-checkpoint summary at end of training."""
-        if not self.save_best_robust:
-            return
         if self.final_summary_target_episodes is not None:
             if self.metrics_tracker is None:
                 return
             if self.metrics_tracker.episode_count < self.final_summary_target_episodes:
                 return
+        if self.model_gating_enabled:
+            print("\n🧱 Model gating summary")
+            print(f"   Evaluations gated: {len(self.gating_history)}")
+            print(f"   PASS: {self.gating_pass_count} | FAIL: {self.gating_fail_count}")
+            if self.gating_history:
+                marker_name = self.gating_history[0]["marker_name"]
+                latest = self.gating_history[-1]
+                print(
+                    f"   Latest eval: {marker_name}={latest['marker_value']} -> {latest['status']}"
+                )
+                for row in latest["checks"]:
+                    print(
+                        f"   - {row['label']:<24} {row['actual']:.3f} >= {row['threshold']:.3f} [{row['status']}]"
+                    )
+
+                # Keep output compact: show only FAIL history entries (most actionable).
+                fail_history = [entry for entry in self.gating_history if entry["status"] == "FAIL"]
+                if fail_history:
+                    print("   Failure history:")
+                    for entry in fail_history:
+                        failed_checks = [
+                            f"{row['label']} ({row['actual']:.3f} < {row['threshold']:.3f})"
+                            for row in entry["checks"]
+                            if row["status"] == "FAIL"
+                        ]
+                        fail_details = ", ".join(failed_checks) if failed_checks else "unknown"
+                        print(
+                            f"   - {entry['marker_name']}={entry['marker_value']}: {fail_details}"
+                        )
+
+        if not self.save_best_robust:
+            return
         if self.best_robust_score == -float("inf"):
+            if self.model_gating_enabled:
+                print("\n📌 Robust checkpoint summary")
+                print("   No robust checkpoint selected (all gated evaluations failed or no eligible eval window).")
+                print(f"   Gating stats: pass={self.gating_pass_count}, fail={self.gating_fail_count}")
             return
         print("\n📌 Robust checkpoint summary")
         marker_name = "episodes" if self.use_episode_freq else "timesteps"
@@ -1392,6 +1558,8 @@ class BotEvaluationCallback(BaseCallback):
         print(f"   Selected at {marker_name}: {marker_value}")
         if self.best_robust_model_path:
             print(f"   Robust model path: {self.best_robust_model_path}")
+        if self.model_gating_enabled:
+            print(f"   Gating stats: pass={self.gating_pass_count}, fail={self.gating_fail_count}")
 
     def _build_eval_progress_prefix(self, eval_marker: int) -> Optional[str]:
         """Build phase progress prefix for inline evaluation display."""

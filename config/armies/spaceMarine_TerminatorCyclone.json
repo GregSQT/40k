@@ -1,0 +1,15 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Terminator Cyclone Squad",
+  "description": "Space Marine Army:\nTerminator Cyclone squad:\n \t1 Terminator Cyclone\n \t2 Terminators",
+  "units": [
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    },
+    {
+      "unit_type": "Terminator",
+      "count": 2
+    }
+  ]
+}

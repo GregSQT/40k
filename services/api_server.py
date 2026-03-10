@@ -1338,6 +1338,9 @@ def _load_army_file(army_file: str) -> Dict[str, Any]:
         army_cfg = json.load(f)
 
     require_key(army_cfg, "faction")
+    display_name = require_key(army_cfg, "display_name")
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise ValueError(f"Army file {army_file} display_name must be a non-empty string")
     require_key(army_cfg, "description")
     units = require_key(army_cfg, "units")
     if not isinstance(units, list) or not units:
@@ -1354,21 +1357,61 @@ def _load_army_file(army_file: str) -> Dict[str, Any]:
     return army_cfg
 
 
+def _load_faction_display_name_map() -> Dict[str, str]:
+    """Load faction_id -> display_name mapping from config/factions.json."""
+    factions_path = os.path.join(abs_parent, "config", "factions.json")
+    if not os.path.exists(factions_path):
+        raise FileNotFoundError(f"Factions file not found: {factions_path}")
+    with open(factions_path, "r", encoding="utf-8") as factions_file:
+        factions_cfg = json.load(factions_file)
+    if not isinstance(factions_cfg, dict) or not factions_cfg:
+        raise ValueError("config/factions.json must be a non-empty object")
+
+    faction_display_name_map: Dict[str, str] = {}
+    for faction_id, faction_entry in factions_cfg.items():
+        if not isinstance(faction_id, str) or not faction_id.strip():
+            raise ValueError(f"Invalid faction id in config/factions.json: {faction_id!r}")
+        if not isinstance(faction_entry, dict):
+            raise TypeError(
+                f"Faction '{faction_id}' in config/factions.json must be an object, "
+                f"got {type(faction_entry).__name__}"
+            )
+        display_name = require_key(faction_entry, "display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ValueError(
+                f"Faction '{faction_id}' display_name must be a non-empty string"
+            )
+        faction_display_name_map[faction_id.strip()] = display_name.strip()
+    return faction_display_name_map
+
+
 def _list_armies() -> list[Dict[str, Any]]:
     """Return metadata for all army files in config/armies."""
     armies_dir = os.path.join(abs_parent, "config", "armies")
     if not os.path.isdir(armies_dir):
         raise FileNotFoundError(f"Armies directory not found: {armies_dir}")
 
+    faction_display_name_map = _load_faction_display_name_map()
     army_files = sorted([name for name in os.listdir(armies_dir) if name.endswith(".json")])
     armies: list[Dict[str, Any]] = []
     for army_file in army_files:
         army_cfg = _load_army_file(army_file)
+        faction_id = require_key(army_cfg, "faction")
+        if not isinstance(faction_id, str) or not faction_id.strip():
+            raise ValueError(f"Army file {army_file} faction must be a non-empty string")
+        normalized_faction_id = faction_id.strip()
+        if normalized_faction_id not in faction_display_name_map:
+            raise KeyError(
+                f"Faction '{normalized_faction_id}' from army file {army_file} "
+                "is missing in config/factions.json"
+            )
         armies.append(
             {
                 "file": army_file,
                 "name": army_file[:-5],
-                "faction": require_key(army_cfg, "faction"),
+                "display_name": require_key(army_cfg, "display_name"),
+                "faction": normalized_faction_id,
+                "faction_display_name": faction_display_name_map[normalized_faction_id],
                 "description": require_key(army_cfg, "description"),
             }
         )
@@ -1431,6 +1474,7 @@ def _build_units_from_army_config(
                     "ICON": require_key(unit_data, "ICON"),
                     "ICON_SCALE": require_key(unit_data, "ICON_SCALE"),
                     "UNIT_RULES": copy.deepcopy(require_key(unit_data, "UNIT_RULES")),
+                    "UNIT_KEYWORDS": copy.deepcopy(require_key(unit_data, "UNIT_KEYWORDS")),
                     "SHOOT_LEFT": shoot_left,
                     "ATTACK_LEFT": attack_left,
                 }
@@ -1494,6 +1538,23 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         id_remap[old_id] = new_id
         unit["id"] = new_id
     game_state["units"] = combined_units
+
+    # Rebuild reward config mappings for updated roster unit types.
+    # Required so AI target selection and handlers can resolve every new model key.
+    from config_loader import get_config_loader
+    from ai.unit_registry import UnitRegistry
+    config_loader = get_config_loader()
+    unit_registry = UnitRegistry()
+    reward_configs: Dict[str, Any] = {}
+    for unit in combined_units:
+        unit_type = require_key(unit, "unitType")
+        model_key = unit_registry.get_model_key(unit_type)
+        if model_key in reward_configs:
+            continue
+        agent_rewards = config_loader.load_agent_rewards_config(model_key)
+        reward_configs[model_key] = require_key(agent_rewards, model_key)
+    game_state["reward_configs"] = reward_configs
+    game_state["rewards_configs"] = reward_configs
 
     # Keep deployment state coherent after replacement and ID compaction.
     old_deployed_after_replace = {uid for uid in deployed_set if uid not in current_player_unit_ids}
@@ -1684,8 +1745,25 @@ def execute_ai_turn():
         if not success:
             error_type = result.get("error", "unknown_error")
             print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
-            if error_type in ["not_pve_mode", "not_ai_player_turn"]:
+            if error_type == "not_pve_mode":
                 return jsonify({"success": False, "error": result}), 400
+            if error_type == "not_ai_player_turn":
+                serializable_state = make_json_serializable(dict(engine.game_state))
+                _sync_units_hp_from_cache(serializable_state, engine.game_state)
+                _attach_player_types(serializable_state, engine)
+                action_logs = serializable_state.get("action_logs", [])
+                engine.game_state["action_logs"] = []
+                serializable_state["action_logs"] = []
+                return jsonify({
+                    "success": True,
+                    "result": {
+                        "action": "ai_turn_skipped",
+                        "reason": "not_ai_player_turn",
+                        "details": result,
+                    },
+                    "game_state": serializable_state,
+                    "action_logs": action_logs,
+                })
             else:
                 return jsonify({"success": False, "error": result}), 500
 

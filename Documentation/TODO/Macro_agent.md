@@ -196,8 +196,13 @@ Evaluation bots:
 - `callback_params.bot_eval_freq`
 - `callback_params.bot_eval_intermediate`
 - `callback_params.bot_eval_final`
-- `callback_params.bot_eval_weights`
-- `callback_params.bot_eval_randomness`
+- `callback_params.save_best_robust`
+- `callback_params.robust_window`
+- `callback_params.robust_drawdown_penalty`
+- `callback_params.model_gating_enabled`
+- `callback_params.model_gating_min_combined`
+- `callback_params.model_gating_min_worst_bot`
+- `callback_params.model_gating_min_worst_scenario_combined`
 
 Holdout split (si utilise):
 - `callback_params.holdout_regular_scenarios`
@@ -293,6 +298,17 @@ Decision de validation:
 - gate sur holdout (pas training)
 - gate multi-bot
 - gate robustesse temporelle (fenetre glissante)
+- gate de promotion modele (seuils explicites, sinon promotion bloquee)
+
+Comportement concret du gating de promotion (implante):
+- evaluation PASS seulement si:
+  - `combined >= model_gating_min_combined`
+  - `worst_bot_score >= model_gating_min_worst_bot`
+  - `worst_scenario_combined >= model_gating_min_worst_scenario_combined`
+- si FAIL:
+  - pas de promotion `best_model`
+  - pas de promotion robust vers le modele canonique
+  - logs explicites `PASS/FAIL` + detail des criteres
 
 ---
 

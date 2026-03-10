@@ -81,6 +81,8 @@ interface APIGameState {
     unitType: string;
     SHOOT_LEFT?: number;
     ATTACK_LEFT?: number;
+    _current_shoot_nb?: number;
+    _current_fight_nb?: number;
     // AI_TURN.md shooting state fields
     valid_target_pool?: string[];
     selected_target_id?: string;
@@ -147,7 +149,9 @@ interface APIGameState {
 interface ArmyListItem {
   file: string;
   name: string;
+  display_name: string;
   faction: string;
+  faction_display_name: string;
   description: string;
 }
 
@@ -1284,6 +1288,9 @@ export const useEngineAPI = () => {
         ICON_SCALE: unit.ICON_SCALE,
         SHOOT_LEFT: unit.SHOOT_LEFT,
         ATTACK_LEFT: unit.ATTACK_LEFT,
+        valid_target_pool: unit.valid_target_pool,
+        currentShootNb: unit._current_shoot_nb,
+        currentFightNb: unit._current_fight_nb,
         available_weapons: unit.available_weapons,
         UNIT_RULES: unit.UNIT_RULES,
         UNIT_KEYWORDS: unit.UNIT_KEYWORDS,
@@ -2890,6 +2897,13 @@ export const useEngineAPI = () => {
           }
 
           const activationData = await aiResponse.json();
+
+          if (activationData.result?.action === "ai_turn_skipped") {
+            if (activationData.game_state) {
+              setGameState(activationData.game_state);
+            }
+            break;
+          }
 
           // Process AI activation logs immediately
           if (activationData.action_logs && activationData.action_logs.length > 0) {

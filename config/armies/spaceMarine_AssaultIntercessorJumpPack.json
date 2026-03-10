@@ -1,0 +1,19 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Assault Intercessor Jump Pack Squad",
+  "description": "Space Marine Army:\nAssault Intercessor squad with Jump Packs:\n \t1 Sergeant\n \t1 Plasma Pistol\n \t3 Assault Intercessors with Jump Packs",
+  "units": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 3
+    }
+  ]
+}

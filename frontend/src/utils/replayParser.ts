@@ -459,6 +459,31 @@ export function parse_log_file_from_text(text: string): ReplayData {
       continue;
     }
 
+    const rollInfoMatch = trimmed.match(
+      /\[([^\]]+)\]\s(?:E\d+\s+)?(T\d+)\sP(\d+)\s(SHOOT|FIGHT)\s:\sUnit\s(\d+)\((\d+),(\d+)\)\s(?:SHOOT|FIGHTS)\swith\s\[[^\]]+\]\.\sNumber\sof\s(?:shoots|attacks)\s\((D3|D6|2D6|D6\+1)\):\s(\d+)/
+    );
+    if (rollInfoMatch) {
+      const timestamp = rollInfoMatch[1];
+      const turn = rollInfoMatch[2];
+      const player = parseInt(rollInfoMatch[3], 10);
+      const phaseType = rollInfoMatch[4];
+      const unitId = parseInt(rollInfoMatch[5], 10);
+      const unitCol = parseInt(rollInfoMatch[6], 10);
+      const unitRow = parseInt(rollInfoMatch[7], 10);
+
+      currentEpisode.actions.push({
+        type: "roll_info",
+        timestamp,
+        turn,
+        player,
+        unit_id: unitId,
+        pos: { col: unitCol, row: unitRow },
+        move_mode: phaseType.toLowerCase(),
+        log_message: extractLogMessage(trimmed),
+      });
+      continue;
+    }
+
     // Parse SHOOT actions
     const shootMatch = trimmed.match(
       /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ((?:SHOT(?: \[[^\]]+\])*\s+Unit)|WAIT|ADVANCED)/
@@ -874,6 +899,34 @@ export function parse_log_file_from_text(text: string): ReplayData {
         weapon_name: weaponName, // Add weapon name for display
         damage: 0, // Will be calculated below based on combat results
       };
+
+      const fightSubphaseMatch = trimmed.match(/\[FIGHT_SUBPHASE:([^\]]+)\]/);
+      if (!fightSubphaseMatch || !fightSubphaseMatch[1]?.trim()) {
+        throw new Error(`Fight replay line missing FIGHT_SUBPHASE metadata: ${trimmed}`);
+      }
+      action.fight_subphase = fightSubphaseMatch[1].trim();
+
+      const parsePoolTag = (tagName: string): number[] => {
+        const tagMatch = trimmed.match(new RegExp(`\\[${tagName}:([^\\]]*)\\]`));
+        if (!tagMatch) {
+          throw new Error(`Fight replay line missing ${tagName} metadata: ${trimmed}`);
+        }
+        const rawPayload = tagMatch[1].trim();
+        if (rawPayload === "") {
+          return [];
+        }
+        const parsed = rawPayload.split(",").map((token) => {
+          const value = parseInt(token.trim(), 10);
+          if (Number.isNaN(value)) {
+            throw new Error(`Invalid ${tagName} entry '${token}' in line: ${trimmed}`);
+          }
+          return value;
+        });
+        return parsed;
+      };
+      action.charging_activation_pool = parsePoolTag("CHARGING_POOL");
+      action.active_alternating_activation_pool = parsePoolTag("ACTIVE_ALT_POOL");
+      action.non_active_alternating_activation_pool = parsePoolTag("NON_ACTIVE_ALT_POOL");
 
       // Add detailed combat rolls if available
       if (hitMatch) {

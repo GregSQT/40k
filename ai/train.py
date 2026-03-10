@@ -1648,7 +1648,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 f" (eval_count={int(getattr(bot_eval_callback, 'eval_count', 0))}, "
                 f"eval_freq={getattr(bot_eval_callback, 'eval_freq', 'n/a')}, "
                 f"use_episode_freq={getattr(bot_eval_callback, 'use_episode_freq', 'n/a')}, "
-                f"robust_window={getattr(bot_eval_callback, 'robust_window', 'n/a')})"
+                f"robust_window={getattr(bot_eval_callback, 'robust_window', 'n/a')}, "
+                f"gating_enabled={getattr(bot_eval_callback, 'model_gating_enabled', 'n/a')}, "
+                f"gating_pass={getattr(bot_eval_callback, 'gating_pass_count', 'n/a')}, "
+                f"gating_fail={getattr(bot_eval_callback, 'gating_fail_count', 'n/a')})"
             )
         raise RuntimeError(
             f"Robust save mode is enabled but canonical model was not produced: {model_path}{extra_detail}"
@@ -1788,6 +1791,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # EPISODE-BASED ROTATION FIX: Always use episode-based stopping (never timestep-based)
         # The callback will stop training when exact episode count is reached
         # This prevents drift from timestep estimation errors
+        gate_display_state: Dict[str, Any] = {"label": "Gate 🧱"}
+        training_config["_gate_display_state"] = gate_display_state
         episode_callback = EpisodeTerminationCallback(
             cycle_max_eps,  # Use cycle length, not total
             expected_timesteps,
@@ -1798,6 +1803,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             global_start_time=global_start_time,
             phase_label=phase_label,
             phase_episode_offset=phase_episode_offset,
+            gate_display_state=gate_display_state,
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
@@ -1876,12 +1882,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         shared_training_config = cfg.load_training_common_config()
 
         def _resolve_callback_value(key: str) -> Any:
-            value = require_key(callback_params, key)
+            value = callback_params[key] if key in callback_params else None
             if value is not None:
                 return value
             if key not in shared_training_config:
                 raise KeyError(
-                    f"callback_params.{key} is null but config/agents/_training_common.json "
+                    f"callback_params.{key} is missing/null and config/agents/_training_common.json "
                     f"does not define '{key}'"
                 )
             shared_value = shared_training_config[key]
@@ -1927,12 +1933,31 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 f"callback_params.bot_eval_show_progress must be boolean "
                 f"(got {type(bot_eval_show_progress).__name__})"
             )
-        save_best_robust = bool(callback_params.get("save_best_robust", False))
+        save_best_robust = bool(_resolve_callback_value("save_best_robust"))
+        model_gating_enabled = bool(_resolve_callback_value("model_gating_enabled"))
+        model_gating_min_combined = None
+        model_gating_min_worst_bot = None
+        model_gating_min_worst_scenario_combined = None
+        if model_gating_enabled:
+            model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))
+            model_gating_min_worst_bot = float(_resolve_callback_value("model_gating_min_worst_bot"))
+            model_gating_min_worst_scenario_combined = float(
+                _resolve_callback_value("model_gating_min_worst_scenario_combined")
+            )
+            for key, value in (
+                ("model_gating_min_combined", model_gating_min_combined),
+                ("model_gating_min_worst_bot", model_gating_min_worst_bot),
+                ("model_gating_min_worst_scenario_combined", model_gating_min_worst_scenario_combined),
+            ):
+                if value < 0.0 or value > 1.0:
+                    raise ValueError(
+                        f"callback_params.{key} must be between 0.0 and 1.0 (got {value})"
+                    )
         robust_window = 3
         robust_drawdown_penalty = 0.5
         if save_best_robust:
-            robust_window = int(require_key(callback_params, "robust_window"))
-            robust_drawdown_penalty = float(require_key(callback_params, "robust_drawdown_penalty"))
+            robust_window = int(_resolve_callback_value("robust_window"))
+            robust_drawdown_penalty = float(_resolve_callback_value("robust_drawdown_penalty"))
             if robust_window <= 0:
                 raise ValueError(
                     f"callback_params.robust_window must be > 0 (got {robust_window})"
@@ -1972,6 +1997,11 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             save_best_robust=save_best_robust,
             robust_window=robust_window,
             robust_drawdown_penalty=robust_drawdown_penalty,
+            model_gating_enabled=model_gating_enabled,
+            model_gating_min_combined=model_gating_min_combined,
+            model_gating_min_worst_bot=model_gating_min_worst_bot,
+            model_gating_min_worst_scenario_combined=model_gating_min_worst_scenario_combined,
+            gate_display_state=training_config.get("_gate_display_state"),
             eval_deterministic=eval_deterministic,
             final_summary_target_episodes=total_eps,
             initial_episode_marker=max(0, int(global_episode_offset)),

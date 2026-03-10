@@ -1,5 +1,6 @@
 {
   "faction": "spaceMarine",
+  "display_name": "Space Wolves Patrol",
   "description": "Space Marine Army:\nSpace Wolves:\n \t1 Grey Hunter Pack Leader\n \t2 Grey Hunters\n \t2 Blood Claws\n \t2 Fenrisian Wolves",
   "units": [
     {

@@ -109,6 +109,38 @@ def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> b
                 return True
     return False
 
+
+def _append_fight_nb_roll_info_log(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    weapon: Dict[str, Any],
+    nb_roll: int
+) -> None:
+    """
+    Append informational log line for randomized melee attack count rolls.
+    """
+    nb_value = require_key(weapon, "NB")
+    if not isinstance(nb_value, str):
+        return
+
+    unit_id = require_key(unit, "id")
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    weapon_name = str(require_key(weapon, "display_name"))
+
+    action_logs = game_state.setdefault("action_logs", [])
+    action_logs.append(
+        {
+            "type": "roll_info",
+            "phase": "FIGHT",
+            "player": require_key(unit, "player"),
+            "unitId": unit_id,
+            "message": (
+                f"Unit {unit_id}({unit_col},{unit_row}) FIGHTS with [{weapon_name}]. "
+                f"Number of attacks ({nb_value}): {nb_roll}"
+            ),
+        }
+    )
+
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Initialize fight phase and build activation pools.
@@ -988,6 +1020,7 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         nb_roll = resolve_dice_value(require_key(weapon, "NB"), "fight_nb_init")
         unit["ATTACK_LEFT"] = nb_roll
         unit["_current_fight_nb"] = nb_roll
+        _append_fight_nb_roll_info_log(game_state, unit, weapon, nb_roll)
         unit["_fight_attacks_executed"] = 0
     else:
         unit["ATTACK_LEFT"] = 0  # Pas d'armes melee
@@ -1286,6 +1319,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             nb_roll = resolve_dice_value(require_key(weapon, "NB"), "fight_nb_auto_select")
             unit["ATTACK_LEFT"] = nb_roll
             unit["_current_fight_nb"] = nb_roll
+            _append_fight_nb_roll_info_log(game_state, unit, weapon, nb_roll)
     else:
         # Pas d'armes disponibles
         unit["ATTACK_LEFT"] = 0

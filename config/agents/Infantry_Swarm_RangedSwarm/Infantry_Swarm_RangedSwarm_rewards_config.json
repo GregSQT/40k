@@ -4,10 +4,10 @@
     "Unit": "######################### Infantry_Swarm_RangedSwarm ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "base_actions": {
-      "ranged_attack": 0.3,
-      "melee_attack": 0.3,
-      "charge_success": 0.1,
-      "wait": -0.3
+      "ranged_attack": 0.4,
+      "melee_attack": 0.2,
+      "charge_success": 0.05,
+      "wait": -0.1
     },
     "shoot_priority_1": 0.0,
     "shoot_priority_2": 0.0,

@@ -1,0 +1,11 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Assault Terminator Squad",
+  "description": "Space Marine Army:\nAssault Terminator squad:\n \t3 Assault Terminators",
+  "units": [
+    {
+      "unit_type": "AssaultTerminator",
+      "count": 3
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "faction": "tyranid",
+  "display_name": "Tyranid Warrior Melee Brood",
+  "description": "Tyranid army:\n3 Tyranid Warriors (Melee)",
+  "units": [
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 3
+    }
+  ]
+}

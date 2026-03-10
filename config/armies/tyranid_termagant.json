@@ -1,0 +1,11 @@
+{
+  "faction": "tyranid",
+  "display_name": "Termagant Swarm",
+  "description": "Tyranid army:\n18 Termagants",
+  "units": [
+    {
+      "unit_type": "Termagant",
+      "count": 18
+    }
+  ]
+}

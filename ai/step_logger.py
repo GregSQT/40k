@@ -695,8 +695,28 @@ class StepLogger:
             reward = details.get("reward")
             if reward is not None:
                 detail_msg += f" [R:{reward:+.1f}]"
-
-            return base_msg + detail_msg
+            fight_subphase = details.get("fight_subphase")
+            charging_pool = details.get("charging_activation_pool")
+            active_pool = details.get("active_alternating_activation_pool")
+            non_active_pool = details.get("non_active_alternating_activation_pool")
+            if not isinstance(fight_subphase, str) or not fight_subphase.strip():
+                raise KeyError("Combat action missing required fight_subphase for replay contract")
+            if not isinstance(charging_pool, list):
+                raise KeyError("Combat action missing required charging_activation_pool for replay contract")
+            if not isinstance(active_pool, list):
+                raise KeyError("Combat action missing required active_alternating_activation_pool for replay contract")
+            if not isinstance(non_active_pool, list):
+                raise KeyError("Combat action missing required non_active_alternating_activation_pool for replay contract")
+            charging_pool_str = ",".join(str(uid) for uid in charging_pool)
+            active_pool_str = ",".join(str(uid) for uid in active_pool)
+            non_active_pool_str = ",".join(str(uid) for uid in non_active_pool)
+            replay_meta = (
+                f" [FIGHT_SUBPHASE:{fight_subphase}]"
+                f" [CHARGING_POOL:{charging_pool_str}]"
+                f" [ACTIVE_ALT_POOL:{active_pool_str}]"
+                f" [NON_ACTIVE_ALT_POOL:{non_active_pool_str}]"
+            )
+            return base_msg + detail_msg + replay_meta
 
         elif action_type == "wait":
             return f"{unit_label} WAIT"

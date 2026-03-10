@@ -1119,11 +1119,21 @@ export const BoardReplay: React.FC = () => {
     for (let i = 0; i < currentActionIndex; i++) {
       const action = currentEpisode.actions[i];
       const turnNumber = parseInt(action.turn.replace("T", ""), 10);
+      const rollInfoMessage = action.log_message || "";
+      const rollInfoPhase =
+        action.type === "roll_info"
+          ? rollInfoMessage.includes(" FIGHTS with ")
+            ? "fight"
+            : "shoot"
+          : null;
       const actionPhase = action.type.includes("fight")
         ? "fight"
         : action.type.includes("charge")
           ? "charge"
-          : action.type.includes("shoot") || action.type === "advance" || action.type === "hazardous"
+          : rollInfoPhase ||
+              action.type.includes("shoot") ||
+              action.type === "advance" ||
+              action.type === "hazardous"
             ? "shoot"
             : "move";
 
@@ -1160,6 +1170,17 @@ export const BoardReplay: React.FC = () => {
           unitId: action.unit_id!,
           turnNumber: turnNumber,
           phase: "rule_choice",
+          player: action.player,
+        });
+      } else if (action.type === "roll_info" && action.unit_id) {
+        const rollInfoMessage = requireReplayLogMessage(action, "roll_info");
+        const isFightRollInfo = rollInfoMessage.includes(" FIGHTS with ");
+        gameLog.addEvent({
+          type: "roll_info",
+          message: rollInfoMessage,
+          unitId: action.unit_id,
+          turnNumber: turnNumber,
+          phase: isFightRollInfo ? "FIGHT" : "SHOOT",
           player: action.player,
         });
       } else if (action.type === "advance" && action.from && action.to) {

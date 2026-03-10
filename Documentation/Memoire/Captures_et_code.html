@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Captures_et_code</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="memoire_fiches.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Captures_et_code</h1>
+</header>
+<h1 id="captures-décran-et-code-correspondant-rev2">Captures d’écran et
+code correspondant (REV2)</h1>
+<p>Structure pour relier <strong>captures d’écran</strong> et
+<strong>extraits de code</strong> pour au moins la page
+d’authentification et l’interface de jeu (plateau). À intégrer dans le
+mémoire ou en annexe. <strong>Tu dois ajouter toi-même les
+captures</strong> (screenshot de l’app en fonctionnement).</p>
+<hr />
+<h2 id="page-dauthentification-auth">1. Page d’authentification
+(/auth)</h2>
+<h3 id="capture-décran">Capture d’écran</h3>
+<p><strong>[Insérer ici une capture d’écran de la page de connexion :
+formulaire login/mot de passe, bouton Connexion /
+Inscription.]</strong></p>
+<p><em>Légende suggérée :</em> « Page d’authentification – Connexion et
+inscription (route /auth). »</p>
+<h3 id="code-correspondant">Code correspondant</h3>
+<p><strong>Fichier :</strong>
+<code>frontend/src/pages/AuthPage.tsx</code></p>
+<p><strong>Extrait :</strong> envoi de la requête de connexion et
+gestion de la réponse (token, redirection).</p>
+<pre class="tsx"><code>const executeLogin = async (userLogin: string, userPassword: string): Promise&lt;LoginResponse&gt; =&gt; {
+  const loginResponse = await fetch(`${API_BASE}/auth/login`, {
+    method: &quot;POST&quot;,
+    headers: { &quot;Content-Type&quot;: &quot;application/json&quot; },
+    body: JSON.stringify({ login: userLogin, password: userPassword }),
+  });
+
+  const loginPayload = await loginResponse.json();
+  if (!loginResponse.ok) {
+    const errorMessage = loginPayload?.error ?? &quot;Echec de connexion&quot;;
+    throw new Error(errorMessage);
+  }
+
+  return loginPayload as LoginResponse;
+};</code></pre>
+<p><em>Contexte :</em> Le formulaire (login, password) est soumis via
+<code>handleSubmit</code> ; en mode “login”, <code>executeLogin</code>
+est appelé puis la session est enregistrée
+(<code>saveAuthSession</code>) et l’utilisateur est redirigé vers la
+page de jeu.</p>
+<hr />
+<h2 id="interface-de-jeu-plateau-et-panneau-de-contrôle-game">2.
+Interface de jeu – Plateau et panneau de contrôle (/game)</h2>
+<h3 id="capture-décran-1">Capture d’écran</h3>
+<p><strong>[Insérer ici une capture d’écran de l’interface de jeu :
+plateau hex (PIXI), panneau de contrôle (unités, phase, log), barre de
+mode (PvP, PvE, etc.).]</strong></p>
+<p><em>Légende suggérée :</em> « Interface de jeu – Plateau hexagonal et
+panneau de contrôle (route /game). »</p>
+<h3 id="code-correspondant-1">Code correspondant</h3>
+<p><strong>Fichier :</strong>
+<code>frontend/src/hooks/useEngineAPI.ts</code></p>
+<p><strong>Extrait :</strong> appel API pour démarrer une partie (mode
+PvE) et mise à jour de l’état de jeu.</p>
+<pre class="tsx"><code>const response = await fetch(`${API_BASE}/game/start`, {
+  method: &quot;POST&quot;,
+  headers: {
+    &quot;Content-Type&quot;: &quot;application/json&quot;,
+    Authorization: `Bearer ${authSession.token}`,
+  },
+  body: JSON.stringify(requestPayload),
+});
+// ...
+if (data.success) {
+  setGameState(data.game_state);
+  // ...
+}</code></pre>
+<p><em>Contexte :</em> Au chargement de la page de jeu,
+<code>startGame()</code> est appelé ; il construit
+<code>requestPayload</code> (mode depuis l’URL, scénario éventuel),
+envoie la requête avec le token, et met à jour <code>gameState</code>
+avec la réponse. Le plateau et le panneau se rafraîchissent à partir de
+cet état.</p>
+<p><strong>Fichier complémentaire (rendu du plateau) :</strong> les
+composants qui affichent le plateau et les unités consomment
+<code>gameState</code> (ex. unités, phase, objectifs) ; le rendu des
+hexagones et des pions est géré par PIXI dans les composants dédiés au
+plateau (ex. dans <code>frontend/src/</code> selon ton
+architecture).</p>
+<hr />
+<h2 id="intégration-au-mémoire">Intégration au mémoire</h2>
+<ul>
+<li>Dans la section <strong>4.5</strong> (ou équivalent) : pour chaque
+écran (auth, plateau), insérer la capture puis l’encadré « Code
+correspondant : fichier + extrait » comme ci-dessus.</li>
+<li>En <strong>annexe</strong> : tu peux répéter les mêmes blocs
+(capture + code) ou faire référence à cette structure.</li>
+</ul>
+<p>Une fois les captures réalisées (screenshot depuis le navigateur sur
+l’app en local ou déployée), remplace les lignes « [Insérer ici…] » par
+les images dans ton document final (ODT/PDF).</p>
+</body>
+</html>

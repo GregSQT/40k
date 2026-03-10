@@ -1,5 +1,6 @@
 {
   "faction": "tyranid",
+  "display_name": "Tyranid Warriors and Hormagaunts",
   "description": "Tyranid army:\n2 Tyranid Warriors (Ranged)\n7 Hormagaunts",
   "units": [
     {

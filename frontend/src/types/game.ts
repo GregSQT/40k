@@ -141,6 +141,9 @@ export interface Unit {
   // Game state tracking
   SHOOT_LEFT?: number;
   ATTACK_LEFT?: number;
+  valid_target_pool?: string[];
+  currentShootNb?: number;
+  currentFightNb?: number;
   hasChargedThisTurn?: boolean;
   UNIT_RULES?: UnitRule[];
   UNIT_KEYWORDS?: UnitKeyword[];

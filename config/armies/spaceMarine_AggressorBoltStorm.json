@@ -1,0 +1,11 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Aggressor Boltstorm Squad",
+  "description": "Space Marine Army:\nAggressors with BoltStorm Gauntlets squad:\n \t3 Aggressors with BoltStorm Gauntlets",
+  "units": [
+    {
+      "unit_type": "AggressorBoltStorm",
+      "count": 3
+    }
+  ]
+}

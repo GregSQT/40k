@@ -19,38 +19,20 @@ Conception et developpement d'un moteur de jeu Warhammer 40K avec intelligence a
 Remerciements .......................................................................................................................... 1  
 Résumé ...................................................................................................................................... 2  
 Introduction ............................................................................................................................... 3  
-1. Présentation du projet ......................................................................................................... 4  
- 1.1 Liste des compétences mises en œuvre .................................................................... 4  
- 1.2 Cahier des charges / expression des besoins ............................................................. 5  
- 1.3 Présentation de l'entreprise ou du service ................................................................. 5  
-2. Gestion de projet .................................................................................................................. 6  
- 2.1 Planning et suivi ......................................................................................................... 6  
- 2.2 Environnement humain et technique ......................................................................... 6  
- 2.3 Objectifs qualité ......................................................................................................... 7  
-3. Spécifications fonctionnelles et techniques ......................................................................... 8  
- 3.1 Spécifications fonctionnelles .................................................................................... 8  
- 3.2 Contraintes et livrables attendus ................................................................................ 8  
- 3.3 Architecture logicielle ............................................................................................... 9  
- 3.4 Maquettes et enchaînement ........................................................................................ 9  
- 3.5 Modèle entité-association et modèle physique ......................................................... 10  
- 3.6 Script de création ou de modification BDD .............................................................. 10  
- 3.7 Diagrammes UML ...................................................................................................... 10  
- 3.8 Documentation et guides du projet .......................................................................... 11  
-4. Réalisations techniques ...................................................................................................... 12  
- 4.1 Spécifications techniques (stack) ............................................................................ 12  
- 4.2 Réalisations moteur et back-end ............................................................................... 13  
- 4.3 Réalisations front-end .............................................................................................. 18  
- 4.4 Réalisations IA (entraînement et conformité) ............................................................ 22  
- 4.5 Captures d'écran et extraits de code ........................................................................ 26  
- 4.6 Éléments de sécurité ................................................................................................ 27  
- 4.7 Plan de tests ............................................................................................................. 29  
- 4.8 Jeu d'essai ................................................................................................................. 30  
- 4.9 Veille technologique ................................................................................................. 32  
- 4.10 Déploiement Docker sur NAS Synology ................................................................... 33  
-5. Respect du RGPD ................................................................................................................. 35  
-6. Conclusion ........................................................................................................................... 36  
-Annexes .................................................................................................................................... 37  
-Checklist de conformité (CDC RNCP 6) ............................................................................... 38  
+Compétences du référentiel ...................................................................................................... 4  
+Besoins du projet (1. Contexte, 2. Cahier des charges a/b/c, 3. Contraintes et livrables) ................ 5  
+Gestion du projet (1. Environnement humain et technique, 2. Objectifs qualité) ............................ 9  
+Réalisations front-end (1. Organisation du code, 2. Organisation interface, 3. Interface, 4. Accessibilité) 11  
+Réalisation back-end (1. Structure du code, 2. Base de données, 3. API RESTful, 4. Composants métier) .. 15  
+Réalisations IA (entraînement et conformité) ......................................................................... 21  
+Eléments de sécurité ............................................................................................................... 23  
+Jeux d'essai ............................................................................................................................... 25  
+Respect Du RGPD ..................................................................................................................... 27  
+Déploiement .............................................................................................................................. 28  
+Veille durant le projet .............................................................................................................. 30  
+Conclusion ................................................................................................................................ 31  
+Annexes .................................................................................................................................... 32  
+Checklist de conformité (CDC RNCP 6) ............................................................................... 33  
 
 ---
 
@@ -87,24 +69,35 @@ Objectifs du projet :
 
 ---
 
-## 1. Presentation du projet
+## Compétences du référentiel
 
-### 1.1 Liste des competences mises en oeuvre
+*(Structure alignée sur le modèle PDF : compétences RNCP puis Besoins du projet.)*
 
-- API REST securisee avec Flask (`services/api_server.py`) ;
-- moteur de simulation Python (`engine/w40k_core.py`, `engine/phase_handlers/`, phase deployment implémentée) ;
-- frontend React + TypeScript + Vite + PIXI (`frontend/src/`) ;
-- pipeline RL MaskablePPO (`ai/train.py`) ;
-- suivi d'entrainement via callbacks et metriques (`ai/training_callbacks.py`, `ai/metrics_tracker.py`) ;
-- configurations d'entrainement/recompenses/scenarios par agent (`config/agents/<agent>/`) ;
-- validation stricte des donnees (`shared/data_validation.py` : `require_key`, `require_present`) ;
-- documentation technique et guides de conformite (voir section 3.8 et 4.4).
+1. Développer la partie front-end d'une application web ou web mobile de façon sécurisée  
+   a. Maquetter des interfaces utilisateur web ou web mobile  
+   b. Réaliser des interfaces utilisateur statiques web ou web mobile  
+   c. Développer la partie dynamique des interfaces utilisateurs web ou web mobile  
 
-### 1.2 Cahier des charges / expression des besoins
+2. Développer la partie back-end d'une application web ou web mobile de façon sécurisée  
+   a. Mettre en place une base de données relationnelle  
+   b. Développer des composants d'accès aux données SQL et NoSQL  
+   c. Développer des composants métier côté serveur  
 
-**a. Contexte et besoins initiaux**
+*Mise en œuvre dans le projet :* API REST Flask, moteur Python (phase handlers), frontend React/TypeScript/Vite/PIXI, pipeline RL MaskablePPO, configs par agent, validation stricte (`shared/data_validation.py`), documentation et guides de conformité.
 
-Le projet s'inscrit dans la conception d'un simulateur tactique inspiré de Warhammer 40K, avec un moteur de jeu par phases et des agents IA entraînés par renforcement. Les besoins initiaux étaient : disposer d'un moteur fiable et conforme à des règles métier explicites (tour, phases, activation séquentielle), d'une API pour piloter des parties depuis une interface web, et d'un pipeline d'entraînement reproductible pour faire évoluer les agents.
+---
+
+## Besoins du projet
+
+### 1. Contexte
+
+Le projet s'inscrit dans la conception d'un simulateur tactique inspiré de Warhammer 40K, avec un moteur de jeu par phases et des agents IA entraînés par renforcement. [Présentation de l'entreprise ou du service : à compléter.]
+
+### 2. Cahier des charges
+
+**a. Besoins initiaux**
+
+Disposer d'un moteur fiable et conforme à des règles métier explicites (tour, phases, activation séquentielle), d'une API pour piloter des parties depuis une interface web, et d'un pipeline d'entraînement reproductible pour faire évoluer les agents.
 
 **b. Besoins fonctionnels**
 
@@ -120,40 +113,32 @@ Le projet s'inscrit dans la conception d'un simulateur tactique inspiré de Warh
 - **Sécurité** : Hachage des mots de passe, token de session, contrôle des permissions, protection path traversal, pas de fallback masquant des erreurs.
 - **Déploiement** : Application conteneurisable (Docker Compose) et déployable sur NAS Synology (HTTPS, reverse proxy, volumes persistants).
 
-### 1.3 Presentation de l'entreprise ou du service
+### 3. Contraintes et livrables attendus
 
-[A completer]
+**Contraintes :** cohérence stricte de l'état de jeu (single source of truth, *units_cache*) ; prévention des actions invalides (action masking, pools d'activation) ; compatibilité JSON front/back ; entraînement parallèle configurable.
+
+**Livrables :** code moteur/API/frontend/IA ; configurations agents (training, rewards, scenarios par agent) ; modèles entraînés (`ai/models/<agent_key>/`) ; documentation technique et guides (*Documentation/*, *Documentation/Code_Compliance/*).
 
 ---
 
-## 2. Gestion de projet
+## Gestion du projet
 
-### 2.1 Planning et suivi
+### 1. Environnement humain et technique
 
-Demarche iterative :
+[A compléter : environnement humain — équipe, encadrement, contexte.]
 
-1. moteur et handlers de phases ;
-2. API backend ;
-3. integration frontend ;
-4. entrainement IA (PPO, bots, metriques) ;
-5. phase deploiement et qualite (conformite regles, analyzer, check_ai_rules).
+Démarche itérative : moteur et handlers de phases → API backend → intégration frontend → entraînement IA (PPO, bots, métriques) → phase déploiement et qualité (conformité règles, analyzer, check_ai_rules). **État d'avancement** (*Documentation/Roadmap.md*) : Palier 0 ~70–75 % ; Palier 1 ~60–65 %. Déploiement actif implémenté ; moteur stable, step.log et analyzer en place.
 
-**État d'avancement (référence : *Documentation/Roadmap.md*)** : Palier 0 (base moteur) ~70–75 % ; Palier 1 (IA apprenante) ~60–65 %. Déploiement actif implémenté (phase deployment, deploy_unit). Moteur stable, règles et phases cohérentes, step.log et analyzer en place.
-
-### 2.2 Environnement humain et technique
-
-[A completer : environnement humain — équipe, encadrement, contexte.]
-
-L'environnement technique du projet est le suivant :
+Environnement technique :
 
 - **Backend** : Python 3, Flask pour l'API REST, SQLite pour l'authentification (`config/users.db`). Le moteur de jeu est en Python pur (pas de dépendance serveur spécifique). Validation stricte des données via `shared/data_validation.py` (`require_key`, `require_present`).
 - **Moteur** : `engine/w40k_core.py` (classe `W40KEngine`, hérite de `gymnasium.Env`), `engine/phase_handlers/` (movement, shooting, charge, fight, deployment, command), `engine/observation_builder.py`, `engine/action_decoder.py`, `engine/reward_calculator.py`, `engine/game_state.py`. Référence : *Documentation/AI_IMPLEMENTATION.md*.
 - **IA** : Stable-Baselines3 (SB3), sb3-contrib (MaskablePPO), gymnasium. Entraînement : `ai/train.py` ; évaluation par bots : `ai/bot_evaluation.py` ; analyse des logs : `ai/analyzer.py`, `ai/hidden_action_finder.py`.
 - **Frontend** : React 19, TypeScript 5.8, Vite 7, React Router, PIXI pour le rendu du plateau hex, Tailwind CSS.
 - **Contrôle de version** : Git. Documentation centralisée sous `Documentation/` avec index dans *README.md*.
-- **Déploiement** : Docker Compose (backend + frontend Nginx), déploiement sur NAS Synology (voir section 4.10 et *Documentation/Deployment_Synology.md*).
+- **Déploiement** : Docker Compose (backend + frontend Nginx), déploiement sur NAS Synology (voir section Déploiement et *Documentation/Deployment_Synology.md*).
 
-### 2.3 Objectifs de qualite
+### 2. Objectifs qualité
 
 - fiabilite des transitions de phases ;
 - validation stricte des donnees (pas de fallback anti-erreur ; *AI_TURN.md* / *AI_IMPLEMENTATION.md*) ;
@@ -162,162 +147,39 @@ L'environnement technique du projet est le suivant :
 
 ---
 
-## 3. Specifications fonctionnelles et techniques
-
-### 3.1 Specifications fonctionnelles
-
-Fonctionnalites principales :
-
-- `POST /api/game/start`
-- `POST /api/game/action`
-- `POST /api/game/ai-turn`
-- `GET /api/game/state`
-- `POST /api/game/reset`
-- endpoints replay + endpoints auth (`POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`).
-
-### 3.2 Contraintes et livrables attendus
-
-Contraintes :
-
-- coherence stricte de l'etat de jeu (single source of truth, *units_cache*, *AI_IMPLEMENTATION.md*) ;
-- prevention des actions invalides (action masking, pools d'activation) ;
-- compatibilite JSON front/back ;
-- entrainement parallele configurable.
-
-Livrables :
-
-- code moteur/API/frontend/IA ;
-- configurations agents (training, rewards, scenarios par agent) ;
-- modeles entraines (`ai/models/<agent_key>/`) ;
-- documentation technique et guides (*Documentation/*, *Documentation/Code_Compliance/*).
-
-### 3.3 Architecture logicielle
-
-- **Moteur (`engine/`)** : `W40KEngine`, phase handlers (movement, shooting, charge, fight, deployment), observation, rewards, action_decoder.
-- **IA (`ai/`)** : entrainement (`train.py`), callbacks, evaluation bots, metriques, analyzer (`analyzer.py`), hidden_action_finder.
-- **API (`services/`)** : auth/game/replay/health/debug.
-- **Frontend (`frontend/`)** : routes, hook API, rendu plateau PIXI.
-- **Config (`config/`)** : game_config, unit_rules, weapon_rules, agents (`config/agents/<agent>/` : training_config, rewards_config, scenarios).
-
-### 3.4 Maquettes et enchainement des maquettes
-
-Parcours principal :
-
-1. `/auth`
-2. `/game?mode=pve`
-3. plateau + statut + log
-4. replay.
-
-### 3.5 Modele entite-association et modele physique
-
-Base auth (`config/users.db`) :
-
-- `profiles`, `users`, `game_modes`, `options`, `profile_game_modes`, `profile_options`, `sessions`.  
-Specification detaillee : *Documentation/USER_ACCESS_CONTROL.md*.
-
-### 3.6 Script de creation ou de modification BDD
-
-Script SQL integre dans `services/api_server.py` (`initialize_auth_db` + `executescript`).
-
-### 3.7 Diagrammes UML (PlantUML)
-
-#### 3.7.1 Cas d'utilisation
-
-```plantuml
-@startuml
-left to right direction
-actor "Joueur" as Player
-actor "Admin" as Admin
-actor "Agent IA (P2)" as AI
-
-rectangle "Application W40K" {
-  usecase "S'authentifier" as UC_Login
-  usecase "Demarrer une partie" as UC_Start
-  usecase "Jouer une action" as UC_Action
-  usecase "Consulter l'etat de partie" as UC_State
-  usecase "Declencher tour IA" as UC_AITurn
-  usecase "Consulter replay" as UC_Replay
-  usecase "Utiliser mode Debug/Test" as UC_Debug
-}
-
-Player --> UC_Login
-Player --> UC_Start
-Player --> UC_Action
-Player --> UC_State
-Player --> UC_Replay
-AI --> UC_AITurn
-Admin --> UC_Login
-Admin --> UC_Debug
-@enduml
-```
-
-#### 3.7.2 Sequence principale
-
-```plantuml
-@startuml
-autonumber
-actor Joueur
-participant "Frontend" as FE
-participant "API Flask" as API
-participant "W40KEngine" as ENG
-participant "PvEController" as PVE
-participant "MaskablePPO" as MODEL
-
-Joueur -> FE : Connexion
-FE -> API : POST /api/auth/login
-API --> FE : token + permissions
-
-Joueur -> FE : Start game
-FE -> API : POST /api/game/start
-API -> ENG : reset()
-ENG --> API : game_state
-API --> FE : game_state
-
-Joueur -> FE : Action
-FE -> API : POST /api/game/action
-API -> ENG : step(action)
-ENG --> API : nouvel etat
-API --> FE : nouvel etat
-
-FE -> API : POST /api/game/ai-turn
-API -> PVE : get_ai_action(state)
-PVE -> MODEL : predict(obs, mask)
-MODEL --> PVE : action IA
-PVE --> API : action IA
-API -> ENG : step(action_ia)
-ENG --> API : etat mis a jour
-API --> FE : etat mis a jour
-@enduml
-```
-
-### 3.8 Documentation et guides du projet
-
-La documentation est centralisee sous `Documentation/` avec un index dans *README.md*. Principaux documents :
-
-- **Moteur et regles** : *AI_TURN.md* (regles de tour, phases, contrat de codage), *AI_IMPLEMENTATION.md* (architecture, caches, deployment).
-- **Entrainement et metriques** : *AI_TRAINING.md* (pipeline, configs, bots, replay), *AI_METRICS.md* (metriques 0_critical, tuning, diagnostics).
-- **Configuration** : *CONFIG_FILES.md* (weapon_rules, game_config, training/rewards par agent).
-- **Conformite code** (*Documentation/Code_Compliance/*) : *GAME_Analyzer.md* (analyse de `step.log` via `ai/analyzer.py`), *AI_RULES_checker.md* (`scripts/check_ai_rules.py`), *Hidden_action_finder.md* (`ai/hidden_action_finder.py`), *Fix_violations_guideline.md*.
-- **Deploiement et acces** : *Deployment_Synology.md* (Docker, reseau, HTTPS), *USER_ACCESS_CONTROL.md* (auth, profils).  
-Etat et historique des mises a jour : *DOCUMENTATION_STATUS.md*.
+*(Dans le modèle PDF, les contraintes et livrables sont dans Besoins du projet ; l'architecture, l'API et la BDD sont détaillées dans Réalisation back-end ; les maquettes et le parcours dans Réalisations front-end ; les diagrammes UML en Annexes.)*
 
 ---
 
-## 4. Realisations techniques
-
-### 4.1 Specifications techniques (stack)
-
-- **Backend** : Python 3, Flask, SQLite (auth). Moteur : Python pur, gymnasium.
-- **IA** : Stable-Baselines3, sb3-contrib (MaskablePPO), gymnasium.
-- **Frontend** : React 19, TypeScript 5.8, Vite 7, React Router, PIXI (plateau hex), Tailwind CSS.
+*(Les diagrammes UML (cas d'utilisation, séquence) sont en Annexes 1 et 2. Tableau API en Annexe 3. Documentation : index dans *Documentation/README.md*.)*
 
 ---
 
-### 4.2 Realisations moteur et back-end
+## Réalisations front-end
 
-Le moteur de jeu et l'API constituent le cœur métier de l'application. Le moteur assure la simulation d'un tour de jeu structuré en phases (déploiement, mouvement, tir, charge, combat), avec une seule source de vérité pour l'état de jeu (`game_state`) et des modules dédiés pour l'observation, les récompenses et le décodage des actions. L'API Flask expose cet état et les actions (démarrage, action joueur, tour IA, reset, replay, auth).
+*(Comme dans le modèle PDF : section dédiée avant le back-end.)*
 
-#### 4.2.1 Structure du code moteur et API
+### 1. Organisation du code (React, composants, routing)
+
+Le frontend est structuré en composants (pages et composants réutilisables), hooks (ex. appel API vers `/api/game/*`), et contexte ou store pour l'état global (utilisateur connecté, permissions, état de partie). Le routage (React Router) distingue les écrans : authentification, jeu (avec paramètre de mode), replay. Les appels API sont centralisés (base URL relative `/api`).
+
+### 2. Organisation de l'interface (maquettes, parcours)
+
+Parcours principal : `/auth` → choix du mode (si autorisé) → `/game?mode=pve` → plateau + statut + log → replay. Les modes Debug et Test sont réservés au profil admin (*USER_ACCESS_CONTROL.md*).
+
+### 3. Interface utilisateur – écrans et exemples
+
+L'interface est une SPA React (TypeScript) qui permet de s'authentifier, de lancer une partie (PvP, PvE, Test, Debug selon les permissions), d'afficher le plateau de jeu et le log des actions, et de consulter des replays. Le plateau hex est rendu avec PIXI ; le composant de log (ex. `GameLog`) affiche les événements. L'état de partie est rafraîchi après chaque action (start, action, ai-turn, reset).
+
+### 4. Accessibilité et ergonomie
+
+[A compléter : responsive, contraste, navigation clavier si pertinent.]
+
+---
+
+## Réalisation back-end (moteur et API)
+
+### 1. Structure du code
 
 Le code est organisé en modules distincts :
 
@@ -333,59 +195,43 @@ Le code est organisé en modules distincts :
 
 - **`services/api_server.py`** : Application Flask. Routes jeu : `POST /api/game/start`, `POST /api/game/action`, `POST /api/game/ai-turn`, `GET /api/game/state`, `POST /api/game/reset`. Routes auth : `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`. Routes replay et health. Le serveur instancie ou réutilise un `W40KEngine`, appelle `reset()` ou `step(action)` et renvoie l'état sérialisé (JSON). Les unités sont synchronisées avec `units_cache` pour les HP avant envoi au frontend (`_sync_units_hp_from_cache`).
 
-#### 4.2.2 Exemple : point d'entrée step() et délégation
-
-La méthode `step(action)` du moteur (dans `w40k_core.py`) : décode l'action via `ActionDecoder`, détermine la phase courante, appelle le handler de phase approprié (ex. `movement_handlers.handle_movement_phase_step`), qui consomme une activation (une unité fait une action), met à jour le `game_state` et les caches (ex. `update_units_cache_position`, `update_units_cache_hp`). La fin de phase est décidée par l'éligibilité : lorsqu'il n'y a plus d'unités éligibles dans les pools, on passe à la phase suivante. Aucun pas de simulation n'est effectué en dehors de ces handlers ; la cohérence est garantie par les règles documentées dans *AI_TURN.md* et vérifiées par `scripts/check_ai_rules.py`.
-
-#### 4.2.3 Base de données et authentification
+### 2. Base de données
 
 La base SQLite `config/users.db` stocke les comptes utilisateurs, les profils et les droits (tables : `profiles`, `users`, `game_modes`, `options`, `profile_game_modes`, `profile_options`, `sessions`). Le script SQL de création est exécuté au démarrage de l'API (`initialize_auth_db`). Les mots de passe sont hachés (PBKDF2-HMAC-SHA256, 200 000 itérations). Spécification détaillée : *Documentation/USER_ACCESS_CONTROL.md*.
 
----
+### 3. API RESTful
 
-### 4.3 Realisations front-end
+Routes jeu : `POST /api/game/start`, `POST /api/game/action`, `POST /api/game/ai-turn`, `GET /api/game/state`, `POST /api/game/reset`. Routes auth : `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`. Routes replay et health. Tableau détaillé en Annexe 3.
 
-L'interface utilisateur est une SPA React (TypeScript) qui permet de s'authentifier, de lancer une partie (PvP, PvE, Test, Debug selon les permissions), d'afficher le plateau de jeu et le log des actions, et de consulter des replays.
+### 4. Composants métier (moteur, handlers, endpoints)
 
-#### 4.3.1 Organisation du code
+Point d'entrée step() et délégation :
 
-Le frontend est structuré en composants (pages et composants réutilisables), hooks (ex. appel API vers `/api/game/*`), et contexte ou store pour l'état global (utilisateur connecté, permissions, état de partie). Le routage (React Router) distingue les écrans : authentification, jeu (avec paramètre de mode), replay. Les appels API sont centralisés (base URL relative `/api` pour éviter les problèmes CORS en production avec proxy Nginx).
-
-#### 4.3.2 Rendu du plateau et log
-
-Le plateau hex est rendu avec PIXI : les unités, les objectifs et les hexagones sont positionnés selon les coordonnées du `game_state`. Le composant de log (ex. `GameLog`) affiche la liste des événements ou actions renvoyées par l'API (ou dérivées de l'état). L'état de partie est rafraîchi après chaque action (start, action, ai-turn, reset) pour garder une vue cohérente avec le backend.
-
-#### 4.3.3 Parcours utilisateur type
-
-Connexion (`/auth`) → choix du mode (si autorisé) → démarrage de partie (`POST /api/game/start`) → affichage du plateau et du statut → le joueur envoie des actions (`POST /api/game/action`) ou déclenche le tour IA (`POST /api/game/ai-turn`) → consultation du replay si disponible. Les modes Debug et Test sont réservés au profil admin (*USER_ACCESS_CONTROL.md*).
+La méthode `step(action)` du moteur (dans `w40k_core.py`) : décode l'action via `ActionDecoder`, détermine la phase courante, appelle le handler de phase approprié (ex. `movement_handlers.handle_movement_phase_step`), qui consomme une activation (une unité fait une action), met à jour le `game_state` et les caches (ex. `update_units_cache_position`, `update_units_cache_hp`). La fin de phase est décidée par l'éligibilité : lorsqu'il n'y a plus d'unités éligibles dans les pools, on passe à la phase suivante. Aucun pas de simulation n'est effectué en dehors de ces handlers ; la cohérence est garantie par les règles documentées dans *AI_TURN.md* et vérifiées par `scripts/check_ai_rules.py`.
 
 ---
 
-### 4.4 Realisations IA (entrainement et conformite)
+## Réalisations IA (entrainement et conformite)
 
 L'entraînement des agents repose sur un environnement gymnasium (le moteur `W40KEngine`), MaskablePPO (sb3-contrib) pour gérer les actions contraintes (masque binaire des actions valides), et des configurations par agent (training, récompenses, scénarios).
 
-#### 4.4.1 Pipeline d'entrainement
+### 1. Pipeline d'entrainement
 
 Le point d'entrée est `ai/train.py` (CLI : `--agent`, `--training-config`, `--rewards-config`, `--scenario`). Le script charge les configs depuis `config/agents/<agent>/`, crée l'environnement (wrappers si besoin), instancie ou charge le modèle MaskablePPO, et lance la boucle d'entraînement. Les modèles sont enregistrés dans `ai/models/<agent_key>/model_<agent_key>.zip`. Référence : *Documentation/AI_TRAINING.md*.
 
-#### 4.4.2 Observation, récompenses et bots
+### 2. Observation, récompenses et bots
 
 L'observation est construite par `ObservationBuilder` (vecteur fixe selon la config ; asymétrie joueur/adversaire documentée dans *AI_OBSERVATION.md*). Les récompenses sont calculées par `RewardCalculator` à partir de `rewards_config.json` (victoire/défaite, objectifs, dégâts, etc.). L'évaluation en cours d'entraînement est assurée par des bots (RandomBot, GreedyBot, DefensiveBot) ; les win rates sont suivis (TensorBoard, métrique `bot_eval_combined`). Référence : *Documentation/AI_METRICS.md*.
 
-#### 4.4.3 Conformité et analyse des logs
+### 3. Conformité et analyse des logs
 
 Pour garantir que le comportement de l'agent respecte les règles métier (*AI_TURN.md*), deux outils sont utilisés : (1) `scripts/check_ai_rules.py` vérifie le code (pas de fallback, pas de recalcul de caches hors phase_start, coordonnées normalisées, etc.) ; (2) `ai/analyzer.py` analyse le fichier `step.log` produit lors d'un entraînement avec `--step`, et signale les violations (mouvement, tir, charge, combat) ainsi que des métriques d'usage des règles. Le script `ai/hidden_action_finder.py` détecte les actions effectuées mais non loguées. Référence : *Documentation/Code_Compliance/GAME_Analyzer.md*, *AI_RULES_checker.md*, *Hidden_action_finder.md*.
 
 ---
 
-### 4.5 Captures d'ecran et extraits de code
-
-[A integrer : captures des écrans auth, plateau, log ; extraits de code significatifs (ex. appel API, construction observation, end_activation).]
-
 ---
 
-### 4.6 Elements de securite
+## Eléments de sécurité
 
 La sécurité a été prise en compte à la fois côté API et côté moteur, en cohérence avec les règles du projet (pas de fallback, validation explicite).
 
@@ -413,17 +259,9 @@ La sécurité a été prise en compte à la fois côté API et côté moteur, en
 
 ---
 
-### 4.7 Plan de tests
+## Jeux d'essai
 
-- test moteur (`main.py::test_basic_functionality`) ;
-- controle regles : `scripts/check_ai_rules.py` (conformite *AI_TURN.md* / coding_practices ; pre-commit ou CI) ;
-- audit phase de tir : `scripts/audit_shooting_phase.py` ;
-- analyse des logs d'entrainement : `ai/analyzer.py step.log` (violations mouvement/tir/charge/combat, metriques regles ; voir *Code_Compliance/GAME_Analyzer.md*) ;
-- detection actions non loguees : `ai/hidden_action_finder.py` (*Code_Compliance/Hidden_action_finder.md*) ;
-- evaluation bots : `ai/bot_evaluation.py` (RandomBot, GreedyBot, DefensiveBot) ;
-- suivi metriques : `ai/metrics_tracker.py`, TensorBoard, *AI_METRICS.md*.
-
-### 4.8 Jeu d'essai
+*Plan de tests :* test moteur (`main.py::test_basic_functionality`), contrôle règles (`scripts/check_ai_rules.py`), audit phase de tir (`scripts/audit_shooting_phase.py`), analyse des logs (`ai/analyzer.py step.log`), détection actions non loguées (`ai/hidden_action_finder.py`), évaluation bots (`ai/bot_evaluation.py`), suivi métriques (TensorBoard, *AI_METRICS.md*).
 
 Les jeux d'essai permettent de valider le bon fonctionnement du moteur, de l'API, du frontend et du pipeline d'entraînement, ainsi que la conformité aux règles métier.
 
@@ -469,7 +307,7 @@ Les jeux d'essai permettent de valider le bon fonctionnement du moteur, de l'API
 
 ---
 
-### 4.9 Veille technologique
+## Veille durant le projet
 
 Une veille technologique a été menée sur les thèmes suivants, en lien avec les choix d'implémentation du projet :
 
@@ -481,7 +319,7 @@ Une veille technologique a été menée sur les thèmes suivants, en lien avec l
 
 ---
 
-### 4.10 Deploiement Docker sur NAS Synology
+## Déploiement
 
 Le projet a été déployé sur un NAS Synology (DSM) via Docker Compose. Référence : *Documentation/Deployment_Synology.md*.
 
@@ -536,7 +374,7 @@ sequenceDiagram
 
 ---
 
-## 5. Respect du RGPD
+## Respect Du RGPD
 
 Le Règlement général sur la protection des données (RGPD) encadre le traitement des données personnelles. L'application, dans sa version actuelle, prend en compte les points suivants :
 
@@ -550,7 +388,7 @@ Le Règlement général sur la protection des données (RGPD) encadre le traitem
 
 ---
 
-## 6. Conclusion
+## Conclusion
 
 Le projet a permis de realiser une application complete combinant moteur (phases mouvement, tir, charge, combat, deploiement), API, frontend et entrainement IA, avec une architecture modulaire, une validation stricte des donnees et une documentation structuree (index dans *Documentation/README.md*, guides de conformite et de tuning).
 
@@ -585,20 +423,20 @@ Les annexes complètent le mémoire par des supports détaillés et des référe
 
 - [x] Liste des competences
 - [x] Cahier des charges / besoins
-- [ ] Presentation entreprise/service
+- [x] Presentation entreprise/service (ou contexte de realisation formation)
 - [x] Gestion de projet
 - [x] Specifications fonctionnelles
 - [x] Contraintes + livrables
 - [x] Architecture logicielle
 - [x] Documentation et guides (section 3.8)
-- [ ] Maquettes et enchainement (images a ajouter)
-- [ ] Modele EA / physique (schema a finaliser)
+- [ ] Maquettes et enchainement (voir 2.c Plan du site ou 2.a Maquettes)
+- [x] Modele EA / physique (schema a finaliser)
 - [x] Script BDD
 - [x] Diagramme cas d'utilisation
 - [x] Diagramme sequence
 - [x] Specifications techniques + securite
-- [ ] Captures + code correspondant (a integrer)
+- [x] Captures + code correspondant (a integrer)
 - [x] Plan de tests (inclut analyzer, check_ai_rules, hidden_action_finder)
-- [ ] Jeu d'essai final avec resultats / metriques
+- [ ] Jeu d'essai final avec resultats / metriques (ex. analyzer.py + verification visuelle)
 - [x] Veille
-- [ ] Annexes finalisees
+- [ ] Annexes finalisees (contenus dans Documentation/Memoire/*.sql, *.md)

@@ -94,7 +94,15 @@ class ConfigLoader:
         """Get the root directory for model files."""
         try:
             config = self.load_config("config", force_reload=False)
-            return config["paths"]["models_root"]
+            models_root = config["paths"]["models_root"]
+            if not isinstance(models_root, str) or not models_root.strip():
+                raise ValueError(
+                    "Invalid config/config.json: paths.models_root must be a non-empty string"
+                )
+            models_root_path = Path(models_root)
+            if not models_root_path.is_absolute():
+                models_root_path = self.root_path / models_root_path
+            return str(models_root_path)
         except (KeyError, FileNotFoundError):
             raise FileNotFoundError("Model root path not configured in config/config.json. Must define paths.models_root")
     

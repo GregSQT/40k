@@ -46,7 +46,8 @@ export interface BaseLogEntry {
     | "phase_change"
     | "move_cancel"
     | "charge_cancel"
-    | "advance";
+    | "advance"
+    | "roll_info";
   message: string;
   turnNumber?: number;
   phase?: string;
@@ -362,6 +363,8 @@ export function getEventIcon(type: string): string {
       return "✕"; // X for cancellation
     case "advance":
       return "⇒"; // Double arrow for advance
+    case "roll_info":
+      return "i"; // Informational roll result
     case "wait":
       return "⏸"; // Pause icon for wait
     default:
@@ -437,6 +440,8 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
       return "game-log-entry--cancel";
     case "advance":
       return "game-log-entry--advance";
+    case "roll_info":
+      return "game-log-entry--rule-choice";
     default:
       return "game-log-entry--default";
   }

@@ -1,0 +1,15 @@
+{
+  "faction": "spaceMarine",
+  "display_name": "Blood Claw Pack",
+  "description": "Space Marine Army:\nBlood Claw squad:\n \t1 Blood Claw Pack Leader\n \t6 Blood Claws",
+  "units": [
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 6
+    }
+  ]
+}

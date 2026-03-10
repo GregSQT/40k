@@ -1,7 +1,8 @@
 {
   "roster_id": "p1_roster-05",
   "composition": [
-    {"unit_type": "IntercessorGrenadeLauncher", "count": 2},
-    {"unit_type": "Intercessor", "count": 3}
+    {"unit_type": "TerminatorCyclone", "count": 1},
+    {"unit_type": "EradicatorMeltaRifle", "count": 1},
+    {"unit_type": "EradicatorMultiMelta", "count": 1}
   ]
 }

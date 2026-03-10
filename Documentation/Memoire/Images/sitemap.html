@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plan du site</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2rem;
+      min-height: 100vh;
+      font-family: 'DM Sans', sans-serif;
+      background: #f8f9fa;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 2rem;
+    }
+    .diagram {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .node {
+      padding: 0.75rem 1.25rem;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border: 2px solid rgba(0,0,0,0.12);
+    }
+    .node--entree { background: #e9ecef; color: #495057; }
+    .node--public { background: #fff; color: #212529; }
+    .node--connecte { background: #fff8e1; color: #5d4037; }
+    .node--admin { background: #ffe0b2; color: #4e342e; }
+    .node small { display: block; font-weight: 400; font-size: 0.75rem; margin-top: 0.25rem; opacity: 0.85; }
+    .arrow {
+      color: #868e96;
+      font-size: 1.25rem;
+      flex-shrink: 0;
+    }
+    .arrow-label {
+      font-size: 0.7rem;
+      color: #868e96;
+      text-align: center;
+      margin-top: 0.25rem;
+    }
+    .row { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+    .branch {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+      padding-top: 1rem;
+      border-top: 1px dashed #dee2e6;
+    }
+    .branch-label { font-size: 0.75rem; color: #868e96; }
+    .legend {
+      display: flex;
+      gap: 1.5rem;
+      margin-top: 2rem;
+      padding: 1rem 1.5rem;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      font-size: 0.85rem;
+    }
+    .legend-item { display: flex; align-items: center; gap: 0.5rem; }
+    .legend-dot { width: 14px; height: 14px; border-radius: 4px; border: 2px solid rgba(0,0,0,0.15); }
+    .legend-dot--public { background: #fff; }
+    .legend-dot--connecte { background: #fff8e1; }
+    .legend-dot--admin { background: #ffe0b2; }
+  </style>
+</head>
+<body>
+  <h1>Plan du site</h1>
+  <div class="diagram">
+    <div class="node node--entree">/ ou *<small>entrée</small></div>
+    <span class="arrow">→</span>
+    <div class="node node--public">/auth<small>Connexion / Inscription</small></div>
+    <span class="arrow">→</span>
+    <div class="node node--connecte">/game<small>Jeu · PvP / PvE</small></div>
+    <span class="arrow">↔</span>
+    <div class="node node--connecte">/replay<small>Visionneuse replay</small></div>
+  </div>
+  <div class="row">
+    <span class="arrow-label">non connecté → /auth</span>
+    <span class="arrow-label">connecté → /game</span>
+    <span class="arrow-label">connexion OK → /game</span>
+  </div>
+  <div class="branch">
+    <span class="branch-label">depuis /game, si permissions admin</span>
+    <span class="arrow">→</span>
+    <div class="node node--admin">/game?mode=pve_test<br>/game?mode=pvp_test<small>Modes Test · profil admin</small></div>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot legend-dot--public"></span> Tous visiteurs</div>
+    <div class="legend-item"><span class="legend-dot legend-dot--connecte"></span> Utilisateur connecté</div>
+    <div class="legend-item"><span class="legend-dot legend-dot--admin"></span> Admin (modes Test)</div>
+  </div>
+</body>
+</html>

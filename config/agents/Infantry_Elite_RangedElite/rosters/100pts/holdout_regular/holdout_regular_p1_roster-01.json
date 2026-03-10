@@ -1,6 +1,8 @@
 {
   "roster_id": "p1_roster-01",
   "composition": [
-    {"unit_type": "GreyHunter", "count": 5}
+    {"unit_type": "TerminatorCyclone", "count": 1},
+    {"unit_type": "EradicatorMeltaRifle", "count": 1},
+    {"unit_type": "EradicatorMultiMelta", "count": 1}
   ]
 }

@@ -464,7 +464,14 @@ Règles:
       "bot_eval_freq": 200,              // Bot eval every N episodes (100-200 recommended)
       "bot_eval_use_episodes": true,     // true = freq in episodes, false = timesteps
       "bot_eval_intermediate": 30,       // Episodes per bot per eval (30 = good precision/speed balance)
-      "bot_eval_final": 0                // Final eval episodes (0 = skip)
+      "bot_eval_final": 0,               // Final eval episodes (0 = skip)
+      "save_best_robust": true,          // If true, canonical model comes from robust selection
+      "robust_window": 3,                // Moving window size for robust score
+      "robust_drawdown_penalty": 0.5,    // Drawdown penalty applied to robust score
+      "model_gating_enabled": true,      // Enable hard gating before model promotion
+      "model_gating_min_combined": 0.55, // Min combined score required
+      "model_gating_min_worst_bot": 0.45, // Min(min random, greedy, defensive)
+      "model_gating_min_worst_scenario_combined": 0.45 // Min scenario combined required
     },
 
     "observation_params": {
@@ -683,6 +690,21 @@ python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episode
 ```
 
 **Eval parameters** (`callback_params`): `bot_eval_freq` (how often), `bot_eval_intermediate` (episodes per bot — 30 recommended for stable estimates without long runs).
+
+**Model gating (production)**:
+- `model_gating_enabled=true` active un gate dur avant promotion de modèle.
+- Un eval passe le gate uniquement si les 3 conditions sont vraies:
+  - `combined >= model_gating_min_combined`
+  - `worst_bot_score >= model_gating_min_worst_bot` (`min(random, greedy, defensive)`)
+  - `worst_scenario_combined >= model_gating_min_worst_scenario_combined`
+- Si le gate échoue:
+  - pas de promotion `best_model`,
+  - pas de promotion robust (`model_<agent>.zip` non écrasé),
+  - logs explicites `PASS/FAIL` par critère.
+
+**Résolution des `callback_params`**:
+- Une clé absente ou `null` dans le config agent est résolue via `config/agents/_training_common.json`.
+- Si la clé manque aussi dans `_training_common.json`: erreur explicite (fail fast).
 
 ### Win Rate Benchmarks
 

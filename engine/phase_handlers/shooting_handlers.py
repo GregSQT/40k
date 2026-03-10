@@ -177,6 +177,38 @@ def _get_rapid_fire_parameter(weapon: Dict[str, Any]) -> Optional[int]:
     return None
 
 
+def _append_shoot_nb_roll_info_log(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    weapon: Dict[str, Any],
+    nb_roll: int
+) -> None:
+    """
+    Append informational log line for randomized shooting attack count rolls.
+    """
+    nb_value = require_key(weapon, "NB")
+    if not isinstance(nb_value, str):
+        return
+
+    unit_id = require_key(unit, "id")
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    weapon_name = str(require_key(weapon, "display_name"))
+
+    action_logs = game_state.setdefault("action_logs", [])
+    action_logs.append(
+        {
+            "type": "roll_info",
+            "phase": "SHOOT",
+            "player": require_key(unit, "player"),
+            "unitId": unit_id,
+            "message": (
+                f"Unit {unit_id}({unit_col},{unit_row}) SHOOT with [{weapon_name}]. "
+                f"Number of shoots ({nb_value}): {nb_roll}"
+            ),
+        }
+    )
+
+
 def _tracking_set_contains_unit(unit_id: Any, tracking_set: Set[Any]) -> bool:
     """Check unit membership in tracking sets with normalized string comparison."""
     unit_id_str = str(unit_id)
@@ -216,7 +248,8 @@ def _can_unit_advance_in_shoot_phase(unit: Dict[str, Any], game_state: Dict[str,
     if "id" not in unit:
         raise KeyError(f"Unit missing required 'id' field: {unit}")
     has_advanced = str(unit["id"]) in require_key(game_state, "units_advanced")
-    return bool(unit["_can_advance"]) and not has_advanced
+    has_shot = _unit_has_shot_with_any_weapon(unit)
+    return bool(unit["_can_advance"]) and not has_advanced and not has_shot
 
 
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
@@ -1529,6 +1562,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_init")
         unit["SHOOT_LEFT"] = nb_roll
         unit["_current_shoot_nb"] = nb_roll
+        _append_shoot_nb_roll_info_log(game_state, unit, selected_weapon, nb_roll)
     else:
         unit["SHOOT_LEFT"] = 0
         unit["_current_shoot_nb"] = unit["SHOOT_LEFT"]
@@ -2697,6 +2731,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                     nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_auto_weapon_switch")
                     unit["SHOOT_LEFT"] = nb_roll
                     unit["_current_shoot_nb"] = nb_roll
+                    _append_shoot_nb_roll_info_log(game_state, unit, selected_weapon, nb_roll)
 
                     updated_valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
                     unit["valid_target_pool"] = updated_valid_targets
@@ -2771,6 +2806,7 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
                 nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_switch")
                 unit["SHOOT_LEFT"] = nb_roll
                 unit["_current_shoot_nb"] = nb_roll
+                _append_shoot_nb_roll_info_log(game_state, unit, weapon, nb_roll)
                 valid_targets = temp_valid_targets
                 break
         
@@ -2790,7 +2826,13 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
         
         # For human players: allow advance mode instead of ending activation
         # only if unit has not already advanced in this shooting phase.
-        if selected_weapon and unit["SHOOT_LEFT"] == current_weapon_nb and str(unit_id) not in require_key(game_state, "units_advanced"):
+        has_shot = _unit_has_shot_with_any_weapon(unit)
+        if (
+            selected_weapon
+            and unit["SHOOT_LEFT"] == current_weapon_nb
+            and str(unit_id) not in require_key(game_state, "units_advanced")
+            and not has_shot
+        ):
             # No targets at activation - return signal to allow advance mode
             return True, {
                 "waiting_for_player": True,
@@ -3211,6 +3253,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_select_weapon")
         unit["SHOOT_LEFT"] = nb_roll
         unit["_current_shoot_nb"] = nb_roll
+        _append_shoot_nb_roll_info_log(game_state, unit, weapon, nb_roll)
         
         # AI_TURN.md COMPLIANCE: Unit must already be in pool (pool is built once at phase start)
         # If unit is not in pool, it was removed via end_activation and cannot be reactivated
@@ -3639,6 +3682,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_auto_select")
                         unit["SHOOT_LEFT"] = nb_roll
                         unit["_current_shoot_nb"] = nb_roll
+                        _append_shoot_nb_roll_info_log(game_state, unit, weapon, nb_roll)
                         selected_weapon = weapon
                     else:
                         return False, {"error": "no_weapons_available", "unitId": unit_id}
@@ -3699,6 +3743,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_auto_select_category")
                     unit["SHOOT_LEFT"] = nb_roll
                     unit["_current_shoot_nb"] = nb_roll
+                    _append_shoot_nb_roll_info_log(game_state, unit, weapon, nb_roll)
                     
                     # PISTOL RULE VALIDATION: Re-validate after weapon selection
                     # This ensures the newly selected weapon is valid for current context
@@ -3723,6 +3768,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                         nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_manual_init")
                         unit["SHOOT_LEFT"] = nb_roll
                         unit["_current_shoot_nb"] = nb_roll
+                        _append_shoot_nb_roll_info_log(game_state, unit, selected_weapon, nb_roll)
                     elif current_shoot_left == 0 and active_shooting_unit == unit_id:
                         # Unit has already shot and SHOOT_LEFT is 0
                         # Need to select another weapon of the same category (PISTOL or non-PISTOL)
@@ -3780,6 +3826,7 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                                 nb_roll = resolve_dice_value(require_key(weapon, "NB"), "shooting_nb_manual_continue")
                                 unit["SHOOT_LEFT"] = nb_roll
                                 unit["_current_shoot_nb"] = nb_roll
+                                _append_shoot_nb_roll_info_log(game_state, unit, weapon, nb_roll)
                                 # Continue with shooting
                             else:
                                 return False, {"error": "no_weapons_available", "unitId": unit_id}
@@ -3968,9 +4015,14 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 # For now, auto-select first usable weapon
                 next_weapon = usable_weapons[0]
                 unit["selectedRngWeaponIndex"] = next_weapon["index"]
-                nb_roll = resolve_dice_value(require_key(require_key(next_weapon, "weapon"), "NB"), "shooting_nb_next_weapon")
+                next_weapon_data = require_key(next_weapon, "weapon")
+                nb_roll = resolve_dice_value(
+                    require_key(next_weapon_data, "NB"),
+                    "shooting_nb_next_weapon"
+                )
                 unit["SHOOT_LEFT"] = nb_roll
                 unit["_current_shoot_nb"] = nb_roll
+                _append_shoot_nb_roll_info_log(game_state, unit, next_weapon_data, nb_roll)
                 
                 # CRITICAL: Rebuild target pool using shooting_build_valid_target_pool for consistency
                 # This wrapper automatically determines context (advance_status, adjacent_status)
@@ -4382,47 +4434,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         try:
             from ai.reward_mapper import RewardMapper
             rewards_configs = require_key(game_state, "rewards_configs")
-
-        # CRITICAL FIX: Use controlled_agent for reward config lookup (includes phase suffix)
-            cfg2 = require_key(game_state, "config")
-            controlled_agent = require_key(cfg2, "controlled_agent")
-            # Training mode: use controlled_agent which includes phase suffix
-            reward_config_key = controlled_agent
-
-        # Get unit-specific config - RAISE ERROR if not found
-            unit_reward_config = rewards_configs.get(reward_config_key)
-            if not unit_reward_config:
-                raise ValueError(f"No reward config found for unit type '{reward_config_key}' in rewards_configs. Available: {list(rewards_configs.keys())}")
-
-            reward_mapper = RewardMapper(unit_reward_config)
-
-        # Get unit_registry for mapping scenario types
             from ai.unit_registry import UnitRegistry
             unit_registry = UnitRegistry()
-        
-        # Get the shooter's actual scenario unit type
-            shooter_scenario_type = shooter["unitType"]
-        
-            try:
-            # Map scenario type to reward config key using unit_registry
-                shooter_reward_key = unit_registry.get_model_key(shooter_scenario_type)
-            except ValueError:
-            # Unit type not found in registry
-                shooter_reward_key = None
-        
-        # CHANGE 5: Use controlled_agent for ALL units when in training mode
-        # This ensures consistent reward scaling across both players (e.g., phase4 rewards for all)
-            if controlled_agent and shooter_reward_key:
-            # Training mode - use controlled_agent for ALL units (includes phase suffix)
-                enriched_shooter = shooter.copy()
-                enriched_shooter["unitType"] = controlled_agent  # CHANGE 5: Removed player check - all units use phase1
-            elif shooter_reward_key:
-            # No controlled_agent or not in training - use registry mapping
-                enriched_shooter = shooter.copy()
-                enriched_shooter["unitType"] = shooter_reward_key
-            else:
-            # CHANGE 7: NO FALLBACK - raise error if no valid config found
-                raise ValueError(f"Cannot determine reward config for shooter {shooter.get('id', 'unknown')}: controlled_agent={controlled_agent}, shooter_reward_key={shooter_reward_key if 'shooter_reward_key' in locals() else 'not_set'}")
+            scenario_unit_type = require_key(shooter, "unitType")
+            reward_config_key = unit_registry.get_model_key(scenario_unit_type)
+            unit_reward_config = require_key(rewards_configs, reward_config_key)
+
+            reward_mapper = RewardMapper(unit_reward_config)
+            enriched_shooter = shooter.copy()
+            enriched_shooter["unitType"] = reward_config_key
        
         # Get unit rewards config
             unit_rewards = reward_mapper._get_unit_rewards(enriched_shooter)
@@ -5423,6 +5443,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             nb_roll = resolve_dice_value(require_key(selected_weapon, "NB"), "shooting_nb_post_advance")
             unit["SHOOT_LEFT"] = nb_roll
             unit["_current_shoot_nb"] = nb_roll
+            _append_shoot_nb_roll_info_log(game_state, unit, selected_weapon, nb_roll)
         else:
             unit["SHOOT_LEFT"] = 0
         

@@ -425,7 +425,7 @@ export default function Board({
     const weaponClickHandler = (e: Event) => {
       const { unitId } = (e as CustomEvent<{ unitId: number }>).detail;
       const unit = units.find((u) => u.id === unitId);
-      if (!unit || !unit.RNG_WEAPONS || unit.RNG_WEAPONS.length <= 1) return;
+      if (!unit || !unit.RNG_WEAPONS || unit.RNG_WEAPONS.length === 0) return;
 
       // Calculate position near the icon (top-right of unit)
       const canvas = canvasContainerRef.current?.querySelector("canvas");
@@ -1564,6 +1564,22 @@ export default function Board({
 
     // ✅ UNIFIED UNIT RENDERING USING COMPONENT
     for (const unit of units) {
+      const unitsCache = gameState?.units_cache;
+      const unitIdStr = String(unit.id);
+      const isPresentInUnitsCache =
+        unitsCache !== undefined ? Object.hasOwn(unitsCache, unitIdStr) : true;
+      const isHazardousDeathGhost =
+        phase === "shoot" &&
+        selectedUnitId === unit.id &&
+        unitsCache !== undefined &&
+        !isPresentInUnitsCache;
+
+      // units_cache is the single source of truth for living units.
+      // Keep only the hazardous-death ghost visible during the current shooting activation.
+      if (!isPresentInUnitsCache && !isHazardousDeathGhost) {
+        continue;
+      }
+
       const centerX = unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
       const centerY =
         unit.row * HEX_VERT_SPACING +
@@ -1625,25 +1641,25 @@ export default function Board({
           if (!gameState) {
             throw new Error("Missing gameState during fight eligibility calculation");
           }
-          const fightSubPhase = gameState.fight_subphase;
-          if (!fightSubPhase) {
+          const currentFightSubPhase = gameState.fight_subphase;
+          if (!currentFightSubPhase) {
             throw new Error("Missing fight_subphase during fight eligibility calculation");
           }
           let fightPool: Array<number | string> | undefined;
-          if (fightSubPhase === "charging") {
+          if (currentFightSubPhase === "charging") {
             fightPool = gameState.charging_activation_pool;
           } else if (
-            fightSubPhase === "alternating_non_active" ||
-            fightSubPhase === "cleanup_non_active"
+            currentFightSubPhase === "alternating_non_active" ||
+            currentFightSubPhase === "cleanup_non_active"
           ) {
             fightPool = gameState.non_active_alternating_activation_pool;
-          } else if (fightSubPhase === "alternating_active" || fightSubPhase === "cleanup_active") {
+          } else if (currentFightSubPhase === "alternating_active" || currentFightSubPhase === "cleanup_active") {
             fightPool = gameState.active_alternating_activation_pool;
           } else {
-            throw new Error(`Unknown fight_subphase: ${fightSubPhase}`);
+            throw new Error(`Unknown fight_subphase: ${currentFightSubPhase}`);
           }
           if (!fightPool) {
-            throw new Error(`Missing fight activation pool for subphase: ${fightSubPhase}`);
+            throw new Error(`Missing fight activation pool for subphase: ${currentFightSubPhase}`);
           }
           return fightPool.some((id) => String(id) === String(unit.id));
         }
@@ -1671,12 +1687,6 @@ export default function Board({
         (phase === "move" || phase === "shoot") &&
         movePreview !== null &&
         unit.id === movePreview.unitId;
-      const unitCacheEntry = gameState?.units_cache?.[String(unit.id)] ?? null;
-      const isDeadInCache = unitCacheEntry === null && !!gameState?.units_cache;
-      const isHazardousDeathGhost =
-        phase === "shoot" &&
-        selectedUnitId === unit.id &&
-        isDeadInCache;
 
       const unitToRender = isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost
         ? ({ ...unit, isGhost: true } as Unit & { isGhost: boolean })
@@ -2195,6 +2205,13 @@ export default function Board({
       };
 
       for (const unit of units) {
+        if (
+          gameState?.units_cache &&
+          !Object.hasOwn(gameState.units_cache, String(unit.id))
+        ) {
+          continue;
+        }
+
         const unitIdNum = typeof unit.id === "number" ? unit.id : parseInt(unit.id as string, 10);
         const overlayCol =
           mode === "movePreview" && movePreview && movePreview.unitId === unitIdNum

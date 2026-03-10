@@ -1,0 +1,11 @@
+{
+  "faction": "tyranid",
+  "display_name": "Genestealer Brood",
+  "description": "Tyranid Army:\nGenestealer squad:\n \t5 Genestealers",
+  "units": [
+    {
+      "unit_type": "Genestealer",
+      "count": 5
+    }
+  ]
+}

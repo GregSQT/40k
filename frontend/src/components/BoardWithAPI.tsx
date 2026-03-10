@@ -126,8 +126,16 @@ export const BoardWithAPI: React.FC = () => {
   } | null>(null);
   const [rosterPickerPlayer, setRosterPickerPlayer] = useState<PlayerId | null>(null);
   const [rosterPickerArmies, setRosterPickerArmies] = useState<
-    Array<{ file: string; name: string; faction: string; description: string }>
+    Array<{
+      file: string;
+      name: string;
+      display_name: string;
+      faction: string;
+      faction_display_name: string;
+      description: string;
+    }>
   >([]);
+  const [rosterPickerSelectedFaction, setRosterPickerSelectedFaction] = useState<string>("");
   const [rosterPickerHoveredDescription, setRosterPickerHoveredDescription] = useState<string>("");
   const [rosterPickerLoading, setRosterPickerLoading] = useState(false);
   const [rosterPickerError, setRosterPickerError] = useState<string | null>(null);
@@ -142,6 +150,7 @@ export const BoardWithAPI: React.FC = () => {
 
   const closeRosterPicker = () => {
     setRosterPickerPlayer(null);
+    setRosterPickerSelectedFaction("");
     setRosterPickerHoveredDescription("");
     setRosterPickerError(null);
   };
@@ -156,12 +165,49 @@ export const BoardWithAPI: React.FC = () => {
     try {
       const armies = await apiProps.listArmies();
       setRosterPickerArmies(armies);
+      const availableFactions = Array.from(new Set(armies.map((army) => army.faction))).sort();
+      setRosterPickerSelectedFaction(availableFactions[0] ?? "");
     } catch (err) {
       setRosterPickerError(err instanceof Error ? err.message : "Failed to load armies");
     } finally {
       setRosterPickerLoading(false);
     }
   };
+
+  const rosterPickerFactions = useMemo(() => {
+    return Array.from(new Set(rosterPickerArmies.map((army) => army.faction))).sort();
+  }, [rosterPickerArmies]);
+
+  const rosterPickerFactionDisplayNameById = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const army of rosterPickerArmies) {
+      if (labels[army.faction] && labels[army.faction] !== army.faction_display_name) {
+        throw new Error(
+          `Conflicting faction_display_name for faction '${army.faction}': ` +
+            `'${labels[army.faction]}' vs '${army.faction_display_name}'`
+        );
+      }
+      labels[army.faction] = army.faction_display_name;
+    }
+    return labels;
+  }, [rosterPickerArmies]);
+
+  const effectiveRosterPickerFaction = useMemo(() => {
+    if (
+      rosterPickerSelectedFaction &&
+      rosterPickerFactions.includes(rosterPickerSelectedFaction)
+    ) {
+      return rosterPickerSelectedFaction;
+    }
+    return rosterPickerFactions[0] ?? "";
+  }, [rosterPickerSelectedFaction, rosterPickerFactions]);
+
+  const filteredRosterPickerArmies = useMemo(() => {
+    if (!effectiveRosterPickerFaction) {
+      return rosterPickerArmies;
+    }
+    return rosterPickerArmies.filter((army) => army.faction === effectiveRosterPickerFaction);
+  }, [rosterPickerArmies, effectiveRosterPickerFaction]);
 
   const handleSelectRoster = async (armyFile: string) => {
     if (!apiProps.changeRoster) {
@@ -1124,8 +1170,23 @@ export const BoardWithAPI: React.FC = () => {
             {rosterPickerError && <div className="deployment-panel__picker-error">{rosterPickerError}</div>}
             {!rosterPickerLoading && !rosterPickerError && (
               <div className="deployment-panel__picker-content">
+                <div className="deployment-panel__picker-factions">
+                  {rosterPickerFactions.map((faction) => (
+                    <button
+                      type="button"
+                      key={faction}
+                      className={`deployment-panel__picker-item ${effectiveRosterPickerFaction === faction ? "deployment-panel__picker-item--active" : ""}`}
+                      onClick={() => {
+                        setRosterPickerSelectedFaction(faction);
+                        setRosterPickerHoveredDescription("");
+                      }}
+                    >
+                      {rosterPickerFactionDisplayNameById[faction]}
+                    </button>
+                  ))}
+                </div>
                 <div className="deployment-panel__picker-list">
-                  {rosterPickerArmies.map((army) => (
+                  {filteredRosterPickerArmies.map((army) => (
                     <button
                       type="button"
                       key={army.file}
@@ -1133,9 +1194,14 @@ export const BoardWithAPI: React.FC = () => {
                       onMouseEnter={() => setRosterPickerHoveredDescription(army.description)}
                       onClick={() => handleSelectRoster(army.file)}
                     >
-                      {army.name}
+                      {army.display_name}
                     </button>
                   ))}
+                  {filteredRosterPickerArmies.length === 0 && (
+                    <div className="deployment-panel__picker-loading">
+                      Aucun roster pour cette faction.
+                    </div>
+                  )}
                 </div>
                 <div className="deployment-panel__picker-tooltip">
                   {rosterPickerHoveredDescription || "Survolez une armee pour voir sa description"}

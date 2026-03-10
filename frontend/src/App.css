@@ -964,9 +964,20 @@ body {
 
 .deployment-panel__picker-content {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(220px, 1fr) minmax(220px, 1fr);
   gap: 10px;
   margin-top: 8px;
+}
+
+.deployment-panel__picker-factions {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .deployment-panel__picker-list {
@@ -1813,6 +1824,14 @@ textarea:focus {
   background: transparent;
   border: none;
   border-radius: 0;
+}
+
+.game-log-entry__icon--roll_info {
+  background: #1d4ed8;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: var(--icon-square-border-radius) px;
+  color: #ffffff;
+  font-weight: 700;
 }
 
 .game-log-entry__icon--shoot {
