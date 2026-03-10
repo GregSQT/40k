@@ -338,7 +338,6 @@ export class UnitRenderer {
     this.renderTargetIndicator(iconZIndex); // Shows 🎯 for all targets (shoot, charge, fight)
     this.renderShootingIndicator(iconZIndex);
     this.renderMovementIndicator(iconZIndex);
-    this.renderAdvanceIndicator(iconZIndex);
     this.renderChargeIndicator(iconZIndex);
     this.renderFightIndicator(iconZIndex);
     this.renderAttackCounter(unitIconScale);
@@ -1105,29 +1104,6 @@ export class UnitRenderer {
       "--icon-move-bg-color",
       "--icon-move-size",
       "--icon-square-standard-size", // Use standard size for consistency
-      positionX,
-      positionY
-    );
-  }
-
-  private renderAdvanceIndicator(iconZIndex: number): void {
-    const { unit, advancingUnitId, centerX, centerY, HEX_RADIUS } = this.props;
-
-    // Only show advance indicator on the unit that is advancing
-    if (!advancingUnitId || unit.id !== advancingUnitId) return;
-
-    const offset = HEX_RADIUS * 0.6;
-    const positionX = centerX - offset;
-    const positionY = centerY + offset;
-
-    // Orange background for advance (uses standard size)
-    this.renderActionIconInSquare(
-      iconZIndex,
-      "/icons/Action_Logo/3-5 - Advance.png",
-      "--icon-advance-bg-color",
-      "--icon-advance-color",
-      "--icon-advance-size",
-      "--icon-square-standard-size", // Use standard size
       positionX,
       positionY
     );
