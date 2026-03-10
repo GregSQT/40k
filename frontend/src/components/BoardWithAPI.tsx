@@ -15,6 +15,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
+import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import { UnitStatusTable } from "./UnitStatusTable";
 
@@ -1262,30 +1263,33 @@ export const BoardWithAPI: React.FC = () => {
                         <div className="rule-choice-group__options-col">
                           <div className="rule-choice-group__options">
                             {prompt.options.map((option) => (
-                              <button
-                                type="button"
-                                key={option.display_rule_id}
-                                className={`deployment-panel__picker-item rule-choice-group__option ${!isActivePrompt ? "rule-choice-group__option--inactive" : ""}`}
-                                onMouseEnter={() =>
-                                  setRuleChoiceHoveredDescription(getRuleDescription(option.display_rule_id))
-                                }
-                                onMouseLeave={() => setRuleChoiceHoveredDescription("")}
-                                onBlur={() => setRuleChoiceHoveredDescription("")}
-                                onClick={() => {
-                                  if (!isActivePrompt) {
-                                    return;
-                                  }
-                                  apiProps.onSelectRuleChoice(prompt, option.display_rule_id);
-                                }}
-                                aria-disabled={!isActivePrompt}
-                                title={
+                              <TooltipWrapper
+                                text={
                                   isActivePrompt
                                     ? `Selectionner ${option.label}`
                                     : "Cette unite sera proposee quand ce sera son tour de choix"
                                 }
+                                key={option.display_rule_id}
                               >
-                                {option.label}
-                              </button>
+                                <button
+                                  type="button"
+                                  className={`deployment-panel__picker-item rule-choice-group__option ${!isActivePrompt ? "rule-choice-group__option--inactive" : ""}`}
+                                  onMouseEnter={() =>
+                                    setRuleChoiceHoveredDescription(getRuleDescription(option.display_rule_id))
+                                  }
+                                  onMouseLeave={() => setRuleChoiceHoveredDescription("")}
+                                  onBlur={() => setRuleChoiceHoveredDescription("")}
+                                  onClick={() => {
+                                    if (!isActivePrompt) {
+                                      return;
+                                    }
+                                    apiProps.onSelectRuleChoice(prompt, option.display_rule_id);
+                                  }}
+                                  aria-disabled={!isActivePrompt}
+                                >
+                                  {option.label}
+                                </button>
+                              </TooltipWrapper>
                             ))}
                           </div>
                         </div>

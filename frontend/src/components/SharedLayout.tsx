@@ -2,6 +2,7 @@
 import type React from "react";
 import { useLocation } from "react-router-dom";
 import { ErrorBoundary } from "./ErrorBoundary";
+import TooltipWrapper from "./TooltipWrapper";
 
 interface SharedLayoutProps {
   children: React.ReactNode; // Left column content (GameBoard, ReplayViewer, etc.)
@@ -99,22 +100,23 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
       </nav>
 
       {onOpenSettings && (
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="settings-button"
-          title="Paramètres"
-          style={{
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            fontSize: "20px",
-            color: "#9ca3af",
-            padding: "4px",
-          }}
-        >
-          ⚙️
-        </button>
+        <TooltipWrapper text="Paramètres">
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="settings-button"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "20px",
+              color: "#9ca3af",
+              padding: "4px",
+            }}
+          >
+            ⚙️
+          </button>
+        </TooltipWrapper>
       )}
     </div>
   );

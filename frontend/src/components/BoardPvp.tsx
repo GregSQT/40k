@@ -1143,10 +1143,8 @@ export default function Board({
     const coverTargets: Set<string> = new Set(); // Track targets in cover
     let backendShootableEnemyIds: Set<string> | null = null;
     if (phase === "shoot" && selectedUnit) {
-      const selectedUnitTargetPool = selectedUnit.valid_target_pool;
-      if (Array.isArray(selectedUnitTargetPool)) {
-        backendShootableEnemyIds = new Set(selectedUnitTargetPool.map((id) => String(id)));
-      } else if (stableBlinkingUnits) {
+      // Single source of truth for ghosting: live backend blinking payload only.
+      if (stableBlinkingUnits && stableBlinkingUnits.length > 0) {
         backendShootableEnemyIds = new Set(stableBlinkingUnits.map((id) => String(id)));
       }
     }
@@ -1208,8 +1206,33 @@ export default function Board({
         return;
       }
 
-      const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
       const attackCellSet = new Set<string>();
+      const backendRatioByHex = source.unit.los_preview_ratio_by_hex;
+      const backendAttackCells = source.unit.los_preview_attack_cells;
+      const backendCoverCells = source.unit.los_preview_cover_cells;
+      const useBackendLosPreview = false;
+
+      if (useBackendLosPreview) {
+        for (const [hexKey, ratio] of Object.entries(backendRatioByHex)) {
+          if (typeof ratio !== "number" || Number.isNaN(ratio)) {
+            throw new Error(`Invalid los_preview_ratio_by_hex value for key '${hexKey}'`);
+          }
+          losVisibilityRatioByHex.set(hexKey, ratio);
+        }
+        for (const cell of backendAttackCells) {
+          const key = `${cell.col},${cell.row}`;
+          if (!attackCellSet.has(key)) {
+            attackCellSet.add(key);
+            attackCells.push({ col: cell.col, row: cell.row });
+          }
+        }
+        for (const cell of backendCoverCells) {
+          coverCells.push({ col: cell.col, row: cell.row });
+        }
+        return;
+      }
+
+      const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
       const centerCube = offsetToCube(source.fromCol, source.fromRow);
       const range = getMaxRangedRange(source.unit);
       if (range <= 0) {
@@ -1290,6 +1313,7 @@ export default function Board({
     if (shootingPreviewSource) {
       appendShootingPreviewCells(shootingPreviewSource);
     }
+    const coverCellKeySet = new Set(coverCells.map((cell) => `${cell.col},${cell.row}`));
     if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
       attackCells.push(...fightPreviewCells);
     }
@@ -1626,20 +1650,19 @@ export default function Board({
 
       // Use backend's blinkingUnits list for shootability (authoritative LoS calculation)
       // Backend has already calculated valid targets with proper LoS checks
+      const hasAuthoritativeShootTargets =
+        phase === "shoot" &&
+        selectedUnitId !== null &&
+        shootPreviewBackendIds !== null;
+
       let isShootable = true;
       // ONLY apply greying in PvP mode when we have actual blinking data
       // - Replay mode: blinkingUnits is undefined -> skip greying
       // - PvP mode before backend responds: blinkingUnits is [] -> skip greying (prevents grey flash)
       // - PvP mode with targets: blinkingUnits has IDs -> apply greying
-      if (
-        phase === "shoot" &&
-        unit.player !== current_player &&
-        selectedUnitId !== null &&
-        stableBlinkingUnits &&
-        stableBlinkingUnits.length > 0
-      ) {
-        // Only grey out units that are NOT in the blinkingUnits list
-        isShootable = stableBlinkingUnits.includes(unit.id);
+      if (hasAuthoritativeShootTargets && unit.player !== current_player) {
+        // Only grey out enemies that are NOT in the authoritative backend target list.
+        isShootable = shootPreviewBackendIds.has(String(unit.id));
       }
 
       // Debug only for key units - EXACT UnitRenderer.tsx logic check
@@ -1723,10 +1746,8 @@ export default function Board({
 
       const isShootingPreviewGhost =
         phase === "shoot" &&
-        (mode === "attackPreview" || mode === "targetPreview") &&
-        selectedUnitId !== null &&
+        hasAuthoritativeShootTargets &&
         unit.player !== current_player &&
-        shootPreviewBackendIds !== null &&
         !shootPreviewBackendIds.has(String(unit.id));
 
       const unitToRender =
@@ -1780,6 +1801,7 @@ export default function Board({
         blinkingAttackerId,
         isBlinkingActive,
         blinkVersion,
+        shootingTargetInCover: coverCellKeySet.has(`${unit.col},${unit.row}`),
         // Pass shooting indicators
         shootingTargetId,
         shootingUnitId,
@@ -2531,8 +2553,15 @@ export default function Board({
           <div
             className="rule-tooltip unit-icon-tooltip"
             style={{
+              position: "fixed",
               left: `${unitHoverTooltip.x}px`,
               top: `${unitHoverTooltip.y}px`,
+              marginBottom: 0,
+              zIndex: 1300,
+              visibility: "visible",
+              opacity: 1,
+              transform: "translate(12px, -14px)",
+              pointerEvents: "none",
             }}
           >
             {unitHoverTooltip.text}

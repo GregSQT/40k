@@ -33,6 +33,7 @@ interface UnitRendererProps {
   isBlinkingActive?: boolean;
   blinkVersion?: number;
   blinkState?: boolean;
+  shootingTargetInCover?: boolean;
 
   // Shooting target (for replay mode explosion icon)
   shootingTargetId?: number | null;
@@ -196,7 +197,8 @@ export class UnitRenderer {
     // Find any existing blink containers and clean them up
     // Check if this unit should still be blinking
     const shouldBlink =
-      this.props.isBlinkingActive && this.props.blinkingUnits?.includes(this.props.unit.id);
+      Array.isArray(this.props.blinkingUnits) &&
+      this.props.blinkingUnits.some((id) => String(id) === String(this.props.unit.id));
     const isTargetPreviewed =
       (this.props.mode === "targetPreview" || this.props.mode === "attackPreview") &&
       this.props.targetPreview &&
@@ -234,7 +236,17 @@ export class UnitRenderer {
           }) || null
         : null;
       if (attacker && this.props.phase === "shoot") {
-        const preferred = getPreferredRangedWeaponAgainstTarget(attacker, this.props.unit);
+        const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
+        const selectedWeaponIgnoresCover =
+          Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
+          selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
+        const effectiveTargetInCover =
+          this.props.shootingTargetInCover === true && !selectedWeaponIgnoresCover;
+        const preferred = getPreferredRangedWeaponAgainstTarget(
+          attacker,
+          this.props.unit,
+          effectiveTargetInCover
+        );
         if (preferred) {
           expectedWeaponSignature = buildWeaponSignature(preferred.weapon);
         }
@@ -1201,12 +1213,28 @@ export class UnitRenderer {
       targetPreview.targetId === unit.id;
 
     // Check if this unit should be blinking (multi-unit blinking for valid targets)
-    const shouldBlink = this.props.isBlinkingActive && this.props.blinkingUnits?.includes(unit.id);
+    const shouldBlink =
+      Array.isArray(this.props.blinkingUnits) &&
+      this.props.blinkingUnits.some((id) => String(id) === String(unit.id));
+
+    const getEffectiveTargetInCover = (attacker: Unit | null): boolean => {
+      if (!attacker) {
+        return false;
+      }
+      if (this.props.phase !== "shoot") {
+        return false;
+      }
+      const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
+      const selectedWeaponIgnoresCover =
+        Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
+        selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
+      return this.props.shootingTargetInCover === true && !selectedWeaponIgnoresCover;
+    };
 
     // Use either individual target preview OR multi-unit blinking
     const shouldShowBlinkingHP = isTargetPreviewed || shouldBlink;
-    const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * 2.5 : HP_BAR_WIDTH;
-    const finalBarHeight = shouldShowBlinkingHP ? HP_BAR_HEIGHT * 2.5 : HP_BAR_HEIGHT;
+    const finalBarWidth = shouldShowBlinkingHP ? HP_BAR_WIDTH * 1.5 : HP_BAR_WIDTH;
+    const finalBarHeight = shouldShowBlinkingHP ? HP_BAR_HEIGHT * 1.5 : HP_BAR_HEIGHT;
     const finalBarX = shouldShowBlinkingHP ? centerX - finalBarWidth / 2 : barX;
     const finalBarY = shouldShowBlinkingHP ? barY - (finalBarHeight - HP_BAR_HEIGHT) : barY;
 
@@ -1231,7 +1259,11 @@ export class UnitRenderer {
               totalDamage = targetPreview.currentBlinkStep * weaponDamage;
             }
           } else {
-            const preferred = getPreferredRangedWeaponAgainstTarget(shooter, unit);
+            const preferred = getPreferredRangedWeaponAgainstTarget(
+              shooter,
+              unit,
+              getEffectiveTargetInCover(shooter)
+            );
             if (preferred) {
               const potentialDamage = Number(preferred.potentialDamage);
               if (Number.isNaN(potentialDamage)) {
@@ -1284,6 +1316,8 @@ export class UnitRenderer {
         unit,
         attacker,
         phase: this.props.phase as "shoot" | "fight" | "charge",
+        inCover: getEffectiveTargetInCover(attacker),
+        onTooltip: this.props.onUnitTooltip,
         app: this.props.app,
         centerX: this.props.centerX,
         finalBarX,

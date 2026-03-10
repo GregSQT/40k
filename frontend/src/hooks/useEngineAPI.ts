@@ -85,6 +85,9 @@ interface APIGameState {
     _current_fight_nb?: number;
     // AI_TURN.md shooting state fields
     valid_target_pool?: string[];
+    los_preview_attack_cells?: Array<{ col: number; row: number }>;
+    los_preview_cover_cells?: Array<{ col: number; row: number }>;
+    los_preview_ratio_by_hex?: Record<string, number>;
     selected_target_id?: string;
     TOTAL_ATTACK_LOG?: string;
     UNIT_RULES: Array<{
@@ -731,10 +734,29 @@ export const useEngineAPI = () => {
           // STEP 1: Start blinking if blinking_units is present (regardless of empty_target_pool)
           if (data.result?.blinking_units && data.result?.start_blinking) {
             const newUnitIds = data.result.blinking_units.map((id: string) => parseInt(id, 10));
+            const parseOptionalId = (rawId: string | number | null | undefined, label: string): number | null => {
+              if (rawId === null || rawId === undefined) {
+                return null;
+              }
+              const parsedId = typeof rawId === "string" ? parseInt(rawId, 10) : rawId;
+              if (!Number.isFinite(parsedId)) {
+                throw new Error(`Invalid ${label}: ${String(rawId)}`);
+              }
+              return parsedId;
+            };
+            const phase = data.game_state?.phase;
             const newAttackerId =
-              data.game_state?.phase === "charge" && data.result?.unitId
-                ? parseInt(data.result.unitId, 10)
-                : null;
+              parseOptionalId(data.result?.unitId, "result.unitId") ??
+              parseOptionalId(
+                phase === "shoot"
+                  ? data.game_state?.active_shooting_unit
+                  : phase === "fight"
+                    ? data.game_state?.active_fight_unit
+                    : phase === "charge"
+                      ? data.game_state?.active_charge_unit
+                      : null,
+                "active attacker unit id"
+              );
 
             // Check if we need to update: different unitIds, different attackerId, or no timer
             const unitIdsChanged =
@@ -1289,6 +1311,9 @@ export const useEngineAPI = () => {
         SHOOT_LEFT: unit.SHOOT_LEFT,
         ATTACK_LEFT: unit.ATTACK_LEFT,
         valid_target_pool: unit.valid_target_pool,
+        los_preview_attack_cells: unit.los_preview_attack_cells,
+        los_preview_cover_cells: unit.los_preview_cover_cells,
+        los_preview_ratio_by_hex: unit.los_preview_ratio_by_hex,
         currentShootNb: unit._current_shoot_nb,
         currentFightNb: unit._current_fight_nb,
         available_weapons: unit.available_weapons,

@@ -132,6 +132,20 @@ def _weapon_has_devastating_wounds_rule(weapon: Dict[str, Any]) -> bool:
     return False
 
 
+def _weapon_has_ignores_cover_rule(weapon: Dict[str, Any]) -> bool:
+    """Check if weapon has IGNORES_COVER rule."""
+    if not weapon:
+        return False
+    rules = weapon["WEAPON_RULES"] if "WEAPON_RULES" in weapon else []
+    for rule in rules:
+        if hasattr(rule, "rule"):  # ParsedWeaponRule object
+            if rule.rule == "IGNORES_COVER":
+                return True
+        elif rule == "IGNORES_COVER":  # String
+            return True
+    return False
+
+
 def _weapon_has_hazardous_rule(weapon: Dict[str, Any]) -> bool:
     """Check if weapon has HAZARDOUS rule."""
     if not weapon:
@@ -1881,6 +1895,9 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
+    if "weapon_rule" not in game_state:
+        raise KeyError("game_state missing required 'weapon_rule' field")
+    weapon_rule = game_state["weapon_rule"]
 
     # Determine context for valid_target_pool_build
     # arg2 = (unit.id in units_advanced) ? 1 : 0
@@ -1948,10 +1965,6 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     # Use context already determined above (lines 881-892)
     # Do NOT recalculate - use advance_status and adjacent_status already computed
     # which correctly implement "arg3=0 always after advance" rule
-    if "weapon_rule" not in game_state:
-        raise KeyError("game_state missing required 'weapon_rule' field")
-    weapon_rule = game_state["weapon_rule"]
-
     # CRITICAL: Ensure los_cache exists and is up-to-date before calling valid_target_pool_build
     # This can happen if shooting_build_valid_target_pool is called before shooting_unit_activation_start
     # OR if unit has advanced since los_cache was built
@@ -2249,82 +2262,178 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
             raise KeyError(f"Target dict must have 'id' or 'col'/'row': {list(target.keys())}")
         end_col, end_row = int(target["col"]), int(target["row"])
 
-    # Try multiple sources for wall hexes
-    wall_hexes_data = []
-    wall_source = None
-
-    # Source 1: Direct in game_state
-    if "wall_hexes" in game_state:
-        wall_hexes_data = game_state["wall_hexes"]
-        wall_source = "game_state['wall_hexes']"
-    
-    # Source 2: In board configuration within game_state
-    elif "board" in game_state and "wall_hexes" in game_state["board"]:
-        wall_hexes_data = game_state["board"]["wall_hexes"]
-        wall_source = "game_state['board']['wall_hexes']"
-    
-    # Source 3: Check if walls exist in board config
-    # Direct field access chain
-    elif "board_config" in game_state and "wall_hexes" in game_state["board_config"]:
-        wall_hexes_data = game_state["board_config"]["wall_hexes"]
-        wall_source = "game_state['board_config']['wall_hexes']"
-    
-    else:
-        # CHANGE 8: NO FALLBACK - raise error if wall data not found in any source
-        raise KeyError("wall_hexes not found in game_state['wall_hexes'], game_state['board']['wall_hexes'], or game_state['board_config']['wall_hexes']")
-    
-    if not wall_hexes_data:
+    wall_hexes = _get_wall_hexes_set(game_state)
+    if not wall_hexes:
         return True
     
-    # Convert wall_hexes to set for fast lookup
-    # CRITICAL: Convert coordinates to int for consistent comparison
-    wall_hexes = set()
-    invalid_walls = []
-    for wall_hex in wall_hexes_data:
-        if isinstance(wall_hex, (list, tuple)) and len(wall_hex) >= 2:
-            # CRITICAL: Convert to int to ensure consistent comparison with hex_path coordinates
-            col_int = int(wall_hex[0])
-            row_int = int(wall_hex[1])
-            wall_hexes.add((col_int, row_int))
-        else:
-            invalid_walls.append(str(wall_hex))
-    
-    try:
-        start_col_int = int(start_col)
-        start_row_int = int(start_row)
-        end_col_int = int(end_col)
-        end_row_int = int(end_row)
+    start_col_int = int(start_col)
+    start_row_int = int(start_row)
+    end_col_int = int(end_col)
+    end_row_int = int(end_row)
 
-        # Keep frontend/backend LoS rules aligned:
-        # - 9-point sampling per hex (center + 8 ring points)
-        # - visibility ratio thresholds:
-        #   < 0.25 => blocked, [0.25, cover_ratio) => in cover, >= cover_ratio => clear
-        config = require_key(game_state, "config")
-        game_rules = require_key(config, "game_rules")
-        los_visibility_min_ratio = require_key(game_rules, "los_visibility_min_ratio")
-        cover_ratio = require_key(game_rules, "cover_ratio")
-        visibility_ratio, can_see, in_cover = _compute_los_visibility_ratio(
-            start_col_int,
-            start_row_int,
-            end_col_int,
-            end_row_int,
-            wall_hexes,
-            float(los_visibility_min_ratio),
-            float(cover_ratio),
+    # Keep frontend/backend LoS rules aligned:
+    # - 7-point sampling per hex (center + 6 vertices)
+    # - visibility ratio thresholds from config:
+    #   < los_visibility_min_ratio => blocked
+    #   [los_visibility_min_ratio, cover_ratio) => in cover
+    #   >= cover_ratio => clear
+    visibility_ratio, can_see, in_cover = _get_los_visibility_state(
+        game_state,
+        start_col_int,
+        start_row_int,
+        end_col_int,
+        end_row_int,
+        wall_hexes,
+    )
+    if debug_mode:
+        visibility_state = "BLOCKED" if not can_see else ("COVER" if in_cover else "CLEAR")
+        add_debug_log(
+            game_state,
+            f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id}({start_col},{start_row}) "
+            f"-> Target {target_id}({end_col},{end_row}): {visibility_state} ratio={visibility_ratio:.3f}"
         )
-        if debug_mode:
-            visibility_state = "BLOCKED" if not can_see else ("COVER" if in_cover else "CLEAR")
-            add_debug_log(
-                game_state,
-                f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id}({start_col},{start_row}) "
-                f"-> Target {target_id}({end_col},{end_row}): {visibility_state} ratio={visibility_ratio:.3f}"
-            )
-        return can_see
+    return can_see
 
-    except Exception as e:
-        if debug_mode:
-            add_debug_log(game_state, f"[LOS DEBUG] E{episode} T{turn} Shooter {shooter_id} -> Target {target_id}: ERROR {e!r} (deny LoS)")
-        return False
+
+def _get_wall_hexes_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
+    """Resolve and normalize wall hexes from game_state sources."""
+    wall_hexes_data: Any
+    if "wall_hexes" in game_state:
+        wall_hexes_data = game_state["wall_hexes"]
+    elif "board" in game_state and "wall_hexes" in game_state["board"]:
+        wall_hexes_data = game_state["board"]["wall_hexes"]
+    elif "board_config" in game_state and "wall_hexes" in game_state["board_config"]:
+        wall_hexes_data = game_state["board_config"]["wall_hexes"]
+    else:
+        raise KeyError(
+            "wall_hexes not found in game_state['wall_hexes'], "
+            "game_state['board']['wall_hexes'], or game_state['board_config']['wall_hexes']"
+        )
+    if not isinstance(wall_hexes_data, (list, tuple, set)):
+        raise TypeError(
+            "wall_hexes source must be a list/tuple/set, "
+            f"got {type(wall_hexes_data).__name__}"
+        )
+    wall_hexes: Set[Tuple[int, int]] = set()
+    for wall_hex in wall_hexes_data:
+        if not isinstance(wall_hex, (list, tuple)) or len(wall_hex) < 2:
+            raise ValueError(f"Invalid wall hex format: {wall_hex!r}")
+        wall_hexes.add((int(wall_hex[0]), int(wall_hex[1])))
+    return wall_hexes
+
+
+def _get_los_visibility_state(
+    game_state: Dict[str, Any],
+    start_col: int,
+    start_row: int,
+    end_col: int,
+    end_row: int,
+    wall_hexes: Set[Tuple[int, int]],
+) -> Tuple[float, bool, bool]:
+    """Return (visibility_ratio, can_see, in_cover) using configured LoS thresholds."""
+    config = require_key(game_state, "config")
+    game_rules = require_key(config, "game_rules")
+    los_visibility_min_ratio = require_key(game_rules, "los_visibility_min_ratio")
+    cover_ratio = require_key(game_rules, "cover_ratio")
+    return _compute_los_visibility_ratio(
+        start_col,
+        start_row,
+        end_col,
+        end_row,
+        wall_hexes,
+        float(los_visibility_min_ratio),
+        float(cover_ratio),
+    )
+
+
+def _update_unit_los_preview_data(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    weapon_rule: int,
+    advance_status: int,
+    adjacent_status: int,
+) -> None:
+    """
+    Build backend LoS preview payload for frontend.
+
+    Single source of truth:
+    - Uses backend LoS ratio computation and backend weapon availability context.
+    - Persists on unit as:
+      - los_preview_attack_cells: [{col,row}, ...] clear LoS
+      - los_preview_cover_cells: [{col,row}, ...] visible in cover
+      - los_preview_ratio_by_hex: {"col,row": ratio_float, ...} for all evaluated hexes
+    """
+    if "id" not in unit:
+        raise KeyError(f"Unit missing required 'id' field: {unit}")
+    if "player" not in unit:
+        raise KeyError(f"Unit missing required 'player' field: {unit}")
+
+    weapon_available_pool = weapon_availability_check(
+        game_state, unit, weapon_rule, advance_status, adjacent_status
+    )
+    usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
+    if not usable_weapons:
+        unit["los_preview_attack_cells"] = []
+        unit["los_preview_cover_cells"] = []
+        unit["los_preview_ratio_by_hex"] = {}
+        return
+
+    max_range = 0
+    for weapon_info in usable_weapons:
+        weapon = require_key(weapon_info, "weapon")
+        weapon_range = require_key(weapon, "RNG")
+        if not isinstance(weapon_range, int):
+            raise TypeError(
+                f"Weapon RNG must be int for LoS preview, got {type(weapon_range).__name__}: {weapon_range}"
+            )
+        if weapon_range > max_range:
+            max_range = weapon_range
+    if max_range <= 0:
+        unit["los_preview_attack_cells"] = []
+        unit["los_preview_cover_cells"] = []
+        unit["los_preview_ratio_by_hex"] = {}
+        return
+
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    if not isinstance(board_cols, int) or not isinstance(board_rows, int):
+        raise TypeError(
+            "game_state board dimensions must be ints: "
+            f"board_cols={type(board_cols).__name__}, board_rows={type(board_rows).__name__}"
+        )
+
+    shooter_col, shooter_row = require_unit_position(unit, game_state)
+    wall_hexes = _get_wall_hexes_set(game_state)
+    attack_cells: List[Dict[str, int]] = []
+    cover_cells: List[Dict[str, int]] = []
+    ratio_by_hex: Dict[str, float] = {}
+
+    for col in range(board_cols):
+        for row in range(board_rows):
+            if row == board_rows - 1 and (col % 2) == 1:
+                continue
+            distance = _calculate_hex_distance(shooter_col, shooter_row, col, row)
+            if distance <= 0 or distance > max_range:
+                continue
+            visibility_ratio, can_see, in_cover = _get_los_visibility_state(
+                game_state,
+                int(shooter_col),
+                int(shooter_row),
+                int(col),
+                int(row),
+                wall_hexes,
+            )
+            ratio_by_hex[f"{col},{row}"] = float(visibility_ratio)
+            if not can_see:
+                continue
+            if in_cover:
+                cover_cells.append({"col": int(col), "row": int(row)})
+            else:
+                attack_cells.append({"col": int(col), "row": int(row)})
+
+    unit["los_preview_attack_cells"] = attack_cells
+    unit["los_preview_cover_cells"] = cover_cells
+    unit["los_preview_ratio_by_hex"] = ratio_by_hex
 
 
 def _hex_to_pixel(col: int, row: int, hex_radius: float) -> Tuple[float, float]:
@@ -2398,7 +2507,7 @@ def _compute_los_visibility_ratio(
 
     Returns:
         (visibility_ratio, can_see, in_cover)
-        - can_see is True when visibility_ratio >= 0.25.
+        - can_see is True when visibility_ratio >= los_visibility_min_ratio.
     """
     if not isinstance(los_visibility_min_ratio, (int, float)):
         raise TypeError(
@@ -3390,7 +3499,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         unit["SHOOT_LEFT"] = nb_roll
         unit["_current_shoot_nb"] = nb_roll
         _append_shoot_nb_roll_info_log(game_state, unit, weapon, nb_roll)
-        
         # AI_TURN.md COMPLIANCE: Unit must already be in pool (pool is built once at phase start)
         # If unit is not in pool, it was removed via end_activation and cannot be reactivated
         # CRITICAL: Normalize unit_id to string for consistent comparison (pool stores strings)
@@ -4929,7 +5037,37 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
                     )
                 ap_modifier_ability_display_name = source_rule_display_name
                 effective_ap = effective_ap - 1
-    save_target = _calculate_save_target(target, effective_ap)
+    save_target_base = _calculate_save_target(target, effective_ap, save_bonus=0)
+    target_in_cover = False
+    cover_bonus_applied = False
+    cover_bonus_value = 0
+    if not _weapon_has_ignores_cover_rule(weapon):
+        attacker_col, attacker_row = require_unit_position(attacker, game_state)
+        target_col, target_row = require_unit_position(target, game_state)
+        wall_hexes = _get_wall_hexes_set(game_state)
+        visibility_ratio, can_see, target_in_cover = _get_los_visibility_state(
+            game_state,
+            int(attacker_col),
+            int(attacker_row),
+            int(target_col),
+            int(target_row),
+            wall_hexes,
+        )
+        if not can_see:
+            raise ValueError(
+                f"Target {target_id} became not visible during save calculation "
+                f"(visibility_ratio={visibility_ratio:.3f})"
+            )
+        if target_in_cover:
+            cover_bonus_applied = True
+            cover_bonus_value = 1
+    save_target = _calculate_save_target(target, effective_ap, save_bonus=cover_bonus_value)
+    save_target_display = (
+        f"{save_target_base}+->{save_target}+"
+        if cover_bonus_applied
+        else f"{save_target}+"
+    )
+    save_cover_log_suffix = " [COVER]" if cover_bonus_applied else ""
     save_log_suffix = (
         f" [{ap_modifier_ability_display_name}]"
         if isinstance(ap_modifier_ability_display_name, str) and ap_modifier_ability_display_name.strip()
@@ -4942,7 +5080,7 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         attack_log = (
             f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
             f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
-            f"Save:{save_target}+:{save_roll}(SAVED){save_log_suffix}{hazardous_log_suffix}"
+            f"Save:{save_target_display}:{save_roll}(SAVED){save_log_suffix}{save_cover_log_suffix}{hazardous_log_suffix}"
         )
         return {
             "hit_roll": hit_roll,
@@ -4955,6 +5093,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "wound_success": True,  # Wound succeeded
             "save_roll": save_roll,
             "save_target": save_target,
+            "save_target_base": save_target_base,
+            "save_cover_applied": cover_bonus_applied,
+            "save_cover_bonus": cover_bonus_value,
             "save_success": True,
             "save_skipped": False,
             "save_skip_reason": None,
@@ -4984,14 +5125,14 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         attack_log = (
             f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
             f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
-            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP{hazardous_log_suffix}"
+            f"Save:{save_target_display}:{save_roll}(FAIL){save_log_suffix}{save_cover_log_suffix} Dmg:{damage_dealt}HP{hazardous_log_suffix}"
         )
     else:
         # Target survives
         attack_log = (
             f"Hit:{hit_target_display_with_heavy}:{hit_roll}(HIT){heavy_log_suffix} "
             f"Wound:{wound_target}+:{wound_roll}(WOUND){wound_log_suffix} "
-            f"Save:{save_target}+:{save_roll}(FAIL){save_log_suffix} Dmg:{damage_dealt}HP{hazardous_log_suffix}"
+            f"Save:{save_target_display}:{save_roll}(FAIL){save_log_suffix}{save_cover_log_suffix} Dmg:{damage_dealt}HP{hazardous_log_suffix}"
         )
     
     return {
@@ -5005,6 +5146,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
         "wound_success": True,  # Wound succeeded
         "save_roll": save_roll,
         "save_target": save_target,
+        "save_target_base": save_target_base,
+        "save_cover_applied": cover_bonus_applied,
+        "save_cover_bonus": cover_bonus_value,
         "save_success": False,  # Save failed
         "save_skipped": False,
         "save_skip_reason": None,
@@ -5025,8 +5169,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     }
 
 
-def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
-    """Calculate save target with AP modifier and invulnerable save"""
+def _calculate_save_target(target: Dict[str, Any], ap: int, save_bonus: int = 0) -> int:
+    """Calculate save target with AP, optional save bonus, and invulnerable save."""
     # Direct UPPERCASE field access
     if "ARMOR_SAVE" not in target:
         raise KeyError(f"Target missing required 'ARMOR_SAVE' field: {target}")
@@ -5035,8 +5179,15 @@ def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:
     armor_save = target["ARMOR_SAVE"]
     invul_save = target["INVUL_SAVE"]
     
+    if not isinstance(save_bonus, int):
+        raise TypeError(f"save_bonus must be int, got {type(save_bonus).__name__}")
+    if save_bonus < 0:
+        raise ValueError(f"save_bonus must be >= 0, got {save_bonus}")
+    effective_save_bonus = min(1, save_bonus)
     # Apply AP to armor save (AP is negative, subtract to worsen save: 3+ with -1 AP = 4+)
     modified_armor_save = armor_save - ap
+    # Save bonus improves armor save target number (cannot stack above +1 total).
+    modified_armor_save = modified_armor_save - effective_save_bonus
     
     # Handle invulnerable saves: 0 means no invul save, use 7 (impossible)
     effective_invul = invul_save if invul_save > 0 else 7

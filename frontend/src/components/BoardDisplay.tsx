@@ -293,12 +293,12 @@ export const drawBoard = (
             } else if (isAdvanceDestination) {
               // ADVANCE_IMPLEMENTATION_PLAN.md: Orange for advance destinations
               highlightCell.beginFill(0xff8c00, 0.5);
-            } else if (isAttackable) {
-              // Vivid medium blue for clear line of sight (plus bleu, même luminosité)
-              highlightCell.beginFill(0x4f8bff, 0.4);
             } else if (isInCover) {
               // Vivid light blue for targets in cover
               highlightCell.beginFill(0x9ec5ff, 0.4);
+            } else if (isAttackable) {
+              // Vivid medium blue for clear line of sight (plus bleu, même luminosité)
+              highlightCell.beginFill(0x4f8bff, 0.4);
             } else if (isChargeable) {
               // Charge destinations: use violet
               highlightCell.beginFill(0x9f7aea, 0.4);
@@ -310,10 +310,10 @@ export const drawBoard = (
             if (isChargeable) {
               // Charge destinations: use violet
               highlightCell.beginFill(0x9f7aea, 0.5);
-            } else if (isAttackable) {
-              highlightCell.beginFill(ATTACK_COLOR, 0.5);
             } else if (isInCover) {
               highlightCell.beginFill(CHARGE_COLOR, 0.5);
+            } else if (isAttackable) {
+              highlightCell.beginFill(ATTACK_COLOR, 0.5);
             } else if (isAvailable) {
               highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
             }

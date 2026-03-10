@@ -247,6 +247,12 @@ export const GameLog: React.FC<GameLogProps> = ({
       "Mortal Wound: degat direct qui contourne les jets de sauvegarde.",
       false
     );
+    setRuleDescription(
+      descriptions,
+      "COVER",
+      "Cover: +1 au jet de sauvegarde d'armure pour cette attaque (bonus total capé a +1, non cumulable).",
+      false
+    );
 
     return descriptions;
   }, []);

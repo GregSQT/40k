@@ -431,6 +431,8 @@ class StepLogger:
             hit_rule_modifier = details.get("hit_rule_modifier")
             wound_target = details["wound_target"]
             save_target = details["save_target"]
+            save_target_base = details.get("save_target_base")
+            save_cover_applied = bool(details.get("save_cover_applied", False))
             save_skipped = bool(details.get("save_skipped", False))
             save_skip_reason = details.get("save_skip_reason")
             rapid_fire_bonus_shot = bool(details.get("rapid_fire_bonus_shot", False))
@@ -483,12 +485,22 @@ class StepLogger:
                         detail_parts.append("Save [DEVASTATING WOUNDS]")
                         detail_parts.append(f"Dmg:{damage}HP")
                     else:
-                        save_part = f"Save {save_roll}({save_target}+)"
+                        if save_cover_applied:
+                            if not isinstance(save_target_base, int):
+                                raise KeyError(
+                                    "Shoot action missing required save_target_base when save_cover_applied is True"
+                                )
+                            save_target_display = f"{save_target_base}+->{save_target}+"
+                        else:
+                            save_target_display = f"{save_target}+"
+                        save_part = f"Save {save_roll}({save_target_display})"
                         if (
                             isinstance(ap_modifier_ability_display_name, str)
                             and ap_modifier_ability_display_name.strip()
                         ):
                             save_part += f" [{ap_modifier_ability_display_name.strip().upper()}]"
+                        if save_cover_applied:
+                            save_part += " [COVER]"
                         detail_parts.append(save_part)
                         if save_result == "FAIL":
                             detail_parts.append(f"Dmg:{damage}HP")
@@ -656,6 +668,8 @@ class StepLogger:
             hit_target = details["hit_target"]
             wound_target = details["wound_target"]
             save_target = details["save_target"]
+            save_target_base = details.get("save_target_base")
+            save_cover_applied = bool(details.get("save_cover_applied", False))
             wound_ability_display_name = details.get("wound_ability_display_name")
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
@@ -683,7 +697,18 @@ class StepLogger:
                 
                 # Only show save if wound succeeded  
                 if wound_result in ("WOUND", "SUCCESS"):
-                    detail_parts.append(f"Save {save_roll}({save_target}+)")
+                    if save_cover_applied:
+                        if not isinstance(save_target_base, int):
+                            raise KeyError(
+                                "Combat action missing required save_target_base when save_cover_applied is True"
+                            )
+                        save_target_display = f"{save_target_base}+->{save_target}+"
+                    else:
+                        save_target_display = f"{save_target}+"
+                    save_part = f"Save {save_roll}({save_target_display})"
+                    if save_cover_applied:
+                        save_part += " [COVER]"
+                    detail_parts.append(save_part)
                     
                     # Show damage if save failed (even if damage is 0, it should be logged)
                     if save_result == "FAIL":

@@ -10,6 +10,8 @@ export interface BlinkingHPBarConfig {
   unit: Unit;
   attacker: Unit | null;
   phase: "shoot" | "fight" | "charge";
+  inCover: boolean;
+  onTooltip?: (tooltip: { visible: boolean; text: string; x: number; y: number }) => void;
   app: PIXI.Application;
   centerX: number;
   finalBarX: number;
@@ -38,10 +40,11 @@ export interface BlinkingHPBarResult {
 export function calculateWoundProbability(
   attacker: Unit,
   target: Unit,
-  phase: "shoot" | "fight" | "charge"
+  phase: "shoot" | "fight" | "charge",
+  inCover: boolean = false
 ): number {
   if (phase === "shoot") {
-    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target);
+    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target, inCover);
     return preferred ? preferred.overallProbability : 0;
   }
 
@@ -73,10 +76,11 @@ export function calculateWoundProbability(
 export function calculateDamagePerAttack(
   attacker: Unit,
   target: Unit,
-  phase: "shoot" | "fight" | "charge"
+  phase: "shoot" | "fight" | "charge",
+  inCover: boolean = false
 ): number {
   if (phase === "shoot") {
-    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target);
+    const preferred = getPreferredRangedWeaponAgainstTarget(attacker, target, inCover);
     return preferred ? preferred.potentialDamage : 0;
   }
 
@@ -102,6 +106,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     unit,
     attacker,
     phase,
+    inCover,
+    onTooltip,
     app,
     centerX,
     finalBarX,
@@ -124,7 +130,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   let weaponSignature: string | null = null;
   if (attacker) {
     if (phase === "shoot") {
-      const preferred = getPreferredRangedWeaponAgainstTarget(attacker, unit);
+      const preferred = getPreferredRangedWeaponAgainstTarget(attacker, unit, inCover);
       if (preferred) {
         weaponSignature = buildWeaponSignature(preferred.weapon);
       }
@@ -151,7 +157,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     const attackerMatches = existingContainer.attackerId === attackerIdNum;
     const weaponMatches = existingContainer.weaponSignature === weaponSignature;
     if (attackerMatches && weaponMatches) {
-      updateProbabilityDisplay(existingContainer, attacker, unit, phase);
+      updateProbabilityDisplay(existingContainer, attacker, unit, phase, inCover);
       return {
         container: existingContainer,
         cleanup: existingContainer.cleanupBlink || (() => {}),
@@ -189,7 +195,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   hpContainer.addChild(barBg);
 
   // Calculate damage
-  const shooterDamage = attacker ? calculateDamagePerAttack(attacker, unit, phase) : 0;
+  const shooterDamage = attacker ? calculateDamagePerAttack(attacker, unit, phase, inCover) : 0;
 
   // Current HP
   const currentHP = Math.max(0, unit.HP_CUR ?? unit.HP_MAX);
@@ -286,34 +292,127 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   // Calculate and display probability
   let displayProbability = 0;
   if (attacker) {
-    displayProbability = calculateWoundProbability(attacker, unit, phase);
+    displayProbability = calculateWoundProbability(attacker, unit, phase, inCover);
   }
 
   // Create probability display square
-  const squareSize = 35;
-  const squareX = centerX - squareSize / 2;
-  const squareY = finalBarY - squareSize - 8;
+  const cellWidth = 30;
+  const cellHeight = 24;
+  const iconGap = 6;
+  const iconAdvance = phase === "shoot" && inCover ? 24 : 0;
+  const hasCoverIcon = phase === "shoot" && inCover;
+  const groupWidth = cellWidth + (hasCoverIcon ? iconGap + iconAdvance : 0);
+  const groupLeftX = centerX - groupWidth / 2;
+  const percentageOffsetX = 2;
+  const squareX = groupLeftX + percentageOffsetX;
+  const squareY = finalBarY - cellHeight - 4;
 
   const probBg = new PIXI.Graphics();
   probBg.name = `prob-bg-${unit.id}`;
   probBg.beginFill(0x333333, 0.9);
   probBg.lineStyle(2, 0x00ff00, 1);
-  probBg.drawRoundedRect(squareX, squareY, squareSize, squareSize, 3);
+  probBg.drawRoundedRect(squareX, squareY, cellWidth, cellHeight, 3);
   probBg.endFill();
   probBg.zIndex = 400;
+  probBg.eventMode = "static";
+  probBg.cursor = "help";
   hpContainer.addChild(probBg);
 
   const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
-    fontSize: 12,
+    fontSize: 10,
     fill: 0xe6ffed,
     align: "center",
     fontWeight: "bold",
   });
   probText.name = `prob-text-${unit.id}`;
   probText.anchor.set(0.5);
-  probText.position.set(squareX + squareSize / 2, squareY + squareSize / 2);
+  probText.position.set(squareX + cellWidth / 2, squareY + cellHeight / 2);
   probText.zIndex = 401;
+  probText.eventMode = "static";
+  probText.cursor = "help";
   hpContainer.addChild(probText);
+
+  const probabilityTooltipText =
+    "Probabilité estimée d'infliger des degats";
+  const updateProbabilityTooltip = (event: PIXI.FederatedPointerEvent): void => {
+    if (!onTooltip) {
+      return;
+    }
+    const canvas = app.view as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    onTooltip({
+      visible: true,
+      text: probabilityTooltipText,
+      x: rect.left + event.global.x,
+      y: rect.top + event.global.y,
+    });
+  };
+  const hideProbabilityTooltip = (): void => {
+    onTooltip?.({
+      visible: false,
+      text: probabilityTooltipText,
+      x: 0,
+      y: 0,
+    });
+  };
+  probBg.on("pointerover", updateProbabilityTooltip);
+  probBg.on("pointermove", updateProbabilityTooltip);
+  probBg.on("pointerout", hideProbabilityTooltip);
+  probText.on("pointerover", updateProbabilityTooltip);
+  probText.on("pointermove", updateProbabilityTooltip);
+  probText.on("pointerout", hideProbabilityTooltip);
+
+  if (hasCoverIcon) {
+    const coverIcon = new PIXI.Text("🛡️", {
+      fontSize: 24,
+      fill: 0xfbbf24,
+      align: "center",
+      fontWeight: "bold",
+      stroke: 0x38bdf8,
+      strokeThickness: 3,
+    });
+    coverIcon.name = `cover-icon-${unit.id}`;
+    coverIcon.anchor.set(0.5);
+    const iconCenterX = groupLeftX + cellWidth + iconGap + iconAdvance / 2;
+    coverIcon.position.set(iconCenterX, squareY + cellHeight / 2);
+    coverIcon.zIndex = 402;
+    coverIcon.eventMode = "static";
+    coverIcon.cursor = "help";
+    coverIcon.on("pointerover", () => {
+      coverIcon.style.fill = 0xfcd34d;
+    });
+    coverIcon.on("pointerout", () => {
+      coverIcon.style.fill = 0xfbbf24;
+    });
+    const updateTooltipPosition = (event: PIXI.FederatedPointerEvent): void => {
+      if (!onTooltip) {
+        return;
+      }
+      const canvas = app.view as HTMLCanvasElement;
+      const rect = canvas.getBoundingClientRect();
+      onTooltip({
+        visible: true,
+        text: "COVER (+1 Save)",
+        x: rect.left + event.global.x,
+        y: rect.top + event.global.y,
+      });
+    };
+    coverIcon.on("pointerover", (event: PIXI.FederatedPointerEvent) => {
+      updateTooltipPosition(event);
+    });
+    coverIcon.on("pointermove", (event: PIXI.FederatedPointerEvent) => {
+      updateTooltipPosition(event);
+    });
+    coverIcon.on("pointerout", () => {
+      onTooltip?.({
+        visible: false,
+        text: "COVER (+1 Save)",
+        x: 0,
+        y: 0,
+      });
+    });
+    hpContainer.addChild(coverIcon);
+  }
 
   // Cleanup function
   const cleanup = () => {
@@ -342,9 +441,10 @@ export function updateProbabilityDisplay(
   container: HPBlinkContainer,
   attacker: Unit | null,
   target: Unit,
-  phase: "shoot" | "fight" | "charge"
+  phase: "shoot" | "fight" | "charge",
+  inCover: boolean = false
 ): void {
-  const displayProbability = attacker ? calculateWoundProbability(attacker, target, phase) : 0;
+  const displayProbability = attacker ? calculateWoundProbability(attacker, target, phase, inCover) : 0;
 
   const existingProbText = container.children.find(
     (c: PIXI.DisplayObject) => c.name === `prob-text-${target.id}`

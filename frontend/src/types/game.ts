@@ -142,6 +142,9 @@ export interface Unit {
   SHOOT_LEFT?: number;
   ATTACK_LEFT?: number;
   valid_target_pool?: string[];
+  los_preview_attack_cells?: Array<{ col: number; row: number }>;
+  los_preview_cover_cells?: Array<{ col: number; row: number }>;
+  los_preview_ratio_by_hex?: Record<string, number>;
   currentShootNb?: number;
   currentFightNb?: number;
   hasChargedThisTurn?: boolean;

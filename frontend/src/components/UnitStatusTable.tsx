@@ -3,6 +3,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
 import type { Unit, UnitId } from "../types/game";
+import TooltipWrapper from "./TooltipWrapper";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
   charge_after_advance: "Allows a unit to charge in the same turn it advanced.",
@@ -1094,9 +1095,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                       borderRight: "1px solid rgba(0, 0, 0, 0.1)",
                       fontSize: "14px",
                     }}
-                    title="Movement"
                   >
-                    M
+                    <TooltipWrapper text="Movement">M</TooltipWrapper>
                   </th>
                   <th
                     className="unit-status-header-cell"
@@ -1107,9 +1107,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                       border: "1px solid rgba(0, 0, 0, 0.1)",
                       fontSize: "14px",
                     }}
-                    title="Toughness"
                   >
-                    T
+                    <TooltipWrapper text="Toughness">T</TooltipWrapper>
                   </th>
                   <th
                     className="unit-status-header-cell"
@@ -1120,9 +1119,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                       border: "1px solid rgba(0, 0, 0, 0.1)",
                       fontSize: "14px",
                     }}
-                    title="Save Value"
                   >
-                    SV
+                    <TooltipWrapper text="Save Value">SV</TooltipWrapper>
                   </th>
                   <th
                     className="unit-status-header-cell"
@@ -1133,9 +1131,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                       border: "1px solid rgba(0, 0, 0, 0.1)",
                       fontSize: "14px",
                     }}
-                    title="Leadership"
                   >
-                    LD
+                    <TooltipWrapper text="Leadership">LD</TooltipWrapper>
                   </th>
                   <th
                     className="unit-status-header-cell"
@@ -1146,9 +1143,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                       border: "1px solid rgba(0, 0, 0, 0.1)",
                       fontSize: "14px",
                     }}
-                    title="Objective Control"
                   >
-                    OC
+                    <TooltipWrapper text="Objective Control">OC</TooltipWrapper>
                   </th>
                   <th
                     className="unit-status-header-cell"
@@ -1159,9 +1155,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                       border: "1px solid rgba(0, 0, 0, 0.1)",
                       fontSize: "14px",
                     }}
-                    title="Unit Value"
                   >
-                    VAL
+                    <TooltipWrapper text="Unit Value">VAL</TooltipWrapper>
                   </th>
                 </tr>
               </thead>

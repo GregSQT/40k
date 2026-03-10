@@ -125,6 +125,21 @@
   --font-weight-medium: 500;
   --font-weight-bold: 700;
 
+  /* Tooltip Design Tokens (single source of truth) */
+  --tooltip-bg: rgba(20, 20, 20, 0.98);
+  --tooltip-border-color: #4caf50;
+  --tooltip-border-width: 2px;
+  --tooltip-border-radius: 6px;
+  --tooltip-text-color: #b6f7c9;
+  --tooltip-font-family: "Arial", sans-serif;
+  --tooltip-font-size: 11px;
+  --tooltip-font-weight: 400;
+  --tooltip-line-height: 1.4;
+  --tooltip-padding-y: 6px;
+  --tooltip-padding-x: 8px;
+  --tooltip-max-width: 600px;
+  --tooltip-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+
   /* Border Radius */
   --radius-sm: 4px;
   --radius-md: 7px;
@@ -1007,14 +1022,19 @@ body {
 }
 
 .deployment-panel__picker-tooltip {
-  border: 1px solid #374151;
-  border-radius: 6px;
-  background: #0f172a;
+  border: var(--tooltip-border-width) solid var(--tooltip-border-color);
+  border-radius: var(--tooltip-border-radius);
+  background: var(--tooltip-bg);
   padding: 8px;
   min-height: 72px;
-  font-size: 13px;
-  color: #cbd5e1;
+  font-family: var(--tooltip-font-family);
+  font-size: var(--tooltip-font-size);
+  font-weight: var(--tooltip-font-weight);
+  color: var(--tooltip-text-color);
+  line-height: var(--tooltip-line-height);
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+  box-shadow: var(--tooltip-shadow);
 }
 
 .deployment-panel__picker-item--active {
@@ -1966,17 +1986,19 @@ textarea:focus {
 .game-log-rule-ref__tooltip {
   z-index: 99999;
   min-width: 220px;
-  max-width: 600px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(20, 20, 20, 0.98);
-  border: 2px solid #4caf50;
-  color: #b6f7c9;
-  font-size: 0.9em;
-  line-height: 1.4;
+  max-width: var(--tooltip-max-width);
+  padding: var(--tooltip-padding-y) var(--tooltip-padding-x);
+  border-radius: var(--tooltip-border-radius);
+  background: var(--tooltip-bg);
+  border: var(--tooltip-border-width) solid var(--tooltip-border-color);
+  color: var(--tooltip-text-color);
+  font-family: var(--tooltip-font-family);
+  font-size: var(--tooltip-font-size);
+  font-weight: var(--tooltip-font-weight);
+  line-height: var(--tooltip-line-height);
   white-space: normal;
   overflow-wrap: break-word;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--tooltip-shadow);
   pointer-events: none;
 }
 
@@ -2621,16 +2643,20 @@ textarea:focus {
   left: 0;
   bottom: 100%;
   margin-bottom: 6px;
-  padding: 6px 8px;
-  border: 2px solid #4caf50;
-  border-radius: 6px;
-  background: rgba(20, 20, 20, 0.98);
-  color: #b6f7c9;
-  font-size: 0.9em;
+  padding: var(--tooltip-padding-y) var(--tooltip-padding-x);
+  border: var(--tooltip-border-width) solid var(--tooltip-border-color);
+  border-radius: var(--tooltip-border-radius);
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text-color);
+  font-family: var(--tooltip-font-family);
+  font-size: var(--tooltip-font-size);
+  font-weight: var(--tooltip-font-weight);
+  line-height: var(--tooltip-line-height);
   width: max-content;
-  max-width: 600px;
+  max-width: var(--tooltip-max-width);
   white-space: normal;
   overflow-wrap: break-word;
+  box-shadow: var(--tooltip-shadow);
   z-index: 1201;
   visibility: hidden;
   opacity: 0;
@@ -2655,17 +2681,22 @@ textarea:focus {
   top: 0;
   bottom: auto;
   margin-bottom: 0;
-  padding: 9px 10px;
+  padding: var(--tooltip-padding-y) var(--tooltip-padding-x);
+  border: var(--tooltip-border-width) solid var(--tooltip-border-color);
+  border-radius: var(--tooltip-border-radius);
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text-color);
+  font-family: var(--tooltip-font-family);
+  font-size: var(--tooltip-font-size);
+  font-weight: var(--tooltip-font-weight);
+  line-height: var(--tooltip-line-height);
+  max-width: var(--tooltip-max-width);
+  box-shadow: var(--tooltip-shadow);
   z-index: 1300;
   visibility: visible;
   opacity: 1;
   transform: translate(12px, -14px);
   pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  line-height: 1.2;
 }
 
 .combi-badge {

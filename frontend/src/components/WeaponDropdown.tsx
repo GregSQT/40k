@@ -2,6 +2,7 @@ import type React from "react";
 import { useEffect, useRef } from "react";
 import weaponRules from "../../../config/weapon_rules.json";
 import type { WeaponOption } from "../types/game";
+import TooltipWrapper from "./TooltipWrapper";
 
 interface WeaponDropdownProps {
   weapons: WeaponOption[];
@@ -55,6 +56,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
           {weapons.map((weaponOption) => {
             const weapon = weaponOption.weapon;
             const isDisabled = !weaponOption.canUse;
+            const disabledReason = isDisabled ? weaponOption.reason : null;
 
             return (
               <tr
@@ -65,25 +67,28 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
                     onSelectWeapon(weaponOption.index);
                   }
                 }}
-                title={isDisabled ? weaponOption.reason : undefined}
               >
                 <td>
-                  {weapon.COMBI_WEAPON && (
-                    <span className="combi-badge" title="Combi weapon">
-                      C
-                    </span>
-                  )}
-                  {weapon.display_name}
-                  {weapon.WEAPON_RULES?.map((rule) => (
-                    <span key={rule} className="rule-badge-wrapper">
-                      <span className="rule-badge">
-                        [{weaponRules[rule as keyof typeof weaponRules]?.name || rule}]
-                      </span>
-                      <span className="rule-tooltip">
-                        {weaponRules[rule as keyof typeof weaponRules]?.description || rule}
-                      </span>
-                    </span>
-                  ))}
+                  <TooltipWrapper text={disabledReason}>
+                    <>
+                      {weapon.COMBI_WEAPON && (
+                        <TooltipWrapper text="Combi weapon">
+                          <span className="combi-badge">C</span>
+                        </TooltipWrapper>
+                      )}
+                      {weapon.display_name}
+                      {weapon.WEAPON_RULES?.map((rule) => (
+                        <span key={rule} className="rule-badge-wrapper">
+                          <span className="rule-badge">
+                            [{weaponRules[rule as keyof typeof weaponRules]?.name || rule}]
+                          </span>
+                          <span className="rule-tooltip">
+                            {weaponRules[rule as keyof typeof weaponRules]?.description || rule}
+                          </span>
+                        </span>
+                      ))}
+                    </>
+                  </TooltipWrapper>
                 </td>
                 <td>{weapon.RNG ? `${weapon.RNG}"` : "-"}</td>
                 <td>{weapon.NB}</td>

@@ -1,5 +1,6 @@
 // frontend/src/components/TurnPhaseTracker.tsx
 import type React from "react";
+import TooltipWrapper from "./TooltipWrapper";
 
 interface TurnPhaseTrackerProps {
   currentTurn: number;
@@ -302,15 +303,16 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         {current_player !== undefined && (
           <div style={{ display: "flex", gap: "2px", alignItems: "center", justifyContent: "center" }}>
             {current_player === 1 && onEndPhaseClick && (
-              <button
-                type="button"
-                style={getEndPhaseStyle(1, true, !!onEndPhaseClick)}
-                onClick={() => onEndPhaseClick?.(1)}
-                disabled={!onEndPhaseClick}
-                title="Terminer immédiatement la phase pour P1"
-              >
-                End Phase
-              </button>
+              <TooltipWrapper text="Terminer immédiatement la phase pour P1">
+                <button
+                  type="button"
+                  style={getEndPhaseStyle(1, true, !!onEndPhaseClick)}
+                  onClick={() => onEndPhaseClick?.(1)}
+                  disabled={!onEndPhaseClick}
+                >
+                  End Phase
+                </button>
+              </TooltipWrapper>
             )}
             <button
               type="button"
@@ -329,15 +331,16 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               P2
             </button>
             {current_player === 2 && onEndPhaseClick && (
-              <button
-                type="button"
-                style={getEndPhaseStyle(2, true, !!onEndPhaseClick)}
-                onClick={() => onEndPhaseClick?.(2)}
-                disabled={!onEndPhaseClick}
-                title="Terminer immédiatement la phase pour P2"
-              >
-                End Phase
-              </button>
+              <TooltipWrapper text="Terminer immédiatement la phase pour P2">
+                <button
+                  type="button"
+                  style={getEndPhaseStyle(2, true, !!onEndPhaseClick)}
+                  onClick={() => onEndPhaseClick?.(2)}
+                  disabled={!onEndPhaseClick}
+                >
+                  End Phase
+                </button>
+              </TooltipWrapper>
             )}
           </div>
         )}

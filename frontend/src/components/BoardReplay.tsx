@@ -15,6 +15,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
+import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import { UnitStatusTable } from "./UnitStatusTable";
 
@@ -1502,14 +1503,15 @@ export const BoardReplay: React.FC = () => {
 
           {/* Main playback controls - CENTER-LEFT */}
           <div className="replay-nav-buttons">
-            <button
-              type="button"
-              onClick={() => setCurrentActionIndex(0)}
-              className="replay-btn replay-btn--nav"
-              title="Go to start"
-            >
-              <span className="replay-icon replay-icon--start">⏮</span>
-            </button>
+            <TooltipWrapper text="Go to start">
+              <button
+                type="button"
+                onClick={() => setCurrentActionIndex(0)}
+                className="replay-btn replay-btn--nav"
+              >
+                <span className="replay-icon replay-icon--start">⏮</span>
+              </button>
+            </TooltipWrapper>
             {!isPlaying ? (
               <button
                 type="button"
