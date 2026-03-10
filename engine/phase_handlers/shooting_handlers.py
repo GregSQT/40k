@@ -4,6 +4,7 @@ engine/phase_handlers/shooting_handlers.py - AI_Shooting_Phase.md Basic Implemen
 Only pool building functionality - foundation for complete handler autonomy
 """
 
+import copy
 import math
 from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import (
@@ -11,6 +12,7 @@ from engine.combat_utils import (
     get_unit_by_id,
     resolve_dice_value,
     expected_dice_value,
+    set_unit_coordinates,
 )
 from shared.data_validation import require_key
 from .shared_utils import (
@@ -905,6 +907,53 @@ def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
     
     # Debug log cache size (optional, remove in production)
     # print(f"LoS CACHE: Built {len(los_cache)} entries for {len(alive_units)} units")
+
+def preview_shoot_valid_targets_from_position(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    dest_col: int,
+    dest_row: int,
+    *,
+    advance_position: bool = False,
+) -> List[str]:
+    """
+    Build valid_target_pool for a unit at a hypothetical position (read-only, no mutation).
+    Used by move phase preview and advance phase preview: same logic as shoot phase, source of truth.
+
+    Args:
+        advance_position: If True, simulate unit having advanced (ASSAULT weapons only, or shoot_after_advance).
+    """
+    unit = _get_unit_by_id(game_state, unit_id)
+    if not unit:
+        return []
+    if "units_cache" not in game_state:
+        return []
+    state_copy = copy.deepcopy(game_state)
+    unit_id_str = str(unit_id)
+    unit_copy = _get_unit_by_id(state_copy, unit_id)
+    if not unit_copy:
+        return []
+    set_unit_coordinates(unit_copy, dest_col, dest_row)
+    update_units_cache_position(state_copy, unit_id_str, dest_col, dest_row)
+    if advance_position:
+        if "units_advanced" not in state_copy:
+            state_copy["units_advanced"] = set()
+        state_copy["units_advanced"].add(unit_id_str)
+    if "weapon_rule" not in state_copy:
+        state_copy["weapon_rule"] = 1
+    # Initialize weapon.shot = 0 (required by weapon_availability_check; move phase has no shooting init)
+    current_player = int(require_key(unit_copy, "player"))
+    for u in state_copy.get("units", []):
+        if int(u.get("player", 0)) != current_player:
+            continue
+        for weapon in u.get("RNG_WEAPONS", []):
+            if "shot" not in weapon:
+                weapon["shot"] = 0
+    if "los_cache" in unit_copy:
+        del unit_copy["los_cache"]
+    build_unit_los_cache(state_copy, unit_id_str)
+    return shooting_build_valid_target_pool(state_copy, unit_id_str)
+
 
 def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_id: str) -> None:
     """

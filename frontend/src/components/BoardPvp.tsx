@@ -1149,17 +1149,6 @@ export default function Board({
       }
     }
     const shootPreviewBackendIds = backendShootableEnemyIds;
-    // Calculate blockedTargets for ALL enemies during shooting phase (not just preview)
-    if (phase === "shoot" && selectedUnit) {
-      const enemyUnits = units.filter((u) => u.player !== selectedUnit.player);
-      if (shootPreviewBackendIds) {
-        for (const enemy of enemyUnits) {
-          if (!shootPreviewBackendIds.has(String(enemy.id))) {
-            blockedTargets.add(`${enemy.col},${enemy.row}`);
-          }
-        }
-      }
-    }
 
     const resolveShootingPreviewSource = (): { unit: Unit; fromCol: number; fromRow: number } | null => {
       if (mode === "advancePreview") {
@@ -1316,6 +1305,24 @@ export default function Board({
     const coverCellKeySet = new Set(coverCells.map((cell) => `${cell.col},${cell.row}`));
     if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
       attackCells.push(...fightPreviewCells);
+    }
+
+    // Unified: movePreview and shoot phase use same backend source of truth (blinking_units)
+    const effectiveBlinkingUnits = stableBlinkingUnits ?? [];
+    const effectiveBlinkingAttackerId = blinkingAttackerId;
+    const effectiveShootTargetsSet: Set<string> | null =
+      effectiveBlinkingUnits.length > 0
+        ? new Set(effectiveBlinkingUnits.map(String))
+        : shootPreviewBackendIds;
+
+    // Populate blockedTargets from unified source (enemies NOT in effective targets)
+    if (effectiveShootTargetsSet && shootingPreviewSource) {
+      const enemyUnits = units.filter((u) => u.player !== shootingPreviewSource.unit.player);
+      for (const enemy of enemyUnits) {
+        if (!effectiveShootTargetsSet.has(String(enemy.id))) {
+          blockedTargets.add(`${enemy.col},${enemy.row}`);
+        }
+      }
     }
 
     // ✅ DRAW BOARD ONCE with populated availableCells
@@ -1648,21 +1655,16 @@ export default function Board({
       if (mode === "advancePreview" && movePreview && unit.id === movePreview.unitId) continue;
       if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
 
-      // Use backend's blinkingUnits list for shootability (authoritative LoS calculation)
-      // Backend has already calculated valid targets with proper LoS checks
+      // Unified: movePreview and shoot phase use same code path for greying non-targetable enemies
       const hasAuthoritativeShootTargets =
-        phase === "shoot" &&
-        selectedUnitId !== null &&
-        shootPreviewBackendIds !== null;
+        effectiveShootTargetsSet !== null &&
+        effectiveShootTargetsSet.size > 0 &&
+        ((phase === "shoot" && selectedUnitId !== null) ||
+          (mode === "movePreview" && movePreview !== null));
 
       let isShootable = true;
-      // ONLY apply greying in PvP mode when we have actual blinking data
-      // - Replay mode: blinkingUnits is undefined -> skip greying
-      // - PvP mode before backend responds: blinkingUnits is [] -> skip greying (prevents grey flash)
-      // - PvP mode with targets: blinkingUnits has IDs -> apply greying
       if (hasAuthoritativeShootTargets && unit.player !== current_player) {
-        // Only grey out enemies that are NOT in the authoritative backend target list.
-        isShootable = shootPreviewBackendIds.has(String(unit.id));
+        isShootable = effectiveShootTargetsSet.has(String(unit.id));
       }
 
       // Debug only for key units - EXACT UnitRenderer.tsx logic check
@@ -1745,10 +1747,11 @@ export default function Board({
         unit.id === movePreview.unitId;
 
       const isShootingPreviewGhost =
-        phase === "shoot" &&
+        (phase === "shoot" || mode === "movePreview") &&
         hasAuthoritativeShootTargets &&
         unit.player !== current_player &&
-        !shootPreviewBackendIds.has(String(unit.id));
+        effectiveShootTargetsSet !== null &&
+        !effectiveShootTargetsSet.has(String(unit.id));
 
       const unitToRender =
         isChargeOrigin || isMoveOriginGhost || isHazardousDeathGhost || isShootingPreviewGhost
@@ -1796,9 +1799,9 @@ export default function Board({
         targetPreview,
         onConfirmMove,
         parseColor,
-        // Pass blinking state
-        blinkingUnits: stableBlinkingUnits,
-        blinkingAttackerId,
+        // Pass blinking state (unified: movePreview and attackPreview use same code path)
+        blinkingUnits: effectiveBlinkingUnits,
+        blinkingAttackerId: effectiveBlinkingAttackerId,
         isBlinkingActive,
         blinkVersion,
         shootingTargetInCover: coverCellKeySet.has(`${unit.col},${unit.row}`),

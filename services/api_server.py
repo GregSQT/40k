@@ -1174,7 +1174,31 @@ def execute_action():
         
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
-        
+
+        # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
+        if action.get("action") == "preview_shoot_from_position":
+            unit_id = action.get("unitId")
+            dest_col = action.get("destCol")
+            dest_row = action.get("destRow")
+            advance_position = action.get("advancePosition") is True
+            if unit_id is None or dest_col is None or dest_row is None:
+                return jsonify({
+                    "success": False,
+                    "error": "preview_shoot_from_position requires unitId, destCol, destRow",
+                }), 400
+            from engine.phase_handlers.shooting_handlers import preview_shoot_valid_targets_from_position
+            valid_targets = preview_shoot_valid_targets_from_position(
+                engine.game_state, str(unit_id), int(dest_col), int(dest_row),
+                advance_position=advance_position,
+            )
+            return jsonify({
+                "success": True,
+                "result": {
+                    "blinking_units": valid_targets,
+                    "start_blinking": len(valid_targets) > 0,
+                },
+            })
+
         # Route ALL actions through engine consistently
         if action.get("action") == "end_phase":
             success, result = _execute_end_phase_action(engine, action)

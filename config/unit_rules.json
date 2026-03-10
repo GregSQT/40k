@@ -17,6 +17,7 @@
   },
   "reactive_move": {
     "id": "reactive_move",
+    "name": "Skulking Horrors",
     "description": "Once per turn, after an enemy unit ends a move (normal, advance or retreat) within 9\" of this unit, it can perform a normal move up to D6\"."
   },
   "reroll_1_save_fight": {

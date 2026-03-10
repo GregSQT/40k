@@ -238,6 +238,9 @@ export const useEngineAPI = () => {
   }>({ unitIds: [], blinkTimer: null, attackerId: null });
   const [blinkVersion, setBlinkVersion] = useState(0);
 
+  // Move phase preview: backend source of truth (same logic as shoot phase)
+  const [movePreviewBlinkingUnits, setMovePreviewBlinkingUnits] = useState<number[]>([]);
+
   // State for failed charge roll display
   const [failedChargeRoll, setFailedChargeRoll] = useState<{
     unitId: number;
@@ -457,6 +460,52 @@ export const useEngineAPI = () => {
       setAdvanceRoll(null);
     }
   }, [gameState?.phase, targetPreview?.blinkTimer]);
+
+  // Move/advance phase preview: fetch valid targets from backend (source of truth, same as shoot phase)
+  const isAdvancePreview =
+    gameState?.phase === "shoot" && movePreview && pendingPreviewAction === "advance";
+  const isMovePreview = gameState?.phase === "move" && movePreview;
+  useEffect(() => {
+    if (
+      !gameState ||
+      !movePreview ||
+      !gameState.units_cache ||
+      (!isMovePreview && !isAdvancePreview)
+    ) {
+      setMovePreviewBlinkingUnits([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchPreview = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/game/action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "preview_shoot_from_position",
+            unitId: String(movePreview.unitId),
+            destCol: movePreview.destCol,
+            destRow: movePreview.destRow,
+            advancePosition: isAdvancePreview,
+          }),
+        });
+        if (!response.ok || cancelled) return;
+        const data = await response.json();
+        if (!data.success || !data.result?.blinking_units || cancelled) {
+          setMovePreviewBlinkingUnits([]);
+          return;
+        }
+        const ids = data.result.blinking_units.map((id: string) => parseInt(id, 10));
+        setMovePreviewBlinkingUnits(ids);
+      } catch {
+        if (!cancelled) setMovePreviewBlinkingUnits([]);
+      }
+    };
+    fetchPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [gameState, movePreview, isMovePreview, isAdvancePreview]);
 
   // Execute action via API
   const executeAction = useCallback(
@@ -1878,6 +1927,22 @@ export const useEngineAPI = () => {
     [gameState]
   );
 
+  /** Unit can shoot after advance: ASSAULT weapon OR shoot_after_advance rule (e.g. Cunning Hunters). */
+  const unitCanShootAfterAdvance = useCallback(
+    (unitId: number): boolean => {
+      if (unitHasAssaultWeapon(unitId)) return true;
+      if (!gameState) return false;
+      const unit = gameState.units.find((u) => parseInt(String(u.id), 10) === unitId);
+      if (!unit || !Array.isArray(unit.UNIT_RULES)) return false;
+      const shootAfterAdvanceRuleIds = ["shoot_after_advance", "cunning_hunters_shoot_after_advance"];
+      return unit.UNIT_RULES.some(
+        (r: { ruleId?: string }) =>
+          typeof r?.ruleId === "string" && shootAfterAdvanceRuleIds.includes(r.ruleId)
+      );
+    },
+    [gameState, unitHasAssaultWeapon]
+  );
+
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance move to destination
   const handleAdvanceMove = useCallback(
     async (unitId: number | string, destCol: number, destRow: number) => {
@@ -1887,7 +1952,7 @@ export const useEngineAPI = () => {
         throw new Error("Advance preview is only supported during shoot phase");
       }
 
-      const canShowShootPreviewAfterAdvance = unitHasAssaultWeapon(numericUnitId);
+      const canShowShootPreviewAfterAdvance = unitCanShootAfterAdvance(numericUnitId);
 
       if (canShowShootPreviewAfterAdvance) {
         setMovePreview({
@@ -1911,7 +1976,7 @@ export const useEngineAPI = () => {
       // Don't reset advance state here - let backend cleanup signals handle it
       // This allows the advance roll badge to be displayed before cleanup
     },
-    [executeAction, gameState, unitHasAssaultWeapon]
+    [executeAction, gameState, unitCanShootAfterAdvance]
   );
 
   const handleFightAttack = useCallback(
@@ -2206,12 +2271,25 @@ export const useEngineAPI = () => {
     throw new Error(`API ERROR: ${error}`);
   }
 
-  // Memoize blinkingUnits.unitIds to prevent re-renders when only blinkState changes
-  // Compare by content (string) to avoid re-renders when only blinkState toggles
+  // Memoize blinkingUnits: move/advance phase preview uses backend (source of truth), shoot phase uses blinking_units
   const blinkingUnitsIds = useMemo(() => {
-    // Return sorted copy to ensure stable reference when content is same
+    const usePreviewBlinking =
+      (gameState?.phase === "move" && movePreview && movePreviewBlinkingUnits.length > 0) ||
+      (gameState?.phase === "shoot" &&
+        movePreview &&
+        pendingPreviewAction === "advance" &&
+        movePreviewBlinkingUnits.length > 0);
+    if (usePreviewBlinking) {
+      return [...movePreviewBlinkingUnits].sort((a, b) => a - b);
+    }
     return [...blinkingUnits.unitIds].sort((a, b) => a - b);
-  }, [blinkingUnits.unitIds]);
+  }, [
+    gameState?.phase,
+    movePreview,
+    pendingPreviewAction,
+    movePreviewBlinkingUnits,
+    blinkingUnits.unitIds,
+  ]);
 
   // Memoize isBlinkingActive to prevent re-renders when only blinkState toggles
   const isBlinkingActiveMemo = useMemo(() => {
@@ -2487,7 +2565,15 @@ export const useEngineAPI = () => {
     onSkipAdvanceWarning: handleSkipAdvanceWarning,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnitsIds,
-    blinkingAttackerId: blinkingUnits.attackerId ?? null,
+    blinkingAttackerId: (() => {
+      const usePreviewAttacker =
+        (gameState?.phase === "move" && movePreview && movePreviewBlinkingUnits.length > 0) ||
+        (gameState?.phase === "shoot" &&
+          movePreview &&
+          pendingPreviewAction === "advance" &&
+          movePreviewBlinkingUnits.length > 0);
+      return usePreviewAttacker ? movePreview!.unitId : (blinkingUnits.attackerId ?? null);
+    })(),
     isBlinkingActive: isBlinkingActiveMemo,
     blinkVersion,
     ruleChoicePrompt,

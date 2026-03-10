@@ -437,17 +437,19 @@ export class UnitRenderer {
     }
     const unitWithFlags = unit as UnitWithFlags;
 
+    // Unified: movePreview and shoot phase use same greying logic (non-targetable = ghost)
+    const hasShootingPreviewContext =
+      (phase === "shoot" && selectedUnitId !== null) || this.props.mode === "movePreview";
     if (
-      phase === "shoot" &&
+      hasShootingPreviewContext &&
       unit.player !== current_player &&
-      selectedUnitId !== null &&
       this.props.blinkingUnits &&
       this.props.blinkingUnits.length > 0
     ) {
       const isShootable =
         this.props.isShootable !== undefined
           ? this.props.isShootable
-          : this.props.blinkingUnits.includes(unit.id);
+          : this.props.blinkingUnits.some((id) => String(id) === String(unit.id));
 
       if (!isShootable && !unitWithFlags.isGhost) {
         const grey = 0x888888;
@@ -766,20 +768,20 @@ export class UnitRenderer {
             sprite.alpha = 0.8;
           }
         }
-        // Grey-out enemies that are NOT valid shooting targets during shooting phase
-        // ONLY apply when we have actual blinking data (prevents grey flash during loading)
+        // Unified: movePreview and shoot phase use same greying logic
+        const hasShootingPreviewContextSprite =
+          (phase === "shoot" && selectedUnitId !== null) || this.props.mode === "movePreview";
         if (
           !isPreview &&
-          phase === "shoot" &&
+          hasShootingPreviewContextSprite &&
           unit.player !== current_player &&
-          selectedUnitId !== null &&
           this.props.blinkingUnits &&
           this.props.blinkingUnits.length > 0
         ) {
           const isShootable =
             this.props.isShootable !== undefined
               ? this.props.isShootable
-              : this.props.blinkingUnits.includes(unit.id);
+              : this.props.blinkingUnits.some((id) => String(id) === String(unit.id));
 
           if (!isShootable) {
             sprite.alpha = 0.5;
@@ -1221,7 +1223,8 @@ export class UnitRenderer {
       if (!attacker) {
         return false;
       }
-      if (this.props.phase !== "shoot") {
+      // movePreview = shooting preview from destination; attackPreview/targetPreview = shoot phase
+      if (this.props.phase !== "shoot" && this.props.mode !== "movePreview") {
         return false;
       }
       const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
@@ -1312,10 +1315,15 @@ export class UnitRenderer {
       }
 
       // Create blinking HP bar using the new utility module
+      // When mode is movePreview, we're previewing shooting from destination → use "shoot" for ranged damage
+      const blinkPhase: "shoot" | "fight" | "charge" =
+        this.props.mode === "movePreview"
+          ? "shoot"
+          : (this.props.phase as "shoot" | "fight" | "charge");
       createBlinkingHPBar({
         unit,
         attacker,
-        phase: this.props.phase as "shoot" | "fight" | "charge",
+        phase: blinkPhase,
         inCover: getEffectiveTargetInCover(attacker),
         onTooltip: this.props.onUnitTooltip,
         app: this.props.app,

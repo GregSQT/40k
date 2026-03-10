@@ -30,6 +30,7 @@ Index des documents à la racine de `Documentation/`. Les sous-dossiers (TODO, P
 
 | Document | Rôle |
 |----------|------|
+| **[FRONTEND_UI.md](FRONTEND_UI.md)** | UI frontend : LoS hex-native, couvert, tooltips, preview de tir (phase move + shoot). |
 | **[Weapon_rules.md](Weapon_rules.md)** | Système d’armes : armurerie TypeScript, règles (RAPID_FIRE, etc.), sélection IA, backend/frontend. **Référence complète armes.** → Vue d’ensemble dans AI_IMPLEMENTATION (section weapons/). |
 | **[Unit_rules.md](Unit_rules.md)** | Règles d’unités : `unit_rules.json`, `UNIT_RULES` dans les unités TS, résolution, choix contextuels. |
 | **Reactive move** | Règle d’unité : spécification dans [Unit_rules.md](Unit_rules.md) (section « 10) Specification : reactive_move »). |

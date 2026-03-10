@@ -1,6 +1,6 @@
 # État de la documentation (racine Documentation/)
 
-> Dernière revue : mars 2025. Ce fichier résume les corrections effectuées et les points d’attention.
+> Dernière revue : mars 2026. Ce fichier résume les corrections effectuées et les points d’attention.
 >
 > **Index des docs** : [README.md](README.md) — liste des documents regroupés par thème (architecture, training, systèmes de jeu, config, déploiement) pour éviter les docs orphelins.
 
@@ -39,7 +39,7 @@
 - `ARMORY_REFACTOR.md` — jamais créé ; architecture décrite dans Weapon_rules.md.  
 - `AI_GAME_OVERVIEW.md` — référencé dans AI_OBSERVATION.md ; référence retirée.
 
-## Mises à jour supplémentaires (mars 2025)
+## Mises à jour supplémentaires (mars 2026)
 
 - **Déploiement** : Contenu des trois docs (deploiement_agent.md, DEPLOYMENT_ACTIVE_V1.md, DEPLOYMENT_AGENT_SPEC_EXECUTABLE_V1.md) intégré dans **AI_IMPLEMENTATION.md** (section phase_handlers + deployment_handlers). Les trois fichiers ont été supprimés. Le déploiement actif est implémenté (phase deployment, deploy_unit, deployment_handlers.py).
 
@@ -51,6 +51,14 @@
 - **Roadmap.md** : Pourcentages de complétion révisés (Palier 0 ~70–75 %, Palier 1 ~60–65 %) et mention du déploiement actif implémenté.
 
 - **train.py** : Référence « AI_GAME_OVERVIEW.md » remplacée par « AI_TURN.md / AI_IMPLEMENTATION.md ».
+
+## Mises à jour mars 2026 (UI frontend)
+
+- **FRONTEND_UI.md** (nouveau) : Document unique pour les systèmes UI frontend :
+  - **LoS hex-native** : `hasLineOfSight` dans gameHelpers.ts (7 points par hex, seuils `los_visibility_min_ratio` / `cover_ratio` depuis game_config.json).
+  - **Gestion du couvert** : hex bleu vif (visibilité claire) vs bleu clair (couvert), impact sur sauvegarde, IGNORES_COVER.
+  - **Refactor tooltips** : `blinkingHPBar.ts` avec `onTooltip`, probabilités (hit, wound, save), icône couvert.
+  - **Preview de tir en phase move** : API `preview_shoot_from_position`, source de vérité backend, unification du code frontend (effectiveBlinkingUnits, effectiveShootTargetsSet, ghost des non-ciblables).
 
 ## Documents à la racine : statut rapide
 
@@ -73,6 +81,7 @@
 | Unit_rules.md | OK | Règles d’unités. |
 | USER_ACCESS_CONTROL.md | Spéc | Auth / profils. |
 | Weapon_rules.md | OK | Armurerie. |
+| FRONTEND_UI.md | OK | LoS hex-native, couvert, tooltips, preview de tir (phase move + shoot). |
 | reactive_move.md | — | Contenu intégré dans Unit_rules.md (section 10 — reactive_move) ; fichier supprimé. |
 
 ## Fusions réalisées
