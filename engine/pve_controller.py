@@ -178,7 +178,9 @@ class PvEController:
                 self._set_macro_intent_target(
                     INTENT_ATTRITION, int(attrition_index), macro_obs, game_state
                 )
-            micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(selected_unit_id, game_state)
+            micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(
+                selected_unit_id, game_state, engine
+            )
             micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
             micro_obs = self._normalize_obs_for_inference(micro_obs, micro_model_path)
             micro_prediction = micro_model.predict(micro_obs, action_masks=action_mask, deterministic=True)
@@ -208,7 +210,9 @@ class PvEController:
                 macro_action_int, macro_obs, max_units, max_objectives, detail_max, eligible_mask, engine
             )
             self._set_macro_intent_target(intent_id, detail_index, macro_obs, game_state)
-            micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(selected_unit_id, game_state)
+            micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(
+                selected_unit_id, game_state, engine
+            )
             micro_obs = engine.build_observation_for_unit(str(selected_unit_id))
             micro_obs = self._normalize_obs_for_inference(micro_obs, micro_model_path)
             action_mask, eligible_units = engine.action_decoder.get_action_mask_for_unit(game_state, str(selected_unit_id))
@@ -288,7 +292,9 @@ class PvEController:
 
         The selected option is expected to already be applied in game_state before this call.
         """
-        micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(unit_id, game_state)
+        micro_model, micro_model_path = self._get_micro_model_and_path_for_unit_id(
+            unit_id, game_state, engine
+        )
         unit_observation = engine.build_observation_for_unit(str(unit_id))
         unit_observation = self._normalize_obs_for_inference(unit_observation, micro_model_path)
         obs_tensor, _ = micro_model.policy.obs_to_tensor(unit_observation)
@@ -862,8 +868,11 @@ class PvEController:
         model, _ = self._get_micro_model_and_path_for_unit_id(unit_id, game_state)
         return model
 
-    def _get_micro_model_and_path_for_unit_id(self, unit_id: str, game_state: Dict[str, Any]):
-        """Get micro model and its path for a specific unit id (for VecNormalize inference)."""
+    def _get_micro_model_and_path_for_unit_id(
+        self, unit_id: str, game_state: Dict[str, Any], engine=None
+    ):
+        """Get micro model and its path for a specific unit id (for VecNormalize inference).
+        If model_key is not loaded, attempts lazy load when engine is provided."""
         unit_by_id = {str(u["id"]): u for u in game_state["units"]}
         unit = unit_by_id.get(str(unit_id))
         if not unit:
@@ -873,9 +882,38 @@ class PvEController:
         unit_type = require_key(unit, "unitType")
         model_key = self.unit_registry.get_model_key(unit_type)
         if model_key not in self.micro_models:
-            raise KeyError(f"Micro model not loaded for model_key={model_key}")
+            if engine is not None:
+                self._load_micro_model_lazy(model_key, engine)
+            else:
+                raise KeyError(f"Micro model not loaded for model_key={model_key}")
         model_path = self.micro_model_paths.get(model_key, "")
         return self.micro_models[model_key], model_path
+
+    def _load_micro_model_lazy(self, model_key: str, engine) -> None:
+        """Load a single micro model on demand (for roster change after initial load)."""
+        from sb3_contrib import MaskablePPO
+        from sb3_contrib.common.wrappers import ActionMasker
+
+        def mask_fn(env):
+            return env.get_action_mask()
+
+        masked_env = ActionMasker(engine, mask_fn)
+        config = get_config_loader()
+        models_root = config.get_models_root()
+        model_storage_key = config._resolve_agent_config_key(model_key)
+        model_path = os.path.join(
+            models_root,
+            model_storage_key,
+            f"model_{model_storage_key}.zip",
+        )
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                f"Micro model required for PvE mode not found: {model_path}"
+            )
+        self.micro_models[model_key] = MaskablePPO.load(model_path, env=masked_env)
+        self.micro_model_paths[model_key] = model_path
+        if not self.quiet:
+            print(f"PvE: Lazy-loaded micro model: {model_key}")
 
     def _normalize_obs_for_inference(self, obs: np.ndarray, model_path: str) -> np.ndarray:
         """Normalize observation for inference if model was trained with VecNormalize."""

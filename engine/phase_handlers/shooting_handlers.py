@@ -840,6 +840,10 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
     # Import has_line_of_sight_coords for performance
     from engine.combat_utils import has_line_of_sight_coords
     
+    # Defensive: ensure los_cache exists before loop (handles edge cases)
+    if "los_cache" not in unit:
+        unit["los_cache"] = {}
+
     # Calculate LoS for each enemy in units_cache (only alive enemies — dead must not appear in pool)
     for target_id, target_data in units_cache.items():
         # Skip friendly units (only calculate LoS to enemies)

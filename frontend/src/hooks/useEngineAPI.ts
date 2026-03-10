@@ -2838,7 +2838,7 @@ export const useEngineAPI = () => {
 
       try {
         let totalUnitsProcessed = 0;
-        const maxIterations = 10; // Reduced to prevent infinite loops
+        const maxIterations = 25; // Allow larger armies (e.g. 12+ units in move phase)
         let iteration = 0;
         let lastPoolSize = -1;
         let samePoolSizeCount = 0;
@@ -3262,8 +3262,12 @@ export const useEngineAPI = () => {
             } else {
               break;
             }
-          } else if (activationData.result?.activation_ended) {
-            // Unit completed activation immediately (SKIP, no valid targets, etc.)
+          } else if (
+            activationData.result?.activation_ended ||
+            activationData.result?.activation_complete
+          ) {
+            // Unit completed activation (move, skip, wait, etc.)
+            // Backend uses activation_ended (generic) or activation_complete (movement handler)
             totalUnitsProcessed++;
 
             // Check if phase complete after unit completion
