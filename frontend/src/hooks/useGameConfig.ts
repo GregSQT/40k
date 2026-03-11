@@ -150,7 +150,7 @@ const isGameConfig = (value: unknown): value is GameConfig => {
   return true;
 };
 
-export const useGameConfig = (boardConfigName: string = "default"): ExtendedGameConfig => {
+export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGameConfig => {
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -163,7 +163,7 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
         setError(null);
 
         const [boardResponse, gameResponse] = await Promise.all([
-          fetch("/config/board_config.json"),
+          fetch("/api/config/board"),
           fetch("/config/game_config.json"),
         ]);
 
@@ -175,46 +175,28 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
 
         if (!boardResponse.ok) {
           throw new Error(
-            `Board config missing: /config/board_config.json (HTTP ${boardResponse.status})`
+            `Board config missing: /api/config/board (HTTP ${boardResponse.status})`
           );
         }
 
-        const [boardResponseText, gameResponseText] = await Promise.all([
-          boardResponse.text(),
-          gameResponse.text(),
-        ]);
-
-        if (!boardResponseText.trim()) {
-          throw new Error("Board config file is empty");
-        }
+        const boardJson = await boardResponse.json();
+        const gameResponseText = await gameResponse.text();
 
         if (!gameResponseText.trim()) {
           throw new Error("Game config file is empty");
         }
 
-        let boardDataRaw: unknown;
         let gameDataRaw: unknown;
         try {
-          boardDataRaw = JSON.parse(boardResponseText);
           gameDataRaw = JSON.parse(gameResponseText);
         } catch (parseError) {
-          throw new Error(`Invalid JSON in config files: ${parseError}`);
+          throw new Error(`Invalid JSON in game config: ${parseError}`);
         }
 
-        if (!isRecord(boardDataRaw)) {
-          throw new Error("Invalid board config root: expected object");
+        if (!isRecord(boardJson) || !boardJson.success || !boardJson.config) {
+          throw new Error("Invalid board config response from API");
         }
-        const boardData = boardDataRaw;
-
-        if (!boardData[boardConfigName]) {
-          console.warn(
-            `Board config '${boardConfigName}' not found, available configs:`,
-            Object.keys(boardData)
-          );
-          throw new Error(`Board config '${boardConfigName}' not found`);
-        }
-
-        const configData = boardData[boardConfigName];
+        const configData = boardJson.config;
         if (!isBoardConfig(configData)) {
           throw new Error("Invalid board config: missing required properties");
         }
@@ -237,7 +219,7 @@ export const useGameConfig = (boardConfigName: string = "default"): ExtendedGame
     };
 
     loadConfigs();
-  }, [boardConfigName]);
+  }, []);
 
   const maxTurns = gameConfig?.game_rules.max_turns ?? 100;
   const boardSize: [number, number] = gameConfig?.game_rules.board_size ?? [24, 18];

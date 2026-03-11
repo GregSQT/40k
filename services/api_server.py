@@ -9,6 +9,7 @@ import os
 import sqlite3
 import sys
 import time
+from pathlib import Path
 import hashlib
 import secrets
 import copy
@@ -64,6 +65,15 @@ def make_json_serializable(obj):
         return make_json_serializable(obj.__dict__)
     else:
         return obj
+
+
+def _game_state_for_json(engine_instance) -> Dict[str, Any]:
+    """Return game_state dict with numpy topology arrays excluded (not JSON-serializable, frontend doesn't need them)."""
+    gs = dict(engine_instance.game_state)
+    for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
+        gs.pop(key, None)
+    return gs
+
 
 def _sync_units_hp_from_cache(serializable_state: Dict[str, Any], game_state: Dict[str, Any]) -> None:
     """
@@ -1113,7 +1123,7 @@ def start_game():
         print("DEBUG: engine.reset() completed successfully")
 
         # Convert game state to JSON-serializable format
-        serializable_state = make_json_serializable(dict(engine.game_state))
+        serializable_state = make_json_serializable(_game_state_for_json(engine))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
@@ -1212,7 +1222,7 @@ def execute_action():
             success, result = engine.execute_semantic_action(action)
 
         # Convert game state to JSON-serializable format
-        serializable_state = make_json_serializable(dict(engine.game_state))
+        serializable_state = make_json_serializable(_game_state_for_json(engine))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
@@ -1652,7 +1662,7 @@ def get_game_state():
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
     # Convert game state to JSON-serializable format
-    serializable_state = make_json_serializable(dict(engine.game_state))
+    serializable_state = make_json_serializable(_game_state_for_json(engine))
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
     
@@ -1671,7 +1681,7 @@ def reset_game():
     
     try:
         obs, info = engine.reset()
-        serializable_state = make_json_serializable(dict(engine.game_state))
+        serializable_state = make_json_serializable(_game_state_for_json(engine))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
@@ -1689,15 +1699,52 @@ def reset_game():
 
 @app.route('/api/config/board', methods=['GET'])
 def get_board_config():
-    """Get board configuration for frontend."""
+    """Get board configuration for frontend.
+    Loads board_config.json from config/board/{paths.board}/, then walls and objectives
+    from the same directory (walls/walls-XX.json, objectives/objectives-XX.json).
+    """
     try:
         from config_loader import get_config_loader
         config_loader = get_config_loader()
         board_data = config_loader.get_board_config()
-        return jsonify({
-            "success": True,
-            "config": board_data["default"]
-        })
+        board_spec = board_data["default"]
+        config_json = config_loader.load_config("config", force_reload=False)
+        board_subdir = config_json.get("paths", {}).get("board")
+        if not board_subdir:
+            return jsonify({"success": True, "config": board_spec})
+
+        project_root = Path(__file__).resolve().parent.parent
+        board_dir = project_root / "config" / board_subdir
+        wall_ref = board_spec.get("wall_ref", "walls-01.json")
+        objectives_ref = board_spec.get("objectives_ref", "objectives-01.json")
+
+        wall_hexes = []
+        if wall_ref and wall_ref.endswith(".json"):
+            wall_path = board_dir / "walls" / wall_ref
+            if wall_path.exists():
+                with open(wall_path, "r", encoding="utf-8-sig") as f:
+                    wall_data = json.load(f)
+                if "walls" in wall_data:
+                    wall_hexes = []
+                    for g in wall_data.get("walls", []):
+                        wall_hexes.extend(g.get("hexes", []))
+                else:
+                    wall_hexes = wall_data.get("wall_hexes", [])
+
+        objectives = []
+        if objectives_ref and objectives_ref.endswith(".json"):
+            obj_path = board_dir / "objectives" / objectives_ref
+            if obj_path.exists():
+                with open(obj_path, "r", encoding="utf-8-sig") as f:
+                    obj_data = json.load(f)
+                objectives = obj_data.get("objectives", [])
+
+        merged = dict(board_spec)
+        merged["wall_hexes"] = wall_hexes
+        merged["objective_zones"] = [
+            {"id": str(o["id"]), "hexes": o["hexes"]} for o in objectives
+        ]
+        return jsonify({"success": True, "config": merged})
     except FileNotFoundError as e:
         return jsonify({
             "success": False,
@@ -1774,7 +1821,7 @@ def execute_ai_turn():
             if error_type == "not_pve_mode":
                 return jsonify({"success": False, "error": result}), 400
             if error_type == "not_ai_player_turn":
-                serializable_state = make_json_serializable(dict(engine.game_state))
+                serializable_state = make_json_serializable(_game_state_for_json(engine))
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
                 action_logs = serializable_state.get("action_logs", [])
@@ -1794,7 +1841,7 @@ def execute_ai_turn():
                 return jsonify({"success": False, "error": result}), 500
 
         # Convert game state to JSON-serializable format
-        serializable_state = make_json_serializable(dict(engine.game_state))
+        serializable_state = make_json_serializable(_game_state_for_json(engine))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
         

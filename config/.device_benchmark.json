@@ -1,9 +1,9 @@
 {
-  "agent": "Infantry_Elite_RangedSwarm",
+  "agent": "Infantry_Troop_RangedTroop",
   "training_config": "default",
-  "rewards_config": "Infantry_Elite_RangedSwarm",
+  "rewards_config": "Infantry_Troop_RangedTroop",
   "recommendation": "CPU",
-  "ratio": 1.1532166131239145,
-  "cpu_ep_s": 1.7994301385268154,
-  "gpu_ep_s": 1.5603574541407204
+  "ratio": 1.076587336636469,
+  "cpu_ep_s": 1.3732847593780038,
+  "gpu_ep_s": 1.275590667514716
 }

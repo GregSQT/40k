@@ -780,6 +780,22 @@ class GameStateManager:
             raise ValueError(f"Invalid JSON in shared walls file {wall_path}: {e}")
         if not isinstance(wall_data, dict):
             raise ValueError(f"Shared walls file {wall_path} must be JSON object")
+        if "walls" in wall_data:
+            walls = require_key(wall_data, "walls")
+            if not isinstance(walls, list):
+                raise ValueError(f"Shared walls file {wall_path} field 'walls' must be list")
+            result: List[List[int]] = []
+            for g in walls:
+                if not isinstance(g, dict):
+                    raise ValueError(f"Shared walls file {wall_path}: wall group must be dict")
+                hexes = require_key(g, "hexes")
+                if not isinstance(hexes, list):
+                    raise ValueError(f"Shared walls file {wall_path}: wall group 'hexes' must be list")
+                for h in hexes:
+                    if not isinstance(h, (list, tuple)) or len(h) < 2:
+                        raise ValueError(f"Shared walls file {wall_path}: invalid wall hex {h}")
+                    result.append([int(h[0]), int(h[1])])
+            return result
         wall_hexes = require_key(wall_data, "wall_hexes")
         if not isinstance(wall_hexes, list):
             raise ValueError(f"Shared walls file {wall_path} field 'wall_hexes' must be list")

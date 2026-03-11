@@ -321,21 +321,16 @@ class W40KEngine(gym.Env):
         board_cols = self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"]
         board_rows = self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"]
         max_range = self._calculate_board_max_range(board_cols, board_rows)
+        _board = self.config["board"]
+        _fallback_walls = (
+            _board["default"]["wall_hexes"] if "wall_hexes" in _board["default"] else []
+        ) if "default" in _board else (
+            _board["wall_hexes"] if "wall_hexes" in _board else []
+        )
         base_wall_hexes = (
             set(map(tuple, self._scenario_wall_hexes))
             if self._scenario_wall_hexes is not None
-            else set(
-                map(
-                    tuple,
-                    self.config["board"]["default"]["wall_hexes"]
-                    if "default" in self.config["board"]
-                    else (
-                        self.config["board"]["wall_hexes"]
-                        if "wall_hexes" in self.config["board"]
-                        else []
-                    ),
-                )
-            )
+            else set(map(tuple, _fallback_walls))
         )
         bottom_row = board_rows - 1
         for col in range(board_cols):

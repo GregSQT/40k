@@ -27,7 +27,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import List, Set, Tuple
+from typing import Any, List, Set, Tuple
 
 import numpy as np
 
@@ -82,12 +82,17 @@ def _parse_dimensions(s: str) -> Tuple[int, int]:
 
 
 def _load_wall_hexes(wall_path: Path) -> Set[Tuple[int, int]]:
-    """Load wall_hexes from a walls-XX.json file."""
+    """Load wall_hexes from a walls-XX.json file. Supports 'walls' (grouped) or 'wall_hexes' (flat)."""
     with open(wall_path, "r", encoding="utf-8-sig") as f:
         data = json.load(f)
-    raw = data.get("wall_hexes")
+    raw: List[Any] = []
+    if "walls" in data:
+        for g in data.get("walls", []):
+            raw.extend(g.get("hexes", []))
+    else:
+        raw = data.get("wall_hexes") or []
     if not isinstance(raw, list):
-        raise ValueError(f"{wall_path}: wall_hexes must be a list")
+        raise ValueError(f"{wall_path}: wall_hexes/walls must yield a list")
     result: Set[Tuple[int, int]] = set()
     for h in raw:
         if not isinstance(h, (list, tuple)) or len(h) < 2:
