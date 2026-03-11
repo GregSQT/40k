@@ -127,6 +127,12 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     units_cache = require_key(game_state, "units_cache")
+    # PERFORMANCE: Build full occupied positions once for all eligibility checks
+    full_occupied_positions = set()
+    for u_id, u_entry in units_cache.items():
+        col_int, row_int = u_entry["col"], u_entry["row"]
+        full_occupied_positions.add((col_int, row_int))
+
     for unit_id, cache_entry in units_cache.items():
         unit = get_unit_by_id(game_state, unit_id)
         if not unit:
@@ -167,7 +173,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
 
         # "Has valid charge target?"
         # Must have at least one enemy within charge range (via BFS pathfinding)
-        if not _has_valid_charge_target(game_state, unit):
+        if not _has_valid_charge_target(game_state, unit, full_occupied_positions):
             continue  # No valid charge targets
 
         # Unit passes all conditions - add to pool
@@ -844,7 +850,8 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     return True
 
 
-def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
+                            full_occupied_positions: Optional[Set[Tuple[int, int]]] = None) -> bool:
     """
     Check if unit has at least one valid charge target.
 
@@ -856,6 +863,9 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
     is adjacent to those hexes.
     
     NOTE: Target can be at distance 13 because charge of 12 can reach adjacent to target at 13.
+    
+    Args:
+        full_occupied_positions: Optional pre-computed set of all unit positions (from get_eligible_units).
     """
     # Maximum possible charge distance is 12 hexes (2d6 max roll)
     # But target can be at distance 13 because charge ends adjacent to target
@@ -868,7 +878,10 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any]) -
     try:
         # Build all hexes reachable via BFS within max charge distance
         # Use the existing charge_build_valid_destinations_pool with max roll
-        reachable_hexes = charge_build_valid_destinations_pool(game_state, unit["id"], CHARGE_MAX_DISTANCE)
+        reachable_hexes = charge_build_valid_destinations_pool(
+            game_state, unit["id"], CHARGE_MAX_DISTANCE,
+            full_occupied_positions=full_occupied_positions
+        )
     except Exception as e:
         # If BFS fails, log error and return False (no valid targets)
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
@@ -1037,7 +1050,9 @@ def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Di
     return True
 
 
-def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int, target_id: Optional[str] = None) -> List[Tuple[int, int]]:
+def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int,
+                                        target_id: Optional[str] = None,
+                                        full_occupied_positions: Optional[Set[Tuple[int, int]]] = None) -> List[Tuple[int, int]]:
     """
     Build valid charge destinations using BFS pathfinding.
 
@@ -1050,6 +1065,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     
     Args:
         target_id: Optional target unit ID. If provided, only hexes adjacent to this target are included.
+        full_occupied_positions: Optional pre-computed set of all unit positions. If provided, unit's position
+            is excluded internally. Used by get_eligible_units for performance.
     """
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
@@ -1075,16 +1092,17 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         if not enemies:
             return []  # No enemies to charge
 
-    # PERFORMANCE: Pre-compute occupied positions
-    # CRITICAL: Normalize coordinates to int to ensure consistent tuple comparison
-    # CRITICAL: Use try-except to handle invalid coordinates gracefully
-    occupied_positions = set()
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(unit["id"])
-    for u_id, u_entry in units_cache.items():
-        if u_id != unit_id_str:
-            col_int, row_int = u_entry["col"], u_entry["row"]
-            occupied_positions.add((col_int, row_int))
+    # PERFORMANCE: Use pre-computed occupied positions if provided, else build from scratch
+    if full_occupied_positions is not None:
+        occupied_positions = full_occupied_positions - {start_pos}
+    else:
+        occupied_positions = set()
+        units_cache = require_key(game_state, "units_cache")
+        unit_id_str = str(unit["id"])
+        for u_id, u_entry in units_cache.items():
+            if u_id != unit_id_str:
+                col_int, row_int = u_entry["col"], u_entry["row"]
+                occupied_positions.add((col_int, row_int))
     
     # CRITICAL: Log occupied positions and all units for debugging position bugs
     if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:

@@ -369,19 +369,20 @@ class EpisodeTerminationCallback(BaseCallback):
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
                     f"{time_info}{duration_display}{gate_display}{phase_display}"
                 )
-                # Store training prefix (without duration/Gate) for eval progress display
-                if self.gate_display_state is not None:
-                    self.gate_display_state["training_prefix"] = (
-                        f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                        f"{time_info} "
-                    )
-                    self.gate_display_state["last_progress_line_len"] = len(progress_line)
+                # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
                 prev_len = self._last_progress_line_len
                 if self.gate_display_state is not None:
                     prev_len = max(prev_len, self.gate_display_state.get("last_progress_line_len", 0))
                 clear_padding = " " * max(0, prev_len - len(progress_line))
                 print(f"\r{progress_line}{clear_padding}", end='', flush=True)
                 self._last_progress_line_len = len(progress_line)
+                # Store training prefix and current len AFTER display (for next eval)
+                if self.gate_display_state is not None:
+                    self.gate_display_state["training_prefix"] = (
+                        f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
+                        f"{time_info} "
+                    )
+                    self.gate_display_state["last_progress_line_len"] = len(progress_line)
 
         # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
         if self.episode_count >= self.max_episodes:
