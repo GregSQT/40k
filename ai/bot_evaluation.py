@@ -15,7 +15,7 @@ import os
 import sys
 import numpy as np
 import re
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Callable, Optional, Dict, List, Any, Tuple
 
 from shared.data_validation import require_key
@@ -486,7 +486,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                          controlled_agent=None, show_progress=False, deterministic=True,
                          step_logger=None, debug_mode=False, eval_progress_label: Optional[str] = None,
                          show_summary: bool = True, eval_progress_prefix: Optional[str] = None,
-                         scenario_pool: str = "training", model_path: Optional[str] = None):
+                         scenario_pool: str = "training", model_path: Optional[str] = None,
+                         line_length_state: Optional[Dict[str, Any]] = None):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -501,6 +502,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         eval_progress_label: Optional suffix displayed on evaluation progress line
         show_summary: Print diagnostic and scenario ranking summary at end
         eval_progress_prefix: Optional fixed prefix shown before eval progress (e.g., phase progress)
+        line_length_state: Optional dict to store last_progress_line_len for clean switch back to training
 
     Returns:
         Dict with keys: 'random', 'greedy', 'defensive', 'combined',
@@ -685,6 +687,33 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     start_time = time.time() if show_progress else None
     last_progress_line_len = 0
 
+    def _print_progress(completed_ep: int, total_ep: int) -> None:
+        """Print progress bar during eval (overwrites line)."""
+        if not show_progress or start_time is None:
+            return
+        nonlocal last_progress_line_len
+        progress_pct = (completed_ep / total_ep) * 100 if total_ep > 0 else 0
+        bar_length = 20
+        filled = int(bar_length * completed_ep / total_ep) if total_ep > 0 else 0
+        bar = '█' * filled + '░' * (bar_length - filled)
+        elapsed = time.time() - start_time
+        _mins = int(elapsed // 60)
+        _secs = int(elapsed % 60)
+        elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
+        speed_str = f"{completed_ep/elapsed:.2f}ep/s" if elapsed > 0 and completed_ep > 0 else "0.00ep/s"
+        if eval_progress_prefix and eval_progress_label:
+            line = f"{eval_progress_prefix}{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
+        elif eval_progress_label:
+            line = f"{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
+        else:
+            line = f"{progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
+        clear_padding = " " * max(0, last_progress_line_len - len(line))
+        sys.stdout.write(f"\r{line}{clear_padding}")
+        sys.stdout.flush()
+        last_progress_line_len = len(line)
+        if line_length_state is not None:
+            line_length_state["last_progress_line_len"] = len(line)
+
     try:
         if use_subprocess and n_workers > 1:
             ctx = mp.get_context("spawn")
@@ -694,11 +723,24 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 initializer=_eval_worker_init,
                 initargs=initargs,
             ) as pool:
-                futures = [pool.submit(_eval_worker_task, t) for t in tasks]
-                results_list = [_get_result_with_timeout(f, t, task_timeout_seconds) for f, t in zip(futures, tasks)]
+                future_to_task = {pool.submit(_eval_worker_task, t): t for t in tasks}
+                results_list = []
+                completed_episodes = 0
+                for future in as_completed(future_to_task):
+                    task = future_to_task[future]
+                    result = _get_result_with_timeout(future, task, task_timeout_seconds)
+                    results_list.append(result)
+                    completed_episodes += result.get("wins", 0) + result.get("losses", 0) + result.get("draws", 0)
+                    _print_progress(completed_episodes, total_episodes)
         else:
             _eval_worker_init(*initargs)
-            results_list = [_eval_worker_task(t) for t in tasks]
+            results_list = []
+            completed_episodes = 0
+            for t in tasks:
+                result = _eval_worker_task(t)
+                results_list.append(result)
+                completed_episodes += result.get("wins", 0) + result.get("losses", 0) + result.get("draws", 0)
+                _print_progress(completed_episodes, total_episodes)
     finally:
         if _temp_model_path and os.path.exists(_temp_model_path):
             try:
@@ -806,6 +848,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         clear_padding = " " * clear_padding_len
         sys.stdout.write(f"\r{full_final_line}{clear_padding}")
         sys.stdout.flush()
+        if line_length_state is not None:
+            line_length_state["last_progress_line_len"] = len(full_final_line)
 
     # total_failed_episodes déjà dans results ; ne pas faire planter tout l'éval (PLAN21)
 

@@ -1967,7 +1967,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 f"callback_params.eval_deterministic must be boolean "
                 f"(got {type(eval_deterministic).__name__})"
             )
-        bot_eval_show_progress = callback_params.get("bot_eval_show_progress", False)
+        bot_eval_show_progress = bool(_resolve_callback_value("bot_eval_show_progress"))
         if not isinstance(bot_eval_show_progress, bool):
             raise ValueError(
                 f"callback_params.bot_eval_show_progress must be boolean "

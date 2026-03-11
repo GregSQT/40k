@@ -369,7 +369,17 @@ class EpisodeTerminationCallback(BaseCallback):
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
                     f"{time_info}{duration_display}{gate_display}{phase_display}"
                 )
-                clear_padding = " " * max(0, self._last_progress_line_len - len(progress_line))
+                # Store training prefix (without duration/Gate) for eval progress display
+                if self.gate_display_state is not None:
+                    self.gate_display_state["training_prefix"] = (
+                        f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
+                        f"{time_info} "
+                    )
+                    self.gate_display_state["last_progress_line_len"] = len(progress_line)
+                prev_len = self._last_progress_line_len
+                if self.gate_display_state is not None:
+                    prev_len = max(prev_len, self.gate_display_state.get("last_progress_line_len", 0))
+                clear_padding = " " * max(0, prev_len - len(progress_line))
                 print(f"\r{progress_line}{clear_padding}", end='', flush=True)
                 self._last_progress_line_len = len(progress_line)
 
@@ -1575,7 +1585,9 @@ class BotEvaluationCallback(BaseCallback):
             )
             sys.stderr.flush()
         from ai.bot_evaluation import evaluate_against_bots
-        eval_progress_prefix = self._build_eval_progress_prefix(eval_marker) if self.show_eval_progress else None
+        eval_progress_prefix = None
+        if self.show_eval_progress and self.gate_display_state is not None:
+            eval_progress_prefix = self.gate_display_state.get("training_prefix", "")
         return evaluate_against_bots(
             model=self.model,
             training_config_name=self.training_config_name,
@@ -1587,4 +1599,5 @@ class BotEvaluationCallback(BaseCallback):
             eval_progress_label=f"Eval {self.eval_count}" if self.show_eval_progress else None,
             show_summary=not self.show_eval_progress,
             eval_progress_prefix=eval_progress_prefix,
+            line_length_state=self.gate_display_state,
         )

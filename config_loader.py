@@ -333,6 +333,9 @@ class ConfigLoader:
         Raises:
             FileNotFoundError: If agent rewards config file doesn't exist
         """
+        cache_key = f"rewards_config::{agent_key}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
         resolved_agent_key = self._resolve_agent_config_key(agent_key)
         agent_config_path = self.config_dir / "agents" / resolved_agent_key / f"{resolved_agent_key}_rewards_config.json"
         
@@ -346,6 +349,7 @@ class ConfigLoader:
             with open(agent_config_path, 'r', encoding='utf-8-sig') as f:
                 rewards_config = json.load(f)
                 if agent_key == resolved_agent_key:
+                    self._cache[cache_key] = rewards_config
                     return rewards_config
 
                 # Inter-faction mode: expose canonical key while keeping source key.
@@ -358,6 +362,7 @@ class ConfigLoader:
 
                 rewards_with_alias = dict(rewards_config)
                 rewards_with_alias[agent_key] = rewards_config[resolved_agent_key]
+                self._cache[cache_key] = rewards_with_alias
                 return rewards_with_alias
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON in {agent_config_path}: {e}")
