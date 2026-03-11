@@ -729,6 +729,43 @@ class ObservationBuilder:
             raise KeyError(f"los_cache missing target_id={target_id} for shooter_id={shooter.get('id')}")
         return 1.0 if los_cache[target_id] else 0.0
 
+    def _has_los_from_topology(
+        self,
+        from_col: int,
+        from_row: int,
+        to_col: int,
+        to_row: int,
+        game_state: Dict[str, Any],
+    ) -> bool:
+        """
+        Check LoS using los_topology (O(1), no cache needed).
+        Single source of truth for observation visibility features.
+        Returns False for out-of-bounds coordinates.
+        """
+        los_topology = game_state.get("los_topology")
+        if los_topology is None:
+            raise KeyError(
+                "los_topology is required. Load topology at reset via topology_{cols}x{rows}-{wall_id}.npz"
+            )
+        board_cols = game_state.get("board_cols")
+        board_rows = game_state.get("board_rows")
+        if not (
+            isinstance(board_cols, int)
+            and isinstance(board_rows, int)
+            and 0 <= from_col < board_cols
+            and 0 <= from_row < board_rows
+            and 0 <= to_col < board_cols
+            and 0 <= to_row < board_rows
+        ):
+            return False
+        config = require_key(game_state, "config")
+        game_rules = require_key(config, "game_rules")
+        los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
+        from_idx = from_row * board_cols + from_col
+        to_idx = to_row * board_cols + to_col
+        visibility_ratio = float(los_topology[from_idx, to_idx])
+        return visibility_ratio >= los_visibility_min_ratio
+
     def _build_los_cache_for_observation(
         self,
         active_unit: Dict[str, Any],
@@ -1113,20 +1150,8 @@ class ObservationBuilder:
         if not is_unit_alive(str(active_unit["id"]), game_state):
             raise ValueError(f"Active unit for observation is not alive: unit_id={active_unit.get('id')}")
         
-        # Build los_cache explicitly for observation (single source of truth)
-        # CRITICAL: Always rebuild for ALL allies. Stale cache (e.g. from before reinforcements)
-        # can miss enemy IDs → KeyError in _encode_enemy_units when ally's los_cache lacks target_id.
-        from engine.phase_handlers.shooting_handlers import build_unit_los_cache
-        units_cache = require_key(game_state, "units_cache")
-        active_player = int(active_unit["player"]) if active_unit["player"] is not None else None
-        if active_player is None:
-            raise ValueError(f"Active unit missing player: {active_unit}")
-        for ally_id, cache_entry in units_cache.items():
-            if int(cache_entry["player"]) != active_player:
-                continue
-            build_unit_los_cache(game_state, str(ally_id))
-
-        # PERF: Local positions cache - one extraction from units_cache, reused ~1M times
+        # PERF: visibility_to_allies uses los_topology directly (no los_cache rebuild needed)
+        # Local positions cache - one extraction from units_cache, reused ~1M times
         units_cache = require_key(game_state, "units_cache")
         positions = {uid: (e["col"], e["row"]) for uid, e in units_cache.items()}
 
@@ -1677,7 +1702,7 @@ class ObservationBuilder:
 
         Asymmetric design: MORE complete information about enemies for tactical decisions.
 
-        Uses unit["los_cache"] for visibility features (must be built explicitly before this call).
+        Uses los_topology directly for visibility features (O(1) per pair, no los_cache needed).
 
         Features per enemy (22 floats):
         0. relative_col, 1. relative_row (egocentric position)
@@ -1812,14 +1837,13 @@ class ObservationBuilder:
                 obs[feature_base + 13] = self._calculate_danger_probability(active_unit, enemy, game_state, positions)
                 
                 # Features 14-16: Allied coordination (3 floats, était 13-15) - DÉCALÉ
+                # visibility_to_allies: use los_topology directly (O(1) per pair, no los_cache needed)
                 visibility = 0.0
                 combined_threat = 0.0
+                enemy_col, enemy_row = positions[str(enemy["id"])]
                 for ally_id, ally in allies_list:
-                    target_id = str(enemy["id"])
-                    los_cache = require_key(ally, "los_cache")
-                    if target_id not in los_cache:
-                        raise KeyError(f"los_cache missing target_id={target_id} for ally_id={ally.get('id')}")
-                    if los_cache[target_id]:
+                    ally_col, ally_row = positions[ally_id]
+                    if self._has_los_from_topology(ally_col, ally_row, enemy_col, enemy_row, game_state):
                         visibility += 1.0
                     combined_threat += self._calculate_danger_probability(enemy, ally, game_state, positions)
                 obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)
@@ -2008,14 +2032,14 @@ class ObservationBuilder:
                 
                 offensive_type = 1.0 if max_rng_range > melee_range else 0.0
                 
-                # LoS check using cache (only for enemies)
+                # LoS check using topology (only for enemies) - O(1), no los_cache needed
                 has_los = 0.0
                 if is_enemy > 0.5:
-                    target_id = str(unit["id"])
-                    active_los_cache = require_key(active_unit, "los_cache")
-                    if target_id not in active_los_cache:
-                        raise KeyError(f"los_cache missing target_id={target_id} for active_unit_id={active_unit.get('id')}")
-                    has_los = 1.0 if active_los_cache[target_id] else 0.0
+                    active_col, active_row = positions[str(active_unit["id"])]
+                    unit_col, unit_row = positions[str(unit["id"])]
+                    has_los = 1.0 if self._has_los_from_topology(
+                        active_col, active_row, unit_col, unit_row, game_state
+                    ) else 0.0
                 
                 # Target preference match (placeholder - will enhance with unit registry)
                 target_match = 0.5
