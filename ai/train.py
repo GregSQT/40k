@@ -287,8 +287,30 @@ from ai.replay_converter import (
 # Global step logger instance
 step_logger = None
 
+def _read_device_benchmark_cache(agent_key: str, training_config: str, rewards_config: str) -> Optional[Tuple[str, bool]]:
+    """Read cached device recommendation from scripts/benchmark_device.py --save-result."""
+    cache_path = os.path.join(project_root, "config", ".device_benchmark.json")
+    if not os.path.isfile(cache_path):
+        return None
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        if (cache.get("agent") == agent_key
+                and cache.get("training_config") == training_config
+                and cache.get("rewards_config") == rewards_config):
+            rec = cache.get("recommendation", "").upper()
+            if rec == "GPU":
+                return ("cuda", True)
+            if rec == "CPU":
+                return ("cpu", False)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
 def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_params: int,
-                       obs_size: Optional[int] = None, net_arch: Optional[List[int]] = None) -> Tuple[str, bool]:
+                       obs_size: Optional[int] = None, net_arch: Optional[List[int]] = None,
+                       cache_key: Optional[Tuple[str, str, str]] = None) -> Tuple[str, bool]:
     """
     Resolve device selection for training.
 
@@ -298,11 +320,17 @@ def resolve_device_mode(device_mode: Optional[str], gpu_available: bool, total_p
         total_params: Sum of network hidden units (heuristic estimate when net_arch not available).
         obs_size: Observation size for benchmark (optional).
         net_arch: Network architecture for benchmark (optional).
+        cache_key: Optional (agent_key, training_config, rewards_config) to use cached benchmark result.
 
     Returns:
         Tuple of (device, use_gpu).
     """
     if device_mode is None:
+        if cache_key and gpu_available:
+            cached = _read_device_benchmark_cache(cache_key[0], cache_key[1], cache_key[2])
+            if cached is not None:
+                print(f"📊 Device: using cached benchmark result ({cached[0].upper()})")
+                return cached
         if gpu_available and obs_size is not None and net_arch is not None:
             result = benchmark_device_speed(obs_size, net_arch)
             if result is not None:
@@ -518,15 +546,18 @@ def create_model(config, training_config_name, rewards_config_name, new_model, a
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
+    cache_key = (controlled_agent_key, training_config_name, rewards_config_name)
     device, use_gpu = resolve_device_mode(
         args.mode if args else None, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch
+        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
     )
 
     model_params["device"] = device
     model_params["verbose"] = 0  # Disable verbose logging
 
-    if not use_gpu and gpu_available:
+    if use_gpu:
+        print(f"🖥️  Using GPU for PPO")
+    elif gpu_available:
         print(f"ℹ️  Using CPU for PPO (10% faster than GPU for MlpPolicy with {obs_size} features)")
         print(f"ℹ️  Benchmark: CPU 311 it/s vs GPU 282 it/s")
     
@@ -793,14 +824,17 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
     # Use GPU only for very large networks (>2000 hidden units)
     obs_size = env.observation_space.shape[0]
+    cache_key = (agent_key, training_config_name, rewards_config_name)
     device, use_gpu = resolve_device_mode(
         device_mode, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch
+        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
     )
 
     model_params["device"] = device
 
-    if not use_gpu and gpu_available:
+    if use_gpu:
+        print(f"🖥️  Using GPU for {agent_key} PPO")
+    elif gpu_available:
         print(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
     
     # Determine whether to create new model or load existing
@@ -1025,13 +1059,16 @@ def create_macro_controller_model(config, training_config_name, rewards_config_n
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
     obs_size = env.observation_space.shape[0]
+    cache_key = (agent_key, training_config_name, rewards_config_name)
     device, use_gpu = resolve_device_mode(
         device_mode, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch
+        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
     )
     model_params["device"] = device
 
-    if not use_gpu and gpu_available:
+    if use_gpu:
+        print(f"🖥️  Using GPU for {agent_key} PPO")
+    elif gpu_available:
         print(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
 
     if new_model or not os.path.exists(model_path):
@@ -1391,13 +1428,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     net_arch = require_key(policy_kwargs, "net_arch")
     total_params = sum(net_arch) if isinstance(net_arch, list) else 512
     obs_size = env.observation_space.shape[0]
+    cache_key = (agent_key, training_config_name, rewards_config_name)
     device, use_gpu = resolve_device_mode(
         device_mode, gpu_available, total_params,
-        obs_size=obs_size, net_arch=net_arch
+        obs_size=obs_size, net_arch=net_arch, cache_key=cache_key
     )
     model_params["device"] = device
 
-    if not use_gpu and gpu_available:
+    if use_gpu:
+        chunk_log(f"🖥️  Using GPU for {agent_key} PPO")
+    elif gpu_available:
         chunk_log(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
 
     if new_model or not os.path.exists(model_path):
@@ -2874,16 +2914,18 @@ def start_multi_agent_orchestration(config, total_episodes: int, training_config
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
-    parser.add_argument("--training-config", required=True,
-                       help="Training configuration to use from config/training_config.json")
-    parser.add_argument("--rewards-config", required=True,
-                       help="Rewards configuration to use from config/rewards_config.json")
+    parser.add_argument("--training-config", default="default",
+                       help="Training config (default: default)")
+    parser.add_argument("--rewards-config", default=None,
+                       help="Rewards config (default: same as --agent when agent set, else 'default')")
     parser.add_argument("--new", action="store_true", 
                        help="Force creation of new model")
     parser.add_argument("--append", action="store_true", 
                        help="Continue training existing model")
     parser.add_argument("--test-only", action="store_true", 
                        help="Only test existing model, don't train")
+    parser.add_argument("--eval", action="store_true",
+                       help="Alias for --test-only")
     parser.add_argument("--test-episodes", type=int, default=0, 
                        help="Number of episodes for testing")
     parser.add_argument("--multi-agent", action="store_true",
@@ -2910,8 +2952,8 @@ def main():
                        help="Specific model file to use for replay generation")
     parser.add_argument("--scenario-template", type=str, default=None,
                        help="Scenario template name from scenario_templates.json for replay generation")
-    parser.add_argument("--scenario", type=str, default=None,
-                       help="Specific scenario (e.g., 'phase2-3'), 'all' for rotation, or curriculum phase ('phase1', 'phase2', ...)")
+    parser.add_argument("--scenario", type=str, default="default",
+                       help="Scenario (default: default; use 'bot' for bot training, 'phase1' for curriculum, etc.)")
     parser.add_argument("--macro-eval-mode", type=str, choices=["micro", "bot"], default="micro",
                        help="MacroController evaluation mode: micro (vs trained agents) or bot (vs evaluation bots)")
     parser.add_argument("--mode", type=str, default=None,
@@ -2922,7 +2964,12 @@ def main():
                        help="Override config parameter (e.g. n_steps 10240 or model_params.batch_size 2048). Can be repeated.")
     
     args = parser.parse_args()
-    
+    args.test_only = args.test_only or args.eval
+
+    # Default rewards-config to agent when agent is set (simplifies: --agent X implies rewards X)
+    if args.rewards_config is None:
+        args.rewards_config = args.agent if args.agent else "default"
+
     # Apply --param overrides to config loader (affects all subsequent config loads)
     if getattr(args, "param", None):
         config = get_config_loader()
@@ -3234,7 +3281,9 @@ def main():
                 controlled_agent=effective_agent_key,
                 show_progress=True,
                 deterministic=True,
-                step_logger=step_logger
+                step_logger=step_logger,
+                model_path=model_path,
+                scenario_pool="holdout",
             )
             
             # Display results

@@ -5,6 +5,7 @@ Delegates to specialized modules, orchestrates game flow.
 """
 
 import os
+import threading
 import time
 import copy
 from pathlib import Path
@@ -43,6 +44,18 @@ from engine.pve_controller import PvEController
 
 # Global flag to ensure debug.log is cleared only once per training session
 _debug_log_cleared = False
+
+_engine_id_counter = 0
+_engine_id_lock = threading.Lock()
+
+
+def _next_engine_id() -> int:
+    """Monotonic ID per engine instance. Prevents cache collision when id() is reused after GC."""
+    global _engine_id_counter
+    with _engine_id_lock:
+        _engine_id_counter += 1
+        return _engine_id_counter
+
 
 def reset_debug_log_flag():
     """Reset the debug log cleared flag. Call this at the start of each training run."""
@@ -333,7 +346,7 @@ class W40KEngine(gym.Env):
         # _cache_instance_id: unique per engine instance, prevents id(game_state) reuse collision
         # when multiple envs run in same process (bot eval) and old game_state is GC'd
         self.game_state = {
-            "_cache_instance_id": id(self),
+            "_cache_instance_id": _next_engine_id(),
             # Core game state
             "units": [],
             "current_player": 1,

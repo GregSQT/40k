@@ -7,7 +7,7 @@ Usage:
   python scripts/los_topology_builder.py --cols 25 --rows 21
 
 Creates config/board/{cols}x{rows}/topology_{cols}x{rows}-{XX}.npz for each
-walls-XX.json found in that directory (or in config/agents/_walls/ as fallback).
+walls-XX.json found in config/board/{cols}x{rows}/walls/ (or board root, or config/agents/_walls/ as fallback).
 
 topology.npz (single file):
   los          (n, n)      float16  visibility_ratio 0-1 (~3 decimal digits)
@@ -325,9 +325,10 @@ def _build_full_topology(
 
 
 def _find_wall_files(board_dir: Path, fallback_walls_dir: Path) -> List[Tuple[Path, str]]:
-    """Find walls-XX.json files. Returns [(path, XX), ...]."""
+    """Find walls-XX.json files. Returns [(path, XX), ...]. Searches board_dir/walls/ first, then board_dir, then fallback."""
     results: List[Tuple[Path, str]] = []
-    for candidate in [board_dir, fallback_walls_dir]:
+    walls_subdir = board_dir / "walls"
+    for candidate in [walls_subdir, board_dir, fallback_walls_dir]:
         if not candidate.exists():
             continue
         for p in sorted(candidate.glob("walls-*.json")):
@@ -372,7 +373,7 @@ def main() -> int:
     wall_files = _find_wall_files(board_dir, fallback_walls)
     if not wall_files:
         print(
-            f"No walls-*.json found in {board_dir} or {fallback_walls}",
+            f"No walls-*.json found in {board_dir / 'walls'}, {board_dir} or {fallback_walls}",
             file=sys.stderr,
         )
         return 1

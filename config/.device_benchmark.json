@@ -1,0 +1,9 @@
+{
+  "agent": "Infantry_Elite_RangedSwarm",
+  "training_config": "default",
+  "rewards_config": "Infantry_Elite_RangedSwarm",
+  "recommendation": "CPU",
+  "ratio": 1.1532166131239145,
+  "cpu_ep_s": 1.7994301385268154,
+  "gpu_ep_s": 1.5603574541407204
+}

@@ -816,7 +816,7 @@ class GameStateManager:
         scenario_file: str,
         field_name: str
     ) -> Path:
-        """Resolve shared config path. _walls -> config/board/{cols}x{rows}/, else config/agents/<shared_dir_name>/."""
+        """Resolve shared config path. _walls -> config/board/{cols}x{rows}/walls/, _objectives -> .../objectives/, else config/agents/<shared_dir_name>/."""
         if not isinstance(raw_ref, str) or not raw_ref.strip():
             raise ValueError(
                 f"Scenario '{scenario_file}' has invalid '{field_name}': {raw_ref!r}"
@@ -834,10 +834,13 @@ class GameStateManager:
             normalized = f"{normalized}.json"
 
         project_root = Path(__file__).resolve().parent.parent
+        from config_loader import get_config_loader
+        cols, rows = get_config_loader().get_board_size()
+        board_dir = project_root / "config" / "board" / f"{cols}x{rows}"
         if shared_dir_name == "_walls":
-            from config_loader import get_config_loader
-            cols, rows = get_config_loader().get_board_size()
-            return project_root / "config" / "board" / f"{cols}x{rows}" / normalized
+            return board_dir / "walls" / normalized
+        if shared_dir_name == "_objectives":
+            return board_dir / "objectives" / normalized
         return project_root / "config" / "agents" / shared_dir_name / normalized
 
     def _load_compact_roster_file(self, roster_path: Path, roster_label: str) -> Dict[str, Any]:

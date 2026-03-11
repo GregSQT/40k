@@ -32,7 +32,7 @@
     "CUDA_LAUNCH_BLOCKING": "0"
   },
   "torch": {
-    "compile_mode": "off",
+    "compile_mode": "reduce-overhead",
     "compile_mode_option_1": "reduce-overhead (default) : CUDA graphs, low overhead",
     "compile_mode_option_2": "max-autotune : CUDA graphs, high overhead",
     "compile_mode_option_3": "default : compilation plus rapide, moins d\u2019optimisations"

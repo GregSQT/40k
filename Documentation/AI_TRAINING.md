@@ -103,9 +103,9 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
   - `config/agents/_p2_rosters/100pts/training/p2_roster-XX.json`
   - `config/agents/_p2_rosters/100pts/holdout/p2_roster-XX.json`
 - **Shared walls**:
-  - `config/agents/_walls/walls-XX.json`
+  - `config/board/{cols}x{rows}/walls/walls-XX.json`
 - **Shared objectives**:
-  - `config/agents/_objectives/objectives-XX.json`
+  - `config/board/{cols}x{rows}/objectives/objectives-XX.json`
 
 ---
 

@@ -20,11 +20,13 @@ if project_root not in sys.path:
 # Import utility functions from engine
 from engine.combat_utils import (
     calculate_hex_distance,
-    get_hex_line,
     get_hex_neighbors,
     normalize_coordinates,
 )
 from shared.data_validation import require_key
+
+# Cache for LoS thresholds (loaded from game_config, same as engine)
+_los_thresholds_cache: Optional[Tuple[float, float]] = None
 
 MAX_D3 = 3
 MAX_D6 = 6
@@ -149,7 +151,10 @@ def _get_objective_name_to_id_map(scenario_name: str) -> Dict[str, int]:
             )
         if not normalized_ref.endswith(".json"):
             normalized_ref = f"{normalized_ref}.json"
-        objectives_path = os.path.join(project_root, "config", "agents", "_objectives", normalized_ref)
+        from config_loader import get_config_loader
+        cols, rows = get_config_loader().get_board_size()
+        objectives_dir = os.path.join(project_root, "config", "board", f"{cols}x{rows}", "objectives")
+        objectives_path = os.path.join(objectives_dir, normalized_ref)
         if not os.path.exists(objectives_path):
             raise FileNotFoundError(
                 f"Scenario '{scenario_name}' objectives_ref file not found: {objectives_path}"
@@ -459,54 +464,71 @@ def get_hex_points(center_x: float, center_y: float, radius: float = 21.0) -> Li
     return points
 
 
+def _get_los_thresholds() -> Tuple[float, float]:
+    """Load los_visibility_min_ratio and cover_ratio from game_config (same as engine)."""
+    global _los_thresholds_cache
+    if _los_thresholds_cache is not None:
+        return _los_thresholds_cache
+    from config_loader import get_config_loader
+    game_config = get_config_loader().get_game_config()
+    game_rules = require_key(game_config, "game_rules")
+    los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
+    cover_ratio = float(require_key(game_rules, "cover_ratio"))
+    _los_thresholds_cache = (los_visibility_min_ratio, cover_ratio)
+    return _los_thresholds_cache
+
+
+def _get_los_wall_hexes(wall_hexes: Set[Tuple[int, int]]) -> Set[Tuple[int, int]]:
+    """
+    Augment wall_hexes with board boundary hexes (bottom_row for odd cols).
+    Matches engine/w40k_core.py and los_topology_builder for LoS consistency.
+    """
+    from config_loader import get_config_loader
+    cols, rows = get_config_loader().get_board_size()
+    result = set(wall_hexes)
+    bottom_row = rows - 1
+    for col in range(cols):
+        if col % 2 == 1:
+            result.add((col, bottom_row))
+    return result
+
+
 def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, target_row: int, wall_hexes: Set[Tuple[int, int]]) -> bool:
     """
     Check line of sight using the same algorithm as the game engine.
     
-    CRITICAL: Uses _get_accurate_hex_line algorithm (cube coordinates) to match
-    the game engine's LoS calculation exactly. This ensures analyzer detects
+    CRITICAL: Uses _compute_los_visibility_ratio (7-point sampling: center + 6 vertices)
+    to match the engine's LoS calculation exactly. This ensures analyzer detects
     the same LoS violations as the game engine.
     
-    Algorithm:
-    1. Calculate hex path from shooter to target using cube coordinates
-    2. Check if any hex in path (excluding start and end) is a wall
-    3. If any wall found, LoS is blocked; otherwise, LoS is clear
+    Algorithm (matches shooting_handlers._get_los_visibility_state):
+    1. Augment wall_hexes with board boundary (bottom_row for odd cols)
+    2. Compute visibility ratio via 7-point sampling per hex
+    3. can_see = visibility_ratio >= los_visibility_min_ratio (from game_config)
     """
-    if not wall_hexes:
-        return True
-    
-    # CRITICAL: Use the same algorithm as game engine (_get_accurate_hex_line)
-    # get_hex_line from combat_utils calls shooting_handlers._get_accurate_hex_line
+    from engine.phase_handlers.shooting_handlers import _compute_los_visibility_ratio
+
+    los_visibility_min_ratio, cover_ratio = _get_los_thresholds()
+    effective_walls = _get_los_wall_hexes(wall_hexes)
+
     try:
-        # CRITICAL: Normalize input coordinates to int before calculating path
-        # This ensures consistent comparison with wall_hexes set
         shooter_col_int = int(shooter_col)
         shooter_row_int = int(shooter_row)
         target_col_int = int(target_col)
         target_row_int = int(target_row)
-        
-        # Calculate hex path from shooter to target
-        hex_path = get_hex_line(shooter_col_int, shooter_row_int, target_col_int, target_row_int)
-        
-        # Check if any hex in path (excluding start and end) is a wall
-        # CRITICAL: Convert coordinates to int for consistent comparison with wall_hexes set
-        for i, (col, row) in enumerate(hex_path):
-            # Skip start and end hexes (same as game engine)
-            if i == 0 or i == len(hex_path) - 1:
-                continue
-            
-            # CRITICAL: Convert to int for consistent comparison with wall_hexes set
-            col_int = int(col)
-            row_int = int(row)
-            
-            if (col_int, row_int) in wall_hexes:
-                # Wall found in path - LoS is blocked
-                return False
-        
-        # No walls blocking - line of sight is clear
-        return True
-        
-    except Exception as e:
+
+        _, can_see, _ = _compute_los_visibility_ratio(
+            shooter_col_int,
+            shooter_row_int,
+            target_col_int,
+            target_row_int,
+            effective_walls,
+            los_visibility_min_ratio,
+            cover_ratio,
+        )
+        return can_see
+
+    except Exception:
         # On error, deny line of sight (fail-safe, same as game engine)
         return False
 

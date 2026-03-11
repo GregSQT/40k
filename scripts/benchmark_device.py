@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Benchmark CPU vs GPU training speed for ai/train.py.
+Benchmark CPU vs GPU training speed for ai/train.py (real training conditions).
 
-This script runs two short training jobs with identical arguments except
-`--mode CPU` and `--mode GPU`, then prints a compact comparison.
+Runs two short training jobs with identical arguments except --mode CPU and --mode GPU,
+then prints a compact comparison. Use --save-result to cache the recommendation so
+train.py skips the micro-benchmark at startup.
+
+Usage:
+  python scripts/benchmark_device.py --agent X --rewards-config Y [--save-result]
+  # Then run training normally; if --save-result was used, no micro-benchmark at startup.
 """
 
 from __future__ import annotations
@@ -87,6 +92,9 @@ def _run_benchmark_mode(
         "--mode",
         mode,
     ]
+    # With few episodes, avoid robust-eval config error (save_best_robust needs eval to run)
+    if episodes < 1000:
+        command.extend(["--param", "callback_params.save_best_robust", "false"])
     command.extend(extra_args)
 
     print(f"\n=== {mode} benchmark ===")
@@ -119,7 +127,15 @@ def _run_benchmark_mode(
     )
 
 
-def _print_summary(cpu: RunResult, gpu: RunResult) -> None:
+def _print_summary(
+    cpu: RunResult,
+    gpu: RunResult,
+    save_path: Optional[Path] = None,
+    agent: str = "",
+    training_config: str = "",
+    rewards_config: str = "",
+) -> Optional[str]:
+    """Print summary and return recommended mode ('CPU' or 'GPU')."""
     print("\n=== Benchmark summary ===")
     print(f"CPU return code: {cpu.returncode}")
     print(f"GPU return code: {gpu.returncode}")
@@ -140,7 +156,7 @@ def _print_summary(cpu: RunResult, gpu: RunResult) -> None:
 
     if cpu.returncode != 0 or gpu.returncode != 0:
         print("\nAt least one run failed. Check logs before drawing conclusions.")
-        return
+        return None
 
     faster = "CPU" if cpu.avg_ep_per_sec >= gpu.avg_ep_per_sec else "GPU"
     speedup = (
@@ -149,14 +165,41 @@ def _print_summary(cpu: RunResult, gpu: RunResult) -> None:
     print(f"\nRecommended device for this workload: {faster} (x{speedup:.2f} faster by avg episodes/s)")
 
 
+    mode = "GPU" if faster == "GPU" else "CPU"
+    print(f"\n💡 Add --mode {mode} to your training command to skip the micro-benchmark at startup.")
+
+    if save_path and agent and training_config and rewards_config:
+        cache = {
+            "agent": agent,
+            "training_config": training_config,
+            "rewards_config": rewards_config,
+            "recommendation": mode,
+            "ratio": speedup,
+            "cpu_ep_s": cpu.avg_ep_per_sec,
+            "gpu_ep_s": gpu.avg_ep_per_sec,
+        }
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with save_path.open("w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+        print(f"📁 Result saved to {save_path} (train.py will use it and skip micro-benchmark)")
+
+    return mode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark CPU vs GPU for ai/train.py")
     parser.add_argument("--agent", required=True, help="Agent key")
     parser.add_argument("--training-config", default="default", help="Training config name")
-    parser.add_argument("--rewards-config", required=True, help="Rewards config name")
+    parser.add_argument("--rewards-config", default=None,
+                       help="Rewards config (default: same as --agent)")
     parser.add_argument("--scenario", default="bot", help="Scenario option for ai/train.py")
     parser.add_argument("--episodes", type=int, default=300, help="Episodes per device run")
     parser.add_argument("--python", default=sys.executable, help="Python executable")
+    parser.add_argument(
+        "--save-result",
+        action="store_true",
+        help="Save recommendation to config/.device_benchmark.json (train.py will skip micro-benchmark)",
+    )
     parser.add_argument(
         "--extra-arg",
         action="append",
@@ -164,6 +207,8 @@ def main() -> int:
         help="Additional argument passed to ai/train.py (repeatable)",
     )
     args = parser.parse_args()
+    if args.rewards_config is None:
+        args.rewards_config = args.agent
 
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -203,7 +248,15 @@ def main() -> int:
             episodes=args.episodes,
             extra_args=args.extra_arg,
         )
-        _print_summary(cpu_result, gpu_result)
+        save_path = (repo_root / "config" / ".device_benchmark.json") if args.save_result else None
+        _print_summary(
+            cpu_result,
+            gpu_result,
+            save_path=save_path,
+            agent=args.agent if args.save_result else "",
+            training_config=args.training_config if args.save_result else "",
+            rewards_config=args.rewards_config if args.save_result else "",
+        )
         return 0 if cpu_result.returncode == 0 and gpu_result.returncode == 0 else 1
     finally:
         # Restore original model if one existed before benchmark.

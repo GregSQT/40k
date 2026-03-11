@@ -20,7 +20,7 @@ La topologie doit utiliser **exactement le même ensemble de murs** que le moteu
 
 ### 1. Murs de terrain (`walls-XX.json`)
 
-Fichier : `config/board/{cols}x{rows}/walls-XX.json` (ou `config/agents/_walls/` en fallback).
+Fichier : `config/board/{cols}x{rows}/walls/walls-XX.json` (ou racine board / `config/agents/_walls/` en fallback).
 
 Structure :
 ```json

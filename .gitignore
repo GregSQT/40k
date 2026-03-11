@@ -114,6 +114,7 @@ ai/temp/
 
 # Configurations locales (peuvent contenir des données sensibles)
 config.local.json
+config/.device_benchmark.json
 config/local/
 ai/scenario_local.json
 ai/session_scenarios/
