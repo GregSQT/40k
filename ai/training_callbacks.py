@@ -353,7 +353,7 @@ class EpisodeTerminationCallback(BaseCallback):
                     else 0.0
                 )
                 duration_display = (
-                    f" | duration avg: {avg_duration_value:.2f}s"
+                    f" duration avg: {avg_duration_value:.2f}s"
                     f" - max: {self.max_episode_duration_seconds:.2f}s"
                 )
                 gate_label = "Gate 🧱"
@@ -819,39 +819,27 @@ class MetricsCollectionCallback(BaseCallback):
                     if 'episode' in info:
                         self._handle_episode_end(info)
         
-        # NEW: Collect reward decomposition from game_state
-        if hasattr(self.training_env, 'envs') and len(self.training_env.envs) > 0:
-            env = self.training_env.envs[0]
-            
-            if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
-                game_state = env.unwrapped.game_state
-                
-                # Collect reward breakdown if available
-                if 'last_reward_breakdown' in game_state:
-                    reward_breakdown = game_state['last_reward_breakdown']
-                    
-                    # Accumulate reward components for episode
-                    if not hasattr(self, 'episode_reward_components'):
-                        self.episode_reward_components = {
-                            'base_actions': 0.0,
-                            'result_bonuses': 0.0,
-                            'tactical_bonuses': 0.0,
-                            'situational': 0.0,
-                            'penalties': 0.0
-                        }
-                    
-                    self.episode_reward_components['base_actions'] += require_key(reward_breakdown, 'base_actions')
-                    self.episode_reward_components['result_bonuses'] += require_key(reward_breakdown, 'result_bonuses')
-                    self.episode_reward_components['tactical_bonuses'] += require_key(reward_breakdown, 'tactical_bonuses')
-                    self.episode_reward_components['situational'] += require_key(reward_breakdown, 'situational')
-                    self.episode_reward_components['penalties'] += require_key(reward_breakdown, 'penalties')
-
-                    # Log position_score if available (Phase 2+ movement metric)
-                    if 'position_score' in reward_breakdown and self.metrics_tracker:
-                        self.metrics_tracker.log_position_score(reward_breakdown['position_score'])
-
-                    # Clear breakdown from game_state to avoid double-counting
-                    del game_state['last_reward_breakdown']
+        # Collect reward breakdown from info (avoids game_state access which triggers
+        # IPC with SubprocVecEnv and degrades training perf). Use first env only (original behavior).
+        if hasattr(self, 'locals') and 'infos' in self.locals and len(self.locals['infos']) > 0:
+            info0 = self.locals['infos'][0]
+            if 'reward_breakdown' in info0:
+                reward_breakdown = info0['reward_breakdown']
+                if not hasattr(self, 'episode_reward_components'):
+                    self.episode_reward_components = {
+                        'base_actions': 0.0,
+                        'result_bonuses': 0.0,
+                        'tactical_bonuses': 0.0,
+                        'situational': 0.0,
+                        'penalties': 0.0
+                    }
+                self.episode_reward_components['base_actions'] += require_key(reward_breakdown, 'base_actions')
+                self.episode_reward_components['result_bonuses'] += require_key(reward_breakdown, 'result_bonuses')
+                self.episode_reward_components['tactical_bonuses'] += require_key(reward_breakdown, 'tactical_bonuses')
+                self.episode_reward_components['situational'] += require_key(reward_breakdown, 'situational')
+                self.episode_reward_components['penalties'] += require_key(reward_breakdown, 'penalties')
+                if 'position_score' in reward_breakdown and self.metrics_tracker:
+                    self.metrics_tracker.log_position_score(reward_breakdown['position_score'])
         
         # Simple Q-value tracking every 100 steps
         if self.model.num_timesteps % 100 == 0 and hasattr(self.model, 'q_net'):
@@ -1576,6 +1564,16 @@ class BotEvaluationCallback(BaseCallback):
 
     def _evaluate_against_bots(self, eval_marker: int) -> Dict[str, Any]:
         """Evaluate agent against bots using standalone function"""
+        import os
+        if os.environ.get("LOS_ENV_TRACE") == "1":
+            import sys
+            train_env = self.model.get_env() if hasattr(self.model, "get_env") else None
+            n_envs = getattr(train_env, "num_envs", "?") if train_env is not None else "?"
+            sys.stderr.write(
+                f"[LOS_ENV_TRACE] training_callbacks _evaluate_against_bots eval_marker={eval_marker} "
+                f"pid={os.getpid()} train_env.num_envs={n_envs}\n"
+            )
+            sys.stderr.flush()
         from ai.bot_evaluation import evaluate_against_bots
         eval_progress_prefix = self._build_eval_progress_prefix(eval_marker) if self.show_eval_progress else None
         return evaluate_against_bots(
@@ -1588,5 +1586,5 @@ class BotEvaluationCallback(BaseCallback):
             deterministic=self.eval_deterministic,
             eval_progress_label=f"Eval {self.eval_count}" if self.show_eval_progress else None,
             show_summary=not self.show_eval_progress,
-            eval_progress_prefix=eval_progress_prefix
+            eval_progress_prefix=eval_progress_prefix,
         )

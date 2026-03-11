@@ -22,16 +22,10 @@ def load_config(scenario_path=None):
     """
     config = {}
 
-    # Load board configuration
-    board_config_path = "config/board_config.json"
-    if not os.path.exists(board_config_path):
-        raise FileNotFoundError(f"Required config file missing: {board_config_path}")
-
-    with open(board_config_path, 'r', encoding='utf-8-sig') as f:
-        content = f.read().strip()
-        if not content:
-            raise ValueError(f"Config file is empty: {board_config_path}")
-        board_raw = json.loads(content)
+    # Load board configuration from config/board/{paths.board}/board_config.json
+    from config_loader import get_config_loader
+    config_loader = get_config_loader()
+    board_raw = config_loader.get_board_config()
 
     # Extract default config from nested structure
     config["board"] = board_raw["default"]

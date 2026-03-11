@@ -447,6 +447,9 @@ class GameStateManager:
             scenario_walls = resolved_scenario_walls
             scenario_objectives = resolved_scenario_objectives
             scenario_primary_objective = None
+            scenario_wall_ref = (
+                scenario_data.get("wall_ref") if isinstance(scenario_data, dict) else None
+            )
 
             if isinstance(scenario_data, dict):
                 if "primary_objectives" in scenario_data:
@@ -476,6 +479,7 @@ class GameStateManager:
             return {
                 "units": enhanced_units,
                 "wall_hexes": scenario_walls,
+                "wall_ref": scenario_wall_ref,
                 "objectives": scenario_objectives,
                 "primary_objectives": scenario_primary_objectives,
                 "primary_objective": scenario_primary_objective_single,
@@ -812,7 +816,7 @@ class GameStateManager:
         scenario_file: str,
         field_name: str
     ) -> Path:
-        """Resolve shared config path under config/agents/<shared_dir_name>."""
+        """Resolve shared config path. _walls -> config/board/{cols}x{rows}/, else config/agents/<shared_dir_name>/."""
         if not isinstance(raw_ref, str) or not raw_ref.strip():
             raise ValueError(
                 f"Scenario '{scenario_file}' has invalid '{field_name}': {raw_ref!r}"
@@ -830,6 +834,10 @@ class GameStateManager:
             normalized = f"{normalized}.json"
 
         project_root = Path(__file__).resolve().parent.parent
+        if shared_dir_name == "_walls":
+            from config_loader import get_config_loader
+            cols, rows = get_config_loader().get_board_size()
+            return project_root / "config" / "board" / f"{cols}x{rows}" / normalized
         return project_root / "config" / "agents" / shared_dir_name / normalized
 
     def _load_compact_roster_file(self, roster_path: Path, roster_label: str) -> Dict[str, Any]:

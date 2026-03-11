@@ -7,6 +7,7 @@ Delegates to specialized modules, orchestrates game flow.
 import os
 import time
 import copy
+from pathlib import Path
 import torch
 import json
 import random
@@ -191,6 +192,7 @@ class W40KEngine(gym.Env):
 
             # Store scenario terrain for game_state initialization
             self._scenario_wall_hexes = scenario_wall_hexes
+            self._scenario_wall_ref = scenario_result.get("wall_ref")
             self._scenario_objectives = scenario_objectives
             self._scenario_primary_objective = primary_objective_config
             self._scenario_roster_info = scenario_roster_info
@@ -273,6 +275,7 @@ class W40KEngine(gym.Env):
 
             # Scenario provided via config (API path) - use if present, else fall back to board config
             self._scenario_wall_hexes = self.config.get("scenario_wall_hexes")
+            self._scenario_wall_ref = self.config.get("scenario_wall_ref")
             self._scenario_objectives = self.config.get("scenario_objectives")
             self._scenario_primary_objective = self.config.get("primary_objective")
         
@@ -327,7 +330,10 @@ class W40KEngine(gym.Env):
                 base_wall_hexes.add((col, bottom_row))
         
         # CRITICAL: Initialize game_state FIRST before any other operations
+        # _cache_instance_id: unique per engine instance, prevents id(game_state) reuse collision
+        # when multiple envs run in same process (bot eval) and old game_state is GC'd
         self.game_state = {
+            "_cache_instance_id": id(self),
             # Core game state
             "units": [],
             "current_player": 1,
@@ -405,6 +411,36 @@ class W40KEngine(gym.Env):
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
             "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else []))
         }
+
+        # Load precomputed LoS topology if wall_ref available (PERF: ~1000x faster LoS lookups)
+        # CRITICAL: Clear topology when no wall_ref to avoid stale data from previous scenario
+        wall_ref = getattr(self, "_scenario_wall_ref", None)
+        if not wall_ref:
+            for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
+                self.game_state.pop(key, None)
+        else:
+            wall_ref = str(wall_ref).strip()
+            if wall_ref.startswith("walls-"):
+                wall_id = wall_ref.replace(".json", "").replace("walls-", "")
+                if wall_id:
+                    _root = Path(__file__).resolve().parent.parent
+                    _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
+                    _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
+                    if not _topology_path.exists():
+                        raise FileNotFoundError(
+                            f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
+                            f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
+                        )
+                    try:
+                        with np.load(str(_topology_path)) as topo:
+                            self.game_state["los_topology"] = topo["los"].copy()
+                            self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
+                            self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Failed to load LoS topology from {_topology_path}: {exc}"
+                        ) from exc
+
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
             raise ValueError("objectives are required for macro target initialization")
@@ -1311,7 +1347,13 @@ class W40KEngine(gym.Env):
         # CRITICAL: Add action_logs to info dict so metrics can access it
         # This must happen BEFORE reset clears action_logs. action_logs is always present (init + reset).
         info["action_logs"] = self.game_state["action_logs"].copy()
-        
+
+        # Add reward_breakdown to info so MetricsCollectionCallback can read it without accessing
+        # game_state (which triggers IPC with SubprocVecEnv and degrades training perf).
+        if "last_reward_breakdown" in self.game_state:
+            info["reward_breakdown"] = self.game_state["last_reward_breakdown"]
+            del self.game_state["last_reward_breakdown"]
+
         # NOTE: last_unit_positions loop removed - now using units_cache_prev snapshot at step() start
         
         if "console_logs" in self.game_state and self.game_state["console_logs"]:
@@ -3445,8 +3487,28 @@ class W40KEngine(gym.Env):
     def _initialize_units(self):
         """Initialize units - delegates to state_manager."""
         self.state_manager.initialize_units(self.game_state)
-    
-    
+        self._rebuild_unit_by_id()
+
+    def _rebuild_unit_by_id(self):
+        """Build O(1) index game_state['unit_by_id'] from game_state['units'].
+        Logs error if duplicate unit IDs detected.
+        """
+        units = require_key(self.game_state, "units")
+        seen_ids = set()
+        unit_by_id = {}
+        for u in units:
+            uid = str(u["id"])
+            if uid in seen_ids:
+                if self.game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    add_debug_file_log(
+                        self.game_state,
+                        f"[unit_by_id] ERROR: duplicate unit id {uid} in game_state['units']"
+                    )
+            seen_ids.add(uid)
+            unit_by_id[uid] = u
+        self.game_state["unit_by_id"] = unit_by_id
+
     def _load_units_from_scenario(self, scenario_file, unit_registry):
         """Load units from scenario - delegates to state_manager."""
         # Create temporary state_manager just for loading during init
@@ -3513,6 +3575,43 @@ class W40KEngine(gym.Env):
             normalized_wall_hexes.add((wall_col, wall_row))
         self._scenario_wall_hexes = sorted(normalized_wall_hexes)
 
+        # Scenarios MUST use wall_ref (config/board/{cols}x{rows}/walls-XX.json). No inline wall_hexes.
+        scenario_wall_ref = scenario_result.get("wall_ref")
+        self._scenario_wall_ref = scenario_wall_ref
+
+        board_cols = self.game_state.get("board_cols")
+        board_rows = self.game_state.get("board_rows")
+        # CRITICAL: Clear topology when no wall_ref to avoid stale data from previous scenario
+        if not scenario_wall_ref:
+            for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
+                self.game_state.pop(key, None)
+        elif isinstance(board_cols, int) and isinstance(board_rows, int):
+            wall_ref = str(scenario_wall_ref).strip()
+            if wall_ref.startswith("walls-"):
+                wall_id = wall_ref.replace(".json", "").replace("walls-", "")
+                if wall_id:
+                    _root = Path(__file__).resolve().parent.parent
+                    _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
+                    _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
+                    if not _topology_path.exists():
+                        raise FileNotFoundError(
+                            f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
+                            f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
+                        )
+                    try:
+                        with np.load(str(_topology_path)) as topo:
+                            self.game_state["los_topology"] = topo["los"].copy()
+                            self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
+                            self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Failed to load LoS topology from {_topology_path}: {exc}"
+                        ) from exc
+
+        # Clear target pool cache on scenario rotation (defense in depth)
+        from engine.phase_handlers import shooting_handlers
+        shooting_handlers.clear_target_pool_cache()
+
         # Determine objectives: use scenario if provided, otherwise use board config
         if scenario_result.get("objectives") is not None:
             self._scenario_objectives = scenario_result["objectives"]
@@ -3550,6 +3649,7 @@ class W40KEngine(gym.Env):
         # Reinitialize game_state units with a SEPARATE deepcopy
         # This ensures game_state["units"] is independent from config["units"]
         self.game_state["units"] = copy.deepcopy(scenario_units)
+        self._rebuild_unit_by_id()
 
         # Update wall_hexes and objectives in game_state if present
         if "wall_hexes" in self.game_state:

@@ -557,6 +557,7 @@ def initialize_engine(scenario_file: str = None):
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
+        scenario_wall_ref = scenario_result.get("wall_ref")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
         scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
@@ -585,6 +586,7 @@ def initialize_engine(scenario_file: str = None):
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
+            "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
@@ -726,6 +728,7 @@ def initialize_test_engine(scenario_file: str = None):
         scenario_primary_objective_ids = scenario_result.get("primary_objectives")
         scenario_primary_objective_id = scenario_result.get("primary_objective")
         scenario_wall_hexes = scenario_result.get("wall_hexes")
+        scenario_wall_ref = scenario_result.get("wall_ref")
         scenario_objectives = scenario_result.get("objectives")
         scenario_deployment_type = scenario_result.get("deployment_type")
         scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
@@ -754,6 +757,7 @@ def initialize_test_engine(scenario_file: str = None):
             "units": scenario_units,
             "primary_objective": primary_objective_config,
             "scenario_wall_hexes": scenario_wall_hexes,
+            "scenario_wall_ref": scenario_wall_ref,
             "scenario_objectives": scenario_objectives,
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
@@ -1562,6 +1566,7 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         id_remap[old_id] = new_id
         unit["id"] = new_id
     game_state["units"] = combined_units
+    game_state["unit_by_id"] = {str(u["id"]): u for u in combined_units}
 
     # Rebuild reward config mappings for updated roster unit types.
     # Required so AI target selection and handlers can resolve every new model key.
@@ -1686,21 +1691,18 @@ def reset_game():
 def get_board_config():
     """Get board configuration for frontend."""
     try:
-        # Load board config from file
-        board_config_path = "config/board_config.json"
-        if os.path.exists(board_config_path):
-            with open(board_config_path, 'r', encoding='utf-8-sig') as f:
-                board_data = json.loads(f.read())
-            return jsonify({
-                "success": True,
-                "config": board_data["default"]
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": "Board config not found"
-            }), 404
-    
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+        board_data = config_loader.get_board_config()
+        return jsonify({
+            "success": True,
+            "config": board_data["default"]
+        })
+    except FileNotFoundError as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 404
     except Exception as e:
         return jsonify({
             "success": False,

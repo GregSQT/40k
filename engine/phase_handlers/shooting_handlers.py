@@ -6,6 +6,7 @@ Only pool building functionality - foundation for complete handler autonomy
 
 import copy
 import math
+import os
 from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import (
     normalize_coordinates,
@@ -32,9 +33,27 @@ from .shared_utils import (
 # PERFORMANCE: Target pool caching (30-40% speedup)
 # ============================================================================
 # Cache valid target pools to avoid repeated distance/LoS calculations
-# Cache key: (unit_id, col, row) - invalidates automatically when unit changes
-_target_pool_cache = {}  # {(unit_id, col, row): [enemy_id, enemy_id, ...]}
+# Cache key: (pid, id(game_state), episode_num, turn, unit_id, col, row, advance_status, adjacent_status, player)
+_target_pool_cache = {}  # per-process, per-env, per-episode; invalidates when unit/weapon changes
 _cache_size_limit = 100  # Prevent memory leak in long episodes
+
+
+def clear_target_pool_cache() -> None:
+    """Clear _target_pool_cache. Call on scenario rotation to avoid stale pool from different topology."""
+    global _target_pool_cache
+    n = len(_target_pool_cache)
+    _target_pool_cache.clear()
+    if os.environ.get("LOS_DEBUG") == "1" and n > 0:
+        import sys
+        sys.stderr.write(f"[LOS_DEBUG] clear_target_pool_cache cleared {n} entries\n")
+        sys.stderr.flush()
+
+
+# LOS debugging env vars (stderr, no debug.log):
+#   LOS_ENV_TRACE=1    - Log env creation in bot_evaluation (batch, id(gs), _cache_instance_id)
+#   LOS_DEBUG=1        - Log hex_los_cache HIT/MISS, build_unit_los_cache per target, cache MISS store
+#   LOS_VERIFY=1       - On pool cache HIT, verify each target with has_line_of_sight_coords;
+#                        if any returns False, dump CONTRADICTION diagnostic (catches root cause)
 
 
 def _serialize_weapon_for_json(weapon: Dict[str, Any]) -> Dict[str, Any]:
@@ -467,6 +486,7 @@ def weapon_availability_check(
                 
                 units_cache = require_key(game_state, "units_cache")
                 unit_player = int(unit["player"]) if unit["player"] is not None else None
+                unit_col, unit_row = require_unit_position(unit, game_state)
                 for enemy_id, cache_entry in units_cache.items():
                     # CRITICAL: Normalize player values to int for consistent comparison
                     enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
@@ -474,9 +494,8 @@ def weapon_availability_check(
                         enemy = get_unit_by_id(game_state, enemy_id)
                         if enemy is None:
                             raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                        # Check range
-                        unit_col, unit_row = require_unit_position(unit, game_state)
-                        enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                        # Check range (use cache_entry for enemy position)
+                        enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
                         distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
                         if distance > weapon_range:
                             continue
@@ -616,6 +635,7 @@ def _get_available_weapons_for_selection(
         
         units_cache = require_key(game_state, "units_cache")
         unit_player = int(unit["player"]) if unit["player"] is not None else None
+        unit_col, unit_row = require_unit_position(unit, game_state)
         for enemy_id, cache_entry in units_cache.items():
             # CRITICAL: Normalize player values to int for consistent comparison
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
@@ -624,9 +644,8 @@ def _get_available_weapons_for_selection(
                 if enemy is None:
                     raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
                 
-                # Check range
-                unit_col, unit_row = require_unit_position(unit, game_state)
-                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                # Check range (use cache_entry for enemy position)
+                enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
                 distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
                 if distance > weapon_range:
                     continue
@@ -863,6 +882,21 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         has_los = has_line_of_sight_coords(unit_col, unit_row, target_col, target_row, game_state)
 
         unit["los_cache"][str(target_id)] = has_los
+
+        if os.environ.get("LOS_DEBUG") == "1":
+            import sys
+            try:
+                ratio, can_see, _ = _get_los_visibility_state(
+                    game_state, int(unit_col), int(unit_row), int(target_col), int(target_row)
+                )
+                topo_str = f"topology={ratio:.6f}"
+            except Exception:
+                topo_str = "topology=N/A"
+            ep = game_state.get("episode_number", "?")
+            turn = game_state.get("turn", "?")
+            msg = f"[LOS_DEBUG] build_unit_los_cache unit={unit_id} target={target_id} ({unit_col},{unit_row})->({target_col},{target_row}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"
+            sys.stderr.write(msg)
+            sys.stderr.flush()
 
 
 def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
@@ -1406,12 +1440,12 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         units_cache = require_key(game_state, "units_cache")
         shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
         shooter_id_str = str(shooter["id"])
+        target_col, target_row = require_unit_position(target, game_state)
         for friendly_id, cache_entry in units_cache.items():
             # CRITICAL: Normalize player values to int for consistent comparison
             friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
-                target_col, target_row = require_unit_position(target, game_state)
-                friendly_col, friendly_row = require_unit_position(friendly_id, game_state)
+                friendly_col, friendly_row = cache_entry["col"], cache_entry["row"]
                 friendly_distance = _calculate_hex_distance(target_col, target_row, friendly_col, friendly_row)
                 
                 if friendly_distance <= melee_range:
@@ -1757,6 +1791,8 @@ def valid_target_pool_build(
         )
     
     # For each target_id in targets_with_los.keys():
+    units_cache = require_key(game_state, "units_cache")
+    unit_col, unit_row = require_unit_position(unit, game_state)
     for target_id_str in targets_with_los.keys():
         # Get enemy unit by ID
         enemy = _get_unit_by_id(game_state, target_id_str)
@@ -1823,8 +1859,10 @@ def valid_target_pool_build(
         # This check must be done BEFORE checking if enemy is engaged with other friendly units
         from engine.utils.weapon_helpers import get_melee_range
         melee_range = get_melee_range()
-        unit_col, unit_row = require_unit_position(unit, game_state)
-        enemy_col, enemy_row = require_unit_position(enemy, game_state)
+        enemy_entry = units_cache.get(target_id_str)
+        if enemy_entry is None:
+            raise KeyError(f"Enemy {target_id_str} not in units_cache (dead or absent)")
+        enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
         distance_to_enemy = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
         
         # Check if enemy is adjacent to shooter
@@ -1861,13 +1899,16 @@ def valid_target_pool_build(
             engaged_friendly_id = None
             engaged_friendly_distance = None
             units_cache = require_key(game_state, "units_cache")
+            enemy_entry = units_cache.get(enemy_id_normalized)
+            if enemy_entry is None:
+                raise KeyError(f"Enemy {enemy_id_normalized} not in units_cache (dead or absent)")
+            enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
             for friendly_id, cache_entry in units_cache.items():
                 # CRITICAL: Convert to int for consistent comparison (player can be int or string)
                 friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
                 if (friendly_player == current_player_int and 
                     friendly_id != unit_id_normalized):
-                    enemy_col, enemy_row = require_unit_position(enemy_id_normalized, game_state)
-                    friendly_col, friendly_row = require_unit_position(friendly_id, game_state)
+                    friendly_col, friendly_row = cache_entry["col"], cache_entry["row"]
                     friendly_distance = _calculate_hex_distance(
                         enemy_col, enemy_row, friendly_col, friendly_row
                     )
@@ -1985,6 +2026,16 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     # Create cache key from unit identity, position, player, AND context (advance_status, adjacent_status)
     # Cache must include context to avoid wrong results after advance
     # CRITICAL: Include unit["player"] to ensure cache is invalidated when player changes
+    # CRITICAL: Include os.getpid() to avoid cross-worker pollution (SubprocVecEnv fork copies cache, id() can collide)
+    # CRITICAL: Use _cache_instance_id (engine id) to avoid cross-env pollution - id(game_state) can
+    # be reused after GC when multiple envs run in same process (bot eval), causing wrong pool reuse
+    gs_instance_id = game_state.get("_cache_instance_id", id(game_state))
+    # CRITICAL: Include episode_number to avoid cross-episode pollution (target positions differ between episodes)
+    # CRITICAL: Include turn - targets can MOVE between turns; pool built in turn 1 is stale in turn 2+
+    # CRITICAL: Include hash of enemy positions - targets can move between activations (reactive, etc.)
+    # Pool built when target at (5,5) is stale when target moved to (12,9)
+    # CRITICAL: Include wall_hexes (topology) so pool from one scenario/board is never reused for another.
+    # Multiple envs in same process (e.g. bot_eval) can have same (pid, id, ep, turn, positions); only topology differs.
     unit_col, unit_row = require_unit_position(unit, game_state)
     unit_id_str = str(unit_id)
     unit_player = require_key(unit, "player")
@@ -1993,18 +2044,28 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Invalid unit player value: {unit_player}") from exc
     unit["player"] = unit_player_int
-    cache_key = (unit_id_str, unit_col, unit_row, advance_status, adjacent_status, unit_player_int)
+    episode_num = game_state.get("episode_number", 0)
+    turn_num = game_state.get("turn", 0)
+    # Hash enemy positions so cache invalidates when any target moves
+    units_cache = require_key(game_state, "units_cache")
+    enemy_pos_hash = tuple(
+        sorted(
+            (tid, int(e["col"]), int(e["row"]))
+            for tid, e in units_cache.items()
+            if int(e.get("player", -1)) != unit_player_int and is_unit_alive(tid, game_state)
+        )
+    )
+    wall_hexes_tuple = tuple(
+        sorted(tuple(w) if isinstance(w, list) else w for w in game_state.get("wall_hexes", []))
+    )
+    cache_key = (os.getpid(), gs_instance_id, episode_num, turn_num, unit_id_str, unit_col, unit_row, advance_status, adjacent_status, unit_player_int, enemy_pos_hash, wall_hexes_tuple)
 
     # Check cache
     if cache_key in _target_pool_cache:
         # Cache hit: Fast path - filter dead targets only
-        # AI_TURN.md: During shooting activation, friendly units cannot die or move
-        # Only targets can die, which is already handled by is_unit_alive (units_cache) filter
-        # Context (advance_status, adjacent_status) is part of cache key, so cache is reliable
         cached_pool = _target_pool_cache[cache_key]
 
-        # Filter out units that died (only change possible during activation)
-        # CRITICAL: Also check that target is not a friendly unit (defense in depth)
+        # Filter out units that died, friendly, or lost LoS
         alive_targets = []
         current_player = unit["player"]
         # CRITICAL: Convert to int for consistent comparison (player can be int or string)
@@ -2021,13 +2082,13 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
                     from engine.game_utils import add_console_log, add_debug_log
                     add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
                     continue  # Skip friendly units
-                
                 # AI_TURN.md: No re-validation needed - cache is reliable during activation
-                # Only targets can die (filtered above), friendly units cannot move or die
                 alive_targets.append(target_id_str)  # Ensure ID is string
 
         # Update unit's target pool
         unit["valid_target_pool"] = alive_targets
+        unit["_pool_from_cache"] = True
+        unit["_pool_cache_key"] = str(cache_key)
 
         return alive_targets
 
@@ -2292,12 +2353,38 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     # Store in cache
     _target_pool_cache[cache_key] = valid_target_pool
 
+    # LOS_DEBUG=1: Log topology value for each target when storing (baseline for contradiction analysis)
+    if os.environ.get("LOS_DEBUG") == "1" and valid_target_pool:
+        import sys
+        from engine.combat_utils import has_line_of_sight_coords
+        units_cache = require_key(game_state, "units_cache")
+        sc, sr = unit_col, unit_row
+        for tid in valid_target_pool:
+            entry = units_cache.get(tid)
+            if entry:
+                tc, tr = entry["col"], entry["row"]
+                has_los = has_line_of_sight_coords(int(sc), int(sr), int(tc), int(tr), game_state)
+                try:
+                    ratio, can_see, _ = _get_los_visibility_state(
+                        game_state, int(sc), int(sr), int(tc), int(tr)
+                    )
+                    topo_str = f"topology={ratio:.6f} can_see={can_see}"
+                except Exception:
+                    topo_str = "topology=N/A"
+                ep = game_state.get("episode_number", "?")
+                turn = game_state.get("turn", "?")
+                msg = f"[LOS_DEBUG] cache MISS store unit={unit_id_str} target={tid} ({sc},{sr})->({tc},{tr}) has_los={has_los} {topo_str} ep={ep} turn={turn}\n"
+                sys.stderr.write(msg)
+                sys.stderr.flush()
+
     # Prevent memory leak: Clear cache if it grows too large
     if len(_target_pool_cache) > _cache_size_limit:
         _target_pool_cache.clear()
 
     # Update unit's target pool
     unit["valid_target_pool"] = valid_target_pool
+    unit["_pool_from_cache"] = False
+    unit["_pool_cache_key"] = str(cache_key)
 
     return valid_target_pool
 
@@ -2332,10 +2419,6 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
             raise KeyError(f"Target dict must have 'id' or 'col'/'row': {list(target.keys())}")
         end_col, end_row = int(target["col"]), int(target["row"])
 
-    wall_hexes = _get_wall_hexes_set(game_state)
-    if not wall_hexes:
-        return True
-    
     start_col_int = int(start_col)
     start_row_int = int(start_row)
     end_col_int = int(end_col)
@@ -2353,7 +2436,6 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
         start_row_int,
         end_col_int,
         end_row_int,
-        wall_hexes,
     )
     if debug_mode:
         visibility_state = "BLOCKED" if not can_see else ("COVER" if in_cover else "CLEAR")
@@ -2365,31 +2447,110 @@ def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], targ
     return can_see
 
 
-def _get_wall_hexes_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
-    """Resolve and normalize wall hexes from game_state sources."""
-    wall_hexes_data: Any
-    if "wall_hexes" in game_state:
-        wall_hexes_data = game_state["wall_hexes"]
-    elif "board" in game_state and "wall_hexes" in game_state["board"]:
-        wall_hexes_data = game_state["board"]["wall_hexes"]
-    elif "board_config" in game_state and "wall_hexes" in game_state["board_config"]:
-        wall_hexes_data = game_state["board_config"]["wall_hexes"]
+def _dump_los_contradiction_diagnostic(
+    game_state: Dict[str, Any],
+    attacker: Dict[str, Any],
+    target: Dict[str, Any],
+    attacker_id: Any,
+    target_id: Any,
+    attacker_col: Any,
+    attacker_row: Any,
+    target_col: Any,
+    target_row: Any,
+) -> None:
+    """
+    Diagnostic: target was in valid_target_pool (los_cache said visible) but
+    has_line_of_sight_coords returned False during save. Dump state to find root cause.
+    """
+    import sys
+    from engine.combat_utils import normalize_coordinates
+
+    lines: List[str] = []
+    lines.append("=" * 80)
+    lines.append("LOS CONTRADICTION DIAGNOSTIC")
+    lines.append("Target was in valid_target_pool (visible) but has_line_of_sight_coords returned False")
+    lines.append("=" * 80)
+
+    # Positions used in save path
+    ac, ar = int(attacker_col), int(attacker_row)
+    tc, tr = int(target_col), int(target_row)
+    ac_norm, ar_norm = normalize_coordinates(ac, ar)
+    tc_norm, tr_norm = normalize_coordinates(tc, tr)
+    cache_key = ((ac_norm, ar_norm), (tc_norm, tr_norm))
+    cache_key_inv = ((tc_norm, tr_norm), (ac_norm, ar_norm))
+
+    lines.append(f"Save path positions: attacker({attacker_id})=({ac},{ar}) target({target_id})=({tc},{tr})")
+    lines.append(f"Normalized: attacker=({ac_norm},{ar_norm}) target=({tc_norm},{tr_norm})")
+    lines.append(f"Cache key: {cache_key}")
+
+    # units_cache positions (what build_unit_los_cache uses)
+    uc = game_state.get("units_cache") or {}
+    attacker_uid = str(attacker_id)
+    target_uid = str(target_id)
+    if attacker_uid in uc:
+        ae = uc[attacker_uid]
+        ua_col, ua_row = ae.get("col"), ae.get("row")
+        lines.append(f"units_cache attacker: col={ua_col} (type={type(ua_col).__name__}) row={ua_row} (type={type(ua_row).__name__})")
+        if (ua_col, ua_row) != (ac_norm, ar_norm):
+            lines.append(f"  >>> MISMATCH vs save path ({ac_norm},{ar_norm})")
+    if target_uid in uc:
+        te = uc[target_uid]
+        ut_col, ut_row = te.get("col"), te.get("row")
+        lines.append(f"units_cache target: col={ut_col} (type={type(ut_col).__name__}) row={ut_row} (type={type(ut_row).__name__})")
+        if (ut_col, ut_row) != (tc_norm, tr_norm):
+            lines.append(f"  >>> MISMATCH vs save path ({tc_norm},{tr_norm})")
+
+    # los_cache (what we stored when building pool)
+    los_cache = attacker.get("los_cache") or {}
+    if target_uid in los_cache:
+        lines.append(f"attacker los_cache[{target_uid}] = {los_cache[target_uid]} (True=was visible when pool built)")
     else:
-        raise KeyError(
-            "wall_hexes not found in game_state['wall_hexes'], "
-            "game_state['board']['wall_hexes'], or game_state['board_config']['wall_hexes']"
-        )
-    if not isinstance(wall_hexes_data, (list, tuple, set)):
-        raise TypeError(
-            "wall_hexes source must be a list/tuple/set, "
-            f"got {type(wall_hexes_data).__name__}"
-        )
-    wall_hexes: Set[Tuple[int, int]] = set()
-    for wall_hex in wall_hexes_data:
-        if not isinstance(wall_hex, (list, tuple)) or len(wall_hex) < 2:
-            raise ValueError(f"Invalid wall hex format: {wall_hex!r}")
-        wall_hexes.add((int(wall_hex[0]), int(wall_hex[1])))
-    return wall_hexes
+        lines.append(f"attacker los_cache: target {target_uid} NOT in los_cache")
+
+    # valid_target_pool
+    vtp = attacker.get("valid_target_pool") or []
+    lines.append(f"valid_target_pool contains target: {target_uid in vtp} (pool size={len(vtp)})")
+
+    # Pool cache trace (for LOS contradiction root cause)
+    pool_from_cache = attacker.get("_pool_from_cache")
+    pool_cache_key = attacker.get("_pool_cache_key")
+    lines.append(f"_pool_from_cache: {pool_from_cache} (True=pool came from cache HIT)")
+    lines.append(f"_pool_cache_key: {pool_cache_key}")
+
+    # hex_los_cache
+    hlc = game_state.get("hex_los_cache") or {}
+    lines.append(f"hex_los_cache size: {len(hlc)}")
+    if cache_key in hlc:
+        lines.append(f"hex_los_cache[cache_key] = {hlc[cache_key]}")
+    else:
+        lines.append(f"hex_los_cache[cache_key]: NOT FOUND (cache miss)")
+    if cache_key_inv in hlc:
+        lines.append(f"hex_los_cache[inverse_key] = {hlc[cache_key_inv]}")
+
+    # topology
+    lt = game_state.get("los_topology")
+    bc, br = game_state.get("board_cols"), game_state.get("board_rows")
+    if lt is not None and bc is not None and br is not None:
+        n = bc * br
+        fi = ar_norm * bc + ac_norm
+        ti = tr_norm * bc + tc_norm
+        if 0 <= fi < n and 0 <= ti < n:
+            val_fwd = float(lt[fi, ti])
+            val_inv = float(lt[ti, fi])
+            lines.append(f"los_topology[attacker_idx, target_idx] = {val_fwd:.6f} (idx {fi}->{ti})")
+            lines.append(f"los_topology[target_idx, attacker_idx] = {val_inv:.6f} (idx {ti}->{fi})")
+        else:
+            lines.append(f"Topology indices out of bounds: fi={fi} ti={ti} n={n}")
+    else:
+        lines.append(f"los_topology present: {lt is not None}, board_cols={bc}, board_rows={br}")
+
+    # Episode context
+    lines.append(f"episode={game_state.get('episode_number')} turn={game_state.get('turn')} phase={game_state.get('phase')}")
+
+    lines.append("=" * 80)
+    msg = "\n".join(lines)
+    sys.stderr.write(msg + "\n")
+    sys.stderr.flush()
 
 
 def _get_los_visibility_state(
@@ -2398,22 +2559,37 @@ def _get_los_visibility_state(
     start_row: int,
     end_col: int,
     end_row: int,
-    wall_hexes: Set[Tuple[int, int]],
 ) -> Tuple[float, bool, bool]:
-    """Return (visibility_ratio, can_see, in_cover) using configured LoS thresholds."""
+    """Return (visibility_ratio, can_see, in_cover) using los_topology (required).
+    Topology is the single source of truth for LoS; no fallback."""
+    los_topology = game_state.get("los_topology")
+    if los_topology is None:
+        raise KeyError(
+            "los_topology is required. Load topology at reset via topology_{cols}x{rows}-{wall_id}.npz"
+        )
     config = require_key(game_state, "config")
     game_rules = require_key(config, "game_rules")
-    los_visibility_min_ratio = require_key(game_rules, "los_visibility_min_ratio")
-    cover_ratio = require_key(game_rules, "cover_ratio")
-    return _compute_los_visibility_ratio(
-        start_col,
-        start_row,
-        end_col,
-        end_row,
-        wall_hexes,
-        float(los_visibility_min_ratio),
-        float(cover_ratio),
-    )
+    los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
+    cover_ratio = float(require_key(game_rules, "cover_ratio"))
+
+    board_cols = game_state.get("board_cols")
+    board_rows = game_state.get("board_rows")
+    if not (
+        isinstance(board_cols, int)
+        and isinstance(board_rows, int)
+        and 0 <= start_col < board_cols
+        and 0 <= start_row < board_rows
+        and 0 <= end_col < board_cols
+        and 0 <= end_row < board_rows
+    ):
+        # Invalid coords (e.g. undeployed unit at -1,-1): no LoS
+        return 0.0, False, False
+    from_idx = start_row * board_cols + start_col
+    to_idx = end_row * board_cols + end_col
+    visibility_ratio = float(los_topology[from_idx, to_idx])
+    can_see = visibility_ratio >= los_visibility_min_ratio
+    in_cover = can_see and visibility_ratio < cover_ratio
+    return visibility_ratio, can_see, in_cover
 
 
 def _update_unit_los_preview_data(
@@ -2473,7 +2649,6 @@ def _update_unit_los_preview_data(
         )
 
     shooter_col, shooter_row = require_unit_position(unit, game_state)
-    wall_hexes = _get_wall_hexes_set(game_state)
     attack_cells: List[Dict[str, int]] = []
     cover_cells: List[Dict[str, int]] = []
     ratio_by_hex: Dict[str, float] = {}
@@ -2491,7 +2666,6 @@ def _update_unit_los_preview_data(
                 int(shooter_row),
                 int(col),
                 int(row),
-                wall_hexes,
             )
             ratio_by_hex[f"{col},{row}"] = float(visibility_ratio)
             if not can_see:
@@ -2793,6 +2967,10 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
     # Clear unit activation state
     if "valid_target_pool" in unit:
         del unit["valid_target_pool"]
+    if "_pool_from_cache" in unit:
+        del unit["_pool_from_cache"]
+    if "_pool_cache_key" in unit:
+        del unit["_pool_cache_key"]
     # AI_TURN.md: Clean up los_cache at end of activation
     if "los_cache" in unit:
         del unit["los_cache"]
@@ -3552,12 +3730,18 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
         # CRITICAL FIX: Invalidate target pool cache after weapon change
         # Cache key doesn't include selectedRngWeaponIndex, so we must clear matching entries
+        # Cache key format: (pid, id(gs), ep, turn, unit_id, col, row, advance, adjacent, player, enemy_pos_hash)
         global _target_pool_cache
         unit_col, unit_row = require_unit_position(unit, game_state)
         unit_id_str = str(unit_id)
+        gs_instance_id = game_state.get("_cache_instance_id", id(game_state))
+        pid = os.getpid()
+        ep = game_state.get("episode_number", 0)
+        turn_num = game_state.get("turn", 0)
         keys_to_remove = [
             key for key in _target_pool_cache.keys()
-            if len(key) >= 3 and str(key[0]) == unit_id_str and key[1] == unit_col and key[2] == unit_row
+            if len(key) >= 7 and key[0] == pid and key[1] == gs_instance_id and key[2] == ep and key[3] == turn_num
+            and str(key[4]) == unit_id_str and key[5] == unit_col and key[6] == unit_row
         ]
         for key in keys_to_remove:
             del _target_pool_cache[key]
@@ -5114,20 +5298,29 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
     if not _weapon_has_ignores_cover_rule(weapon):
         attacker_col, attacker_row = require_unit_position(attacker, game_state)
         target_col, target_row = require_unit_position(target, game_state)
-        wall_hexes = _get_wall_hexes_set(game_state)
-        visibility_ratio, can_see, target_in_cover = _get_los_visibility_state(
+        from engine.combat_utils import has_line_of_sight_coords, normalize_coordinates
+        can_see = has_line_of_sight_coords(
+            int(attacker_col), int(attacker_row),
+            int(target_col), int(target_row),
+            game_state,
+        )
+        if not can_see:
+            _dump_los_contradiction_diagnostic(
+                game_state, attacker, target, attacker_id, target_id,
+                attacker_col, attacker_row, target_col, target_row,
+            )
+            raise ValueError(
+                f"Target {target_id} became not visible during save calculation "
+                f"(has_line_of_sight_coords returned False)"
+            )
+        # Cover check: need ratio from topology
+        visibility_ratio, _, target_in_cover = _get_los_visibility_state(
             game_state,
             int(attacker_col),
             int(attacker_row),
             int(target_col),
             int(target_row),
-            wall_hexes,
         )
-        if not can_see:
-            raise ValueError(
-                f"Target {target_id} became not visible during save calculation "
-                f"(visibility_ratio={visibility_ratio:.3f})"
-            )
         if target_in_cover:
             cover_bonus_applied = True
             cover_bonus_value = 1
@@ -5362,7 +5555,7 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     for enemy_id, cache_entry in units_cache.items():
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
-            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
             distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= cc_range:
                 return True
@@ -5380,12 +5573,12 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     # CRITICAL: Normalize player value to int for consistent comparison
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     units_cache = require_key(game_state, "units_cache")
+    unit_col, unit_row = require_unit_position(unit, game_state)
     for enemy_id, cache_entry in units_cache.items():
         # CRITICAL: Normalize player value to int for consistent comparison
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
-            unit_col, unit_row = require_unit_position(unit, game_state)
-            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
             distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= max_range:
                 return True  # Simplified - assume clear LoS for now
@@ -5393,11 +5586,11 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     return False
 
 def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
-    """Get unit by ID from game state. Compare both sides as strings for int/str ID mismatch."""
-    for unit in game_state["units"]:
-        if str(unit["id"]) == str(unit_id):
-            return unit
-    return None
+    """Get unit by ID from game state. Compare both sides as strings for int/str ID mismatch.
+    REQUIRES: game_state['unit_by_id'] (built at reset/reload). Absence = bug, raise explicitly.
+    """
+    unit_by_id = require_key(game_state, "unit_by_id")
+    return unit_by_id.get(str(unit_id))
 
 def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
     """Calculate hex distance using consistent cube coordinates."""
@@ -5492,7 +5685,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             for enemy_id, cache_entry in units_cache.items():
                 enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
                 if enemy_player != unit_player_int:
-                    enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                    enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
                     if (enemy_col, enemy_row) in neighbors:
                         adjacent_enemies.append(f"{enemy_id}@({enemy_col},{enemy_row})")
             add_debug_file_log(
@@ -5520,7 +5713,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         for enemy_id, cache_entry in units_cache.items():
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if enemy_player != unit_player_int:
-                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
                 if (enemy_col, enemy_row) in neighbors:
                     adjacent_enemies.append(f"{enemy_id}@({enemy_col},{enemy_row})")
         if adjacent_enemies:
@@ -5568,11 +5761,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             unit_id_str = str(unit["id"])
             units_cache = require_key(game_state, "units_cache")
             occupants = []
-            for check_id in units_cache.keys():
-                check_pos = get_unit_position(check_id, game_state)
-                if check_pos is None:
-                    continue
-                check_col, check_row = check_pos
+            for check_id, check_entry in units_cache.items():
+                check_col, check_row = check_entry["col"], check_entry["row"]
                 if check_col == dest_col and check_row == dest_row:
                     check_hp = get_hp_from_cache(str(check_id), game_state)
                     occupants.append(f"{check_id}@({check_col},{check_row}) HP={check_hp}")
@@ -5595,7 +5785,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if enemy_player == unit_player_int:
                 continue
-            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
             if _calculate_hex_distance(dest_col, dest_row, enemy_col, enemy_row) <= 1:
                 return False, {
                     "error": "advance_destination_adjacent_to_enemy",
@@ -5618,12 +5808,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         # Check all units for occupation - CRITICAL: Use explicit int conversion for all comparisons
         units_cache = require_key(game_state, "units_cache")
         unit_id_str = str(unit["id"])
-        for check_id in units_cache.keys():
-            check_pos = get_unit_position(check_id, game_state)
-            if check_pos is None:
-                continue
-            check_col, check_row = check_pos
-            
+        for check_id, check_entry in units_cache.items():
+            check_col, check_row = check_entry["col"], check_entry["row"]
             check_hp = get_hp_from_cache(str(check_id), game_state)
             conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Checking Unit {check_id} at ({check_col},{check_row}) - HP={check_hp}")
             

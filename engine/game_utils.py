@@ -6,6 +6,7 @@ AI_TURN.md COMPLIANCE: Pure lookup functions, no game logic
 
 import os
 from typing import Dict, Any, Optional
+from shared.data_validation import require_key
 
 _debug_log_initialized = False
 
@@ -54,11 +55,11 @@ def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[st
 
     CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
     Pool unit IDs are integers, but some lookups pass strings.
+
+    REQUIRES: game_state["unit_by_id"] (built at reset/reload). Absence = bug, raise explicitly.
     """
-    for unit in game_state["units"]:
-        if str(unit["id"]) == str(unit_id):
-            return unit
-    return None
+    unit_by_id = require_key(game_state, "unit_by_id")
+    return unit_by_id.get(str(unit_id))
 
 
 def add_console_log(game_state: Dict[str, Any], message: str) -> None:

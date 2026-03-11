@@ -42,6 +42,7 @@ Index des documents à la racine de `Documentation/`. Les sous-dossiers (TODO, P
 | Document | Rôle |
 |----------|------|
 | **[CONFIG_FILES.md](CONFIG_FILES.md)** | Référence des fichiers de config : weapon_rules, game_config, training/rewards par agent, scénarios, armurerie. |
+| **[LOS_TOPOLOGY.md](LOS_TOPOLOGY.md)** | Topologie LoS précalculée : script `los_topology_builder.py`, murs terrain + bordure (bottom_row), intégration moteur. |
 | **[Code_Compliance/GAME_Analyzer.md](Code_Compliance/GAME_Analyzer.md)** | `ai/analyzer.py` : analyse de `step.log`, validation des règles de jeu. |
 | **[Code_Compliance/AI_RULES_checker.md](Code_Compliance/AI_RULES_checker.md)** | `scripts/check_ai_rules.py` : vérification de conformité AI_TURN / coding_practices. |
 | **[Code_Compliance/Hidden_action_finder.md](Code_Compliance/Hidden_action_finder.md)** | `ai/hidden_action_finder.py` : détection des mouvements/attaques non logués (step.log vs debug.log). |

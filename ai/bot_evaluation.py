@@ -475,6 +475,14 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     f"Invalid batch_env_count={batch_env_count} for episodes_for_scenario={episodes_for_scenario}"
                 )
             bot_envs = [create_bot_env() for _ in range(batch_env_count)]
+            if os.environ.get("LOS_ENV_TRACE") == "1":
+                import sys
+                # One line per batch to avoid log spam (debug only)
+                sys.stderr.write(
+                    f"[LOS_ENV_TRACE] bot_eval bot={bot_name} scenario={scenario_name} "
+                    f"batch={batch_env_count} envs\n"
+                )
+                sys.stderr.flush()
             slot_obs: List[Optional[np.ndarray]] = [None for _ in range(batch_env_count)]
             slot_info: List[Optional[Dict[str, Any]]] = [None for _ in range(batch_env_count)]
             slot_active = [False for _ in range(batch_env_count)]
@@ -573,7 +581,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
                         if show_progress:
                             progress_pct = (completed_episodes / total_episodes) * 100
-                            bar_length = 50
+                            bar_length = 20
                             filled = int(bar_length * completed_episodes / total_episodes)
                             bar = '█' * filled + '░' * (bar_length - filled)
                             elapsed = time.time() - start_time
@@ -584,23 +592,26 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                             elapsed_str = _format_elapsed(elapsed)
                             eta_str = _format_elapsed(eta)
                             speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed * 60:.1f}ep/m"
-                            if eval_progress_prefix:
-                                eval_label = eval_progress_label if eval_progress_label else ""
+                            if eval_progress_prefix and eval_progress_label:
                                 line = (
-                                    f"{progress_pct:3.0f}% {completed_episodes}/{total_episodes} "
-                                    f"[{elapsed_str}<{eta_str}, {speed_str}] {eval_label}"
-                                ).rstrip()
+                                    f" [{elapsed_str}<{eta_str}, {speed_str}] | "
+                                    f"{eval_progress_label}: {progress_pct:3.0f}% {bar} "
+                                    f"{completed_episodes}/{total_episodes}"
+                                )
+                                full_line = f"{eval_progress_prefix}{line}"
                             elif eval_progress_label:
                                 line = (
-                                    f"{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} "
-                                    f"[{elapsed_str}<{eta_str}, {speed_str}] {eval_progress_label}"
+                                    f"[{elapsed_str}<{eta_str}, {speed_str}] | "
+                                    f"{eval_progress_label}: {progress_pct:3.0f}% {bar} "
+                                    f"{completed_episodes}/{total_episodes}"
                                 )
+                                full_line = line
                             else:
                                 line = (
                                     f"{progress_pct:3.0f}% {bar} {completed_episodes}/{total_episodes} "
                                     f"vs {bot_name.capitalize()}Bot [{scenario_name}] [{elapsed_str}<{eta_str}, {speed_str}]"
                                 )
-                            full_line = f"{eval_progress_prefix} | {line}" if eval_progress_prefix else line
+                                full_line = f"{eval_progress_prefix} {line}" if eval_progress_prefix else line
                             clear_padding_len = max(0, last_progress_line_len - len(full_line))
                             clear_padding = " " * clear_padding_len
                             sys.stdout.write(f"\r{full_line}{clear_padding}")
@@ -623,9 +634,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
             except Exception as e:
                 total_failed_episodes += 1
-                if show_progress:
-                    print(f"\n❌ Bot evaluation failed for {bot_name} on scenario {scenario_name}: {e}")
+                import traceback
                 error_type = type(e).__name__
+                episode = turn = phase = current_player = fight_subphase = None
                 try:
                     active_slot = 0
                     for idx in range(len(bot_envs)):
@@ -639,24 +650,18 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     current_player = game_state.get("current_player")
                     fight_subphase = game_state.get("fight_subphase")
                 except Exception as state_error:
-                    episode = None
-                    turn = None
-                    phase = None
-                    current_player = None
-                    fight_subphase = None
                     if show_progress:
                         print(f"⚠️ Failed to read game_state after bot error: {state_error}")
-                if show_progress:
-                    print(
-                        f"❌ Bot evaluation error details: type={error_type} "
-                        f"episode_index=unknown "
-                        f"episode_number={episode} turn={turn} phase={phase} "
-                        f"player={current_player} fight_subphase={fight_subphase}"
-                    )
-                import traceback
-                traceback_str = traceback.format_exc()
-                if show_progress:
-                    print(f"❌ Bot evaluation traceback:\n{traceback_str}")
+                # Always log to stderr so failures are diagnosable even when show_progress=False
+                err_lines = [
+                    f"\n❌ Bot evaluation failed for {bot_name} on scenario {scenario_name}: {e}",
+                    f"❌ Error details: type={error_type} episode_number={episode} turn={turn} "
+                    f"phase={phase} player={current_player} fight_subphase={fight_subphase}",
+                    f"❌ Traceback:\n{traceback.format_exc()}",
+                ]
+                for line in err_lines:
+                    sys.stderr.write(line + "\n")
+                sys.stderr.flush()
                 # Do not treat this as valid games; skip win/loss counting
             finally:
                 # Close environment after all episodes for this scenario are done
@@ -692,30 +697,31 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     if show_progress:
         # Show final progress bar (100%) before moving to next line
         progress_pct = 100.0
-        bar_length = 50
+        bar_length = 20
         bar = '█' * bar_length
         elapsed = time.time() - start_time
         _mins = int(elapsed // 60)
         _secs = int(elapsed % 60)
         elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
         speed_str = f"{total_episodes/elapsed:.2f}ep/s" if elapsed > 0 else "0.00ep/s"
-        if eval_progress_prefix:
-            eval_label = eval_progress_label if eval_progress_label else ""
+        if eval_progress_prefix and eval_progress_label:
             final_line = (
-                f"{progress_pct:3.0f}% {total_episodes}/{total_episodes} "
-                f"[Completed] [{elapsed_str}, {speed_str}] {eval_label}"
-            ).rstrip()
+                f" [{elapsed_str}, {speed_str}] | "
+                f"{eval_progress_label}: {progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes}"
+            )
+            full_final_line = f"{eval_progress_prefix}{final_line}"
         elif eval_progress_label:
             final_line = (
                 f"{progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes} "
                 f"[Completed] [{elapsed_str}, {speed_str}] {eval_progress_label}"
             )
+            full_final_line = final_line
         else:
             final_line = (
                 f"{progress_pct:3.0f}% {bar} {total_episodes}/{total_episodes} "
                 f"[Completed] [{elapsed_str}, {speed_str}]"
             )
-        full_final_line = f"{eval_progress_prefix} | {final_line}" if eval_progress_prefix else final_line
+            full_final_line = f"{eval_progress_prefix} {final_line}" if eval_progress_prefix else final_line
         clear_padding_len = max(0, last_progress_line_len - len(full_final_line))
         clear_padding = " " * clear_padding_len
         sys.stdout.write(f"\r{full_final_line}{clear_padding}")

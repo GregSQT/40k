@@ -118,6 +118,9 @@ config/local/
 ai/scenario_local.json
 ai/session_scenarios/
 
+# Cache topology précalculé (généré par scripts/los_topology_builder.py)
+config/board/**/topology_*.npz
+
 # ╔═════════════════════════════════════════════════════════════════════════════╗
 # ║                           FICHIERS TEMPORAIRES                             ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝

@@ -191,8 +191,25 @@ class ConfigLoader:
         )
     
     def get_board_config(self) -> Dict[str, Any]:
-        """Get board configuration."""
-        return self.load_config("board_config", force_reload=False)
+        """Get board configuration from config/board/{paths.board}/board_config.json."""
+        config = self.load_config("config", force_reload=False)
+        board_subdir = config.get("paths", {}).get("board")
+        if board_subdir:
+            board_path = self.config_dir / board_subdir / "board_config.json"
+        else:
+            board_path = self.config_dir / "board_config.json"
+        if not board_path.exists():
+            raise FileNotFoundError(f"Board config not found: {board_path}")
+        cache_key = "board_config"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        try:
+            with open(board_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            self._cache[cache_key] = data
+            return data
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON in {board_path}: {e}")
     
     def get_unit_definitions(self) -> Dict[str, Any]:
         """Get unit definitions."""

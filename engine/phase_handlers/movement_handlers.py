@@ -200,10 +200,10 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         
         # Pre-compute occupied positions and enemy adjacent hexes for this check
         occupied_positions = set()
-        for other_id in units_cache.keys():
+        for other_id, other_entry in units_cache.items():
             if other_id == unit_id:
                 continue
-            col_int, row_int = require_unit_position(other_id, game_state)
+            col_int, row_int = other_entry["col"], other_entry["row"]
             occupied_positions.add((col_int, row_int))
         # Use cached enemy_adjacent_hexes from phase start
         # Cache is built once per phase in movement_phase_start()/shooting_phase_start()/charge_phase_start()
@@ -538,10 +538,10 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     # Check all units for occupation
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
-    for other_id in units_cache.keys():
+    for other_id, other_entry in units_cache.items():
         if other_id == unit_id_str:
             continue
-        check_col, check_row = require_unit_position(other_id, game_state)
+        check_col, check_row = other_entry["col"], other_entry["row"]
         
         if check_col == dest_col_int and check_row == dest_row_int:
             # Another unit already occupies this destination - prevent collision
@@ -564,7 +564,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
         enemy_player_int = int(require_key(cache_entry, "player"))
         if enemy_player_int == unit_player_int:
             continue
-        enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+        enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
         if calculate_hex_distance(dest_col_int, dest_row_int, enemy_col, enemy_row) <= 1:
             return False, {
                 "error": "destination_adjacent_to_enemy",
@@ -684,7 +684,7 @@ def _is_valid_destination(game_state: Dict[str, Any], col: int, row: int, unit: 
                 # Normalize player values to int for consistent comparison (handles int/string mismatches)
                 enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
                 if enemy_player != unit_player:
-                    enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                    enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
                     neighbors = get_hex_neighbors(enemy_col, enemy_row)
                     if (col_int, row_int) in neighbors:
                         adjacent_enemies.append(f"Unit {enemy_id} at ({enemy_col},{enemy_row})")
@@ -723,7 +723,7 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
         # Normalize player values to int for consistent comparison (handles int/string mismatches)
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
-            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
             hex_dist = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if hex_dist <= cc_range:
                 result = True
@@ -809,11 +809,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     unit_id_str = str(unit["id"])
     units_processed = 0
     units_skipped = 0
-    for other_id in units_cache.keys():
+    for other_id, other_entry in units_cache.items():
         units_processed += 1
         if other_id != unit_id_str:
-            # Normalize coordinates - raises clear error if invalid (no defensive try/except)
-            col_int, row_int = require_unit_position(other_id, game_state)
+            col_int, row_int = other_entry["col"], other_entry["row"]
             occupied_positions.add((col_int, row_int))
     
     # DEBUG: Log all units and their positions for collision debugging
@@ -827,9 +826,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         
         # Log all units and their positions
         units_info = []
-        for other_id in units_cache.keys():
-            # Normalize coordinates - raises clear error if invalid (no defensive try/except)
-            col_int, row_int = require_unit_position(other_id, game_state)
+        for other_id, other_entry in units_cache.items():
+            col_int, row_int = other_entry["col"], other_entry["row"]
             in_occupied = (col_int, row_int) in occupied_positions
             units_info.append(f"Unit {other_id}@({col_int},{row_int}){'✓' if in_occupied else '✗'}")
         
@@ -855,7 +853,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             enemy_hp = require_key(enemy_entry, "HP_CUR")
             if enemy_hp <= 0:
                 continue
-            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
             for neighbor_col, neighbor_row in get_hex_neighbors(enemy_col, enemy_row):
                 if (
                     neighbor_col < 0
@@ -1061,6 +1059,9 @@ def _select_strategic_destination(
     if not enemy_units:
         return valid_destinations[0]
 
+    # Pre-build enemy positions from cache (avoids repeated require_unit_position calls)
+    enemy_positions = {eid: (units_cache[str(eid)]["col"], units_cache[str(eid)]["row"]) for eid in enemy_units}
+
     # STRATEGY 0: AGGRESSIVE - Move closest to nearest enemy
     if strategy_id == 0:
         best_dest = valid_destinations[0]
@@ -1069,7 +1070,7 @@ def _select_strategic_destination(
         for dest in valid_destinations:
             # Find distance to nearest enemy from this destination
             for enemy_id in enemy_units:
-                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                enemy_col, enemy_row = enemy_positions[enemy_id]
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_enemy:
                     min_dist_to_enemy = dist
@@ -1087,7 +1088,7 @@ def _select_strategic_destination(
         for dest in valid_destinations:
             targets_in_range = 0
             for enemy_id in enemy_units:
-                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                enemy_col, enemy_row = enemy_positions[enemy_id]
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist <= weapon_range:
                     # Check LoS (simplified - assumes LoS if in range for now)
@@ -1108,7 +1109,7 @@ def _select_strategic_destination(
             # Find distance to nearest enemy (we want to maximize this)
             min_dist_to_any_enemy = float('inf')
             for enemy_id in enemy_units:
-                enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+                enemy_col, enemy_row = enemy_positions[enemy_id]
                 dist = calculate_hex_distance(dest[0], dest[1], enemy_col, enemy_row)
                 if dist < min_dist_to_any_enemy:
                     min_dist_to_any_enemy = dist

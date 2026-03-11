@@ -1,6 +1,6 @@
 // scripts/copy-configs.js (from project root)
 
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,9 +12,9 @@ const projectRoot = join(__dirname, "..");
 const configDir = join(projectRoot, "config");
 const targetDir = join(projectRoot, "frontend", "public", "config");
 
-// Config files to copy
+// Config files to copy: string = config/filename, or { source, target } for custom source
 const configFiles = [
-  "board_config.json",
+  { source: "board_config", target: "board_config.json" }, // source from config.json paths.board
   "game_config.json",
   "scenario.json",
   "unit_definitions.json",
@@ -43,27 +43,44 @@ async function copyConfigs() {
     console.log("✅ Generated unit_registry.json");
   }
 
+  // Resolve board_config source from config.json paths.board
+  let boardConfigSource = join(configDir, "board_config.json");
+  try {
+    const configJsonPath = join(configDir, "config.json");
+    if (existsSync(configJsonPath)) {
+      const configJson = JSON.parse(readFileSync(configJsonPath, "utf8"));
+      const boardSubdir = configJson?.paths?.board;
+      if (boardSubdir) {
+        boardConfigSource = join(configDir, boardSubdir, "board_config.json");
+      }
+    }
+  } catch (_) {}
+
   // Copy each config file
   let copiedCount = 0;
   let skippedCount = 0;
 
-  configFiles.forEach((filename) => {
-    const sourcePath = join(configDir, filename);
-    const targetPath = join(targetDir, filename);
+  for (const entry of configFiles) {
+    const sourcePath = typeof entry === "string"
+      ? join(configDir, entry)
+      : entry.source === "board_config"
+        ? boardConfigSource
+        : join(configDir, entry.source);
+    const targetPath = join(targetDir, typeof entry === "string" ? entry : entry.target);
 
     if (existsSync(sourcePath)) {
       try {
         copyFileSync(sourcePath, targetPath);
-        console.log(`✅ Copied: ${filename}`);
+        console.log(`✅ Copied: ${typeof entry === "string" ? entry : entry.target}`);
         copiedCount++;
       } catch (error) {
-        console.error(`❌ Failed to copy ${filename}:`, error.message);
+        console.error(`❌ Failed to copy ${typeof entry === "string" ? entry : entry.target}:`, error.message);
       }
     } else {
-      console.log(`⚠️  Skipped: ${filename} (source not found)`);
+      console.log(`⚠️  Skipped: ${typeof entry === "string" ? entry : entry.target} (source not found)`);
       skippedCount++;
     }
-  });
+  }
 
   console.log(`🎯 Config sync complete: ${copiedCount} copied, ${skippedCount} skipped`);
   console.log("   Frontend configs are now up-to-date with backend!");

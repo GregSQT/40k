@@ -355,7 +355,7 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     for enemy_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) != unit_player:
-            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
+            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
             distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy_id} @ ({enemy_col},{enemy_row}) distance={distance}")
             if distance <= cc_range:
@@ -1260,8 +1260,8 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
         if int(cache_entry["player"]) == unit_player:
             continue
 
-        # Adjacent check (within melee range)
-        target_col, target_row = require_unit_position(target_id, game_state)
+        # Adjacent check (within melee range) - use cache_entry for target position
+        target_col, target_row = cache_entry["col"], cache_entry["row"]
         distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
         if distance > cc_range:
             continue
@@ -2264,9 +2264,11 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
     
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
+    unit_col, unit_row = require_unit_position(unit, game_state)
     for enemy_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) != unit_player:
-            distance = calculate_hex_distance(*require_unit_position(unit, game_state), *require_unit_position(enemy_id, game_state))
+            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
+            distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
             if distance <= rng_rng:
                 return True  # Simplified - assume clear LoS for now
     

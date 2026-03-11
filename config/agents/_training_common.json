@@ -1,6 +1,7 @@
 {
   "seed": 100,
   "total_episodes": 50000,
+  "bot_eval_show_progress": true,
   "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
   "max_turns_per_episode": 5,
   "n_envs": 48,

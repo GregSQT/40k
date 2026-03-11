@@ -3,6 +3,7 @@
 combat_utils.py - Pure utility functions for combat calculations
 """
 
+import os
 from typing import Dict, List, Tuple, Any, Optional, Set, Union
 
 # NOTE: Do not import is_unit_alive at top level — causes circular import
@@ -84,16 +85,17 @@ def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[st
     Handles int/string ID mismatches by comparing both sides as strings.
 
     Args:
-        game_state: Game state dictionary with "units" list
+        game_state: Game state dictionary with "unit_by_id" index
         unit_id: Unit ID to find (int or string)
 
     Returns:
         Unit dictionary if found, None otherwise
+
+    REQUIRES: game_state['unit_by_id'] (built at reset/reload). Absence = bug, raise explicitly.
     """
-    for unit in game_state["units"]:
-        if str(unit["id"]) == str(unit_id):
-            return unit
-    return None
+    from shared.data_validation import require_key  # Lazy: avoid circular import
+    unit_by_id = require_key(game_state, "unit_by_id")
+    return unit_by_id.get(str(unit_id))
 
 
 def is_hex_adjacent_to_enemy(col: int, row: int, player: int,
@@ -301,6 +303,23 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
     if col1 == col2 and row1 == row2:
         return 0
 
+    # Precomputed topology lookup (O(1), ~1000x faster than BFS)
+    pathfinding_topology = game_state.get("pathfinding_topology")
+    board_cols = game_state.get("board_cols")
+    board_rows = game_state.get("board_rows")
+    if (
+        pathfinding_topology is not None
+        and isinstance(board_cols, int)
+        and isinstance(board_rows, int)
+        and 0 <= col1 < board_cols
+        and 0 <= row1 < board_rows
+        and 0 <= col2 < board_cols
+        and 0 <= row2 < board_rows
+    ):
+        from_idx = row1 * board_cols + col1
+        to_idx = row2 * board_cols + col2
+        return int(pathfinding_topology[from_idx, to_idx])
+
     # Check cache first
     cache_key = ((col1, row1), (col2, row2))
     if "pathfinding_distance_cache" in game_state:
@@ -425,12 +444,19 @@ def has_line_of_sight_coords(from_col: int, from_row: int, to_col: int, to_row: 
         # CRITICAL: Normalize coordinates to int for consistent comparison
         from_col_int, from_row_int = normalize_coordinates(from_col, from_row)
         to_col_int, to_row_int = normalize_coordinates(to_col, to_row)
-        
+
         # Check hex-coordinate cache first
         if "hex_los_cache" in game_state:
             cache_key = ((from_col_int, from_row_int), (to_col_int, to_row_int))
             if cache_key in game_state["hex_los_cache"]:
-                return game_state["hex_los_cache"][cache_key]
+                result = game_state["hex_los_cache"][cache_key]
+                if os.environ.get("LOS_DEBUG") == "1":
+                    _trace_hex_los(
+                        "hex_los_cache HIT",
+                        from_col_int, from_row_int, to_col_int, to_row_int,
+                        result, game_state,
+                    )
+                return result
 
         # Cache miss: compute LoS using temp unit dicts
         temp_shooter = {"col": from_col_int, "row": from_row_int}
@@ -442,7 +468,38 @@ def has_line_of_sight_coords(from_col: int, from_row: int, to_col: int, to_row: 
             game_state["hex_los_cache"] = {}
         game_state["hex_los_cache"][((from_col_int, from_row_int), (to_col_int, to_row_int))] = has_los
 
+        if os.environ.get("LOS_DEBUG") == "1":
+            _trace_hex_los(
+                "hex_los_cache MISS (computed)",
+                from_col_int, from_row_int, to_col_int, to_row_int,
+                has_los, game_state,
+            )
+
         return has_los
+
+
+def _trace_hex_los(
+    event: str,
+    from_col: int, from_row: int, to_col: int, to_row: int,
+    result: bool,
+    game_state: Dict[str, Any],
+) -> None:
+    """Trace hex LoS for LOS_DEBUG=1. Logs event, coords, result, and topology value."""
+    import sys
+    try:
+        from engine.phase_handlers import shooting_handlers
+        ratio, can_see, _ = shooting_handlers._get_los_visibility_state(
+            game_state, from_col, from_row, to_col, to_row
+        )
+        topo_str = f"topology={ratio:.6f} can_see={can_see}"
+    except Exception:
+        topo_str = "topology=N/A"
+    ep = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    pid = os.getpid()
+    msg = f"[LOS_DEBUG] {event} ({from_col},{from_row})->({to_col},{to_row}) result={result} {topo_str} ep={ep} turn={turn} pid={pid}\n"
+    sys.stderr.write(msg)
+    sys.stderr.flush()
 
 
 def check_los_cached(shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:

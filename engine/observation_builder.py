@@ -642,9 +642,10 @@ class ObservationBuilder:
         else:
             return 0.5  # Default neutral
     
-    def _calculate_movement_direction(self, unit: Dict[str, Any], 
+    def _calculate_movement_direction(self, unit: Dict[str, Any],
                                      active_unit: Dict[str, Any],
-                                     game_state: Dict[str, Any]) -> float:
+                                     game_state: Dict[str, Any],
+                                     positions: Dict[str, Tuple[int, int]]) -> float:
         """
         Encode temporal behavior in single float - replaces frame stacking.
         
@@ -677,10 +678,8 @@ class ObservationBuilder:
         
         prev_entry = units_cache_prev[unit_id]
         prev_col, prev_row = prev_entry["col"], prev_entry["row"]
-        curr_col, curr_row = require_unit_position(unit, game_state)
-        
-        # Calculate movement toward/away from active unit
-        active_col, active_row = require_unit_position(active_unit, game_state)
+        curr_col, curr_row = positions[str(unit_id)]
+        active_col, active_row = positions[str(active_unit["id"])]
         prev_dist = calculate_hex_distance(
             prev_col, prev_row, 
             active_col, active_row
@@ -829,7 +828,8 @@ class ObservationBuilder:
         else:
             return min(1.0, expected_damage / target_hp)
     
-    def _calculate_danger_probability(self, defender: Dict[str, Any], attacker: Dict[str, Any], game_state: Dict[str, Any]) -> float:
+    def _calculate_danger_probability(self, defender: Dict[str, Any], attacker: Dict[str, Any], game_state: Dict[str, Any],
+                                     positions: Optional[Dict[str, Tuple[int, int]]] = None) -> float:
         """
         Calculate probability that attacker will kill defender on its next turn.
         Works for ANY unit pair (active unit vs enemy, VIP vs enemy, etc.)
@@ -852,8 +852,12 @@ class ObservationBuilder:
             return self._danger_probability_cache[cache_key]
 
         # Use BFS pathfinding distance to respect walls for reachability
-        defender_col, defender_row = require_unit_position(defender, game_state)
-        attacker_col, attacker_row = require_unit_position(attacker, game_state)
+        if positions is not None:
+            defender_col, defender_row = positions[str(defender["id"])]
+            attacker_col, attacker_row = positions[str(attacker["id"])]
+        else:
+            defender_col, defender_row = require_unit_position(defender, game_state)
+            attacker_col, attacker_row = require_unit_position(attacker, game_state)
         distance = calculate_pathfinding_distance(
             defender_col, defender_row,
             attacker_col, attacker_row,
@@ -1030,7 +1034,8 @@ class ObservationBuilder:
             logging.error(f"observation_builder._get_target_type_preference failed: {str(e)} - returning neutral value 0.5")
             return 0.5
 
-    def _can_melee_units_charge_target(self, target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    def _can_melee_units_charge_target(self, target: Dict[str, Any], game_state: Dict[str, Any],
+                                       positions: Dict[str, Tuple[int, int]]) -> bool:
         """Check if any friendly melee units can charge this target.
 
         Uses BFS pathfinding distance to respect walls for charge reachability.
@@ -1052,8 +1057,8 @@ class ObservationBuilder:
                 has_melee):  # Has melee capability
 
                 # Charge range check using BFS pathfinding to respect walls
-                unit_col, unit_row = require_unit_position(unit, game_state)
-                target_col, target_row = require_unit_position(target, game_state)
+                unit_col, unit_row = positions[str(unit["id"])]
+                target_col, target_row = positions[str(target["id"])]
                 distance = calculate_pathfinding_distance(
                     unit_col, unit_row,
                     target_col, target_row,
@@ -1131,6 +1136,11 @@ class ObservationBuilder:
             )
             if needs_rebuild:
                 build_unit_los_cache(game_state, ally_id_str)
+
+        # PERF: Local positions cache - one extraction from units_cache, reused ~1M times
+        units_cache = require_key(game_state, "units_cache")
+        positions = {uid: (e["col"], e["row"]) for uid, e in units_cache.items()}
+
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
         obs[0] = float(game_state["current_player"])
         phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
@@ -1158,7 +1168,7 @@ class ObservationBuilder:
 
         # Objective control status (5 floats for 5 objectives)
         # -1.0 = enemy controls, 0.0 = contested/empty, 1.0 = we control
-        self._encode_objective_control(obs, active_unit, game_state, base_idx=11)
+        self._encode_objective_control(obs, active_unit, game_state, base_idx=11, positions=positions)
         # === SECTION 2: Active Unit Capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md ===
         obs[16] = require_key(active_unit, "MOVE") / 12.0
 
@@ -1214,31 +1224,31 @@ class ObservationBuilder:
         # Global Context: [0:16] = 16 floats (ADVANCE_IMPLEMENTATION: +1 for has_advanced)
         # Active Unit Capabilities: [16:38] = 22 floats
         # base_idx = 16 + 22 = 38
-        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=38)
+        self._encode_directional_terrain(obs, active_unit, game_state, base_idx=38, positions=positions)
         # === SECTION 4: Allied Units (72 floats) ===
         # Directional Terrain: [38:70] = 32 floats
         # base_idx = 38 + 32 = 70
-        self._encode_allied_units(obs, active_unit, game_state, base_idx=70)
+        self._encode_allied_units(obs, active_unit, game_state, base_idx=70, positions=positions)
         # === SECTION 5: Enemy Units (132 floats) ===
         # Allied Units: [70:142] = 72 floats
         # base_idx = 70 + 72 = 142
         # === SECTION 6: Valid Targets (40 floats) ===
         # Shared 6 reference enemies so every valid target has enemy_index; avoid "Required key 'X' missing".
         # Sort before building 6 so encoded targets (first 5) are always in the 6.
-        valid_targets = self._get_valid_targets(active_unit, game_state)
-        self._sort_valid_targets(valid_targets, active_unit, game_state)
-        six_enemies = self._get_six_reference_enemies(active_unit, game_state, valid_targets)
-        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies)
+        valid_targets = self._get_valid_targets(active_unit, game_state, positions=positions)
+        self._sort_valid_targets(valid_targets, active_unit, game_state, positions=positions)
+        six_enemies = self._get_six_reference_enemies(active_unit, game_state, valid_targets, positions=positions)
+        self._encode_enemy_units(obs, active_unit, game_state, base_idx=142, six_enemies=six_enemies, positions=positions)
         # Enemy Units: [142:274] = 132 floats (6 × 22 features)
         # base_idx = 142 + 132 = 274
         self._encode_valid_targets(
             obs, active_unit, game_state, base_idx=274,
-            valid_targets=valid_targets, six_enemies=six_enemies
+            valid_targets=valid_targets, six_enemies=six_enemies, positions=positions
         )
         # === SECTION 7: Macro target + intent (9 floats) ===
         if self.obs_size < 323:
             raise ValueError(f"obs_size too small for macro target features: {self.obs_size}")
-        self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=314)
+        self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=314, positions=positions)
         return obs
 
     def build_observation_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> np.ndarray:
@@ -1260,7 +1270,8 @@ class ObservationBuilder:
     # ============================================================================
 
     def _encode_objective_control(self, obs: np.ndarray, active_unit: Dict[str, Any],
-                                   game_state: Dict[str, Any], base_idx: int):
+                                   game_state: Dict[str, Any], base_idx: int,
+                                   positions: Dict[str, Tuple[int, int]]):
         """
         Encode objective control status for each objective.
         5 floats for 5 objectives (obs[10:15]).
@@ -1291,7 +1302,7 @@ class ObservationBuilder:
                     if not is_unit_alive(str(unit["id"]), game_state):
                         continue
 
-                    unit_pos = require_unit_position(unit, game_state)
+                    unit_pos = positions[str(unit["id"])]
                     if unit_pos in hex_set:
                         oc = require_key(unit, "OC")
                         if unit["player"] == my_player:
@@ -1314,7 +1325,8 @@ class ObservationBuilder:
         obs: np.ndarray,
         active_unit: Dict[str, Any],
         game_state: Dict[str, Any],
-        base_idx: int
+        base_idx: int,
+        positions: Dict[str, Tuple[int, int]],
     ) -> None:
         """
         Encode macro intent context for the active unit.
@@ -1356,7 +1368,7 @@ class ObservationBuilder:
         if board_cols <= 0 or board_rows <= 0:
             raise ValueError(f"Invalid board size for macro intent encoding: cols={board_cols}, rows={board_rows}")
 
-        unit_col, unit_row = require_unit_position(active_unit, game_state)
+        unit_col, unit_row = positions[str(active_unit["id"])]
         max_range = require_key(game_state, "max_range")
 
         target_col_norm = 0.0
@@ -1394,11 +1406,11 @@ class ObservationBuilder:
             )
             distance_norm = distance / float(max_range) if max_range > 0 else 0.0
         elif detail_type_int in (DETAIL_ENEMY, DETAIL_ALLY):
-            unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+            unit_by_id = require_key(game_state, "unit_by_id")
             target_unit = unit_by_id.get(str(detail_id_int))
             if target_unit is None:
                 raise KeyError(f"macro_detail_id unit missing from game_state: {detail_id_int}")
-            target_col, target_row = require_unit_position(target_unit, game_state)
+            target_col, target_row = positions[str(target_unit["id"])]
             target_col_norm = target_col / float(board_cols - 1)
             target_row_norm = target_row / float(board_rows - 1)
             hp_cur = require_hp_from_cache(str(detail_id_int), game_state)
@@ -1496,7 +1508,8 @@ class ObservationBuilder:
             return None
         raise ValueError(f"No active unit found in pool for player {current_player} (phase={current_phase})")
     
-    def _encode_directional_terrain(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
+    def _encode_directional_terrain(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int,
+                                   positions: Dict[str, Tuple[int, int]]):
         """
         Encode terrain awareness in 8 cardinal directions.
         32 floats = 8 directions × 4 features per direction.
@@ -1513,23 +1526,41 @@ class ObservationBuilder:
             (-1, 0),   # W
             (-1, -1)   # NW
         ]
-        
+
+        active_col, active_row = positions[str(active_unit["id"])]
+        board_cols = game_state.get("board_cols")
+        board_rows = game_state.get("board_rows")
+        wall_edge_topology = game_state.get("wall_edge_topology")
+
         for dir_idx, (dx, dy) in enumerate(directions):
             feature_base = base_idx + dir_idx * 4
-            
-            # Find nearest wall, friendly, enemy, and edge in this direction
-            wall_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "wall")
-            friendly_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "friendly")
-            enemy_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "enemy")
-            edge_dist = self._find_edge_distance(active_unit, dx, dy, game_state)
-            
+
+            # Wall and edge: use precomputed topology when available (PERF: avoids 8×60 wall loops + 8×4 edge lookups)
+            if (
+                wall_edge_topology is not None
+                and isinstance(board_cols, int)
+                and isinstance(board_rows, int)
+                and 0 <= active_col < board_cols
+                and 0 <= active_row < board_rows
+            ):
+                hex_idx = active_row * board_cols + active_col
+                wall_dist = float(wall_edge_topology[hex_idx, dir_idx, 0])
+                edge_dist = float(wall_edge_topology[hex_idx, dir_idx, 1])
+            else:
+                wall_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "wall", positions)
+                edge_dist = self._find_edge_distance(active_unit, dx, dy, game_state, positions)
+
+            friendly_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "friendly", positions)
+            enemy_dist = self._find_nearest_in_direction(active_unit, dx, dy, game_state, "enemy", positions)
+
             # Normalize by perception radius
             obs[feature_base + 0] = min(1.0, wall_dist / perception_radius)
             obs[feature_base + 1] = min(1.0, friendly_dist / perception_radius)
             obs[feature_base + 2] = min(1.0, enemy_dist / perception_radius)
             obs[feature_base + 3] = min(1.0, edge_dist / perception_radius)
     
-    def _encode_allied_units(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int):
+    def _encode_allied_units(self, obs: np.ndarray, active_unit: Dict[str, Any], game_state: Dict[str, Any], base_idx: int,
+                            positions: Dict[str, Tuple[int, int]]):
         """
         Encode up to 6 allied units within perception radius.
         72 floats = 6 units × 12 features per unit.
@@ -1562,17 +1593,17 @@ class ObservationBuilder:
                 raise KeyError(f"Unit missing required 'player' field: {other_unit}")
             if other_unit["player"] != active_unit["player"]:
                 continue  # Skip enemies
-            
+
             if "col" not in other_unit or "row" not in other_unit:
                 raise KeyError(f"Unit missing required position fields: {other_unit}")
-            
-            active_col, active_row = require_unit_position(active_unit, game_state)
-            other_col, other_row = require_unit_position(other_unit, game_state)
+
+            active_col, active_row = positions[str(active_unit["id"])]
+            other_col, other_row = positions[str(other_unit["id"])]
             distance = calculate_hex_distance(
                 active_col, active_row,
                 other_col, other_row
             )
-            
+
             if distance <= perception_radius:
                 allies.append((distance, other_unit))
         
@@ -1601,8 +1632,8 @@ class ObservationBuilder:
                 distance, ally = allies[i]
                 
                 # Feature 0-1: Relative position (egocentric)
-                ally_col, ally_row = require_unit_position(ally, game_state)
-                active_col, active_row = require_unit_position(active_unit, game_state)
+                ally_col, ally_row = positions[str(ally["id"])]
+                active_col, active_row = positions[str(active_unit["id"])]
                 rel_col = (ally_col - active_col) / 24.0
                 rel_row = (ally_row - active_row) / 24.0
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
@@ -1617,7 +1648,7 @@ class ObservationBuilder:
                 obs[feature_base + 4] = 1.0 if ally["id"] in game_state["units_moved"] else 0.0
                 
                 # Feature 5: Movement direction (temporal behavior)
-                obs[feature_base + 5] = self._calculate_movement_direction(ally, active_unit, game_state)
+                obs[feature_base + 5] = self._calculate_movement_direction(ally, active_unit, game_state, positions)
                 
                 # Feature 6: Distance normalized
                 obs[feature_base + 6] = distance / perception_radius
@@ -1635,7 +1666,7 @@ class ObservationBuilder:
                 obs[feature_base + 10] = 0.0
                 
                 # Feature 11: Danger level (threat to my survival)
-                danger = self._calculate_danger_probability(active_unit, ally, game_state)
+                danger = self._calculate_danger_probability(active_unit, ally, game_state, positions)
                 obs[feature_base + 11] = danger
             else:
                 # Padding for empty slots
@@ -1649,6 +1680,7 @@ class ObservationBuilder:
         game_state: Dict[str, Any],
         base_idx: int,
         six_enemies: Optional[List[tuple]] = None,
+        positions: Optional[Dict[str, Tuple[int, int]]] = None,
     ):
         """
         Encode up to 6 enemy units within perception radius.
@@ -1682,6 +1714,8 @@ class ObservationBuilder:
         matches enemy_index_map in _encode_valid_targets (avoids "Required key 'X' missing").
         """
         perception_radius = self.perception_radius
+        if positions is None:
+            positions = {uid: (e["col"], e["row"]) for uid, e in require_key(game_state, "units_cache").items()}
         if six_enemies is not None:
             enemies = six_enemies
         else:
@@ -1695,8 +1729,8 @@ class ObservationBuilder:
                     continue
                 if "col" not in other_unit or "row" not in other_unit:
                     raise KeyError(f"Unit missing required position fields: {other_unit}")
-                active_col, active_row = require_unit_position(active_unit, game_state)
-                other_col, other_row = require_unit_position(other_unit, game_state)
+                active_col, active_row = positions[str(active_unit["id"])]
+                other_col, other_row = positions[str(other_unit["id"])]
                 d = calculate_hex_distance(active_col, active_row, other_col, other_row)
                 if d <= perception_radius:
                     enemies.append((d, other_unit))
@@ -1728,8 +1762,8 @@ class ObservationBuilder:
                 distance, enemy = enemies[i]
                 
                 # Feature 0-2: Position and distance
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
-                active_col, active_row = require_unit_position(active_unit, game_state)
+                enemy_col, enemy_row = positions[str(enemy["id"])]
+                active_col, active_row = positions[str(active_unit["id"])]
                 rel_col = (enemy_col - active_col) / 24.0
                 rel_row = (enemy_row - active_row) / 24.0
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
@@ -1743,7 +1777,7 @@ class ObservationBuilder:
                 
                 # Feature 5-6: Movement tracking
                 obs[feature_base + 5] = 1.0 if enemy["id"] in game_state["units_moved"] else 0.0
-                obs[feature_base + 6] = self._calculate_movement_direction(enemy, active_unit, game_state)
+                obs[feature_base + 6] = self._calculate_movement_direction(enemy, active_unit, game_state, positions)
                 
                 # Feature 7-9: Action tracking
                 obs[feature_base + 7] = 1.0 if enemy["id"] in game_state["units_shot"] else 0.0
@@ -1772,7 +1806,7 @@ class ObservationBuilder:
                 obs[feature_base + 12] = best_kill_prob
                 
                 # Feature 13: danger_to_me (était feature 12) - DÉCALÉ
-                obs[feature_base + 13] = self._calculate_danger_probability(active_unit, enemy, game_state)
+                obs[feature_base + 13] = self._calculate_danger_probability(active_unit, enemy, game_state, positions)
                 
                 # Features 14-16: Allied coordination (3 floats, était 13-15) - DÉCALÉ
                 visibility = 0.0
@@ -1793,7 +1827,7 @@ class ObservationBuilder:
                             raise KeyError(f"los_cache missing target_id={target_id} for ally_id={ally.get('id')}")
                         if los_cache[target_id]:
                             visibility += 1.0
-                    combined_threat += self._calculate_danger_probability(enemy, ally, game_state)
+                    combined_threat += self._calculate_danger_probability(enemy, ally, game_state, positions)
                 obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)
                 obs[feature_base + 15] = min(1.0, combined_threat / 5.0)  # combined_friendly_threat (était feature 14)
                 
@@ -1815,8 +1849,8 @@ class ObservationBuilder:
                         ally.get("RNG_WEAPONS") and len(ally["RNG_WEAPONS"]) > 0):  # A aussi des armes range
                         
                         # Vérifier si peut charger (distance)
-                        ally_col, ally_row = require_unit_position(ally, game_state)
-                        enemy_col, enemy_row = require_unit_position(enemy, game_state)
+                        ally_col, ally_row = positions[str(ally["id"])]
+                        enemy_col, enemy_row = positions[str(enemy["id"])]
                         ally_distance = calculate_pathfinding_distance(
                             ally_col, ally_row,
                             enemy_col, enemy_row,
@@ -1908,17 +1942,17 @@ class ObservationBuilder:
             # AI_TURN.md COMPLIANCE: Direct field access
             if "col" not in other_unit or "row" not in other_unit:
                 raise KeyError(f"Unit missing required position fields: {other_unit}")
-            
-            active_col, active_row = require_unit_position(active_unit, game_state)
-            other_col, other_row = require_unit_position(other_unit, game_state)
+
+            active_col, active_row = positions[str(active_unit["id"])]
+            other_col, other_row = positions[str(other_unit["id"])]
             distance = calculate_hex_distance(
                 active_col, active_row,
                 other_col, other_row
             )
-            
+
             if distance <= perception_radius:
                 nearby_units.append((distance, other_unit))
-        
+
         # Sort by distance (prioritize closer units)
         nearby_units.sort(key=lambda x: x[0])
         
@@ -1942,8 +1976,8 @@ class ObservationBuilder:
                     raise KeyError(f"Nearby unit missing required 'player' field: {unit}")
                 
                 # Relative position (egocentric)
-                unit_col, unit_row = require_unit_position(unit, game_state)
-                active_col, active_row = require_unit_position(active_unit, game_state)
+                unit_col, unit_row = positions[str(unit["id"])]
+                active_col, active_row = positions[str(active_unit["id"])]
                 rel_col = (unit_col - active_col) / 24.0
                 rel_row = (unit_row - active_row) / 24.0
                 dist_norm = distance / perception_radius
@@ -2008,7 +2042,8 @@ class ObservationBuilder:
                 for j in range(10):
                     obs[feature_base + j] = 0.0
     
-    def _get_valid_targets(self, active_unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _get_valid_targets(self, active_unit: Dict[str, Any], game_state: Dict[str, Any],
+                          positions: Dict[str, Tuple[int, int]]) -> List[Dict[str, Any]]:
         """
         Build raw list of valid targets for current phase (shoot / charge / fight).
         Unsorted. Used by _get_six_reference_enemies and _encode_valid_targets.
@@ -2044,8 +2079,8 @@ class ObservationBuilder:
                     raise KeyError(f"Enemy unit {enemy_id} missing from game_state['units']")
                 if "col" not in enemy or "row" not in enemy:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-                active_col, active_row = require_unit_position(active_unit, game_state)
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+                active_col, active_row = positions[str(active_unit["id"])]
+                enemy_col, enemy_row = positions[str(enemy["id"])]
                 distance = calculate_pathfinding_distance(
                     active_col, active_row, enemy_col, enemy_row, game_state
                 )
@@ -2066,8 +2101,8 @@ class ObservationBuilder:
                     raise KeyError(f"Enemy unit {enemy_id} missing from game_state['units']")
                 if "col" not in enemy or "row" not in enemy:
                     raise KeyError(f"Enemy unit missing required position fields: {enemy}")
-                active_col, active_row = require_unit_position(active_unit, game_state)
-                enemy_col, enemy_row = require_unit_position(enemy, game_state)
+                active_col, active_row = positions[str(active_unit["id"])]
+                enemy_col, enemy_row = positions[str(enemy["id"])]
                 if calculate_hex_distance(
                     active_col, active_row, enemy_col, enemy_row
                 ) <= melee_range:
@@ -2076,7 +2111,8 @@ class ObservationBuilder:
     
     def _get_six_reference_enemies(
         self, active_unit: Dict[str, Any], game_state: Dict[str, Any],
-        valid_targets: List[Dict[str, Any]]
+        valid_targets: List[Dict[str, Any]],
+        positions: Dict[str, Tuple[int, int]],
     ) -> List[tuple]:
         """
         Build the 6 reference enemies for obs[141:273] and enemy_index_map.
@@ -2084,7 +2120,7 @@ class ObservationBuilder:
         Returns list of (distance, unit) ordered: valid_targets first (up to 6), then fill by distance.
         """
         perception_radius = self.perception_radius
-        active_col, active_row = require_unit_position(active_unit, game_state)
+        active_col, active_row = positions[str(active_unit["id"])]
         all_enemies: List[tuple] = []
         units_cache = require_key(game_state, "units_cache")
         active_entry = require_key(units_cache, str(active_unit["id"]))
@@ -2098,7 +2134,7 @@ class ObservationBuilder:
                 raise KeyError(f"Unit {other_id} missing from game_state['units']")
             if "col" not in other or "row" not in other:
                 raise KeyError(f"Unit missing required position fields: {other}")
-            oc, or_ = require_unit_position(other, game_state)
+            oc, or_ = positions[str(other["id"])]
             d = calculate_hex_distance(active_col, active_row, oc, or_)
             all_enemies.append((d, other))
         all_enemies.sort(key=lambda x: x[0])
@@ -2111,7 +2147,7 @@ class ObservationBuilder:
             if kid in seen:
                 continue
             seen.add(kid)
-            dc = calculate_hex_distance(active_col, active_row, *require_unit_position(u, game_state))
+            dc = calculate_hex_distance(active_col, active_row, *positions[str(u["id"])])
             six.append((dc, u))
         for d, u in all_enemies:
             if len(six) >= 6:
@@ -2136,13 +2172,14 @@ class ObservationBuilder:
         target: Dict[str, Any],
         active_unit: Dict[str, Any],
         game_state: Dict[str, Any],
+        positions: Dict[str, Tuple[int, int]],
     ):
         """
         Sort key for valid targets: (lower = higher priority).
         Returns (-strategic_efficiency, distance) so best targets sort first.
         """
-        active_col, active_row = require_unit_position(active_unit, game_state)
-        target_col, target_row = require_unit_position(target, game_state)
+        active_col, active_row = positions[str(active_unit["id"])]
+        target_col, target_row = positions[str(target["id"])]
         distance = calculate_hex_distance(
             active_col, active_row, target_col, target_row
         )
@@ -2207,10 +2244,11 @@ class ObservationBuilder:
         valid_targets: List[Dict[str, Any]],
         active_unit: Dict[str, Any],
         game_state: Dict[str, Any],
+        positions: Dict[str, Tuple[int, int]],
     ) -> List[Dict[str, Any]]:
         """Sort valid targets by strategic efficiency (best first). In-place then return."""
         valid_targets.sort(
-            key=lambda t: self._target_priority_score(t, active_unit, game_state)
+            key=lambda t: self._target_priority_score(t, active_unit, game_state, positions)
         )
         return valid_targets
     
@@ -2222,6 +2260,7 @@ class ObservationBuilder:
         base_idx: int,
         valid_targets: Optional[List[Dict[str, Any]]] = None,
         six_enemies: Optional[List[tuple]] = None,
+        positions: Optional[Dict[str, Tuple[int, int]]] = None,
     ):
         """
         Encode valid targets with EXPLICIT action-target correspondence and W40K probabilities.
@@ -2246,12 +2285,14 @@ class ObservationBuilder:
         7. coordination_bonus (1.0 if friendly melee can charge after I shoot) - DÉCALÉ
         """
         perception_radius = self.perception_radius
+        if positions is None:
+            positions = {uid: (e["col"], e["row"]) for uid, e in require_key(game_state, "units_cache").items()}
         if valid_targets is None:
-            valid_targets = self._get_valid_targets(active_unit, game_state)
-            self._sort_valid_targets(valid_targets, active_unit, game_state)
+            valid_targets = self._get_valid_targets(active_unit, game_state, positions)
+            self._sort_valid_targets(valid_targets, active_unit, game_state, positions)
         if six_enemies is None:
             six_enemies = self._get_six_reference_enemies(
-                active_unit, game_state, valid_targets
+                active_unit, game_state, valid_targets, positions
             )
         enemy_index_map: Dict[str, int] = {}
         for idx, (_d, u) in enumerate(six_enemies):
@@ -2279,16 +2320,16 @@ class ObservationBuilder:
                 obs[feature_base + 2] = best_kill_prob
                 
                 # Feature 3: Danger to me (probability target kills ME next turn) - DÉCALÉ
-                danger_prob = self._calculate_danger_probability(active_unit, target, game_state)
+                danger_prob = self._calculate_danger_probability(active_unit, target, game_state, positions)
                 obs[feature_base + 3] = danger_prob
-                
+
                 # Feature 4: Enemy index (reference to obs[141:273]) - DÉCALÉ
                 enemy_idx = require_key(enemy_index_map, str(target["id"]))
                 obs[feature_base + 4] = enemy_idx / 5.0
-                
+
                 # Feature 5: Distance (accessibility) - DÉCALÉ
-                active_col, active_row = require_unit_position(active_unit, game_state)
-                target_col, target_row = require_unit_position(target, game_state)
+                active_col, active_row = positions[str(active_unit["id"])]
+                target_col, target_row = positions[str(target["id"])]
                 distance = calculate_hex_distance(
                     active_col, active_row,
                     target_col, target_row
@@ -2296,14 +2337,14 @@ class ObservationBuilder:
                 obs[feature_base + 5] = distance / perception_radius
                 
                 # Feature 6: Is priority target (moved toward me + high threat) - DÉCALÉ
-                movement_dir = self._calculate_movement_direction(target, active_unit, game_state)
+                movement_dir = self._calculate_movement_direction(target, active_unit, game_state, positions)
                 is_approaching = 1.0 if movement_dir > 0.75 else 0.0
-                danger = self._calculate_danger_probability(active_unit, target, game_state)
+                danger = self._calculate_danger_probability(active_unit, target, game_state, positions)
                 is_priority = 1.0 if (is_approaching > 0.5 and danger > 0.5) else 0.0
                 obs[feature_base + 6] = is_priority
                 
                 # Feature 7: Coordination bonus (can friendly melee charge after I shoot) - DÉCALÉ
-                can_be_charged = 1.0 if self._can_melee_units_charge_target(target, game_state) else 0.0
+                can_be_charged = 1.0 if self._can_melee_units_charge_target(target, game_state, positions) else 0.0
                 obs[feature_base + 7] = can_be_charged
             else:
                 # Padding for empty slots
@@ -2364,23 +2405,21 @@ class ObservationBuilder:
     # DIRECTIONAL HELPERS
     # ============================================================================
     
-    def _find_nearest_in_direction(self, unit: Dict[str, Any], dx: int, dy: int, game_state: Dict[str, Any], 
-                                   search_type: str) -> float:
+    def _find_nearest_in_direction(self, unit: Dict[str, Any], dx: int, dy: int, game_state: Dict[str, Any],
+                                   search_type: str, positions: Dict[str, Tuple[int, int]]) -> float:
         """Find nearest object (wall/friendly/enemy) in given direction."""
         perception_radius = self.perception_radius
         min_distance = 999.0
-        
+        unit_col, unit_row = positions[str(unit["id"])]
+
         if search_type == "wall":
-            # Search walls in direction
             for wall_col, wall_row in game_state["wall_hexes"]:
-                if self._is_in_direction(unit, wall_col, wall_row, game_state, dx, dy):
-                    unit_col, unit_row = require_unit_position(unit, game_state)
+                if self._is_in_direction(unit_col, unit_row, wall_col, wall_row, dx, dy):
                     dist = calculate_hex_distance(unit_col, unit_row, wall_col, wall_row)
                     if dist < min_distance and dist <= perception_radius:
                         min_distance = dist
-        
+
         elif search_type in ["friendly", "enemy"]:
-            # P1/P2: friendly = same player, enemy = opposite player (1->2, 2->1)
             if search_type == "friendly":
                 target_player = unit["player"]
             else:
@@ -2392,20 +2431,18 @@ class ObservationBuilder:
                     continue
                 if other_unit["id"] == unit["id"]:
                     continue
-                    
-                other_col, other_row = require_unit_position(other_unit, game_state)
-                if self._is_in_direction(unit, other_col, other_row, game_state, dx, dy):
-                    unit_col, unit_row = require_unit_position(unit, game_state)
+
+                other_col, other_row = positions[str(other_unit["id"])]
+                if self._is_in_direction(unit_col, unit_row, other_col, other_row, dx, dy):
                     dist = calculate_hex_distance(unit_col, unit_row, other_col, other_row)
                     if dist < min_distance and dist <= perception_radius:
                         min_distance = dist
-        
+
         return min_distance if min_distance < 999.0 else perception_radius
     
-    def _is_in_direction(self, unit: Dict[str, Any], target_col: int, target_row: int, game_state: Dict[str, Any],
+    def _is_in_direction(self, unit_col: int, unit_row: int, target_col: int, target_row: int,
                         dx: int, dy: int) -> bool:
         """Check if target is roughly in the specified direction from unit."""
-        unit_col, unit_row = require_unit_position(unit, game_state)
         delta_col = target_col - unit_col
         delta_row = target_row - unit_row
         
@@ -2417,23 +2454,21 @@ class ObservationBuilder:
         else:  # Diagonal
             return (delta_col * dx > 0) and (delta_row * dy > 0)
     
-    def _find_edge_distance(self, unit: Dict[str, Any], dx: int, dy: int, game_state: Dict[str, Any]) -> float:
+    def _find_edge_distance(self, unit: Dict[str, Any], dx: int, dy: int, game_state: Dict[str, Any],
+                            positions: Dict[str, Tuple[int, int]]) -> float:
         """Calculate distance to board edge in given direction."""
         perception_radius = self.perception_radius
+        unit_col, unit_row = positions[str(unit["id"])]
         if dx > 0:  # East
-            unit_col, unit_row = require_unit_position(unit, game_state)
             edge_dist = game_state["board_cols"] - unit_col - 1
         elif dx < 0:  # West
-            unit_col, unit_row = require_unit_position(unit, game_state)
             edge_dist = unit_col
         else:
             edge_dist = perception_radius
-        
+
         if dy > 0:  # South
-            unit_col, unit_row = require_unit_position(unit, game_state)
             edge_dist = min(edge_dist, game_state["board_rows"] - unit_row - 1)
         elif dy < 0:  # North
-            unit_col, unit_row = require_unit_position(unit, game_state)
             edge_dist = min(edge_dist, unit_row)
-        
+
         return float(edge_dist)
