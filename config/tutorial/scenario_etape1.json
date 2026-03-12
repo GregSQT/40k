@@ -3,7 +3,7 @@
   "wall_ref": "tutorial_walls-01.json",
   "units": [
     { "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 19 },
-    { "id": 2, "unit_type": "Termagant", "player": 2, "col": 12, "row": 1 }
+    { "id": 2, "unit_type": "TermagantTuto", "player": 2, "col": 12, "row": 7 }
   ],
     "objectives": [
       {"id": 1, "name": "South", "hexes": [[12, 19], [11, 18], [12, 18], [13, 18], [13, 19], [12, 20], [11, 19]]}

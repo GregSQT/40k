@@ -464,6 +464,7 @@ export default function Board({
           y: rect.top + centerY - HEX_RADIUS * 0.6,
         },
       });
+      window.dispatchEvent(new CustomEvent("weaponMenuOpened", { detail: { unitId } }));
     };
 
     window.addEventListener("boardWeaponSelectionClick", weaponClickHandler);
@@ -479,9 +480,10 @@ export default function Board({
     const showSpotlight =
       tutorial.popupVisible &&
       tutorial.currentStep?.stepKey &&
-      TUTORIAL_STEP_TITLES_INTERCESSOR_HALO.includes(
+      (TUTORIAL_STEP_TITLES_INTERCESSOR_HALO.includes(
         tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_INTERCESSOR_HALO)[number]
-      ) &&
+      ) ||
+        tutorial.currentStep?.stage === "1-4") &&
       boardConfig &&
       units.length > 0;
     if (!showSpotlight) {
@@ -517,6 +519,7 @@ export default function Board({
   }, [
     tutorial?.popupVisible,
     tutorial?.currentStep?.stepKey,
+    tutorial?.currentStep?.stage,
     tutorial?.setSpotlightPosition,
     boardConfig,
     units,
@@ -2506,6 +2509,10 @@ export default function Board({
   const handleSelectWeapon = async (weaponIndex: number) => {
     if (!weaponSelectionMenu) return;
 
+    const unit = units.find((u) => u.id === weaponSelectionMenu.unitId);
+    const weapon = unit?.RNG_WEAPONS?.[weaponIndex];
+    const weaponDisplayName = weapon?.display_name ?? undefined;
+
     // Close menu immediately (optimistic update)
     setWeaponSelectionMenu(null);
 
@@ -2525,11 +2532,9 @@ export default function Board({
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.game_state) {
-          // Trigger a custom event to notify useEngineAPI to update gameState
-          // This ensures the frontend state is synchronized with backend
           window.dispatchEvent(
             new CustomEvent("weaponSelected", {
-              detail: { gameState: data.game_state },
+              detail: { gameState: data.game_state, weaponDisplayName },
             })
           );
         }

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+  <title>Pointeur souris</title>
+  <!-- Curseur type flèche (pointe en haut à gauche) -->
+  <path d="M0 0l16 16h-6v6h-4v-6H0V0z"/>
+</svg>

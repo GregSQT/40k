@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Fragment } from "react";
 import { createPortal } from "react-dom";
 import type {
   TutorialLang,
@@ -9,6 +9,31 @@ import type {
   TutorialStepDisplay,
 } from "../contexts/TutorialContext";
 
+/** Path SVG (viewport moins trous des spotlights) pour bloquer les clics hors zones autorisées. */
+function buildBlockingPath(
+  width: number,
+  height: number,
+  spotlights: TutorialSpotlightPosition[]
+): string {
+  const viewport = `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`;
+  if (spotlights.length === 0) return viewport;
+  const holes = spotlights.map((s) => {
+    if (s.shape === "circle") {
+      const c = s as TutorialSpotlightCircle;
+      const r = Math.max(0, (c.radius ?? 0) + 20);
+      return `M ${c.x + r} ${c.y} A ${r} ${r} 0 1 1 ${c.x - r} ${c.y} A ${r} ${r} 0 1 1 ${c.x + r} ${c.y} Z`;
+    }
+    const r = s as TutorialSpotlightRect;
+    const pad = 4;
+    const left = r.left - pad;
+    const top = r.top - pad;
+    const w = r.width + pad * 2;
+    const h = r.height + pad * 2;
+    return `M ${left} ${top} L ${left + w} ${top} L ${left + w} ${top + h} L ${left} ${top + h} Z`;
+  });
+  return [viewport, ...holes].join(" ");
+}
+
 interface TutorialOverlayProps {
   step: TutorialStepDisplay;
   lang: TutorialLang;
@@ -17,8 +42,10 @@ interface TutorialOverlayProps {
   onSkipTutorial?: () => void;
   /** Positions viewport (px) des halos : cercles ou rectangles non grisés (board, panneau). */
   spotlights?: TutorialSpotlightPosition[];
-  /** Rect viewport (px) de la moitié haute du panneau gauche = zone à assombrir (fog) pour l’étape 1-5. */
-  fogLeftPanelUpperHalfRect?: TutorialSpotlightRect | null;
+  /** Zones où les clics sont autorisés (trous dans la couche de blocage). Si absent, = spotlights. */
+  allowedClickSpotlights?: TutorialSpotlightPosition[] | null;
+  /** Rects viewport (px) des zones de fog sur le panneau gauche (étape 1-5 : 2 bandes, opacité réduite). */
+  fogLeftPanelRects?: TutorialSpotlightRect[] | null;
 }
 
 /**
@@ -26,6 +53,8 @@ interface TutorialOverlayProps {
  * Accessibilité : focus trap, fermeture à Échap.
  */
 const BACKDROP_OPACITY = 0.82;
+/** Opacité des 2 bandes de fog sur le panneau gauche (étape 1-5), pour un rendu moins noir. */
+const FOG_LEFT_PANEL_OPACITY = 0.5;
 
 const MASK_ID = "tutorial-spotlight-mask";
 const BLUR_FILTER_ID = "tutorial-spotlight-blur";
@@ -43,6 +72,65 @@ const PHASE_LOGO: Record<string, string> = {
 };
 
 const TERMAGANT_ICON_PATH = "/icons/Termagant_red.webp";
+const CURSOR_POINTER_ICON_PATH = "/icons/Cursor.png";
+
+/** Ligne commençant par Cliquez ou Clickez (optionnellement après espaces). */
+const CLICK_LINE_RE = /^\s*(Cliquez|Clickez)/i;
+
+/** Composant icône pointeur réutilisable (placeholder <cursor> ou début de ligne Cliquez). */
+function CursorIcon(): React.ReactElement {
+  return (
+    <img
+      src={CURSOR_POINTER_ICON_PATH}
+      alt=""
+      className="tutorial-overlay-dialog__click-icon"
+      aria-hidden
+    />
+  );
+}
+
+/**
+ * Rendu du corps avec icône pointeur :
+ * - Placeholder <cursor> dans le texte → icône à cet endroit.
+ * - Sinon, ligne qui commence par "Cliquez" / "Clickez" → icône en début de ligne.
+ */
+function renderBodyWithClickIcon(body: string): React.ReactNode {
+  const lines = body.split("\n");
+  if (lines.length === 0) return <p>{body}</p>;
+  return (
+    <p className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>
+      {lines.map((line, i) => {
+        const hasPlaceholder = line.includes("<cursor>");
+        const parts = line.split("<cursor>");
+        const showIconAtStart = !hasPlaceholder && CLICK_LINE_RE.test(line);
+        return (
+          <span key={line ? `click-${line.slice(0, 40)}-${i}` : `click-empty-${i}`}>
+            {showIconAtStart && (
+              <>
+                <CursorIcon />
+                {" "}
+              </>
+            )}
+            {hasPlaceholder
+              ? parts.map((part, j) => (
+                  <span key={`part-${i}-${part.slice(0, 20)}-${j}`}>
+                    {part}
+                    {j < parts.length - 1 && (
+                      <>
+                        <CursorIcon />
+                        {" "}
+                      </>
+                    )}
+                  </span>
+                ))
+              : line}
+            {i < lines.length - 1 ? "\n" : ""}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
 
 /** Regex : ligne commençant par <Range>, <A>, <BS>, <S>, <AP> ou <DMG> puis la description. */
 const WEAPON_ATTR_LINE_RE = /^<(Range|A|BS|S|AP|DMG)>\s*(.*)$/;
@@ -72,7 +160,7 @@ function renderBodyWithWeaponAttrTooltips(body: string): React.ReactNode {
     <div className="tutorial-overlay-dialog__body-paragraph">
       {intro.length > 0 && (
         <p className="tutorial-overlay-dialog__weapon-attr-intro" style={{ whiteSpace: "pre-wrap" }}>
-          {intro.join("\n")}
+          {replaceCursorInText(intro.join("\n"))}
         </p>
       )}
       {attrRows.length > 0 && (
@@ -95,7 +183,7 @@ function renderBodyWithWeaponAttrTooltips(body: string): React.ReactNode {
       )}
       {trailing.length > 0 && (
         <p className="tutorial-overlay-dialog__weapon-attr-trailing" style={{ whiteSpace: "pre-wrap" }}>
-          {trailing.join("\n")}
+          {replaceCursorInText(trailing.join("\n"))}
         </p>
       )}
     </div>
@@ -112,6 +200,27 @@ const HEX_POINTS = [0, 60, 120, 180, 240, 300]
   })
   .join(" ");
 
+/** Remplace les occurrences de <cursor> dans un texte par l'icône pointeur (pour 1-6, 2-2, etc.). */
+function replaceCursorInText(text: string): React.ReactNode {
+  if (!text.includes("<cursor>")) return text;
+  const segments = text.split("<cursor>");
+  return (
+    <>
+      {segments.map((seg, k) => (
+        <span key={seg ? `cursor-${k}-${seg.slice(0, 15)}` : `cursor-${k}`}>
+          {seg}
+          {k < segments.length - 1 && (
+            <>
+              <CursorIcon />
+              {" "}
+            </>
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
+
 function renderBodyWithLosPlaceholders(
   body: string,
   lang: "fr" | "en"
@@ -122,7 +231,11 @@ function renderBodyWithLosPlaceholders(
   let m = re.exec(body);
   while (m !== null) {
     if (m.index > lastIndex) {
-      parts.push(body.slice(lastIndex, m.index));
+      parts.push(
+        <Fragment key={`text-${lastIndex}`}>
+          {replaceCursorInText(body.slice(lastIndex, m.index))}
+        </Fragment>
+      );
     }
     const tag = m[1] ?? m[3] ?? m[0];
     const sameLineDesc = m[2] ?? "";
@@ -183,9 +296,13 @@ function renderBodyWithLosPlaceholders(
     m = re.exec(body);
   }
   if (lastIndex < body.length) {
-    parts.push(body.slice(lastIndex));
+    parts.push(
+      <Fragment key={`text-tail-${lastIndex}`}>
+        {replaceCursorInText(body.slice(lastIndex))}
+      </Fragment>
+    );
   }
-  return parts.length > 1 ? parts : body;
+  return parts.length > 1 ? parts : (parts[0] ?? replaceCursorInText(body));
 }
 
 export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
@@ -195,16 +312,26 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   onClose,
   onSkipTutorial,
   spotlights = [],
-  fogLeftPanelUpperHalfRect = null,
+  allowedClickSpotlights = null,
+  fogLeftPanelRects = [],
 }) => {
+  const clickHoles = allowedClickSpotlights ?? spotlights;
   const title = lang === "fr" ? step.title_fr : step.title_en;
   const body = lang === "fr" ? step.body_fr : step.body_en;
   const bodyContent =
-    step.stage === "1-6"
+    step.stage === "1-6" || step.stage === "2-2"
       ? renderBodyWithLosPlaceholders(body, lang)
-      : step.stage === "2-2"
+      : step.stage === "2-3"
         ? renderBodyWithWeaponAttrTooltips(body)
-        : body;
+        : renderBodyWithClickIcon(body);
+  const isStepIconAndFirstLine = step.popupFirstLineWithIcon === true;
+  const bodyFirstLineIcon = isStepIconAndFirstLine ? body.split("\n")[0] ?? "" : "";
+  const bodyRestIcon = isStepIconAndFirstLine ? body.split("\n").slice(1).join("\n") : "";
+  const bodyContentRestIcon = isStepIconAndFirstLine ? renderBodyWithClickIcon(bodyRestIcon) : null;
+  const isStep1_5 = step.stage === "1-5";
+  const bodyFirstLine1_5 = isStep1_5 ? body.split("\n")[0] ?? "" : "";
+  const bodyRest1_5 = isStep1_5 ? body.split("\n").slice(1).join("\n") : "";
+  const bodyContentRest1_5 = isStep1_5 ? renderBodyWithClickIcon(bodyRest1_5) : null;
   const dialogRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [overlayRect, setOverlayRect] = useState<DOMRect | null>(null);
@@ -249,13 +376,13 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         <mask id={MASK_ID}>
           <rect x="0" y="0" width={overlayRect.width} height={overlayRect.height} fill="white" />
           <g filter={`url(#${BLUR_FILTER_ID})`}>
-            {spotlights.map((s) => {
+            {spotlights.map((s, idx) => {
               if (s.shape === "circle") {
                 const c = s as TutorialSpotlightCircle;
                 const r = c.radius + 20;
                 return (
                   <circle
-                    key={`circle-${c.x}-${c.y}`}
+                    key={`circle-${c.x}-${c.y}-${idx}`}
                     cx={c.x}
                     cy={c.y}
                     r={r}
@@ -267,7 +394,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
               const pad = 4;
               return (
                 <rect
-                  key={`rect-${r.left}-${r.top}`}
+                  key={`rect-${r.left}-${r.top}-${idx}`}
                   x={r.left - pad}
                   y={r.top - pad}
                   width={r.width + pad * 2}
@@ -372,7 +499,21 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     };
   }, []);
 
-  /** Overlay pleine page pour que les halos (ex. Intercessor) soient visibles. Clics transmis au board via pointerEvents: none. */
+  /** Path pour bloquer les clics hors clickHoles et hors dialog (tutoriel : seuls les clics qui font avancer sont autorisés). */
+  const blockingPathD = useMemo(
+    () =>
+      overlayRect && overlayRect.width > 0 && overlayRect.height > 0
+        ? buildBlockingPath(overlayRect.width, overlayRect.height, clickHoles)
+        : "",
+    [overlayRect, clickHoles]
+  );
+
+  const blockClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+  }, []);
+
+  /** Overlay pleine page pour que les halos (ex. Intercessor) soient visibles. Clics hors zones autorisées bloqués. */
   const overlayContent = (
     <div
       ref={overlayRef}
@@ -430,42 +571,76 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           aria-hidden
         />
       )}
-      {fogLeftPanelUpperHalfRect && fogLeftPanelUpperHalfRect.shape === "rect" ? (
+      {Array.isArray(fogLeftPanelRects) && fogLeftPanelRects.length > 0
+        ? (fogLeftPanelRects as TutorialSpotlightRect[]).map((rect, i) =>
+            rect.shape === "rect" ? (
+              <svg
+                key={`fog-left-${rect.left}-${rect.top}`}
+                aria-hidden
+                role="img"
+                style={{
+                  position: "fixed",
+                  left: rect.left - FOG_BLUR_MARGIN,
+                  top: rect.top - FOG_BLUR_MARGIN,
+                  width: rect.width + FOG_BLUR_MARGIN * 2,
+                  height: rect.height + FOG_BLUR_MARGIN * 2,
+                  pointerEvents: "none",
+                }}
+                width={rect.width + FOG_BLUR_MARGIN * 2}
+                height={rect.height + FOG_BLUR_MARGIN * 2}
+                viewBox={`0 0 ${rect.width + FOG_BLUR_MARGIN * 2} ${rect.height + FOG_BLUR_MARGIN * 2}`}
+              >
+                <title>Fog tutoriel panneau gauche (bande {i + 1})</title>
+                <defs>
+                  <filter
+                    id={`${FOG_BLUR_FILTER_ID}-${i}`}
+                    x="-20%"
+                    y="-20%"
+                    width="140%"
+                    height="140%"
+                    colorInterpolationFilters="sRGB"
+                  >
+                    <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
+                  </filter>
+                </defs>
+                <rect
+                  x={FOG_BLUR_MARGIN}
+                  y={FOG_BLUR_MARGIN}
+                  width={rect.width}
+                  height={rect.height}
+                  fill={`rgba(0, 0, 0, ${FOG_LEFT_PANEL_OPACITY})`}
+                  filter={`url(#${FOG_BLUR_FILTER_ID}-${i})`}
+                />
+              </svg>
+            ) : null
+          )
+        : null}
+      {/* Couche qui bloque les clics hors spotlights et hors dialog (seuls les clics qui font avancer passent). */}
+      {blockingPathD && overlayRect ? (
         <svg
           aria-hidden
-          role="img"
+          role="presentation"
           style={{
             position: "fixed",
-            left: fogLeftPanelUpperHalfRect.left - FOG_BLUR_MARGIN,
-            top: fogLeftPanelUpperHalfRect.top - FOG_BLUR_MARGIN,
-            width: fogLeftPanelUpperHalfRect.width + FOG_BLUR_MARGIN * 2,
-            height: fogLeftPanelUpperHalfRect.height + FOG_BLUR_MARGIN * 2,
+            top: 0,
+            left: 0,
+            width: overlayRect.width,
+            height: overlayRect.height,
             pointerEvents: "none",
           }}
-          width={fogLeftPanelUpperHalfRect.width + FOG_BLUR_MARGIN * 2}
-          height={fogLeftPanelUpperHalfRect.height + FOG_BLUR_MARGIN * 2}
-          viewBox={`0 0 ${fogLeftPanelUpperHalfRect.width + FOG_BLUR_MARGIN * 2} ${fogLeftPanelUpperHalfRect.height + FOG_BLUR_MARGIN * 2}`}
+          width={overlayRect.width}
+          height={overlayRect.height}
+          viewBox={`0 0 ${overlayRect.width} ${overlayRect.height}`}
         >
-          <title>Fog tutoriel (moitié haute panneau gauche)</title>
-          <defs>
-            <filter
-              id={FOG_BLUR_FILTER_ID}
-              x="-20%"
-              y="-20%"
-              width="140%"
-              height="140%"
-              colorInterpolationFilters="sRGB"
-            >
-              <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
-            </filter>
-          </defs>
-          <rect
-            x={FOG_BLUR_MARGIN}
-            y={FOG_BLUR_MARGIN}
-            width={fogLeftPanelUpperHalfRect.width}
-            height={fogLeftPanelUpperHalfRect.height}
-            fill={`rgba(0, 0, 0, ${BACKDROP_OPACITY})`}
-            filter={`url(#${FOG_BLUR_FILTER_ID})`}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: couche de blocage des clics hors zones autorisées (trou = spotlight). */}
+          <path
+            fill="transparent"
+            fillRule="evenodd"
+            d={blockingPathD}
+            style={{ pointerEvents: "auto" }}
+            onClick={blockClick}
+            onMouseDown={blockClick}
+            onContextMenu={blockClick}
           />
         </svg>
       ) : null}
@@ -476,7 +651,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         aria-labelledby="tutorial-title"
         tabIndex={-1}
         className="tutorial-overlay-dialog"
-        style={dialogStyle}
+        style={{ ...dialogStyle, pointerEvents: "auto" }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
@@ -527,31 +702,66 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         {step.popupImage || step.popupShowMoveHex || step.popupShowGreenCircle ? (
           <div className="tutorial-overlay-dialog__body-with-illustration">
             {step.popupShowMoveHex ? (
-              <svg
-                className="tutorial-overlay-dialog__move-hex"
-                viewBox="0 0 50 50"
-                aria-hidden
-                role="img"
-              >
-                <title>Hexagone de destination de déplacement</title>
-                <polygon
-                  points={[0, 60, 120, 180, 240, 300]
-                    .map((deg) => {
-                      const rad = (deg * Math.PI) / 180;
-                      const x = 25 + 20 * Math.cos(rad);
-                      const y = 25 + 20 * Math.sin(rad);
-                      return `${x},${y}`;
-                    })
-                    .join(" ")}
-                  fill="rgba(144, 208, 144, 0.5)"
-                  stroke="#00aa00"
-                  strokeWidth="1.2"
-                />
-              </svg>
+              isStep1_5 && bodyFirstLine1_5 ? (
+                <div className="tutorial-overlay-dialog__icon-and-first-line">
+                  <svg
+                    className="tutorial-overlay-dialog__move-hex"
+                    viewBox="0 0 50 50"
+                    aria-hidden
+                    role="img"
+                  >
+                    <title>Hexagone de destination de déplacement</title>
+                    <polygon
+                      points={[0, 60, 120, 180, 240, 300]
+                        .map((deg) => {
+                          const rad = (deg * Math.PI) / 180;
+                          const x = 25 + 20 * Math.cos(rad);
+                          const y = 25 + 20 * Math.sin(rad);
+                          return `${x},${y}`;
+                        })
+                        .join(" ")}
+                      fill="rgba(144, 208, 144, 0.5)"
+                      stroke="#00aa00"
+                      strokeWidth="1.2"
+                    />
+                  </svg>
+                  <span className="tutorial-overlay-dialog__body-first-line">{bodyFirstLine1_5}</span>
+                </div>
+              ) : (
+                <svg
+                  className="tutorial-overlay-dialog__move-hex"
+                  viewBox="0 0 50 50"
+                  aria-hidden
+                  role="img"
+                >
+                  <title>Hexagone de destination de déplacement</title>
+                  <polygon
+                    points={[0, 60, 120, 180, 240, 300]
+                      .map((deg) => {
+                        const rad = (deg * Math.PI) / 180;
+                        const x = 25 + 20 * Math.cos(rad);
+                        const y = 25 + 20 * Math.sin(rad);
+                        return `${x},${y}`;
+                      })
+                      .join(" ")}
+                    fill="rgba(144, 208, 144, 0.5)"
+                    stroke="#00aa00"
+                    strokeWidth="1.2"
+                  />
+                </svg>
+              )
             ) : null}
             {step.popupImage && step.popupShowGreenCircle ? (
-              <div className="tutorial-overlay-dialog__unit-icon-with-green-circle" aria-hidden>
-                <svg
+              <div
+                className={
+                  isStepIconAndFirstLine
+                    ? "tutorial-overlay-dialog__icon-and-first-line"
+                    : "tutorial-overlay-dialog__unit-icon-with-green-circle"
+                }
+                aria-hidden={!isStepIconAndFirstLine}
+              >
+                <div className="tutorial-overlay-dialog__unit-icon-with-green-circle" aria-hidden>
+                  <svg
                   className="tutorial-overlay-dialog__green-activation-circle"
                   viewBox="0 0 64 64"
                   aria-hidden
@@ -573,6 +783,10 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                   className="tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--in-circle"
                   aria-hidden
                 />
+                </div>
+                {isStepIconAndFirstLine && bodyFirstLineIcon ? (
+                  <span className="tutorial-overlay-dialog__body-first-line">{bodyFirstLineIcon}</span>
+                ) : null}
               </div>
             ) : null}
             {step.popupImage && body.includes("{{ICON}}") ? (
@@ -587,17 +801,40 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                 {body.split("{{ICON}}").slice(1).join("{{ICON}}")}
               </p>
             ) : step.popupImage && !step.popupShowGreenCircle ? (
-              <>
-                <img
-                  src={step.popupImage}
-                  alt=""
-                  className="tutorial-overlay-dialog__popup-image"
-                  aria-hidden
-                />
-                {typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>}
-              </>
+              step.popupFirstLineWithIcon && bodyFirstLineIcon ? (
+                <>
+                  <div className="tutorial-overlay-dialog__icon-and-first-line">
+                    <img
+                      src={step.popupImage}
+                      alt=""
+                      className="tutorial-overlay-dialog__popup-image"
+                      aria-hidden
+                    />
+                    <span className="tutorial-overlay-dialog__body-first-line">{bodyFirstLineIcon}</span>
+                  </div>
+                  {bodyContentRestIcon !== null && (typeof bodyContentRestIcon === "string" ? <p>{bodyContentRestIcon}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContentRestIcon}</div>)}
+                </>
+              ) : (
+                <>
+                  <img
+                    src={step.popupImage}
+                    alt=""
+                    className="tutorial-overlay-dialog__popup-image"
+                    aria-hidden
+                  />
+                  {typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>}
+                </>
+              )
             ) : (
-              typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>
+              (() => {
+                const content =
+                  isStepIconAndFirstLine && bodyContentRestIcon !== null
+                    ? bodyContentRestIcon
+                    : isStep1_5 && bodyContentRest1_5 !== null
+                      ? bodyContentRest1_5
+                      : bodyContent;
+                return typeof content === "string" ? <p>{content}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{content}</div>;
+              })()
             )}
           </div>
         ) : (
@@ -631,3 +868,5 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
 
   return createPortal(overlayContent, document.body);
 };
+
+export default TutorialOverlay;

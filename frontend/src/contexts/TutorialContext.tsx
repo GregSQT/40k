@@ -80,12 +80,15 @@ export interface TutorialStepDef {
   hide_advance_icon?: boolean;
   /** Si true, pas de bouton Suivant ; on avance quand le joueur choisit une arme (sélection confirmée). */
   advance_on_weapon_click?: boolean;
+  advance_on_weapon_name?: string;
   /** URL de l’image à afficher dans le popup (ex. icône d’arme). */
   popup_image?: string;
   /** Si true, afficher un hexagone vert (destination de move) dans le popup. */
   popup_show_move_hex?: boolean;
   /** Si true, afficher popup_image (icône d’unité) entourée du cercle vert (unité activable). */
   popup_show_green_circle?: boolean;
+  /** Si true, afficher la première ligne du body sur la même ligne que l’icône (popup_image ou hex). */
+  popup_first_line_with_icon?: boolean;
   /**
    * Point d'ancrage du popup (viewport).
    * - "center" ou absent : centré (comportement par défaut)
@@ -138,12 +141,15 @@ export interface TutorialStepDisplay {
   hideAdvanceIcon?: boolean;
   /** Si true, pas de bouton Suivant ; avancer au choix d’arme (sélection confirmée). */
   advanceOnWeaponClick?: boolean;
+  advanceOnWeaponName?: string;
   /** URL de l’image à afficher dans le popup (ex. icône d’arme). */
   popupImage?: string;
   /** Si true, afficher un hexagone vert (destination de move) dans le popup. */
   popupShowMoveHex?: boolean;
   /** Si true, afficher l’icône (popupImage) entourée du cercle vert (unité activable). */
   popupShowGreenCircle?: boolean;
+  /** Si true, afficher la première ligne du body sur la même ligne que l’icône. */
+  popupFirstLineWithIcon?: boolean;
   /** Position initiale du popup : "center" ou { left, top } en % (ex. "5%") ou px. */
   popupPosition?: "center" | { left: string | number; top: string | number };
 }
@@ -174,9 +180,9 @@ interface TutorialContextValue {
   /** Rect viewport (px) du PANNEAU DROIT (unit-status-tables) = halo. */
   spotlightRightPanel: TutorialSpotlightPosition | null;
   setSpotlightRightPanel: (pos: TutorialSpotlightPosition | null) => void;
-  /** Rect viewport (px) de la moitié haute du panneau gauche = zone de fog (étape 1-5). */
-  leftPanelUpperHalfFogRect: TutorialSpotlightRect | null;
-  setLeftPanelUpperHalfFogRect: (r: TutorialSpotlightRect | null) => void;
+  /** Rects viewport (px) des zones de fog sur le panneau gauche (étape 1-5 : 2 bandes pour moins noir). */
+  leftPanelFogRects: TutorialSpotlightRect[];
+  setLeftPanelFogRects: (r: TutorialSpotlightRect[] | null) => void;
   /** Halos viewport (px) : section RANGED WEAPON(S) du panneau droit (étape 1-6). */
   spotlightRangedWeaponsPositions: TutorialSpotlightPosition[] | null;
   setSpotlightRangedWeaponsPositions: (pos: TutorialSpotlightPosition[] | null) => void;
@@ -224,7 +230,7 @@ export function TutorialProvider({
   const [spotlightTurnPhasePositions, setSpotlightTurnPhasePositions] = useState<TutorialSpotlightPosition[] | null>(null);
   const [spotlightLeftPanel, setSpotlightLeftPanel] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightRightPanel, setSpotlightRightPanel] = useState<TutorialSpotlightPosition | null>(null);
-  const [leftPanelUpperHalfFogRect, setLeftPanelUpperHalfFogRect] = useState<TutorialSpotlightRect | null>(null);
+  const [leftPanelFogRects, setLeftPanelFogRects] = useState<TutorialSpotlightRect[]>([]);
   const [spotlightRangedWeaponsPositions, setSpotlightRangedWeaponsPositions] = useState<TutorialSpotlightPosition[] | null>(null);
   const [spotlightGameLogLastEntry, setSpotlightGameLogLastEntry] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightGameLogHeader, setSpotlightGameLogHeader] = useState<TutorialSpotlightPosition | null>(null);
@@ -266,9 +272,14 @@ export function TutorialProvider({
       advanceOnMoveClick: s.advance_on_move_click === true,
       hideAdvanceIcon: s.hide_advance_icon === true,
       advanceOnWeaponClick: s.advance_on_weapon_click === true,
+      advanceOnWeaponName:
+        typeof s.advance_on_weapon_name === "string" && s.advance_on_weapon_name.trim() !== ""
+          ? s.advance_on_weapon_name.trim()
+          : undefined,
       popupImage: typeof s.popup_image === "string" && s.popup_image.trim() !== "" ? s.popup_image : undefined,
       popupShowMoveHex: s.popup_show_move_hex === true,
       popupShowGreenCircle: s.popup_show_green_circle === true,
+      popupFirstLineWithIcon: s.popup_first_line_with_icon === true,
       popupPosition:
         s.popup_position === "center" || s.popup_position == null
           ? undefined
@@ -289,7 +300,7 @@ export function TutorialProvider({
       setSpotlightTurnPhasePositions(null);
       setSpotlightLeftPanel(null);
       setSpotlightRightPanel(null);
-      setLeftPanelUpperHalfFogRect(null);
+      setLeftPanelFogRects([]);
       setSpotlightRangedWeaponsPositions(null);
       setSpotlightGameLogLastEntry(null);
       setSpotlightGameLogHeader(null);
@@ -458,8 +469,8 @@ export function TutorialProvider({
             setSpotlightLeftPanel,
             spotlightRightPanel,
             setSpotlightRightPanel,
-            leftPanelUpperHalfFogRect,
-            setLeftPanelUpperHalfFogRect,
+            leftPanelFogRects,
+            setLeftPanelFogRects,
             spotlightRangedWeaponsPositions,
             setSpotlightRangedWeaponsPositions,
             spotlightGameLogLastEntry,
@@ -489,8 +500,8 @@ export function TutorialProvider({
             setSpotlightLeftPanel: () => {},
             spotlightRightPanel: null,
             setSpotlightRightPanel: () => {},
-            leftPanelUpperHalfFogRect: null,
-            setLeftPanelUpperHalfFogRect: () => {},
+            leftPanelFogRects: [],
+            setLeftPanelFogRects: () => {},
             spotlightRangedWeaponsPositions: null,
             setSpotlightRangedWeaponsPositions: () => {},
             spotlightGameLogLastEntry: null,
@@ -515,7 +526,7 @@ export function TutorialProvider({
       spotlightTurnPhasePositions,
       spotlightLeftPanel,
       spotlightRightPanel,
-      leftPanelUpperHalfFogRect,
+      leftPanelFogRects,
       spotlightRangedWeaponsPositions,
       spotlightGameLogLastEntry,
       spotlightGameLogHeader,

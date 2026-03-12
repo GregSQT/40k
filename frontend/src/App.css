@@ -2815,6 +2815,16 @@ textarea:focus {
   flex-shrink: 0;
   align-self: flex-start;
 }
+/* Étape 1-4 : icône et libellé "Intercessor (votre unité)" sur la même ligne */
+.tutorial-overlay-dialog__icon-and-first-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tutorial-overlay-dialog__body-first-line {
+  font-weight: 500;
+}
 .tutorial-overlay-dialog__green-activation-circle {
   position: absolute;
   inset: 0;
@@ -2846,6 +2856,15 @@ textarea:focus {
 }
 .tutorial-overlay-dialog__weapon-attr-badge:first-child {
   margin-left: 0;
+}
+/* Icône pointeur souris devant les lignes "Cliquez..." */
+.tutorial-overlay-dialog__click-icon {
+  display: inline-block;
+  width: 2.2em;
+  height: 2.2em;
+  vertical-align: middle;
+  margin-right: 6px;
+  color: var(--tooltip-text-color);
 }
 .tutorial-overlay-dialog__weapon-attr-line {
   display: inline;

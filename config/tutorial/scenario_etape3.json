@@ -2,7 +2,7 @@
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-01.json",
   "units": [
-    { "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 15 }
+    { "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 18 }
   ],
   "objectives": [
     { "id": 5, "name": "Center", "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]] }

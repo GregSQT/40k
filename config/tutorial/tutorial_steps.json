@@ -35,24 +35,25 @@
       "trigger": { "type": "phase_enter", "phase": "move" },
       "advance_on_unit_click": true,
       "popup_image": "/icons/Intercessor.webp",
+      "popup_first_line_with_icon": true,
       "layout": "Halo sur l'Intercessor (cercle vert) + halo sur le bouton Move du turn phase tracker. Pas de bouton Suivant dans le popup.",
       "next_step": "Clic sur l'Intercessor",
-      "title_fr": "Phase de Mouvement",
+      "title_fr": "1-4 Phase de Mouvement",
       "title_en": "Movement phase",
-      "body_fr": "Sélectionnez l'Intercessor (cercle vert) pour m'activer",
-      "body_en": "Select your Intercessor (green circle) to activate it"
+      "body_fr": "Intercessor (votre unité)\n\n--------------------\n<cursor> Cliquez sur l'Intercessor (cercle vert) pour l'activer",
+      "body_en": "Intercessor (your unit)\n\n--------------------\n<cursor> Click on the Intercessor (green circle) to activate it"
     },
     {
       "stage": "1-5",
       "trigger": { "type": "phase_enter", "phase": "move" },
       "advance_on_move_click": true,
       "popup_show_move_hex": true,
-      "layout": "Fog sur la moitié supérieure du panneau gauche. Tableau d'unités (unitStatusTable) déplié pour afficher les stats de l'Intercessor. Halo sur colonnes Name et M.",
+      "layout": "Deux fogs (2 bandes) sur la moitié supérieure du panneau gauche. Tableau d'unités (unitStatusTable) déplié pour afficher les stats de l'Intercessor. Halo sur colonnes Name et M.",
       "next_step": "Clic sur une destination valide (hex vert) pour déplacer l'Intercessor",
       "title_fr": "1-5 Phase de mouvement",
       "title_en": "Movement phase",
-      "body_fr": "Les cases vertes sont des destinations valides (à une distance M maximum). Choisissez-en une pour déplacer votre Intercessor.",
-      "body_en": "The green hexes are valid destinations (up to M distance). Choose one to move your Intercessor."
+      "body_fr": "Les cases vertes sont des destinations valides (à une distance M maximum). \n\n--------------------\n<cursor>Choisissez-en une pour déplacer votre Intercessor.",
+      "body_en": "The green hexes are valid destinations (up to M distance). \n\n--------------------\n<cursor>Choose one to move your Intercessor."
     },
     {
       "stage": "1-6",
@@ -62,8 +63,8 @@
       "next_step": "Clic sur l'icône de l'Intercessor pour confirmer le déplacement",
       "title_fr": "1-6 Phase de mouvement",
       "title_en": "Movement phase",
-      "body_fr": "Les cases bleues représentent la ligne de vue de l'Intercessor.\n<Hex bleu foncé> vue directe. \n<Hex bleu clair> vue partielle (la cible sur cette case bénéficie d'un couvert).\n\n<icone termagant> \nEn haut du plateau de jeu, vous voyez cette unité ennemie dont la barre de points de vie clignote, ce qui signifie que l'Intercessor a une ligne de vue dessus.\n\nCliquez à nouveau sur l'icône de l'Intercessor afin de valider son déplacement.",
-      "body_en": "The blue hexes represent the line of sight of the Intercessor.\n<Dark blue hex> direct view. \n<Light blue hex> partial view (the target on this hex benefits from cover).\n\n<Termagant icon> \nAt the top of the game board, you see this enemy unit whose hit points bar is blinking, which means the Intercessor has line of sight on it.\n\nClick again on the Intercessor icon to confirm the move."
+      "body_fr": "Les cases bleues représentent la ligne de vue de l'Intercessor.\n<Hex bleu foncé> vue directe. \n<Hex bleu clair> vue partielle (la cible sur cette case bénéficie d'un couvert).\n<icone termagant> \nLa barre de points de vie du Termagant clignotte, indiquant que l'Intercessor a une ligne de vue dessus.\n\n--------------------\n<cursor>Cliquez à nouveau sur l'icône de l'Intercessor afin de valider son déplacement.",
+      "body_en": "The blue hexes represent the line of sight of the Intercessor.\n<Dark blue hex> direct view. \n<Light blue hex> partial view (the target on this hex benefits from cover).\n<Termagant icon> \nThe hit points bar of the Termagant blinks, indicating that the Intercessor has line of sight on it.\n\n--------------------\n<cursor>Click again on the Intercessor icon to confirm the move."
     },
     {
       "stage": "2-1",
@@ -74,10 +75,11 @@
       "hide_advance_icon": true,
       "popup_image": "/icons/Intercessor.webp",
       "popup_show_green_circle": true,
-      "title_fr": "Phase de Tir",
+      "popup_first_line_with_icon": true,
+      "title_fr": "2-1 Phase de Tir",
       "title_en": "Shooting phase",
-      "body_fr": "Le mouvement est terminé, nous entrons dans la phase de tir.\nL'intercessor est activable (icone entourée de vert). \n\nCliquez sur l'icône de l'Intercessor pour l'activer.",
-      "body_en": "The movement phase is over, we enter the shooting phase. \nThe Intercessor is activable (green circle). \n\nClick on the Intercessor icon to activate it."
+      "body_fr": "Le cercle vert indique qu'une unité est activable.\nLe mouvement est terminé, nous entrons dans la phase de tir.\nL'intercessor est activable (icone entourée de vert). \n\n--------------------\n<cursor>Cliquez sur l'icône de l'Intercessor pour l'activer.",
+      "body_en": "The green circle indicates that a unit is activable.\nThe movement phase is over, we enter the shooting phase. \nThe Intercessor is activable (green circle). \n\n--------------------\n<cursor>Click on the Intercessor icon to activate it."
     },
     {
       "stage": "2-2",
@@ -85,50 +87,40 @@
       "advance_on_weapon_click": true,
       "popup_position": { "left": "32%", "top": "12%" },
       "trigger": { "type": "phase_enter", "phase": "shooting" },
-      "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre). unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs.",
-      "next_step": "Clic sur le Bolt Rifle dans le menu des armes à distance",
+      "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre).",
+      "next_step": "Clic sur l'icone du menu des armes à distance",
       "title_fr": "2-2 Menu de choix des armes",
       "title_en": "Weapon choice menu",
-      "body_fr": "Le menu des armes à distance dont dispose l'Intercessor s'affiche. \n<Range> Distance (en hex) à laquelle l'arme peut tirer.\n<A> Nombre de tir(s) de l'arme.\n<BS>Le jet à battre sur un D6 pour toucher la cible.\n<S> Force d'attaque de l'arme (à opposer à l'Endurance de la cible).\n<AP> Pouvoir de pénétration de l'arme.\n<DMG> Dommage infligé par l'arme.\n\nSelectionnez le Bolt Rifle.",
-      "body_en": "The line of sight reappears (in blue), and the Termagant is a potential target (its hit points bar blinks).\n\n<Range> Distance (in hex) at which the weapon can shoot.\n<A> Number of shots of the weapon.\n<BS> The roll to beat on a D6 to hit the target.\n<S> Attack strength of the weapon (to oppose to the target's Endurance).\n<AP> Penetration power of the weapon.\n<DMG> Damage inflicted by the weapon.\n\nSelect the Bolt Rifle."
+      "body_fr": "La ligne de vue réapparaît (en bleu), et le Termagant est une cible potentielle (sa barre de points de vie clignote).\n<Hex bleu foncé> vue directe. \n<Hex bleu clair> vue partielle (la cible sur cette case bénéficie d'un couvert).\n<icone termagant> \nLa barre de points de vie du Termagant clignote, indiquant que l'Intercessor a une ligne de vue dessus.\n\n--------------------\n<cursor>Cliquez sur l'icone du menu des armes à distance.",
+      "body_en": "The line of sight reappears (in blue), and the Termagant is a potential target (its hit points bar blinks).\n<Dark blue hex> direct view. \n<Light blue hex> partial view (the target on this hex benefits from cover).\n<Termagant icon> \nThe hit points bar of the Termagant blinks, indicating that the Intercessor has line of sight on it.\n\n--------------------\n<cursor>Click on the icon of the weapon choice menu."
     },
     {
       "stage": "2-3",
       "hide_advance_icon": true,
       "advance_on_weapon_click": true,
-      "popup_image": "/icons/Action_Logo/3-1 - Gun_Choice.png",
+      "advance_on_weapon_name": "Bolt Rifle",
       "popup_position": { "left": "32%", "top": "12%" },
       "trigger": { "type": "phase_enter", "phase": "shooting" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre).",
-      "next_step": "Clic sur l'icône du Termagant",
-      "title_fr": "2-3 Choix de la cible",
-      "title_en": "Target choice",
-      "body_fr": "Les lignes de vue réapparaissent, et le Termagant est une cible potentielle (sa barre de vie clignote).\n\n{{ICON}}\n\nCliquez sur l'icône de bolter au-dessus de l'Intercessor pour choisir l'arme.",
-      "body_en": "The line of sight reappears (in blue), and the Termagant is a potential target (its hit points bar blinks).\n\n{{ICON}}\n\nClick on the bolter icon above the Intercessor to choose your weapon."
+      "next_step": "Clic sur le Bolt Rifle dans le menu des armes à distance",
+      "title_fr": "2-3 Choix de l'arme",
+      "title_en": "Weapon choice",
+      "body_fr": "Le menu affiche les armes à distance dont dispose l'Intercessor. \n<Range> Distance (en hex) à laquelle l'arme peut tirer.\n<A> Nombre de tir(s) de l'arme.\n<BS>Le jet à battre sur un D6 pour toucher la cible.\n<S> Force d'attaque de l'arme (à opposer à l'Endurance de la cible).\n<AP> Pouvoir de pénétration de l'arme.\n<DMG> Dommage infligé par l'arme.\n\n--------------------\n<cursor>Selectionnez le Bolt Rifle.",
+      "body_en": "The weapon choice menu displays the ranged weapons available to the Intercessor. \n<Range> Distance (in hex) at which the weapon can shoot.\n<A> Number of shots of the weapon.\n<BS> The roll to beat on a D6 to hit the target.\n<S> Attack strength of the weapon (to oppose to the target's Endurance).\n<AP> Penetration power of the weapon.\n<DMG> Damage inflicted by the weapon.\n\n--------------------\n<cursor>Select the Bolt Rifle."
     },
     {
       "stage": "2-4",
       "hide_advance_icon": true,
       "advance_on_weapon_click": true,
-      "popup_image": "/icons/Action_Logo/3-1 - Gun_Choice.png",
+      "popup_image": "/icons/Termagant_red.webp",
       "popup_position": { "left": "32%", "top": "12%" },
       "trigger": { "type": "phase_enter", "phase": "shooting" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre).",
-      "next_step": "Clic sur l'icône de bolter au-dessus de l'Intercessor",
-      "title_fr": "2-4 Choix des armes",
-      "title_en": "Weapon choice",
-      "body_fr": "Les lignes de vue réapparaissent, et le Termagant est une cible potentielle (sa barre de vie clignote).\n\n{{ICON}}\n\nCliquez sur l'icône de bolter au-dessus de l'Intercessor pour choisir l'arme.",
-      "body_en": "The line of sight reappears (in blue), and the Termagant is a potential target (its hit points bar blinks).\n\n{{ICON}}\n\nClick on the bolter icon above the Intercessor to choose your weapon."
-    },
-    {
-      "stage": "3-2",
-      "trigger": { "type": "phase_enter", "phase": "move" },
-      "layout": "Popup centré.",
-      "next_step": "Intercessor déplacé sur hex objectif (contrôle de zone)",
-      "title_fr": "Objectif central",
-      "title_en": "Central objective",
-      "body_fr": "Déplacez votre unité sur la zone centrale (hexes en surbrillance) pour marquer des points de contrôle.",
-      "body_en": "Move your unit onto the central zone (highlighted hexes) to score control points."
+      "next_step": "Clic sur l'icône du Termagant",
+      "title_fr": "2-4 Choix de la cible",
+      "title_en": "Target choice",
+      "body_fr": "<cursor>Cliquez sur le termagant pour tirer dessus.",
+      "body_en": "<cursor>Click on the Termagant to shoot at it."
     }
   ]
 }

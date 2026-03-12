@@ -150,6 +150,10 @@ Fichier unique : **`config/tutorial/tutorial_steps.json`**. Les steps peuvent ê
 
 Structure possible : un tableau par etape, ou un tableau unique avec un champ `etape` (1|2|3) et ordre global. Voir 4.3 pour les types de trigger.
 
+**Placeholders dans le corps (body_fr / body_en)** : le texte du popup peut contenir des balises remplacées par l’appli :
+- **`<cursor>`** : affiche l’icône pointeur souris à cet endroit (ex. « Pour valider, <cursor> cliquez sur l’unité »). Si une ligne commence par « Cliquez » ou « Clickez » et ne contient pas `<cursor>`, l’icône est ajoutée automatiquement en début de ligne.
+- Autres : `<Hex bleu foncé>`, `<icone termagant>`, `<Range>`, etc. (voir `TutorialOverlay.tsx`).
+
 **Position du popup (optionnel)** : chaque step peut définir `popup_position` pour contrôler où s’affiche le popup dans la fenêtre (sans dépendre du plateau) :
 - **Absent ou `"center"`** : popup centré (comportement par défaut).
 - **`{ "left": "5%", "top": "10%" }`** : coin haut-gauche du popup à 5 % du bord gauche et 10 % du haut du viewport. On peut utiliser des pourcentages (`"20%"`) ou des pixels (`80`). L’utilisateur peut toujours déplacer le popup par glisser-déposer.
