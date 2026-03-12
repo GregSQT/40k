@@ -24,6 +24,7 @@ Wall set (must match engine/w40k_core.py):
 
 import argparse
 import json
+import multiprocessing
 import sys
 import time
 from pathlib import Path
@@ -194,6 +195,41 @@ def _get_hex_neighbors(col: int, row: int) -> List[Tuple[int, int]]:
 _MAX_PATHFINDING = 51  # max_search_distance+1 for unreachable, fits uint8
 
 
+def _worker_chunk_star(args: Tuple) -> Tuple[int, int, np.ndarray]:
+    """Unpack args for imap (picklable)."""
+    return _worker_chunk(*args)
+
+
+def _worker_chunk(
+    from_start: int,
+    from_end: int,
+    cols: int,
+    rows: int,
+    walls_list: List[Tuple[int, int]],
+) -> Tuple[int, int, np.ndarray]:
+    """Compute topology rows [from_start, from_end). Returns (start, end, chunk array)."""
+    valid_walls = set(walls_list)
+    n = cols * rows
+    chunk = np.zeros((from_end - from_start, n, 2), dtype=np.float32)
+    for local_i, from_idx in enumerate(range(from_start, from_end)):
+        from_row, from_col = from_idx // cols, from_idx % cols
+        for to_idx in range(n):
+            if from_idx == to_idx:
+                chunk[local_i, to_idx, 0] = 1.0
+                chunk[local_i, to_idx, 1] = 0
+                continue
+            to_row, to_col = to_idx // cols, to_idx % cols
+            vis = _compute_visibility_ratio(
+                from_col, from_row, to_col, to_row, valid_walls
+            )
+            path = _compute_pathfinding_distance(
+                from_col, from_row, to_col, to_row, valid_walls, cols, rows
+            )
+            chunk[local_i, to_idx, 0] = vis
+            chunk[local_i, to_idx, 1] = path
+    return (from_start, from_end, chunk)
+
+
 def _compute_pathfinding_distance(
     from_col: int, from_row: int, to_col: int, to_row: int,
     wall_set: Set[Tuple[int, int]], cols: int, rows: int,
@@ -281,47 +317,72 @@ def _build_wall_edge_topology(
 
 
 def _build_full_topology(
-    cols: int, rows: int, wall_hexes: Set[Tuple[int, int]]
+    cols: int, rows: int, wall_hexes: Set[Tuple[int, int]], jobs: int = 1
 ) -> np.ndarray:
     """
     Build full topology: LoS + pathfinding. Shape (n, n, 2).
     [:, :, 0] = visibility_ratio (float16), [:, :, 1] = pathfinding_distance (uint8).
+    Uses symmetry: vis(A,B)=vis(B,A), path(A,B)=path(B,A) — compute only i<j, then mirror.
     """
     n = cols * rows
     valid_walls = {(c, r) for c, r in wall_hexes if 0 <= c < cols and 0 <= r < rows}
+    walls_list = list(valid_walls)
 
-    # Combined array: visibility (float16) + pathfinding (uint8)
-    arr = np.zeros((n, n, 2), dtype=np.float32)  # build as float32, cast at end
-    total_pairs = n * n
-    done = 0
+    arr = np.zeros((n, n, 2), dtype=np.float32)
+    for i in range(n):
+        arr[i, i, 0] = 1.0
+        arr[i, i, 1] = 0
+
+    total_pairs = n * (n - 1) // 2
     start_time = time.time()
-    last_update_pct = -1.0
 
-    for from_row in range(rows):
-        for from_col in range(cols):
-            from_idx = from_row * cols + from_col
-            for to_row in range(rows):
-                for to_col in range(cols):
-                    to_idx = to_row * cols + to_col
-                    if from_idx == to_idx:
-                        arr[from_idx, to_idx, 0] = 1.0
-                        arr[from_idx, to_idx, 1] = 0
-                        done += 1
-                        continue
-                    arr[from_idx, to_idx, 0] = _compute_visibility_ratio(
-                        from_col, from_row, to_col, to_row, valid_walls
-                    )
-                    arr[from_idx, to_idx, 1] = _compute_pathfinding_distance(
-                        from_col, from_row, to_col, to_row, valid_walls, cols, rows
-                    )
-                    done += 1
+    if jobs > 1:
+        n_workers = min(jobs, max(1, multiprocessing.cpu_count() - 1))
+        n_workers = min(n_workers, n)
+        # More chunks = progress updates more often (~every 10-15 sec)
+        n_chunks = min(n, max(n_workers * 8, 64))
+        chunk_size = max(1, (n + n_chunks - 1) // n_chunks)
+        chunks = []
+        for start in range(0, n, chunk_size):
+            end = min(start + chunk_size, n)
+            chunks.append((start, end, cols, rows, walls_list))
+        done = 0
+        last_update_pct = -1.0
+        sys.stdout.write("  Computing topology...\r")
+        sys.stdout.flush()
+        with multiprocessing.Pool(processes=n_workers) as pool:
+            for start, end, chunk_arr in pool.imap_unordered(
+                _worker_chunk_star, chunks, chunksize=1
+            ):
+                arr[start:end, :, :] = chunk_arr
+                done += (end - start) * n
+                pct = min(100.0, (done / (n * n)) * 100)
+                if pct - last_update_pct >= 1.0 or done >= n * n:
+                    last_update_pct = pct
+                    _print_progress(min(done, n * n), n * n, start_time, "pairs")
+        print()
+    else:
+        done = 0
+        last_update_pct = -1.0
+        for from_idx in range(n):
+            from_row, from_col = from_idx // cols, from_idx % cols
+            for to_idx in range(from_idx + 1, n):
+                to_row, to_col = to_idx // cols, to_idx % cols
+                vis = _compute_visibility_ratio(
+                    from_col, from_row, to_col, to_row, valid_walls
+                )
+                path = _compute_pathfinding_distance(
+                    from_col, from_row, to_col, to_row, valid_walls, cols, rows
+                )
+                arr[from_idx, to_idx, 0] = arr[to_idx, from_idx, 0] = vis
+                arr[from_idx, to_idx, 1] = arr[to_idx, from_idx, 1] = path
+                done += 1
 
             pct = (done / total_pairs) * 100
             if pct - last_update_pct >= 1.0 or done == total_pairs:
                 last_update_pct = pct
                 _print_progress(done, total_pairs, start_time, "pairs")
-
-    print()
+        print()
     # Both channels as float16 (pathfinding 0-51 fits; visibility 0-1)
     out = np.empty((n, n, 2), dtype=np.float16)
     out[:, :, 0] = arr[:, :, 0].astype(np.float16)
@@ -330,25 +391,29 @@ def _build_full_topology(
 
 
 def _find_wall_files(board_dir: Path, fallback_walls_dir: Path) -> List[Tuple[Path, str]]:
-    """Find walls-XX.json files. Returns [(path, XX), ...]. Searches board_dir/walls/ first, then board_dir, then fallback."""
+    """Find wall JSON files. Returns [(path, wall_id), ...].
+    - walls-XX.json -> wall_id XX (e.g. 01)
+    - tutorial_walls-01.json -> wall_id tutorial_walls-01
+    Searches board_dir/walls/ first, then board_dir, then fallback.
+    """
     results: List[Tuple[Path, str]] = []
     walls_subdir = board_dir / "walls"
     for candidate in [walls_subdir, board_dir, fallback_walls_dir]:
         if not candidate.exists():
             continue
-        for p in sorted(candidate.glob("walls-*.json")):
-            stem = p.stem  # walls-01
-            if stem.startswith("walls-"):
-                suffix = stem[6:]  # 01
-                if suffix.isdigit():
-                    results.append((p, suffix))
-    # Deduplicate by suffix (prefer board_dir)
+        for p in sorted(candidate.glob("*.json")):
+            stem = p.stem
+            if stem.startswith("walls-") and len(stem) > 6 and stem[6:].isdigit():
+                results.append((p, stem[6:]))  # 01
+            elif stem.startswith("tutorial_walls-"):
+                results.append((p, stem))  # tutorial_walls-01
+    # Deduplicate by wall_id (prefer first occurrence)
     seen: set[str] = set()
     unique: List[Tuple[Path, str]] = []
-    for path, suffix in results:
-        if suffix not in seen:
-            seen.add(suffix)
-            unique.append((path, suffix))
+    for path, wall_id in results:
+        if wall_id not in seen:
+            seen.add(wall_id)
+            unique.append((path, wall_id))
     return unique
 
 
@@ -361,6 +426,14 @@ def main() -> int:
     )
     parser.add_argument("--cols", type=int, help="Board columns")
     parser.add_argument("--rows", type=int, help="Board rows")
+    parser.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Parallel jobs (default: 1). Use 0 for auto (CPU count - 1).",
+    )
     args = parser.parse_args()
 
     if args.dimensions:
@@ -378,12 +451,18 @@ def main() -> int:
     wall_files = _find_wall_files(board_dir, fallback_walls)
     if not wall_files:
         print(
-            f"No walls-*.json found in {board_dir / 'walls'}, {board_dir} or {fallback_walls}",
+            f"No wall JSON (walls-*.json or tutorial_walls-*.json) found in {board_dir / 'walls'}, {board_dir} or {fallback_walls}",
             file=sys.stderr,
         )
         return 1
 
     board_dir.mkdir(parents=True, exist_ok=True)
+
+    jobs = args.jobs
+    if jobs == 0:
+        jobs = max(1, multiprocessing.cpu_count() - 1)
+    if jobs > 1:
+        print(f"Using {jobs} parallel jobs\n")
 
     for wall_path, wall_id in wall_files:
         print(f"Building topology for {cols}x{rows} + {wall_path.name}...")
@@ -392,7 +471,7 @@ def main() -> int:
         print(f"  Terrain walls: {len(terrain_walls)}, + boundary: {len(wall_hexes)} total")
 
         # Single topology file: LoS + pathfinding + wall_edge
-        full = _build_full_topology(cols, rows, wall_hexes)
+        full = _build_full_topology(cols, rows, wall_hexes, jobs=jobs)
         wall_edge = _build_wall_edge_topology(cols, rows, wall_hexes)
         out_name = f"topology_{cols}x{rows}-{wall_id}.npz"
         out_path = board_dir / out_name

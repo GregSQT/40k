@@ -1,0 +1,633 @@
+import type React from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type {
+  TutorialLang,
+  TutorialSpotlightCircle,
+  TutorialSpotlightPosition,
+  TutorialSpotlightRect,
+  TutorialStepDisplay,
+} from "../contexts/TutorialContext";
+
+interface TutorialOverlayProps {
+  step: TutorialStepDisplay;
+  lang: TutorialLang;
+  onLangChange: (lang: TutorialLang) => void;
+  onClose: () => void;
+  onSkipTutorial?: () => void;
+  /** Positions viewport (px) des halos : cercles ou rectangles non grisés (board, panneau). */
+  spotlights?: TutorialSpotlightPosition[];
+  /** Rect viewport (px) de la moitié haute du panneau gauche = zone à assombrir (fog) pour l’étape 1-5. */
+  fogLeftPanelUpperHalfRect?: TutorialSpotlightRect | null;
+}
+
+/**
+ * Modal d'étape du tutoriel : titre, corps, bouton Compris, optionnel Passer le tutoriel.
+ * Accessibilité : focus trap, fermeture à Échap.
+ */
+const BACKDROP_OPACITY = 0.82;
+
+const MASK_ID = "tutorial-spotlight-mask";
+const BLUR_FILTER_ID = "tutorial-spotlight-blur";
+const FOG_BLUR_FILTER_ID = "tutorial-fog-blur";
+const BLUR_EDGE = 8;
+/** Marge autour du rect de fog pour que le flou ne soit pas coupé. */
+const FOG_BLUR_MARGIN = 24;
+
+/** Logos des phases (frontend/public/icons/Action_Logo) affichés à gauche du titre. */
+const PHASE_LOGO: Record<string, string> = {
+  move: "/icons/Action_Logo/2 - Movemement.png",
+  shooting: "/icons/Action_Logo/3 - Shooting.png",
+  charge: "/icons/Action_Logo/4 - Charge.png",
+  fight: "/icons/Action_Logo/5 - Fight.png",
+};
+
+const TERMAGANT_ICON_PATH = "/icons/Termagant_red.webp";
+
+/** Regex : ligne commençant par <Range>, <A>, <BS>, <S>, <AP> ou <DMG> puis la description. */
+const WEAPON_ATTR_LINE_RE = /^<(Range|A|BS|S|AP|DMG)>\s*(.*)$/;
+
+/**
+ * Rendu du corps pour l'étape 2-2 : intro, tableau 2 colonnes (attributs à droite de la colonne gauche, infos à gauche de la colonne droite), puis texte de fin.
+ */
+function renderBodyWithWeaponAttrTooltips(body: string): React.ReactNode {
+  const lines = body.split("\n");
+  const intro: string[] = [];
+  const attrRows: { attrName: string; description: string }[] = [];
+  const trailing: string[] = [];
+  let phase: "intro" | "attrs" | "trailing" = "intro";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(WEAPON_ATTR_LINE_RE);
+    if (m !== null) {
+      if (phase === "intro") phase = "attrs";
+      attrRows.push({ attrName: m[1], description: m[2].trim() });
+    } else {
+      if (phase === "attrs") phase = "trailing";
+      if (phase === "intro") intro.push(line);
+      else trailing.push(line);
+    }
+  }
+  return (
+    <div className="tutorial-overlay-dialog__body-paragraph">
+      {intro.length > 0 && (
+        <p className="tutorial-overlay-dialog__weapon-attr-intro" style={{ whiteSpace: "pre-wrap" }}>
+          {intro.join("\n")}
+        </p>
+      )}
+      {attrRows.length > 0 && (
+        <div className="tutorial-overlay-dialog__weapon-attr-cols">
+          <div className="tutorial-overlay-dialog__weapon-attr-col tutorial-overlay-dialog__weapon-attr-col--left">
+            {attrRows.map(({ attrName }) => (
+              <div key={attrName} className="tutorial-overlay-dialog__weapon-attr-cell">
+                <span className="tutorial-overlay-dialog__weapon-attr-badge">{attrName}</span>
+              </div>
+            ))}
+          </div>
+          <div className="tutorial-overlay-dialog__weapon-attr-col tutorial-overlay-dialog__weapon-attr-col--right">
+            {attrRows.map(({ attrName, description }) => (
+              <div key={attrName} className="tutorial-overlay-dialog__weapon-attr-cell tutorial-overlay-dialog__weapon-attr-desc">
+                {description}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {trailing.length > 0 && (
+        <p className="tutorial-overlay-dialog__weapon-attr-trailing" style={{ whiteSpace: "pre-wrap" }}>
+          {trailing.join("\n")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Points du polygone hexagone (même format que l’hex vert 1-5) : centre 25,25, rayon 20. */
+const HEX_POINTS = [0, 60, 120, 180, 240, 300]
+  .map((deg) => {
+    const rad = (deg * Math.PI) / 180;
+    const x = 25 + 20 * Math.cos(rad);
+    const y = 25 + 20 * Math.sin(rad);
+    return `${x},${y}`;
+  })
+  .join(" ");
+
+function renderBodyWithLosPlaceholders(
+  body: string,
+  lang: "fr" | "en"
+): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  const re = /(<Hex bleu foncé>|<Dark blue hex>|<Hex bleu clair>|<Light blue hex>)([^\n]*)\n?|(<icone termagant>|<Termagant icon>)\s*\n?/g;
+  let m = re.exec(body);
+  while (m !== null) {
+    if (m.index > lastIndex) {
+      parts.push(body.slice(lastIndex, m.index));
+    }
+    const tag = m[1] ?? m[3] ?? m[0];
+    const sameLineDesc = m[2] ?? "";
+    if (tag.includes("termagant") || tag.includes("Termagant icon")) {
+      parts.push(
+        <span key={`termagant-${m.index}`} className="tutorial-overlay-dialog__unit-icon-with-label">
+          <img
+            src={TERMAGANT_ICON_PATH}
+            alt=""
+            className="tutorial-overlay-dialog__unit-icon tutorial-overlay-dialog__unit-icon--large"
+            aria-hidden
+          />
+          <span className="tutorial-overlay-dialog__unit-icon-label">Termagant</span>
+        </span>
+      );
+    } else if (tag.includes("foncé") || tag.includes("Dark blue")) {
+      parts.push(
+        <span key={`dark-${m.index}`} className="tutorial-overlay-dialog__los-hex-row">
+          <svg
+            className="tutorial-overlay-dialog__los-hex"
+            viewBox="0 0 50 50"
+            aria-hidden
+            role="img"
+          >
+            <title>{lang === "fr" ? "Vue directe" : "Direct view"}</title>
+            <polygon
+              points={HEX_POINTS}
+              fill="rgba(79, 139, 255, 0.5)"
+              stroke="#4f8bff"
+              strokeWidth="1.2"
+            />
+          </svg>
+          <span className="tutorial-overlay-dialog__los-hex-desc">{sameLineDesc.trim()}</span>
+        </span>
+      );
+    } else {
+      parts.push(
+        <span key={`cover-${m.index}`} className="tutorial-overlay-dialog__los-hex-row">
+          <svg
+            className="tutorial-overlay-dialog__los-hex"
+            viewBox="0 0 50 50"
+            aria-hidden
+            role="img"
+          >
+            <title>{lang === "fr" ? "Vue partielle (couvert)" : "Partial view (cover)"}</title>
+            <polygon
+              points={HEX_POINTS}
+              fill="rgba(158, 197, 255, 0.5)"
+              stroke="#9ec5ff"
+              strokeWidth="1.2"
+            />
+          </svg>
+          <span className="tutorial-overlay-dialog__los-hex-desc">{sameLineDesc.trim()}</span>
+        </span>
+      );
+    }
+    lastIndex = re.lastIndex;
+    m = re.exec(body);
+  }
+  if (lastIndex < body.length) {
+    parts.push(body.slice(lastIndex));
+  }
+  return parts.length > 1 ? parts : body;
+}
+
+export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
+  step,
+  lang,
+  onLangChange,
+  onClose,
+  onSkipTutorial,
+  spotlights = [],
+  fogLeftPanelUpperHalfRect = null,
+}) => {
+  const title = lang === "fr" ? step.title_fr : step.title_en;
+  const body = lang === "fr" ? step.body_fr : step.body_en;
+  const bodyContent =
+    step.stage === "1-6"
+      ? renderBodyWithLosPlaceholders(body, lang)
+      : step.stage === "2-2"
+        ? renderBodyWithWeaponAttrTooltips(body)
+        : body;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [overlayRect, setOverlayRect] = useState<DOMRect | null>(null);
+  const [dialogPosition, setDialogPosition] = useState<{ x: number; y: number } | null>(null);
+  const dragStartRef = useRef<{ mouseX: number; mouseY: number; dialogX: number; dialogY: number } | null>(null);
+
+  // Coordonnées viewport : on utilise (0,0) + taille fenêtre pour que les spotlights (déjà en viewport)
+  // soient corrects même si l’overlay était rendu dans un ancêtre avec transform. Rendu dans body via Portal.
+  useLayoutEffect(() => {
+    const update = () =>
+      setOverlayRect(
+        new DOMRect(0, 0, document.documentElement.clientWidth, document.documentElement.clientHeight)
+      );
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  // Masque SVG : coordonnées viewport (overlay en portal = (0,0) → viewport)
+  const svgMask = spotlights.length > 0 && overlayRect ? (
+    <svg
+      aria-hidden
+      role="img"
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+      }}
+      width="100%"
+      height="100%"
+      viewBox={`0 0 ${overlayRect.width} ${overlayRect.height}`}
+      preserveAspectRatio="none"
+    >
+      <title>Masque tutoriel</title>
+      <defs>
+        <filter id={BLUR_FILTER_ID}>
+          <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
+        </filter>
+        <mask id={MASK_ID}>
+          <rect x="0" y="0" width={overlayRect.width} height={overlayRect.height} fill="white" />
+          <g filter={`url(#${BLUR_FILTER_ID})`}>
+            {spotlights.map((s) => {
+              if (s.shape === "circle") {
+                const c = s as TutorialSpotlightCircle;
+                const r = c.radius + 20;
+                return (
+                  <circle
+                    key={`circle-${c.x}-${c.y}`}
+                    cx={c.x}
+                    cy={c.y}
+                    r={r}
+                    fill="black"
+                  />
+                );
+              }
+              const r = s as TutorialSpotlightRect;
+              const pad = 4;
+              return (
+                <rect
+                  key={`rect-${r.left}-${r.top}`}
+                  x={r.left - pad}
+                  y={r.top - pad}
+                  width={r.width + pad * 2}
+                  height={r.height + pad * 2}
+                  fill="black"
+                />
+              );
+            })}
+          </g>
+        </mask>
+      </defs>
+    </svg>
+  ) : null;
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  // Réappliquer la position configurée quand l’étape change
+  useEffect(() => {
+    setDialogPosition(null);
+    // step.stage utilisé comme clé pour réexécuter l’effet au changement d’étape
+    void step.stage;
+  }, [step.stage]);
+
+  const dialogStyle = ((): React.CSSProperties => {
+    const base: React.CSSProperties = {
+      position: "absolute",
+      zIndex: 1,
+      pointerEvents: "auto",
+      padding: "24px",
+      minWidth: "320px",
+      maxWidth: "520px",
+    };
+    const toCss = (v: string | number): string =>
+      typeof v === "number" ? `${v}px` : v;
+    if (dialogPosition !== null) {
+      return {
+        ...base,
+        left: dialogPosition.x,
+        top: dialogPosition.y,
+        transform: "none",
+      };
+    }
+    if (step.popupPosition && step.popupPosition !== "center" && typeof step.popupPosition === "object") {
+      return {
+        ...base,
+        left: toCss(step.popupPosition.left),
+        top: toCss(step.popupPosition.top),
+        transform: "none",
+      };
+    }
+    return {
+      ...base,
+      left: "50%",
+      top: "50%",
+      transform: "translate(-50%, -50%)",
+    };
+  })();
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
+  };
+
+  const handleTitleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      if ((e.target as HTMLElement).closest("button")) return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      dragStartRef.current = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        dialogX: rect.left,
+        dialogY: rect.top,
+      };
+    },
+    []
+  );
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const start = dragStartRef.current;
+      if (!start) return;
+      setDialogPosition({
+        x: start.dialogX + (e.clientX - start.mouseX),
+        y: start.dialogY + (e.clientY - start.mouseY),
+      });
+    };
+    const handleMouseUp = () => {
+      dragStartRef.current = null;
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  /** Overlay pleine page pour que les halos (ex. Intercessor) soient visibles. Clics transmis au board via pointerEvents: none. */
+  const overlayContent = (
+    <div
+      ref={overlayRef}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 10000,
+        pointerEvents: "none",
+      }}
+    >
+      {spotlights.length > 0 && svgMask ? (
+        <>
+          {svgMask}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: `rgba(0, 0, 0, ${BACKDROP_OPACITY})`,
+              mask: `url(#${MASK_ID})`,
+              WebkitMask: `url(#${MASK_ID})`,
+              pointerEvents: "none",
+            }}
+            aria-hidden
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
+            aria-hidden
+          />
+        </>
+      ) : (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: `rgba(0, 0, 0, ${BACKDROP_OPACITY})`,
+          }}
+          aria-hidden
+        />
+      )}
+      {fogLeftPanelUpperHalfRect && fogLeftPanelUpperHalfRect.shape === "rect" ? (
+        <svg
+          aria-hidden
+          role="img"
+          style={{
+            position: "fixed",
+            left: fogLeftPanelUpperHalfRect.left - FOG_BLUR_MARGIN,
+            top: fogLeftPanelUpperHalfRect.top - FOG_BLUR_MARGIN,
+            width: fogLeftPanelUpperHalfRect.width + FOG_BLUR_MARGIN * 2,
+            height: fogLeftPanelUpperHalfRect.height + FOG_BLUR_MARGIN * 2,
+            pointerEvents: "none",
+          }}
+          width={fogLeftPanelUpperHalfRect.width + FOG_BLUR_MARGIN * 2}
+          height={fogLeftPanelUpperHalfRect.height + FOG_BLUR_MARGIN * 2}
+          viewBox={`0 0 ${fogLeftPanelUpperHalfRect.width + FOG_BLUR_MARGIN * 2} ${fogLeftPanelUpperHalfRect.height + FOG_BLUR_MARGIN * 2}`}
+        >
+          <title>Fog tutoriel (moitié haute panneau gauche)</title>
+          <defs>
+            <filter
+              id={FOG_BLUR_FILTER_ID}
+              x="-20%"
+              y="-20%"
+              width="140%"
+              height="140%"
+              colorInterpolationFilters="sRGB"
+            >
+              <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
+            </filter>
+          </defs>
+          <rect
+            x={FOG_BLUR_MARGIN}
+            y={FOG_BLUR_MARGIN}
+            width={fogLeftPanelUpperHalfRect.width}
+            height={fogLeftPanelUpperHalfRect.height}
+            fill={`rgba(0, 0, 0, ${BACKDROP_OPACITY})`}
+            filter={`url(#${FOG_BLUR_FILTER_ID})`}
+          />
+        </svg>
+      ) : null}
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tutorial-title"
+        tabIndex={-1}
+        className="tutorial-overlay-dialog"
+        style={dialogStyle}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
+      >
+        {/* biome-ignore lint/a11y/useSemanticElements: drag handle, cannot use button (contains interactive children) */}
+        <div
+          className="tutorial-overlay-dialog__title-bar"
+          role="button"
+          tabIndex={0}
+          aria-label="Déplacer la fenêtre"
+          onMouseDown={handleTitleMouseDown}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") e.preventDefault();
+          }}
+          style={{ cursor: "move", userSelect: "none" }}
+        >
+          <div className="tutorial-overlay-dialog__title-row">
+            {step.phase && PHASE_LOGO[step.phase] ? (
+              <img
+                src={PHASE_LOGO[step.phase]}
+                alt=""
+                className="tutorial-overlay-dialog__phase-logo"
+                aria-hidden
+              />
+            ) : null}
+            <h2 id="tutorial-title">{title}</h2>
+          </div>
+          <div className="tutorial-overlay-dialog__lang-buttons">
+            <button
+              type="button"
+              onClick={() => onLangChange("fr")}
+              className="tutorial-lang-btn"
+              aria-pressed={lang === "fr"}
+              aria-label="Français"
+            >
+              FR
+            </button>
+            <button
+              type="button"
+              onClick={() => onLangChange("en")}
+              className="tutorial-lang-btn"
+              aria-pressed={lang === "en"}
+              aria-label="English"
+            >
+              EN
+            </button>
+          </div>
+        </div>
+        {step.popupImage || step.popupShowMoveHex || step.popupShowGreenCircle ? (
+          <div className="tutorial-overlay-dialog__body-with-illustration">
+            {step.popupShowMoveHex ? (
+              <svg
+                className="tutorial-overlay-dialog__move-hex"
+                viewBox="0 0 50 50"
+                aria-hidden
+                role="img"
+              >
+                <title>Hexagone de destination de déplacement</title>
+                <polygon
+                  points={[0, 60, 120, 180, 240, 300]
+                    .map((deg) => {
+                      const rad = (deg * Math.PI) / 180;
+                      const x = 25 + 20 * Math.cos(rad);
+                      const y = 25 + 20 * Math.sin(rad);
+                      return `${x},${y}`;
+                    })
+                    .join(" ")}
+                  fill="rgba(144, 208, 144, 0.5)"
+                  stroke="#00aa00"
+                  strokeWidth="1.2"
+                />
+              </svg>
+            ) : null}
+            {step.popupImage && step.popupShowGreenCircle ? (
+              <div className="tutorial-overlay-dialog__unit-icon-with-green-circle" aria-hidden>
+                <svg
+                  className="tutorial-overlay-dialog__green-activation-circle"
+                  viewBox="0 0 64 64"
+                  aria-hidden
+                >
+                  <title>Cercle vert d’unité activable</title>
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    fill="none"
+                    stroke="#00ff00"
+                    strokeWidth="3"
+                    strokeOpacity="0.8"
+                  />
+                </svg>
+                <img
+                  src={step.popupImage}
+                  alt=""
+                  className="tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--in-circle"
+                  aria-hidden
+                />
+              </div>
+            ) : null}
+            {step.popupImage && body.includes("{{ICON}}") ? (
+              <p className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>
+                {body.split("{{ICON}}")[0]}
+                <img
+                  src={step.popupImage}
+                  alt=""
+                  className="tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--inline"
+                  aria-hidden
+                />
+                {body.split("{{ICON}}").slice(1).join("{{ICON}}")}
+              </p>
+            ) : step.popupImage && !step.popupShowGreenCircle ? (
+              <>
+                <img
+                  src={step.popupImage}
+                  alt=""
+                  className="tutorial-overlay-dialog__popup-image"
+                  aria-hidden
+                />
+                {typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>}
+              </>
+            ) : (
+              typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>
+            )}
+          </div>
+        ) : (
+          typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>
+        )}
+        <div
+          style={{
+            display: "flex",
+            gap: "12px",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+            alignItems: "flex-end",
+          }}
+        >
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            {!step.advanceOnUnitClick && !step.advanceOnMoveClick && !step.advanceOnWeaponClick && (
+              <button type="button" onClick={onClose} className="tutorial-btn-primary">
+                Suivant
+              </button>
+            )}
+            {onSkipTutorial && (
+              <button type="button" onClick={onSkipTutorial} className="tutorial-btn-secondary">
+                Passer le tutoriel
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(overlayContent, document.body);
+};

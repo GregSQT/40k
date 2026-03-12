@@ -30,7 +30,8 @@ const ProtectedGameRoute = () => {
   const allowedModes = authSession.permissions.game_modes;
   const isRequestedModeAllowed =
     allowedModes.includes(requestedMode) ||
-    ((requestedMode === "pvp_test" || requestedMode === "pve_test") && allowedModes.includes("test"));
+    ((requestedMode === "pvp_test" || requestedMode === "pve_test" || requestedMode === "tutorial") &&
+      allowedModes.includes("test"));
   if (!isRequestedModeAllowed) {
     const fallbackMode = allowedModes.includes("pve")
       ? "pve"

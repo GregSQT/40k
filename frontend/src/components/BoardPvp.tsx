@@ -1,7 +1,11 @@
 // frontend/src/components/BoardPvp.tsx
 
 import * as PIXI from "pixi.js-legacy";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  TUTORIAL_STEP_TITLES_INTERCESSOR_HALO,
+  useTutorial,
+} from "../contexts/TutorialContext";
 import { useGameConfig } from "../hooks/useGameConfig";
 import type {
   FightSubPhase,
@@ -223,6 +227,8 @@ type BoardProps = {
   onCancelAdvanceWarning?: () => void;
   onSkipAdvanceWarning?: () => void;
   showAdvanceWarningPopup?: boolean; // If false, skip advance warning popup
+  /** Tutoriel : masquer l’icône Advance au-dessus des unités pendant certains steps. */
+  hideAdvanceIconForTutorial?: boolean;
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
   deploymentState?: GameState["deployment_state"];
@@ -299,6 +305,7 @@ export default function Board({
   onCancelAdvanceWarning,
   onSkipAdvanceWarning,
   showAdvanceWarningPopup = false,
+  hideAdvanceIconForTutorial = false,
   wallHexesOverride,
   availableCellsOverride,
   deploymentState,
@@ -464,6 +471,56 @@ export default function Board({
       window.removeEventListener("boardWeaponSelectionClick", weaponClickHandler);
     };
   }, [units, boardConfig]);
+
+  // Tutoriel : halo autour de l'Intercessor quand la popup "Phase de mouvement" est affichée
+  const tutorial = useTutorial();
+  useLayoutEffect(() => {
+    if (!tutorial?.setSpotlightPosition) return;
+    const showSpotlight =
+      tutorial.popupVisible &&
+      tutorial.currentStep?.stepKey &&
+      TUTORIAL_STEP_TITLES_INTERCESSOR_HALO.includes(
+        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_INTERCESSOR_HALO)[number]
+      ) &&
+      boardConfig &&
+      units.length > 0;
+    if (!showSpotlight) {
+      tutorial.setSpotlightPosition(null);
+      return;
+    }
+    const p1Unit = units.find((u) => Number(u.player) === 1);
+    if (!p1Unit || p1Unit.col == null || p1Unit.row == null) {
+      tutorial.setSpotlightPosition(null);
+      return;
+    }
+    const rect = canvasContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const HEX_RADIUS = boardConfig.hex_radius;
+    const MARGIN = boardConfig.margin;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
+    const centerX =
+      p1Unit.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+    const centerY =
+      p1Unit.row * HEX_VERT_SPACING +
+      ((p1Unit.col % 2) * HEX_VERT_SPACING) / 2 +
+      HEX_HEIGHT / 2 +
+      MARGIN;
+    tutorial.setSpotlightPosition({
+      shape: "circle",
+      x: rect.left + centerX,
+      y: rect.top + centerY,
+      radius: 72,
+    });
+  }, [
+    tutorial?.popupVisible,
+    tutorial?.currentStep?.stepKey,
+    tutorial?.setSpotlightPosition,
+    boardConfig,
+    units,
+  ]);
 
   const stableBlinkingUnits = useMemo(() => {
     if (!blinkingUnits) return undefined;
@@ -2332,7 +2389,7 @@ export default function Board({
             return !isAdjacentToEnemy;
           })();
 
-          if (canAdvance && onAdvance) {
+          if (canAdvance && onAdvance && !hideAdvanceIconForTutorial) {
             addOverlayIcon(
               "/icons/Action_Logo/3-5 - Advance.png",
               centerX,
@@ -2428,6 +2485,7 @@ export default function Board({
     onStartMovePreview,
     shootingActivationQueue,
     showAdvanceWarningPopup,
+    hideAdvanceIconForTutorial,
     showHexCoordinates,
     showLosDebugOverlay,
     shootingTargetId,

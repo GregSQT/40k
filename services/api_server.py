@@ -1697,6 +1697,21 @@ def reset_game():
             "error": f"Reset failed: {str(e)}"
         }), 500
 
+@app.route('/api/config/tutorial/steps', methods=['GET'])
+def get_tutorial_steps():
+    """Sert config/tutorial/tutorial_steps.json (source unique)."""
+    try:
+        project_root = Path(__file__).resolve().parent.parent
+        path = project_root / "config" / "tutorial" / "tutorial_steps.json"
+        if not path.exists():
+            return jsonify({"success": False, "error": "tutorial_steps.json not found"}), 404
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/config/board', methods=['GET'])
 def get_board_config():
     """Get board configuration for frontend.

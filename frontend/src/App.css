@@ -140,6 +140,17 @@
   --tooltip-max-width: 600px;
   --tooltip-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
 
+  /* Tutorial overlay dialog: same look as tooltips */
+  --tutorial-dialog-bg: var(--tooltip-bg);
+  --tutorial-dialog-border: var(--tooltip-border-width) solid var(--tooltip-border-color);
+  --tutorial-dialog-radius: var(--tooltip-border-radius);
+  --tutorial-dialog-color: var(--tooltip-text-color);
+  --tutorial-dialog-font-family: var(--tooltip-font-family);
+  --tutorial-dialog-font-size: var(--tooltip-font-size);
+  --tutorial-dialog-font-weight: var(--tooltip-font-weight);
+  --tutorial-dialog-line-height: var(--tooltip-line-height);
+  --tutorial-dialog-shadow: var(--tooltip-shadow);
+
   /* Border Radius */
   --radius-sm: 4px;
   --radius-md: 7px;
@@ -2697,6 +2708,296 @@ textarea:focus {
   opacity: 1;
   transform: translate(12px, -14px);
   pointer-events: none;
+}
+
+/* Tutorial step dialog: same look as tooltips, larger font for readability */
+.tutorial-overlay-dialog {
+  background: var(--tutorial-dialog-bg);
+  border: var(--tutorial-dialog-border);
+  border-radius: var(--tutorial-dialog-radius);
+  color: var(--tutorial-dialog-color);
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  font-weight: var(--tutorial-dialog-font-weight);
+  line-height: 1.45;
+  box-shadow: var(--tutorial-dialog-shadow);
+  outline: none;
+}
+.tutorial-overlay-dialog:focus {
+  outline: none;
+}
+.tutorial-overlay-dialog__title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -24px -24px 16px -24px;
+  padding: 10px 24px;
+  background: rgba(76, 175, 80, 0.22);
+  border-radius: 6px 6px 0 0;
+  outline: none;
+}
+.tutorial-overlay-dialog__title-bar:focus {
+  outline: none;
+}
+.tutorial-overlay-dialog__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.tutorial-overlay-dialog__title-row h2 {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.tutorial-overlay-dialog__phase-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.tutorial-overlay-dialog__lang-buttons {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.tutorial-overlay-dialog h2 {
+  color: var(--tutorial-dialog-color);
+  font-family: var(--tutorial-dialog-font-family);
+  font-weight: var(--tutorial-dialog-font-weight);
+  font-size: 18px;
+}
+.tutorial-overlay-dialog p {
+  color: var(--tutorial-dialog-color);
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  font-weight: var(--tutorial-dialog-font-weight);
+  line-height: 1.45;
+  margin-bottom: 24px;
+  white-space: pre-wrap;
+}
+.tutorial-overlay-dialog__body-with-image,
+.tutorial-overlay-dialog__body-with-illustration {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.tutorial-overlay-dialog__body-with-image p,
+.tutorial-overlay-dialog__body-with-illustration p {
+  margin-bottom: 0;
+}
+.tutorial-overlay-dialog__popup-image {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  align-self: flex-start;
+}
+.tutorial-overlay-dialog__popup-image--inline {
+  width: 40px;
+  height: 40px;
+  vertical-align: middle;
+  margin: 0 6px;
+}
+.tutorial-overlay-dialog__move-hex {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+/* Icône d’unité avec cercle vert (unité activable), ex. étape 2-1 */
+.tutorial-overlay-dialog__unit-icon-with-green-circle {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+.tutorial-overlay-dialog__green-activation-circle {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.tutorial-overlay-dialog__popup-image--in-circle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+/* Étape 2-2 : noms d'attributs d'arme en apparence tooltip (badge, survol = description) */
+.tutorial-overlay-dialog__weapon-attr-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 4px;
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid var(--tooltip-border-color);
+  border-radius: 3px;
+  font-size: 0.85em;
+  color: var(--tooltip-text-color);
+  cursor: help;
+  font-weight: normal;
+}
+.tutorial-overlay-dialog__weapon-attr-badge:first-child {
+  margin-left: 0;
+}
+.tutorial-overlay-dialog__weapon-attr-line {
+  display: inline;
+}
+.tutorial-overlay-dialog__weapon-attr-desc {
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  color: var(--tutorial-dialog-color);
+  font-weight: var(--tutorial-dialog-font-weight);
+}
+/* 2-2 : 2 colonnes — gauche = attributs (alignés à droite), droite = infos (alignées à gauche) */
+.tutorial-overlay-dialog__weapon-attr-intro,
+.tutorial-overlay-dialog__weapon-attr-trailing {
+  margin: 0 0 12px 0;
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  color: var(--tutorial-dialog-color);
+}
+.tutorial-overlay-dialog__weapon-attr-trailing {
+  margin-top: 12px;
+}
+.tutorial-overlay-dialog__weapon-attr-cols {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px 20px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+.tutorial-overlay-dialog__weapon-attr-col--left {
+  text-align: right;
+}
+.tutorial-overlay-dialog__weapon-attr-col--right {
+  text-align: left;
+}
+.tutorial-overlay-dialog__weapon-attr-col .tutorial-overlay-dialog__weapon-attr-cell {
+  padding: 2px 0;
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  color: var(--tutorial-dialog-color);
+}
+.tutorial-overlay-dialog__weapon-attr-col--right .tutorial-overlay-dialog__weapon-attr-desc {
+  font-weight: var(--tutorial-dialog-font-weight);
+}
+/* Étape 1-6 : hex bleu foncé (vue 100%, 0x4f8bff) et hex bleu clair (couvert, 0x9ec5ff), même format que l’hex vert 1-5 */
+.tutorial-overlay-dialog__los-hex-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.tutorial-overlay-dialog__los-hex-row .tutorial-overlay-dialog__los-hex {
+  flex-shrink: 0;
+}
+.tutorial-overlay-dialog__los-hex {
+  display: inline-block;
+  width: 48px;
+  height: 48px;
+  vertical-align: middle;
+  margin: 0;
+  flex-shrink: 0;
+}
+.tutorial-overlay-dialog__los-hex-desc {
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  color: var(--tutorial-dialog-color);
+}
+.tutorial-overlay-dialog__unit-icon {
+  display: inline-block;
+  width: 1.4em;
+  height: 1.4em;
+  object-fit: contain;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+.tutorial-overlay-dialog__unit-icon-block {
+  display: block;
+  margin: 0.6em 0;
+}
+.tutorial-overlay-dialog__unit-icon-block .tutorial-overlay-dialog__unit-icon--large {
+  width: 64px;
+  height: 64px;
+  display: block;
+  margin: 0 auto;
+}
+.tutorial-overlay-dialog__unit-icon-with-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0.6em 0 12px 0;
+}
+.tutorial-overlay-dialog__unit-icon-with-label .tutorial-overlay-dialog__unit-icon--large {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+.tutorial-overlay-dialog__unit-icon-label {
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  font-weight: var(--tutorial-dialog-font-weight);
+  color: var(--tutorial-dialog-color);
+}
+.tutorial-overlay-dialog .tutorial-btn-primary {
+  padding: 10px 20px;
+  border-radius: var(--tutorial-dialog-radius);
+  border: var(--tutorial-dialog-border);
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--tutorial-dialog-color);
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tutorial-overlay-dialog .tutorial-btn-primary:hover {
+  background: rgba(76, 175, 80, 0.25);
+}
+.tutorial-overlay-dialog .tutorial-btn-secondary {
+  padding: 10px 20px;
+  border-radius: var(--tutorial-dialog-radius);
+  border: 1px solid rgba(182, 247, 201, 0.5);
+  background: transparent;
+  color: var(--tutorial-dialog-color);
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 14px;
+  cursor: pointer;
+}
+.tutorial-overlay-dialog .tutorial-btn-secondary:hover {
+  background: rgba(76, 175, 80, 0.1);
+  border-color: var(--tooltip-border-color);
+}
+.tutorial-overlay-dialog .tutorial-btn-primary:focus,
+.tutorial-overlay-dialog .tutorial-btn-secondary:focus {
+  outline: none;
+}
+.tutorial-overlay-dialog .tutorial-lang-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(182, 247, 201, 0.5);
+  background: transparent;
+  color: var(--tutorial-dialog-color);
+  font-family: var(--tutorial-dialog-font-family);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+.tutorial-overlay-dialog .tutorial-lang-btn:hover {
+  background: rgba(76, 175, 80, 0.1);
+  border-color: var(--tooltip-border-color);
+}
+.tutorial-overlay-dialog .tutorial-lang-btn[aria-pressed="true"] {
+  background: rgba(76, 175, 80, 0.2);
+  border-color: var(--tooltip-border-color);
 }
 
 .combi-badge {

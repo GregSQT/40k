@@ -22,6 +22,12 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
     const isPvPTestMode = location.pathname === "/game" && location.search.includes("mode=pvp_test");
     const isPvEMode = location.pathname === "/game" && location.search.includes("mode=pve");
     const isPvETestMode = location.pathname === "/game" && location.search.includes("mode=pve_test");
+    const isTutorialMode = location.pathname === "/game" && location.search.includes("mode=tutorial");
+
+    // Handle Tutorial mode
+    if (path === "/game?mode=tutorial") {
+      return `nav-button ${isTutorialMode ? "nav-button--active" : "nav-button--inactive"}`;
+    }
 
     // Handle PvE mode detection via query parameter
     if (path === "/game?mode=pve") {
@@ -44,7 +50,8 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
         location.pathname === "/game" &&
         !isPvPTestMode &&
         !isPvEMode &&
-        !isPvETestMode;
+        !isPvETestMode &&
+        !isTutorialMode;
       return `nav-button ${isPvPMode ? "nav-button--active" : "nav-button--inactive"}`;
     }
 
@@ -75,6 +82,13 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
           className={getButtonClass("/game?mode=pve")}
         >
           PvE
+        </button>
+        <button
+          type="button"
+          onClick={() => (window.location.href = "/game?mode=tutorial")}
+          className={getButtonClass("/game?mode=tutorial")}
+        >
+          Tutorial
         </button>
         <button
           type="button"

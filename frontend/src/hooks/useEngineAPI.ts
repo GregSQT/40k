@@ -282,17 +282,28 @@ export const useEngineAPI = () => {
         const isPvEMode = mode === "pve";
         const isPvETestMode = mode === "pve_test";
         const isPvPTestMode = mode === "pvp_test";
-        const requestedModeCode = isPvETestMode
-          ? "pve_test"
-          : isPvEMode
-            ? "pve"
-            : isPvPTestMode
-              ? "pvp_test"
-              : "pvp";
+        const isTutorialMode = mode === "tutorial";
+        const requestedModeCode = isTutorialMode
+          ? "pvp_test"
+          : isPvETestMode
+            ? "pve_test"
+            : isPvEMode
+              ? "pve"
+              : isPvPTestMode
+                ? "pvp_test"
+                : "pvp";
 
         console.log(
           `Starting game in ${
-            isPvPTestMode ? "PvP Test" : isPvETestMode ? "PvE Test" : isPvEMode ? "PvE" : "PvP"
+            isTutorialMode
+              ? "Tutorial"
+              : isPvPTestMode
+                ? "PvP Test"
+                : isPvETestMode
+                  ? "PvE Test"
+                  : isPvEMode
+                    ? "PvE"
+                    : "PvP"
           } mode`
         );
 
@@ -300,7 +311,9 @@ export const useEngineAPI = () => {
           pve_mode: isPvEMode || isPvETestMode,
           mode_code: requestedModeCode,
         };
-        if (isPvPTestMode) {
+        if (isTutorialMode) {
+          requestPayload.scenario_file = "config/tutorial/scenario_etape1.json";
+        } else if (isPvPTestMode) {
           requestPayload.scenario_file = "config/scenario_pvp_test.json";
         } else if (isPvETestMode) {
           requestPayload.scenario_file = "config/scenario_pve_test.json";
@@ -358,6 +371,43 @@ export const useEngineAPI = () => {
     };
 
     startGame();
+  }, []);
+
+  /** Relance une partie avec le scénario donné (utilisé par le tutoriel pour etape2/etape3). */
+  const startGameWithScenario = useCallback(async (scenarioFile: string) => {
+    const authSession = getAuthSession();
+    if (!authSession?.token) {
+      setError("Session utilisateur manquante. Merci de vous reconnecter.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/game/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authSession.token}`,
+        },
+        body: JSON.stringify({
+          pve_mode: false,
+          mode_code: "pvp_test",
+          scenario_file: scenarioFile,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to start game: ${response.status}`);
+      }
+      const data = await response.json();
+      if (data.success && data.game_state) {
+        setGameState(data.game_state);
+      } else {
+        throw new Error(data.error || "Failed to start game");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   // Listen for weapon selection events to update gameState
@@ -2421,6 +2471,7 @@ export const useEngineAPI = () => {
       winner: gameState.winner,
       pending_rule_choice_queue: gameState.pending_rule_choice_queue,
       active_rule_choice_prompt: gameState.active_rule_choice_prompt,
+      wall_hexes: gameState.wall_hexes,
     };
   }, [
     gameState,
@@ -2498,6 +2549,7 @@ export const useEngineAPI = () => {
       // blinkState removed - blinking is handled locally in UnitRenderer
       fightSubPhase: null,
       executeAITurn: async () => {},
+      startGameWithScenario: async () => {},
     };
   }
 
@@ -3542,6 +3594,7 @@ export const useEngineAPI = () => {
         aiTurnInProgress = false;
       }
     },
+    startGameWithScenario,
   };
 
   return returnObject;

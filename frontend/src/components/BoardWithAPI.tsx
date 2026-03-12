@@ -1,10 +1,23 @@
 // frontend/src/components/BoardWithAPI.tsx
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
 import { clearAuthSession, getAuthSession } from "../auth/authStorage";
+import {
+  TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
+  TUTORIAL_STEP_TITLE_PHASE_TIR,
+  TUTORIAL_STEP_TITLE_PHASES,
+  TUTORIAL_STEP_TITLE_ROUNDS,
+  TUTORIAL_STEP_TITLE_TURNS,
+  TUTORIAL_STEP_TITLE_WEAPON_CHOICE,
+  TUTORIAL_STEP_TITLES_HALO_LEFT,
+  TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO,
+  TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO,
+  TutorialProvider,
+  useTutorial,
+} from "../contexts/TutorialContext";
 import { useEngineAPI } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
@@ -17,6 +30,7 @@ import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
+import { TutorialOverlay } from "./TutorialOverlay";
 import { UnitStatusTable } from "./UnitStatusTable";
 
 type RuleChoicePrompt = {
@@ -34,6 +48,463 @@ type RuleChoicePrompt = {
   }>;
 };
 
+/** Étapes avec halo sur le turn phase tracker : Rounds=tour, Tours=P1/P2, Phases=phases. */
+const TURN_PHASE_STEP_TITLES = [
+  TUTORIAL_STEP_TITLE_ROUNDS,
+  TUTORIAL_STEP_TITLE_TURNS,
+  TUTORIAL_STEP_TITLE_PHASES,
+] as const;
+
+function TutorialOverlayGate(): React.ReactNode {
+  const tutorial = useTutorial();
+  if (!tutorial?.popupVisible || !tutorial?.currentStep) return null;
+  const title = tutorial.currentStep.stepKey;
+  const stage = tutorial.currentStep.stage;
+  const isStep1_5 = stage === "1-5";
+  const isStep1_6 = stage === "1-6";
+  const isPhaseMoveStep = TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
+    title as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
+  );
+  const isTurnPhaseStep = TURN_PHASE_STEP_TITLES.includes(
+    title as (typeof TURN_PHASE_STEP_TITLES)[number]
+  );
+  const isMoveButtonStep = TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO.includes(
+    title as (typeof TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO)[number]
+  );
+  const stageMajor = parseInt((stage ?? "").split("-")[0] ?? "", 10);
+  const isFrom2_1Onwards = !Number.isNaN(stageMajor) && stageMajor >= 2;
+  const isHaloLeft =
+    (TUTORIAL_STEP_TITLES_HALO_LEFT.includes(
+      title as (typeof TUTORIAL_STEP_TITLES_HALO_LEFT)[number]
+    ) ||
+      stage === "1-5" ||
+      stage === "1-6" ||
+      stage === "2-3" ||
+      isFrom2_1Onwards) &&
+    stage !== "1-4";
+  const isStep2_1 = stage === "2-1";
+  const isStep2_2 = stage === "2-2";
+  const isShootButtonStep =
+    title === TUTORIAL_STEP_TITLE_PHASE_TIR || title === TUTORIAL_STEP_TITLE_WEAPON_CHOICE;
+  const needsTurnPhaseHalo =
+    isTurnPhaseStep || isMoveButtonStep || isShootButtonStep || stage === "1-5" || stage === "1-6";
+  const turnPhaseSpotlights = needsTurnPhaseHalo ? tutorial.spotlightTurnPhasePositions : null;
+  const leftPanelSpotlight = isHaloLeft ? tutorial.spotlightLeftPanel : null;
+  const gameLogLastEntrySpotlight = isStep2_1 ? tutorial.spotlightGameLogLastEntry : null;
+  const gameLogHeaderSpotlight = isStep2_1 ? tutorial.spotlightGameLogHeader : null;
+  const tableSpotlights = isStep2_2
+    ? [
+        ...(tutorial.spotlightRangedWeaponsPositions ?? []),
+        ...(tutorial.spotlightEnemyUnitAttributes ? [tutorial.spotlightEnemyUnitAttributes] : []),
+      ]
+    : isStep1_6
+      ? (tutorial.spotlightRangedWeaponsPositions ?? [])
+      : isPhaseMoveStep
+        ? (tutorial.spotlightTablePositions ?? [])
+        : [];
+  const spotlights = [
+    tutorial.spotlightPosition ?? null,
+    ...tableSpotlights,
+    ...(needsTurnPhaseHalo && turnPhaseSpotlights ? turnPhaseSpotlights : []),
+    ...(isHaloLeft && leftPanelSpotlight ? [leftPanelSpotlight] : []),
+    ...(isStep2_1 && gameLogLastEntrySpotlight ? [gameLogLastEntrySpotlight] : []),
+    ...(isStep2_1 && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : []),
+  ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[];
+  return (
+    <TutorialOverlay
+      step={tutorial.currentStep}
+      lang={tutorial.tutorialLang}
+      onLangChange={tutorial.setTutorialLang}
+      onClose={tutorial.onClosePopup}
+      onSkipTutorial={tutorial.onSkipTutorial}
+      spotlights={spotlights}
+      fogLeftPanelUpperHalfRect={isStep1_5 ? tutorial.leftPanelUpperHalfFogRect : null}
+    />
+  );
+}
+
+/** TurnPhaseTracker avec halos tutoriel (Rounds / Tours / Phases / bouton Move). */
+function TurnPhaseTrackerWithTutorial(
+  props: React.ComponentProps<typeof TurnPhaseTracker>
+): React.ReactElement {
+  const tutorial = useTutorial();
+  const title = tutorial?.popupVisible ? (tutorial?.currentStep?.stepKey ?? null) : null;
+  const stage = tutorial?.currentStep?.stage ?? "";
+  const isTurnPhaseStep =
+    title === TUTORIAL_STEP_TITLE_ROUNDS ||
+    title === TUTORIAL_STEP_TITLE_TURNS ||
+    title === TUTORIAL_STEP_TITLE_PHASES;
+  const isMoveButtonStep = title === TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT;
+  const isShootButtonStep =
+    title === TUTORIAL_STEP_TITLE_PHASE_TIR || title === TUTORIAL_STEP_TITLE_WEAPON_CHOICE;
+  const showTurnPhaseRects =
+    isTurnPhaseStep || isMoveButtonStep || isShootButtonStep || stage === "1-5" || stage === "1-6";
+  const effectiveTitleForRects =
+    showTurnPhaseRects && (stage === "1-5" || stage === "1-6")
+      ? TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT
+      : title ?? undefined;
+  useEffect(() => {
+    if (!showTurnPhaseRects && tutorial?.setSpotlightTurnPhasePositions) {
+      tutorial.setSpotlightTurnPhasePositions(null);
+    }
+  }, [showTurnPhaseRects, tutorial?.setSpotlightTurnPhasePositions]);
+  return (
+    <TurnPhaseTracker
+      {...props}
+      tutorialStepTitle={showTurnPhaseRects ? effectiveTitleForRects : undefined}
+      onTutorialRects={tutorial?.setSpotlightTurnPhasePositions}
+    />
+  );
+}
+
+/** Wrapper du PANNEAU GAUCHE (board) : rapporte son rect pour le halo (zone sans brouillard) et, en 1-5, la moitié haute pour le fog. */
+function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): React.ReactElement {
+  const ref = useRef<HTMLDivElement>(null);
+  const tutorial = useTutorial();
+  const stage = tutorial?.currentStep?.stage ?? "";
+  const stageMajor = parseInt(stage.split("-")[0] ?? "", 10);
+  const isFrom2_1Onwards = !Number.isNaN(stageMajor) && stageMajor >= 2;
+  const isHaloLeft =
+    ((tutorial?.popupVisible &&
+      tutorial?.currentStep?.stepKey &&
+      TUTORIAL_STEP_TITLES_HALO_LEFT.includes(
+        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_HALO_LEFT)[number]
+      )) ||
+      tutorial?.currentStep?.stage === "1-5" ||
+      tutorial?.currentStep?.stage === "1-6" ||
+      isFrom2_1Onwards) &&
+    tutorial?.currentStep?.stage !== "1-4";
+  const isPhaseMoveStep = Boolean(
+    tutorial?.popupVisible &&
+      tutorial?.currentStep?.stepKey &&
+      TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
+        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
+      )
+  );
+  const isStep1_5 = tutorial?.currentStep?.stage === "1-5";
+  const needsMeasure = isHaloLeft || isPhaseMoveStep || isStep1_5;
+  useLayoutEffect(() => {
+    if (!tutorial?.setSpotlightLeftPanel) return;
+    if (!needsMeasure) {
+      tutorial.setSpotlightLeftPanel(null);
+      tutorial?.setLeftPanelUpperHalfFogRect?.(null);
+      return;
+    }
+    let cancelled = false;
+    const measure = () => {
+      if (cancelled) return;
+      const el = ref.current?.parentElement ?? ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1920;
+      if (r.left > viewportWidth * 0.6) return;
+      if (isStep1_5) {
+        tutorial.setSpotlightLeftPanel({
+          shape: "rect",
+          left: r.left,
+          top: r.top + r.height / 2,
+          width: r.width,
+          height: r.height / 2,
+        });
+        tutorial.setLeftPanelUpperHalfFogRect?.({
+          shape: "rect",
+          left: r.left,
+          top: r.top,
+          width: r.width,
+          height: r.height / 2,
+        });
+      } else {
+        tutorial.setSpotlightLeftPanel(
+          isHaloLeft
+            ? { shape: "rect", left: r.left, top: r.top, width: r.width, height: r.height }
+            : null
+        );
+        tutorial.setLeftPanelUpperHalfFogRect?.(null);
+      }
+    };
+    measure();
+    const raf = requestAnimationFrame(() => {
+      if (cancelled) return;
+      measure();
+      requestAnimationFrame(() => {
+        if (!cancelled) measure();
+      });
+    });
+    const t = setTimeout(() => {
+      if (!cancelled) measure();
+    }, 150);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+      tutorial.setSpotlightLeftPanel(null);
+      tutorial.setLeftPanelUpperHalfFogRect?.(null);
+    };
+  }, [needsMeasure, isHaloLeft, isStep1_5, tutorial?.setSpotlightLeftPanel, tutorial?.setLeftPanelUpperHalfFogRect]);
+  return (
+    <div ref={ref} className="board-column-overlay-anchor">
+      {children}
+    </div>
+  );
+}
+
+/** GameLog avec rappel du rect de la dernière ligne pour halo tutoriel 2-1. */
+function GameLogWithTutorialSpotlight(
+  props: React.ComponentProps<typeof GameLog>
+): React.ReactElement {
+  const tutorial = useTutorial();
+  const isStep2_1 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "2-1";
+  return (
+    <GameLog
+      {...props}
+      onLastEntryRect={isStep2_1 ? tutorial?.setSpotlightGameLogLastEntry ?? undefined : undefined}
+      onHeaderRect={isStep2_1 ? tutorial?.setSpotlightGameLogHeader ?? undefined : undefined}
+    />
+  );
+}
+
+/** Wrapper du PANNEAU DROIT (unit-status-tables) : rapporte son rect pour le halo étape 5. */
+function RightColumnTutorialSpotlight({ children }: { children: React.ReactNode }): React.ReactElement {
+  const ref = useRef<HTMLDivElement>(null);
+  const tutorial = useTutorial();
+  const isPhaseMoveStep = Boolean(
+    tutorial?.popupVisible &&
+      tutorial?.currentStep?.stepKey &&
+      TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
+        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
+      )
+  );
+  useLayoutEffect(() => {
+    if (!tutorial?.setSpotlightRightPanel) return;
+    if (!isPhaseMoveStep) {
+      tutorial.setSpotlightRightPanel(null);
+      return;
+    }
+    let cancelled = false;
+    const measure = () => {
+      if (cancelled) return;
+      const el = ref.current?.parentElement ?? ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      tutorial.setSpotlightRightPanel({
+        shape: "rect",
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        height: r.height,
+      });
+    };
+    measure();
+    const raf = requestAnimationFrame(() => {
+      if (!cancelled) return;
+      measure();
+      requestAnimationFrame(() => {
+        if (!cancelled) measure();
+      });
+    });
+    const t = setTimeout(() => {
+      if (!cancelled) measure();
+    }, 150);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+      tutorial.setSpotlightRightPanel(null);
+    };
+  }, [isPhaseMoveStep, tutorial?.setSpotlightRightPanel]);
+  return <div ref={ref} style={{ display: "contents" }}>{children}</div>;
+}
+
+/** BoardPvp avec interception clic Intercessor (advance_on_unit_click) et confirmation déplacement (advance_on_move_click). */
+function BoardPvpWithTutorialAdvance(
+  props: React.ComponentProps<typeof BoardPvp>
+): React.ReactElement {
+  const tutorial = useTutorial();
+  const wrappedOnSelectUnit = useCallback(
+    (unitId: number | string | null) => {
+      if (tutorial?.currentStep?.advanceOnUnitClick && tutorial?.onClosePopup && unitId != null) {
+        const unit = props.units.find((u) => u.id === unitId || u.id === Number(unitId));
+        if (unit && Number(unit.player) === 1) {
+          tutorial.onClosePopup();
+        }
+      }
+      props.onSelectUnit(unitId);
+    },
+    [
+      tutorial?.currentStep?.advanceOnUnitClick,
+      tutorial?.onClosePopup,
+      props.onSelectUnit,
+      props.units,
+    ]
+  );
+  /** Avance (1-6 → suite) à la confirmation du move (clic sur l’icône unité). */
+  const wrappedOnConfirmMove = useCallback(
+    async () => {
+      const isStep1_6 = tutorial?.currentStep?.stage === "1-6";
+      if (isStep1_6 && tutorial?.prepareSkipNextPhaseTrigger) {
+        tutorial.prepareSkipNextPhaseTrigger();
+      }
+      await props.onConfirmMove?.();
+      if (isStep1_6 && tutorial?.onClosePopup) {
+        tutorial.onClosePopup();
+      }
+    },
+    [
+      props.onConfirmMove,
+      tutorial?.currentStep?.stage,
+      tutorial?.onClosePopup,
+      tutorial?.prepareSkipNextPhaseTrigger,
+    ]
+  );
+
+  /** Avance (1-5 → 1-6) au choix de la case verte (destination), avant la confirmation. */
+  const wrappedOnStartMovePreview = useCallback(
+    (unitId: number | string, col: number | string, row: number | string) => {
+      const isStep1_5 = tutorial?.currentStep?.stage === "1-5";
+      if (isStep1_5 && tutorial?.prepareSkipNextPhaseTrigger) {
+        tutorial.prepareSkipNextPhaseTrigger();
+      }
+      props.onStartMovePreview?.(unitId, col, row);
+      if (isStep1_5 && tutorial?.onClosePopup) {
+        tutorial.onClosePopup();
+      }
+    },
+    [
+      props.onStartMovePreview,
+      tutorial?.currentStep?.stage,
+      tutorial?.onClosePopup,
+      tutorial?.prepareSkipNextPhaseTrigger,
+    ]
+  );
+
+  const wrappedOnDirectMove = useCallback(
+    async (unitId: number | string, col: number | string, row: number | string) => {
+      if (tutorial?.currentStep?.advanceOnMoveClick && tutorial?.prepareSkipNextPhaseTrigger) {
+        tutorial.prepareSkipNextPhaseTrigger();
+      }
+      await props.onDirectMove?.(unitId, col, row);
+      if (tutorial?.currentStep?.advanceOnMoveClick && tutorial?.onClosePopup) {
+        tutorial.onClosePopup();
+      }
+    },
+    [
+      props.onDirectMove,
+      tutorial?.currentStep?.advanceOnMoveClick,
+      tutorial?.onClosePopup,
+      tutorial?.prepareSkipNextPhaseTrigger,
+    ]
+  );
+
+  // Avancer au step 2-2 quand le joueur a choisi une arme (sélection confirmée)
+  useEffect(() => {
+    if (!tutorial?.currentStep?.advanceOnWeaponClick || !tutorial?.onClosePopup) return;
+    const handler = () => {
+      tutorial.onClosePopup();
+    };
+    window.addEventListener("weaponSelected", handler);
+    return () => window.removeEventListener("weaponSelected", handler);
+  }, [tutorial?.currentStep?.advanceOnWeaponClick, tutorial?.onClosePopup]);
+
+  return (
+    <BoardPvp
+      {...props}
+      onSelectUnit={wrappedOnSelectUnit}
+      onConfirmMove={props.onConfirmMove != null ? wrappedOnConfirmMove : undefined}
+      onStartMovePreview={props.onStartMovePreview != null ? wrappedOnStartMovePreview : undefined}
+      onDirectMove={props.onDirectMove != null ? wrappedOnDirectMove : undefined}
+      hideAdvanceIconForTutorial={tutorial?.currentStep?.hideAdvanceIcon ?? false}
+    />
+  );
+}
+
+/** Table joueur 1 : rendu *dans* TutorialProvider, donc useTutorial() fournit le contexte et on peut forcer expand + halo. */
+function UnitStatusTablePlayer1WithTutorial(
+  props: React.ComponentProps<typeof UnitStatusTable>
+): React.ReactElement {
+  const tutorial = useTutorial();
+  const isPhaseMoveStep = Boolean(
+    tutorial?.popupVisible &&
+      tutorial?.currentStep?.stepKey &&
+      TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
+        tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
+      )
+  );
+  const isStep1_6 = tutorial?.currentStep?.stage === "1-6";
+  const isStep2_2 = tutorial?.currentStep?.stage === "2-2";
+  const wrappedOnSelectUnit = useCallback(
+    (unitId: number) => {
+      if (
+        tutorial?.currentStep?.advanceOnUnitClick &&
+        tutorial?.onClosePopup &&
+        props.units.some(
+          (u) => (u.id === unitId || u.id === Number(unitId)) && Number(u.player) === 1
+        )
+      ) {
+        tutorial.onClosePopup();
+      }
+      props.onSelectUnit(unitId);
+    },
+    [
+      tutorial?.currentStep?.advanceOnUnitClick,
+      tutorial?.onClosePopup,
+      props.onSelectUnit,
+      props.units,
+    ]
+  );
+  useEffect(() => {
+    if (!isPhaseMoveStep && tutorial?.setSpotlightTablePositions) {
+      tutorial.setSpotlightTablePositions(null);
+    }
+  }, [isPhaseMoveStep, tutorial?.setSpotlightTablePositions]);
+  useEffect(() => {
+    if (!isStep1_6 && !isStep2_2 && tutorial?.setSpotlightRangedWeaponsPositions) {
+      tutorial.setSpotlightRangedWeaponsPositions(null);
+    }
+  }, [isStep1_6, isStep2_2, tutorial?.setSpotlightRangedWeaponsPositions]);
+  return (
+    <UnitStatusTable
+      {...props}
+      onSelectUnit={wrappedOnSelectUnit}
+      tutorialForceTableExpanded={isPhaseMoveStep || isStep2_2}
+      tutorialForceUnitIdsExpanded={isPhaseMoveStep || isStep2_2 ? [1] : undefined}
+      onNameMColumnsRect={isPhaseMoveStep && !isStep1_6 ? tutorial?.setSpotlightTablePositions : undefined}
+      tutorialForceRangedExpandedForUnitIds={isStep1_6 || isStep2_2 ? [1] : undefined}
+      onRangedWeaponsSectionRect={
+        isStep1_6 || isStep2_2 ? tutorial?.setSpotlightRangedWeaponsPositions : undefined
+      }
+    />
+  );
+}
+
+/** Table joueur 2 : en étape 2-2, force expand première unité ennemie (ex. id 2) et rapporte son rect titre + attributs pour halo. */
+function UnitStatusTablePlayer2WithTutorial(
+  props: React.ComponentProps<typeof UnitStatusTable>
+): React.ReactElement {
+  const tutorial = useTutorial();
+  const isStep2_2 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "2-2";
+  useEffect(() => {
+    if (!isStep2_2 && tutorial?.setSpotlightEnemyUnitAttributes) {
+      tutorial.setSpotlightEnemyUnitAttributes(null);
+    }
+  }, [isStep2_2, tutorial?.setSpotlightEnemyUnitAttributes]);
+  return (
+    <UnitStatusTable
+      {...props}
+      tutorialForceTableExpanded={isStep2_2}
+      tutorialForceUnitIdsExpanded={isStep2_2 ? [2] : undefined}
+      onUnitAttributesSectionRect={
+        isStep2_2 && tutorial?.setSpotlightEnemyUnitAttributes
+          ? (positions) =>
+              tutorial?.setSpotlightEnemyUnitAttributes(positions?.[0] ?? null)
+          : undefined
+      }
+      tutorialReportAttributesForUnitIds={isStep2_2 ? [2] : undefined}
+    />
+  );
+}
+
 export const BoardWithAPI: React.FC = () => {
   const authSession = getAuthSession();
   if (!authSession) {
@@ -48,15 +519,18 @@ export const BoardWithAPI: React.FC = () => {
 
   // Detect game mode from URL
   const location = useLocation();
+  const isTutorialMode = location.pathname === "/game" && location.search.includes("mode=tutorial");
   const gameMode = location.pathname.includes("/replay")
     ? "training"
-    : location.pathname === "/game" && location.search.includes("mode=pvp_test")
+    : isTutorialMode
+      ? "tutorial"
+      : location.pathname === "/game" && location.search.includes("mode=pvp_test")
         ? "pvp_test"
-      : location.pathname === "/game" && location.search.includes("mode=pve_test")
-        ? "pve"
-      : location.pathname === "/game" && location.search.includes("mode=pve")
-        ? "pve"
-        : "pvp";
+        : location.pathname === "/game" && location.search.includes("mode=pve_test")
+          ? "pve"
+          : location.pathname === "/game" && location.search.includes("mode=pve")
+            ? "pve"
+            : "pvp";
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
@@ -115,7 +589,9 @@ export const BoardWithAPI: React.FC = () => {
   // Track UnitStatusTable collapse states
   const [, setPlayer1Collapsed] = useState(false);
   const [, setPlayer2Collapsed] = useState(false);
-  const [deploymentRosterCollapsed, setDeploymentRosterCollapsed] = useState<Record<PlayerId, boolean>>({
+  const [deploymentRosterCollapsed, setDeploymentRosterCollapsed] = useState<
+    Record<PlayerId, boolean>
+  >({
     1: false,
     2: false,
   });
@@ -194,10 +670,7 @@ export const BoardWithAPI: React.FC = () => {
   }, [rosterPickerArmies]);
 
   const effectiveRosterPickerFaction = useMemo(() => {
-    if (
-      rosterPickerSelectedFaction &&
-      rosterPickerFactions.includes(rosterPickerSelectedFaction)
-    ) {
+    if (rosterPickerSelectedFaction && rosterPickerFactions.includes(rosterPickerSelectedFaction)) {
       return rosterPickerSelectedFaction;
     }
     return rosterPickerFactions[0] ?? "";
@@ -229,7 +702,7 @@ export const BoardWithAPI: React.FC = () => {
   const isGameOver = apiProps.gameState?.game_over === true;
   const activeRuleChoicePrompt = (apiProps.ruleChoicePrompt as RuleChoicePrompt | null) ?? null;
   const pendingRuleChoiceQueue = (
-    (apiProps.gameState as GameState & { pending_rule_choice_queue?: RuleChoicePrompt[] } | null)
+    (apiProps.gameState as (GameState & { pending_rule_choice_queue?: RuleChoicePrompt[] }) | null)
       ?.pending_rule_choice_queue ?? []
   ).filter((entry): entry is RuleChoicePrompt => {
     return (
@@ -241,7 +714,10 @@ export const BoardWithAPI: React.FC = () => {
   const ruleChoicePrompts = (() => {
     const map = new Map<string, RuleChoicePrompt>();
     if (activeRuleChoicePrompt) {
-      map.set(`${activeRuleChoicePrompt.unit_id}:${activeRuleChoicePrompt.rule_id}`, activeRuleChoicePrompt);
+      map.set(
+        `${activeRuleChoicePrompt.unit_id}:${activeRuleChoicePrompt.rule_id}`,
+        activeRuleChoicePrompt
+      );
     }
     for (const queueEntry of pendingRuleChoiceQueue) {
       map.set(`${queueEntry.unit_id}:${queueEntry.rule_id}`, queueEntry);
@@ -266,7 +742,9 @@ export const BoardWithAPI: React.FC = () => {
         throw new Error(`Invalid unit_rules.json entry '${entryKey}': missing non-empty 'id'`);
       }
       if (typeof description !== "string" || description.trim() === "") {
-        throw new Error(`Invalid unit_rules.json entry '${entryKey}': missing non-empty 'description'`);
+        throw new Error(
+          `Invalid unit_rules.json entry '${entryKey}': missing non-empty 'description'`
+        );
       }
       descriptions[id] = description;
     }
@@ -459,7 +937,10 @@ export const BoardWithAPI: React.FC = () => {
     } else if (currentPhase === "move") {
       // Move phase: Check move activation pool for AI eligibility
       if (apiProps.gameState.move_activation_pool) {
-        hasEligibleAIUnits = hasAiUnitsInPool(apiProps.gameState.move_activation_pool, apiProps.gameState);
+        hasEligibleAIUnits = hasAiUnitsInPool(
+          apiProps.gameState.move_activation_pool,
+          apiProps.gameState
+        );
       }
     } else if (currentPhase === "shoot") {
       hasEligibleAIUnits = apiProps.gameState.shoot_activation_pool
@@ -468,7 +949,10 @@ export const BoardWithAPI: React.FC = () => {
     } else if (currentPhase === "charge") {
       // Charge phase: Check charge activation pool for AI eligibility
       if (apiProps.gameState.charge_activation_pool) {
-        hasEligibleAIUnits = hasAiUnitsInPool(apiProps.gameState.charge_activation_pool, apiProps.gameState);
+        hasEligibleAIUnits = hasAiUnitsInPool(
+          apiProps.gameState.charge_activation_pool,
+          apiProps.gameState
+        );
       }
     } else if (currentPhase === "fight") {
       // Fight phase: Check fight subphase pools for AI eligibility
@@ -508,9 +992,7 @@ export const BoardWithAPI: React.FC = () => {
       throw new Error("Missing current_player in gameState");
     }
     const isAITurn =
-      currentPhase === "fight"
-        ? hasEligibleAIUnits
-        : getPlayerType(current_player) === "ai";
+      currentPhase === "fight" ? hasEligibleAIUnits : getPlayerType(current_player) === "ai";
 
     // Removed duplicate log - now handled below with change detection
 
@@ -843,9 +1325,21 @@ export const BoardWithAPI: React.FC = () => {
                     ? "deployment-panel__player-banner--player2"
                     : "deployment-panel__player-banner--player1"
                 }`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "8px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
+                    gap: "8px",
+                  }}
+                >
                   <button
                     type="button"
                     className="deployment-panel__toggle"
@@ -855,7 +1349,11 @@ export const BoardWithAPI: React.FC = () => {
                         [player]: !prev[player],
                       }))
                     }
-                    aria-label={isCollapsed ? `Etendre roster player ${player}` : `Reduire roster player ${player}`}
+                    aria-label={
+                      isCollapsed
+                        ? `Etendre roster player ${player}`
+                        : `Reduire roster player ${player}`
+                    }
                   >
                     {isCollapsed ? "+" : "−"}
                   </button>
@@ -930,7 +1428,9 @@ export const BoardWithAPI: React.FC = () => {
                                 border: isSelected
                                   ? "2px solid #7CFF7C"
                                   : `1px solid ${getIconBorderColor(player)}`,
-                                background: isSelected ? "rgba(124, 255, 124, 0.2)" : "rgba(0, 0, 0, 0.35)",
+                                background: isSelected
+                                  ? "rgba(124, 255, 124, 0.2)"
+                                  : "rgba(0, 0, 0, 0.35)",
                                 color: "white",
                                 cursor: canInteractDeployment ? "pointer" : "not-allowed",
                                 opacity: canInteractDeployment ? 1 : 0.55,
@@ -981,7 +1481,9 @@ export const BoardWithAPI: React.FC = () => {
     );
   })();
 
-  const unitsById = new Map((apiProps.gameState?.units ?? []).map((unit) => [String(unit.id), unit]));
+  const unitsById = new Map(
+    (apiProps.gameState?.units ?? []).map((unit) => [String(unit.id), unit])
+  );
   const getRulePromptUnitLabel = (prompt: RuleChoicePrompt): string => {
     const unit = unitsById.get(prompt.unit_id);
     if (!unit) {
@@ -1040,10 +1542,10 @@ export const BoardWithAPI: React.FC = () => {
   })();
 
   const rightColumnContent = (
-    <>
+    <RightColumnTutorialSpotlight>
       {gameConfig ? (
         <div className="turn-phase-tracker-right">
-          <TurnPhaseTracker
+          <TurnPhaseTrackerWithTutorial
             currentTurn={apiProps.gameState?.currentTurn ?? 1}
             currentPhase={apiProps.gameState?.phase ?? "move"}
             phases={
@@ -1069,7 +1571,7 @@ export const BoardWithAPI: React.FC = () => {
       )}
 
       {/* AI Status Display */}
-      {isAiMode && (
+      {isAiMode &&
         (() => {
           const currentPlayer = apiProps.gameState?.current_player;
           const currentPlayerType =
@@ -1078,28 +1580,27 @@ export const BoardWithAPI: React.FC = () => {
               : null;
           const isCurrentPlayerAI = currentPlayerType === "ai";
           return (
-        <div
-          className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
-            isCurrentPlayerAI
-              ? isAIProcessingRef.current
-                ? "bg-purple-900 border border-purple-700"
-                : "bg-purple-800 border border-purple-600"
-              : "bg-gray-800 border border-gray-600"
-          }`}
-        >
-          <span className="text-sm font-medium text-white">
-            {isCurrentPlayerAI ? "🤖 AI Turn" : "👤 Your Turn"}
-          </span>
-          {isCurrentPlayerAI && isAIProcessingRef.current && (
-            <>
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
-              <span className="text-purple-200 text-sm">AI thinking...</span>
-            </>
-          )}
-        </div>
+            <div
+              className={`flex items-center gap-2 px-3 py-2 rounded mb-2 ${
+                isCurrentPlayerAI
+                  ? isAIProcessingRef.current
+                    ? "bg-purple-900 border border-purple-700"
+                    : "bg-purple-800 border border-purple-600"
+                  : "bg-gray-800 border border-gray-600"
+              }`}
+            >
+              <span className="text-sm font-medium text-white">
+                {isCurrentPlayerAI ? "🤖 AI Turn" : "👤 Your Turn"}
+              </span>
+              {isCurrentPlayerAI && isAIProcessingRef.current && (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
+                  <span className="text-purple-200 text-sm">AI thinking...</span>
+                </>
+              )}
+            </div>
           );
-        })()
-      )}
+        })()}
 
       <div className="scoring-panel">
         {(() => {
@@ -1109,9 +1610,19 @@ export const BoardWithAPI: React.FC = () => {
           const p1Percent = total > 0 ? (p1Score / total) * 100 : 50;
           const p2Percent = 100 - p1Percent;
           return (
-            <div className="scoring-panel__bar" role="img" aria-label={`Scoring P1 ${p1Score} points, P2 ${p2Score} points`}>
-              <div className="scoring-panel__segment scoring-panel__segment--p1" style={{ width: `${p1Percent}%` }} />
-              <div className="scoring-panel__segment scoring-panel__segment--p2" style={{ width: `${p2Percent}%` }} />
+            <div
+              className="scoring-panel__bar"
+              role="img"
+              aria-label={`Scoring P1 ${p1Score} points, P2 ${p2Score} points`}
+            >
+              <div
+                className="scoring-panel__segment scoring-panel__segment--p1"
+                style={{ width: `${p1Percent}%` }}
+              />
+              <div
+                className="scoring-panel__segment scoring-panel__segment--p2"
+                style={{ width: `${p2Percent}%` }}
+              />
               <div className="scoring-panel__divider" />
               <div className="scoring-panel__labels">
                 <span className="scoring-panel__score">P1 - Primary: {p1Score}</span>
@@ -1174,8 +1685,12 @@ export const BoardWithAPI: React.FC = () => {
             <div className="deployment-panel__picker-title">
               Change roster - Player {rosterPickerPlayer}
             </div>
-            {rosterPickerLoading && <div className="deployment-panel__picker-loading">Loading armies...</div>}
-            {rosterPickerError && <div className="deployment-panel__picker-error">{rosterPickerError}</div>}
+            {rosterPickerLoading && (
+              <div className="deployment-panel__picker-loading">Loading armies...</div>
+            )}
+            {rosterPickerError && (
+              <div className="deployment-panel__picker-error">{rosterPickerError}</div>
+            )}
             {!rosterPickerLoading && !rosterPickerError && (
               <div className="deployment-panel__picker-content">
                 <div className="deployment-panel__picker-factions">
@@ -1217,7 +1732,11 @@ export const BoardWithAPI: React.FC = () => {
               </div>
             )}
             <div className="deployment-panel__picker-actions">
-              <button type="button" className="deployment-panel__picker-close" onClick={closeRosterPicker}>
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={closeRosterPicker}
+              >
                 Close
               </button>
             </div>
@@ -1228,7 +1747,10 @@ export const BoardWithAPI: React.FC = () => {
         <div className="rule-choice-overlay">
           <div
             className="deployment-panel__picker deployment-panel__picker--draggable"
-            style={{ left: `${ruleChoicePopupPosition.x}px`, top: `${ruleChoicePopupPosition.y}px` }}
+            style={{
+              left: `${ruleChoicePopupPosition.x}px`,
+              top: `${ruleChoicePopupPosition.y}px`,
+            }}
           >
             <button
               type="button"
@@ -1275,7 +1797,9 @@ export const BoardWithAPI: React.FC = () => {
                                   type="button"
                                   className={`deployment-panel__picker-item rule-choice-group__option ${!isActivePrompt ? "rule-choice-group__option--inactive" : ""}`}
                                   onMouseEnter={() =>
-                                    setRuleChoiceHoveredDescription(getRuleDescription(option.display_rule_id))
+                                    setRuleChoiceHoveredDescription(
+                                      getRuleDescription(option.display_rule_id)
+                                    )
                                   }
                                   onMouseLeave={() => setRuleChoiceHoveredDescription("")}
                                   onBlur={() => setRuleChoiceHoveredDescription("")}
@@ -1325,7 +1849,7 @@ export const BoardWithAPI: React.FC = () => {
       )}
 
       <ErrorBoundary fallback={<div>Failed to load player 1 status</div>}>
-        <UnitStatusTable
+        <UnitStatusTablePlayer1WithTutorial
           units={apiProps.gameState?.units ?? []}
           player={1}
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
@@ -1342,7 +1866,7 @@ export const BoardWithAPI: React.FC = () => {
       </ErrorBoundary>
 
       <ErrorBoundary fallback={<div>Failed to load player 2 status</div>}>
-        <UnitStatusTable
+        <UnitStatusTablePlayer2WithTutorial
           units={apiProps.gameState?.units ?? []}
           player={2}
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
@@ -1360,137 +1884,155 @@ export const BoardWithAPI: React.FC = () => {
 
       {/* Game Log Component */}
       <ErrorBoundary fallback={<div>Failed to load game log</div>}>
-        <GameLog
+        <GameLogWithTutorialSpotlight
           events={gameLog.events}
           availableHeight={logAvailableHeight}
           currentTurn={apiProps.gameState?.currentTurn ?? 1}
           debugMode={settings.showDebug}
         />
       </ErrorBoundary>
-    </>
+    </RightColumnTutorialSpotlight>
   );
 
   return (
-    <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>
-      {/*
+    <TutorialProvider
+      isTutorialMode={isTutorialMode}
+      gameState={apiProps.gameState ?? null}
+      startGameWithScenario={apiProps.startGameWithScenario}
+    >
+      <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>
+        {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.
       */}
-      <div className="board-column-overlay-anchor">
-        <BoardPvp
-          units={apiProps.units}
-          selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId}
-          ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
-          showHexCoordinates={settings.showDebug}
-          showLosDebugOverlay={settings.showDebugLoS}
-          eligibleUnitIds={apiProps.eligibleUnitIds}
-          mode={apiProps.mode}
-          movePreview={apiProps.movePreview}
-          attackPreview={apiProps.attackPreview || null}
-          targetPreview={
-            apiProps.targetPreview
-              ? {
-                  targetId: apiProps.targetPreview.targetId,
-                  shooterId: apiProps.targetPreview.shooterId,
-                  currentBlinkStep: apiProps.targetPreview.currentBlinkStep ?? 0,
-                  totalBlinkSteps: apiProps.targetPreview.totalBlinkSteps ?? 2,
-                  blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
-                  hitProbability: apiProps.targetPreview.hitProbability ?? 0.5,
-                  woundProbability: apiProps.targetPreview.woundProbability ?? 0.5,
-                  saveProbability: apiProps.targetPreview.saveProbability ?? 0.5,
-                  overallProbability: apiProps.targetPreview.overallProbability ?? 0.25,
-                }
-              : null
-          }
-          blinkingUnits={apiProps.blinkingUnits}
-          blinkingAttackerId={apiProps.blinkingAttackerId}
-          isBlinkingActive={apiProps.isBlinkingActive}
-          onSelectUnit={
-            isGameOver ||
-            (isRosterSetupMode &&
-              apiProps.gameState?.phase === "deployment" &&
-              apiProps.gameState?.deployment_type === "active" &&
-              !testDeploymentStarted)
-              ? () => {}
-              : apiProps.onSelectUnit
-          }
-          onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
-          onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
-          onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}
-          onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
-          onDeployUnit={
-            isGameOver ||
-            (isRosterSetupMode &&
-              apiProps.gameState?.phase === "deployment" &&
-              apiProps.gameState?.deployment_type === "active" &&
-              !testDeploymentStarted)
-              ? () => {}
-              : apiProps.onDeployUnit
-          }
-          onConfirmMove={isGameOver ? () => {} : apiProps.onConfirmMove}
-          onCancelMove={isGameOver ? () => {} : apiProps.onCancelMove}
-          onShoot={isGameOver ? () => {} : apiProps.onShoot}
-          onSkipShoot={isGameOver ? () => {} : apiProps.onSkipShoot}
-          onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
-          onCancelTargetPreview={() => {
-            const targetPreview = apiProps.targetPreview as TargetPreview | null;
-            if (targetPreview?.blinkTimer) {
-              clearInterval(targetPreview.blinkTimer);
+        <BoardColumnWithTutorial>
+          <BoardPvpWithTutorialAdvance
+            units={apiProps.units}
+            selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId}
+            ruleChoiceHighlightedUnitId={highlightedRuleChoiceUnitId}
+            showHexCoordinates={settings.showDebug}
+            showLosDebugOverlay={settings.showDebugLoS}
+            eligibleUnitIds={apiProps.eligibleUnitIds}
+            mode={apiProps.mode}
+            movePreview={apiProps.movePreview}
+            attackPreview={apiProps.attackPreview || null}
+            wallHexesOverride={
+              apiProps.gameState?.wall_hexes != null && Array.isArray(apiProps.gameState.wall_hexes)
+                ? (
+                    apiProps.gameState.wall_hexes as Array<
+                      [number, number] | { col: number; row: number }
+                    >
+                  ).map((h) =>
+                    Array.isArray(h) ? { col: h[0], row: h[1] } : { col: h.col, row: h.row }
+                  )
+                : undefined
             }
-            // Clear target preview in engine API
-          }}
-          onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
-          onActivateFight={isGameOver ? () => {} : apiProps.onActivateFight}
-          current_player={apiProps.current_player as PlayerId}
-          unitsMoved={apiProps.unitsMoved}
-          unitsCharged={apiProps.unitsCharged}
-          unitsAttacked={apiProps.unitsAttacked}
-          unitsFled={apiProps.unitsFled}
-          phase={apiProps.phase as "deployment" | "move" | "shoot" | "charge" | "fight"}
-          fightSubPhase={apiProps.fightSubPhase}
-          onCharge={isGameOver ? () => {} : apiProps.onCharge}
-          onActivateCharge={isGameOver ? () => {} : apiProps.onActivateCharge}
-          onChargeEnemyUnit={isGameOver ? () => {} : apiProps.onChargeEnemyUnit}
-          onMoveCharger={isGameOver ? () => {} : apiProps.onMoveCharger}
-          onCancelCharge={isGameOver ? () => {} : apiProps.onCancelCharge}
-          onValidateCharge={isGameOver ? () => {} : apiProps.onValidateCharge}
-          onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
-          gameState={apiProps.gameState as GameState}
-          getChargeDestinations={apiProps.getChargeDestinations}
-          onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
-          onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
-          onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
-          getAdvanceDestinations={apiProps.getAdvanceDestinations}
-          advanceRoll={apiProps.advanceRoll}
-          advancingUnitId={apiProps.advancingUnitId}
-          advanceWarningPopup={apiProps.advanceWarningPopup}
-          onConfirmAdvanceWarning={isGameOver ? () => {} : apiProps.onConfirmAdvanceWarning}
-          onCancelAdvanceWarning={isGameOver ? () => {} : apiProps.onCancelAdvanceWarning}
-          onSkipAdvanceWarning={isGameOver ? () => {} : apiProps.onSkipAdvanceWarning}
-          showAdvanceWarningPopup={settings.showAdvanceWarning}
-          autoSelectWeapon={settings.autoSelectWeapon}
-          deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
-          objectivesOverride={objectivesOverride}
-        />
-        {isRosterSetupMode &&
-          apiProps.gameState?.phase === "deployment" &&
-          apiProps.gameState?.deployment_type === "active" &&
-          !testDeploymentStarted && (
-            <div className="test-start-overlay">
-              <div className="test-start-modal">
-                <button
-                  type="button"
-                  className="test-start-bar__button"
-                  onClick={() => {
-                    closeRosterPicker();
-                    setTestDeploymentStarted(true);
-                  }}
-                >
-                  Start Deployment
-                </button>
+            targetPreview={
+              apiProps.targetPreview
+                ? {
+                    targetId: apiProps.targetPreview.targetId,
+                    shooterId: apiProps.targetPreview.shooterId,
+                    currentBlinkStep: apiProps.targetPreview.currentBlinkStep ?? 0,
+                    totalBlinkSteps: apiProps.targetPreview.totalBlinkSteps ?? 2,
+                    blinkTimer: apiProps.targetPreview.blinkTimer ?? null,
+                    hitProbability: apiProps.targetPreview.hitProbability ?? 0.5,
+                    woundProbability: apiProps.targetPreview.woundProbability ?? 0.5,
+                    saveProbability: apiProps.targetPreview.saveProbability ?? 0.5,
+                    overallProbability: apiProps.targetPreview.overallProbability ?? 0.25,
+                  }
+                : null
+            }
+            blinkingUnits={apiProps.blinkingUnits}
+            blinkingAttackerId={apiProps.blinkingAttackerId}
+            isBlinkingActive={apiProps.isBlinkingActive}
+            onSelectUnit={
+              isGameOver ||
+              (isRosterSetupMode &&
+                apiProps.gameState?.phase === "deployment" &&
+                apiProps.gameState?.deployment_type === "active" &&
+                !testDeploymentStarted)
+                ? () => {}
+                : apiProps.onSelectUnit
+            }
+            onSkipUnit={isGameOver ? () => {} : apiProps.onSkipUnit}
+            onStartMovePreview={isGameOver ? () => {} : apiProps.onStartMovePreview}
+            onDirectMove={isGameOver ? () => {} : apiProps.onDirectMove}
+            onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
+            onDeployUnit={
+              isGameOver ||
+              (isRosterSetupMode &&
+                apiProps.gameState?.phase === "deployment" &&
+                apiProps.gameState?.deployment_type === "active" &&
+                !testDeploymentStarted)
+                ? () => {}
+                : apiProps.onDeployUnit
+            }
+            onConfirmMove={isGameOver ? () => {} : apiProps.onConfirmMove}
+            onCancelMove={isGameOver ? () => {} : apiProps.onCancelMove}
+            onShoot={isGameOver ? () => {} : apiProps.onShoot}
+            onSkipShoot={isGameOver ? () => {} : apiProps.onSkipShoot}
+            onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
+            onCancelTargetPreview={() => {
+              const targetPreview = apiProps.targetPreview as TargetPreview | null;
+              if (targetPreview?.blinkTimer) {
+                clearInterval(targetPreview.blinkTimer);
+              }
+              // Clear target preview in engine API
+            }}
+            onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
+            onActivateFight={isGameOver ? () => {} : apiProps.onActivateFight}
+            current_player={apiProps.current_player as PlayerId}
+            unitsMoved={apiProps.unitsMoved}
+            unitsCharged={apiProps.unitsCharged}
+            unitsAttacked={apiProps.unitsAttacked}
+            unitsFled={apiProps.unitsFled}
+            phase={apiProps.phase as "deployment" | "move" | "shoot" | "charge" | "fight"}
+            fightSubPhase={apiProps.fightSubPhase}
+            onCharge={isGameOver ? () => {} : apiProps.onCharge}
+            onActivateCharge={isGameOver ? () => {} : apiProps.onActivateCharge}
+            onChargeEnemyUnit={isGameOver ? () => {} : apiProps.onChargeEnemyUnit}
+            onMoveCharger={isGameOver ? () => {} : apiProps.onMoveCharger}
+            onCancelCharge={isGameOver ? () => {} : apiProps.onCancelCharge}
+            onValidateCharge={isGameOver ? () => {} : apiProps.onValidateCharge}
+            onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
+            gameState={apiProps.gameState as GameState}
+            getChargeDestinations={apiProps.getChargeDestinations}
+            onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
+            onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
+            onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
+            getAdvanceDestinations={apiProps.getAdvanceDestinations}
+            advanceRoll={apiProps.advanceRoll}
+            advancingUnitId={apiProps.advancingUnitId}
+            advanceWarningPopup={apiProps.advanceWarningPopup}
+            onConfirmAdvanceWarning={isGameOver ? () => {} : apiProps.onConfirmAdvanceWarning}
+            onCancelAdvanceWarning={isGameOver ? () => {} : apiProps.onCancelAdvanceWarning}
+            onSkipAdvanceWarning={isGameOver ? () => {} : apiProps.onSkipAdvanceWarning}
+            showAdvanceWarningPopup={settings.showAdvanceWarning}
+            autoSelectWeapon={settings.autoSelectWeapon}
+            deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+            objectivesOverride={objectivesOverride}
+          />
+          {isRosterSetupMode &&
+            apiProps.gameState?.phase === "deployment" &&
+            apiProps.gameState?.deployment_type === "active" &&
+            !testDeploymentStarted && (
+              <div className="test-start-overlay">
+                <div className="test-start-modal">
+                  <button
+                    type="button"
+                    className="test-start-bar__button"
+                    onClick={() => {
+                      closeRosterPicker();
+                      setTestDeploymentStarted(true);
+                    }}
+                  >
+                    Start Deployment
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-      </div>
+            )}
+        </BoardColumnWithTutorial>
+      </SharedLayout>
+      <TutorialOverlayGate />
       <SettingsMenu
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -1509,6 +2051,6 @@ export const BoardWithAPI: React.FC = () => {
         canToggleAutoSelectWeapon={canUseAutoWeaponSelection}
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
       />
-    </SharedLayout>
+    </TutorialProvider>
   );
 };

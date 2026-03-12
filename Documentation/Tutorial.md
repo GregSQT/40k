@@ -150,6 +150,12 @@ Fichier unique : **`config/tutorial/tutorial_steps.json`**. Les steps peuvent ê
 
 Structure possible : un tableau par etape, ou un tableau unique avec un champ `etape` (1|2|3) et ordre global. Voir 4.3 pour les types de trigger.
 
+**Position du popup (optionnel)** : chaque step peut définir `popup_position` pour contrôler où s’affiche le popup dans la fenêtre (sans dépendre du plateau) :
+- **Absent ou `"center"`** : popup centré (comportement par défaut).
+- **`{ "left": "5%", "top": "10%" }`** : coin haut-gauche du popup à 5 % du bord gauche et 10 % du haut du viewport. On peut utiliser des pourcentages (`"20%"`) ou des pixels (`80`). L’utilisateur peut toujours déplacer le popup par glisser-déposer.
+
+**Ancrage à un hex (extension possible)** : pour ancrer le popup près d’un hex du plateau (ex. au-dessus de l’unité ciblée), il faudrait ajouter `popup_anchor_hex: { "col": 12, "row": 10 }` et faire calculer les coordonnées viewport (hex → pixels) par le composant qui a accès au layout du plateau (ex. BoardPvp), puis passer cette position au TutorialOverlay. Non implémenté à ce jour ; la position viewport-relative ci-dessus suffit pour la plupart des cas.
+
 ### 4.3 Types de trigger (à implémenter côté frontend)
 
 | `trigger.type` | Paramètres | Description |

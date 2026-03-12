@@ -428,26 +428,30 @@ class W40KEngine(gym.Env):
                 self.game_state.pop(key, None)
         else:
             wall_ref = str(wall_ref).strip()
-            if wall_ref.startswith("walls-"):
-                wall_id = wall_ref.replace(".json", "").replace("walls-", "")
-                if wall_id:
-                    _root = Path(__file__).resolve().parent.parent
-                    _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
-                    _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
-                    if not _topology_path.exists():
-                        raise FileNotFoundError(
-                            f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
-                            f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
-                        )
-                    try:
-                        with np.load(str(_topology_path)) as topo:
-                            self.game_state["los_topology"] = topo["los"].copy()
-                            self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
-                            self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
-                    except Exception as exc:
-                        raise RuntimeError(
-                            f"Failed to load LoS topology from {_topology_path}: {exc}"
-                        ) from exc
+            # wall_id: walls-01.json -> 01; tutorial_walls-01.json -> tutorial_walls-01
+            _stem = wall_ref.replace(".json", "").strip()
+            if wall_ref.startswith("walls-") and _stem[6:].isdigit():
+                wall_id = _stem[6:]
+            else:
+                wall_id = _stem
+            if wall_id:
+                _root = Path(__file__).resolve().parent.parent
+                _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
+                _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
+                if not _topology_path.exists():
+                    raise FileNotFoundError(
+                        f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
+                        f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
+                    )
+                try:
+                    with np.load(str(_topology_path)) as topo:
+                        self.game_state["los_topology"] = topo["los"].copy()
+                        self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
+                        self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to load LoS topology from {_topology_path}: {exc}"
+                    ) from exc
 
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
@@ -3595,26 +3599,29 @@ class W40KEngine(gym.Env):
                 self.game_state.pop(key, None)
         elif isinstance(board_cols, int) and isinstance(board_rows, int):
             wall_ref = str(scenario_wall_ref).strip()
-            if wall_ref.startswith("walls-"):
-                wall_id = wall_ref.replace(".json", "").replace("walls-", "")
-                if wall_id:
-                    _root = Path(__file__).resolve().parent.parent
-                    _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
-                    _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
-                    if not _topology_path.exists():
-                        raise FileNotFoundError(
-                            f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
-                            f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
-                        )
-                    try:
-                        with np.load(str(_topology_path)) as topo:
-                            self.game_state["los_topology"] = topo["los"].copy()
-                            self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
-                            self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
-                    except Exception as exc:
-                        raise RuntimeError(
-                            f"Failed to load LoS topology from {_topology_path}: {exc}"
-                        ) from exc
+            _stem = wall_ref.replace(".json", "").strip()
+            if wall_ref.startswith("walls-") and len(_stem) > 6 and _stem[6:].isdigit():
+                wall_id = _stem[6:]
+            else:
+                wall_id = _stem
+            if wall_id:
+                _root = Path(__file__).resolve().parent.parent
+                _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
+                _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
+                if not _topology_path.exists():
+                    raise FileNotFoundError(
+                        f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
+                        f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
+                    )
+                try:
+                    with np.load(str(_topology_path)) as topo:
+                        self.game_state["los_topology"] = topo["los"].copy()
+                        self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
+                        self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to load LoS topology from {_topology_path}: {exc}"
+                    ) from exc
 
         # Clear target pool cache on scenario rotation (defense in depth)
         from engine.phase_handlers import shooting_handlers

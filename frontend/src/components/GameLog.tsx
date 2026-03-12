@@ -167,6 +167,15 @@ export interface GameLogEvent extends BaseLogEntry {
   reward?: number;
   ruleHintByLabel?: Record<string, string>;
 }
+/** Rect viewport pour halo tutoriel (dernière ligne du log). */
+export type GameLogLastEntryRect = {
+  shape: "rect";
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
 interface GameLogProps {
   events: GameLogEvent[];
   maxEvents?: number;
@@ -174,6 +183,10 @@ interface GameLogProps {
   useStepNumbers?: boolean;
   currentTurn?: number;
   debugMode?: boolean;
+  /** Tutoriel 2-1 : rapporter le rect de la dernière ligne (la plus récente) pour halo. */
+  onLastEntryRect?: (rect: GameLogLastEntryRect | null) => void;
+  /** Tutoriel 2-1 : rapporter le rect du titre (header) du Game Log pour halo. */
+  onHeaderRect?: (rect: GameLogLastEntryRect | null) => void;
 }
 
 export const GameLog: React.FC<GameLogProps> = ({
@@ -181,8 +194,12 @@ export const GameLog: React.FC<GameLogProps> = ({
   availableHeight = 220,
   useStepNumbers = false,
   debugMode = false,
+  onLastEntryRect,
+  onHeaderRect,
 }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
+  const lastEntryRef = React.useRef<HTMLDivElement>(null);
+  const headerRef = React.useRef<HTMLDivElement>(null);
   const ruleDescriptionByLookup = React.useMemo(() => {
     const descriptions = new Map<string, string>();
 
@@ -306,9 +323,45 @@ export const GameLog: React.FC<GameLogProps> = ({
     }
   }, []);
 
+  // Tutoriel 2-1 : rapporter le rect de la dernière ligne (la plus récente)
+  React.useLayoutEffect(() => {
+    if (!onLastEntryRect) return;
+    if (!lastEntryRef.current || displayedEvents.length === 0) {
+      onLastEntryRect(null);
+      return;
+    }
+    const rect = lastEntryRef.current.getBoundingClientRect();
+    onLastEntryRect({
+      shape: "rect",
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+    return () => onLastEntryRect(null);
+  }, [onLastEntryRect, displayedEvents.length]);
+
+  // Tutoriel 2-1 : rapporter le rect du titre (header) du Game Log
+  React.useLayoutEffect(() => {
+    if (!onHeaderRect) return;
+    if (!headerRef.current) {
+      onHeaderRect(null);
+      return;
+    }
+    const rect = headerRef.current.getBoundingClientRect();
+    onHeaderRect({
+      shape: "rect",
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+    return () => onHeaderRect(null);
+  }, [onHeaderRect]);
+
   return (
     <div className="game-log">
-      <div className="game-log__header">
+      <div ref={headerRef} className="game-log__header">
         <h3 className="game-log__title">Game Log</h3>
         <div className="game-log__count">{events.length} events</div>
       </div>
@@ -325,7 +378,7 @@ export const GameLog: React.FC<GameLogProps> = ({
               overflow: "auto",
             }}
           >
-            {displayedEvents.map((event) => {
+            {displayedEvents.map((event, index) => {
               // Check if this is a wait/skip action
               // Multiple detection methods:
               // 1. Check action_name field
@@ -358,6 +411,7 @@ export const GameLog: React.FC<GameLogProps> = ({
               return (
                 <div
                   key={event.id}
+                  ref={index === 0 ? lastEntryRef : undefined}
                   className={`game-log-entry ${getEventTypeClass(event)} ${waitClass} ${objectiveControlClass}`}
                 >
                   <div className="game-log-entry__single-line">
