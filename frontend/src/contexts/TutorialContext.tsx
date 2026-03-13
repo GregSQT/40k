@@ -22,19 +22,42 @@ export const TUTORIAL_STEP_TITLE_PHASES = "Phases";
 export const TUTORIAL_STEP_TITLE_PHASE_MOVE = "Phase de mouvement";
 /** Ordre 4 : "Phase de Mouvement" (halo Intercessor + bouton move du turn phase tracker). */
 export const TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT = "Phase de Mouvement";
+/** Titre étape 1-14 (même layout halo Intercessor + bouton Move). À garder en sync avec tutorial_steps.json. */
+export const TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT = "1-14 Phase de Mouvement";
+/** Titre étape 1-15 (halo colonnes Name et M pour clic Intercessor). À garder en sync avec tutorial_steps.json. */
+export const TUTORIAL_STEP_TITLE_1_15_PHASE_MOUVEMENT = "1-15 Phase de mouvement";
 /** Phase de Tir (halo sur le bouton Shoot du turn phase tracker). */
 export const TUTORIAL_STEP_TITLE_PHASE_TIR = "Phase de Tir";
-/** Choix des armes (étape 2-2 : halos Move/Shoot, Intercessor armes, Termagant attributs). */
+/** Titre étape 1-21 (panneau gauche sans fog, halo colonnes Name/M pour clic Intercessor). À garder en sync avec tutorial_steps.json. */
+export const TUTORIAL_STEP_TITLE_1_21_PHASE_TIR = "1-21 Phase de Tir";
+/** Choix des armes (étape 1-22 : halos Move/Shoot, Intercessor armes, Termagant attributs). */
 export const TUTORIAL_STEP_TITLE_WEAPON_CHOICE = "Choix des armes";
+/** Titre étape 1-22 (panneau gauche sans fog). À garder en sync avec tutorial_steps.json. */
+export const TUTORIAL_STEP_TITLE_1_22_MENU_CHOIX_ARMES = "1-22 Menu de choix des armes";
+/** Titre étape 1-23 (panneau gauche sans fog, choix Bolt Rifle). À garder en sync avec tutorial_steps.json. */
+export const TUTORIAL_STEP_TITLE_1_23_CHOIX_ARMES = "1-23 Choix de l'arme";
+/** Titre étape 1-24 (panneau gauche sans fog, clic Termagant). À garder en sync avec tutorial_steps.json. */
+export const TUTORIAL_STEP_TITLE_1_24_CHOIX_CIBLE = "1-24 Choix de la cible";
 
 /** Étapes qui affichent le halo sur l'Intercessor (board). */
-export const TUTORIAL_STEP_TITLES_INTERCESSOR_HALO = [TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT] as const;
+export const TUTORIAL_STEP_TITLES_INTERCESSOR_HALO = [
+  TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
+  TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT,
+] as const;
 
-/** Étapes qui affichent le halo sur les colonnes Name et M (panneau droit). */
-export const TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO = [TUTORIAL_STEP_TITLE_PHASE_MOVE] as const;
+/** Étapes qui affichent le halo sur les colonnes Name et M (panneau droit) pour clic sur l’unité (ex. Intercessor). */
+export const TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO = [
+  TUTORIAL_STEP_TITLE_PHASE_MOVE,
+  TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT,
+  TUTORIAL_STEP_TITLE_1_15_PHASE_MOUVEMENT,
+  TUTORIAL_STEP_TITLE_1_21_PHASE_TIR,
+] as const;
 
 /** Étapes qui affichent le halo sur le bouton Move du turn phase tracker. */
-export const TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO = [TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT] as const;
+export const TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO = [
+  TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
+  TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT,
+] as const;
 
 /**
  * Étapes où le HALO (zone sans brouillard) est sur le PANNEAU GAUCHE (board).
@@ -43,18 +66,23 @@ export const TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO = [TUTORIAL_STEP_TITLE_PHASE_
 export const TUTORIAL_STEP_TITLES_HALO_LEFT = [
   TUTORIAL_STEP_TITLE_PHASE_MOVE,
   TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
+  TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT,
   TUTORIAL_STEP_TITLE_PHASE_TIR,
+  TUTORIAL_STEP_TITLE_1_21_PHASE_TIR,
   TUTORIAL_STEP_TITLE_WEAPON_CHOICE,
+  TUTORIAL_STEP_TITLE_1_22_MENU_CHOIX_ARMES,
+  TUTORIAL_STEP_TITLE_1_23_CHOIX_ARMES,
+  TUTORIAL_STEP_TITLE_1_24_CHOIX_CIBLE,
 ] as const;
 
-/** Parse "stage" (e.g. "1-4") → etape + order. Accepte aussi etape/order en legacy. */
+/** Parse "stage" (e.g. "1-14") → etape + order. Accepte aussi etape/order en legacy. */
 function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
   let etape: number;
   let order: number;
   if (typeof raw.stage === "string") {
     const parts = raw.stage.split("-").map(Number);
     if (parts.length !== 2 || !Number.isInteger(parts[0]) || !Number.isInteger(parts[1])) {
-      throw new Error(`Invalid stage: "${raw.stage}". Expected format "X-Y" (e.g. "1-4").`);
+      throw new Error(`Invalid stage: "${raw.stage}". Expected format "X-Y" (e.g. "1-14").`);
     }
     etape = parts[0];
     order = parts[1];
@@ -62,7 +90,7 @@ function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
     etape = raw.etape;
     order = raw.order;
   } else {
-    throw new Error("Step must have 'stage' (e.g. '1-4') or 'etape' and 'order'.");
+    throw new Error("Step must have 'stage' (e.g. '1-14') or 'etape' and 'order'.");
   }
   const { stage: _s, etape: _e, order: _o, ...rest } = raw;
   return { ...rest, etape, order } as TutorialStepDef;
@@ -129,7 +157,7 @@ export interface TutorialStepDisplay {
   body_en: string;
   /** Clé pour identifier l'étape (halos, etc.) = title_fr. */
   stepKey: string;
-  /** Identifiant d’étape "X-Y" (ex. "1-5", "1-6") pour distinguer les steps au même stepKey. */
+  /** Identifiant d’étape "X-Y" (ex. "1-15", "1-16") pour distinguer les steps au même stepKey. */
   stage: string;
   /** Phase du tour (move, shooting, charge, fight) pour les étapes liées à une phase ; utilisé pour afficher le logo à gauche du titre. */
   phase?: string;
@@ -180,19 +208,19 @@ interface TutorialContextValue {
   /** Rect viewport (px) du PANNEAU DROIT (unit-status-tables) = halo. */
   spotlightRightPanel: TutorialSpotlightPosition | null;
   setSpotlightRightPanel: (pos: TutorialSpotlightPosition | null) => void;
-  /** Rects viewport (px) des zones de fog sur le panneau gauche (étape 1-5 : 2 bandes pour moins noir). */
+  /** Rects viewport (px) des zones de fog sur le panneau gauche (étape 1-15 : 2 bandes pour moins noir). */
   leftPanelFogRects: TutorialSpotlightRect[];
   setLeftPanelFogRects: (r: TutorialSpotlightRect[] | null) => void;
-  /** Halos viewport (px) : section RANGED WEAPON(S) du panneau droit (étape 1-6). */
+  /** Halos viewport (px) : section RANGED WEAPON(S) du panneau droit (étape 1-16). */
   spotlightRangedWeaponsPositions: TutorialSpotlightPosition[] | null;
   setSpotlightRangedWeaponsPositions: (pos: TutorialSpotlightPosition[] | null) => void;
-  /** Rect viewport (px) de la dernière ligne du Game Log (étape 2-1). */
+  /** Rect viewport (px) de la dernière ligne du Game Log (étape 1-21). */
   spotlightGameLogLastEntry: TutorialSpotlightPosition | null;
   setSpotlightGameLogLastEntry: (pos: TutorialSpotlightPosition | null) => void;
-  /** Rect viewport (px) du titre du Game Log (étape 2-1). */
+  /** Rect viewport (px) du titre du Game Log (étape 1-21). */
   spotlightGameLogHeader: TutorialSpotlightPosition | null;
   setSpotlightGameLogHeader: (pos: TutorialSpotlightPosition | null) => void;
-  /** Rect viewport (px) de la ligne attributs + titre d’une unité ennemie (étape 2-2, ex. Termagant). */
+  /** Rect viewport (px) de la ligne attributs + titre d’une unité ennemie (étape 1-22, ex. Termagant). */
   spotlightEnemyUnitAttributes: TutorialSpotlightPosition | null;
   setSpotlightEnemyUnitAttributes: (pos: TutorialSpotlightPosition | null) => void;
 }
@@ -230,7 +258,10 @@ export function TutorialProvider({
   const [spotlightTurnPhasePositions, setSpotlightTurnPhasePositions] = useState<TutorialSpotlightPosition[] | null>(null);
   const [spotlightLeftPanel, setSpotlightLeftPanel] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightRightPanel, setSpotlightRightPanel] = useState<TutorialSpotlightPosition | null>(null);
-  const [leftPanelFogRects, setLeftPanelFogRects] = useState<TutorialSpotlightRect[]>([]);
+  const [leftPanelFogRects, setLeftPanelFogRectsState] = useState<TutorialSpotlightRect[]>([]);
+  const setLeftPanelFogRects = useCallback((r: TutorialSpotlightRect[] | null) => {
+    setLeftPanelFogRectsState(r ?? []);
+  }, []);
   const [spotlightRangedWeaponsPositions, setSpotlightRangedWeaponsPositions] = useState<TutorialSpotlightPosition[] | null>(null);
   const [spotlightGameLogLastEntry, setSpotlightGameLogLastEntry] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightGameLogHeader, setSpotlightGameLogHeader] = useState<TutorialSpotlightPosition | null>(null);
@@ -306,7 +337,7 @@ export function TutorialProvider({
       setSpotlightGameLogHeader(null);
       setSpotlightEnemyUnitAttributes(null);
     }
-  }, [popupVisible]);
+  }, [popupVisible, setLeftPanelFogRects]);
 
   useEffect(() => {
     if (!isTutorialMode) return;
@@ -396,6 +427,13 @@ export function TutorialProvider({
     if (!justLostLastEnemy) return;
 
     if (currentEtape === 1) {
+      // Étape 1-124 → 1-125 : afficher la popup "Mort du termagant" au lieu de passer à l’étape 2
+      const idx125 = stepsForEtape.findIndex((s) => `${s.etape}-${s.order}` === "1-125");
+      if (idx125 >= 0) {
+        setCurrentStepIndex(idx125);
+        setPopupVisible(true);
+        return;
+      }
       setCurrentEtape(2);
       setCurrentStepIndex(0);
       onDeployShownForEtapeRef.current.delete(2);
@@ -413,6 +451,7 @@ export function TutorialProvider({
     hasLivingEnemyUnits,
     gameState?.phase,
     startGameWithScenario,
+    stepsForEtape,
   ]);
 
   const prepareSkipNextPhaseTrigger = useCallback(() => {
@@ -527,6 +566,7 @@ export function TutorialProvider({
       spotlightLeftPanel,
       spotlightRightPanel,
       leftPanelFogRects,
+      setLeftPanelFogRects,
       spotlightRangedWeaponsPositions,
       spotlightGameLogLastEntry,
       spotlightGameLogHeader,

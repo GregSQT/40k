@@ -1,0 +1,13 @@
+{
+  "roster_id": "p1_training_roster-04",
+  "composition": [
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 2
+    }
+  ]
+}

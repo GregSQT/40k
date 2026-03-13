@@ -1,8 +1,0 @@
-{
-  "roster_id": "p2_roster-09",
-  "composition": [
-    {"unit_type": "TyranidWarriorRanged", "count": 1},
-    {"unit_type": "HeavyIntercessor", "count": 3},
-    {"unit_type": "Intercessor", "count": 2}
-  ]
-}

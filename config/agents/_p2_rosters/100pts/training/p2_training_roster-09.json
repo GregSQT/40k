@@ -1,0 +1,8 @@
+{
+  "roster_id": "p2_training_roster-09",
+  "composition": [
+    {"unit_type": "Terminator", "count": 1},
+    {"unit_type": "HeavyIntercessor", "count": 1},
+    {"unit_type": "Intercessor", "count": 2}
+  ]
+}

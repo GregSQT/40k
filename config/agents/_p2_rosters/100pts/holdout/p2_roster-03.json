@@ -1,9 +1,0 @@
-{
-  "roster_id": "p2_roster-03",
-  "composition": [
-    {"unit_type": "TyranidWarriorRanged", "count": 1},
-    {"unit_type": "AssaultTerminator", "count": 2},
-    {"unit_type": "AssaultIntercessorSergeant", "count": 1},
-    {"unit_type": "AssaultIntercessor", "count": 1}
-  ]
-}

@@ -640,7 +640,7 @@ class GameStateManager:
                         / scale_name
                         / expected_split
                     )
-                    pattern = f"{expected_split}_p1_roster-*.json"
+                    pattern = f"p1_{expected_split}_roster-*.json"
                 else:
                     base_dir = (
                         project_root
@@ -650,7 +650,7 @@ class GameStateManager:
                         / scale_name
                         / expected_split
                     )
-                    pattern = "p2_roster-*.json"
+                    pattern = f"p2_{expected_split}_roster-*.json"
                 if not base_dir.exists():
                     raise FileNotFoundError(
                         f"Scenario '{scenario_file}' {field_name}={random_token!r} but directory does not exist: {base_dir}"
@@ -695,13 +695,57 @@ class GameStateManager:
         if not normalized.endswith(".json"):
             normalized = f"{normalized}.json"
 
+        ref_split, _, ref_filename = normalized.partition("/")
+        VALID_P1_SPLITS = {"training", "holdout_regular", "holdout_hard"}
+        VALID_P2_SPLITS = {"training", "holdout"}
+        valid_splits = VALID_P1_SPLITS if roster_kind == "p1" else VALID_P2_SPLITS
+        project_root = Path(__file__).resolve().parent.parent
+
+        # Allow explicit split in ref (e.g. holdout_regular/... when scenario is in training/)
+        # Enables cross-split evaluation (P1 holdout vs P2 training)
+        if ref_split in valid_splits:
+            if roster_kind == "p1":
+                explicit_base = (
+                    project_root
+                    / "config"
+                    / "agents"
+                    / scenario_agent_key
+                    / "rosters"
+                    / scale_name
+                    / ref_split
+                )
+            else:
+                explicit_base = (
+                    project_root
+                    / "config"
+                    / "agents"
+                    / "_p2_rosters"
+                    / scale_name
+                    / ref_split
+                )
+            explicit_path = explicit_base / ref_filename
+            if explicit_path.exists():
+                return normalized, was_randomized
+            # Try roster_id match in explicit split (e.g. holdout_regular_p1_roster-01)
+            if explicit_base.exists():
+                requested_id = Path(ref_filename).stem
+                for candidate_path in sorted(explicit_base.glob("*.json"), key=lambda p: p.name):
+                    try:
+                        with open(candidate_path, "r", encoding="utf-8-sig") as f:
+                            data = json.load(f)
+                        if require_key(data, "roster_id") == requested_id:
+                            return f"{ref_split}/{candidate_path.name}", was_randomized
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+
+        # Fallback: require ref to match expected_split (scenario path context)
         prefix = f"{expected_split}/"
         if not normalized.startswith(prefix):
             raise ValueError(
-                f"Scenario '{scenario_file}' field '{field_name}' must target '{expected_split}/...' but got '{normalized}'"
+                f"Scenario '{scenario_file}' field '{field_name}' must target '{expected_split}/...' "
+                f"(or explicit valid split) but got '{normalized}'"
             )
-        filename = normalized[len(prefix):]
-        project_root = Path(__file__).resolve().parent.parent
+        filename = ref_filename
         if roster_kind == "p1":
             base_dir = (
                 project_root
@@ -726,8 +770,7 @@ class GameStateManager:
             return normalized, was_randomized
 
         requested_roster_id = Path(filename).stem
-        expected_roster_prefix = f"{roster_kind}_roster-"
-        if not requested_roster_id.startswith(expected_roster_prefix):
+        if not requested_roster_id.startswith(f"{roster_kind}_") or "roster-" not in requested_roster_id:
             raise FileNotFoundError(
                 f"Scenario '{scenario_file}' references missing roster file '{normalized}' "
                 f"and roster id inference is not supported for '{requested_roster_id}'"

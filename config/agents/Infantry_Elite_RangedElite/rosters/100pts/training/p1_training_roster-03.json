@@ -1,0 +1,13 @@
+{
+  "roster_id": "p1_training_roster-03",
+  "composition": [
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 2
+    },
+    {
+      "unit_type": "EradicatorMultiMelta",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "roster_id": "p2_holdout_roster-03",
+  "composition": [
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultTerminator",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    }
+  ]
+}

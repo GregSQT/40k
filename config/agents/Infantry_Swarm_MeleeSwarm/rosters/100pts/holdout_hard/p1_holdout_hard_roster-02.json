@@ -1,0 +1,17 @@
+{
+  "roster_id": "p1_holdout_hard_roster-02",
+  "composition": [
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 3
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 3
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 7
+    }
+  ]
+}

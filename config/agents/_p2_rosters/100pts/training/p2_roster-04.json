@@ -1,7 +1,0 @@
-{
-  "roster_id": "p2_roster-04",
-  "composition": [
-    {"unit_type": "TyranidWarriorRanged", "count": 3},
-    {"unit_type": "Termagant", "count": 4}
-  ]
-}

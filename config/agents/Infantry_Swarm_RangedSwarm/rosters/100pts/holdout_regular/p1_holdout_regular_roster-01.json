@@ -1,0 +1,9 @@
+{
+  "roster_id": "p1_holdout_regular_roster-01",
+  "composition": [
+    {
+      "unit_type": "Termagant",
+      "count": 13
+    }
+  ]
+}

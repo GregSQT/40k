@@ -1,0 +1,13 @@
+{
+  "roster_id": "p1_training_roster-10",
+  "composition": [
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 3
+    },
+    {
+      "unit_type": "GreyHunter",
+      "count": 2
+    }
+  ]
+}

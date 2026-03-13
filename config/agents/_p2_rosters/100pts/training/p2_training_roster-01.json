@@ -1,0 +1,7 @@
+{
+  "roster_id": "p2_training_roster-01",
+  "composition": [
+    {"unit_type": "Genestealer", "count": 6},
+    {"unit_type": "Hormagaunt", "count": 4}
+  ]
+}

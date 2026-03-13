@@ -1,0 +1,21 @@
+{
+  "roster_id": "p2_holdout_roster-05",
+  "composition": [
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    }
+  ]
+}

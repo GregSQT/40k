@@ -170,12 +170,17 @@ class RewardCalculator:
         enriched_unit = self._enrich_unit_for_reward_mapper(acting_unit)
         
         if action_type == "shoot":
-            # CRITICAL: Check if this is a waiting_for_player action without attacks executed
-            # In this case, no logs are added yet, so return 0.0 reward
+            # CRITICAL: Check if no attacks were executed (waiting_for_player or end activation without firing)
+            # In these cases, no logs are added, so return 0.0 reward
             waiting_for_player = result.get("waiting_for_player", False)
             all_attack_results = result["all_attack_results"] if "all_attack_results" in result else []
             if waiting_for_player and not all_attack_results:
-                # No attacks executed yet, return 0.0 reward
+                # No attacks executed yet (waiting for target selection), return 0.0 reward
+                reward_breakdown['total'] = 0.0
+                game_state['last_reward_breakdown'] = reward_breakdown
+                return 0.0
+            if not all_attack_results:
+                # End activation without firing (e.g. no valid targets, no weapons) - no logs
                 reward_breakdown['total'] = 0.0
                 game_state['last_reward_breakdown'] = reward_breakdown
                 return 0.0
@@ -183,7 +188,7 @@ class RewardCalculator:
             # Sum all shoot rewards from current activation (handles RNG_NB > 1)
             action_logs = require_key(game_state, "action_logs")
             
-            # Validate action_logs exists and is not empty
+            # Validate action_logs exists and is not empty (attacks were executed, logs must exist)
             if not action_logs or len(action_logs) == 0:
                 raise RuntimeError(
                     f"CRITICAL: action_logs is empty for shoot action! "

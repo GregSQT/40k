@@ -1,7 +1,0 @@
-{
-  "roster_id": "p1_roster-01",
-  "composition": [
-    {"unit_type": "GreyHunterPlasmaGun", "count": 2},
-    {"unit_type": "Hellblaster", "count": 2}
-  ]
-}

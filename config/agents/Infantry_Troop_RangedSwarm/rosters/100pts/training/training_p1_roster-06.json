@@ -1,7 +1,0 @@
-{
-  "roster_id": "p1_roster-06",
-  "composition": [
-    {"unit_type": "IntercessorGrenadeLauncher", "count": 1},
-    {"unit_type": "GreyHunter", "count": 3}
-  ]
-}

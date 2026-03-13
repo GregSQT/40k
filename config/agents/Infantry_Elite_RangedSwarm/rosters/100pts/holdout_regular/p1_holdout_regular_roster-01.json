@@ -1,0 +1,13 @@
+{
+  "roster_id": "p1_holdout_regular_roster-01",
+  "composition": [
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "AggressorFlamestorm",
+      "count": 1
+    }
+  ]
+}

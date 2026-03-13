@@ -1,4 +1,5 @@
 // frontend/src/hooks/useEngineAPI.ts
+import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
@@ -175,7 +176,13 @@ interface RuleChoicePrompt {
   options: RuleChoiceOption[];
 }
 
-export const useEngineAPI = () => {
+export interface UseEngineAPIOptions {
+  /** Ref à un getter appelé avant envoi d’un tir (left_click enemy) ; si forceKill, le backend force la mort de la cible (tutoriel 1-24, 2e tir). */
+  getTutorialShootOptionsRef?: MutableRefObject<() => { forceKill?: boolean }>;
+}
+
+export const useEngineAPI = (options?: UseEngineAPIOptions) => {
+  const getTutorialShootOptionsRef = options?.getTutorialShootOptionsRef;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1517,12 +1524,18 @@ export const useEngineAPI = () => {
             return;
           } else if (gameState.active_shooting_unit) {
             // Clicking on target when unit is active
-            await executeAction({
+            const clickTarget = determineClickTarget(numericUnitId, gameState);
+            const payload: Record<string, unknown> = {
               action: "left_click",
               unitId: gameState.active_shooting_unit,
               targetId: numericUnitId.toString(),
-              clickTarget: determineClickTarget(numericUnitId, gameState),
-            });
+              clickTarget,
+            };
+            const tutorialOpts = getTutorialShootOptionsRef?.current?.();
+            if (tutorialOpts?.forceKill === true) {
+              payload.tutorial_force_kill = true;
+            }
+            await executeAction(payload);
             return;
           }
         }
@@ -1566,7 +1579,7 @@ export const useEngineAPI = () => {
       setTargetPreview(null);
       // Remove all frontend shooting state - backend manages everything
     },
-    [gameState, executeAction, mode, determineClickTarget, selectedUnitId]
+    [gameState, executeAction, mode, determineClickTarget, selectedUnitId, getTutorialShootOptionsRef]
   );
 
   // Right-click handler for shooting phase

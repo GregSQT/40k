@@ -2567,7 +2567,7 @@ textarea:focus {
   padding: 8px;
   min-width: 400px;
   max-width: 600px;
-  z-index: 1000;
+  z-index: 10001; /* Au-dessus de l’overlay tutoriel (10000) pour pouvoir cliquer Bolt Rifle en 1-23 */
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
@@ -2646,7 +2646,7 @@ textarea:focus {
 }
 
 .rule-badge-wrapper:hover {
-  z-index: 1200;
+  z-index: 10001; /* Au-dessus de l’overlay tutoriel (10000) pour afficher le tooltip */
 }
 
 .rule-tooltip {
@@ -2668,7 +2668,7 @@ textarea:focus {
   white-space: normal;
   overflow-wrap: break-word;
   box-shadow: var(--tooltip-shadow);
-  z-index: 1201;
+  z-index: 10001; /* Au-dessus de l’overlay tutoriel (10000) pour que le tooltip soit visible */
   visibility: hidden;
   opacity: 0;
   transform: translateY(4px);
@@ -2866,6 +2866,24 @@ textarea:focus {
   margin-right: 6px;
   color: var(--tooltip-text-color);
 }
+/* Mini icône entre curseur et texte (même hauteur que le curseur : 2.2em) */
+.tutorial-overlay-dialog__mini-icon {
+  display: inline-block;
+  width: 2.2em;
+  height: 2.2em;
+  vertical-align: middle;
+  margin: 0 4px;
+  object-fit: contain;
+}
+/* 1-23 : Bolt Rifle en gras et blanc */
+.tutorial-overlay-dialog__bolt-rifle {
+  font-weight: 700;
+  color: #fff;
+}
+/* 1-15 : hex et première ligne sur la même ligne */
+.tutorial-overlay-dialog__icon-and-first-line--hex-same-line {
+  flex-wrap: nowrap;
+}
 .tutorial-overlay-dialog__weapon-attr-line {
   display: inline;
 }
@@ -2965,6 +2983,11 @@ textarea:focus {
   font-size: 14px;
   font-weight: var(--tutorial-dialog-font-weight);
   color: var(--tutorial-dialog-color);
+}
+.tutorial-overlay-dialog__death-icon-inline {
+  display: inline;
+  vertical-align: middle;
+  margin-right: 0.25em;
 }
 .tutorial-overlay-dialog .tutorial-btn-primary {
   padding: 10px 20px;

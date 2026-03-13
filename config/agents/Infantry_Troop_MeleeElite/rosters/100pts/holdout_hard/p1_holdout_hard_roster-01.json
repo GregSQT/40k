@@ -1,0 +1,13 @@
+{
+  "roster_id": "p1_holdout_hard_roster-01",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 2
+    },
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 2
+    }
+  ]
+}

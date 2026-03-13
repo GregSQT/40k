@@ -3,6 +3,7 @@ import type React from "react";
 import { useLayoutEffect, useRef } from "react";
 import type { TutorialSpotlightPosition } from "../contexts/TutorialContext";
 import {
+  TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT,
   TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
   TUTORIAL_STEP_TITLE_PHASE_TIR,
   TUTORIAL_STEP_TITLE_PHASES,
@@ -91,7 +92,10 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
       } else if (tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASES) {
         const r = rectFromEl(phasesContainerRef.current, PAD);
         rects = r && isTurnPhaseTrackerRect(r) ? [r] : null;
-      } else if (tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT) {
+      } else if (
+        tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT ||
+        tutorialStepTitle === TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT
+      ) {
         const r = rectFromEl(movePhaseButtonRef.current, PAD);
         rects = r && isTurnPhaseTrackerRect(r) ? [r] : null;
       } else if (tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASE_TIR) {
@@ -114,7 +118,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
         measure();
         setTimeout(() => {
           if (!cancelled) measure();
-        }, 150);
+        }, 30);
       });
     });
     return () => {

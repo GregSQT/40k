@@ -1,0 +1,9 @@
+{
+  "roster_id": "p1_training_roster-02",
+  "composition": [
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 3
+    }
+  ]
+}

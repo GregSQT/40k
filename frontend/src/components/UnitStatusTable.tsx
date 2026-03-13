@@ -42,7 +42,7 @@ interface UnitStatusTableProps {
   guidedFocusUnitId?: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
-  gameMode?: "pvp" | "pvp_test" | "pve" | "training";
+  gameMode?: "pvp" | "pvp_test" | "pve" | "training" | "tutorial";
   isReplay?: boolean;
   victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;
@@ -242,7 +242,7 @@ const UnitRow = memo<UnitRowProps>(
         reportRect();
         t2 = requestAnimationFrame(() => reportRect());
       });
-      const t = setTimeout(() => reportRect(), 150);
+      const t = setTimeout(() => reportRect(), 30);
       return () => {
         cancelAnimationFrame(t1);
         if (t2 != null) cancelAnimationFrame(t2);
@@ -283,7 +283,7 @@ const UnitRow = memo<UnitRowProps>(
       });
       const t = setTimeout(() => {
         if (!cancelled) measure();
-      }, 150);
+      }, 30);
       return () => {
         cancelled = true;
         cancelAnimationFrame(raf);
@@ -324,7 +324,7 @@ const UnitRow = memo<UnitRowProps>(
         reportAttributesRect();
         requestAnimationFrame(reportAttributesRect);
       });
-      const t = setTimeout(reportAttributesRect, 150);
+      const t = setTimeout(reportAttributesRect, 30);
       return () => {
         cancelAnimationFrame(t1);
         clearTimeout(t);

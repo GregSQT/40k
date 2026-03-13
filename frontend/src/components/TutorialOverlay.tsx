@@ -1,6 +1,15 @@
 import type React from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Fragment } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
+import { getEventIcon } from "../../../shared/gameLogStructure";
 import type {
   TutorialLang,
   TutorialSpotlightCircle,
@@ -72,7 +81,66 @@ const PHASE_LOGO: Record<string, string> = {
 };
 
 const TERMAGANT_ICON_PATH = "/icons/Termagant_red.webp";
+const INTERCESSOR_ICON_PATH = "/icons/Intercessor.webp";
 const CURSOR_POINTER_ICON_PATH = "/icons/Cursor.png";
+const WEAPON_MENU_ICON_PATH = "/icons/weapon_menu_icon.png";
+
+/** Mini icônes entre le curseur et le texte (étapes 1-14, 1-15, 1-16, 1-21, 1-22, 1-24). */
+const MINI_ICON_CLASS = "tutorial-overlay-dialog__mini-icon";
+function MiniIntercessorIcon(): React.ReactElement {
+  return (
+    <img
+      src={INTERCESSOR_ICON_PATH}
+      alt=""
+      className={MINI_ICON_CLASS}
+      aria-hidden
+    />
+  );
+}
+function MiniHexIcon(): React.ReactElement {
+  return (
+    <svg
+      className={MINI_ICON_CLASS}
+      viewBox="0 0 50 50"
+      aria-hidden
+      role="img"
+      style={{ verticalAlign: "middle", margin: "0 4px" }}
+    >
+      <title>Hex destination</title>
+      <polygon
+        points={[0, 60, 120, 180, 240, 300]
+          .map((deg) => {
+            const rad = (deg * Math.PI) / 180;
+            return `${25 + 20 * Math.cos(rad)},${25 + 20 * Math.sin(rad)}`;
+          })
+          .join(" ")}
+        fill="rgba(144, 208, 144, 0.5)"
+        stroke="#00aa00"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+function MiniWeaponMenuIcon(): React.ReactElement {
+  return (
+    <img
+      src={WEAPON_MENU_ICON_PATH}
+      alt=""
+      className={MINI_ICON_CLASS}
+      aria-hidden
+    />
+  );
+}
+function MiniTermagantIcon(): React.ReactElement {
+  return (
+    <img
+      src={TERMAGANT_ICON_PATH}
+      alt=""
+      className={MINI_ICON_CLASS}
+      aria-hidden
+    />
+  );
+}
 
 /** Ligne commençant par Cliquez ou Clickez (optionnellement après espaces). */
 const CLICK_LINE_RE = /^\s*(Cliquez|Clickez)/i;
@@ -91,10 +159,14 @@ function CursorIcon(): React.ReactElement {
 
 /**
  * Rendu du corps avec icône pointeur :
- * - Placeholder <cursor> dans le texte → icône à cet endroit.
+ * - Placeholder <cursor> dans le texte → icône à cet endroit (+ optionnel afterCursor entre curseur et texte).
  * - Sinon, ligne qui commence par "Cliquez" / "Clickez" → icône en début de ligne.
  */
-function renderBodyWithClickIcon(body: string): React.ReactNode {
+function renderBodyWithClickIcon(
+  body: string,
+  options?: { afterCursor?: React.ReactNode }
+): React.ReactNode {
+  const afterCursor = options?.afterCursor ?? null;
   const lines = body.split("\n");
   if (lines.length === 0) return <p>{body}</p>;
   return (
@@ -108,6 +180,7 @@ function renderBodyWithClickIcon(body: string): React.ReactNode {
             {showIconAtStart && (
               <>
                 <CursorIcon />
+                {afterCursor}
                 {" "}
               </>
             )}
@@ -118,6 +191,7 @@ function renderBodyWithClickIcon(body: string): React.ReactNode {
                     {j < parts.length - 1 && (
                       <>
                         <CursorIcon />
+                        {afterCursor}
                         {" "}
                       </>
                     )}
@@ -136,9 +210,13 @@ function renderBodyWithClickIcon(body: string): React.ReactNode {
 const WEAPON_ATTR_LINE_RE = /^<(Range|A|BS|S|AP|DMG)>\s*(.*)$/;
 
 /**
- * Rendu du corps pour l'étape 2-2 : intro, tableau 2 colonnes (attributs à droite de la colonne gauche, infos à gauche de la colonne droite), puis texte de fin.
+ * Rendu du corps pour l'étape 2-2 / 1-23 : intro, tableau 2 colonnes (attributs), puis texte de fin (optionnel afterCursor et Bolt Rifle en gras pour 1-23).
  */
-function renderBodyWithWeaponAttrTooltips(body: string): React.ReactNode {
+function renderBodyWithWeaponAttrTooltips(
+  body: string,
+  options?: { afterCursor?: React.ReactNode; boltRifleBold?: boolean }
+): React.ReactNode {
+  const { afterCursor, boltRifleBold } = options ?? {};
   const lines = body.split("\n");
   const intro: string[] = [];
   const attrRows: { attrName: string; description: string }[] = [];
@@ -159,7 +237,10 @@ function renderBodyWithWeaponAttrTooltips(body: string): React.ReactNode {
   return (
     <div className="tutorial-overlay-dialog__body-paragraph">
       {intro.length > 0 && (
-        <p className="tutorial-overlay-dialog__weapon-attr-intro" style={{ whiteSpace: "pre-wrap" }}>
+        <p
+          className="tutorial-overlay-dialog__weapon-attr-intro"
+          style={{ whiteSpace: "pre-wrap" }}
+        >
           {replaceCursorInText(intro.join("\n"))}
         </p>
       )}
@@ -174,7 +255,10 @@ function renderBodyWithWeaponAttrTooltips(body: string): React.ReactNode {
           </div>
           <div className="tutorial-overlay-dialog__weapon-attr-col tutorial-overlay-dialog__weapon-attr-col--right">
             {attrRows.map(({ attrName, description }) => (
-              <div key={attrName} className="tutorial-overlay-dialog__weapon-attr-cell tutorial-overlay-dialog__weapon-attr-desc">
+              <div
+                key={attrName}
+                className="tutorial-overlay-dialog__weapon-attr-cell tutorial-overlay-dialog__weapon-attr-desc"
+              >
                 {description}
               </div>
             ))}
@@ -182,8 +266,11 @@ function renderBodyWithWeaponAttrTooltips(body: string): React.ReactNode {
         </div>
       )}
       {trailing.length > 0 && (
-        <p className="tutorial-overlay-dialog__weapon-attr-trailing" style={{ whiteSpace: "pre-wrap" }}>
-          {replaceCursorInText(trailing.join("\n"))}
+        <p
+          className="tutorial-overlay-dialog__weapon-attr-trailing"
+          style={{ whiteSpace: "pre-wrap" }}
+        >
+          {replaceCursorInText(trailing.join("\n"), { afterCursor, boltRifleBold })}
         </p>
       )}
     </div>
@@ -200,18 +287,83 @@ const HEX_POINTS = [0, 60, 120, 180, 240, 300]
   })
   .join(" ");
 
-/** Remplace les occurrences de <cursor> dans un texte par l'icône pointeur (pour 1-6, 2-2, etc.). */
-function replaceCursorInText(text: string): React.ReactNode {
-  if (!text.includes("<cursor>")) return text;
+/** Remplace les placeholders <icone mort> / <death icon> par l’icône mort du game log (même ligne, étape 1-25). */
+function replaceDeathIconInText(text: string): React.ReactNode {
+  const deathIcon = getEventIcon("death");
+  const re = /<icone mort>|<death icon>/gi;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let m = re.exec(text);
+  while (m !== null) {
+    if (m.index > lastIndex) {
+      parts.push(
+        <Fragment key={`death-text-${lastIndex}`}>
+          {replaceCursorInText(text.slice(lastIndex, m.index))}
+        </Fragment>
+      );
+    }
+    parts.push(
+      <span
+        key={`death-icon-${m.index}`}
+        className="tutorial-overlay-dialog__death-icon-inline"
+        aria-hidden
+      >
+        {deathIcon}
+      </span>
+    );
+    lastIndex = re.lastIndex;
+    m = re.exec(text);
+  }
+  if (parts.length === 0) return replaceCursorInText(text);
+  if (lastIndex < text.length) {
+    parts.push(
+      <Fragment key={`death-text-tail-${lastIndex}`}>
+        {replaceCursorInText(text.slice(lastIndex))}
+      </Fragment>
+    );
+  }
+  return <>{parts}</>;
+}
+
+/** Optionnel : mettre "Bolt Rifle" en gras et blanc (étape 1-23). */
+function highlightBoltRifleInSegment(seg: string): React.ReactNode {
+  if (!seg.includes("Bolt Rifle")) return seg;
+  const parts = seg.split(/(Bolt Rifle)/g);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p === "Bolt Rifle" ? (
+          <strong key={`bolt-rifle-${i}-${p}`} className="tutorial-overlay-dialog__bolt-rifle">
+            Bolt Rifle
+          </strong>
+        ) : (
+          <Fragment key={`seg-${i}-${String(p).slice(0, 8)}`}>{p}</Fragment>
+        )
+      )}
+    </>
+  );
+}
+
+/** Remplace les occurrences de <cursor> dans un texte par l'icône pointeur (+ optionnel afterCursor entre curseur et texte ; optionnel boltRifleBold pour 1-23). */
+function replaceCursorInText(
+  text: string,
+  options?: { afterCursor?: React.ReactNode; boltRifleBold?: boolean }
+): React.ReactNode {
+  const afterCursor = options?.afterCursor;
+  const boltRifleBold = options?.boltRifleBold === true;
+  if (!text.includes("<cursor>")) {
+    return boltRifleBold ? highlightBoltRifleInSegment(text) : text;
+  }
   const segments = text.split("<cursor>");
   return (
     <>
       {segments.map((seg, k) => (
         <span key={seg ? `cursor-${k}-${seg.slice(0, 15)}` : `cursor-${k}`}>
-          {seg}
+          {boltRifleBold ? highlightBoltRifleInSegment(seg) : seg}
           {k < segments.length - 1 && (
             <>
               <CursorIcon />
+              {afterCursor ?? null}
               {" "}
             </>
           )}
@@ -223,17 +375,20 @@ function replaceCursorInText(text: string): React.ReactNode {
 
 function renderBodyWithLosPlaceholders(
   body: string,
-  lang: "fr" | "en"
+  lang: "fr" | "en",
+  options?: { afterCursor?: React.ReactNode }
 ): React.ReactNode {
+  const afterCursor = options?.afterCursor;
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
-  const re = /(<Hex bleu foncé>|<Dark blue hex>|<Hex bleu clair>|<Light blue hex>)([^\n]*)\n?|(<icone termagant>|<Termagant icon>)\s*\n?/g;
+  const re =
+    /(<Hex bleu foncé>|<Dark blue hex>|<Hex bleu clair>|<Light blue hex>)([^\n]*)\n?|(<icone termagant>|<Termagant icon>)\s*\n?/g;
   let m = re.exec(body);
   while (m !== null) {
     if (m.index > lastIndex) {
       parts.push(
         <Fragment key={`text-${lastIndex}`}>
-          {replaceCursorInText(body.slice(lastIndex, m.index))}
+          {replaceCursorInText(body.slice(lastIndex, m.index), { afterCursor })}
         </Fragment>
       );
     }
@@ -241,7 +396,10 @@ function renderBodyWithLosPlaceholders(
     const sameLineDesc = m[2] ?? "";
     if (tag.includes("termagant") || tag.includes("Termagant icon")) {
       parts.push(
-        <span key={`termagant-${m.index}`} className="tutorial-overlay-dialog__unit-icon-with-label">
+        <span
+          key={`termagant-${m.index}`}
+          className="tutorial-overlay-dialog__unit-icon-with-label"
+        >
           <img
             src={TERMAGANT_ICON_PATH}
             alt=""
@@ -298,11 +456,11 @@ function renderBodyWithLosPlaceholders(
   if (lastIndex < body.length) {
     parts.push(
       <Fragment key={`text-tail-${lastIndex}`}>
-        {replaceCursorInText(body.slice(lastIndex))}
+        {replaceCursorInText(body.slice(lastIndex), { afterCursor })}
       </Fragment>
     );
   }
-  return parts.length > 1 ? parts : (parts[0] ?? replaceCursorInText(body));
+  return parts.length > 1 ? parts : (parts[0] ?? replaceCursorInText(body, { afterCursor }));
 }
 
 export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
@@ -318,32 +476,73 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   const clickHoles = allowedClickSpotlights ?? spotlights;
   const title = lang === "fr" ? step.title_fr : step.title_en;
   const body = lang === "fr" ? step.body_fr : step.body_en;
+  const afterCursorIcon = useMemo(() => {
+    switch (step.stage) {
+      case "1-14":
+      case "1-16":
+      case "1-21":
+        return <MiniIntercessorIcon />;
+      case "1-15":
+        return <MiniHexIcon />;
+      case "1-22":
+        return <MiniWeaponMenuIcon />;
+      case "1-24":
+        return <MiniTermagantIcon />;
+      default:
+        return null;
+    }
+  }, [step.stage]);
   const bodyContent =
-    step.stage === "1-6" || step.stage === "2-2"
-      ? renderBodyWithLosPlaceholders(body, lang)
-      : step.stage === "2-3"
-        ? renderBodyWithWeaponAttrTooltips(body)
-        : renderBodyWithClickIcon(body);
+    step.stage === "1-16" || step.stage === "1-22" || step.stage === "2-2"
+      ? renderBodyWithLosPlaceholders(body, lang, { afterCursor: afterCursorIcon })
+      : step.stage === "1-23" || step.stage === "2-3"
+        ? renderBodyWithWeaponAttrTooltips(body, {
+            afterCursor: afterCursorIcon,
+            boltRifleBold: step.stage === "1-23",
+          })
+        : step.stage === "1-25"
+          ? replaceDeathIconInText(body)
+          : renderBodyWithClickIcon(body, { afterCursor: afterCursorIcon });
   const isStepIconAndFirstLine = step.popupFirstLineWithIcon === true;
-  const bodyFirstLineIcon = isStepIconAndFirstLine ? body.split("\n")[0] ?? "" : "";
+  const bodyFirstLineIcon = isStepIconAndFirstLine ? (body.split("\n")[0] ?? "") : "";
   const bodyRestIcon = isStepIconAndFirstLine ? body.split("\n").slice(1).join("\n") : "";
-  const bodyContentRestIcon = isStepIconAndFirstLine ? renderBodyWithClickIcon(bodyRestIcon) : null;
-  const isStep1_5 = step.stage === "1-5";
-  const bodyFirstLine1_5 = isStep1_5 ? body.split("\n")[0] ?? "" : "";
+  const bodyContentRestIcon =
+    isStepIconAndFirstLine
+      ? renderBodyWithClickIcon(bodyRestIcon, { afterCursor: afterCursorIcon })
+      : null;
+  const isStep1_5 = step.stage === "1-15";
+  const bodyFirstLine1_5 = isStep1_5 ? (body.split("\n")[0] ?? "") : "";
   const bodyRest1_5 = isStep1_5 ? body.split("\n").slice(1).join("\n") : "";
-  const bodyContentRest1_5 = isStep1_5 ? renderBodyWithClickIcon(bodyRest1_5) : null;
+  const bodyContentRest1_5 =
+    isStep1_5
+      ? renderBodyWithClickIcon(bodyRest1_5, { afterCursor: afterCursorIcon })
+      : null;
+  const showIllustrationBlock =
+    (step.popupImage && step.stage !== "1-24") ||
+    step.popupShowMoveHex ||
+    step.popupShowGreenCircle;
   const dialogRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [overlayRect, setOverlayRect] = useState<DOMRect | null>(null);
   const [dialogPosition, setDialogPosition] = useState<{ x: number; y: number } | null>(null);
-  const dragStartRef = useRef<{ mouseX: number; mouseY: number; dialogX: number; dialogY: number } | null>(null);
+  const dragStartRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    dialogX: number;
+    dialogY: number;
+  } | null>(null);
 
   // Coordonnées viewport : on utilise (0,0) + taille fenêtre pour que les spotlights (déjà en viewport)
   // soient corrects même si l’overlay était rendu dans un ancêtre avec transform. Rendu dans body via Portal.
   useLayoutEffect(() => {
     const update = () =>
       setOverlayRect(
-        new DOMRect(0, 0, document.documentElement.clientWidth, document.documentElement.clientHeight)
+        new DOMRect(
+          0,
+          0,
+          document.documentElement.clientWidth,
+          document.documentElement.clientHeight
+        )
       );
     update();
     window.addEventListener("resize", update);
@@ -351,63 +550,64 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   }, []);
 
   // Masque SVG : coordonnées viewport (overlay en portal = (0,0) → viewport)
-  const svgMask = spotlights.length > 0 && overlayRect ? (
-    <svg
-      aria-hidden
-      role="img"
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none",
-      }}
-      width="100%"
-      height="100%"
-      viewBox={`0 0 ${overlayRect.width} ${overlayRect.height}`}
-      preserveAspectRatio="none"
-    >
-      <title>Masque tutoriel</title>
-      <defs>
-        <filter id={BLUR_FILTER_ID}>
-          <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
-        </filter>
-        <mask id={MASK_ID}>
-          <rect x="0" y="0" width={overlayRect.width} height={overlayRect.height} fill="white" />
-          <g filter={`url(#${BLUR_FILTER_ID})`}>
-            {spotlights.map((s, idx) => {
-              if (s.shape === "circle") {
-                const c = s as TutorialSpotlightCircle;
-                const r = c.radius + 20;
+  const svgMask =
+    spotlights.length > 0 && overlayRect ? (
+      <svg
+        aria-hidden
+        role="img"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          pointerEvents: "none",
+        }}
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${overlayRect.width} ${overlayRect.height}`}
+        preserveAspectRatio="none"
+      >
+        <title>Masque tutoriel</title>
+        <defs>
+          <filter id={BLUR_FILTER_ID}>
+            <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
+          </filter>
+          <mask id={MASK_ID}>
+            <rect x="0" y="0" width={overlayRect.width} height={overlayRect.height} fill="white" />
+            <g filter={`url(#${BLUR_FILTER_ID})`}>
+              {spotlights.map((s, idx) => {
+                if (s.shape === "circle") {
+                  const c = s as TutorialSpotlightCircle;
+                  const r = c.radius + 20;
+                  return (
+                    <circle
+                      key={`circle-${c.x}-${c.y}-${idx}`}
+                      cx={c.x}
+                      cy={c.y}
+                      r={r}
+                      fill="black"
+                    />
+                  );
+                }
+                const r = s as TutorialSpotlightRect;
+                const pad = 4;
                 return (
-                  <circle
-                    key={`circle-${c.x}-${c.y}-${idx}`}
-                    cx={c.x}
-                    cy={c.y}
-                    r={r}
+                  <rect
+                    key={`rect-${r.left}-${r.top}-${idx}`}
+                    x={r.left - pad}
+                    y={r.top - pad}
+                    width={r.width + pad * 2}
+                    height={r.height + pad * 2}
                     fill="black"
                   />
                 );
-              }
-              const r = s as TutorialSpotlightRect;
-              const pad = 4;
-              return (
-                <rect
-                  key={`rect-${r.left}-${r.top}-${idx}`}
-                  x={r.left - pad}
-                  y={r.top - pad}
-                  width={r.width + pad * 2}
-                  height={r.height + pad * 2}
-                  fill="black"
-                />
-              );
-            })}
-          </g>
-        </mask>
-      </defs>
-    </svg>
-  ) : null;
+              })}
+            </g>
+          </mask>
+        </defs>
+      </svg>
+    ) : null;
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -429,8 +629,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       minWidth: "320px",
       maxWidth: "520px",
     };
-    const toCss = (v: string | number): string =>
-      typeof v === "number" ? `${v}px` : v;
+    const toCss = (v: string | number): string => (typeof v === "number" ? `${v}px` : v);
     if (dialogPosition !== null) {
       return {
         ...base,
@@ -439,7 +638,11 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         transform: "none",
       };
     }
-    if (step.popupPosition && step.popupPosition !== "center" && typeof step.popupPosition === "object") {
+    if (
+      step.popupPosition &&
+      step.popupPosition !== "center" &&
+      typeof step.popupPosition === "object"
+    ) {
       return {
         ...base,
         left: toCss(step.popupPosition.left),
@@ -462,22 +665,19 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     }
   };
 
-  const handleTitleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button !== 0) return;
-      if ((e.target as HTMLElement).closest("button")) return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const rect = dialog.getBoundingClientRect();
-      dragStartRef.current = {
-        mouseX: e.clientX,
-        mouseY: e.clientY,
-        dialogX: rect.left,
-        dialogY: rect.top,
-      };
-    },
-    []
-  );
+  const handleTitleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button")) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const rect = dialog.getBoundingClientRect();
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      dialogX: rect.left,
+      dialogY: rect.top,
+    };
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -699,11 +899,11 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
             </button>
           </div>
         </div>
-        {step.popupImage || step.popupShowMoveHex || step.popupShowGreenCircle ? (
+        {showIllustrationBlock ? (
           <div className="tutorial-overlay-dialog__body-with-illustration">
             {step.popupShowMoveHex ? (
               isStep1_5 && bodyFirstLine1_5 ? (
-                <div className="tutorial-overlay-dialog__icon-and-first-line">
+                <div className="tutorial-overlay-dialog__icon-and-first-line tutorial-overlay-dialog__icon-and-first-line--hex-same-line">
                   <svg
                     className="tutorial-overlay-dialog__move-hex"
                     viewBox="0 0 50 50"
@@ -725,7 +925,9 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                       strokeWidth="1.2"
                     />
                   </svg>
-                  <span className="tutorial-overlay-dialog__body-first-line">{bodyFirstLine1_5}</span>
+                  <span className="tutorial-overlay-dialog__body-first-line">
+                    {bodyFirstLine1_5}
+                  </span>
                 </div>
               ) : (
                 <svg
@@ -762,35 +964,40 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
               >
                 <div className="tutorial-overlay-dialog__unit-icon-with-green-circle" aria-hidden>
                   <svg
-                  className="tutorial-overlay-dialog__green-activation-circle"
-                  viewBox="0 0 64 64"
-                  aria-hidden
-                >
-                  <title>Cercle vert d’unité activable</title>
-                  <circle
-                    cx="32"
-                    cy="32"
-                    r="28"
-                    fill="none"
-                    stroke="#00ff00"
-                    strokeWidth="3"
-                    strokeOpacity="0.8"
+                    className="tutorial-overlay-dialog__green-activation-circle"
+                    viewBox="0 0 64 64"
+                    aria-hidden
+                  >
+                    <title>Cercle vert d’unité activable</title>
+                    <circle
+                      cx="32"
+                      cy="32"
+                      r="28"
+                      fill="none"
+                      stroke="#00ff00"
+                      strokeWidth="3"
+                      strokeOpacity="0.8"
+                    />
+                  </svg>
+                  <img
+                    src={step.popupImage}
+                    alt=""
+                    className="tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--in-circle"
+                    aria-hidden
                   />
-                </svg>
-                <img
-                  src={step.popupImage}
-                  alt=""
-                  className="tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--in-circle"
-                  aria-hidden
-                />
                 </div>
                 {isStepIconAndFirstLine && bodyFirstLineIcon ? (
-                  <span className="tutorial-overlay-dialog__body-first-line">{bodyFirstLineIcon}</span>
+                  <span className="tutorial-overlay-dialog__body-first-line">
+                    {bodyFirstLineIcon}
+                  </span>
                 ) : null}
               </div>
             ) : null}
             {step.popupImage && body.includes("{{ICON}}") ? (
-              <p className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>
+              <p
+                className="tutorial-overlay-dialog__body-paragraph"
+                style={{ whiteSpace: "pre-wrap" }}
+              >
                 {body.split("{{ICON}}")[0]}
                 <img
                   src={step.popupImage}
@@ -810,9 +1017,21 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                       className="tutorial-overlay-dialog__popup-image"
                       aria-hidden
                     />
-                    <span className="tutorial-overlay-dialog__body-first-line">{bodyFirstLineIcon}</span>
+                    <span className="tutorial-overlay-dialog__body-first-line">
+                      {bodyFirstLineIcon}
+                    </span>
                   </div>
-                  {bodyContentRestIcon !== null && (typeof bodyContentRestIcon === "string" ? <p>{bodyContentRestIcon}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContentRestIcon}</div>)}
+                  {bodyContentRestIcon !== null &&
+                    (typeof bodyContentRestIcon === "string" ? (
+                      <p>{bodyContentRestIcon}</p>
+                    ) : (
+                      <div
+                        className="tutorial-overlay-dialog__body-paragraph"
+                        style={{ whiteSpace: "pre-wrap" }}
+                      >
+                        {bodyContentRestIcon}
+                      </div>
+                    ))}
                 </>
               ) : (
                 <>
@@ -822,7 +1041,16 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                     className="tutorial-overlay-dialog__popup-image"
                     aria-hidden
                   />
-                  {typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>}
+                  {typeof bodyContent === "string" ? (
+                    <p>{bodyContent}</p>
+                  ) : (
+                    <div
+                      className="tutorial-overlay-dialog__body-paragraph"
+                      style={{ whiteSpace: "pre-wrap" }}
+                    >
+                      {bodyContent}
+                    </div>
+                  )}
                 </>
               )
             ) : (
@@ -833,12 +1061,28 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                     : isStep1_5 && bodyContentRest1_5 !== null
                       ? bodyContentRest1_5
                       : bodyContent;
-                return typeof content === "string" ? <p>{content}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{content}</div>;
+                return typeof content === "string" ? (
+                  <p>{content}</p>
+                ) : (
+                  <div
+                    className="tutorial-overlay-dialog__body-paragraph"
+                    style={{ whiteSpace: "pre-wrap" }}
+                  >
+                    {content}
+                  </div>
+                );
               })()
             )}
           </div>
+        ) : typeof bodyContent === "string" ? (
+          <p>{bodyContent}</p>
         ) : (
-          typeof bodyContent === "string" ? <p>{bodyContent}</p> : <div className="tutorial-overlay-dialog__body-paragraph" style={{ whiteSpace: "pre-wrap" }}>{bodyContent}</div>
+          <div
+            className="tutorial-overlay-dialog__body-paragraph"
+            style={{ whiteSpace: "pre-wrap" }}
+          >
+            {bodyContent}
+          </div>
         )}
         <div
           style={{

@@ -1,7 +1,0 @@
-{
-  "roster_id": "p2_roster-02",
-  "composition": [
-    {"unit_type": "AssaultIntercessorSergeant", "count": 1},
-    {"unit_type": "AssaultIntercessor", "count": 4}
-  ]
-}

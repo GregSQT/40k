@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useLocation } from "react-router-dom";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
+import type { MutableRefObject } from "react";
 import { clearAuthSession, getAuthSession } from "../auth/authStorage";
 import {
   TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
@@ -60,8 +61,8 @@ function TutorialOverlayGate(): React.ReactNode {
   if (!tutorial?.popupVisible || !tutorial?.currentStep) return null;
   const title = tutorial.currentStep.stepKey;
   const stage = tutorial.currentStep.stage;
-  const isStep1_5 = stage === "1-5";
-  const isStep1_6 = stage === "1-6";
+  const isStep1_5 = stage === "1-15";
+  const isStep1_6 = stage === "1-16";
   const isPhaseMoveStep = TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO.includes(
     title as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
   );
@@ -77,15 +78,15 @@ function TutorialOverlayGate(): React.ReactNode {
     (TUTORIAL_STEP_TITLES_HALO_LEFT.includes(
       title as (typeof TUTORIAL_STEP_TITLES_HALO_LEFT)[number]
     ) ||
-      stage === "1-5" ||
-      stage === "1-6" ||
-      stage === "2-3" ||
+      stage === "1-15" ||
+      stage === "1-16" ||
+      stage === "1-23" ||
       isFrom2_1Onwards) &&
-    stage !== "1-4";
-  const isStep2_1 = stage === "2-1";
-  const isStep2_2 = stage === "2-2";
-  const isStep2_3 = stage === "2-3";
-  const isStep2_4 = stage === "2-4";
+    stage !== "1-14";
+  const isStep2_1 = stage === "1-21";
+  const isStep2_2 = stage === "1-22";
+  const isStep2_3 = stage === "1-23";
+  const isStep2_4 = stage === "1-24";
   const isStep2_2Or3Or4 = isStep2_2 || isStep2_3 || isStep2_4;
   const isShootButtonStep =
     title === TUTORIAL_STEP_TITLE_PHASE_TIR || title === TUTORIAL_STEP_TITLE_WEAPON_CHOICE;
@@ -93,13 +94,14 @@ function TutorialOverlayGate(): React.ReactNode {
     isTurnPhaseStep ||
     isMoveButtonStep ||
     isShootButtonStep ||
-    stage === "1-4" ||
-    stage === "1-5" ||
-    stage === "1-6" ||
-    stage === "2-1" ||
-    stage === "2-2" ||
-    stage === "2-3" ||
-    stage === "2-4" ||
+    stage === "1-14" ||
+    stage === "1-14" ||
+    stage === "1-15" ||
+    stage === "1-16" ||
+    stage === "1-21" ||
+    stage === "1-22" ||
+    stage === "1-23" ||
+    stage === "1-24" ||
     stage === "3-1";
   const turnPhaseSpotlights = needsTurnPhaseHalo ? tutorial.spotlightTurnPhasePositions : null;
   const leftPanelSpotlight = isHaloLeft ? tutorial.spotlightLeftPanel : null;
@@ -125,18 +127,19 @@ function TutorialOverlayGate(): React.ReactNode {
     ...((isStep2_1 || isStep2_4) && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : []),
   ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[];
 
-  /** En 2-2 : seul le clic sur l’icône d’arme (board) doit avancer ; pas le Termagant. */
-  const allowedClickSpotlights =
-    isStep2_2
-      ? [
-          tutorial.spotlightPosition ?? null,
-          ...(tutorial.spotlightRangedWeaponsPositions ?? []),
-          ...(needsTurnPhaseHalo && turnPhaseSpotlights ? turnPhaseSpotlights : []),
-          ...(isHaloLeft && leftPanelSpotlight ? [leftPanelSpotlight] : []),
-          ...((isStep2_1 || isStep2_4) && gameLogLastEntrySpotlight ? [gameLogLastEntrySpotlight] : []),
-          ...((isStep2_1 || isStep2_4) && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : []),
-        ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[]
-      : spotlights;
+  /** En 1-22 : seul le clic sur l’icône d’arme (board) doit avancer ; pas le Termagant. */
+  const allowedClickSpotlights = isStep2_2
+    ? ([
+        tutorial.spotlightPosition ?? null,
+        ...(tutorial.spotlightRangedWeaponsPositions ?? []),
+        ...(needsTurnPhaseHalo && turnPhaseSpotlights ? turnPhaseSpotlights : []),
+        ...(isHaloLeft && leftPanelSpotlight ? [leftPanelSpotlight] : []),
+        ...((isStep2_1 || isStep2_4) && gameLogLastEntrySpotlight
+          ? [gameLogLastEntrySpotlight]
+          : []),
+        ...((isStep2_1 || isStep2_4) && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : []),
+      ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[])
+    : spotlights;
 
   return (
     <TutorialOverlay
@@ -163,27 +166,36 @@ function TurnPhaseTrackerWithTutorial(
     title === TUTORIAL_STEP_TITLE_ROUNDS ||
     title === TUTORIAL_STEP_TITLE_TURNS ||
     title === TUTORIAL_STEP_TITLE_PHASES;
-  const isMoveButtonStep = title === TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT;
+  const isMoveButtonStep = Boolean(
+    title &&
+      TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO.includes(
+        title as (typeof TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO)[number]
+      )
+  );
   const isShootButtonStep =
     title === TUTORIAL_STEP_TITLE_PHASE_TIR || title === TUTORIAL_STEP_TITLE_WEAPON_CHOICE;
   const showTurnPhaseRects =
     isTurnPhaseStep ||
     isMoveButtonStep ||
     isShootButtonStep ||
-    stage === "1-4" ||
-    stage === "1-5" ||
-    stage === "1-6" ||
-    stage === "2-1" ||
-    stage === "2-2" ||
-    stage === "2-3" ||
-    stage === "2-4" ||
+    stage === "1-14" ||
+    stage === "1-15" ||
+    stage === "1-16" ||
+    stage === "1-21" ||
+    stage === "1-22" ||
+    stage === "1-23" ||
+    stage === "1-24" ||
     stage === "3-1";
   const effectiveTitleForRects = showTurnPhaseRects
-    ? (stage === "1-4" || stage === "1-5" || stage === "1-6"
-        ? TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT
-        : stage === "2-1" || stage === "2-2" || stage === "2-3" || stage === "2-4" || stage === "3-1"
-          ? TUTORIAL_STEP_TITLE_PHASE_TIR
-          : title ?? undefined)
+    ? stage === "1-14" || stage === "1-15" || stage === "1-16"
+      ? TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT
+      : stage === "1-21" ||
+          stage === "1-22" ||
+          stage === "1-23" ||
+          stage === "1-24" ||
+          stage === "3-1"
+        ? TUTORIAL_STEP_TITLE_PHASE_TIR
+        : (title ?? undefined)
     : undefined;
   useEffect(() => {
     if (!showTurnPhaseRects && tutorial?.setSpotlightTurnPhasePositions) {
@@ -199,7 +211,7 @@ function TurnPhaseTrackerWithTutorial(
   );
 }
 
-/** Wrapper du PANNEAU GAUCHE (board) : rapporte son rect pour le halo (zone sans brouillard) et, en 1-5, la moitié haute pour le fog. */
+/** Wrapper du PANNEAU GAUCHE (board) : rapporte son rect pour le halo (zone sans brouillard) et, en 1-15, la moitié haute pour le fog. */
 function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): React.ReactElement {
   const ref = useRef<HTMLDivElement>(null);
   const tutorial = useTutorial();
@@ -212,10 +224,10 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
       TUTORIAL_STEP_TITLES_HALO_LEFT.includes(
         tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_HALO_LEFT)[number]
       )) ||
-      tutorial?.currentStep?.stage === "1-5" ||
-      tutorial?.currentStep?.stage === "1-6" ||
+      tutorial?.currentStep?.stage === "1-15" ||
+      tutorial?.currentStep?.stage === "1-16" ||
       isFrom2_1Onwards) &&
-    tutorial?.currentStep?.stage !== "1-4";
+    tutorial?.currentStep?.stage !== "1-14";
   const isPhaseMoveStep = Boolean(
     tutorial?.popupVisible &&
       tutorial?.currentStep?.stepKey &&
@@ -223,7 +235,7 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
         tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
       )
   );
-  const isStep1_5 = tutorial?.currentStep?.stage === "1-5";
+  const isStep1_5 = tutorial?.currentStep?.stage === "1-15";
   const needsMeasure = isHaloLeft || isPhaseMoveStep || isStep1_5;
   useLayoutEffect(() => {
     if (!tutorial?.setSpotlightLeftPanel) return;
@@ -252,7 +264,13 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
         });
         tutorial.setLeftPanelFogRects?.([
           { shape: "rect", left: r.left, top: r.top, width: r.width, height: bandHeight },
-          { shape: "rect", left: r.left, top: r.top + bandHeight, width: r.width, height: bandHeight },
+          {
+            shape: "rect",
+            left: r.left,
+            top: r.top + bandHeight,
+            width: r.width,
+            height: bandHeight,
+          },
         ]);
       } else {
         tutorial.setSpotlightLeftPanel(
@@ -273,7 +291,7 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
     });
     const t = setTimeout(() => {
       if (!cancelled) measure();
-    }, 150);
+    }, 30);
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
@@ -281,7 +299,13 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
       tutorial.setSpotlightLeftPanel(null);
       tutorial.setLeftPanelFogRects?.(null);
     };
-  }, [needsMeasure, isHaloLeft, isStep1_5, tutorial?.setSpotlightLeftPanel, tutorial?.setLeftPanelFogRects]);
+  }, [
+    needsMeasure,
+    isHaloLeft,
+    isStep1_5,
+    tutorial?.setSpotlightLeftPanel,
+    tutorial?.setLeftPanelFogRects,
+  ]);
   return (
     <div ref={ref} className="board-column-overlay-anchor">
       {children}
@@ -291,33 +315,38 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
 
 const GAME_LOG_LINE_HEIGHT_PX = 28;
 
-/** GameLog avec rappel du rect de la dernière ligne pour halo tutoriel 2-1 ; en 2-4 agrandit d'une ligne par tir. */
+/** GameLog avec rappel du rect de la dernière ligne pour halo tutoriel 1-21 ; en 1-24 agrandit d'une ligne par tir. */
 function GameLogWithTutorialSpotlight(
   props: React.ComponentProps<typeof GameLog>
 ): React.ReactElement {
   const tutorial = useTutorial();
-  const isStep2_1 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "2-1";
-  const isStep2_4 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "2-4";
+  const isStep2_1 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "1-21";
+  const isStep2_4 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "1-24";
   const shootEventCount = (props.events ?? []).filter((e) => e.type === "shoot").length;
   const baseHeight = props.availableHeight ?? 220;
-  const availableHeight =
-    isStep2_4 ? baseHeight + shootEventCount * GAME_LOG_LINE_HEIGHT_PX : baseHeight;
+  const availableHeight = isStep2_4
+    ? baseHeight + shootEventCount * GAME_LOG_LINE_HEIGHT_PX
+    : baseHeight;
   return (
     <GameLog
       {...props}
       availableHeight={availableHeight}
       onLastEntryRect={
-        isStep2_1 || isStep2_4 ? tutorial?.setSpotlightGameLogLastEntry ?? undefined : undefined
+        isStep2_1 || isStep2_4 ? (tutorial?.setSpotlightGameLogLastEntry ?? undefined) : undefined
       }
       onHeaderRect={
-        isStep2_1 || isStep2_4 ? tutorial?.setSpotlightGameLogHeader ?? undefined : undefined
+        isStep2_1 || isStep2_4 ? (tutorial?.setSpotlightGameLogHeader ?? undefined) : undefined
       }
     />
   );
 }
 
 /** Wrapper du PANNEAU DROIT (unit-status-tables) : rapporte son rect pour le halo étape 5. */
-function RightColumnTutorialSpotlight({ children }: { children: React.ReactNode }): React.ReactElement {
+function RightColumnTutorialSpotlight({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.ReactElement {
   const ref = useRef<HTMLDivElement>(null);
   const tutorial = useTutorial();
   const isPhaseMoveStep = Boolean(
@@ -358,7 +387,7 @@ function RightColumnTutorialSpotlight({ children }: { children: React.ReactNode 
     });
     const t = setTimeout(() => {
       if (!cancelled) measure();
-    }, 150);
+    }, 30);
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
@@ -366,7 +395,11 @@ function RightColumnTutorialSpotlight({ children }: { children: React.ReactNode 
       tutorial.setSpotlightRightPanel(null);
     };
   }, [isPhaseMoveStep, tutorial?.setSpotlightRightPanel]);
-  return <div ref={ref} style={{ display: "contents" }}>{children}</div>;
+  return (
+    <div ref={ref} style={{ display: "contents" }}>
+      {children}
+    </div>
+  );
 }
 
 /** BoardPvp avec interception clic Intercessor (advance_on_unit_click) et confirmation déplacement (advance_on_move_click). */
@@ -378,10 +411,18 @@ function BoardPvpWithTutorialAdvance(
     (unitId: number | string | null) => {
       if (unitId != null) {
         const unit = props.units.find((u) => u.id === unitId || u.id === Number(unitId));
-        if (unit && Number(unit.player) === 2 && (tutorial?.currentStep?.stage === "2-2" || tutorial?.currentStep?.stage === "2-3")) {
+        if (
+          unit &&
+          Number(unit.player) === 2 &&
+          (tutorial?.currentStep?.stage === "1-22" || tutorial?.currentStep?.stage === "1-23")
+        ) {
           return;
         }
-        if (tutorial?.currentStep?.advanceOnUnitClick && tutorial?.onClosePopup && Number(unit?.player) === 1) {
+        if (
+          tutorial?.currentStep?.advanceOnUnitClick &&
+          tutorial?.onClosePopup &&
+          Number(unit?.player) === 1
+        ) {
           tutorial.onClosePopup();
         }
       }
@@ -395,30 +436,27 @@ function BoardPvpWithTutorialAdvance(
       props.units,
     ]
   );
-  /** Avance (1-6 → suite) à la confirmation du move (clic sur l’icône unité). */
-  const wrappedOnConfirmMove = useCallback(
-    async () => {
-      const isStep1_6 = tutorial?.currentStep?.stage === "1-6";
-      if (isStep1_6 && tutorial?.prepareSkipNextPhaseTrigger) {
-        tutorial.prepareSkipNextPhaseTrigger();
-      }
-      await props.onConfirmMove?.();
-      if (isStep1_6 && tutorial?.onClosePopup) {
-        tutorial.onClosePopup();
-      }
-    },
-    [
-      props.onConfirmMove,
-      tutorial?.currentStep?.stage,
-      tutorial?.onClosePopup,
-      tutorial?.prepareSkipNextPhaseTrigger,
-    ]
-  );
+  /** Avance (1-16 → suite) à la confirmation du move (clic sur l’icône unité). */
+  const wrappedOnConfirmMove = useCallback(async () => {
+    const isStep1_6 = tutorial?.currentStep?.stage === "1-16";
+    if (isStep1_6 && tutorial?.prepareSkipNextPhaseTrigger) {
+      tutorial.prepareSkipNextPhaseTrigger();
+    }
+    await props.onConfirmMove?.();
+    if (isStep1_6 && tutorial?.onClosePopup) {
+      tutorial.onClosePopup();
+    }
+  }, [
+    props.onConfirmMove,
+    tutorial?.currentStep?.stage,
+    tutorial?.onClosePopup,
+    tutorial?.prepareSkipNextPhaseTrigger,
+  ]);
 
-  /** Avance (1-5 → 1-6) au choix de la case verte (destination), avant la confirmation. */
+  /** Avance (1-15 → 1-16) au choix de la case verte (destination), avant la confirmation. */
   const wrappedOnStartMovePreview = useCallback(
     (unitId: number | string, col: number | string, row: number | string) => {
-      const isStep1_5 = tutorial?.currentStep?.stage === "1-5";
+      const isStep1_5 = tutorial?.currentStep?.stage === "1-15";
       if (isStep1_5 && tutorial?.prepareSkipNextPhaseTrigger) {
         tutorial.prepareSkipNextPhaseTrigger();
       }
@@ -453,20 +491,20 @@ function BoardPvpWithTutorialAdvance(
     ]
   );
 
-  // Avancer 2-2 → 2-3 quand le joueur ouvre le menu de sélection d’arme (clic sur l’icône)
+  // Avancer 1-22 → 1-23 quand le joueur ouvre le menu de sélection d’arme (clic sur l’icône)
   const stage = tutorial?.currentStep?.stage ?? "";
   useEffect(() => {
-    if (stage !== "2-2" || !tutorial?.currentStep?.advanceOnWeaponClick || !tutorial?.onClosePopup)
+    if (stage !== "1-22" || !tutorial?.currentStep?.advanceOnWeaponClick || !tutorial?.onClosePopup)
       return;
     const handler = () => tutorial.onClosePopup();
     window.addEventListener("weaponMenuOpened", handler);
     return () => window.removeEventListener("weaponMenuOpened", handler);
   }, [stage, tutorial?.currentStep?.advanceOnWeaponClick, tutorial?.onClosePopup]);
 
-  // Avancer 2-3 → 2-4 (etc.) quand le joueur a choisi une arme dans le menu (sélection confirmée)
-  // En 2-3, n’avancer que si l’arme sélectionnée correspond à advanceOnWeaponName (ex. Bolt Rifle)
+  // Avancer 1-23 → 1-24 (etc.) quand le joueur a choisi une arme dans le menu (sélection confirmée)
+  // En 1-23, n’avancer que si l’arme sélectionnée correspond à advanceOnWeaponName (ex. Bolt Rifle)
   useEffect(() => {
-    if (stage === "2-2" || !tutorial?.currentStep?.advanceOnWeaponClick || !tutorial?.onClosePopup)
+    if (stage === "1-22" || !tutorial?.currentStep?.advanceOnWeaponClick || !tutorial?.onClosePopup)
       return;
     const expectedWeaponName = tutorial.currentStep.advanceOnWeaponName;
     const handler = (e: Event) => {
@@ -479,15 +517,36 @@ function BoardPvpWithTutorialAdvance(
     };
     window.addEventListener("weaponSelected", handler);
     return () => window.removeEventListener("weaponSelected", handler);
-  }, [stage, tutorial?.currentStep?.advanceOnWeaponClick, tutorial?.currentStep?.advanceOnWeaponName, tutorial?.onClosePopup]);
+  }, [
+    stage,
+    tutorial?.currentStep?.advanceOnWeaponClick,
+    tutorial?.currentStep?.advanceOnWeaponName,
+    tutorial?.onClosePopup,
+  ]);
 
   return (
     <BoardPvp
       {...props}
       onSelectUnit={wrappedOnSelectUnit}
-      onConfirmMove={props.onConfirmMove != null ? wrappedOnConfirmMove : undefined}
-      onStartMovePreview={props.onStartMovePreview != null ? wrappedOnStartMovePreview : undefined}
-      onDirectMove={props.onDirectMove != null ? wrappedOnDirectMove : undefined}
+      onConfirmMove={
+        props.onConfirmMove != null
+          ? () => {
+              void wrappedOnConfirmMove();
+            }
+          : () => {}
+      }
+      onStartMovePreview={
+        props.onStartMovePreview != null
+          ? wrappedOnStartMovePreview
+          : (_unitId: string | number, _col: string | number, _row: string | number) => {}
+      }
+      onDirectMove={
+        props.onDirectMove != null
+          ? (unitId: string | number, col: string | number, row: string | number) => {
+              void wrappedOnDirectMove(unitId, col, row);
+            }
+          : (_unitId: string | number, _col: string | number, _row: string | number) => {}
+      }
       hideAdvanceIconForTutorial={tutorial?.currentStep?.hideAdvanceIcon ?? false}
     />
   );
@@ -505,10 +564,9 @@ function UnitStatusTablePlayer1WithTutorial(
         tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO)[number]
       )
   );
-  const isStep1_6 = tutorial?.currentStep?.stage === "1-6";
+  const isStep1_6 = tutorial?.currentStep?.stage === "1-16";
   const stage = tutorial?.currentStep?.stage ?? "";
-  const isStep2_2Or3Or4 =
-    stage === "2-2" || stage === "2-3" || stage === "2-4";
+  const isStep2_2Or3Or4 = stage === "1-22" || stage === "1-23" || stage === "1-24";
   const wrappedOnSelectUnit = useCallback(
     (unitId: number) => {
       if (
@@ -545,7 +603,9 @@ function UnitStatusTablePlayer1WithTutorial(
       onSelectUnit={wrappedOnSelectUnit}
       tutorialForceTableExpanded={isPhaseMoveStep || isStep2_2Or3Or4}
       tutorialForceUnitIdsExpanded={isPhaseMoveStep || isStep2_2Or3Or4 ? [1] : undefined}
-      onNameMColumnsRect={isPhaseMoveStep && !isStep1_6 ? tutorial?.setSpotlightTablePositions : undefined}
+      onNameMColumnsRect={
+        isPhaseMoveStep && !isStep1_6 ? tutorial?.setSpotlightTablePositions : undefined
+      }
       tutorialForceRangedExpandedForUnitIds={isStep1_6 || isStep2_2Or3Or4 ? [1] : undefined}
       onRangedWeaponsSectionRect={
         isStep1_6 || isStep2_2Or3Or4 ? tutorial?.setSpotlightRangedWeaponsPositions : undefined
@@ -564,17 +624,27 @@ function rectEquals(
   return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
 }
 
-/** Table joueur 2 : en étapes 2-2/2-3/2-4, force expand première unité ennemie (ex. id 2) et rapporte son rect titre + attributs pour halo. */
+/** Table joueur 2 : en étapes 1-22/1-23/1-24, force expand première unité ennemie (ex. id 2) et rapporte son rect titre + attributs pour halo. */
 function UnitStatusTablePlayer2WithTutorial(
   props: React.ComponentProps<typeof UnitStatusTable>
 ): React.ReactElement {
   const tutorial = useTutorial();
   const stage = tutorial?.currentStep?.stage ?? "";
   const isStep2_2Or3Or4 =
-    tutorial?.popupVisible && (stage === "2-2" || stage === "2-3" || stage === "2-4");
-  const lastRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
+    tutorial?.popupVisible && (stage === "1-22" || stage === "1-23" || stage === "1-24");
+  const lastRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(
+    null
+  );
   const onUnitAttributesSectionRect = useCallback(
-    (positions: Array<{ shape: "rect"; left: number; top: number; width: number; height: number }> | null) => {
+    (
+      positions: Array<{
+        shape: "rect";
+        left: number;
+        top: number;
+        width: number;
+        height: number;
+      }> | null
+    ) => {
       if (!tutorial?.setSpotlightEnemyUnitAttributes) return;
       const next = positions?.[0] ?? null;
       if (next && lastRectRef.current && rectEquals(next, lastRectRef.current)) return;
@@ -601,6 +671,45 @@ function UnitStatusTablePlayer2WithTutorial(
   );
 }
 
+/** Met à jour le ref des options de tir tutoriel (étape 1-24 : forcer mort au 2e tir). Doit être rendu dans TutorialProvider. */
+function TutorialShootOptionsSync({
+  getTutorialShootOptionsRef,
+}: {
+  getTutorialShootOptionsRef: MutableRefObject<() => { forceKill?: boolean }>;
+}) {
+  const tutorial = useTutorial();
+  const [tutorial124FirstShotDone, setTutorial124FirstShotDone] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (
+        d?.type === "shoot" &&
+        d?.target_died === false &&
+        tutorial?.currentStep?.stage === "1-24"
+      ) {
+        setTutorial124FirstShotDone(true);
+      }
+    };
+    window.addEventListener("backendLogEvent", handler);
+    return () => window.removeEventListener("backendLogEvent", handler);
+  }, [tutorial?.currentStep?.stage]);
+
+  useEffect(() => {
+    if (tutorial?.currentStep?.stage !== "1-24") {
+      setTutorial124FirstShotDone(false);
+    }
+  }, [tutorial?.currentStep?.stage]);
+
+  useEffect(() => {
+    getTutorialShootOptionsRef.current = () =>
+      tutorial?.currentStep?.stage === "1-24" && tutorial124FirstShotDone
+        ? { forceKill: true }
+        : {};
+  });
+  return null;
+}
+
 export const BoardWithAPI: React.FC = () => {
   const authSession = getAuthSession();
   if (!authSession) {
@@ -610,7 +719,8 @@ export const BoardWithAPI: React.FC = () => {
   const canUseAdvanceWarning = authSession.permissions.options.show_advance_warning;
   const canUseAutoWeaponSelection = authSession.permissions.options.auto_weapon_selection;
 
-  const apiProps = useEngineAPI();
+  const getTutorialShootOptionsRef = useRef<() => { forceKill?: boolean }>(() => ({}));
+  const apiProps = useEngineAPI({ getTutorialShootOptionsRef });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
 
   // Detect game mode from URL
@@ -1996,6 +2106,7 @@ export const BoardWithAPI: React.FC = () => {
       gameState={apiProps.gameState ?? null}
       startGameWithScenario={apiProps.startGameWithScenario}
     >
+      <TutorialShootOptionsSync getTutorialShootOptionsRef={getTutorialShootOptionsRef} />
       <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.

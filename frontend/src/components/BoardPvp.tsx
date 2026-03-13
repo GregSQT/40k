@@ -483,7 +483,7 @@ export default function Board({
       (TUTORIAL_STEP_TITLES_INTERCESSOR_HALO.includes(
         tutorial.currentStep.stepKey as (typeof TUTORIAL_STEP_TITLES_INTERCESSOR_HALO)[number]
       ) ||
-        tutorial.currentStep?.stage === "1-4") &&
+        tutorial.currentStep?.stage === "1-14") &&
       boardConfig &&
       units.length > 0;
     if (!showSpotlight) {

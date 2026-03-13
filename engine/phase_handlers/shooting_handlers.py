@@ -3933,6 +3933,8 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
         click_target = action["clickTarget"]
     
     if click_target in ["target", "enemy"] and target_id:
+        if action.get("tutorial_force_kill") is True:
+            game_state["_tutorial_force_kill_this_shot"] = True
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     elif click_target == "friendly_unit" and target_id:
@@ -4649,8 +4651,31 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     shooter_col, shooter_row = require_unit_position(shooter, game_state)
     target_col, target_row = require_unit_position(target, game_state)
 
-    # Execute single attack_sequence(RNG) per AI_TURN.md
-    attack_result = _attack_sequence_rng(shooter, target, game_state)
+    # Tutoriel 1-24 : forcer la mort de la cible au 2e tir (sans lancer les dés)
+    if game_state.pop("_tutorial_force_kill_this_shot", False):
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        weapon = get_selected_ranged_weapon(shooter)
+        weapon_name = weapon.get("display_name", "") if weapon else ""
+        attack_result = {
+            "damage": target_hp_before_damage,
+            "target_died": True,
+            "hit_roll": 6,
+            "wound_roll": 6,
+            "save_roll": 1,
+            "hit_success": True,
+            "wound_success": True,
+            "attack_log": (
+                f"Hit:3+:6(HIT) Wound:4+:6(WOUND) Save:4+:1(FAIL) Dmg:{target_hp_before_damage}HP"
+                " [TUTORIAL]"
+            ),
+            "weapon_name": weapon_name,
+            "hazardous_test_required": False,
+            "hazardous_test_roll": None,
+            "hazardous_triggered": False,
+        }
+    else:
+        # Execute single attack_sequence(RNG) per AI_TURN.md
+        attack_result = _attack_sequence_rng(shooter, target, game_state)
     attack_result["target_hp_before_damage"] = target_hp_before_damage
     attack_result["target_coords"] = (target_col, target_row)
     # Preserve shooter metadata before potential hazardous self-destruction removes it from units_cache.

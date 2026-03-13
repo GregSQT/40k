@@ -1,0 +1,13 @@
+{
+  "roster_id": "p1_holdout_regular_roster-02",
+  "composition": [
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 2
+    }
+  ]
+}

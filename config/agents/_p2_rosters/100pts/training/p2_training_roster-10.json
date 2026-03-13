@@ -1,0 +1,7 @@
+{
+  "roster_id": "p2_training_roster-10",
+  "composition": [
+    {"unit_type": "AssaultIntercessorSergeant", "count": 1},
+    {"unit_type": "AssaultIntercessor", "count": 3}
+  ]
+}

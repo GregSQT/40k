@@ -1,7 +1,0 @@
-{
-  "roster_id": "p1_roster-04",
-  "composition": [
-    {"unit_type": "SternguardVeteranBoltRifle", "count": 1},
-    {"unit_type": "TyranidWarriorRanged", "count": 2}
-  ]
-}

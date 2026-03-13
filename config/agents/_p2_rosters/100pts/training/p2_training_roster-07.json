@@ -1,0 +1,8 @@
+{
+  "roster_id": "p2_training_roster-07",
+  "composition": [
+    {"unit_type": "AggressorBoltStorm", "count": 1},
+    {"unit_type": "AssaultIntercessorSergeant", "count": 1},
+    {"unit_type": "AssaultIntercessor", "count": 1}
+  ]
+}
