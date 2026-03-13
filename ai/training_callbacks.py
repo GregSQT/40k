@@ -188,6 +188,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self._last_step_perf_time: Optional[float] = None
         self._ema_env_actions_per_second: Optional[float] = None
         self.gate_display_state = gate_display_state
+        self.total_eval_time_at_last_display = 0.0
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -299,13 +300,19 @@ class EpisodeTerminationCallback(BaseCallback):
                 if self.start_time is not None and display_episode_count > 0:
                     # Total elapsed time from start
                     elapsed = current_time - self.start_time
+                    total_eval_now = (
+                        self.gate_display_state.get("total_eval_time", 0.0)
+                        if self.gate_display_state else 0.0
+                    )
 
                     # Update EMA from real deltas (time and episodes), no fixed-batch assumption.
                     if (
                         self.last_display_time is not None
                         and self.last_display_episode_count is not None
                     ):
-                        delta_time = current_time - self.last_display_time
+                        eval_delta = total_eval_now - self.total_eval_time_at_last_display
+                        delta_time = current_time - self.last_display_time - eval_delta
+                        self.total_eval_time_at_last_display = total_eval_now
                         delta_episodes = display_episode_count - self.last_display_episode_count
                         if delta_time > 0 and delta_episodes > 0:
                             avg_time_per_episode = delta_time / delta_episodes
@@ -328,9 +335,10 @@ class EpisodeTerminationCallback(BaseCallback):
                         eps_speed = 1.0 / self.ema_episode_time if self.ema_episode_time > 0 else 0
                     else:
                         # Use overall average when EMA not yet available (early episodes)
-                        avg_episode_time = elapsed / display_episode_count
+                        training_elapsed = elapsed - total_eval_now
+                        avg_episode_time = training_elapsed / display_episode_count if display_episode_count > 0 else 0
                         eta = avg_episode_time * remaining_episodes
-                        eps_speed = display_episode_count / elapsed if elapsed > 0 else 0
+                        eps_speed = display_episode_count / training_elapsed if training_elapsed > 0 else 0
 
                     # Format times as HH:MM:SS or MM:SS depending on duration
                     def format_time(seconds):
@@ -1098,7 +1106,8 @@ class BotEvaluationCallback(BaseCallback):
                  initial_episode_marker: int = 0,
                  show_eval_progress: bool = False,
                  phase_progress_total_episodes: Optional[int] = None,
-                 phase_progress_episode_offset: int = 0):
+                 phase_progress_episode_offset: int = 0,
+                 scenario_pool: str = "training"):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -1158,6 +1167,7 @@ class BotEvaluationCallback(BaseCallback):
         self.show_eval_progress = show_eval_progress
         self.phase_progress_total_episodes = phase_progress_total_episodes
         self.phase_progress_episode_offset = int(phase_progress_episode_offset)
+        self.scenario_pool = scenario_pool
         self.eval_count = int(initial_episode_marker // eval_freq) if use_episode_freq and eval_freq > 0 else 0
         self.best_combined_win_rate = 0.0
         self.save_best_robust = save_best_robust
@@ -1461,7 +1471,7 @@ class BotEvaluationCallback(BaseCallback):
                     'defensive': results['defensive'],
                     'combined': combined_win_rate
                 }
-                self.metrics_tracker.log_bot_evaluations(bot_results)
+                self.metrics_tracker.log_bot_evaluations(bot_results, step=int(eval_marker))
 
             # Also log to model's logger (backup)
             if hasattr(self.model, 'logger') and self.model.logger:
@@ -1576,6 +1586,8 @@ class BotEvaluationCallback(BaseCallback):
     def _evaluate_against_bots(self, eval_marker: int) -> Dict[str, Any]:
         """Evaluate agent against bots using standalone function"""
         import os
+        import time
+        eval_start = time.time()
         if os.environ.get("LOS_ENV_TRACE") == "1":
             import sys
             train_env = self.model.get_env() if hasattr(self.model, "get_env") else None
@@ -1589,7 +1601,7 @@ class BotEvaluationCallback(BaseCallback):
         eval_progress_prefix = None
         if self.show_eval_progress and self.gate_display_state is not None:
             eval_progress_prefix = self.gate_display_state.get("training_prefix", "")
-        return evaluate_against_bots(
+        results = evaluate_against_bots(
             model=self.model,
             training_config_name=self.training_config_name,
             rewards_config_name=self.rewards_config_name,
@@ -1601,4 +1613,11 @@ class BotEvaluationCallback(BaseCallback):
             show_summary=not self.show_eval_progress,
             eval_progress_prefix=eval_progress_prefix,
             line_length_state=self.gate_display_state,
+            scenario_pool=self.scenario_pool,
         )
+        if self.gate_display_state is not None:
+            self.gate_display_state["total_eval_time"] = (
+                self.gate_display_state.get("total_eval_time", 0.0)
+                + (time.time() - eval_start)
+            )
+        return results

@@ -1967,6 +1967,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 f"callback_params.eval_deterministic must be boolean "
                 f"(got {type(eval_deterministic).__name__})"
             )
+        bot_eval_scenario_pool = str(_resolve_callback_value("bot_eval_scenario_pool"))
         bot_eval_show_progress = bool(_resolve_callback_value("bot_eval_show_progress"))
         if not isinstance(bot_eval_show_progress, bool):
             raise ValueError(
@@ -2034,6 +2035,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             verbose=1,
             training_config_name=training_config_name,
             rewards_config_name=rewards_config_name,
+            scenario_pool=bot_eval_scenario_pool,
             save_best_robust=save_best_robust,
             robust_window=robust_window,
             robust_drawdown_penalty=robust_drawdown_penalty,

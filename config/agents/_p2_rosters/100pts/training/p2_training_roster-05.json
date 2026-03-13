@@ -1,7 +1,6 @@
 {
   "roster_id": "p2_training_roster-05",
   "composition": [
-    {"unit_type": "TyranidWarriorRanged", "count": 1},
-    {"unit_type": "Hormagaunt", "count": 9}
+    {"unit_type": "Terminator", "count": 3}
   ]
 }

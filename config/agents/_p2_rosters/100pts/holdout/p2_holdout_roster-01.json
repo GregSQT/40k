@@ -1,17 +1,7 @@
 {
   "roster_id": "p2_holdout_roster-01",
   "composition": [
-    {
-      "unit_type": "TyranidWarriorRanged",
-      "count": 1
-    },
-    {
-      "unit_type": "IntercessorGrenadeLauncher",
-      "count": 1
-    },
-    {
-      "unit_type": "Intercessor",
-      "count": 3
-    }
+    {"unit_type": "IntercessorGrenadeLauncher", "count": 1},
+    {"unit_type": "Intercessor", "count": 5}
   ]
 }

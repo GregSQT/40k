@@ -233,6 +233,12 @@ interface TutorialContextValue {
   /** Rect viewport (px) de la ligne attributs + titre d’une unité ennemie (étape 1-22, ex. Termagant). */
   spotlightEnemyUnitAttributes: TutorialSpotlightPosition | null;
   setSpotlightEnemyUnitAttributes: (pos: TutorialSpotlightPosition | null) => void;
+  /** Rects viewport (px) des lignes des unités P2 (étape 2-11/2-12 : halos sur Hormagaunts). */
+  spotlightP2UnitRowPositions: TutorialSpotlightPosition[];
+  setSpotlightP2UnitRowPositions: (pos: TutorialSpotlightPosition[] | null) => void;
+  /** Cercles viewport (px) des icônes sur le board (étape 2-11/2-12 : Intercessor + Hormagaunts). */
+  spotlightBoardUnitPositions: TutorialSpotlightPosition[];
+  setSpotlightBoardUnitPositions: (pos: TutorialSpotlightPosition[] | null) => void;
   /** Position (col, row) où l'ennemi est mort (étape 1-25 : afficher icône ghost Termagant sur le board). */
   lastEnemyDeathPosition: { col: number; row: number } | null;
 }
@@ -286,6 +292,14 @@ export function TutorialProvider({
   const [spotlightGameLogLastEntry, setSpotlightGameLogLastEntry] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightGameLogHeader, setSpotlightGameLogHeader] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightEnemyUnitAttributes, setSpotlightEnemyUnitAttributes] = useState<TutorialSpotlightPosition | null>(null);
+  const [spotlightP2UnitRowPositions, setSpotlightP2UnitRowPositionsState] = useState<TutorialSpotlightPosition[]>([]);
+  const setSpotlightP2UnitRowPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
+    setSpotlightP2UnitRowPositionsState(pos ?? []);
+  }, []);
+  const [spotlightBoardUnitPositions, setSpotlightBoardUnitPositionsState] = useState<TutorialSpotlightPosition[]>([]);
+  const setSpotlightBoardUnitPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
+    setSpotlightBoardUnitPositionsState(pos ?? []);
+  }, []);
   const [lastEnemyDeathPosition, setLastEnemyDeathPosition] = useState<{ col: number; row: number } | null>(null);
   const [tutorialLang, setTutorialLang] = useState<TutorialLang>("fr");
   const lastPhaseRef = useRef<string | null>(null);
@@ -294,6 +308,7 @@ export function TutorialProvider({
   const skipNextPhaseTriggerRef = useRef(false);
   /** En cours de chargement scenario 1->2 : ne pas laisser l'effet phase reecrire l'etape (evite fog/popup 1-11). */
   const transitioningToEtape2Ref = useRef(false);
+
 
   const stepsForEtape = useMemo(
     () =>
@@ -360,9 +375,11 @@ export function TutorialProvider({
       setSpotlightGameLogLastEntry(null);
       setSpotlightGameLogHeader(null);
       setSpotlightEnemyUnitAttributes(null);
+      setSpotlightP2UnitRowPositions([]);
+      setSpotlightBoardUnitPositions([]);
       setLastEnemyDeathPosition(null);
     }
-  }, [popupVisible, setLeftPanelFogRects, setRightPanelFogRects]);
+  }, [popupVisible, setLeftPanelFogRects, setRightPanelFogRects, setSpotlightP2UnitRowPositions, setSpotlightBoardUnitPositions]);
 
   useEffect(() => {
     if (!isTutorialMode) return;
@@ -597,6 +614,10 @@ export function TutorialProvider({
             setSpotlightGameLogHeader,
             spotlightEnemyUnitAttributes,
             setSpotlightEnemyUnitAttributes,
+            spotlightP2UnitRowPositions,
+            setSpotlightP2UnitRowPositions,
+            spotlightBoardUnitPositions,
+            setSpotlightBoardUnitPositions,
             lastEnemyDeathPosition,
           }
         : {
@@ -632,6 +653,10 @@ export function TutorialProvider({
             setSpotlightGameLogHeader: () => {},
             spotlightEnemyUnitAttributes: null,
             setSpotlightEnemyUnitAttributes: () => {},
+            spotlightP2UnitRowPositions: [],
+            setSpotlightP2UnitRowPositions: () => {},
+            spotlightBoardUnitPositions: [],
+            setSpotlightBoardUnitPositions: () => {},
             lastEnemyDeathPosition: null,
           },
     [
@@ -658,6 +683,10 @@ export function TutorialProvider({
       spotlightGameLogLastEntry,
       spotlightGameLogHeader,
       spotlightEnemyUnitAttributes,
+      spotlightP2UnitRowPositions,
+      setSpotlightP2UnitRowPositions,
+      spotlightBoardUnitPositions,
+      setSpotlightBoardUnitPositions,
       lastEnemyDeathPosition,
     ]
   );

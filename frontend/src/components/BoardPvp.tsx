@@ -525,6 +525,52 @@ export default function Board({
     units,
   ]);
 
+  // Tutoriel 2-11/2-12 : halos sur les icônes Intercessor + Hormagaunts sur le board
+  useLayoutEffect(() => {
+    if (!tutorial?.setSpotlightBoardUnitPositions) return;
+    const showBoardUnitSpotlights =
+      tutorial.popupVisible &&
+      (tutorial.currentStep?.stage === "2-11" || tutorial.currentStep?.stage === "2-12") &&
+      boardConfig &&
+      units.length > 0;
+    if (!showBoardUnitSpotlights) {
+      tutorial.setSpotlightBoardUnitPositions(null);
+      return;
+    }
+    const rect = canvasContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const HEX_RADIUS = boardConfig.hex_radius;
+    const MARGIN = boardConfig.margin;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+    const HEX_HORIZ_SPACING = HEX_WIDTH;
+    const HEX_VERT_SPACING = HEX_HEIGHT;
+    const RADIUS = 72;
+    const circles: Array<{ shape: "circle"; x: number; y: number; radius: number }> = [];
+    for (const u of units) {
+      if (u.col == null || u.row == null) continue;
+      const centerX = u.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+      const centerY =
+        u.row * HEX_VERT_SPACING +
+        ((u.col % 2) * HEX_VERT_SPACING) / 2 +
+        HEX_HEIGHT / 2 +
+        MARGIN;
+      circles.push({
+        shape: "circle",
+        x: rect.left + centerX,
+        y: rect.top + centerY,
+        radius: RADIUS,
+      });
+    }
+    tutorial.setSpotlightBoardUnitPositions(circles.length ? circles : null);
+  }, [
+    tutorial?.popupVisible,
+    tutorial?.currentStep?.stage,
+    tutorial?.setSpotlightBoardUnitPositions,
+    boardConfig,
+    units,
+  ]);
+
   const stableBlinkingUnits = useMemo(() => {
     if (!blinkingUnits) return undefined;
     const sorted = blinkingUnits.length > 0 ? [...blinkingUnits].sort((a, b) => a - b) : [];

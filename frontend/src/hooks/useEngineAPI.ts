@@ -380,18 +380,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     startGame();
   }, []);
 
-  /** Relance une partie avec le scénario donné (utilisé par le tutoriel pour etape2/etape3). options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. */
+  /** Relance une partie avec le scénario donné (utilisé par le tutoriel pour etape2/etape3). options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. skipLoading : ne pas afficher l'écran de chargement (évite de démonter TutorialProvider pendant la transition). */
   const startGameWithScenario = useCallback(
     async (
       scenarioFile: string,
-      options?: { preserveP1PositionsFrom?: APIGameState | null }
+      options?: { preserveP1PositionsFrom?: APIGameState | null; skipLoading?: boolean }
     ) => {
       const authSession = getAuthSession();
       if (!authSession?.token) {
         setError("Session utilisateur manquante. Merci de vous reconnecter.");
         return;
       }
-      setLoading(true);
+      const skipLoading = options?.skipLoading ?? (options?.preserveP1PositionsFrom != null);
+      if (!skipLoading) {
+        setLoading(true);
+      }
       try {
         const body: Record<string, unknown> = {
           pve_mode: false,
@@ -421,7 +424,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
       } finally {
-        setLoading(false);
+        if (!skipLoading) {
+          setLoading(false);
+        }
       }
     },
     []

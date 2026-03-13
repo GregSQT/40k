@@ -1,13 +1,6 @@
 {
   "roster_id": "p2_holdout_roster-02",
   "composition": [
-    {
-      "unit_type": "TyranidWarriorRanged",
-      "count": 1
-    },
-    {
-      "unit_type": "Hormagaunt",
-      "count": 10
-    }
+    {"unit_type": "Hormagaunt", "count": 18}
   ]
 }

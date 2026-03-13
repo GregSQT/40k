@@ -98,11 +98,13 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
       ) {
         const r = rectFromEl(movePhaseButtonRef.current, PAD);
         rects = r && isTurnPhaseTrackerRect(r) ? [r] : null;
-      } else if (tutorialStepTitle === "2-11") {
+      } else if (tutorialStepTitle === "2-11" || tutorialStepTitle === "2-12") {
         const rTurn = rectFromEl(turnSectionRef.current, PAD);
+        const rP2 = rectFromEl(p2ButtonRef.current, PAD);
         const rMove = rectFromEl(movePhaseButtonRef.current, PAD);
         const out: TutorialSpotlightPosition[] = [];
         if (rTurn && isTurnPhaseTrackerRect(rTurn)) out.push(rTurn);
+        if (rP2 && isTurnPhaseTrackerRect(rP2)) out.push(rP2);
         if (rMove && isTurnPhaseTrackerRect(rMove)) out.push(rMove);
         rects = out.length ? out : null;
       } else if (tutorialStepTitle === TUTORIAL_STEP_TITLE_PHASE_TIR) {

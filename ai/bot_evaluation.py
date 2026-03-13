@@ -571,16 +571,14 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         f"model_{base_agent_key}.zip"
     )
 
-    # model_path pour workers : fourni ou dérivé (même chemin que vec pour le .zip)
-    effective_model_path = model_path or vec_model_path
-    if not os.path.exists(effective_model_path):
-        import tempfile
-        _fd, effective_model_path = tempfile.mkstemp(suffix=".zip")
-        os.close(_fd)
-        model.save(effective_model_path)
-        _temp_model_path = effective_model_path
-    else:
-        _temp_model_path = None
+    # model_path pour workers : toujours sauvegarder le modèle courant en temp pour l'éval.
+    # Pendant l'entraînement, le fichier canonique (model_agent.zip) n'est mis à jour qu'à la fin.
+    # Si on utilisait ce fichier, les workers chargeraient un modèle obsolète → a_bot_eval_combined plat.
+    import tempfile
+    _fd, effective_model_path = tempfile.mkstemp(suffix=".zip")
+    os.close(_fd)
+    model.save(effective_model_path)
+    _temp_model_path = effective_model_path
 
     bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
     eval_weights = bot_eval_cfg["weights"]

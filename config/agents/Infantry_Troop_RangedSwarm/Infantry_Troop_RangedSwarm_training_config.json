@@ -21,7 +21,7 @@
     "robust_drawdown_penalty": 0.5,
     "holdout_regular_scenarios": ["holdout_regular_bot-1", "holdout_regular_bot-2"],
     "holdout_hard_scenarios": ["holdout_hard_bot-1", "holdout_hard_bot-2", "holdout_hard_bot-3"],
-    "bot_eval_weights": {"random": 0.2, "greedy": 0.4, "defensive": 0.4},
+    "bot_eval_weights": {"random": 0.2, "greedy": 0.5, "defensive": 0.3},
     "bot_eval_randomness": {"greedy": 0.1, "defensive": 0.1}
   },
     "observation_params": {

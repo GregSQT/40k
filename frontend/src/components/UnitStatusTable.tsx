@@ -90,6 +90,20 @@ interface UnitStatusTableProps {
     | null;
   /** En mode tutoriel (étape 2-2) : ids des unités pour lesquelles rapporter la section attributs (titre + ligne). */
   tutorialReportAttributesForUnitIds?: UnitId[];
+  /** En mode tutoriel (étape 2-11/2-12) : rapporter les rects des lignes des unités P2 pour halos. */
+  onP2UnitRowRects?:
+    | ((
+        positions: Array<{
+          shape: "rect";
+          left: number;
+          top: number;
+          width: number;
+          height: number;
+        }> | null
+      ) => void)
+    | null;
+  /** En mode tutoriel (étape 2-11/2-12) : activer le rapport des rects P2. */
+  tutorialReportP2UnitRowRects?: boolean;
 }
 
 interface UnitRowProps {
@@ -128,6 +142,18 @@ interface UnitRowProps {
           width: number;
           height: number;
         }> | null
+      ) => void)
+    | null;
+  /** Tutoriel 2-11/2-12 : rapporter le rect viewport de la ligne unité pour halo P2. */
+  reportUnitRowRect?:
+    | ((
+        rect: {
+          shape: "rect";
+          left: number;
+          top: number;
+          width: number;
+          height: number;
+        } | null
       ) => void)
     | null;
   /** Tutoriel 2-2 : rapporter le rect viewport (ligne titre + ligne attributs) pour le halo. */
@@ -173,6 +199,7 @@ const UnitRow = memo<UnitRowProps>(
     nameHeaderRef,
     mHeaderRef,
     reportRangedWeaponsRect,
+    reportUnitRowRect,
     reportUnitAttributesRect,
     tableHeaderRowRef,
   }) => {
@@ -331,6 +358,39 @@ const UnitRow = memo<UnitRowProps>(
         reportUnitAttributesRect(null);
       };
     }, [reportUnitAttributesRect, reportAttributesRect]);
+
+    // Tutoriel 2-11/2-12 : rapporter le rect de la ligne unité pour halo P2
+    const reportRowRect = useCallback(() => {
+      if (!reportUnitRowRect || !unitRowRef.current) return;
+      const r = unitRowRef.current.getBoundingClientRect();
+      const pad = 4;
+      const minSize = 4;
+      if (r.width < minSize || r.height < minSize) {
+        reportUnitRowRect(null);
+        return;
+      }
+      reportUnitRowRect({
+        shape: "rect",
+        left: r.left - pad,
+        top: r.top - pad,
+        width: r.width + pad * 2,
+        height: r.height + pad * 2,
+      });
+    }, [reportUnitRowRect]);
+    useLayoutEffect(() => {
+      if (!reportUnitRowRect) return;
+      reportRowRect();
+      const t1 = requestAnimationFrame(() => {
+        reportRowRect();
+        requestAnimationFrame(reportRowRect);
+      });
+      const t = setTimeout(reportRowRect, 30);
+      return () => {
+        cancelAnimationFrame(t1);
+        clearTimeout(t);
+        reportUnitRowRect(null);
+      };
+    }, [reportUnitRowRect, reportRowRect]);
 
     if (!unit.HP_MAX) {
       throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
@@ -1075,10 +1135,33 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     onRangedWeaponsSectionRect,
     onUnitAttributesSectionRect,
     tutorialReportAttributesForUnitIds,
+    onP2UnitRowRects,
+    tutorialReportP2UnitRowRects = false,
   }) => {
     const nameHeaderRef = useRef<HTMLTableCellElement>(null);
     const mHeaderRef = useRef<HTMLTableCellElement>(null);
     const tableHeaderRowRef = useRef<HTMLTableRowElement>(null);
+    const p2UnitRectsRef = useRef<Map<UnitId, { shape: "rect"; left: number; top: number; width: number; height: number }>>(new Map());
+
+    const handleP2UnitRowRect = useCallback(
+      (unitId: UnitId, rect: { shape: "rect"; left: number; top: number; width: number; height: number } | null) => {
+        if (!onP2UnitRowRects) return;
+        if (rect) {
+          p2UnitRectsRef.current.set(unitId, rect);
+        } else {
+          p2UnitRectsRef.current.delete(unitId);
+        }
+        onP2UnitRowRects(Array.from(p2UnitRectsRef.current.values()));
+      },
+      [onP2UnitRowRects]
+    );
+
+    useEffect(() => {
+      if (!tutorialReportP2UnitRowRects && onP2UnitRowRects) {
+        p2UnitRectsRef.current.clear();
+        onP2UnitRowRects(null);
+      }
+    }, [tutorialReportP2UnitRowRects, onP2UnitRowRects]);
 
     // Collapse/expand state for entire table
     const [isCollapsed, setIsCollapsed] = useState(true);
@@ -1537,6 +1620,11 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                     (id) => String(unit.id) === String(id) || unit.id === id
                   )
                     ? onUnitAttributesSectionRect
+                    : undefined
+                }
+                reportUnitRowRect={
+                  player === 2 && tutorialReportP2UnitRowRects && onP2UnitRowRects
+                    ? (rect) => handleP2UnitRowRect(unit.id, rect)
                     : undefined
                 }
                 tableHeaderRowRef={tableHeaderRowRef}

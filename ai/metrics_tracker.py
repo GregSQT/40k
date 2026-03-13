@@ -856,32 +856,34 @@ class W40KMetricsTracker:
                 # Log zero if no actions yet
                 self.writer.add_scalar('game_critical/invalid_action_rate', 0.0, self.episode_count)
     
-    def log_bot_evaluations(self, bot_results: Dict[str, float]):
+    def log_bot_evaluations(self, bot_results: Dict[str, float], step: Optional[int] = None):
         """
         Log bot evaluation results to both 0_critical/ and bot_eval/ namespaces.
 
         Args:
             bot_results: Dict with keys 'random', 'greedy', 'defensive', 'combined'
+            step: Optional step for x-axis (e.g. eval_marker). If None, uses episode_count.
         """
+        x = step if step is not None else self.episode_count
         # Log individual bot results to bot_eval/ namespace
         if 'random' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_random', bot_results['random'], self.episode_count)
+            self.writer.add_scalar('bot_eval/vs_random', bot_results['random'], x)
         if 'greedy' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], self.episode_count)
+            self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], x)
         if 'defensive' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], self.episode_count)
+            self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], x)
         if all(k in bot_results for k in ('random', 'greedy', 'defensive')):
             worst_bot_score = min(bot_results['random'], bot_results['greedy'], bot_results['defensive'])
-            self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, self.episode_count)
-            self.writer.add_scalar('0_critical/m_worst_bot_score', worst_bot_score, self.episode_count)
+            self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, x)
+            self.writer.add_scalar('0_critical/m_worst_bot_score', worst_bot_score, x)
 
         # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:
             self.bot_eval_combined = bot_results['combined']
             # Log to bot_eval/ namespace
-            self.writer.add_scalar('bot_eval/combined', bot_results['combined'], self.episode_count)
+            self.writer.add_scalar('bot_eval/combined', bot_results['combined'], x)
             # Log IMMEDIATELY to 0_critical/ namespace (don't wait for next episode)
-            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], self.episode_count)
+            self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], x)
 
     def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
         """Log holdout split aggregates to TensorBoard."""

@@ -264,12 +264,14 @@ class GameStateManager:
 
             deploy_pools = {}
             if deployment_zone:
-                if deployment_zone != "hammer":
+                if deployment_zone not in ("hammer", "hammer_tutorial"):
                     raise ValueError(
                         f"Unsupported deployment_zone '{deployment_zone}' in {scenario_file}"
                     )
                 project_root = os.path.dirname(os.path.dirname(__file__))
-                deployment_path = os.path.join(project_root, "config", "deployment", "hammer.json")
+                deployment_path = os.path.join(
+                    project_root, "config", "deployment", f"{deployment_zone}.json"
+                )
                 if not os.path.exists(deployment_path):
                     raise FileNotFoundError(f"Deployment file not found: {deployment_path}")
                 try:

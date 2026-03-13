@@ -1,7 +1,7 @@
 {
   "roster_id": "p2_training_roster-01",
   "composition": [
-    {"unit_type": "Genestealer", "count": 6},
-    {"unit_type": "Hormagaunt", "count": 4}
+    {"unit_type": "IntercessorGrenadeLauncher", "count": 1},
+    {"unit_type": "Intercessor", "count": 4}
   ]
 }
