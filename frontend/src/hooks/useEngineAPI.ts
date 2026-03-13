@@ -30,7 +30,7 @@ const API_BASE = "/api";
 // Prevent duplicate AI turn calls
 let aiTurnInProgress = false;
 
-interface APIGameState {
+export interface APIGameState {
   units: Array<{
     id: string | number;
     player: number;
@@ -380,42 +380,52 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     startGame();
   }, []);
 
-  /** Relance une partie avec le scénario donné (utilisé par le tutoriel pour etape2/etape3). */
-  const startGameWithScenario = useCallback(async (scenarioFile: string) => {
-    const authSession = getAuthSession();
-    if (!authSession?.token) {
-      setError("Session utilisateur manquante. Merci de vous reconnecter.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_BASE}/game/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authSession.token}`,
-        },
-        body: JSON.stringify({
+  /** Relance une partie avec le scénario donné (utilisé par le tutoriel pour etape2/etape3). options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. */
+  const startGameWithScenario = useCallback(
+    async (
+      scenarioFile: string,
+      options?: { preserveP1PositionsFrom?: APIGameState | null }
+    ) => {
+      const authSession = getAuthSession();
+      if (!authSession?.token) {
+        setError("Session utilisateur manquante. Merci de vous reconnecter.");
+        return;
+      }
+      setLoading(true);
+      try {
+        const body: Record<string, unknown> = {
           pve_mode: false,
           mode_code: "pvp_test",
           scenario_file: scenarioFile,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to start game: ${response.status}`);
+        };
+        if (options?.preserveP1PositionsFrom != null) {
+          body.preserve_p1_positions_from = options.preserveP1PositionsFrom;
+        }
+        const response = await fetch(`${API_BASE}/game/start`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authSession.token}`,
+          },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to start game: ${response.status}`);
+        }
+        const data = await response.json();
+        if (data.success && data.game_state) {
+          setGameState(data.game_state);
+        } else {
+          throw new Error(data.error || "Failed to start game");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setLoading(false);
       }
-      const data = await response.json();
-      if (data.success && data.game_state) {
-        setGameState(data.game_state);
-      } else {
-        throw new Error(data.error || "Failed to start game");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   // Listen for weapon selection events to update gameState
   useEffect(() => {

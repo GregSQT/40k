@@ -124,16 +124,42 @@
     },
     {
       "stage": "1-25",
-      "hide_advance_icon": true,
-      "advance_on_weapon_click": true,
+      "hide_advance_icon": false,
+      "advance_on_weapon_click": false,
       "popup_position": { "left": "32%", "top": "12%" },
       "trigger": { "type": "phase_enter", "phase": "shooting" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir. Halo sur : boutons Move Shoot et charge (turn phase tracker), les lignes d'arme de l'Intercessor (et ligne titre) et tout le combat log",
-      "next_step": "Clic sur Suivant",
+      "next_step": "Le termagant est mort.",
       "title_fr": "1-25 Mort du termagant",
       "title_en": "Termagant death",
-      "body_fr": "<icone mort> Le Termagant est mort.\nC'est maintenant le tour de l'adversaire.",
-      "body_en": "<death icon> The Termagant is dead.\nIt's now Player 2's turn."
+      "body_fr": "<icone mort> Le Termagant est mort.\nC'est maintenant le tour de l'adversaire.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer.",
+      "body_en": "<death icon> The Termagant is dead.\nIt's now Player 2's turn.\n\n--------------------\n<cursor>Click on Next to continue."
+    },
+    {
+      "stage": "2-11",
+      "hide_advance_icon": false,
+      "advance_on_weapon_click": false,
+      "popup_position": { "left": "32%", "top": "12%" },
+      "trigger": { "type": "phase_enter", "phase": "deployment" },
+      "layout": "Fog sur le panneau gauche et droite. Unitstatustable expanded pour afficher les units de P2. Halo sur le bouton turn 2 de turnphase tracker, Move dans turnphase tracker, et les icones des Termagants de P2.",
+      "next_step": "Clic sur Suivant",
+      "title_fr": "2-11 Arrivée des Hormagaunts",
+      "title_en": "Hormagaunts arrival",
+      "body_fr": "Au début de son tour, le joueur 2 fait arriver des Hormagaunts sur le plateau.",
+      "body_en": "At the beginning of their turn, Player 2 deploys Hormagaunts on the board."
+    },
+    {
+      "stage": "2-12",
+      "hide_advance_icon": false,
+      "advance_on_weapon_click": false,
+      "popup_position": { "left": "32%", "top": "12%" },
+      "trigger": { "type": "phase_enter", "phase": "deployment" },
+      "layout": "Fog sur le panneau gauche. . Unitstatustable expanded pour afficher les units de P2. Halo sur le bouton turn 2 de turnphase tracker, Move dans turnphase tracker, et les icones des Termagants de P2.",
+      "next_step": "Clic sur Suivant",
+      "title_fr": "2-11 Arrivée des Hormagaunts",
+      "title_en": "Hormagaunts arrival",
+      "body_fr": "Au début de son tour, le joueur 2 fait arriver des Hormagaunts sur le plateau.",
+      "body_en": "At the beginning of their turn, Player 2 deploys Hormagaunts on the board."
     }
   ]
 }

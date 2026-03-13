@@ -1,13 +1,16 @@
 {
   "primary_objectives": ["objectives_control"],
   "wall_ref": "tutorial_walls-01.json",
+  "deployment_zone": "hammer",
+  "deployment_type_P1": "fixed",
+  "deployment_type_P2": "fixed",
   "units": [
-    { "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 10 },
-    { "id": 2, "unit_type": "Hormagaunt", "player": 2, "col": 11, "row": 10 },
-    { "id": 3, "unit_type": "Hormagaunt", "player": 2, "col": 12, "row": 9 },
-    { "id": 4, "unit_type": "Hormagaunt", "player": 2, "col": 13, "row": 10 }
+    { "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 19 },
+    { "id": 2, "unit_type": "Hormagaunt", "player": 2, "col": 12, "row": 2 },
+    { "id": 3, "unit_type": "Hormagaunt", "player": 2, "col": 2, "row": 4 },
+    { "id": 4, "unit_type": "Hormagaunt", "player": 2, "col": 22, "row": 4 }
   ],
     "objectives": [
-    { "id": 5, "name": "Center", "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]] }
+      {"id": 1, "name": "South", "hexes": [[12, 19], [11, 18], [12, 18], [13, 18], [13, 19], [12, 20], [11, 19]]}
   ]
 }

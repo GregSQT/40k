@@ -1,0 +1,129 @@
+{
+  "agent_key": "Infantry_Troop_RangedSwarm",
+  "scale": "100pts",
+  "split": "holdout_regular",
+  "model_path": "/home/greg/40k/ai/models/Infantry_Troop_RangedSwarm/model_Infantry_Troop_RangedSwarm.zip",
+  "generated_at": "2026-03-13T17:48:35Z",
+  "episodes_per_matchup": 100,
+  "p1_benchmark": null,
+  "p1_benchmark_split": null,
+  "p2_benchmark": null,
+  "p2_benchmark_split": null,
+  "overall_win_rate": 0.33,
+  "matchups": {
+    "p1_holdout_regular_roster-01": {
+      "p2_holdout_roster-01": {
+        "wins": 38,
+        "losses": 61,
+        "draws": 1,
+        "win_rate": 0.38
+      },
+      "p2_holdout_roster-02": {
+        "wins": 49,
+        "losses": 51,
+        "draws": 0,
+        "win_rate": 0.49
+      },
+      "p2_holdout_roster-03": {
+        "wins": 43,
+        "losses": 57,
+        "draws": 0,
+        "win_rate": 0.43
+      },
+      "p2_holdout_roster-04": {
+        "wins": 49,
+        "losses": 51,
+        "draws": 0,
+        "win_rate": 0.49
+      },
+      "p2_holdout_roster-05": {
+        "wins": 36,
+        "losses": 64,
+        "draws": 0,
+        "win_rate": 0.36
+      }
+    },
+    "p1_holdout_regular_roster-02": {
+      "p2_holdout_roster-01": {
+        "wins": 11,
+        "losses": 89,
+        "draws": 0,
+        "win_rate": 0.11
+      },
+      "p2_holdout_roster-02": {
+        "wins": 25,
+        "losses": 75,
+        "draws": 0,
+        "win_rate": 0.25
+      },
+      "p2_holdout_roster-03": {
+        "wins": 27,
+        "losses": 73,
+        "draws": 0,
+        "win_rate": 0.27
+      },
+      "p2_holdout_roster-04": {
+        "wins": 25,
+        "losses": 75,
+        "draws": 0,
+        "win_rate": 0.25
+      },
+      "p2_holdout_roster-05": {
+        "wins": 27,
+        "losses": 73,
+        "draws": 0,
+        "win_rate": 0.27
+      }
+    }
+  },
+  "p1_summaries": [
+    {
+      "p1_roster_id": "p1_holdout_regular_roster-01",
+      "overall_win_rate": 0.43,
+      "vs_best": "p2_holdout_roster-02",
+      "vs_worst": "p2_holdout_roster-05",
+      "sur_performant": true,
+      "sous_performant": false
+    },
+    {
+      "p1_roster_id": "p1_holdout_regular_roster-02",
+      "overall_win_rate": 0.23,
+      "vs_best": "p2_holdout_roster-03",
+      "vs_worst": "p2_holdout_roster-01",
+      "sur_performant": false,
+      "sous_performant": true
+    }
+  ],
+  "p2_summaries": [
+    {
+      "p2_roster_id": "p2_holdout_roster-01",
+      "p1_win_rate_vs_this_p2": 0.245,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "p2_holdout_roster-05",
+      "p1_win_rate_vs_this_p2": 0.315,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "p2_holdout_roster-03",
+      "p1_win_rate_vs_this_p2": 0.35,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "p2_holdout_roster-02",
+      "p1_win_rate_vs_this_p2": 0.37,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "p2_holdout_roster-04",
+      "p1_win_rate_vs_this_p2": 0.37,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    }
+  ]
+}

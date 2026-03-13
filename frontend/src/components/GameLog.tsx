@@ -323,14 +323,15 @@ export const GameLog: React.FC<GameLogProps> = ({
     }
   }, []);
 
-  // Tutoriel 2-1 : rapporter le rect de la dernière ligne (la plus récente)
+  // Tutoriel : rapporter les rects pour les halos. lastEntryRef = 1re entrée (index 0 = plus récente, en haut).
+  // Le parent utilise "Header" pour la ligne du HAUT en 1-25 : on envoie donc la 1re ligne (lastEntryRef) vers onHeaderRect.
   React.useLayoutEffect(() => {
     if (!onLastEntryRect) return;
-    if (!lastEntryRef.current || displayedEvents.length === 0) {
+    if (!headerRef.current) {
       onLastEntryRect(null);
       return;
     }
-    const rect = lastEntryRef.current.getBoundingClientRect();
+    const rect = headerRef.current.getBoundingClientRect();
     onLastEntryRect({
       shape: "rect",
       left: rect.left,
@@ -339,16 +340,15 @@ export const GameLog: React.FC<GameLogProps> = ({
       height: rect.height,
     });
     return () => onLastEntryRect(null);
-  }, [onLastEntryRect, displayedEvents.length]);
+  }, [onLastEntryRect]);
 
-  // Tutoriel 2-1 : rapporter le rect du titre (header) du Game Log
   React.useLayoutEffect(() => {
     if (!onHeaderRect) return;
-    if (!headerRef.current) {
+    if (!lastEntryRef.current || displayedEvents.length === 0) {
       onHeaderRect(null);
       return;
     }
-    const rect = headerRef.current.getBoundingClientRect();
+    const rect = lastEntryRef.current.getBoundingClientRect();
     onHeaderRect({
       shape: "rect",
       left: rect.left,
@@ -357,7 +357,7 @@ export const GameLog: React.FC<GameLogProps> = ({
       height: rect.height,
     });
     return () => onHeaderRect(null);
-  }, [onHeaderRect]);
+  }, [onHeaderRect, displayedEvents.length]);
 
   return (
     <div className="game-log">

@@ -4,10 +4,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import type { APIGameState } from "../hooks/useEngineAPI";
 
 const TUTORIAL_SCENARIOS = [
   "config/tutorial/scenario_etape1.json",
@@ -38,6 +40,8 @@ export const TUTORIAL_STEP_TITLE_1_22_MENU_CHOIX_ARMES = "1-22 Menu de choix des
 export const TUTORIAL_STEP_TITLE_1_23_CHOIX_ARMES = "1-23 Choix de l'arme";
 /** Titre étape 1-24 (panneau gauche sans fog, clic Termagant). À garder en sync avec tutorial_steps.json. */
 export const TUTORIAL_STEP_TITLE_1_24_CHOIX_CIBLE = "1-24 Choix de la cible";
+/** Titre étape 1-25 (panneau gauche sans fog, halo armes + combat log). À garder en sync avec tutorial_steps.json. */
+export const TUTORIAL_STEP_TITLE_1_25_MORT_TERMAGANT = "1-25 Mort du termagant";
 
 /** Étapes qui affichent le halo sur l'Intercessor (board). */
 export const TUTORIAL_STEP_TITLES_INTERCESSOR_HALO = [
@@ -73,6 +77,7 @@ export const TUTORIAL_STEP_TITLES_HALO_LEFT = [
   TUTORIAL_STEP_TITLE_1_22_MENU_CHOIX_ARMES,
   TUTORIAL_STEP_TITLE_1_23_CHOIX_ARMES,
   TUTORIAL_STEP_TITLE_1_24_CHOIX_CIBLE,
+  TUTORIAL_STEP_TITLE_1_25_MORT_TERMAGANT,
 ] as const;
 
 /** Parse "stage" (e.g. "1-14") → etape + order. Accepte aussi etape/order en legacy. */
@@ -193,6 +198,8 @@ interface TutorialContextValue {
   /** À appeler avant une action qui met à jour le gameState et avance l’étape (ex. confirmation déplacement), pour ne pas être écrasé par l’effet phase_enter. */
   prepareSkipNextPhaseTrigger: () => void;
   currentEtape: number;
+  /** Phase du jeu (deployment, move, etc.) pour forcer le layout 2-11 quand étape 2 + deployment. */
+  gamePhase: string | null;
   /** Position viewport (px) du halo autour de l'unité ciblée ; null si pas de halo. */
   spotlightPosition: TutorialSpotlightPosition | null;
   setSpotlightPosition: (pos: TutorialSpotlightPosition | null) => void;
@@ -211,6 +218,9 @@ interface TutorialContextValue {
   /** Rects viewport (px) des zones de fog sur le panneau gauche (étape 1-15 : 2 bandes pour moins noir). */
   leftPanelFogRects: TutorialSpotlightRect[];
   setLeftPanelFogRects: (r: TutorialSpotlightRect[] | null) => void;
+  /** Rects viewport (px) des zones de fog sur le panneau droit (étape 2-11 : fog sur tout le panneau). */
+  rightPanelFogRects: TutorialSpotlightRect[];
+  setRightPanelFogRects: (r: TutorialSpotlightRect[] | null) => void;
   /** Halos viewport (px) : section RANGED WEAPON(S) du panneau droit (étape 1-16). */
   spotlightRangedWeaponsPositions: TutorialSpotlightPosition[] | null;
   setSpotlightRangedWeaponsPositions: (pos: TutorialSpotlightPosition[] | null) => void;
@@ -223,6 +233,8 @@ interface TutorialContextValue {
   /** Rect viewport (px) de la ligne attributs + titre d’une unité ennemie (étape 1-22, ex. Termagant). */
   spotlightEnemyUnitAttributes: TutorialSpotlightPosition | null;
   setSpotlightEnemyUnitAttributes: (pos: TutorialSpotlightPosition | null) => void;
+  /** Position (col, row) où l'ennemi est mort (étape 1-25 : afficher icône ghost Termagant sur le board). */
+  lastEnemyDeathPosition: { col: number; row: number } | null;
 }
 
 const TutorialContext = createContext<TutorialContextValue | null>(null);
@@ -235,10 +247,14 @@ interface TutorialProviderProps {
   isTutorialMode: boolean;
   gameState: {
     phase?: string;
-    units?: Array<{ id: string | number; player: number }>;
+    units?: Array<{ id: string | number; player: number; col?: number; row?: number }>;
     units_cache?: Record<string, unknown>;
   } | null;
-  startGameWithScenario: (scenarioFile: string) => Promise<void>;
+  /** options.preserveP1PositionsFrom : état de jeu courant pour garder les positions des unités P1 (ex. Intercessor après 1-25). */
+  startGameWithScenario: (
+    scenarioFile: string,
+    options?: { preserveP1PositionsFrom?: APIGameState | null }
+  ) => Promise<void>;
   children: React.ReactNode;
 }
 
@@ -262,15 +278,22 @@ export function TutorialProvider({
   const setLeftPanelFogRects = useCallback((r: TutorialSpotlightRect[] | null) => {
     setLeftPanelFogRectsState(r ?? []);
   }, []);
+  const [rightPanelFogRects, setRightPanelFogRectsState] = useState<TutorialSpotlightRect[]>([]);
+  const setRightPanelFogRects = useCallback((r: TutorialSpotlightRect[] | null) => {
+    setRightPanelFogRectsState(r ?? []);
+  }, []);
   const [spotlightRangedWeaponsPositions, setSpotlightRangedWeaponsPositions] = useState<TutorialSpotlightPosition[] | null>(null);
   const [spotlightGameLogLastEntry, setSpotlightGameLogLastEntry] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightGameLogHeader, setSpotlightGameLogHeader] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightEnemyUnitAttributes, setSpotlightEnemyUnitAttributes] = useState<TutorialSpotlightPosition | null>(null);
+  const [lastEnemyDeathPosition, setLastEnemyDeathPosition] = useState<{ col: number; row: number } | null>(null);
   const [tutorialLang, setTutorialLang] = useState<TutorialLang>("fr");
   const lastPhaseRef = useRef<string | null>(null);
   const onDeployShownForEtapeRef = useRef<Set<number>>(new Set());
   /** Après avancement manuel (onClosePopup → étape suivante), ne pas laisser l’effet phase_enter écraser l’index. */
   const skipNextPhaseTriggerRef = useRef(false);
+  /** En cours de chargement scenario 1->2 : ne pas laisser l'effet phase reecrire l'etape (evite fog/popup 1-11). */
+  const transitioningToEtape2Ref = useRef(false);
 
   const stepsForEtape = useMemo(
     () =>
@@ -332,12 +355,14 @@ export function TutorialProvider({
       setSpotlightLeftPanel(null);
       setSpotlightRightPanel(null);
       setLeftPanelFogRects([]);
+      setRightPanelFogRects([]);
       setSpotlightRangedWeaponsPositions(null);
       setSpotlightGameLogLastEntry(null);
       setSpotlightGameLogHeader(null);
       setSpotlightEnemyUnitAttributes(null);
+      setLastEnemyDeathPosition(null);
     }
-  }, [popupVisible, setLeftPanelFogRects]);
+  }, [popupVisible, setLeftPanelFogRects, setRightPanelFogRects]);
 
   useEffect(() => {
     if (!isTutorialMode) return;
@@ -379,17 +404,31 @@ export function TutorialProvider({
     [stepsForEtape]
   );
 
+  /** Force étape 2-11 quand on est en étape 2 et phase deployment (évite layout 1-11 après transition). */
+  useLayoutEffect(() => {
+    if (!isTutorialMode || skipped || steps.length === 0) return;
+    const phase = gameState?.phase ?? null;
+    if (currentEtape === 2 && phase === "deployment") {
+      const stepsForEtape2 = steps.filter((s) => s.etape === 2).sort((a, b) => a.order - b.order);
+      const idx211 = stepsForEtape2.findIndex((s) => s.order === 11);
+      if (idx211 >= 0 && idx211 !== currentStepIndex) {
+        setCurrentStepIndex(idx211);
+        setPopupVisible(true);
+      }
+    }
+  }, [isTutorialMode, skipped, currentEtape, currentStepIndex, gameState?.phase, steps]);
+
   useEffect(() => {
     if (!isTutorialMode || skipped || !gameState || steps.length === 0) return;
+    if (transitioningToEtape2Ref.current) return;
     const phase = gameState.phase ?? null;
-    if (phase === "deployment") return;
 
-    if (!onDeployShownForEtapeRef.current.has(currentEtape)) {
+    if (phase !== "deployment" && !onDeployShownForEtapeRef.current.has(currentEtape)) {
       if (showStepForTrigger("on_deploy")) {
         onDeployShownForEtapeRef.current.add(currentEtape);
       }
       if (phase != null) lastPhaseRef.current = phase;
-      return;
+      if (!onDeployShownForEtapeRef.current.has(currentEtape)) return;
     }
 
     if (phase != null && phase !== lastPhaseRef.current) {
@@ -427,13 +466,19 @@ export function TutorialProvider({
     if (!justLostLastEnemy) return;
 
     if (currentEtape === 1) {
-      // Étape 1-124 → 1-125 : afficher la popup "Mort du termagant" au lieu de passer à l’étape 2
-      const idx125 = stepsForEtape.findIndex((s) => `${s.etape}-${s.order}` === "1-125");
-      if (idx125 >= 0) {
-        setCurrentStepIndex(idx125);
+      // Étape 1-24 → 1-25 : afficher la popup "Mort du termagant" au lieu de passer à l’étape 2
+      const idx25 = stepsForEtape.findIndex((s) => `${s.etape}-${s.order}` === "1-25");
+      if (idx25 >= 0) {
+        const p2Unit = gameState?.units?.find((u) => Number(u.player) === 2);
+        if (p2Unit && typeof p2Unit.col === "number" && typeof p2Unit.row === "number") {
+          setLastEnemyDeathPosition({ col: p2Unit.col, row: p2Unit.row });
+        }
+        setSpotlightGameLogLastEntry(null);
+        setCurrentStepIndex(idx25);
         setPopupVisible(true);
         return;
       }
+      setLastEnemyDeathPosition(null);
       setCurrentEtape(2);
       setCurrentStepIndex(0);
       onDeployShownForEtapeRef.current.delete(2);
@@ -450,6 +495,7 @@ export function TutorialProvider({
     currentEtape,
     hasLivingEnemyUnits,
     gameState?.phase,
+    gameState?.units,
     startGameWithScenario,
     stepsForEtape,
   ]);
@@ -471,14 +517,44 @@ export function TutorialProvider({
       const hasNextEtape = steps.some((s) => s.etape === nextEtape);
       if (hasNextEtape) {
         skipNextPhaseTriggerRef.current = true;
-        setCurrentEtape(nextEtape);
-        setCurrentStepIndex(0);
-        setPopupVisible(true);
+        const advanceToNextEtape = () => {
+          setCurrentEtape(nextEtape);
+          setCurrentStepIndex(0);
+          setPopupVisible(true);
+        };
+        if (currentEtape === 1 && nextEtape === 2 && startGameWithScenario && gameState) {
+          transitioningToEtape2Ref.current = true;
+          lastPhaseRef.current = "deployment";
+          startGameWithScenario(TUTORIAL_SCENARIOS[1], {
+            preserveP1PositionsFrom: gameState as APIGameState,
+          })
+            .then(() => {
+              advanceToNextEtape();
+            })
+            .catch(() => {
+              advanceToNextEtape();
+            })
+            .finally(() => {
+              transitioningToEtape2Ref.current = false;
+            });
+        } else {
+          advanceToNextEtape();
+          if (currentEtape === 2 && nextEtape === 3 && startGameWithScenario) {
+            startGameWithScenario(TUTORIAL_SCENARIOS[2]);
+          }
+        }
       } else {
         setPopupVisible(false);
       }
     }
-  }, [currentStepIndex, stepsForEtape, currentEtape, steps]);
+  }, [
+    currentStepIndex,
+    stepsForEtape,
+    currentEtape,
+    steps,
+    startGameWithScenario,
+    gameState,
+  ]);
 
   const onSkipTutorial = useCallback(() => {
     setSkipped(true);
@@ -496,6 +572,7 @@ export function TutorialProvider({
             onSkipTutorial,
             prepareSkipNextPhaseTrigger,
             currentEtape,
+            gamePhase: gameState?.phase ?? null,
             tutorialLang,
             setTutorialLang,
             spotlightPosition,
@@ -510,6 +587,8 @@ export function TutorialProvider({
             setSpotlightRightPanel,
             leftPanelFogRects,
             setLeftPanelFogRects,
+            rightPanelFogRects,
+            setRightPanelFogRects,
             spotlightRangedWeaponsPositions,
             setSpotlightRangedWeaponsPositions,
             spotlightGameLogLastEntry,
@@ -518,6 +597,7 @@ export function TutorialProvider({
             setSpotlightGameLogHeader,
             spotlightEnemyUnitAttributes,
             setSpotlightEnemyUnitAttributes,
+            lastEnemyDeathPosition,
           }
         : {
             isTutorialMode: false,
@@ -527,6 +607,7 @@ export function TutorialProvider({
             onSkipTutorial: () => {},
             prepareSkipNextPhaseTrigger: () => {},
             currentEtape: 1,
+            gamePhase: null,
             tutorialLang: "fr" as const,
             setTutorialLang: () => {},
             spotlightPosition: null,
@@ -541,6 +622,8 @@ export function TutorialProvider({
             setSpotlightRightPanel: () => {},
             leftPanelFogRects: [],
             setLeftPanelFogRects: () => {},
+            rightPanelFogRects: [],
+            setRightPanelFogRects: () => {},
             spotlightRangedWeaponsPositions: null,
             setSpotlightRangedWeaponsPositions: () => {},
             spotlightGameLogLastEntry: null,
@@ -549,11 +632,13 @@ export function TutorialProvider({
             setSpotlightGameLogHeader: () => {},
             spotlightEnemyUnitAttributes: null,
             setSpotlightEnemyUnitAttributes: () => {},
+            lastEnemyDeathPosition: null,
           },
     [
       isTutorialMode,
       currentStep,
       popupVisible,
+      gameState?.phase,
       skipped,
       onClosePopup,
       onSkipTutorial,
@@ -567,10 +652,13 @@ export function TutorialProvider({
       spotlightRightPanel,
       leftPanelFogRects,
       setLeftPanelFogRects,
+      rightPanelFogRects,
+      setRightPanelFogRects,
       spotlightRangedWeaponsPositions,
       spotlightGameLogLastEntry,
       spotlightGameLogHeader,
       spotlightEnemyUnitAttributes,
+      lastEnemyDeathPosition,
     ]
   );
 

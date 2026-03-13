@@ -2875,6 +2875,29 @@ textarea:focus {
   margin: 0 4px;
   object-fit: contain;
 }
+/* 1-21 : mini icône Intercessor avec cercle vert (unité activable) */
+.tutorial-overlay-dialog__mini-icon-with-green-circle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2em;
+  height: 2.2em;
+  vertical-align: middle;
+  margin: 0 4px;
+}
+.tutorial-overlay-dialog__mini-icon-with-green-circle .tutorial-overlay-dialog__mini-icon {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+}
+.tutorial-overlay-dialog__mini-green-activation-circle {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 /* 1-23 : Bolt Rifle en gras et blanc */
 .tutorial-overlay-dialog__bolt-rifle {
   font-weight: 700;
@@ -2984,10 +3007,23 @@ textarea:focus {
   font-weight: var(--tutorial-dialog-font-weight);
   color: var(--tutorial-dialog-color);
 }
+/* 1-25 : icône Termagant en fantôme (unité morte) */
+.tutorial-overlay-dialog__termagant-ghost-icon {
+  display: inline-block;
+  width: 2em;
+  height: 2em;
+  vertical-align: middle;
+  margin-right: 0.35em;
+  object-fit: contain;
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
 .tutorial-overlay-dialog__death-icon-inline {
   display: inline;
   vertical-align: middle;
   margin-right: 0.25em;
+  font-size: 1.8em;
+  line-height: 1;
 }
 .tutorial-overlay-dialog .tutorial-btn-primary {
   padding: 10px 20px;

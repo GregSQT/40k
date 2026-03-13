@@ -55,6 +55,8 @@ interface TutorialOverlayProps {
   allowedClickSpotlights?: TutorialSpotlightPosition[] | null;
   /** Rects viewport (px) des zones de fog sur le panneau gauche (étape 1-5 : 2 bandes, opacité réduite). */
   fogLeftPanelRects?: TutorialSpotlightRect[] | null;
+  /** Rects viewport (px) des zones de fog sur le panneau droit (étape 2-11). */
+  fogRightPanelRects?: TutorialSpotlightRect[] | null;
 }
 
 /**
@@ -97,6 +99,35 @@ function MiniIntercessorIcon(): React.ReactElement {
     />
   );
 }
+/** Mini Intercessor avec cercle vert (étape 1-21). */
+function MiniIntercessorIconWithGreenCircle(): React.ReactElement {
+  return (
+    <span className="tutorial-overlay-dialog__mini-icon-with-green-circle" aria-hidden>
+      <svg
+        className="tutorial-overlay-dialog__mini-green-activation-circle"
+        viewBox="0 0 32 32"
+        aria-hidden
+      >
+        <title>Cercle vert unité activable</title>
+        <circle
+          cx="16"
+          cy="16"
+          r="14"
+          fill="none"
+          stroke="#00ff00"
+          strokeWidth="2"
+          strokeOpacity="0.8"
+        />
+      </svg>
+      <img
+        src={INTERCESSOR_ICON_PATH}
+        alt=""
+        className={MINI_ICON_CLASS}
+        aria-hidden
+      />
+    </span>
+  );
+}
 function MiniHexIcon(): React.ReactElement {
   return (
     <svg
@@ -137,6 +168,17 @@ function MiniTermagantIcon(): React.ReactElement {
       src={TERMAGANT_ICON_PATH}
       alt=""
       className={MINI_ICON_CLASS}
+      aria-hidden
+    />
+  );
+}
+/** Icône Termagant en fantôme (étape 1-25 : unité morte). */
+function TermagantGhostIcon(): React.ReactElement {
+  return (
+    <img
+      src={TERMAGANT_ICON_PATH}
+      alt=""
+      className="tutorial-overlay-dialog__termagant-ghost-icon"
       aria-hidden
     />
   );
@@ -287,12 +329,17 @@ const HEX_POINTS = [0, 60, 120, 180, 240, 300]
   })
   .join(" ");
 
-/** Remplace les placeholders <icone mort> / <death icon> par l’icône mort du game log (même ligne, étape 1-25). */
-function replaceDeathIconInText(text: string): React.ReactNode {
+/** Remplace les placeholders <icone mort> / <death icon> par l’icône mort du game log (même ligne, étape 1-25). Option ghostTermagant : affiche une icône fantôme du Termagant avant la première icône mort. */
+function replaceDeathIconInText(
+  text: string,
+  options?: { ghostTermagant?: boolean }
+): React.ReactNode {
   const deathIcon = getEventIcon("death");
+  const showGhostTermagant = options?.ghostTermagant === true;
   const re = /<icone mort>|<death icon>/gi;
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
+  let firstDeathIcon = true;
   let m = re.exec(text);
   while (m !== null) {
     if (m.index > lastIndex) {
@@ -308,9 +355,17 @@ function replaceDeathIconInText(text: string): React.ReactNode {
         className="tutorial-overlay-dialog__death-icon-inline"
         aria-hidden
       >
-        {deathIcon}
+        {showGhostTermagant && firstDeathIcon ? (
+          <>
+            <TermagantGhostIcon />
+            {deathIcon}
+          </>
+        ) : (
+          deathIcon
+        )}
       </span>
     );
+    firstDeathIcon = false;
     lastIndex = re.lastIndex;
     m = re.exec(text);
   }
@@ -472,6 +527,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   spotlights = [],
   allowedClickSpotlights = null,
   fogLeftPanelRects = [],
+  fogRightPanelRects = [],
 }) => {
   const clickHoles = allowedClickSpotlights ?? spotlights;
   const title = lang === "fr" ? step.title_fr : step.title_en;
@@ -480,8 +536,9 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     switch (step.stage) {
       case "1-14":
       case "1-16":
-      case "1-21":
         return <MiniIntercessorIcon />;
+      case "1-21":
+        return <MiniIntercessorIconWithGreenCircle />;
       case "1-15":
         return <MiniHexIcon />;
       case "1-22":
@@ -501,7 +558,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
             boltRifleBold: step.stage === "1-23",
           })
         : step.stage === "1-25"
-          ? replaceDeathIconInText(body)
+          ? replaceDeathIconInText(body, { ghostTermagant: false })
           : renderBodyWithClickIcon(body, { afterCursor: afterCursorIcon });
   const isStepIconAndFirstLine = step.popupFirstLineWithIcon === true;
   const bodyFirstLineIcon = isStepIconAndFirstLine ? (body.split("\n")[0] ?? "") : "";
@@ -775,7 +832,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         ? (fogLeftPanelRects as TutorialSpotlightRect[]).map((rect, i) =>
             rect.shape === "rect" ? (
               <svg
-                key={`fog-left-${rect.left}-${rect.top}`}
+                key={`fog-left-${rect.left}-${rect.top}-${i}`}
                 aria-hidden
                 role="img"
                 style={{
@@ -793,7 +850,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                 <title>Fog tutoriel panneau gauche (bande {i + 1})</title>
                 <defs>
                   <filter
-                    id={`${FOG_BLUR_FILTER_ID}-${i}`}
+                    id={`${FOG_BLUR_FILTER_ID}-left-${i}`}
                     x="-20%"
                     y="-20%"
                     width="140%"
@@ -809,7 +866,51 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                   width={rect.width}
                   height={rect.height}
                   fill={`rgba(0, 0, 0, ${FOG_LEFT_PANEL_OPACITY})`}
-                  filter={`url(#${FOG_BLUR_FILTER_ID}-${i})`}
+                  filter={`url(#${FOG_BLUR_FILTER_ID}-left-${i})`}
+                />
+              </svg>
+            ) : null
+          )
+        : null}
+      {Array.isArray(fogRightPanelRects) && fogRightPanelRects.length > 0
+        ? (fogRightPanelRects as TutorialSpotlightRect[]).map((rect, i) =>
+            rect.shape === "rect" ? (
+              <svg
+                key={`fog-right-${rect.left}-${rect.top}-${i}`}
+                aria-hidden
+                role="img"
+                style={{
+                  position: "fixed",
+                  left: rect.left - FOG_BLUR_MARGIN,
+                  top: rect.top - FOG_BLUR_MARGIN,
+                  width: rect.width + FOG_BLUR_MARGIN * 2,
+                  height: rect.height + FOG_BLUR_MARGIN * 2,
+                  pointerEvents: "none",
+                }}
+                width={rect.width + FOG_BLUR_MARGIN * 2}
+                height={rect.height + FOG_BLUR_MARGIN * 2}
+                viewBox={`0 0 ${rect.width + FOG_BLUR_MARGIN * 2} ${rect.height + FOG_BLUR_MARGIN * 2}`}
+              >
+                <title>Fog tutoriel panneau droit</title>
+                <defs>
+                  <filter
+                    id={`${FOG_BLUR_FILTER_ID}-right-${i}`}
+                    x="-20%"
+                    y="-20%"
+                    width="140%"
+                    height="140%"
+                    colorInterpolationFilters="sRGB"
+                  >
+                    <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
+                  </filter>
+                </defs>
+                <rect
+                  x={FOG_BLUR_MARGIN}
+                  y={FOG_BLUR_MARGIN}
+                  width={rect.width}
+                  height={rect.height}
+                  fill={`rgba(0, 0, 0, ${FOG_LEFT_PANEL_OPACITY})`}
+                  filter={`url(#${FOG_BLUR_FILTER_ID}-right-${i})`}
                 />
               </svg>
             ) : null

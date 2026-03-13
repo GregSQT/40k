@@ -3,23 +3,23 @@
 scripts/roster_matchup_stats.py - Collect roster matchup statistics
 
 Runs P1 (trained agent) vs P2 (GreedyBot) for each (p1_roster, p2_roster) pair,
-collects win/loss/draw stats, and writes config/agents/<agent>/rosters/<scale>/matchups.json.
+collects win/loss/draw stats, and writes to config/agents/<agent>/rosters/<scale>/matchups/.
+
+Output files:
+  - P1 benchmark: <p1_roster_id>_matchups.json
+  - P2 benchmark: <p2_roster_id>_matchups.json
+  - Full matrix: <split>_matchups.json
 
 Modes:
   - Full matrix (default): all P1 × P2 combinations
   - P1 benchmark: --p1-benchmark p1_roster-01  → one P1, evaluate all P2 rosters
   - P2 benchmark: --p2-benchmark p2_training_roster-01   → one P2, evaluate all P1 rosters
-
-Output format (matchups.json):
-  - matchups: { p1_roster_id: { p2_roster_id: { wins, losses, draws, win_rate } } }
-  - p1_summaries: P1 rosters ranked by overall_win_rate
-  - p2_summaries: P2 rosters ranked by p1_win_rate_vs_this_p2 (low = P2 strong)
+  - All splits: --all-splits  → run training, holdout_regular, holdout_hard
 
 Usage:
   python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm [--scale 100pts] [--episodes 30]
-  python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --p1-benchmark p1_training_roster-01  # eval P2 vs fixed P1
-  python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --p2-benchmark p2_training_roster-01  # eval P1 vs fixed P2
-  python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --p1-benchmark p1_holdout_regular_roster-01 --p1-benchmark-split holdout_regular  # P1 holdout_regular vs P2 training (cross-split)
+  python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --p1-benchmark p1_training_roster-01
+  python scripts/roster_matchup_stats.py --agent Infantry_Troop_RangedSwarm --all-splits --episodes 100
 """
 
 import argparse
@@ -192,10 +192,15 @@ def main() -> None:
                     help="Use single P2 roster as benchmark; evaluate all P1 rosters vs it (e.g. p2_roster-01)")
     parser.add_argument("--p2-benchmark-split", metavar="SPLIT", default=None,
                     help="Split to load P2 benchmark from (e.g. holdout). Default: same as --split")
+    parser.add_argument("--all-splits", action="store_true",
+                    help="Run for training, holdout_regular, and holdout_hard (output: <split>_matchups.json each)")
     args = parser.parse_args()
 
     if args.p1_benchmark and args.p2_benchmark:
         print("❌ Cannot use both --p1-benchmark and --p2-benchmark")
+        sys.exit(1)
+    if args.all_splits and (args.p1_benchmark or args.p2_benchmark):
+        print("❌ --all-splits cannot be used with --p1-benchmark or --p2-benchmark")
         sys.exit(1)
     rewards_config = args.rewards_config or args.agent
 
@@ -206,9 +211,25 @@ def main() -> None:
         print(f"❌ Model not found: {model_path}")
         sys.exit(1)
 
-    # Determine splits for P1 and P2
-    p1_split = args.p1_benchmark_split if args.p1_benchmark and args.p1_benchmark_split else args.split
-    p2_split_base = args.p2_benchmark_split if args.p2_benchmark and args.p2_benchmark_split else args.split
+    splits_to_run: List[str] = (
+        ["training", "holdout_regular", "holdout_hard"] if args.all_splits else [args.split]
+    )
+
+    for current_split in splits_to_run:
+        if args.all_splits:
+            print(f"\n{'='*60}\n📌 Split: {current_split}\n{'='*60}")
+        _run_one_split(args, current_split, model_path, rewards_config)
+
+
+def _run_one_split(
+    args: argparse.Namespace,
+    current_split: str,
+    model_path: str,
+    rewards_config: str,
+) -> None:
+    """Run matchup stats for one split (training, holdout_regular, or holdout_hard)."""
+    p1_split = args.p1_benchmark_split if args.p1_benchmark and args.p1_benchmark_split else current_split
+    p2_split_base = args.p2_benchmark_split if args.p2_benchmark and args.p2_benchmark_split else current_split
     p2_split = "holdout" if p2_split_base.startswith("holdout") else p2_split_base
 
     p1_rosters = _collect_p1_rosters(args.agent, args.scale, p1_split)
@@ -217,30 +238,29 @@ def main() -> None:
         p2_rosters = _collect_p2_rosters(args.scale, p2_split_base)
     if not p1_rosters:
         print(f"❌ No P1 rosters in {args.agent}/rosters/{args.scale}/{p1_split}/")
-        sys.exit(1)
+        return
     if not p2_rosters:
         print(f"❌ No P2 rosters in _p2_rosters/{args.scale}/{p2_split}/")
-        sys.exit(1)
+        return
 
-    # Apply benchmark filter if specified
     if args.p1_benchmark:
         p1_rosters = [(ref, rid) for ref, rid in p1_rosters if rid == args.p1_benchmark]
         if not p1_rosters:
             print(f"❌ P1 benchmark '{args.p1_benchmark}' not found in {p1_split}")
-            sys.exit(1)
+            return
         print(f"📌 P1 benchmark: {args.p1_benchmark} (from {p1_split}, evaluating {len(p2_rosters)} P2 rosters from {p2_split})")
     if args.p2_benchmark:
         p2_rosters = [(ref, rid) for ref, rid in p2_rosters if rid == args.p2_benchmark]
         if not p2_rosters:
             print(f"❌ P2 benchmark '{args.p2_benchmark}' not found in {p2_split}")
-            sys.exit(1)
+            return
         print(f"📌 P2 benchmark: {args.p2_benchmark} (from {p2_split}, evaluating {len(p1_rosters)} P1 rosters from {p1_split})")
 
-    scenario_subdir = "holdout_regular" if args.split == "holdout_regular" else "holdout_hard" if args.split == "holdout_hard" else "training"
+    scenario_subdir = "holdout_regular" if current_split == "holdout_regular" else "holdout_hard" if current_split == "holdout_hard" else "training"
     scenario_dir = PROJECT_ROOT / "config" / "agents" / args.agent / "scenarios" / scenario_subdir
     matchup_dir = scenario_dir / "matchups"
     matchup_dir.mkdir(parents=True, exist_ok=True)
-    template = _build_scenario_template(args.scale, args.split)
+    template = _build_scenario_template(args.scale, current_split)
     obs_normalizer = _build_obs_normalizer(args.agent, args.training_config, model_path)
 
     matchups: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -309,12 +329,19 @@ def main() -> None:
             "sous_performant_p2": avg_wr > overall_wr + 0.05,
         })
 
-    out_path = PROJECT_ROOT / "config" / "agents" / args.agent / "rosters" / args.scale / "matchups.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    matchups_out_dir = PROJECT_ROOT / "config" / "agents" / args.agent / "rosters" / args.scale / "matchups"
+    matchups_out_dir.mkdir(parents=True, exist_ok=True)
+    if args.p1_benchmark:
+        out_filename = f"{p1_rosters[0][1]}_matchups.json"
+    elif args.p2_benchmark:
+        out_filename = f"{p2_rosters[0][1]}_matchups.json"
+    else:
+        out_filename = f"{current_split}_matchups.json"
+    out_path = matchups_out_dir / out_filename
     output = {
         "agent_key": args.agent,
         "scale": args.scale,
-        "split": args.split,
+        "split": current_split,
         "model_path": model_path,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "episodes_per_matchup": args.episodes,

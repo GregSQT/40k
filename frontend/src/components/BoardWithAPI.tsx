@@ -72,21 +72,25 @@ function TutorialOverlayGate(): React.ReactNode {
   const isMoveButtonStep = TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO.includes(
     title as (typeof TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO)[number]
   );
+  const forceLayout2_11 =
+    tutorial.currentEtape === 2 && tutorial.gamePhase === "deployment";
   const stageMajor = parseInt((stage ?? "").split("-")[0] ?? "", 10);
   const isFrom2_1Onwards = !Number.isNaN(stageMajor) && stageMajor >= 2;
+  const isStage2_11Or12 = forceLayout2_11 || stage === "2-11" || stage === "2-12";
   const isHaloLeft =
     (TUTORIAL_STEP_TITLES_HALO_LEFT.includes(
       title as (typeof TUTORIAL_STEP_TITLES_HALO_LEFT)[number]
     ) ||
-      stage === "1-15" ||
+      (stage === "1-15" ||
       stage === "1-16" ||
       stage === "1-23" ||
-      isFrom2_1Onwards) &&
+      (isFrom2_1Onwards && !isStage2_11Or12))) &&
     stage !== "1-14";
   const isStep2_1 = stage === "1-21";
   const isStep2_2 = stage === "1-22";
   const isStep2_3 = stage === "1-23";
   const isStep2_4 = stage === "1-24";
+  const isStep1_25 = stage === "1-25";
   const isStep2_2Or3Or4 = isStep2_2 || isStep2_3 || isStep2_4;
   const isShootButtonStep =
     title === TUTORIAL_STEP_TITLE_PHASE_TIR || title === TUTORIAL_STEP_TITLE_WEAPON_CHOICE;
@@ -102,29 +106,43 @@ function TutorialOverlayGate(): React.ReactNode {
     stage === "1-22" ||
     stage === "1-23" ||
     stage === "1-24" ||
+    stage === "1-25" ||
+    stage === "2-11" ||
+    stage === "2-12" ||
     stage === "3-1";
   const turnPhaseSpotlights = needsTurnPhaseHalo ? tutorial.spotlightTurnPhasePositions : null;
   const leftPanelSpotlight = isHaloLeft ? tutorial.spotlightLeftPanel : null;
   const gameLogLastEntrySpotlight =
     isStep2_1 || isStep2_4 ? tutorial.spotlightGameLogLastEntry : null;
-  const gameLogHeaderSpotlight = isStep2_1 || isStep2_4 ? tutorial.spotlightGameLogHeader : null;
+  const gameLogHeaderSpotlight = isStep2_1 || isStep2_4 || isStep1_25 ? tutorial.spotlightGameLogHeader : null;
+  /** En 1-25 : uniquement le header (ligne du haut), jamais la dernière ligne. */
+  const gameLogSpotlights =
+    stage === "1-25"
+      ? gameLogHeaderSpotlight
+        ? [gameLogHeaderSpotlight]
+        : []
+      : [
+          ...((isStep2_1 || isStep2_4) && gameLogLastEntrySpotlight ? [gameLogLastEntrySpotlight] : []),
+          ...((isStep2_1 || isStep2_4 || isStep1_25) && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : []),
+        ];
   const tableSpotlights = isStep2_2Or3Or4
     ? [
         ...(tutorial.spotlightRangedWeaponsPositions ?? []),
         ...(tutorial.spotlightEnemyUnitAttributes ? [tutorial.spotlightEnemyUnitAttributes] : []),
       ]
-    : isStep1_6
+    : isStep1_25
+      ? (tutorial.spotlightRangedWeaponsPositions ?? [])
+      : isStep1_6
       ? (tutorial.spotlightRangedWeaponsPositions ?? [])
       : isPhaseMoveStep
-        ? (tutorial.spotlightTablePositions ?? [])
-        : [];
+          ? (tutorial.spotlightTablePositions ?? [])
+          : [];
   const spotlights = [
     tutorial.spotlightPosition ?? null,
     ...tableSpotlights,
     ...(needsTurnPhaseHalo && turnPhaseSpotlights ? turnPhaseSpotlights : []),
     ...(isHaloLeft && leftPanelSpotlight ? [leftPanelSpotlight] : []),
-    ...((isStep2_1 || isStep2_4) && gameLogLastEntrySpotlight ? [gameLogLastEntrySpotlight] : []),
-    ...((isStep2_1 || isStep2_4) && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : []),
+    ...gameLogSpotlights,
   ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[];
 
   /** En 1-22 : seul le clic sur l’icône d’arme (board) doit avancer ; pas le Termagant. */
@@ -150,7 +168,10 @@ function TutorialOverlayGate(): React.ReactNode {
       onSkipTutorial={tutorial.onSkipTutorial}
       spotlights={spotlights}
       allowedClickSpotlights={allowedClickSpotlights}
-      fogLeftPanelRects={isStep1_5 ? tutorial.leftPanelFogRects : null}
+      fogLeftPanelRects={
+        isStep1_5 ? tutorial.leftPanelFogRects : isStage2_11Or12 ? tutorial.leftPanelFogRects : null
+      }
+      fogRightPanelRects={isStage2_11Or12 ? tutorial.rightPanelFogRects : null}
     />
   );
 }
@@ -174,6 +195,8 @@ function TurnPhaseTrackerWithTutorial(
   );
   const isShootButtonStep =
     title === TUTORIAL_STEP_TITLE_PHASE_TIR || title === TUTORIAL_STEP_TITLE_WEAPON_CHOICE;
+  const forceLayout2_11 =
+    tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
   const showTurnPhaseRects =
     isTurnPhaseStep ||
     isMoveButtonStep ||
@@ -185,17 +208,24 @@ function TurnPhaseTrackerWithTutorial(
     stage === "1-22" ||
     stage === "1-23" ||
     stage === "1-24" ||
+    stage === "1-25" ||
+    forceLayout2_11 ||
+    stage === "2-11" ||
+    stage === "2-12" ||
     stage === "3-1";
   const effectiveTitleForRects = showTurnPhaseRects
     ? stage === "1-14" || stage === "1-15" || stage === "1-16"
       ? TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT
-      : stage === "1-21" ||
-          stage === "1-22" ||
-          stage === "1-23" ||
-          stage === "1-24" ||
-          stage === "3-1"
-        ? TUTORIAL_STEP_TITLE_PHASE_TIR
-        : (title ?? undefined)
+      : forceLayout2_11 || stage === "2-11" || stage === "2-12"
+        ? "2-11"
+        : stage === "1-21" ||
+            stage === "1-22" ||
+            stage === "1-23" ||
+            stage === "1-24" ||
+            stage === "1-25" ||
+            stage === "3-1"
+          ? TUTORIAL_STEP_TITLE_PHASE_TIR
+          : (title ?? undefined)
     : undefined;
   useEffect(() => {
     if (!showTurnPhaseRects && tutorial?.setSpotlightTurnPhasePositions) {
@@ -216,8 +246,11 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
   const ref = useRef<HTMLDivElement>(null);
   const tutorial = useTutorial();
   const stage = tutorial?.currentStep?.stage ?? "";
+  const forceLayout2_11 =
+    tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
   const stageMajor = parseInt(stage.split("-")[0] ?? "", 10);
   const isFrom2_1Onwards = !Number.isNaN(stageMajor) && stageMajor >= 2;
+  const isStage2_11Or12 = forceLayout2_11 || stage === "2-11" || stage === "2-12";
   const isHaloLeft =
     ((tutorial?.popupVisible &&
       tutorial?.currentStep?.stepKey &&
@@ -226,7 +259,7 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
       )) ||
       tutorial?.currentStep?.stage === "1-15" ||
       tutorial?.currentStep?.stage === "1-16" ||
-      isFrom2_1Onwards) &&
+      (isFrom2_1Onwards && !isStage2_11Or12)) &&
     tutorial?.currentStep?.stage !== "1-14";
   const isPhaseMoveStep = Boolean(
     tutorial?.popupVisible &&
@@ -236,7 +269,7 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
       )
   );
   const isStep1_5 = tutorial?.currentStep?.stage === "1-15";
-  const needsMeasure = isHaloLeft || isPhaseMoveStep || isStep1_5;
+  const needsMeasure = isHaloLeft || isPhaseMoveStep || isStep1_5 || isStage2_11Or12;
   useLayoutEffect(() => {
     if (!tutorial?.setSpotlightLeftPanel) return;
     if (!needsMeasure) {
@@ -272,6 +305,11 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
             height: bandHeight,
           },
         ]);
+      } else if (isStage2_11Or12) {
+        tutorial.setSpotlightLeftPanel(null);
+        tutorial.setLeftPanelFogRects?.([
+          { shape: "rect", left: r.left, top: r.top, width: r.width, height: r.height },
+        ]);
       } else {
         tutorial.setSpotlightLeftPanel(
           isHaloLeft
@@ -303,6 +341,7 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
     needsMeasure,
     isHaloLeft,
     isStep1_5,
+    isStage2_11Or12,
     tutorial?.setSpotlightLeftPanel,
     tutorial?.setLeftPanelFogRects,
   ]);
@@ -315,33 +354,42 @@ function BoardColumnWithTutorial({ children }: { children: React.ReactNode }): R
 
 const GAME_LOG_LINE_HEIGHT_PX = 28;
 
-/** GameLog avec rappel du rect de la dernière ligne pour halo tutoriel 1-21 ; en 1-24 agrandit d'une ligne par tir. */
+/** GameLog avec rappel du rect de la dernière ligne pour halo tutoriel 1-21 ; en 1-24 agrandit d'une ligne par tir. En 1-25 halo sur la ligne du haut (header) uniquement. */
 function GameLogWithTutorialSpotlight(
   props: React.ComponentProps<typeof GameLog>
 ): React.ReactElement {
   const tutorial = useTutorial();
   const isStep2_1 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "1-21";
   const isStep2_4 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "1-24";
+  const isStep1_25 = tutorial?.popupVisible && tutorial?.currentStep?.stage === "1-25";
   const shootEventCount = (props.events ?? []).filter((e) => e.type === "shoot").length;
   const baseHeight = props.availableHeight ?? 220;
   const availableHeight = isStep2_4
     ? baseHeight + shootEventCount * GAME_LOG_LINE_HEIGHT_PX
     : baseHeight;
+  const reportGameLogHeaderRect = isStep2_1 || isStep2_4 || isStep1_25;
+  const reportGameLogLastEntryRect = isStep2_1 || isStep2_4;
+  // En 1-25 : ne pas utiliser le rect "dernière ligne", pour que le halo reste sur la ligne du haut (header) uniquement
+  useEffect(() => {
+    if (isStep1_25 && tutorial?.setSpotlightGameLogLastEntry) {
+      tutorial.setSpotlightGameLogLastEntry(null);
+    }
+  }, [isStep1_25, tutorial?.setSpotlightGameLogLastEntry]);
   return (
     <GameLog
       {...props}
       availableHeight={availableHeight}
       onLastEntryRect={
-        isStep2_1 || isStep2_4 ? (tutorial?.setSpotlightGameLogLastEntry ?? undefined) : undefined
+        reportGameLogLastEntryRect ? (tutorial?.setSpotlightGameLogLastEntry ?? undefined) : undefined
       }
       onHeaderRect={
-        isStep2_1 || isStep2_4 ? (tutorial?.setSpotlightGameLogHeader ?? undefined) : undefined
+        reportGameLogHeaderRect ? (tutorial?.setSpotlightGameLogHeader ?? undefined) : undefined
       }
     />
   );
 }
 
-/** Wrapper du PANNEAU DROIT (unit-status-tables) : rapporte son rect pour le halo étape 5. */
+/** Wrapper du PANNEAU DROIT (unit-status-tables) : rapporte son rect pour le halo étape 5 ou fog 2-11. */
 function RightColumnTutorialSpotlight({
   children,
 }: {
@@ -349,6 +397,10 @@ function RightColumnTutorialSpotlight({
 }): React.ReactElement {
   const ref = useRef<HTMLDivElement>(null);
   const tutorial = useTutorial();
+  const stage = tutorial?.currentStep?.stage ?? "";
+  const forceLayout2_11 =
+    tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
+  const isStage2_11Or12 = forceLayout2_11 || stage === "2-11" || stage === "2-12";
   const isPhaseMoveStep = Boolean(
     tutorial?.popupVisible &&
       tutorial?.currentStep?.stepKey &&
@@ -360,8 +412,15 @@ function RightColumnTutorialSpotlight({
     if (!tutorial?.setSpotlightRightPanel) return;
     if (!isPhaseMoveStep) {
       tutorial.setSpotlightRightPanel(null);
-      return;
     }
+    if (!tutorial?.setRightPanelFogRects) return;
+    if (!isStage2_11Or12) {
+      tutorial.setRightPanelFogRects(null);
+    }
+  }, [isPhaseMoveStep, isStage2_11Or12, tutorial?.setSpotlightRightPanel, tutorial?.setRightPanelFogRects]);
+  useLayoutEffect(() => {
+    if (!tutorial?.setSpotlightRightPanel || !tutorial?.setRightPanelFogRects) return;
+    if (!isPhaseMoveStep && !isStage2_11Or12) return;
     let cancelled = false;
     const measure = () => {
       if (cancelled) return;
@@ -369,17 +428,26 @@ function RightColumnTutorialSpotlight({
       if (!el) return;
       const r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) return;
-      tutorial.setSpotlightRightPanel({
-        shape: "rect",
-        left: r.left,
-        top: r.top,
-        width: r.width,
-        height: r.height,
-      });
+      if (isPhaseMoveStep) {
+        tutorial.setSpotlightRightPanel({
+          shape: "rect",
+          left: r.left,
+          top: r.top,
+          width: r.width,
+          height: r.height,
+        });
+      } else {
+        tutorial.setSpotlightRightPanel(null);
+      }
+      if (isStage2_11Or12) {
+        tutorial.setRightPanelFogRects([
+          { shape: "rect", left: r.left, top: r.top, width: r.width, height: r.height },
+        ]);
+      }
     };
     measure();
     const raf = requestAnimationFrame(() => {
-      if (!cancelled) return;
+      if (cancelled) return;
       measure();
       requestAnimationFrame(() => {
         if (!cancelled) measure();
@@ -393,8 +461,9 @@ function RightColumnTutorialSpotlight({
       cancelAnimationFrame(raf);
       clearTimeout(t);
       tutorial.setSpotlightRightPanel(null);
+      tutorial.setRightPanelFogRects?.(null);
     };
-  }, [isPhaseMoveStep, tutorial?.setSpotlightRightPanel]);
+  }, [isPhaseMoveStep, isStage2_11Or12, tutorial?.setSpotlightRightPanel, tutorial?.setRightPanelFogRects]);
   return (
     <div ref={ref} style={{ display: "contents" }}>
       {children}
@@ -567,6 +636,8 @@ function UnitStatusTablePlayer1WithTutorial(
   const isStep1_6 = tutorial?.currentStep?.stage === "1-16";
   const stage = tutorial?.currentStep?.stage ?? "";
   const isStep2_2Or3Or4 = stage === "1-22" || stage === "1-23" || stage === "1-24";
+  const isStep1_25 = stage === "1-25";
+  const isStep2_2Or3Or4Or5 = isStep2_2Or3Or4 || isStep1_25;
   const wrappedOnSelectUnit = useCallback(
     (unitId: number) => {
       if (
@@ -593,22 +664,22 @@ function UnitStatusTablePlayer1WithTutorial(
     }
   }, [isPhaseMoveStep, tutorial?.setSpotlightTablePositions]);
   useEffect(() => {
-    if (!isStep1_6 && !isStep2_2Or3Or4 && tutorial?.setSpotlightRangedWeaponsPositions) {
+    if (!isStep1_6 && !isStep2_2Or3Or4 && !isStep1_25 && tutorial?.setSpotlightRangedWeaponsPositions) {
       tutorial.setSpotlightRangedWeaponsPositions(null);
     }
-  }, [isStep1_6, isStep2_2Or3Or4, tutorial?.setSpotlightRangedWeaponsPositions]);
+  }, [isStep1_6, isStep2_2Or3Or4, isStep1_25, tutorial?.setSpotlightRangedWeaponsPositions]);
   return (
     <UnitStatusTable
       {...props}
       onSelectUnit={wrappedOnSelectUnit}
-      tutorialForceTableExpanded={isPhaseMoveStep || isStep2_2Or3Or4}
-      tutorialForceUnitIdsExpanded={isPhaseMoveStep || isStep2_2Or3Or4 ? [1] : undefined}
+      tutorialForceTableExpanded={isPhaseMoveStep || isStep2_2Or3Or4Or5}
+      tutorialForceUnitIdsExpanded={isPhaseMoveStep || isStep2_2Or3Or4Or5 ? [1] : undefined}
       onNameMColumnsRect={
         isPhaseMoveStep && !isStep1_6 ? tutorial?.setSpotlightTablePositions : undefined
       }
-      tutorialForceRangedExpandedForUnitIds={isStep1_6 || isStep2_2Or3Or4 ? [1] : undefined}
+      tutorialForceRangedExpandedForUnitIds={isStep1_6 || isStep2_2Or3Or4Or5 ? [1] : undefined}
       onRangedWeaponsSectionRect={
-        isStep1_6 || isStep2_2Or3Or4 ? tutorial?.setSpotlightRangedWeaponsPositions : undefined
+        isStep1_6 || isStep2_2Or3Or4Or5 ? tutorial?.setSpotlightRangedWeaponsPositions : undefined
       }
     />
   );
@@ -632,6 +703,12 @@ function UnitStatusTablePlayer2WithTutorial(
   const stage = tutorial?.currentStep?.stage ?? "";
   const isStep2_2Or3Or4 =
     tutorial?.popupVisible && (stage === "1-22" || stage === "1-23" || stage === "1-24");
+  const forceLayout2_11 =
+    tutorial?.popupVisible &&
+    tutorial?.currentEtape === 2 &&
+    tutorial?.gamePhase === "deployment";
+  const isStage2_11Or12 =
+    forceLayout2_11 || (tutorial?.popupVisible && (stage === "2-11" || stage === "2-12"));
   const lastRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(
     null
   );
@@ -663,7 +740,7 @@ function UnitStatusTablePlayer2WithTutorial(
   return (
     <UnitStatusTable
       {...props}
-      tutorialForceTableExpanded={isStep2_2Or3Or4}
+      tutorialForceTableExpanded={isStep2_2Or3Or4 || isStage2_11Or12}
       tutorialForceUnitIdsExpanded={isStep2_2Or3Or4 ? [2] : undefined}
       onUnitAttributesSectionRect={isStep2_2Or3Or4 ? onUnitAttributesSectionRect : undefined}
       tutorialReportAttributesForUnitIds={isStep2_2Or3Or4 ? [2] : undefined}

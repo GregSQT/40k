@@ -783,6 +783,15 @@ export default function Board({
     }
     app.stage.position.set(canvasPaddingX, canvasPaddingTop);
 
+    // Remove previous tutorial death ghost (étape 1-25) if any
+    const existingGhost = app.stage.children.find((c) => c.name === "tutorial-death-ghost");
+    if (existingGhost) {
+      app.stage.removeChild(existingGhost);
+      if ("destroy" in existingGhost && typeof (existingGhost as PIXI.Container).destroy === "function") {
+        (existingGhost as PIXI.Container).destroy({ children: true });
+      }
+    }
+
     // ✅ CREATE PERSISTENT UI CONTAINER for target logos, charge badges, etc.
     // This container is NEVER cleaned up by drawBoard()
     // Always recreate/re-add to ensure it's on the stage
@@ -2090,6 +2099,37 @@ export default function Board({
       }
     }
 
+    // ✅ TUTORIAL 1-25 : ghost Termagant à l'emplacement de mort sur le board
+    if (
+      tutorial?.currentStep?.stage === "1-25" &&
+      tutorial?.lastEnemyDeathPosition &&
+      boardConfig
+    ) {
+      const { col, row } = tutorial.lastEnemyDeathPosition;
+      const ghostCenterX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+      const ghostCenterY =
+        row * HEX_VERT_SPACING +
+        ((col % 2) * HEX_VERT_SPACING) / 2 +
+        HEX_HEIGHT / 2 +
+        MARGIN;
+      const ghostContainer = new PIXI.Container();
+      ghostContainer.name = "tutorial-death-ghost";
+      const ghostSprite = PIXI.Sprite.from("/icons/Termagant_red.webp");
+      ghostSprite.anchor.set(0.5);
+      ghostSprite.position.set(ghostCenterX, ghostCenterY);
+      ghostSprite.alpha = 0.45;
+      const iconScale = boardConfig.display?.icon_scale ?? 1;
+      const targetSize = HEX_RADIUS * iconScale;
+      const tw = ghostSprite.texture?.width ?? ghostSprite.width ?? 1;
+      const th = ghostSprite.texture?.height ?? ghostSprite.height ?? 1;
+      const maxDim = Math.max(tw, th, 1);
+      const ghostScale = targetSize / maxDim;
+      ghostSprite.scale.set(ghostScale, ghostScale);
+      ghostSprite.tint = 0x888888;
+      ghostContainer.addChild(ghostSprite);
+      app.stage.addChild(ghostContainer);
+    }
+
     // ✅ CHARGE ROLL POPUP RENDERING
     if (chargeRollPopup) {
       const popupText = chargeRollPopup.tooLow
@@ -2503,6 +2543,8 @@ export default function Board({
     blinkVersion,
     deploymentState,
     replayActionIndex,
+    tutorial?.currentStep?.stage,
+    tutorial?.lastEnemyDeathPosition,
   ]);
 
   // Handle weapon selection

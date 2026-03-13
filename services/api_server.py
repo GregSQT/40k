@@ -29,7 +29,7 @@ sys.path.insert(0, engine_dir)
 from engine.w40k_core import W40KEngine
 from main import load_config
 from shared.data_validation import require_key
-from engine.combat_utils import resolve_dice_value
+from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
 
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
@@ -1121,6 +1121,35 @@ def start_game():
             print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
             raise
         print("DEBUG: engine.reset() completed successfully")
+
+        # Tutoriel : conserver les positions des unités P1 depuis l’état précédent (ex. Intercessor après 1-25)
+        preserve_p1 = data.get("preserve_p1_positions_from")
+        if isinstance(preserve_p1, dict) and preserve_p1.get("units"):
+            prev_units = preserve_p1["units"]
+            p1_positions = {}
+            for u in prev_units:
+                if int(u.get("player", 0)) != 1:
+                    continue
+                uid = u.get("id")
+                if uid is None:
+                    continue
+                col, row = u.get("col"), u.get("row")
+                if col is not None and row is not None:
+                    p1_positions[str(uid)] = (col, row)
+            if p1_positions:
+                for unit in engine.game_state["units"]:
+                    if int(unit.get("player", 0)) != 1:
+                        continue
+                    uid_str = str(unit["id"])
+                    if uid_str in p1_positions:
+                        set_unit_coordinates(unit, p1_positions[uid_str][0], p1_positions[uid_str][1])
+                build_units_cache(engine.game_state)
+                rebuild_choice_timing_index(engine.game_state)
+                uc = engine.game_state["units_cache"]
+                engine.game_state["units_cache_prev"] = {
+                    uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
+                    for uid, d in uc.items()
+                }
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(_game_state_for_json(engine))
