@@ -525,6 +525,18 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     from ai.training_utils import get_scenario_list_for_phase
 
     config = get_config_loader()
+    global_config = config.load_config("config", force_reload=False)
+    progress_bar_cfg = require_key(global_config, "progress_bar")
+    bot_eval_bar_length = require_key(progress_bar_cfg, "bot_eval_width")
+    if not isinstance(bot_eval_bar_length, int) or isinstance(bot_eval_bar_length, bool):
+        raise TypeError(
+            "config.progress_bar.bot_eval_width must be an integer "
+            f"(got {type(bot_eval_bar_length).__name__})"
+        )
+    if bot_eval_bar_length <= 0:
+        raise ValueError(
+            f"config.progress_bar.bot_eval_width must be > 0 (got {bot_eval_bar_length})"
+        )
 
     # CRITICAL FIX: Strip phase suffix from controlled_agent for file path lookup
     # controlled_agent may be "Agent_phase1", but files are at "config/agents/Agent/..."
@@ -691,7 +703,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             return
         nonlocal last_progress_line_len
         progress_pct = (completed_ep / total_ep) * 100 if total_ep > 0 else 0
-        bar_length = 20
+        bar_length = bot_eval_bar_length
         filled = int(bar_length * completed_ep / total_ep) if total_ep > 0 else 0
         bar = '█' * filled + '░' * (bar_length - filled)
         elapsed = time.time() - start_time
@@ -817,7 +829,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     if show_progress:
         # Show final progress bar (100%) before moving to next line
         progress_pct = 100.0
-        bar_length = 20
+        bar_length = bot_eval_bar_length
         bar = '█' * bar_length
         elapsed = time.time() - start_time
         _mins = int(elapsed // 60)

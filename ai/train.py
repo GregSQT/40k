@@ -192,6 +192,37 @@ from ai.vec_normalize_utils import save_vec_normalize, load_vec_normalize, get_v
 
 from shared.data_validation import require_key
 
+_progress_bar_width_cache: Optional[Dict[str, int]] = None
+
+
+def _get_progress_bar_width(config_key: str) -> int:
+    """Load and validate progress bar width from config/config.json."""
+    global _progress_bar_width_cache
+    if _progress_bar_width_cache is None:
+        config_loader = get_config_loader()
+        global_config = config_loader.load_config("config", force_reload=False)
+        progress_bar_cfg = require_key(global_config, "progress_bar")
+        validated_widths: Dict[str, int] = {}
+        for key in (
+            "training_width",
+            "bot_eval_width",
+            "curriculum_phase_width",
+            "macro_eval_width",
+        ):
+            width = require_key(progress_bar_cfg, key)
+            if not isinstance(width, int) or isinstance(width, bool):
+                raise TypeError(
+                    f"config.progress_bar.{key} must be an integer "
+                    f"(got {type(width).__name__})"
+                )
+            if width <= 0:
+                raise ValueError(
+                    f"config.progress_bar.{key} must be > 0 (got {width})"
+                )
+            validated_widths[key] = width
+        _progress_bar_width_cache = validated_widths
+    return require_key(_progress_bar_width_cache, config_key)
+
 
 def _apply_torch_compile(model) -> None:
     """Wrap policy.forward to move action_masks to model device (GPU or CPU), then apply torch.compile on CUDA.
@@ -1150,7 +1181,7 @@ def _build_macro_eval_env(config, training_config_name, rewards_config_name, age
 
 def _print_eval_progress(completed, total, start_time, label):
     progress_pct = (completed / total) * 100
-    bar_length = 50
+    bar_length = _get_progress_bar_width("macro_eval_width")
     filled = int(bar_length * completed / total)
     bar = '█' * filled + '░' * (bar_length - filled)
 
@@ -2486,13 +2517,15 @@ def _format_phase_label_for_display(phase_name: str) -> str:
 def _build_curriculum_phase_progress_prefix(
     phase_episodes: int,
     max_episodes_in_phase: int,
-    bar_length: int = 40
+    bar_length: Optional[int] = None
 ) -> str:
     """Build fixed left progress panel for curriculum gate evaluations."""
     if max_episodes_in_phase <= 0:
         raise ValueError(
             f"max_episodes_in_phase must be > 0 (got {max_episodes_in_phase})"
         )
+    if bar_length is None:
+        bar_length = _get_progress_bar_width("curriculum_phase_width")
     bounded_episodes = min(max(phase_episodes, 0), max_episodes_in_phase)
     progress_ratio = bounded_episodes / max_episodes_in_phase
     progress_pct = progress_ratio * 100.0

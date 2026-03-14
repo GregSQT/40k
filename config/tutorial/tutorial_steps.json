@@ -68,7 +68,7 @@
     },
     {
       "stage": "1-21",
-      "trigger": { "type": "phase_enter", "phase": "shooting" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. Halo sur les boutons Move et Shoot dans turnphase tracker et sur le titre (feature) du Combat Log et sur la ligne qui vient d'apparaitre dans Combat Log.",
       "next_step": "Clic sur l'icône de l'Intercessor pour le sélectionner",
       "advance_on_unit_click": true,
@@ -77,16 +77,16 @@
       "popup_show_green_circle": true,
       "popup_first_line_with_icon": true,
       "title_fr": "1-21 Phase de Tir",
-      "title_en": "Shooting phase",
+      "title_en": "Shoot phase",
       "body_fr": "Le cercle vert indique qu'une unité est activable.\nLe mouvement est terminé, nous entrons dans la phase de tir.\nL'intercessor est activable (icone entourée de vert). \n\n--------------------\n<cursor>Cliquez sur l'icône de l'Intercessor pour l'activer.",
-      "body_en": "The green circle indicates that a unit is activable.\nThe movement phase is over, we enter the shooting phase. \nThe Intercessor is activable (green circle). \n\n--------------------\n<cursor>Click on the Intercessor icon to activate it."
+      "body_en": "The green circle indicates that a unit is activable.\nThe movement phase is over, we enter the shoot phase. \nThe Intercessor is activable (green circle). \n\n--------------------\n<cursor>Click on the Intercessor icon to activate it."
     },
     {
       "stage": "1-22",
       "hide_advance_icon": true,
       "advance_on_weapon_click": true,
       "popup_position": { "left": "32%", "top": "12%" },
-      "trigger": { "type": "phase_enter", "phase": "shooting" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre).",
       "next_step": "Clic sur l'icone du menu des armes à distance",
       "title_fr": "1-22 Menu de choix des armes",
@@ -100,7 +100,7 @@
       "advance_on_weapon_click": true,
       "advance_on_weapon_name": "Bolt Rifle",
       "popup_position": { "left": "32%", "top": "12%" },
-      "trigger": { "type": "phase_enter", "phase": "shooting" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre).",
       "next_step": "Clic sur le Bolt Rifle dans le menu des armes à distance",
       "title_fr": "1-23 Choix de l'arme",
@@ -114,7 +114,7 @@
       "advance_on_weapon_click": true,
       "popup_image": "/icons/Termagant_red.webp",
       "popup_position": { "left": "32%", "top": "12%" },
-      "trigger": { "type": "phase_enter", "phase": "shooting" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre).",
       "next_step": "Clic sur l'icône du Termagant",
       "title_fr": "1-24 Choix de la cible",
@@ -127,7 +127,7 @@
       "hide_advance_icon": false,
       "advance_on_weapon_click": false,
       "popup_position": { "left": "32%", "top": "12%" },
-      "trigger": { "type": "phase_enter", "phase": "shooting" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir. Halo sur : boutons Move et Shoot (turn phase tracker), les lignes d'arme de l'Intercessor (et ligne titre) et tout le combat log",
       "next_step": "Le termagant est mort.",
       "title_fr": "1-25 Mort du termagant",
@@ -170,9 +170,9 @@
       "layout": "Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de tir. Au moins 1 Hormagaunt effectue une advance.",
       "next_step": "Clic sur Suivant",
       "title_fr": "2-13 Phase de tir des Hormagaunts",
-      "title_en": "Shooting phase of Hormagaunts",
+      "title_en": "Shoot phase of Hormagaunts",
       "body_fr": "Pendant la phase de tir, une unité peut choisir soit de tirer avec une arme à distance, soit d'avancer. Si une unité avance, elle ne pourra pas charger pendant la phase de charge suivante.",
-      "body_en": "During the shooting phase, a unit can choose to either shoot with a ranged weapon or advance. If a unit advances, it will not be able to charge during the next charge phase."
+      "body_en": "During the shoot phase, a unit can choose to either shoot with a ranged weapon or advance. If a unit advances, it will not be able to charge during the next charge phase."
     },
     {
       "stage": "2-14",

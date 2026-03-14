@@ -505,10 +505,38 @@ export function TutorialProvider({
         lastPhaseRef.current = phase;
         return;
       }
+      const phaseOrder = ["move", "shoot", "charge", "fight"];
+      const lastPhaseIdx = phaseOrder.indexOf(lastPhaseRef.current ?? "");
+      const newPhaseIdx = phaseOrder.indexOf(phase);
+      // Étape 2 : si cascade (ex. move→charge sans phase shoot), afficher le prochain step (2-12)
+      if (
+        currentEtape === 2 &&
+        stepsForEtape.length > 0 &&
+        newPhaseIdx > lastPhaseIdx + 1 &&
+        currentStepIndex < stepsForEtape.length - 1
+      ) {
+        const nextIdx = currentStepIndex + 1;
+        if (nextIdx < stepsForEtape.length) {
+          lastPhaseRef.current = phase;
+          setCurrentStepIndex(nextIdx);
+          setPopupVisible(true);
+          return;
+        }
+      }
       lastPhaseRef.current = phase;
       showStepForTrigger("phase_enter", phase);
     }
-  }, [isTutorialMode, skipped, gameState, currentEtape, steps.length, showStepForTrigger]);
+  }, [
+    isTutorialMode,
+    skipped,
+    gameState,
+    gameState?.phase,
+    currentEtape,
+    currentStepIndex,
+    stepsForEtape.length,
+    steps.length,
+    showStepForTrigger,
+  ]);
 
   const hasLivingEnemyUnits = useMemo(() => {
     if (!gameState?.units) return false;

@@ -25,6 +25,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 from shared.data_validation import require_key
 from ai.vec_normalize_utils import get_vec_normalize_path
+from config_loader import get_config_loader
 
 # Import evaluation bots for testing - flag used by print_final_training_summary
 try:
@@ -41,6 +42,23 @@ __all__ = [
     'MetricsCollectionCallback',
     'BotEvaluationCallback'
 ]
+
+def _require_progress_bar_width(config_key: str) -> int:
+    """Load and validate progress bar width from config/config.json."""
+    config_loader = get_config_loader()
+    global_config = config_loader.load_config("config", force_reload=False)
+    progress_bar_cfg = require_key(global_config, "progress_bar")
+    width = require_key(progress_bar_cfg, config_key)
+    if not isinstance(width, int) or isinstance(width, bool):
+        raise TypeError(
+            f"config.progress_bar.{config_key} must be an integer "
+            f"(got {type(width).__name__})"
+        )
+    if width <= 0:
+        raise ValueError(
+            f"config.progress_bar.{config_key} must be > 0 (got {width})"
+        )
+    return width
 
 
 class LearningRateScheduleCallback(BaseCallback):
@@ -189,6 +207,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self._ema_env_actions_per_second: Optional[float] = None
         self.gate_display_state = gate_display_state
         self.total_eval_time_at_last_display = 0.0
+        self.training_progress_bar_length = _require_progress_bar_width("training_width")
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -291,7 +310,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 global_progress_pct = (display_episode_count / display_total_episodes) * 100
 
                 # Global progress bar (full width)
-                bar_length = 40
+                bar_length = self.training_progress_bar_length
                 filled = int(bar_length * display_episode_count / display_total_episodes)
                 bar = '█' * filled + '░' * (bar_length - filled)
 
@@ -353,7 +372,7 @@ class EpisodeTerminationCallback(BaseCallback):
                     elapsed_str = format_time(elapsed)
                     eta_str = format_time(eta)
                     speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
-                    time_info = f" [{elapsed_str}<{eta_str}, {speed_str}]"
+                    time_info = f"{elapsed_str}<{eta_str}, {speed_str}"
 
                 avg_duration_value = (
                     self.total_episode_duration_seconds / self.episode_duration_stats_count
@@ -361,8 +380,8 @@ class EpisodeTerminationCallback(BaseCallback):
                     else 0.0
                 )
                 duration_display = (
-                    f" duration avg: {avg_duration_value:.2f}s"
-                    f" - max: {self.max_episode_duration_seconds:.2f}s"
+                    f"{avg_duration_value:.2f}s/ep, "
+                    f"max {self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"
                 if self.gate_display_state is not None:
@@ -375,7 +394,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
                 progress_line = (
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                    f"{time_info}{duration_display}{gate_display}{phase_display}"
+                    f" [{time_info}] {duration_display}{gate_display}{phase_display}"
                 )
                 # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
                 prev_len = self._last_progress_line_len
@@ -388,7 +407,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 if self.gate_display_state is not None:
                     self.gate_display_state["training_prefix"] = (
                         f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                        f"{time_info} "
+                        f" [{time_info}] "
                     )
                     self.gate_display_state["last_progress_line_len"] = len(progress_line)
 
@@ -1210,6 +1229,9 @@ class BotEvaluationCallback(BaseCallback):
         self.best_robust_model_path: Optional[str] = None
         self.final_summary_target_episodes = final_summary_target_episodes
         self.last_eval_results: Optional[Dict[str, Any]] = None
+        self.curriculum_phase_progress_bar_length = _require_progress_bar_width(
+            "curriculum_phase_width"
+        )
 
         if EVALUATION_BOTS_AVAILABLE:
             # Initialize bots with stochasticity to prevent overfitting (15% random actions)
@@ -1578,7 +1600,7 @@ class BotEvaluationCallback(BaseCallback):
         bounded_episodes = min(phase_episode_count, self.phase_progress_total_episodes)
         progress_ratio = bounded_episodes / self.phase_progress_total_episodes
         progress_pct = progress_ratio * 100.0
-        bar_length = 40
+        bar_length = self.curriculum_phase_progress_bar_length
         filled = int(bar_length * progress_ratio)
         bar = '█' * filled + '░' * (bar_length - filled)
         return f"{progress_pct:3.0f}% {bar} {bounded_episodes}/{self.phase_progress_total_episodes}"
