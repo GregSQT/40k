@@ -177,12 +177,18 @@ interface RuleChoicePrompt {
 }
 
 export interface UseEngineAPIOptions {
-  /** Ref à un getter appelé avant envoi d’un tir (left_click enemy) ; si forceKill, le backend force la mort de la cible (tutoriel 1-24, 2e tir). */
+  /** Ref à un getter appelé avant envoi d'un tir (left_click enemy) ; si forceKill, le backend force la mort de la cible (tutoriel 1-24, 2e tir). */
   getTutorialShootOptionsRef?: MutableRefObject<() => { forceKill?: boolean }>;
+  /** Tutoriel étape 2 (2-11/2-12/2-13) : arrêter la boucle AI après chaque phase pour permettre pause entre move/shoot/charge. */
+  stopAiAfterPhaseChangeRef?: MutableRefObject<boolean>;
+  /** Appelé immédiatement quand on break pour changement de phase ; permet de mettre pauseAI à true avant que le useEffect ne re-déclenche l'IA. */
+  onStopAfterPhaseChange?: () => void;
 }
 
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const getTutorialShootOptionsRef = options?.getTutorialShootOptionsRef;
+  const stopAiAfterPhaseChangeRef = options?.stopAiAfterPhaseChangeRef;
+  const onStopAfterPhaseChange = options?.onStopAfterPhaseChange;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -291,7 +297,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const isPvPTestMode = mode === "pvp_test";
         const isTutorialMode = mode === "tutorial";
         const requestedModeCode = isTutorialMode
-          ? "pvp_test"
+          ? "pve"
           : isPvETestMode
             ? "pve_test"
             : isPvEMode
@@ -315,7 +321,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
 
         const requestPayload: Record<string, unknown> = {
-          pve_mode: isPvEMode || isPvETestMode,
+          pve_mode: isPvEMode || isPvETestMode || isTutorialMode,
           mode_code: requestedModeCode,
         };
         if (isTutorialMode) {
@@ -349,7 +355,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const data = await response.json();
         if (data.success) {
           const expectedPlayer2Type: "human" | "ai" =
-            isPvEMode || isPvETestMode ? "ai" : "human";
+            requestedModeCode === "pve" || requestedModeCode === "pve_test" ? "ai" : "human";
           const player2Type = data.game_state?.player_types?.["2"];
           if (player2Type !== expectedPlayer2Type) {
             throw new Error(
@@ -397,8 +403,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       try {
         const body: Record<string, unknown> = {
-          pve_mode: false,
-          mode_code: "pvp_test",
+          pve_mode: true,
+          mode_code: "pve",
           scenario_file: scenarioFile,
         };
         if (options?.preserveP1PositionsFrom != null) {
@@ -2669,11 +2675,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return targetId;
     })(),
     // Add AI turn execution for PvE mode
-    executeAITurn: async () => {
+    executeAITurn: async (options?: { stopAfterPhaseChange?: boolean }) => {
       if (aiTurnInProgress) {
         return;
       }
       aiTurnInProgress = true;
+
+      const stopAfterPhase =
+        options?.stopAfterPhaseChange ?? stopAiAfterPhaseChangeRef?.current ?? false;
 
       // Check if AI has eligible units in current phase FIRST
       const phaseCheck = gameState.phase;
@@ -3002,12 +3011,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         };
       };
 
+      let totalUnitsProcessed = 0;
+      let iteration = 0;
       try {
-        let totalUnitsProcessed = 0;
         const maxIterations = 25; // Allow larger armies (e.g. 12+ units in move phase)
-        let iteration = 0;
         let lastPoolSize = -1;
         let samePoolSizeCount = 0;
+        const initialPhase = gameState.phase;
 
         while (iteration < maxIterations) {
           iteration++;
@@ -3156,6 +3166,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Update game state from activation
           if (activationData.game_state) {
             setGameState(activationData.game_state);
+            const newPhase = activationData.game_state.phase;
+            const phaseChanged = newPhase !== initialPhase;
+            // Tutoriel 2-11/2-12/2-13/2-14 : arrêter après chaque phase pour afficher le popup suivant
+            if (stopAfterPhase && phaseChanged) {
+              onStopAfterPhaseChange?.();
+              break;
+            }
           }
 
           // Step 2: Check if we got a preview response requiring decision
@@ -3261,14 +3278,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
             } else if (
               currentPhase === "charge" &&
-              activationData.result.blinking_units &&
-              activationData.result.start_blinking
+              (activationData.result.blinking_units || activationData.result.valid_targets) &&
+              (activationData.result.start_blinking !== false || activationData.result.valid_targets)
             ) {
-              // Charge phase - we have blinking_units (potential targets) but no destinations yet
+              // Charge phase - we have blinking_units or valid_targets (potential targets) but no destinations yet
               // Step 1: Select target (this will trigger roll and build destinations)
-              const blinkingUnits = activationData.result.blinking_units;
+              const blinkingUnits = activationData.result.blinking_units as string[] | undefined;
+              const validTargets = activationData.result.valid_targets as Array<{ id: string | number }> | undefined;
+              const targetIds = blinkingUnits?.length
+                ? blinkingUnits
+                : validTargets?.map((t) => String(t.id)) ?? [];
 
-              if (!blinkingUnits || blinkingUnits.length === 0) {
+              if (!targetIds.length) {
                 aiDecision = { action: "skip", unitId };
               } else {
                 interface ChargeUnit {
@@ -3285,13 +3306,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 if (!currentUnit) {
                   aiDecision = { action: "skip", unitId };
                 } else {
-                  // Find nearest enemy from blinking_units
+                  // Find nearest enemy from target IDs
                   const enemies =
                     activationData.game_state?.units.filter(
                       (u: ChargeUnit) =>
                         u.player !== currentUnit.player &&
                         u.HP_CUR > 0 &&
-                        blinkingUnits.includes(String(u.id))
+                        targetIds.includes(String(u.id))
                     ) || [];
 
                   if (enemies.length === 0) {
@@ -3335,8 +3356,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 action: "advance",
                 unitId: advanceUnitId,
               };
-            } else if (activationData.result.valid_targets) {
+            } else if (
+              activationData.result.valid_targets &&
+              currentPhase !== "charge"
+            ) {
               // Handle valid targets (uniformized to snake_case in backend)
+              // Charge phase is handled above via blinking_units/valid_targets block
               const targets = activationData.result.valid_targets;
 
               if (currentPhase === "fight") {
@@ -3346,6 +3371,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 // Shooting phase - pick target using fresh backend state
                 aiDecision = makeShootingDecision(targets, unitId, activationData.game_state);
               }
+            } else if (currentPhase === "charge" && activationData.result.waiting_for_player) {
+              // Charge phase waiting but no targets/destinations - skip to avoid infinite loop
+              aiDecision = { action: "skip", unitId };
             } else {
               break;
             }
@@ -3425,6 +3453,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               if (decisionData.result?.phase_complete) {
                 break;
               }
+              // Tutoriel 2-11/2-12/2-13/2-14 : arrêter après chaque phase
+              if (
+                stopAfterPhase &&
+                decisionData.game_state?.phase !== initialPhase
+              ) {
+                onStopAfterPhaseChange?.();
+                break;
+              }
             } else {
               break;
             }
@@ -3436,8 +3472,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             // Backend uses activation_ended (generic) or activation_complete (movement handler)
             totalUnitsProcessed++;
 
+            const actEndPhase = activationData.game_state?.phase;
+            const actEndPhaseChanged = actEndPhase !== initialPhase;
+
             // Check if phase complete after unit completion
             if (activationData.result?.phase_complete) {
+              break;
+            }
+            // Tutoriel 2-11/2-12/2-13/2-14 : arrêter après chaque phase
+            if (stopAfterPhase && actEndPhaseChanged) {
+              onStopAfterPhaseChange?.();
               break;
             }
           } else if (
@@ -3467,6 +3511,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   totalUnitsProcessed++;
 
                   if (skipData.result?.phase_complete) {
+                    break;
+                  }
+                  // Tutoriel 2-11/2-12/2-13 : arrêter après chaque phase
+                  if (
+                    stopAfterPhase &&
+                    skipData.game_state?.phase !== initialPhase
+                  ) {
+                    onStopAfterPhaseChange?.();
                     break;
                   }
                 }

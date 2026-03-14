@@ -31,6 +31,7 @@ from main import load_config
 from shared.data_validation import require_key
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
+from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
 
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
 PBKDF2_ITERATIONS = 200000
@@ -1150,6 +1151,74 @@ def start_game():
                     uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
                     for uid, d in uc.items()
                 }
+
+            # Tutoriel 1-25→2 : avancer au début du T1 de P2 (fin du T1 de P1 simulée)
+            # Les Hormagaunts bougeront pendant la phase move du T1 de P2
+            # Déploiement selon les positions du scenario (ex. scenario_etape2.json)
+            gs = engine.game_state
+            scenario_file = data.get("scenario_file")
+            p2_positions_from_scenario = {}
+            if isinstance(scenario_file, str) and scenario_file.strip():
+                scenario_path = os.path.join(abs_parent, scenario_file.strip())
+                if os.path.exists(scenario_path):
+                    try:
+                        with open(scenario_path, "r", encoding="utf-8") as f:
+                            scenario_data = json.load(f)
+                        for u in scenario_data.get("units", []):
+                            if int(u.get("player", 0)) != 2:
+                                continue
+                            uid = u.get("id")
+                            if uid is None:
+                                continue
+                            col, row = u.get("col"), u.get("row")
+                            if col is not None and row is not None:
+                                p2_positions_from_scenario[str(uid)] = (int(col), int(row))
+                    except (json.JSONDecodeError, OSError):
+                        pass
+            while gs.get("phase") == "deployment":
+                dep_state = gs.get("deployment_state")
+                if not dep_state:
+                    break
+                deployer = int(dep_state.get("current_deployer", 2))
+                deployable = dep_state.get("deployable_units", {})
+                pool_ids = deployable.get(deployer, deployable.get(str(deployer), []))
+                if not pool_ids:
+                    break
+                unit_id = str(pool_ids[0])
+                dest = None
+                if unit_id in p2_positions_from_scenario:
+                    dest = p2_positions_from_scenario[unit_id]
+                if dest is None:
+                    pools = dep_state.get("deployment_pools", {})
+                    hex_pool = pools.get(deployer, pools.get(str(deployer), []))
+                    if not hex_pool:
+                        break
+                    occupied = {(int(u.get("col", -2)), int(u.get("row", -2))) for u in gs.get("units", [])
+                                if u.get("col") is not None and u.get("row") is not None}
+                    for h in hex_pool:
+                        if isinstance(h, (list, tuple)) and len(h) >= 2:
+                            c, r = int(h[0]), int(h[1])
+                        elif isinstance(h, dict) and "col" in h and "row" in h:
+                            c, r = int(h["col"]), int(h["row"])
+                        else:
+                            continue
+                        if (c, r) not in occupied:
+                            dest = (c, r)
+                            break
+                if dest is None:
+                    break
+                action = {"action": "deploy_unit", "unitId": unit_id, "destCol": dest[0], "destRow": dest[1]}
+                ok, res = deployment_handlers.execute_deployment_action(gs, action)
+                if not ok:
+                    break
+                if res.get("phase_complete"):
+                    command_handlers.command_phase_start(gs)
+                    movement_handlers.movement_phase_start(gs)
+                    break
+            gs["current_player"] = 2
+            gs["turn"] = 1
+            command_handlers.command_phase_start(gs)
+            movement_handlers.movement_phase_start(gs)
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(_game_state_for_json(engine))

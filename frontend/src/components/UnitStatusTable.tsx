@@ -50,6 +50,8 @@ interface UnitStatusTableProps {
   tutorialForceTableExpanded?: boolean;
   /** En mode tutoriel : forcer ces unités à avoir la ligne stats dépliée (ex. Intercessor id 1). */
   tutorialForceUnitIdsExpanded?: UnitId[];
+  /** En mode tutoriel (étape 2-11) : forcer ces unités à avoir la ligne stats repliée (ex. premier Hormagaunt id 2). */
+  tutorialForceUnitIdsCollapsed?: UnitId[];
   /** En mode tutoriel : rapporter les positions viewport [colonne Name, colonne M] pour les halos. */
   onNameMColumnsRect?:
     | ((
@@ -144,9 +146,10 @@ interface UnitRowProps {
         }> | null
       ) => void)
     | null;
-  /** Tutoriel 2-11/2-12 : rapporter le rect viewport de la ligne unité pour halo P2. */
+  /** Tutoriel 2-11/2-12 : rapporter le rect viewport de la ligne unité pour halo P2. Signature (unitId, rect) pour éviter recréation de callback par unité. */
   reportUnitRowRect?:
     | ((
+        unitId: UnitId,
         rect: {
           shape: "rect";
           left: number;
@@ -366,17 +369,17 @@ const UnitRow = memo<UnitRowProps>(
       const pad = 4;
       const minSize = 4;
       if (r.width < minSize || r.height < minSize) {
-        reportUnitRowRect(null);
+        reportUnitRowRect(unit.id, null);
         return;
       }
-      reportUnitRowRect({
+      reportUnitRowRect(unit.id, {
         shape: "rect",
         left: r.left - pad,
         top: r.top - pad,
         width: r.width + pad * 2,
         height: r.height + pad * 2,
       });
-    }, [reportUnitRowRect]);
+    }, [reportUnitRowRect, unit.id]);
     useLayoutEffect(() => {
       if (!reportUnitRowRect) return;
       reportRowRect();
@@ -388,9 +391,9 @@ const UnitRow = memo<UnitRowProps>(
       return () => {
         cancelAnimationFrame(t1);
         clearTimeout(t);
-        reportUnitRowRect(null);
+        reportUnitRowRect(unit.id, null);
       };
-    }, [reportUnitRowRect, reportRowRect]);
+    }, [reportUnitRowRect, reportRowRect, unit.id]);
 
     if (!unit.HP_MAX) {
       throw new Error(`Unit ${unit.id} missing required HP_MAX field`);
@@ -1130,6 +1133,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     onCollapseChange,
     tutorialForceTableExpanded = false,
     tutorialForceUnitIdsExpanded,
+    tutorialForceUnitIdsCollapsed,
     onNameMColumnsRect,
     tutorialForceRangedExpandedForUnitIds,
     onRangedWeaponsSectionRect,
@@ -1259,6 +1263,18 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
         });
       }
     }, [tutorialForceUnitIdsExpanded]);
+
+    useEffect(() => {
+      if (tutorialForceUnitIdsCollapsed && tutorialForceUnitIdsCollapsed.length > 0) {
+        setExpandedUnits((prev) => {
+          const next = new Set(prev);
+          for (const id of tutorialForceUnitIdsCollapsed) {
+            next.delete(id);
+          }
+          return next;
+        });
+      }
+    }, [tutorialForceUnitIdsCollapsed]);
 
     useEffect(() => {
       if (
@@ -1624,7 +1640,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                 }
                 reportUnitRowRect={
                   player === 2 && tutorialReportP2UnitRowRects && onP2UnitRowRects
-                    ? (rect) => handleP2UnitRowRect(unit.id, rect)
+                    ? handleP2UnitRowRect
                     : undefined
                 }
                 tableHeaderRowRef={tableHeaderRowRef}

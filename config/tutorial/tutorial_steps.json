@@ -132,15 +132,15 @@
       "next_step": "Le termagant est mort.",
       "title_fr": "1-25 Mort du termagant",
       "title_en": "Termagant death",
-      "body_fr": "<icone mort> Le Termagant est mort.\nC'est maintenant le tour de l'adversaire.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer.",
-      "body_en": "<death icon> The Termagant is dead.\nIt's now Player 2's turn.\n\n--------------------\n<cursor>Click on Next to continue."
+      "body_fr": "<icone mort> Le Termagant est mort.\n\nC'est maintenant le tour de l'adversaire.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer.",
+      "body_en": "<death icon> The Termagant is dead.\n\nIt's now Player 2's turn.\n\n--------------------\n<cursor>Click on Next to continue."
     },
     {
       "stage": "2-11",
       "hide_advance_icon": false,
       "advance_on_weapon_click": false,
       "popup_position": { "left": "58%", "top": "25%" },
-      "trigger": { "type": "phase_enter", "phase": "deployment" },
+      "trigger": { "type": "phase_enter", "phase": "move" },
       "layout": "Fog sur le panneau de droite et de la ligne 0 à 8 du board. Unitstatustable expanded pour afficher les units de P2. Halo sur le bouton turn 1 et P2 et Move de turnphase tracker et les icones des Termagants de P2.",
       "next_step": "Clic sur Suivant",
       "title_fr": "2-11 Arrivée des Hormagaunts",
@@ -153,13 +153,39 @@
       "hide_advance_icon": false,
       "advance_on_weapon_click": false,
       "popup_position": { "left": "58%", "top": "25%" },
-      "trigger": { "type": "phase_enter", "phase": "deployment" },
-      "layout": "Plus de fog nulle part. Les Hormagaunts executent leur phase de mouvement.",
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
+      "layout": "Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de mouvement.",
       "next_step": "Clic sur Suivant",
       "title_fr": "2-12 Phase de mouvement des Hormagaunts",
       "title_en": "Movement phase of Hormagaunts",
-      "body_fr": "Les Hormagaunts executent leur phase de mouvement.",
-      "body_en": "The Hormagaunts execute their movement phase."
+      "body_fr": "Les Hormagaunts ont exécuté leur phase de mouvement.",
+      "body_en": "The Hormagaunts have executed their movement phase."
+    },
+    {
+      "stage": "2-13",
+      "hide_advance_icon": false,
+      "advance_on_weapon_click": false,
+      "popup_position": { "left": "58%", "top": "25%" },
+      "trigger": { "type": "phase_enter", "phase": "charge" },
+      "layout": "Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de tir. Au moins 1 Hormagaunt effectue une advance.",
+      "next_step": "Clic sur Suivant",
+      "title_fr": "2-13 Phase de tir des Hormagaunts",
+      "title_en": "Shooting phase of Hormagaunts",
+      "body_fr": "Pendant la phase de tir, une unité peut choisir soit de tirer avec une arme à distance, soit d'avancer. Si une unité avance, elle ne pourra pas charger pendant la phase de charge suivante.",
+      "body_en": "During the shooting phase, a unit can choose to either shoot with a ranged weapon or advance. If a unit advances, it will not be able to charge during the next charge phase."
+    },
+    {
+      "stage": "2-14",
+      "hide_advance_icon": false,
+      "advance_on_weapon_click": false,
+      "popup_position": { "left": "58%", "top": "25%" },
+      "trigger": { "type": "phase_enter", "phase": "fight" },
+      "layout": "Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de charge.",
+      "next_step": "Clic sur Suivant",
+      "title_fr": "2-14 Phase de charge des Hormagaunts",
+      "title_en": "Charge phase of Hormagaunts",
+      "body_fr": "Pendant la phase de charge, une unité peut choisir de charger une cible ennemie si :\n\t- Elle n'a pas avancé pendant la phase précédente.\n\t- Elle n'est pas adjacent à une unité ennemie.\n Elle peut charger une cible située à 12 cases maximum d'elle.",
+      "body_en": "During the charge phase, a unit can choose to charge an enemy unit if :\n\t- It did not advance during the previous phase.\n\t- It is not adjacent to an enemy unit.\n- It can charge a target located at a maximum distance of 12 hexes from it."
     }
   ]
 }

@@ -223,7 +223,25 @@ class PvEController:
             predicted_action = micro_prediction.item()
         else:
             predicted_action = micro_prediction
-        
+
+        # Tutoriel 2-13 : forcer au moins 1 advance pour un Hormagaunt P2 en phase shoot
+        scenario_file = getattr(engine, "_current_scenario_file", "") or ""
+        if (
+            "tutorial" in scenario_file
+            and require_key(game_state, "phase") == "shoot"
+            and require_key(game_state, "current_player") == 2
+        ):
+            units_advanced = require_key(game_state, "units_advanced")
+            p2_advanced = any(
+                str(u.get("id")) in units_advanced
+                for u in game_state.get("units", [])
+                if int(u.get("player", 0)) == 2
+            )
+            if not p2_advanced and len(action_mask) > 12 and bool(action_mask[12]):
+                pred_int = int(predicted_action) if predicted_action is not None else -1
+                if pred_int == 11:
+                    predicted_action = 12
+
         # Apply action mask like in training - force valid action if predicted action is invalid
         if game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log

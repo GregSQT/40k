@@ -261,13 +261,24 @@ interface TutorialProviderProps {
     scenarioFile: string,
     options?: { preserveP1PositionsFrom?: APIGameState | null }
   ) => Promise<void>;
+  /** Callback appelé quand l'étape tutoriel change (ex. pour mettre l'IA en pause pendant 2-11). */
+  onStepChange?: (step: TutorialStepDisplay | null) => void;
+  /** Callback appelé quand l'IA doit être mise en pause (transition étape 2 ou popup 2-11/2-12/2-13 visible). */
+  onPauseAIChange?: (pause: boolean) => void;
+  /** Ref pour indiquer à useEngineAPI d'arrêter la boucle AI après chaque phase (étapes 2-11/2-12/2-13). */
+  stopAiAfterPhaseChangeRef?: React.MutableRefObject<boolean>;
   children: React.ReactNode;
 }
+
+const STAGES_AI_PAUSED = ["2-11", "2-12", "2-13"] as const;
 
 export function TutorialProvider({
   isTutorialMode,
   gameState,
   startGameWithScenario,
+  onStepChange,
+  onPauseAIChange,
+  stopAiAfterPhaseChangeRef,
   children,
 }: TutorialProviderProps) {
   const [steps, setSteps] = useState<TutorialStepDef[]>([]);
@@ -294,7 +305,21 @@ export function TutorialProvider({
   const [spotlightEnemyUnitAttributes, setSpotlightEnemyUnitAttributes] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightP2UnitRowPositions, setSpotlightP2UnitRowPositionsState] = useState<TutorialSpotlightPosition[]>([]);
   const setSpotlightP2UnitRowPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
-    setSpotlightP2UnitRowPositionsState(pos ?? []);
+    setSpotlightP2UnitRowPositionsState((prev) => {
+      const next = pos ?? [];
+      if (prev.length !== next.length) return next;
+      const areEqual = next.every((n, i) => {
+        const p = prev[i];
+        if (!p || p.shape !== "rect" || n.shape !== "rect") return false;
+        return (
+          p.left === n.left &&
+          p.top === n.top &&
+          p.width === n.width &&
+          p.height === n.height
+        );
+      });
+      return areEqual ? prev : next;
+    });
   }, []);
   const [spotlightBoardUnitPositions, setSpotlightBoardUnitPositionsState] = useState<TutorialSpotlightPosition[]>([]);
   const setSpotlightBoardUnitPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
@@ -308,6 +333,8 @@ export function TutorialProvider({
   const skipNextPhaseTriggerRef = useRef(false);
   /** En cours de chargement scenario 1->2 : ne pas laisser l'effet phase reecrire l'etape (evite fog/popup 1-11). */
   const transitioningToEtape2Ref = useRef(false);
+  /** Étapes 2-11/2-12/2-13 : l'utilisateur a cliqué Suivant → IA libérée pour exécuter la phase. */
+  const [releasedSteps, setReleasedSteps] = useState<Set<string>>(() => new Set());
 
 
   const stepsForEtape = useMemo(
@@ -360,6 +387,30 @@ export function TutorialProvider({
             : undefined,
     };
   }, [stepsForEtape, currentStepIndex]);
+
+  useLayoutEffect(() => {
+    onStepChange?.(currentStep);
+  }, [currentStep, onStepChange]);
+
+  /** Pause IA : transition étape 2, ou phase move/shoot/charge non encore libérée par clic Suivant.
+   * Basé sur la phase du jeu, pas sur popupVisible (évite que l'IA enchaîne avant affichage du popup). */
+  const phase = gameState?.phase ?? null;
+  const shouldPauseAI =
+    transitioningToEtape2Ref.current ||
+    (currentEtape === 2 &&
+      phase != null &&
+      ((phase === "move" && !releasedSteps.has("2-11")) ||
+        (phase === "shoot" && !releasedSteps.has("2-12")) ||
+        (phase === "charge" && !releasedSteps.has("2-13"))));
+  useLayoutEffect(() => {
+    onPauseAIChange?.(shouldPauseAI);
+  }, [shouldPauseAI, onPauseAIChange]);
+
+  useLayoutEffect(() => {
+    if (stopAiAfterPhaseChangeRef) {
+      stopAiAfterPhaseChangeRef.current = isTutorialMode && currentEtape === 2;
+    }
+  }, [isTutorialMode, currentEtape, stopAiAfterPhaseChangeRef]);
 
   /** Reset tous les spotlights quand le popup se ferme. */
   useEffect(() => {
@@ -522,6 +573,12 @@ export function TutorialProvider({
   }, []);
 
   const onClosePopup = useCallback(() => {
+    const stage = stepsForEtape[currentStepIndex] ? `${stepsForEtape[currentStepIndex].etape}-${stepsForEtape[currentStepIndex].order}` : "";
+    if (STAGES_AI_PAUSED.includes(stage as (typeof STAGES_AI_PAUSED)[number])) {
+      setReleasedSteps((prev) => new Set(prev).add(stage));
+      setPopupVisible(false);
+      return;
+    }
     if (currentStepIndex < stepsForEtape.length - 1) {
       skipNextPhaseTriggerRef.current = true;
       setCurrentStepIndex((i) => i + 1);
@@ -542,6 +599,7 @@ export function TutorialProvider({
         if (currentEtape === 1 && nextEtape === 2 && startGameWithScenario && gameState) {
           transitioningToEtape2Ref.current = true;
           lastPhaseRef.current = "deployment";
+          onPauseAIChange?.(true);
           startGameWithScenario(TUTORIAL_SCENARIOS[1], {
             preserveP1PositionsFrom: gameState as APIGameState,
           })
@@ -571,6 +629,7 @@ export function TutorialProvider({
     steps,
     startGameWithScenario,
     gameState,
+    onPauseAIChange,
   ]);
 
   const onSkipTutorial = useCallback(() => {

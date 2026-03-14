@@ -164,8 +164,9 @@ function TutorialOverlayGate(): React.ReactNode {
       ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[])
     : spotlights;
 
-  // 2-11/2-12 : fog rect sur partie haute (rows 0-11). 1-15 : fog rects 2 bandes.
-  const fogLeft = isStep1_5 || isStage2_11Or12 ? tutorial.leftPanelFogRects : null;
+  // 1-15 : fog rects 2 bandes. 2-11 : pas de fog rect (l'overlay masque déjà tout sauf le halo board bas).
+  // Éviter double fog en partie supérieure droite (overlay + fog droit se superposaient).
+  const fogLeft = isStep1_5 ? tutorial.leftPanelFogRects : null;
   const fogRight = null;
   return (
     <TutorialOverlay
@@ -264,6 +265,7 @@ function BoardColumnWithTutorial({
   const stageMajor = parseInt(stage.split("-")[0] ?? "", 10);
   const isFrom2_1Onwards = !Number.isNaN(stageMajor) && stageMajor >= 2;
   const isStage2_11Or12 = forceLayout2_11 || stage === "2-11" || stage === "2-12";
+  const isStage2_11Only = forceLayout2_11 || stage === "2-11";
   const isHaloLeft =
     ((tutorial?.popupVisible &&
       tutorial?.currentStep?.stepKey &&
@@ -318,8 +320,8 @@ function BoardColumnWithTutorial({
             height: bandHeight,
           },
         ]);
-      } else if (isStage2_11Or12) {
-        // Fog rect rows 0-11 (partie haute). Spotlight partie basse (rows 12+) = trou dans backdrop.
+      } else if (isStage2_11Only) {
+        // 2-11 uniquement : fog partie haute (rows 0-11). À partir de 2-12, plus de fog.
         const fogRows = 12;
         const fogHeight = r.height * Math.min(1, fogRows / Math.max(1, boardRows));
         tutorial.setSpotlightLeftPanel({
@@ -329,9 +331,17 @@ function BoardColumnWithTutorial({
           width: r.width,
           height: r.height - fogHeight,
         });
-        tutorial.setLeftPanelFogRects?.([
-          { shape: "rect", left: r.left, top: r.top, width: r.width, height: fogHeight },
-        ]);
+        tutorial.setLeftPanelFogRects?.(null);
+      } else if (isStage2_11Or12) {
+        // 2-12+ : plus de fog nulle part, panneau entier visible.
+        tutorial.setSpotlightLeftPanel({
+          shape: "rect",
+          left: r.left,
+          top: r.top,
+          width: r.width,
+          height: r.height,
+        });
+        tutorial.setLeftPanelFogRects?.(null);
       } else {
         tutorial.setSpotlightLeftPanel(
           isHaloLeft
@@ -363,6 +373,7 @@ function BoardColumnWithTutorial({
     needsMeasure,
     isHaloLeft,
     isStep1_5,
+    isStage2_11Only,
     isStage2_11Or12,
     boardRows,
     tutorial?.setSpotlightLeftPanel,
@@ -423,7 +434,7 @@ function RightColumnTutorialSpotlight({
   const stage = tutorial?.currentStep?.stage ?? "";
   const forceLayout2_11 =
     tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
-  const isStage2_11Or12 = forceLayout2_11 || stage === "2-11" || stage === "2-12";
+  const isStage2_11Only = forceLayout2_11 || stage === "2-11";
   const isPhaseMoveStep = Boolean(
     tutorial?.popupVisible &&
       tutorial?.currentStep?.stepKey &&
@@ -437,13 +448,13 @@ function RightColumnTutorialSpotlight({
       tutorial.setSpotlightRightPanel(null);
     }
     if (!tutorial?.setRightPanelFogRects) return;
-    if (!isStage2_11Or12) {
+    if (!isStage2_11Only) {
       tutorial.setRightPanelFogRects(null);
     }
-  }, [isPhaseMoveStep, isStage2_11Or12, tutorial?.setSpotlightRightPanel, tutorial?.setRightPanelFogRects]);
+  }, [isPhaseMoveStep, isStage2_11Only, tutorial?.setSpotlightRightPanel, tutorial?.setRightPanelFogRects]);
   useLayoutEffect(() => {
     if (!tutorial?.setSpotlightRightPanel || !tutorial?.setRightPanelFogRects) return;
-    if (!isPhaseMoveStep && !isStage2_11Or12) return;
+    if (!isPhaseMoveStep && !isStage2_11Only) return;
     let cancelled = false;
     const measure = () => {
       if (cancelled) return;
@@ -462,7 +473,7 @@ function RightColumnTutorialSpotlight({
       } else {
         tutorial.setSpotlightRightPanel(null);
       }
-      if (isStage2_11Or12) {
+      if (isStage2_11Only) {
         tutorial.setRightPanelFogRects([
           { shape: "rect", left: r.left, top: r.top, width: r.width, height: r.height },
         ]);
@@ -486,7 +497,7 @@ function RightColumnTutorialSpotlight({
       tutorial.setSpotlightRightPanel(null);
       tutorial.setRightPanelFogRects?.(null);
     };
-  }, [isPhaseMoveStep, isStage2_11Or12, tutorial?.setSpotlightRightPanel, tutorial?.setRightPanelFogRects]);
+  }, [isPhaseMoveStep, isStage2_11Only, tutorial?.setSpotlightRightPanel, tutorial?.setRightPanelFogRects]);
   return (
     <div ref={ref} style={{ display: "contents" }}>
       {children}
@@ -780,6 +791,7 @@ function UnitStatusTablePlayer2WithTutorial(
       {...props}
       tutorialForceTableExpanded={isStep2_2Or3Or4 || isStage2_11Or12}
       tutorialForceUnitIdsExpanded={isStep2_2Or3Or4 ? [2] : undefined}
+      tutorialForceUnitIdsCollapsed={stage === "2-11" ? [2] : undefined}
       onUnitAttributesSectionRect={isStep2_2Or3Or4 ? onUnitAttributesSectionRect : undefined}
       tutorialReportAttributesForUnitIds={isStep2_2Or3Or4 ? [2] : undefined}
       onP2UnitRowRects={isStage2_11Or12 ? onP2UnitRowRects : undefined}
@@ -837,7 +849,13 @@ export const BoardWithAPI: React.FC = () => {
   const canUseAutoWeaponSelection = authSession.permissions.options.auto_weapon_selection;
 
   const getTutorialShootOptionsRef = useRef<() => { forceKill?: boolean }>(() => ({}));
-  const apiProps = useEngineAPI({ getTutorialShootOptionsRef });
+  const stopAiAfterPhaseChangeRef = useRef(false);
+  const [pauseAIForTutorial, setPauseAIForTutorial] = useState(false);
+  const apiProps = useEngineAPI({
+    getTutorialShootOptionsRef,
+    stopAiAfterPhaseChangeRef,
+    onStopAfterPhaseChange: () => setPauseAIForTutorial(true),
+  });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
 
   // Detect game mode from URL
@@ -859,8 +877,8 @@ export const BoardWithAPI: React.FC = () => {
     if (!playerTypes) {
       return false;
     }
-    // Strict guard: AI orchestration is only valid in PvE routes.
-    if (gameMode !== "pve") {
+    // AI orchestration: PvE et tutoriel (P2 contrôlé par IA).
+    if (gameMode !== "pve" && gameMode !== "tutorial") {
       return false;
     }
     return Object.values(playerTypes).some((playerType) => playerType === "ai");
@@ -1339,8 +1357,14 @@ export const BoardWithAPI: React.FC = () => {
     // Allow multiple AI activations in same phase if there are still eligible units
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
+    // Tutoriel 2-11/2-12/2-13 : pause IA tant que le popup est visible (Hormagaunts immobiles jusqu'au clic Suivant)
     const shouldTriggerAI =
-      isAiEnabled && isAITurn && !isAIProcessingRef.current && gameNotOver && hasEligibleAIUnits;
+      isAiEnabled &&
+      isAITurn &&
+      !isAIProcessingRef.current &&
+      gameNotOver &&
+      hasEligibleAIUnits &&
+      !pauseAIForTutorial;
 
     // Only log when values actually change (prevents console flooding during animations)
     const currentAICheck = {
@@ -1415,7 +1439,9 @@ export const BoardWithAPI: React.FC = () => {
             }
           }
           if (apiProps.executeAITurn) {
-            await apiProps.executeAITurn();
+            await apiProps.executeAITurn({
+              stopAfterPhaseChange: stopAiAfterPhaseChangeRef.current,
+            });
             // Don't set lastProcessedTurn here - allow multiple activations in same phase
             // lastProcessedTurn will be set when phase actually changes (via useEffect dependency)
           } else {
@@ -1449,7 +1475,7 @@ export const BoardWithAPI: React.FC = () => {
       //   turnKeyMatches: lastProcessedTurn === turnKey
       // });
     }
-  }, [isAiMode, apiProps, lastProcessedTurn]);
+  }, [isAiMode, apiProps, lastProcessedTurn, pauseAIForTutorial]);
 
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
@@ -2222,6 +2248,8 @@ export const BoardWithAPI: React.FC = () => {
       isTutorialMode={isTutorialMode}
       gameState={apiProps.gameState ?? null}
       startGameWithScenario={apiProps.startGameWithScenario}
+      onPauseAIChange={setPauseAIForTutorial}
+      stopAiAfterPhaseChangeRef={stopAiAfterPhaseChangeRef}
     >
       <TutorialShootOptionsSync getTutorialShootOptionsRef={getTutorialShootOptionsRef} />
       <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>
