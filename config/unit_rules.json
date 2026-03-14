@@ -1,6 +1,7 @@
 {
   "charge_after_advance": {
     "id": "charge_after_advance",
+    "name": "Bounding Leap",
     "description": "Allows a unit to charge in the same turn it advanced."
   },
   "charge_after_flee": {

@@ -77,6 +77,7 @@ const FOG_BLUR_MARGIN = 24;
 /** Logos des phases (frontend/public/icons/Action_Logo) affichés à gauche du titre. */
 const PHASE_LOGO: Record<string, string> = {
   move: "/icons/Action_Logo/2 - Movemement.png",
+  shoot: "/icons/Action_Logo/3 - Shooting.png",
   shooting: "/icons/Action_Logo/3 - Shooting.png",
   charge: "/icons/Action_Logo/4 - Charge.png",
   fight: "/icons/Action_Logo/5 - Fight.png",
@@ -399,6 +400,27 @@ function highlightBoltRifleInSegment(seg: string): React.ReactNode {
   );
 }
 
+function highlightBoundingLeapInSegment(seg: string): React.ReactNode {
+  if (!seg.includes("Bounding Leap")) return seg;
+  const parts = seg.split(/(Bounding Leap)/g);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p === "Bounding Leap" ? (
+          <span
+            key={`bounding-leap-${i}-${p}`}
+            className="rule-tooltip tutorial-overlay-dialog__inline-rule-tooltip"
+          >
+            Bounding Leap
+          </span>
+        ) : (
+          <Fragment key={`bound-seg-${i}-${String(p).slice(0, 8)}`}>{p}</Fragment>
+        )
+      )}
+    </>
+  );
+}
+
 /** Remplace les occurrences de <cursor> dans un texte par l'icône pointeur (+ optionnel afterCursor entre curseur et texte ; optionnel boltRifleBold pour 1-23). */
 function replaceCursorInText(
   text: string,
@@ -406,15 +428,22 @@ function replaceCursorInText(
 ): React.ReactNode {
   const afterCursor = options?.afterCursor;
   const boltRifleBold = options?.boltRifleBold === true;
+  const renderSegment = (seg: string): React.ReactNode => {
+    const withBolt = boltRifleBold ? highlightBoltRifleInSegment(seg) : seg;
+    if (typeof withBolt === "string") {
+      return highlightBoundingLeapInSegment(withBolt);
+    }
+    return withBolt;
+  };
   if (!text.includes("<cursor>")) {
-    return boltRifleBold ? highlightBoltRifleInSegment(text) : text;
+    return renderSegment(text);
   }
   const segments = text.split("<cursor>");
   return (
     <>
       {segments.map((seg, k) => (
         <span key={seg ? `cursor-${k}-${seg.slice(0, 15)}` : `cursor-${k}`}>
-          {boltRifleBold ? highlightBoltRifleInSegment(seg) : seg}
+          {renderSegment(seg)}
           {k < segments.length - 1 && (
             <>
               <CursorIcon />
@@ -532,6 +561,8 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   const clickHoles = allowedClickSpotlights ?? spotlights;
   const title = lang === "fr" ? step.title_fr : step.title_en;
   const body = lang === "fr" ? step.body_fr : step.body_en;
+  const isStage124Family = step.stage === "1-24" || step.stage.startsWith("1-24-");
+  const backdropOpacity = isStage124Family ? 0 : BACKDROP_OPACITY;
   const afterCursorIcon = useMemo(() => {
     switch (step.stage) {
       case "1-14":
@@ -575,7 +606,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       ? renderBodyWithClickIcon(bodyRest1_5, { afterCursor: afterCursorIcon })
       : null;
   const showIllustrationBlock =
-    (step.popupImage && step.stage !== "1-24") ||
+    (step.popupImage && !isStage124Family) ||
     step.popupShowMoveHex ||
     step.popupShowGreenCircle;
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -797,7 +828,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: `rgba(0, 0, 0, ${BACKDROP_OPACITY})`,
+              backgroundColor: `rgba(0, 0, 0, ${backdropOpacity})`,
               mask: `url(#${MASK_ID})`,
               WebkitMask: `url(#${MASK_ID})`,
               pointerEvents: "none",
@@ -823,7 +854,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: `rgba(0, 0, 0, ${BACKDROP_OPACITY})`,
+            backgroundColor: `rgba(0, 0, 0, ${backdropOpacity})`,
           }}
           aria-hidden
         />

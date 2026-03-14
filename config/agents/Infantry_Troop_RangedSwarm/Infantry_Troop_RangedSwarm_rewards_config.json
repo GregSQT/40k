@@ -18,7 +18,8 @@
     "attack_priority_1": 0.0,
     "attack_priority_2": 0.0,
     "result_bonuses": {
-      "kill_target":  1.0,
+      "damage_target": 0.2,
+      "kill_target":  2.0,
       "target_lowest_hp": 0.3
     },
     "target_type_bonuses": {},

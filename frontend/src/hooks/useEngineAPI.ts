@@ -178,7 +178,7 @@ interface RuleChoicePrompt {
 
 export interface UseEngineAPIOptions {
   /** Ref à un getter appelé avant envoi d'un tir (left_click enemy) ; si forceKill, le backend force la mort de la cible (tutoriel 1-24, 2e tir). */
-  getTutorialShootOptionsRef?: MutableRefObject<() => { forceKill?: boolean }>;
+  getTutorialShootOptionsRef?: MutableRefObject<() => { forceKill?: boolean; forceMiss?: boolean }>;
   /** Tutoriel étape 2 (2-11/2-12/2-13) : arrêter la boucle AI après chaque phase pour permettre pause entre move/shoot/charge. */
   stopAiAfterPhaseChangeRef?: MutableRefObject<boolean>;
   /** Appelé immédiatement quand on break pour changement de phase ; permet de mettre pauseAI à true avant que le useEffect ne re-déclenche l'IA. */
@@ -1555,6 +1555,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const tutorialOpts = getTutorialShootOptionsRef?.current?.();
             if (tutorialOpts?.forceKill === true) {
               payload.tutorial_force_kill = true;
+            }
+            if (tutorialOpts?.forceMiss === true) {
+              payload.tutorial_force_miss = true;
             }
             await executeAction(payload);
             return;

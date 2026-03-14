@@ -116,11 +116,66 @@
       "popup_position": { "left": "32%", "top": "12%" },
       "trigger": { "type": "phase_enter", "phase": "shoot" },
       "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre).",
-      "next_step": "Clic sur l'icône du Termagant",
+      "next_step": "Le Termagant est mort.",
       "title_fr": "1-24 Choix de la cible",
       "title_en": "Target choice",
       "body_fr": "<cursor>Cliquez sur le termagant pour tirer dessus.",
       "body_en": "<cursor>Click on the Termagant to shoot at it."
+    },
+    {
+      "stage": "1-24-1",
+      "hide_advance_icon": true,
+      "advance_on_weapon_click": true,
+      "popup_position": { "left": "32%", "top": "12%" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
+      "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre), tout le combat log.",
+      "next_step": "Clic sur l'icône du Termagant",
+      "title_fr": "1-24-1 Résolution d'un tir - Jet de Toucher",
+      "title_en": "Shooting resolution - Touch roll",
+      "body_fr": "L'Intercessor fait d'abord un jet pour toucher la cible.\nLe Bolt Rifle a une caractéristique BS de 3+ : Le joueur doit faire 3 ou plus sur son jet de D6 pour toucher la cible.\n\t- En cas de succès, on passe au jet de blessure.\n\t- En cas d'échec, l'attaque s'achève.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer.",
+      "body_en": "The Intercessor first rolls a dice to hit the target.\nThe Bolt Rifle has a BS characteristic of 3+ : The player must roll 3 or more on its D6 roll to hit the target.\n\t- In case of success, we move to the wound roll.\n\t- In case of failure, the attack ends.\n\n--------------------\n<cursor>Click on Next to continue."
+    },
+    {
+      "stage": "1-24-2",
+      "hide_advance_icon": true,
+      "advance_on_weapon_click": true,
+      "popup_image": "/icons/Termagant_red.webp",
+      "popup_position": { "left": "32%", "top": "12%" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
+      "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre), tout le combat log.",
+      "next_step": "Clic sur l'icône du Termagant",
+      "title_fr": "1-24-2 Résolution d'un tir - Jet de Blessure",
+      "title_en": "Shooting resolution - Wound roll",
+      "body_fr": "Ayant touché, l'Intercessor doit essayer de blesser sa cible.\nLa résolution des jets de blessure se font selon ce tableau:\nS(Force) de l'attaquant vs T(Endurance) de la cible \tRésultat requis\n\t- La force est le DOUBLE (ou plus)de l’Endurance\t 2+\n\t- La force est SUPÉRIEURE à l’Endurance\t 3+\n\t- La force est ÉGALE à l’Endurance\t 4+\n\t- La force est INFÉRIEURE à l’Endurance\t 5+\n\t- La force est la MOITIÉ (ou moins)de l’Endurance\t 6+\nLe Bolt Rifle a une caractéristique S (Strength) de 4.\nLe Termagant a une caractéristique T (Toughness) de 3.\nLe joueur doit donc faire 3 ou plus pour blesser le Termagant.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer.",
+      "body_en": "Having hit, the Intercessor must try to wound its target.\nThe resolution of the wound rolls is done according to this table:\nS(Strength) of the attacker vs T(Toughness) of the target \tRequired result\n\t- The strength is DOUBLE (or more) of the Toughness\t 2+\n\t- The strength is SUPERIOR to the Toughness\t 3+\n\t- The strength is EQUAL to the Toughness\t 4+\n\t- The strength is INFERIOR to the Toughness\t 5+\n\t- The strength is HALF (or less) of the Toughness\t 6+\nThe Bolt Rifle has a S (Strength) characteristic of 4.\nThe Termagant has a T (Toughness) characteristic of 3.\nThe player must therefore roll 3 or more to wound the Termagant.\n\n--------------------\n<cursor>Click on Next to continue."
+    },
+    {
+      "stage": "1-24-3",
+      "hide_advance_icon": true,
+      "advance_on_weapon_click": true,
+      "popup_image": "/icons/Termagant_red.webp",
+      "popup_position": { "left": "32%", "top": "12%" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
+      "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre), tout le combat log.",
+      "next_step": "Clic sur l'icône du Termagant",
+      "title_fr": "1-24-3 Résolution d'un tir - Jet de Sauvegarde",
+      "title_en": "Shooting resolution - Save roll",
+      "body_fr": "Ayant été blessé, le Termagant doit faire un jet de Sauvegarde (SV) pour éviter de perdre des points de vie.\n\tLa caractéristique SV du termagant est 5+.\n\tLa caractéristique AP (Pénétration d'Armure) du Bolt Rifle est -1.\nPour réussir sa sauvegarde, le Termagant doit donc faire 5 ou plus sur sont jet, mais il aura -1 au résultat du dé.\nIl devra donc faire 6+ pour réussir son jet d'armure\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer.",
+      "body_en": "Having been wounded, the Termagant must roll a Save (SV) roll to avoid losing hit points.\n\tThe Termagant's SV characteristic is 5+.\n\tThe AP (Armor Penetration) characteristic of the Bolt Rifle is -1.\nTo succeed in its save, the Termagant must roll 5 or more on its roll, but it will have -1 on the dice result.\nHe will therefore need to roll 6 or more to succeed in his armor roll.\n\n--------------------\n<cursor>Click on Next to continue."
+    },
+    {
+      "stage": "1-24-4",
+      "hide_advance_icon": true,
+      "advance_on_weapon_click": true,
+      "popup_image": "/icons/Termagant_red.webp",
+      "popup_position": { "left": "32%", "top": "12%" },
+      "trigger": { "type": "phase_enter", "phase": "shoot" },
+      "layout": "Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et ligne titre); ligne d'attribut du Termagant (et ligne titre), tout le combat log.",
+      "next_step": "Clic sur l'icône du Termagant",
+      "title_fr": "1-24-4 Résolution d'un tir - Perte de Points de Vie",
+      "title_en": "Shooting resolution - Hit point loss",
+      "body_fr": "Ayant raté son jet de Sauvegarde, le Termagant va perdre des Points de vie.\n\tLa caractéristique HP (Points de Vie) du Termagant est 1.\n\tLa caractéristique DMG (Dégâts) du Bolt Rifle est 1.\nLe Termagant va donc perdre 1 HP, ce qui l'amène à zéro : il est mort.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer.",
+      "body_en": "Having failed its save roll, the Termagant will lose hit points.\n\tThe Termagant's HP characteristic is 1.\n\tThe DMG (Damage) characteristic of the Bolt Rifle is 1.\nThe Termagant will therefore lose 1 HP, which brings it to zero : it is dead.\n\n--------------------\n<cursor>Click on Next to continue."
     },
     {
       "stage": "1-25",
@@ -171,8 +226,8 @@
       "next_step": "Clic sur Suivant",
       "title_fr": "2-13 Phase de tir des Hormagaunts",
       "title_en": "Shoot phase of Hormagaunts",
-      "body_fr": "Pendant la phase de tir, une unité peut choisir soit de tirer avec une arme à distance, soit d'avancer. Si une unité avance, elle ne pourra pas charger pendant la phase de charge suivante.",
-      "body_en": "During the shoot phase, a unit can choose to either shoot with a ranged weapon or advance. If a unit advances, it will not be able to charge during the next charge phase."
+      "body_fr": "Pendant la phase de tir, une unité peut choisir de :\n\t- tirer avec une arme à distance.\n\t- avancer (se déplacer de D6 cases).\n Si une unité avance, elle ne pourra pas charger pendant la phase de charge suivante.",
+      "body_en": "During the shoot phase, a unit can choose to :\n\t- shoot with a ranged weapon.\n\t- advance (move up to D6 hex).\n If a unit advances, it will not be able to charge during the next charge phase."
     },
     {
       "stage": "2-14",
@@ -184,7 +239,7 @@
       "next_step": "Clic sur Suivant",
       "title_fr": "2-14 Phase de charge des Hormagaunts",
       "title_en": "Charge phase of Hormagaunts",
-      "body_fr": "Pendant la phase de charge, une unité peut choisir de charger une cible ennemie si :\n\t- Elle n'a pas avancé pendant la phase précédente.\n\t- Elle n'est pas adjacent à une unité ennemie.\n Elle peut charger une cible située à 12 cases maximum d'elle.",
+      "body_fr": "Pendant la phase de charge, une unité peut choisir de charger une cible ennemie si :\n\t- Elle n'a pas avancé pendant la phase précédente.\n\t- Elle n'est pas adjacent à une unité ennemie.\n Elle peut charger une cible située à 12 cases maximum d'elle.\n\nLes hormagaunts peuvent charger même après avoir avancé grace à leur règle <Bounding Leap> décrite dans le tableau des unités.",
       "body_en": "During the charge phase, a unit can choose to charge an enemy unit if :\n\t- It did not advance during the previous phase.\n\t- It is not adjacent to an enemy unit.\n- It can charge a target located at a maximum distance of 12 hexes from it."
     }
   ]

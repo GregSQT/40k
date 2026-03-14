@@ -2685,6 +2685,19 @@ textarea:focus {
   transform: translateY(0);
 }
 
+.tutorial-overlay-dialog__inline-rule-tooltip {
+  position: static;
+  display: inline-block;
+  margin-left: 4px;
+  margin-right: 4px;
+  margin-bottom: 0;
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  pointer-events: none;
+  vertical-align: baseline;
+}
+
 /* Board unit hover tooltip: same colors as weapon rule tooltip */
 .unit-icon-tooltip {
   position: fixed;

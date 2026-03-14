@@ -39,7 +39,7 @@
   },
   "progress_bar": {
     "training_width": 30,
-    "bot_eval_width": 15,
+    "bot_eval_width": 20,
     "curriculum_phase_width": 30,
     "macro_eval_width": 30
   }

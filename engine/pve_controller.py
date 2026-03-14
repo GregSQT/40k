@@ -224,23 +224,32 @@ class PvEController:
         else:
             predicted_action = micro_prediction
 
-        # Tutoriel 2-13 : forcer au moins 1 advance pour un Hormagaunt P2 en phase shoot
+        # Tutoriel étape 2 : garantir au moins 1 ADVANCE en shoot et 1 CHARGE en charge pour P2.
         scenario_file = getattr(engine, "_current_scenario_file", "") or ""
         if (
             "tutorial" in scenario_file
-            and require_key(game_state, "phase") == "shoot"
             and require_key(game_state, "current_player") == 2
         ):
-            units_advanced = require_key(game_state, "units_advanced")
-            p2_advanced = any(
-                str(u.get("id")) in units_advanced
-                for u in game_state.get("units", [])
-                if int(u.get("player", 0)) == 2
-            )
-            if not p2_advanced and len(action_mask) > 12 and bool(action_mask[12]):
-                pred_int = int(predicted_action) if predicted_action is not None else -1
-                if pred_int == 11:
+            current_phase = require_key(game_state, "phase")
+            units = require_key(game_state, "units")
+            if current_phase == "shoot":
+                units_advanced = require_key(game_state, "units_advanced")
+                p2_advanced = any(
+                    str(require_key(u, "id")) in units_advanced
+                    for u in units
+                    if int(require_key(u, "player")) == 2
+                )
+                if not p2_advanced and len(action_mask) > 12 and bool(action_mask[12]):
                     predicted_action = 12
+            elif current_phase == "charge":
+                units_charged = require_key(game_state, "units_charged")
+                p2_charged = any(
+                    str(require_key(u, "id")) in units_charged
+                    for u in units
+                    if int(require_key(u, "player")) == 2
+                )
+                if not p2_charged and len(action_mask) > 9 and bool(action_mask[9]):
+                    predicted_action = 9
 
         # Apply action mask like in training - force valid action if predicted action is invalid
         if game_state.get("debug_mode", False):

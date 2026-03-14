@@ -1227,6 +1227,14 @@ class BotEvaluationCallback(BaseCallback):
         self.best_robust_combined = -float("inf")
         self.best_robust_eval_marker: Optional[int] = None
         self.best_robust_model_path: Optional[str] = None
+        self.best_robust_worst_bot_name: Optional[str] = None
+        self.best_robust_worst_bot_score: Optional[float] = None
+        self.best_robust_worst_scenario_name: Optional[str] = None
+        self.best_robust_worst_scenario_combined: Optional[float] = None
+        self.best_robust_worst_holdout_regular_name: Optional[str] = None
+        self.best_robust_worst_holdout_regular_combined: Optional[float] = None
+        self.best_robust_worst_holdout_hard_name: Optional[str] = None
+        self.best_robust_worst_holdout_hard_combined: Optional[float] = None
         self.final_summary_target_episodes = final_summary_target_episodes
         self.last_eval_results: Optional[Dict[str, Any]] = None
         self.curriculum_phase_progress_bar_length = _require_progress_bar_width(
@@ -1453,6 +1461,66 @@ class BotEvaluationCallback(BaseCallback):
                     )
             self.model.logger.dump(step=self.model.num_timesteps)
 
+    @staticmethod
+    def _extract_robust_worst_cases(results: Dict[str, Any]) -> Dict[str, Optional[Any]]:
+        """Extract worst bot/scenario identifiers and scores from evaluation results."""
+        random_score = float(require_key(results, "random"))
+        greedy_score = float(require_key(results, "greedy"))
+        defensive_score = float(require_key(results, "defensive"))
+        bot_scores = {
+            "random": random_score,
+            "greedy": greedy_score,
+            "defensive": defensive_score,
+        }
+        worst_bot_name, worst_bot_score = min(bot_scores.items(), key=lambda item: item[1])
+
+        scenario_scores = require_key(results, "scenario_scores")
+        if not isinstance(scenario_scores, dict) or not scenario_scores:
+            raise ValueError("scenario_scores must be a non-empty dict for robust summary")
+
+        worst_scenario_name: Optional[str] = None
+        worst_scenario_combined: Optional[float] = None
+        worst_holdout_regular_name: Optional[str] = None
+        worst_holdout_regular_combined: Optional[float] = None
+        worst_holdout_hard_name: Optional[str] = None
+        worst_holdout_hard_combined: Optional[float] = None
+
+        for scenario_name, values in scenario_scores.items():
+            if not isinstance(values, dict):
+                raise TypeError(
+                    f"scenario_scores['{scenario_name}'] must be dict "
+                    f"(got {type(values).__name__})"
+                )
+            combined = float(require_key(values, "combined"))
+
+            if worst_scenario_combined is None or combined < worst_scenario_combined:
+                worst_scenario_name = str(scenario_name)
+                worst_scenario_combined = combined
+
+            if str(scenario_name).startswith("holdout_regular_"):
+                if (
+                    worst_holdout_regular_combined is None
+                    or combined < worst_holdout_regular_combined
+                ):
+                    worst_holdout_regular_name = str(scenario_name)
+                    worst_holdout_regular_combined = combined
+
+            if str(scenario_name).startswith("holdout_hard_"):
+                if worst_holdout_hard_combined is None or combined < worst_holdout_hard_combined:
+                    worst_holdout_hard_name = str(scenario_name)
+                    worst_holdout_hard_combined = combined
+
+        return {
+            "worst_bot_name": worst_bot_name,
+            "worst_bot_score": worst_bot_score,
+            "worst_scenario_name": worst_scenario_name,
+            "worst_scenario_combined": worst_scenario_combined,
+            "worst_holdout_regular_name": worst_holdout_regular_name,
+            "worst_holdout_regular_combined": worst_holdout_regular_combined,
+            "worst_holdout_hard_name": worst_holdout_hard_name,
+            "worst_holdout_hard_combined": worst_holdout_hard_combined,
+        }
+
     def _on_step(self) -> bool:
         if not EVALUATION_BOTS_AVAILABLE:
             return True
@@ -1520,6 +1588,15 @@ class BotEvaluationCallback(BaseCallback):
                     self.best_robust_score = robust_score
                     self.best_robust_combined = combined_win_rate
                     self.best_robust_eval_marker = eval_marker
+                    robust_worst_cases = self._extract_robust_worst_cases(results)
+                    self.best_robust_worst_bot_name = robust_worst_cases["worst_bot_name"]
+                    self.best_robust_worst_bot_score = robust_worst_cases["worst_bot_score"]
+                    self.best_robust_worst_scenario_name = robust_worst_cases["worst_scenario_name"]
+                    self.best_robust_worst_scenario_combined = robust_worst_cases["worst_scenario_combined"]
+                    self.best_robust_worst_holdout_regular_name = robust_worst_cases["worst_holdout_regular_name"]
+                    self.best_robust_worst_holdout_regular_combined = robust_worst_cases["worst_holdout_regular_combined"]
+                    self.best_robust_worst_holdout_hard_name = robust_worst_cases["worst_holdout_hard_name"]
+                    self.best_robust_worst_holdout_hard_combined = robust_worst_cases["worst_holdout_hard_combined"]
                     if self.best_model_save_path:
                         robust_model_zip_path = self._build_robust_model_zip_path(robust_score)
                         saved_robust_zip_path = self._save_model_with_vecnormalize(robust_model_zip_path)
@@ -1586,6 +1663,44 @@ class BotEvaluationCallback(BaseCallback):
         marker_value = self.best_robust_eval_marker if self.best_robust_eval_marker is not None else self.num_timesteps
         print(f"   Best robust score: {self.best_robust_score:.4f}")
         print(f"   Combined at robust best: {self.best_robust_combined:.4f}")
+        if (
+            self.best_robust_worst_bot_name is not None
+            and self.best_robust_worst_bot_score is not None
+        ):
+            print(
+                "   Worst bot score at robust best: "
+                f"{self.best_robust_worst_bot_name} = {self.best_robust_worst_bot_score:.4f}"
+            )
+        if (
+            self.best_robust_worst_scenario_name is not None
+            and self.best_robust_worst_scenario_combined is not None
+        ):
+            print(
+                "   Worst scenario combined at robust best: "
+                f"{self.best_robust_worst_scenario_name} = {self.best_robust_worst_scenario_combined:.4f}"
+            )
+        if (
+            self.best_robust_worst_holdout_regular_name is not None
+            and self.best_robust_worst_holdout_regular_combined is not None
+        ):
+            print(
+                "   Worst holdout regular combined at robust best: "
+                f"{self.best_robust_worst_holdout_regular_name} = "
+                f"{self.best_robust_worst_holdout_regular_combined:.4f}"
+            )
+        else:
+            print("   Worst holdout regular combined at robust best: N/A")
+        if (
+            self.best_robust_worst_holdout_hard_name is not None
+            and self.best_robust_worst_holdout_hard_combined is not None
+        ):
+            print(
+                "   Worst holdout hard combined at robust best: "
+                f"{self.best_robust_worst_holdout_hard_name} = "
+                f"{self.best_robust_worst_holdout_hard_combined:.4f}"
+            )
+        else:
+            print("   Worst holdout hard combined at robust best: N/A")
         print(f"   Selected at {marker_name}: {marker_value}")
         if self.best_robust_model_path:
             print(f"   Robust model path: {self.best_robust_model_path}")

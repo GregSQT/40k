@@ -3935,6 +3935,8 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     if click_target in ["target", "enemy"] and target_id:
         if action.get("tutorial_force_kill") is True:
             game_state["_tutorial_force_kill_this_shot"] = True
+        if action.get("tutorial_force_miss") is True:
+            game_state["_tutorial_force_miss_this_shot"] = True
         return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
     
     elif click_target == "friendly_unit" and target_id:
@@ -4651,8 +4653,26 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     shooter_col, shooter_row = require_unit_position(shooter, game_state)
     target_col, target_row = require_unit_position(target, game_state)
 
-    # Tutoriel 1-24 : forcer la mort de la cible au 2e tir (sans lancer les dés)
-    if game_state.pop("_tutorial_force_kill_this_shot", False):
+    # Tutoriel 1-24 : forcer un miss au 1er tir et la mort au tir suivant (sans lancer les dés)
+    if game_state.pop("_tutorial_force_miss_this_shot", False):
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon
+        weapon = get_selected_ranged_weapon(shooter)
+        weapon_name = weapon.get("display_name", "") if weapon else ""
+        attack_result = {
+            "damage": 0,
+            "target_died": False,
+            "hit_roll": 1,
+            "wound_roll": None,
+            "save_roll": None,
+            "hit_success": False,
+            "wound_success": False,
+            "attack_log": "Hit:3+:1(MISS) Dmg:0HP [TUTORIAL]",
+            "weapon_name": weapon_name,
+            "hazardous_test_required": False,
+            "hazardous_test_roll": None,
+            "hazardous_triggered": False,
+        }
+    elif game_state.pop("_tutorial_force_kill_this_shot", False):
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         weapon = get_selected_ranged_weapon(shooter)
         weapon_name = weapon.get("display_name", "") if weapon else ""

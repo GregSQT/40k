@@ -718,24 +718,23 @@ class W40KMetricsTracker:
         This dashboard contains ONLY the metrics you need to tune PPO hyperparameters.
         All metrics are smoothed (20-episode rolling average) for clear trends.
 
-        GAME PERFORMANCE (3 metrics):
+        GAME PERFORMANCE (4 metrics):
         - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
-        - 0_critical/b_win_rate_100ep       - Training opponent performance
-        - 0_critical/c_episode_reward_smooth  - Learning progress
+        - 0_critical/b_worst_bot_score      - Min(random, greedy, defensive)
+        - 0_critical/c_win_rate_100ep       - Training opponent performance
+        - 0_critical/d_episode_reward_smooth  - Learning progress
 
         PPO HEALTH (5 metrics):
-        - 0_critical/d_loss_mean           - Overall learning health
-        - 0_critical/e_explained_variance  - >0.3 -> Value function working
-        - 0_critical/f_clip_fraction       - [0.1-0.3] -> Tune learning_rate
-        - 0_critical/g_approx_kl           - <0.02 -> Policy stability
-        - 0_critical/h_entropy_loss        - [0.5-2.0] -> Tune ent_coef
+        - 0_critical/e_loss_mean           - Overall learning health
+        - 0_critical/f_explained_variance  - >0.3 -> Value function working
+        - 0_critical/g_clip_fraction       - [0.1-0.3] -> Tune learning_rate
+        - 0_critical/h_approx_kl           - <0.02 -> Policy stability
+        - 0_critical/i_entropy_loss        - [0.5-2.0] -> Tune ent_coef
 
         TECHNICAL HEALTH (3 metrics):
-        - 0_critical/i_gradient_norm       - <10 -> No gradient explosion
-        - 0_critical/j_immediate_reward_ratio - <0.9 -> Reward balance
+        - 0_critical/j_gradient_norm       - <10 -> No gradient explosion
         - 0_critical/k_reward_victory_gap  - >20-30 -> Reward aligned with victory
         - 0_critical/l_value_loss_smooth   - Smoothed critic loss
-        - 0_critical/m_worst_bot_score     - Min(random, greedy, defensive)
 
         NOTE: position_score moved to combat/ category
         """
@@ -752,12 +751,12 @@ class W40KMetricsTracker:
         # 1. Win Rate (100-episode rolling window) - SORTS FIRST alphabetically
         if len(self.win_rate_window) >= 1:
             win_rate = np.mean(self.win_rate_window)
-            self.writer.add_scalar('0_critical/b_win_rate_100ep', win_rate, self.episode_count)
+            self.writer.add_scalar('0_critical/c_win_rate_100ep', win_rate, self.episode_count)
 
         # 2. Episode Reward (smoothed) - Training signal strength
         if len(self.all_episode_rewards) >= 1:
             reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
-            self.writer.add_scalar('0_critical/c_episode_reward_smooth', reward_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/d_episode_reward_smooth', reward_smooth, self.episode_count)
 
         # NOTE: position_score moved to combat/ category
 
@@ -770,28 +769,28 @@ class W40KMetricsTracker:
             clip_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['clip_fractions'], window_size=20
             )
-            self.writer.add_scalar('0_critical/f_clip_fraction', clip_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/g_clip_fraction', clip_smooth, self.episode_count)
 
         # 4. Approx KL - Policy change magnitude
         if len(self.hyperparameter_tracking['approx_kls']) >= 1:
             kl_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['approx_kls'], window_size=20
             )
-            self.writer.add_scalar('0_critical/g_approx_kl', kl_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/h_approx_kl', kl_smooth, self.episode_count)
 
         # 5. Explained Variance - Value function quality
         if len(require_key(self.hyperparameter_tracking, 'explained_variances')) >= 1:
             ev_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['explained_variances'], window_size=20
             )
-            self.writer.add_scalar('0_critical/e_explained_variance', ev_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/f_explained_variance', ev_smooth, self.episode_count)
 
         # 6. Entropy Loss - Exploration health
         if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
             entropy_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['entropy_losses'], window_size=20
             )
-            self.writer.add_scalar('0_critical/h_entropy_loss', entropy_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/i_entropy_loss', entropy_smooth, self.episode_count)
 
         # 7. Loss Mean (combined policy + value loss) - Training stability
         if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
@@ -801,7 +800,7 @@ class W40KMetricsTracker:
             recent_value = self.hyperparameter_tracking['value_losses'][-20:]
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = np.mean(combined_losses)
-            self.writer.add_scalar('0_critical/d_loss_mean', loss_mean, self.episode_count)
+            self.writer.add_scalar('0_critical/e_loss_mean', loss_mean, self.episode_count)
             value_loss_smooth = float(np.mean(recent_value))
             self.writer.add_scalar('0_critical/l_value_loss_smooth', value_loss_smooth, self.episode_count)
         
@@ -811,21 +810,12 @@ class W40KMetricsTracker:
         
         # 8. Gradient Norm (direct value from latest training step) - Technical health
         if hasattr(self, 'latest_gradient_norm') and self.latest_gradient_norm is not None:
-            self.writer.add_scalar('0_critical/i_gradient_norm', self.latest_gradient_norm, self.episode_count)
+            self.writer.add_scalar('0_critical/j_gradient_norm', self.latest_gradient_norm, self.episode_count)
         else:
             # Log placeholder if gradient_norm not available from stable-baselines3
             # This keeps the metric visible in TensorBoard even if SB3 doesn't log it
             if self.episode_count <= 1:
-                self.writer.add_scalar('0_critical/i_gradient_norm', 0.0, self.episode_count)
-
-        # 9. Immediate Reward Ratio (calculate from reward components) - Reward composition
-        if (len(self.reward_components['base_actions']) >= 20 and
-            len(self.all_episode_rewards) >= 20):
-            recent_base = np.mean(self.reward_components['base_actions'][-20:])
-            recent_total = np.mean(self.all_episode_rewards[-20:])
-            if abs(recent_total) > 0.01:
-                immediate_ratio = abs(recent_base) / abs(recent_total)
-                self.writer.add_scalar('0_critical/j_immediate_reward_ratio', immediate_ratio, self.episode_count)
+                self.writer.add_scalar('0_critical/j_gradient_norm', 0.0, self.episode_count)
         
         # 10. Reward-Victory Gap (reward alignment: mean reward when won vs lost)
         # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory
@@ -875,7 +865,7 @@ class W40KMetricsTracker:
         if all(k in bot_results for k in ('random', 'greedy', 'defensive')):
             worst_bot_score = min(bot_results['random'], bot_results['greedy'], bot_results['defensive'])
             self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, x)
-            self.writer.add_scalar('0_critical/m_worst_bot_score', worst_bot_score, x)
+            self.writer.add_scalar('0_critical/b_worst_bot_score', worst_bot_score, x)
 
         # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:

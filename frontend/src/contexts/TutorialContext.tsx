@@ -84,26 +84,48 @@ export const TUTORIAL_STEP_TITLES_HALO_LEFT = [
 function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
   let etape: number;
   let order: number;
+  let stageId: string | undefined;
   if (typeof raw.stage === "string") {
-    const parts = raw.stage.split("-").map(Number);
-    if (parts.length !== 2 || !Number.isInteger(parts[0]) || !Number.isInteger(parts[1])) {
-      throw new Error(`Invalid stage: "${raw.stage}". Expected format "X-Y" (e.g. "1-14").`);
+    const stageRaw = raw.stage.trim();
+    const parts = stageRaw.split("-");
+    if (
+      parts.length < 2 ||
+      !parts.every((p) => /^[0-9]+$/.test(p)) ||
+      !Number.isInteger(Number(parts[0])) ||
+      !Number.isInteger(Number(parts[1]))
+    ) {
+      throw new Error(
+        `Invalid stage: "${raw.stage}". Expected format "X-Y" or "X-Y-Z" (e.g. "1-14", "1-24-1").`
+      );
     }
-    etape = parts[0];
-    order = parts[1];
+    etape = Number(parts[0]);
+    const baseOrder = Number(parts[1]);
+    if (parts.length > 2) {
+      const suffix = parts.slice(2).join("");
+      const fractional = Number(`0.${suffix}`);
+      if (!Number.isFinite(fractional)) {
+        throw new Error(`Invalid stage suffix in "${raw.stage}"`);
+      }
+      order = baseOrder + fractional;
+    } else {
+      order = baseOrder;
+    }
+    stageId = stageRaw;
   } else if (typeof raw.etape === "number" && typeof raw.order === "number") {
     etape = raw.etape;
     order = raw.order;
+    stageId = `${etape}-${order}`;
   } else {
     throw new Error("Step must have 'stage' (e.g. '1-14') or 'etape' and 'order'.");
   }
   const { stage: _s, etape: _e, order: _o, ...rest } = raw;
-  return { ...rest, etape, order } as TutorialStepDef;
+  return { ...rest, etape, order, stage_id: stageId } as TutorialStepDef;
 }
 
 export interface TutorialStepDef {
   etape: number;
   order: number;
+  stage_id?: string;
   trigger: { type: string; phase?: string };
   /** Si true, pas de bouton Suivant ; on avance au clic sur l'unité joueur 1 (ex. Intercessor). */
   advance_on_unit_click?: boolean;
@@ -132,6 +154,10 @@ export interface TutorialStepDef {
   title_en: string;
   body_fr: string;
   body_en: string;
+}
+
+function getStageId(step: TutorialStepDef): string {
+  return step.stage_id ?? `${step.etape}-${step.order}`;
 }
 
 /** Halo circulaire (ex. unité sur le board). */
@@ -351,11 +377,19 @@ export function TutorialProvider({
     }
     const s = stepsForEtape[currentStepIndex];
     if (!s || !("title_fr" in s)) return null;
-    const stage = `${s.etape}-${s.order}`;
-    const phase =
+    const stage = getStageId(s);
+    const isStep124Substep = stage.startsWith("1-24-");
+    let phase =
       s.trigger?.type === "phase_enter" && typeof s.trigger.phase === "string" && s.trigger.phase.trim() !== ""
         ? s.trigger.phase
         : undefined;
+    // Étape 2: le popup 2-13 résume la phase de tir (après transition vers charge),
+    // et 2-14 résume la charge (après transition vers fight).
+    if (stage === "2-13") {
+      phase = "shoot";
+    } else if (stage === "2-14") {
+      phase = "charge";
+    }
     return {
       title_fr: s.title_fr,
       title_en: s.title_en,
@@ -367,7 +401,8 @@ export function TutorialProvider({
       advanceOnUnitClick: s.advance_on_unit_click === true,
       advanceOnMoveClick: s.advance_on_move_click === true,
       hideAdvanceIcon: s.hide_advance_icon === true,
-      advanceOnWeaponClick: s.advance_on_weapon_click === true,
+      // Les sous-étapes 1-24-* sont des popups pédagogiques "Suivant", pas des steps pilotés par clic arme.
+      advanceOnWeaponClick: isStep124Substep ? false : s.advance_on_weapon_click === true,
       advanceOnWeaponName:
         typeof s.advance_on_weapon_name === "string" && s.advance_on_weapon_name.trim() !== ""
           ? s.advance_on_weapon_name.trim()
@@ -387,6 +422,10 @@ export function TutorialProvider({
             : undefined,
     };
   }, [stepsForEtape, currentStepIndex]);
+  const hasOnDeployStepForEtape = useMemo(
+    () => stepsForEtape.some((s) => s.trigger.type === "on_deploy"),
+    [stepsForEtape]
+  );
 
   useLayoutEffect(() => {
     onStepChange?.(currentStep);
@@ -455,7 +494,8 @@ export function TutorialProvider({
 
   const showStepForTrigger = useCallback(
     (triggerType: string, phase?: string) => {
-      const idx = stepsForEtape.findIndex((s) => {
+      const idx = stepsForEtape.findIndex((s, index) => {
+        if (index < currentStepIndex) return false;
         if (s.trigger.type !== triggerType) return false;
         if (triggerType === "phase_enter" && phase != null) {
           return s.trigger.phase === phase;
@@ -469,7 +509,7 @@ export function TutorialProvider({
       }
       return false;
     },
-    [stepsForEtape]
+    [stepsForEtape, currentStepIndex]
   );
 
   /** Force étape 2-11 quand on est en étape 2 et phase deployment (évite layout 1-11 après transition). */
@@ -491,7 +531,11 @@ export function TutorialProvider({
     if (transitioningToEtape2Ref.current) return;
     const phase = gameState.phase ?? null;
 
-    if (phase !== "deployment" && !onDeployShownForEtapeRef.current.has(currentEtape)) {
+    if (
+      phase !== "deployment" &&
+      hasOnDeployStepForEtape &&
+      !onDeployShownForEtapeRef.current.has(currentEtape)
+    ) {
       if (showStepForTrigger("on_deploy")) {
         onDeployShownForEtapeRef.current.add(currentEtape);
       }
@@ -535,6 +579,7 @@ export function TutorialProvider({
     currentStepIndex,
     stepsForEtape.length,
     steps.length,
+    hasOnDeployStepForEtape,
     showStepForTrigger,
   ]);
 
@@ -562,8 +607,20 @@ export function TutorialProvider({
     if (!justLostLastEnemy) return;
 
     if (currentEtape === 1) {
+      // Si des sous-étapes 1-24-* existent, les jouer avant 1-25 même si la cible est déjà morte.
+      const currentOrder = stepsForEtape[currentStepIndex]?.order;
+      if (typeof currentOrder === "number" && Number.isFinite(currentOrder)) {
+        const next124SubstepIdx = stepsForEtape.findIndex(
+          (s, idx) => idx > currentStepIndex && s.order > currentOrder && s.order < 25
+        );
+        if (next124SubstepIdx >= 0) {
+          setCurrentStepIndex(next124SubstepIdx);
+          setPopupVisible(true);
+          return;
+        }
+      }
       // Étape 1-24 → 1-25 : afficher la popup "Mort du termagant" au lieu de passer à l’étape 2
-      const idx25 = stepsForEtape.findIndex((s) => `${s.etape}-${s.order}` === "1-25");
+      const idx25 = stepsForEtape.findIndex((s) => getStageId(s) === "1-25");
       if (idx25 >= 0) {
         const p2Unit = gameState?.units?.find((u) => Number(u.player) === 2);
         if (p2Unit && typeof p2Unit.col === "number" && typeof p2Unit.row === "number") {
@@ -589,6 +646,7 @@ export function TutorialProvider({
     isTutorialMode,
     skipped,
     currentEtape,
+    currentStepIndex,
     hasLivingEnemyUnits,
     gameState?.phase,
     gameState?.units,
@@ -601,7 +659,7 @@ export function TutorialProvider({
   }, []);
 
   const onClosePopup = useCallback(() => {
-    const stage = stepsForEtape[currentStepIndex] ? `${stepsForEtape[currentStepIndex].etape}-${stepsForEtape[currentStepIndex].order}` : "";
+    const stage = stepsForEtape[currentStepIndex] ? getStageId(stepsForEtape[currentStepIndex]) : "";
     if (STAGES_AI_PAUSED.includes(stage as (typeof STAGES_AI_PAUSED)[number])) {
       setReleasedSteps((prev) => new Set(prev).add(stage));
       setPopupVisible(false);

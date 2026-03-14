@@ -1,14 +1,14 @@
 {
   "seed": 100,
-  "total_episodes": 50000,
-  "bot_eval_scenario_pool": "training",
+  "total_episodes": 20000,
+  "bot_eval_scenario_pool": "holdout",
   "bot_eval_show_progress": true,
   "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
   "max_turns_per_episode": 5,
   "n_envs": 48,
   "bot_eval_freq": 1000,
   "bot_eval_freq_normal": 1000,
-  "bot_eval_intermediate": 100,
+  "bot_eval_intermediate": 70,
   "bot_eval_intermediate_normal": 100,
   "bot_eval_final": 100 ,
   "bot_eval_final_normal": 100,
@@ -17,7 +17,7 @@
   "robust_window": 3,
   "robust_drawdown_penalty": 0.5,
   "model_gating_enabled": true,
-  "model_gating_min_combined": 0.55,
+  "model_gating_min_combined": 0.60,
   "model_gating_min_worst_bot": 0.45,
   "model_gating_min_worst_scenario_combined": 0.45
 }

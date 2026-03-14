@@ -224,6 +224,67 @@ def _get_progress_bar_width(config_key: str) -> int:
     return require_key(_progress_bar_width_cache, config_key)
 
 
+def _get_tensorboard_run_meta_path(model_path: str) -> str:
+    """Return sidecar metadata path storing active TensorBoard run directory."""
+    return f"{model_path}.tb_run.json"
+
+
+def _read_tensorboard_run_meta(model_path: str) -> Dict[str, Any]:
+    """Read TensorBoard run metadata from model sidecar file."""
+    meta_path = _get_tensorboard_run_meta_path(model_path)
+    if not os.path.exists(meta_path):
+        raise FileNotFoundError(
+            f"TensorBoard run metadata not found: {meta_path}. "
+            "Run with --new once to initialize run tracking before --append."
+        )
+    with open(meta_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    if not isinstance(metadata, dict):
+        raise TypeError(f"Invalid TensorBoard metadata format in {meta_path}: expected object")
+    return metadata
+
+
+def _write_tensorboard_run_meta(model_path: str, run_dir: str) -> None:
+    """Persist active TensorBoard run directory alongside model path."""
+    meta_path = _get_tensorboard_run_meta_path(model_path)
+    payload = {"run_dir": run_dir}
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def _resolve_tensorboard_run_dir(
+    base_log_root: str,
+    training_config_name: str,
+    agent_key: str,
+    model_path: str,
+    new_model: bool,
+    append_training: bool,
+) -> Tuple[str, str]:
+    """Resolve experiment/run directories based on --new/--append semantics."""
+    experiment_dir = os.path.join(base_log_root, f"{training_config_name}_{agent_key}")
+    os.makedirs(experiment_dir, exist_ok=True)
+
+    if append_training:
+        metadata = _read_tensorboard_run_meta(model_path)
+        run_dir = require_key(metadata, "run_dir")
+        if not isinstance(run_dir, str) or not run_dir.strip():
+            raise ValueError(
+                f"Invalid run_dir in TensorBoard metadata for model {model_path}: {run_dir!r}"
+            )
+        if not os.path.exists(run_dir):
+            raise FileNotFoundError(
+                f"TensorBoard run directory from metadata does not exist: {run_dir}"
+            )
+        return experiment_dir, run_dir
+
+    # --new (or implicit non-append training) creates an isolated run directory.
+    run_id = time.strftime("%Y%m%d-%H%M%S")
+    run_dir = os.path.join(experiment_dir, f"run_{run_id}")
+    os.makedirs(run_dir, exist_ok=True)
+    _write_tensorboard_run_meta(model_path, run_dir)
+    return experiment_dir, run_dir
+
+
 def _apply_torch_compile(model) -> None:
     """Wrap policy.forward to move action_masks to model device (GPU or CPU), then apply torch.compile on CUDA.
     CUDA graphs require all inputs on GPU; action_masks from env are numpy (CPU)."""
@@ -1450,10 +1511,22 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model_params["ent_coef"] = start_val  # Use initial value
         chunk_log(f"✅ Entropy coefficient schedule: {start_val} -> {end_val} (will be applied via callback)")
 
-    # Use specific log directory for continuous TensorBoard graphs across runs
+    tensorboard_root = require_key(model_params, "tensorboard_log")
+    if not isinstance(tensorboard_root, str) or not tensorboard_root.strip():
+        raise ValueError(
+            f"model_params.tensorboard_log must be a non-empty string (got {tensorboard_root!r})"
+        )
     tb_log_name = f"{training_config_name}_{agent_key}"
-    specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-    os.makedirs(specific_log_dir, exist_ok=True)
+    experiment_log_dir, specific_log_dir = _resolve_tensorboard_run_dir(
+        base_log_root=tensorboard_root,
+        training_config_name=training_config_name,
+        agent_key=agent_key,
+        model_path=model_path,
+        new_model=new_model,
+        append_training=append_training,
+    )
+    chunk_log(f"📊 TensorBoard experiment: {experiment_log_dir}")
+    chunk_log(f"📊 TensorBoard run: {specific_log_dir}")
 
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
@@ -1518,7 +1591,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             from stable_baselines3.common.logger import configure
             new_logger = configure(specific_log_dir, ["tensorboard"])
             model.set_logger(new_logger)
-            chunk_log(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
+            chunk_log(f"✅ Logger reinitialized for TensorBoard run: {specific_log_dir}")
         except Exception as e:
             chunk_log(f"⚠️ Failed to load model: {e}")
             chunk_log("🆕 Creating new model instead...")
@@ -1547,11 +1620,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Bot ratios printed when building training_bots
 
-    # Determine tensorboard log name for continuous logging
-    tb_log_name = f"{training_config_name}_{agent_key}"
-    
-    # Get TensorBoard directory for metrics
-    model_tensorboard_dir = f"./tensorboard/{tb_log_name}"
+    # Keep tracker aligned with selected run directory.
+    model_tensorboard_dir = specific_log_dir
     
     # Create metrics tracker for entire rotation training
     metrics_tracker = W40KMetricsTracker(
@@ -1681,15 +1751,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # - after each chunk, check how many episodes actually completed (via metrics_tracker)
     # - stop when we reach the exact desired episode count (total_episodes)
 
-    # CRITICAL: reset_num_timesteps=False keeps TensorBoard graph continuous across chunks.
-    # We only allow SB3 to reset its internal counter at the very start of training.
+    # reset_num_timesteps semantics:
+    # - --append: keep monotonic timesteps (never reset) for true continuation.
+    # - --new: fresh run directory allows reset from zero without overwriting prior runs.
     target_episode_count = callback_global_episode_offset + total_episodes
     while metrics_tracker.episode_count < target_episode_count:
         # As a safety guard, we still use the same chunk_timesteps. 
         # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
         model.learn(
             total_timesteps=chunk_timesteps,
-            reset_num_timesteps=(model.num_timesteps == 0),
+            reset_num_timesteps=(not append_training and model.num_timesteps == 0),
             tb_log_name=tb_log_name,  # Same name = continuous graph
             callback=enhanced_callbacks,
             log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
@@ -3321,14 +3392,88 @@ def main():
                 scenario_pool="holdout",
             )
             
-            # Display results
+            scenario_scores = require_key(results, "scenario_scores")
+            if not isinstance(scenario_scores, dict) or not scenario_scores:
+                raise ValueError("eval-only requires non-empty scenario_scores in evaluation results")
+
+            bot_scores = {
+                "random": float(require_key(results, "random")),
+                "greedy": float(require_key(results, "greedy")),
+                "defensive": float(require_key(results, "defensive")),
+            }
+            worst_bot_name, worst_bot_score = min(bot_scores.items(), key=lambda item: item[1])
+
+            worst_scenario_name = None
+            worst_scenario_combined = None
+            worst_holdout_regular_name = None
+            worst_holdout_regular_combined = None
+            worst_holdout_hard_name = None
+            worst_holdout_hard_combined = None
+            for scenario_name, values in scenario_scores.items():
+                if not isinstance(values, dict):
+                    raise TypeError(
+                        f"scenario_scores['{scenario_name}'] must be dict "
+                        f"(got {type(values).__name__})"
+                    )
+                combined_score = float(require_key(values, "combined"))
+                if worst_scenario_combined is None or combined_score < worst_scenario_combined:
+                    worst_scenario_name = str(scenario_name)
+                    worst_scenario_combined = combined_score
+                if str(scenario_name).startswith("holdout_regular_"):
+                    if (
+                        worst_holdout_regular_combined is None
+                        or combined_score < worst_holdout_regular_combined
+                    ):
+                        worst_holdout_regular_name = str(scenario_name)
+                        worst_holdout_regular_combined = combined_score
+                if str(scenario_name).startswith("holdout_hard_"):
+                    if (
+                        worst_holdout_hard_combined is None
+                        or combined_score < worst_holdout_hard_combined
+                    ):
+                        worst_holdout_hard_name = str(scenario_name)
+                        worst_holdout_hard_combined = combined_score
+
+            # Display results (robustness-oriented summary)
             print("\n" + "="*80)
-            print("📊 BOT EVALUATION RESULTS")
+            print("📊 FINAL BOT EVALUATION SUMMARY")
             print("="*80)
-            print(f"vs RandomBot:     {results['random']:.2f} (W:{results['random_wins']} L:{results['random_losses']} D:{results['random_draws']})")
-            print(f"vs GreedyBot:     {results['greedy']:.2f} (W:{results['greedy_wins']} L:{results['greedy_losses']} D:{results['greedy_draws']})")
-            print(f"vs DefensiveBot:  {results['defensive']:.2f} (W:{results['defensive_wins']} L:{results['defensive_losses']} D:{results['defensive_draws']})")
-            print(f"\nCombined Score:   {results['combined']:.2f}")
+            print(
+                f"vs RandomBot:     {results['random']:.2f} "
+                f"(W:{results['random_wins']} L:{results['random_losses']} D:{results['random_draws']})"
+            )
+            print(
+                f"vs GreedyBot:     {results['greedy']:.2f} "
+                f"(W:{results['greedy_wins']} L:{results['greedy_losses']} D:{results['greedy_draws']})"
+            )
+            print(
+                f"vs DefensiveBot:  {results['defensive']:.2f} "
+                f"(W:{results['defensive_wins']} L:{results['defensive_losses']} D:{results['defensive_draws']})"
+            )
+            print(f"Combined Score: {float(require_key(results, 'combined')):.4f}")
+            print(f"Worst bot score: {worst_bot_name} = {worst_bot_score:.4f}")
+            if worst_scenario_name is not None and worst_scenario_combined is not None:
+                print(
+                    "Worst scenario combined: "
+                    f"{worst_scenario_name} = {worst_scenario_combined:.4f}"
+                )
+            if (
+                worst_holdout_regular_name is not None
+                and worst_holdout_regular_combined is not None
+            ):
+                print(
+                    "Worst holdout regular combined: "
+                    f"{worst_holdout_regular_name} = {worst_holdout_regular_combined:.4f}"
+                )
+            else:
+                print("Worst holdout regular combined: N/A")
+            if worst_holdout_hard_name is not None and worst_holdout_hard_combined is not None:
+                print(
+                    "Worst holdout hard combined: "
+                    f"{worst_holdout_hard_name} = {worst_holdout_hard_combined:.4f}"
+                )
+            else:
+                print("Worst holdout hard combined: N/A")
             print("="*80 + "\n")
             
             masked_env.close()
