@@ -146,6 +146,9 @@ class W40KMetricsTracker:
         # NEW: Bot evaluation combined score for 0_critical/ dashboard
         self.bot_eval_combined = None
         
+        # NEW: Latest VALUE trade ratio for 0_critical/ dashboard
+        self.latest_value_trade_ratio = None
+        
         # NEW: Episode tactical data for invalid_action_rate tracking
         self.episode_tactical_data = {
             'total_actions': 0,
@@ -247,6 +250,16 @@ class W40KMetricsTracker:
         units_killed = require_key(tactical_data, 'units_killed')
         if units_killed >= 0:
             self.writer.add_scalar('game_detailed/units_killed', units_killed, self.episode_count)
+
+        # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
+        enemy_value_destroyed = float(require_key(tactical_data, 'enemy_value_destroyed'))
+        ally_value_lost = float(require_key(tactical_data, 'ally_value_lost'))
+        self.writer.add_scalar('combat/f_value_destroyed', enemy_value_destroyed, self.episode_count)
+        self.writer.add_scalar('combat/g_value_lost', ally_value_lost, self.episode_count)
+        if ally_value_lost > 0 and enemy_value_destroyed > 0:
+            value_trade_ratio = enemy_value_destroyed / ally_value_lost
+            self.latest_value_trade_ratio = value_trade_ratio
+            self.writer.add_scalar('combat/h_value_trade_ratio', value_trade_ratio, self.episode_count)
         
         # GAME CRITICAL: Unit trade ratio (killed/lost) - Core success metric
         if units_lost > 0 and units_killed > 0:
@@ -733,7 +746,7 @@ class W40KMetricsTracker:
 
         TECHNICAL HEALTH (3 metrics):
         - 0_critical/j_gradient_norm       - <10 -> No gradient explosion
-        - 0_critical/k_reward_victory_gap  - >20-30 -> Reward aligned with victory
+        - 0_critical/k_value_trade_ratio   - VALUE destroyed / VALUE lost
         - 0_critical/l_value_loss_smooth   - Smoothed critic loss
 
         NOTE: position_score moved to combat/ category
@@ -829,9 +842,13 @@ class W40KMetricsTracker:
                 gap = mean_won - mean_lost
                 self.writer.add_scalar('game_critical/reward_when_won', mean_won, self.episode_count)
                 self.writer.add_scalar('game_critical/reward_when_lost', mean_lost, self.episode_count)
-                self.writer.add_scalar('0_critical/k_reward_victory_gap', gap, self.episode_count)
+                self.writer.add_scalar('game_detailed/reward_victory_gap', gap, self.episode_count)
+
+        # 11. VALUE trade ratio (destroyed/lost) - Attrition robustness
+        if self.latest_value_trade_ratio is not None:
+            self.writer.add_scalar('0_critical/k_value_trade_ratio', self.latest_value_trade_ratio, self.episode_count)
         
-        # 11. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
+        # 12. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
         # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
         # Do not log here - let log_bot_evaluations() handle it
         

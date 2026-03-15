@@ -7,6 +7,7 @@ export class SpaceMarineInfantrySwarmMeleeSwarm {
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
   static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
+  static OFFENSE_TYPE = "Melee"; // Offensive mode classification
   static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
   name: string;

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node ../scripts/copy-configs.js && vite",
     "copy-configs": "node ../scripts/copy-configs.js",
+    "tutorial:check-sync": "node scripts/check_tutorial_md_yaml_sync.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -18,6 +19,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "js-yaml": "^4.1.0",
     "pixi.js-legacy": "^7.4.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -29,6 +31,7 @@
     "@tailwindcss/postcss": "^4.1.13",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
+    "@types/js-yaml": "^4.0.9",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.33.0",

@@ -2145,9 +2145,11 @@ export default function Board({
       }
     }
 
-    // ✅ TUTORIAL 1-25 : ghost Termagant à l'emplacement de mort sur le board
+    // ✅ TUTORIAL 1-24-* / 1-25 : ghost Termagant à l'emplacement de mort sur le board
     if (
-      tutorial?.currentStep?.stage === "1-25" &&
+      tutorial?.currentStep?.stage != null &&
+      (tutorial.currentStep.stage === "1-25" ||
+        tutorial.currentStep.stage.startsWith("1-24-")) &&
       tutorial?.lastEnemyDeathPosition &&
       boardConfig
     ) {

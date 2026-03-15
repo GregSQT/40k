@@ -8,7 +8,7 @@
   "n_envs": 48,
   "bot_eval_freq": 1000,
   "bot_eval_freq_normal": 1000,
-  "bot_eval_intermediate": 70,
+  "bot_eval_intermediate": 100,
   "bot_eval_intermediate_normal": 100,
   "bot_eval_final": 100 ,
   "bot_eval_final_normal": 100,

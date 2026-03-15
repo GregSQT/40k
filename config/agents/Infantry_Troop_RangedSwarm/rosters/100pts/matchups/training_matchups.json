@@ -3,495 +3,165 @@
   "scale": "100pts",
   "split": "training",
   "model_path": "/home/greg/40k/ai/models/Infantry_Troop_RangedSwarm/model_Infantry_Troop_RangedSwarm.zip",
-  "generated_at": "2026-03-13T17:37:42Z",
+  "generated_at": "2026-03-14T21:48:16Z",
   "episodes_per_matchup": 100,
   "p1_benchmark": null,
   "p1_benchmark_split": null,
   "p2_benchmark": null,
   "p2_benchmark_split": null,
-  "overall_win_rate": 0.4473,
+  "overall_win_rate": 0.4433,
   "matchups": {
     "p1_training_roster-01": {
       "p2_training_roster-01": {
-        "wins": 56,
-        "losses": 44,
+        "wins": 32,
+        "losses": 68,
         "draws": 0,
-        "win_rate": 0.56
+        "win_rate": 0.32
       },
       "p2_training_roster-02": {
-        "wins": 30,
-        "losses": 70,
+        "wins": 76,
+        "losses": 24,
         "draws": 0,
-        "win_rate": 0.3
+        "win_rate": 0.76
       },
       "p2_training_roster-03": {
-        "wins": 53,
-        "losses": 47,
+        "wins": 18,
+        "losses": 82,
         "draws": 0,
-        "win_rate": 0.53
+        "win_rate": 0.18
       },
       "p2_training_roster-04": {
-        "wins": 45,
-        "losses": 55,
+        "wins": 26,
+        "losses": 74,
         "draws": 0,
-        "win_rate": 0.45
+        "win_rate": 0.26
       },
       "p2_training_roster-05": {
-        "wins": 60,
-        "losses": 40,
+        "wins": 38,
+        "losses": 62,
         "draws": 0,
-        "win_rate": 0.6
-      },
-      "p2_training_roster-06": {
-        "wins": 58,
-        "losses": 42,
-        "draws": 0,
-        "win_rate": 0.58
-      },
-      "p2_training_roster-07": {
-        "wins": 61,
-        "losses": 39,
-        "draws": 0,
-        "win_rate": 0.61
-      },
-      "p2_training_roster-08": {
-        "wins": 22,
-        "losses": 78,
-        "draws": 0,
-        "win_rate": 0.22
-      },
-      "p2_training_roster-09": {
-        "wins": 29,
-        "losses": 71,
-        "draws": 0,
-        "win_rate": 0.29
-      },
-      "p2_training_roster-10": {
-        "wins": 55,
-        "losses": 45,
-        "draws": 0,
-        "win_rate": 0.55
+        "win_rate": 0.38
       }
     },
     "p1_training_roster-02": {
       "p2_training_roster-01": {
-        "wins": 51,
-        "losses": 49,
-        "draws": 0,
-        "win_rate": 0.51
-      },
-      "p2_training_roster-02": {
-        "wins": 21,
-        "losses": 79,
-        "draws": 0,
-        "win_rate": 0.21
-      },
-      "p2_training_roster-03": {
-        "wins": 48,
-        "losses": 52,
-        "draws": 0,
-        "win_rate": 0.48
-      },
-      "p2_training_roster-04": {
         "wins": 47,
-        "losses": 53,
-        "draws": 0,
+        "losses": 52,
+        "draws": 1,
         "win_rate": 0.47
       },
+      "p2_training_roster-02": {
+        "wins": 80,
+        "losses": 20,
+        "draws": 0,
+        "win_rate": 0.8
+      },
+      "p2_training_roster-03": {
+        "wins": 28,
+        "losses": 72,
+        "draws": 0,
+        "win_rate": 0.28
+      },
+      "p2_training_roster-04": {
+        "wins": 28,
+        "losses": 72,
+        "draws": 0,
+        "win_rate": 0.28
+      },
       "p2_training_roster-05": {
-        "wins": 59,
-        "losses": 41,
+        "wins": 39,
+        "losses": 61,
         "draws": 0,
-        "win_rate": 0.59
-      },
-      "p2_training_roster-06": {
-        "wins": 69,
-        "losses": 31,
-        "draws": 0,
-        "win_rate": 0.69
-      },
-      "p2_training_roster-07": {
-        "wins": 48,
-        "losses": 52,
-        "draws": 0,
-        "win_rate": 0.48
-      },
-      "p2_training_roster-08": {
-        "wins": 24,
-        "losses": 76,
-        "draws": 0,
-        "win_rate": 0.24
-      },
-      "p2_training_roster-09": {
-        "wins": 31,
-        "losses": 69,
-        "draws": 0,
-        "win_rate": 0.31
-      },
-      "p2_training_roster-10": {
-        "wins": 40,
-        "losses": 60,
-        "draws": 0,
-        "win_rate": 0.4
+        "win_rate": 0.39
       }
     },
     "p1_training_roster-03": {
       "p2_training_roster-01": {
-        "wins": 50,
-        "losses": 50,
-        "draws": 0,
-        "win_rate": 0.5
-      },
-      "p2_training_roster-02": {
-        "wins": 25,
-        "losses": 75,
-        "draws": 0,
-        "win_rate": 0.25
-      },
-      "p2_training_roster-03": {
-        "wins": 50,
-        "losses": 50,
-        "draws": 0,
-        "win_rate": 0.5
-      },
-      "p2_training_roster-04": {
-        "wins": 43,
-        "losses": 57,
-        "draws": 0,
-        "win_rate": 0.43
-      },
-      "p2_training_roster-05": {
-        "wins": 56,
-        "losses": 44,
-        "draws": 0,
-        "win_rate": 0.56
-      },
-      "p2_training_roster-06": {
-        "wins": 69,
-        "losses": 31,
-        "draws": 0,
-        "win_rate": 0.69
-      },
-      "p2_training_roster-07": {
-        "wins": 47,
-        "losses": 53,
-        "draws": 0,
-        "win_rate": 0.47
-      },
-      "p2_training_roster-08": {
-        "wins": 24,
-        "losses": 76,
-        "draws": 0,
-        "win_rate": 0.24
-      },
-      "p2_training_roster-09": {
-        "wins": 27,
-        "losses": 73,
-        "draws": 0,
-        "win_rate": 0.27
-      },
-      "p2_training_roster-10": {
-        "wins": 44,
-        "losses": 56,
-        "draws": 0,
-        "win_rate": 0.44
-      }
-    },
-    "p1_training_roster-04": {
-      "p2_training_roster-01": {
-        "wins": 56,
-        "losses": 44,
-        "draws": 0,
-        "win_rate": 0.56
-      },
-      "p2_training_roster-02": {
-        "wins": 30,
-        "losses": 70,
-        "draws": 0,
-        "win_rate": 0.3
-      },
-      "p2_training_roster-03": {
-        "wins": 53,
-        "losses": 47,
-        "draws": 0,
-        "win_rate": 0.53
-      },
-      "p2_training_roster-04": {
-        "wins": 45,
-        "losses": 55,
-        "draws": 0,
-        "win_rate": 0.45
-      },
-      "p2_training_roster-05": {
-        "wins": 60,
-        "losses": 40,
-        "draws": 0,
-        "win_rate": 0.6
-      },
-      "p2_training_roster-06": {
-        "wins": 58,
-        "losses": 42,
-        "draws": 0,
-        "win_rate": 0.58
-      },
-      "p2_training_roster-07": {
-        "wins": 61,
-        "losses": 39,
-        "draws": 0,
-        "win_rate": 0.61
-      },
-      "p2_training_roster-08": {
-        "wins": 22,
-        "losses": 78,
-        "draws": 0,
-        "win_rate": 0.22
-      },
-      "p2_training_roster-09": {
-        "wins": 29,
-        "losses": 71,
-        "draws": 0,
-        "win_rate": 0.29
-      },
-      "p2_training_roster-10": {
-        "wins": 55,
-        "losses": 45,
-        "draws": 0,
-        "win_rate": 0.55
-      }
-    },
-    "p1_training_roster-05": {
-      "p2_training_roster-01": {
         "wins": 51,
         "losses": 49,
         "draws": 0,
         "win_rate": 0.51
       },
       "p2_training_roster-02": {
-        "wins": 21,
-        "losses": 79,
+        "wins": 82,
+        "losses": 18,
         "draws": 0,
-        "win_rate": 0.21
+        "win_rate": 0.82
       },
       "p2_training_roster-03": {
-        "wins": 48,
-        "losses": 52,
+        "wins": 37,
+        "losses": 63,
         "draws": 0,
-        "win_rate": 0.48
+        "win_rate": 0.37
       },
       "p2_training_roster-04": {
+        "wins": 36,
+        "losses": 63,
+        "draws": 1,
+        "win_rate": 0.36
+      },
+      "p2_training_roster-05": {
         "wins": 47,
         "losses": 53,
         "draws": 0,
         "win_rate": 0.47
-      },
-      "p2_training_roster-05": {
-        "wins": 59,
-        "losses": 41,
-        "draws": 0,
-        "win_rate": 0.59
-      },
-      "p2_training_roster-06": {
-        "wins": 69,
-        "losses": 31,
-        "draws": 0,
-        "win_rate": 0.69
-      },
-      "p2_training_roster-07": {
-        "wins": 48,
-        "losses": 52,
-        "draws": 0,
-        "win_rate": 0.48
-      },
-      "p2_training_roster-08": {
-        "wins": 24,
-        "losses": 76,
-        "draws": 0,
-        "win_rate": 0.24
-      },
-      "p2_training_roster-09": {
-        "wins": 31,
-        "losses": 69,
-        "draws": 0,
-        "win_rate": 0.31
-      },
-      "p2_training_roster-10": {
-        "wins": 40,
-        "losses": 60,
-        "draws": 0,
-        "win_rate": 0.4
-      }
-    },
-    "p1_training_roster-06": {
-      "p2_training_roster-01": {
-        "wins": 50,
-        "losses": 50,
-        "draws": 0,
-        "win_rate": 0.5
-      },
-      "p2_training_roster-02": {
-        "wins": 25,
-        "losses": 75,
-        "draws": 0,
-        "win_rate": 0.25
-      },
-      "p2_training_roster-03": {
-        "wins": 50,
-        "losses": 50,
-        "draws": 0,
-        "win_rate": 0.5
-      },
-      "p2_training_roster-04": {
-        "wins": 43,
-        "losses": 57,
-        "draws": 0,
-        "win_rate": 0.43
-      },
-      "p2_training_roster-05": {
-        "wins": 56,
-        "losses": 44,
-        "draws": 0,
-        "win_rate": 0.56
-      },
-      "p2_training_roster-06": {
-        "wins": 69,
-        "losses": 31,
-        "draws": 0,
-        "win_rate": 0.69
-      },
-      "p2_training_roster-07": {
-        "wins": 47,
-        "losses": 53,
-        "draws": 0,
-        "win_rate": 0.47
-      },
-      "p2_training_roster-08": {
-        "wins": 24,
-        "losses": 76,
-        "draws": 0,
-        "win_rate": 0.24
-      },
-      "p2_training_roster-09": {
-        "wins": 27,
-        "losses": 73,
-        "draws": 0,
-        "win_rate": 0.27
-      },
-      "p2_training_roster-10": {
-        "wins": 44,
-        "losses": 56,
-        "draws": 0,
-        "win_rate": 0.44
       }
     }
   },
   "p1_summaries": [
     {
-      "p1_roster_id": "p1_training_roster-01",
-      "overall_win_rate": 0.469,
-      "vs_best": "p2_training_roster-07",
-      "vs_worst": "p2_training_roster-08",
-      "sur_performant": false,
-      "sous_performant": false
-    },
-    {
-      "p1_roster_id": "p1_training_roster-04",
-      "overall_win_rate": 0.469,
-      "vs_best": "p2_training_roster-07",
-      "vs_worst": "p2_training_roster-08",
-      "sur_performant": false,
+      "p1_roster_id": "p1_training_roster-03",
+      "overall_win_rate": 0.506,
+      "vs_best": "p2_training_roster-02",
+      "vs_worst": "p2_training_roster-04",
+      "sur_performant": true,
       "sous_performant": false
     },
     {
       "p1_roster_id": "p1_training_roster-02",
-      "overall_win_rate": 0.438,
-      "vs_best": "p2_training_roster-06",
-      "vs_worst": "p2_training_roster-02",
+      "overall_win_rate": 0.444,
+      "vs_best": "p2_training_roster-02",
+      "vs_worst": "p2_training_roster-03",
       "sur_performant": false,
       "sous_performant": false
     },
     {
-      "p1_roster_id": "p1_training_roster-05",
-      "overall_win_rate": 0.438,
-      "vs_best": "p2_training_roster-06",
-      "vs_worst": "p2_training_roster-02",
+      "p1_roster_id": "p1_training_roster-01",
+      "overall_win_rate": 0.38,
+      "vs_best": "p2_training_roster-02",
+      "vs_worst": "p2_training_roster-03",
       "sur_performant": false,
-      "sous_performant": false
-    },
-    {
-      "p1_roster_id": "p1_training_roster-03",
-      "overall_win_rate": 0.435,
-      "vs_best": "p2_training_roster-06",
-      "vs_worst": "p2_training_roster-08",
-      "sur_performant": false,
-      "sous_performant": false
-    },
-    {
-      "p1_roster_id": "p1_training_roster-06",
-      "overall_win_rate": 0.435,
-      "vs_best": "p2_training_roster-06",
-      "vs_worst": "p2_training_roster-08",
-      "sur_performant": false,
-      "sous_performant": false
+      "sous_performant": true
     }
   ],
   "p2_summaries": [
     {
-      "p2_roster_id": "p2_training_roster-08",
-      "p1_win_rate_vs_this_p2": 0.2333,
-      "sur_performant_p2": true,
-      "sous_performant_p2": false
-    },
-    {
-      "p2_roster_id": "p2_training_roster-02",
-      "p1_win_rate_vs_this_p2": 0.2533,
-      "sur_performant_p2": true,
-      "sous_performant_p2": false
-    },
-    {
-      "p2_roster_id": "p2_training_roster-09",
-      "p1_win_rate_vs_this_p2": 0.29,
+      "p2_roster_id": "p2_training_roster-03",
+      "p1_win_rate_vs_this_p2": 0.2767,
       "sur_performant_p2": true,
       "sous_performant_p2": false
     },
     {
       "p2_roster_id": "p2_training_roster-04",
-      "p1_win_rate_vs_this_p2": 0.45,
-      "sur_performant_p2": false,
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": true,
       "sous_performant_p2": false
-    },
-    {
-      "p2_roster_id": "p2_training_roster-10",
-      "p1_win_rate_vs_this_p2": 0.4633,
-      "sur_performant_p2": false,
-      "sous_performant_p2": false
-    },
-    {
-      "p2_roster_id": "p2_training_roster-03",
-      "p1_win_rate_vs_this_p2": 0.5033,
-      "sur_performant_p2": false,
-      "sous_performant_p2": true
-    },
-    {
-      "p2_roster_id": "p2_training_roster-07",
-      "p1_win_rate_vs_this_p2": 0.52,
-      "sur_performant_p2": false,
-      "sous_performant_p2": true
-    },
-    {
-      "p2_roster_id": "p2_training_roster-01",
-      "p1_win_rate_vs_this_p2": 0.5233,
-      "sur_performant_p2": false,
-      "sous_performant_p2": true
     },
     {
       "p2_roster_id": "p2_training_roster-05",
-      "p1_win_rate_vs_this_p2": 0.5833,
+      "p1_win_rate_vs_this_p2": 0.4133,
       "sur_performant_p2": false,
-      "sous_performant_p2": true
+      "sous_performant_p2": false
     },
     {
-      "p2_roster_id": "p2_training_roster-06",
-      "p1_win_rate_vs_this_p2": 0.6533,
+      "p2_roster_id": "p2_training_roster-01",
+      "p1_win_rate_vs_this_p2": 0.4333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "p2_training_roster-02",
+      "p1_win_rate_vs_this_p2": 0.7933,
       "sur_performant_p2": false,
       "sous_performant_p2": true
     }

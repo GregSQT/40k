@@ -7,6 +7,7 @@ export class SpaceMarineInfantryTroopMeleeTroop {
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
   static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
+  static OFFENSE_TYPE = "Melee"; // Offensive mode classification
   static TARGET_TYPE = "Troop"; // MeleeTroop specialist - backbone melee
 
   name: string;

@@ -528,11 +528,14 @@ class GameStateManager:
                 f"scenarios/holdout_regular, or scenarios/holdout_hard"
             )
         holdout_split_for_p1: Optional[str] = None
+        holdout_split_for_p2: Optional[str] = None
         if split == "holdout":
             if "/scenarios/holdout_regular/" in scenario_file:
                 holdout_split_for_p1 = "holdout_regular"
+                holdout_split_for_p2 = "holdout_regular"
             elif "/scenarios/holdout_hard/" in scenario_file:
                 holdout_split_for_p1 = "holdout_hard"
+                holdout_split_for_p2 = "holdout_hard"
             else:
                 raise ValueError(
                     f"Holdout scenario '{scenario_file}' must be in holdout_regular/ or holdout_hard/"
@@ -553,7 +556,7 @@ class GameStateManager:
             expected_split=(split if split == "training" else str(holdout_split_for_p1)),
             scenario_file=scenario_file,
             field_name="p1_roster_ref",
-            allow_random=(split == "training"),
+            allow_random=(split in {"training", "holdout"}),
             scenario_agent_key=scenario_agent_key,
             scale_name=scale_name,
             roster_kind="p1",
@@ -561,10 +564,10 @@ class GameStateManager:
         )
         p2_ref, _ = self._resolve_roster_ref(
             p2_ref_value,
-            expected_split=split,
+            expected_split=(split if split == "training" else str(holdout_split_for_p2)),
             scenario_file=scenario_file,
             field_name="p2_roster_ref",
-            allow_random=False,
+            allow_random=(split == "holdout"),
             scenario_agent_key=scenario_agent_key,
             scale_name=scale_name,
             roster_kind="p2",
@@ -699,7 +702,7 @@ class GameStateManager:
 
         ref_split, _, ref_filename = normalized.partition("/")
         VALID_P1_SPLITS = {"training", "holdout_regular", "holdout_hard"}
-        VALID_P2_SPLITS = {"training", "holdout"}
+        VALID_P2_SPLITS = {"training", "holdout", "holdout_regular", "holdout_hard"}
         valid_splits = VALID_P1_SPLITS if roster_kind == "p1" else VALID_P2_SPLITS
         project_root = Path(__file__).resolve().parent.parent
 

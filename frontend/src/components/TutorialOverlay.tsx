@@ -10,6 +10,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { getEventIcon } from "../../../shared/gameLogStructure";
+import {
+  getTutorialUiBehavior,
+  TUTORIAL_UI_RUNTIME_CONFIG,
+  type TutorialAfterCursorIconKey,
+} from "../config/tutorialUiRules";
 import type {
   TutorialLang,
   TutorialSpotlightCircle,
@@ -57,13 +62,14 @@ interface TutorialOverlayProps {
   fogLeftPanelRects?: TutorialSpotlightRect[] | null;
   /** Rects viewport (px) des zones de fog sur le panneau droit (étape 2-11). */
   fogRightPanelRects?: TutorialSpotlightRect[] | null;
+  /** Labels debug des spotlights (affichés seulement si fournis). */
+  debugSpotlightLabels?: Array<{ id: string; position: TutorialSpotlightPosition }>;
 }
 
 /**
  * Modal d'étape du tutoriel : titre, corps, bouton Compris, optionnel Passer le tutoriel.
  * Accessibilité : focus trap, fermeture à Échap.
  */
-const BACKDROP_OPACITY = 0.82;
 /** Opacité des 2 bandes de fog sur le panneau gauche (étape 1-5), pour un rendu moins noir. */
 const FOG_LEFT_PANEL_OPACITY = 0.5;
 
@@ -172,6 +178,42 @@ function MiniTermagantIcon(): React.ReactElement {
       aria-hidden
     />
   );
+}
+
+function resolveDefaultAfterCursorIcon(stepStage: string): TutorialAfterCursorIconKey | null {
+  switch (stepStage) {
+    case "1-14":
+    case "1-16":
+      return "intercessor";
+    case "1-21":
+      return "intercessorGreen";
+    case "1-15":
+      return "hex";
+    case "1-22":
+      return "weaponMenu";
+    case "1-24":
+      return "termagant";
+    default:
+      return null;
+  }
+}
+
+function renderAfterCursorIcon(iconKey: TutorialAfterCursorIconKey | null): React.ReactNode {
+  if (iconKey === null) return null;
+  switch (iconKey) {
+    case "intercessor":
+      return <MiniIntercessorIcon />;
+    case "intercessorGreen":
+      return <MiniIntercessorIconWithGreenCircle />;
+    case "hex":
+      return <MiniHexIcon />;
+    case "weaponMenu":
+      return <MiniWeaponMenuIcon />;
+    case "termagant":
+      return <MiniTermagantIcon />;
+    default:
+      throw new Error(`Unknown after cursor icon key: ${String(iconKey)}`);
+  }
 }
 /** Icône Termagant en fantôme (étape 1-25 : unité morte). */
 function TermagantGhostIcon(): React.ReactElement {
@@ -466,7 +508,7 @@ function renderBodyWithLosPlaceholders(
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   const re =
-    /(<Hex bleu foncé>|<Dark blue hex>|<Hex bleu clair>|<Light blue hex>)([^\n]*)\n?|(<icone termagant>|<Termagant icon>)\s*\n?/g;
+    /(<Hex bleu foncé>|<Dark blue hex>|<Hex bleu clair>|<Light blue hex>|<icone termagant>|<Termagant icon>)/g;
   let m = re.exec(body);
   while (m !== null) {
     if (m.index > lastIndex) {
@@ -476,26 +518,21 @@ function renderBodyWithLosPlaceholders(
         </Fragment>
       );
     }
-    const tag = m[1] ?? m[3] ?? m[0];
-    const sameLineDesc = m[2] ?? "";
+    const tag = m[1] ?? m[0];
     if (tag.includes("termagant") || tag.includes("Termagant icon")) {
       parts.push(
-        <span
-          key={`termagant-${m.index}`}
-          className="tutorial-overlay-dialog__unit-icon-with-label"
-        >
+        <span key={`termagant-${m.index}`} aria-hidden>
           <img
             src={TERMAGANT_ICON_PATH}
             alt=""
-            className="tutorial-overlay-dialog__unit-icon tutorial-overlay-dialog__unit-icon--large"
+            className={MINI_ICON_CLASS}
             aria-hidden
           />
-          <span className="tutorial-overlay-dialog__unit-icon-label">Termagant</span>
         </span>
       );
     } else if (tag.includes("foncé") || tag.includes("Dark blue")) {
       parts.push(
-        <span key={`dark-${m.index}`} className="tutorial-overlay-dialog__los-hex-row">
+        <span key={`dark-${m.index}`} aria-hidden>
           <svg
             className="tutorial-overlay-dialog__los-hex"
             viewBox="0 0 50 50"
@@ -510,12 +547,11 @@ function renderBodyWithLosPlaceholders(
               strokeWidth="1.2"
             />
           </svg>
-          <span className="tutorial-overlay-dialog__los-hex-desc">{sameLineDesc.trim()}</span>
         </span>
       );
     } else {
       parts.push(
-        <span key={`cover-${m.index}`} className="tutorial-overlay-dialog__los-hex-row">
+        <span key={`cover-${m.index}`} aria-hidden>
           <svg
             className="tutorial-overlay-dialog__los-hex"
             viewBox="0 0 50 50"
@@ -530,7 +566,6 @@ function renderBodyWithLosPlaceholders(
               strokeWidth="1.2"
             />
           </svg>
-          <span className="tutorial-overlay-dialog__los-hex-desc">{sameLineDesc.trim()}</span>
         </span>
       );
     }
@@ -557,29 +592,29 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   allowedClickSpotlights = null,
   fogLeftPanelRects = [],
   fogRightPanelRects = [],
+  debugSpotlightLabels = [],
 }) => {
   const clickHoles = allowedClickSpotlights ?? spotlights;
   const title = lang === "fr" ? step.title_fr : step.title_en;
   const body = lang === "fr" ? step.body_fr : step.body_en;
-  const isStage124Family = step.stage === "1-24" || step.stage.startsWith("1-24-");
-  const backdropOpacity = isStage124Family ? 0 : BACKDROP_OPACITY;
+  const uiBehavior = getTutorialUiBehavior(step.stage);
+  const defaultAfterCursorIcon = resolveDefaultAfterCursorIcon(step.stage);
+  const effectiveAfterCursorIcon =
+    uiBehavior.afterCursorIcon === undefined ? defaultAfterCursorIcon : uiBehavior.afterCursorIcon;
+  const popupImageGhostClass = uiBehavior.popupImageGhost === true ? " tutorial-overlay-dialog__popup-image--ghost" : "";
+  const backdropOpacity =
+    step.fog.global === true
+      ? (uiBehavior.overlayBackdropOpacity ?? TUTORIAL_UI_RUNTIME_CONFIG.fogBackdropOpacity)
+      : 0;
+  const titleIconSrc =
+    typeof step.titleIcon === "string" && step.titleIcon.trim() !== ""
+      ? step.titleIcon
+      : step.phase && PHASE_LOGO[step.phase]
+        ? PHASE_LOGO[step.phase]
+        : null;
   const afterCursorIcon = useMemo(() => {
-    switch (step.stage) {
-      case "1-14":
-      case "1-16":
-        return <MiniIntercessorIcon />;
-      case "1-21":
-        return <MiniIntercessorIconWithGreenCircle />;
-      case "1-15":
-        return <MiniHexIcon />;
-      case "1-22":
-        return <MiniWeaponMenuIcon />;
-      case "1-24":
-        return <MiniTermagantIcon />;
-      default:
-        return null;
-    }
-  }, [step.stage]);
+    return renderAfterCursorIcon(effectiveAfterCursorIcon);
+  }, [effectiveAfterCursorIcon]);
   const bodyContent =
     step.stage === "1-16" || step.stage === "1-22" || step.stage === "2-2"
       ? renderBodyWithLosPlaceholders(body, lang, { afterCursor: afterCursorIcon })
@@ -606,9 +641,9 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       ? renderBodyWithClickIcon(bodyRest1_5, { afterCursor: afterCursorIcon })
       : null;
   const showIllustrationBlock =
-    (step.popupImage && !isStage124Family) ||
-    step.popupShowMoveHex ||
-    step.popupShowGreenCircle;
+    uiBehavior.hidePopupIllustrationBlock === true
+      ? false
+      : Boolean(step.popupImage || step.popupShowMoveHex || step.popupShowGreenCircle);
   const dialogRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [overlayRect, setOverlayRect] = useState<DOMRect | null>(null);
@@ -906,47 +941,61 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       {Array.isArray(fogRightPanelRects) && fogRightPanelRects.length > 0
         ? (fogRightPanelRects as TutorialSpotlightRect[]).map((rect, i) =>
             rect.shape === "rect" ? (
-              <svg
+              <div
                 key={`fog-right-${rect.left}-${rect.top}-${i}`}
                 aria-hidden
-                role="img"
                 style={{
                   position: "fixed",
-                  left: rect.left - FOG_BLUR_MARGIN,
-                  top: rect.top - FOG_BLUR_MARGIN,
-                  width: rect.width + FOG_BLUR_MARGIN * 2,
-                  height: rect.height + FOG_BLUR_MARGIN * 2,
+                  left: 0,
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: `rgba(0, 0, 0, ${FOG_LEFT_PANEL_OPACITY})`,
+                  clipPath:
+                    overlayRect != null
+                      ? `inset(${rect.top}px ${Math.max(
+                          0,
+                          overlayRect.width - (rect.left + rect.width)
+                        )}px ${Math.max(0, overlayRect.height - (rect.top + rect.height))}px ${
+                          rect.left
+                        }px)`
+                      : undefined,
+                  mask: spotlights.length > 0 ? `url(#${MASK_ID})` : undefined,
+                  WebkitMask: spotlights.length > 0 ? `url(#${MASK_ID})` : undefined,
                   pointerEvents: "none",
                 }}
-                width={rect.width + FOG_BLUR_MARGIN * 2}
-                height={rect.height + FOG_BLUR_MARGIN * 2}
-                viewBox={`0 0 ${rect.width + FOG_BLUR_MARGIN * 2} ${rect.height + FOG_BLUR_MARGIN * 2}`}
-              >
-                <title>Fog tutoriel panneau droit</title>
-                <defs>
-                  <filter
-                    id={`${FOG_BLUR_FILTER_ID}-right-${i}`}
-                    x="-20%"
-                    y="-20%"
-                    width="140%"
-                    height="140%"
-                    colorInterpolationFilters="sRGB"
-                  >
-                    <feGaussianBlur in="SourceGraphic" stdDeviation={BLUR_EDGE} />
-                  </filter>
-                </defs>
-                <rect
-                  x={FOG_BLUR_MARGIN}
-                  y={FOG_BLUR_MARGIN}
-                  width={rect.width}
-                  height={rect.height}
-                  fill={`rgba(0, 0, 0, ${FOG_LEFT_PANEL_OPACITY})`}
-                  filter={`url(#${FOG_BLUR_FILTER_ID}-right-${i})`}
-                />
-              </svg>
+              />
             ) : null
           )
         : null}
+      {debugSpotlightLabels.map((entry) => {
+        const p = entry.position;
+        const left = p.shape === "circle" ? p.x : p.left;
+        const top = p.shape === "circle" ? p.y - p.radius - 22 : p.top - 22;
+        return (
+          <div
+            key={`debug-spotlight-${entry.id}-${left}-${top}`}
+            style={{
+              position: "fixed",
+              left: Math.max(4, left),
+              top: Math.max(4, top),
+              background: "rgba(0, 0, 0, 0.85)",
+              color: "#7CFF7C",
+              border: "1px solid rgba(124, 255, 124, 0.45)",
+              borderRadius: "4px",
+              padding: "2px 6px",
+              fontSize: "11px",
+              fontFamily: "monospace",
+              lineHeight: 1.2,
+              pointerEvents: "none",
+              zIndex: 10002,
+            }}
+            aria-hidden
+          >
+            {entry.id}
+          </div>
+        );
+      })}
       {/* Couche qui bloque les clics hors spotlights et hors dialog (seuls les clics qui font avancer passent). */}
       {blockingPathD && overlayRect ? (
         <svg
@@ -1000,9 +1049,9 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           style={{ cursor: "move", userSelect: "none" }}
         >
           <div className="tutorial-overlay-dialog__title-row">
-            {step.phase && PHASE_LOGO[step.phase] ? (
+            {titleIconSrc ? (
               <img
-                src={PHASE_LOGO[step.phase]}
+                src={titleIconSrc}
                 alt=""
                 className="tutorial-overlay-dialog__phase-logo"
                 aria-hidden
@@ -1114,7 +1163,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                   <img
                     src={step.popupImage}
                     alt=""
-                    className="tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--in-circle"
+                    className={`tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--in-circle${popupImageGhostClass}`}
                     aria-hidden
                   />
                 </div>
@@ -1134,7 +1183,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                 <img
                   src={step.popupImage}
                   alt=""
-                  className="tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--inline"
+                  className={`tutorial-overlay-dialog__popup-image tutorial-overlay-dialog__popup-image--inline${popupImageGhostClass}`}
                   aria-hidden
                 />
                 {body.split("{{ICON}}").slice(1).join("{{ICON}}")}
@@ -1146,7 +1195,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                     <img
                       src={step.popupImage}
                       alt=""
-                      className="tutorial-overlay-dialog__popup-image"
+                      className={`tutorial-overlay-dialog__popup-image${popupImageGhostClass}`}
                       aria-hidden
                     />
                     <span className="tutorial-overlay-dialog__body-first-line">
@@ -1170,7 +1219,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
                   <img
                     src={step.popupImage}
                     alt=""
-                    className="tutorial-overlay-dialog__popup-image"
+                    className={`tutorial-overlay-dialog__popup-image${popupImageGhostClass}`}
                     aria-hidden
                   />
                   {typeof bodyContent === "string" ? (

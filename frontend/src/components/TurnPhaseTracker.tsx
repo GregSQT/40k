@@ -400,7 +400,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               color: "#1E40AF",
             }}
           >
-            Turn :
+            Round :
           </span>
           {turns.map((turn) => {
             const status = getTurnStatus(turn);

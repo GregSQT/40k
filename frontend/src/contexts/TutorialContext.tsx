@@ -9,6 +9,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { getTutorialScenarioRuntimeData } from "../config/tutorialScenarioRuntime";
+import { getTutorialUiBehavior } from "../config/tutorialUiRules";
 import type { APIGameState } from "../hooks/useEngineAPI";
 
 const TUTORIAL_SCENARIOS = [
@@ -17,30 +19,30 @@ const TUTORIAL_SCENARIOS = [
   "config/tutorial/scenario_etape3.json",
 ] as const;
 
-/** Titre de l’étape "Phase de mouvement" (halos board + colonnes Name/M). À garder en sync avec tutorial_steps.json. */
+/** Titre de l’étape "Phase de mouvement" (halos board + colonnes Name/M). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_ROUNDS = "Rounds";
 export const TUTORIAL_STEP_TITLE_TURNS = "Tours";
 export const TUTORIAL_STEP_TITLE_PHASES = "Phases";
 export const TUTORIAL_STEP_TITLE_PHASE_MOVE = "Phase de mouvement";
 /** Ordre 4 : "Phase de Mouvement" (halo Intercessor + bouton move du turn phase tracker). */
 export const TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT = "Phase de Mouvement";
-/** Titre étape 1-14 (même layout halo Intercessor + bouton Move). À garder en sync avec tutorial_steps.json. */
+/** Titre étape 1-14 (même layout halo Intercessor + bouton Move). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT = "1-14 Phase de Mouvement";
-/** Titre étape 1-15 (halo colonnes Name et M pour clic Intercessor). À garder en sync avec tutorial_steps.json. */
+/** Titre étape 1-15 (halo colonnes Name et M pour clic Intercessor). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_1_15_PHASE_MOUVEMENT = "1-15 Phase de mouvement";
 /** Phase de Tir (halo sur le bouton Shoot du turn phase tracker). */
 export const TUTORIAL_STEP_TITLE_PHASE_TIR = "Phase de Tir";
-/** Titre étape 1-21 (panneau gauche sans fog, halo colonnes Name/M pour clic Intercessor). À garder en sync avec tutorial_steps.json. */
+/** Titre étape 1-21 (panneau gauche sans fog, halo colonnes Name/M pour clic Intercessor). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_1_21_PHASE_TIR = "1-21 Phase de Tir";
 /** Choix des armes (étape 1-22 : halos Move/Shoot, Intercessor armes, Termagant attributs). */
 export const TUTORIAL_STEP_TITLE_WEAPON_CHOICE = "Choix des armes";
-/** Titre étape 1-22 (panneau gauche sans fog). À garder en sync avec tutorial_steps.json. */
+/** Titre étape 1-22 (panneau gauche sans fog). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_1_22_MENU_CHOIX_ARMES = "1-22 Menu de choix des armes";
-/** Titre étape 1-23 (panneau gauche sans fog, choix Bolt Rifle). À garder en sync avec tutorial_steps.json. */
+/** Titre étape 1-23 (panneau gauche sans fog, choix Bolt Rifle). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_1_23_CHOIX_ARMES = "1-23 Choix de l'arme";
-/** Titre étape 1-24 (panneau gauche sans fog, clic Termagant). À garder en sync avec tutorial_steps.json. */
+/** Titre étape 1-24 (panneau gauche sans fog, clic Termagant). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_1_24_CHOIX_CIBLE = "1-24 Choix de la cible";
-/** Titre étape 1-25 (panneau gauche sans fog, halo armes + combat log). À garder en sync avec tutorial_steps.json. */
+/** Titre étape 1-25 (panneau gauche sans fog, halo armes + combat log). À garder en sync avec tutorial_scenario.md (bloc tutorial-steps). */
 export const TUTORIAL_STEP_TITLE_1_25_MORT_TERMAGANT = "1-25 Mort du termagant";
 
 /** Étapes qui affichent le halo sur l'Intercessor (board). */
@@ -80,6 +82,13 @@ export const TUTORIAL_STEP_TITLES_HALO_LEFT = [
   TUTORIAL_STEP_TITLE_1_25_MORT_TERMAGANT,
 ] as const;
 
+export interface TutorialFogConfig {
+  global: boolean;
+  leftPanel: boolean;
+  rightPanel: boolean;
+  boardTopBand: boolean;
+}
+
 /** Parse "stage" (e.g. "1-14") → etape + order. Accepte aussi etape/order en legacy. */
 function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
   let etape: number;
@@ -118,6 +127,34 @@ function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
   } else {
     throw new Error("Step must have 'stage' (e.g. '1-14') or 'etape' and 'order'.");
   }
+  if (typeof raw.fog !== "object" || raw.fog == null) {
+    throw new Error(`Step "${stageId ?? `${etape}-${order}`}" must define fog object`);
+  }
+  const fogRecord = raw.fog as Record<string, unknown>;
+  const fogKeys: Array<keyof TutorialFogConfig> = ["global", "leftPanel", "rightPanel", "boardTopBand"];
+  for (const key of fogKeys) {
+    if (typeof fogRecord[key] !== "boolean") {
+      throw new Error(`Step "${stageId ?? `${etape}-${order}`}" fog.${key} must be boolean`);
+    }
+  }
+  if (raw.spotlightIds != null) {
+    if (!Array.isArray(raw.spotlightIds) || raw.spotlightIds.some((v) => typeof v !== "string")) {
+      throw new Error(`Step "${stageId ?? `${etape}-${order}`}" spotlightIds must be string[]`);
+    }
+  }
+  if (raw.allowedClickSpotlightIds != null) {
+    if (
+      !Array.isArray(raw.allowedClickSpotlightIds) ||
+      raw.allowedClickSpotlightIds.some((v) => typeof v !== "string")
+    ) {
+      throw new Error(
+        `Step "${stageId ?? `${etape}-${order}`}" allowedClickSpotlightIds must be string[]`
+      );
+    }
+  }
+  if (raw.title_icon != null && (typeof raw.title_icon !== "string" || raw.title_icon.trim() === "")) {
+    throw new Error(`Step "${stageId ?? `${etape}-${order}`}" title_icon must be a non-empty string`);
+  }
   const { stage: _s, etape: _e, order: _o, ...rest } = raw;
   return { ...rest, etape, order, stage_id: stageId } as TutorialStepDef;
 }
@@ -142,6 +179,8 @@ export interface TutorialStepDef {
   popup_show_move_hex?: boolean;
   /** Si true, afficher popup_image (icône d’unité) entourée du cercle vert (unité activable). */
   popup_show_green_circle?: boolean;
+  /** URL de l’icône affichée à gauche du titre du popup. */
+  title_icon?: string;
   /** Si true, afficher la première ligne du body sur la même ligne que l’icône (popup_image ou hex). */
   popup_first_line_with_icon?: boolean;
   /**
@@ -150,6 +189,9 @@ export interface TutorialStepDef {
    * - { left: "5%" | 20, top: "10%" | 30 } : coin haut-gauche en % ou px (bord viewport)
    */
   popup_position?: "center" | { left?: string | number; top?: string | number };
+  fog: TutorialFogConfig;
+  spotlightIds?: string[];
+  allowedClickSpotlightIds?: string[];
   title_fr: string;
   title_en: string;
   body_fr: string;
@@ -203,6 +245,8 @@ export interface TutorialStepDisplay {
   advanceOnWeaponName?: string;
   /** URL de l’image à afficher dans le popup (ex. icône d’arme). */
   popupImage?: string;
+  /** URL de l’icône affichée à gauche du titre du popup. */
+  titleIcon?: string;
   /** Si true, afficher un hexagone vert (destination de move) dans le popup. */
   popupShowMoveHex?: boolean;
   /** Si true, afficher l’icône (popupImage) entourée du cercle vert (unité activable). */
@@ -211,6 +255,9 @@ export interface TutorialStepDisplay {
   popupFirstLineWithIcon?: boolean;
   /** Position initiale du popup : "center" ou { left, top } en % (ex. "5%") ou px. */
   popupPosition?: "center" | { left: string | number; top: string | number };
+  fog: TutorialFogConfig;
+  spotlightIds?: string[];
+  allowedClickSpotlightIds?: string[];
 }
 
 interface TutorialContextValue {
@@ -256,6 +303,9 @@ interface TutorialContextValue {
   /** Rect viewport (px) du titre du Game Log (étape 1-21). */
   spotlightGameLogHeader: TutorialSpotlightPosition | null;
   setSpotlightGameLogHeader: (pos: TutorialSpotlightPosition | null) => void;
+  /** Rects viewport (px) des 2 lignes supérieures du Game Log (entrées les plus récentes). */
+  spotlightGameLogTopEntriesPositions: TutorialSpotlightPosition[];
+  setSpotlightGameLogTopEntriesPositions: (pos: TutorialSpotlightPosition[] | null) => void;
   /** Rect viewport (px) de la ligne attributs + titre d’une unité ennemie (étape 1-22, ex. Termagant). */
   spotlightEnemyUnitAttributes: TutorialSpotlightPosition | null;
   setSpotlightEnemyUnitAttributes: (pos: TutorialSpotlightPosition | null) => void;
@@ -328,6 +378,12 @@ export function TutorialProvider({
   const [spotlightRangedWeaponsPositions, setSpotlightRangedWeaponsPositions] = useState<TutorialSpotlightPosition[] | null>(null);
   const [spotlightGameLogLastEntry, setSpotlightGameLogLastEntry] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightGameLogHeader, setSpotlightGameLogHeader] = useState<TutorialSpotlightPosition | null>(null);
+  const [spotlightGameLogTopEntriesPositions, setSpotlightGameLogTopEntriesPositionsState] = useState<
+    TutorialSpotlightPosition[]
+  >([]);
+  const setSpotlightGameLogTopEntriesPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
+    setSpotlightGameLogTopEntriesPositionsState(pos ?? []);
+  }, []);
   const [spotlightEnemyUnitAttributes, setSpotlightEnemyUnitAttributes] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightP2UnitRowPositions, setSpotlightP2UnitRowPositionsState] = useState<TutorialSpotlightPosition[]>([]);
   const setSpotlightP2UnitRowPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
@@ -352,6 +408,7 @@ export function TutorialProvider({
     setSpotlightBoardUnitPositionsState(pos ?? []);
   }, []);
   const [lastEnemyDeathPosition, setLastEnemyDeathPosition] = useState<{ col: number; row: number } | null>(null);
+  const lastKnownEnemyPositionRef = useRef<{ col: number; row: number } | null>(null);
   const [tutorialLang, setTutorialLang] = useState<TutorialLang>("fr");
   const lastPhaseRef = useRef<string | null>(null);
   const onDeployShownForEtapeRef = useRef<Set<number>>(new Set());
@@ -378,17 +435,13 @@ export function TutorialProvider({
     const s = stepsForEtape[currentStepIndex];
     if (!s || !("title_fr" in s)) return null;
     const stage = getStageId(s);
-    const isStep124Substep = stage.startsWith("1-24-");
+    const uiBehavior = getTutorialUiBehavior(stage);
     let phase =
       s.trigger?.type === "phase_enter" && typeof s.trigger.phase === "string" && s.trigger.phase.trim() !== ""
         ? s.trigger.phase
         : undefined;
-    // Étape 2: le popup 2-13 résume la phase de tir (après transition vers charge),
-    // et 2-14 résume la charge (après transition vers fight).
-    if (stage === "2-13") {
-      phase = "shoot";
-    } else if (stage === "2-14") {
-      phase = "charge";
+    if (uiBehavior.phaseDisplayOverride != null) {
+      phase = uiBehavior.phaseDisplayOverride;
     }
     return {
       title_fr: s.title_fr,
@@ -401,13 +454,16 @@ export function TutorialProvider({
       advanceOnUnitClick: s.advance_on_unit_click === true,
       advanceOnMoveClick: s.advance_on_move_click === true,
       hideAdvanceIcon: s.hide_advance_icon === true,
-      // Les sous-étapes 1-24-* sont des popups pédagogiques "Suivant", pas des steps pilotés par clic arme.
-      advanceOnWeaponClick: isStep124Substep ? false : s.advance_on_weapon_click === true,
+      advanceOnWeaponClick:
+        uiBehavior.forceAdvanceOnWeaponClick != null
+          ? uiBehavior.forceAdvanceOnWeaponClick
+          : s.advance_on_weapon_click === true,
       advanceOnWeaponName:
         typeof s.advance_on_weapon_name === "string" && s.advance_on_weapon_name.trim() !== ""
           ? s.advance_on_weapon_name.trim()
           : undefined,
       popupImage: typeof s.popup_image === "string" && s.popup_image.trim() !== "" ? s.popup_image : undefined,
+      titleIcon: typeof s.title_icon === "string" && s.title_icon.trim() !== "" ? s.title_icon : undefined,
       popupShowMoveHex: s.popup_show_move_hex === true,
       popupShowGreenCircle: s.popup_show_green_circle === true,
       popupFirstLineWithIcon: s.popup_first_line_with_icon === true,
@@ -420,6 +476,11 @@ export function TutorialProvider({
                 top: s.popup_position.top ?? "50%",
               }
             : undefined,
+      fog: s.fog,
+      spotlightIds: Array.isArray(s.spotlightIds) ? s.spotlightIds : undefined,
+      allowedClickSpotlightIds: Array.isArray(s.allowedClickSpotlightIds)
+        ? s.allowedClickSpotlightIds
+        : undefined,
     };
   }, [stepsForEtape, currentStepIndex]);
   const hasOnDeployStepForEtape = useMemo(
@@ -464,32 +525,32 @@ export function TutorialProvider({
       setSpotlightRangedWeaponsPositions(null);
       setSpotlightGameLogLastEntry(null);
       setSpotlightGameLogHeader(null);
+      setSpotlightGameLogTopEntriesPositions(null);
       setSpotlightEnemyUnitAttributes(null);
       setSpotlightP2UnitRowPositions([]);
       setSpotlightBoardUnitPositions([]);
       setLastEnemyDeathPosition(null);
     }
-  }, [popupVisible, setLeftPanelFogRects, setRightPanelFogRects, setSpotlightP2UnitRowPositions, setSpotlightBoardUnitPositions]);
+  }, [
+    popupVisible,
+    setLeftPanelFogRects,
+    setRightPanelFogRects,
+    setSpotlightP2UnitRowPositions,
+    setSpotlightBoardUnitPositions,
+    setSpotlightGameLogTopEntriesPositions,
+  ]);
 
   useEffect(() => {
     if (!isTutorialMode) return;
-    let cancelled = false;
-    fetch("/api/config/tutorial/steps")
-      .then((r) => {
-        if (!r.ok) throw new Error(`Tutorial steps: ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        if (!cancelled && Array.isArray(data.steps)) {
-          setSteps(data.steps.map((s: Record<string, unknown>) => normalizeStep(s)));
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) console.error("Tutorial steps load failed:", err);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const runtimeData = getTutorialScenarioRuntimeData();
+      if (!Array.isArray(runtimeData.steps)) {
+        throw new Error("Tutorial runtime data does not contain a valid steps[]");
+      }
+      setSteps(runtimeData.steps.map((s: Record<string, unknown>) => normalizeStep(s)));
+    } catch (err) {
+      console.error("Tutorial steps load failed from tutorial_scenario.md:", err);
+    }
   }, [isTutorialMode]);
 
   const showStepForTrigger = useCallback(
@@ -597,6 +658,13 @@ export function TutorialProvider({
     return player2Units.length > 0;
   }, [gameState?.units, gameState?.units_cache]);
 
+  useEffect(() => {
+    const p2Unit = gameState?.units?.find((u) => Number(u.player) === 2);
+    if (p2Unit && typeof p2Unit.col === "number" && typeof p2Unit.row === "number") {
+      lastKnownEnemyPositionRef.current = { col: p2Unit.col, row: p2Unit.row };
+    }
+  }, [gameState?.units]);
+
   const hadEnemiesLastRef = useRef(true);
   useEffect(() => {
     if (!isTutorialMode || skipped || !startGameWithScenario) return;
@@ -607,13 +675,28 @@ export function TutorialProvider({
     if (!justLostLastEnemy) return;
 
     if (currentEtape === 1) {
-      // Si des sous-étapes 1-24-* existent, les jouer avant 1-25 même si la cible est déjà morte.
+      // Option configurable: jouer les sous-étapes intermédiaires avant 1-25 même si la cible est déjà morte.
       const currentOrder = stepsForEtape[currentStepIndex]?.order;
+      const currentStageId =
+        stepsForEtape[currentStepIndex] != null ? getStageId(stepsForEtape[currentStepIndex]) : null;
+      const sequentialSubstepsUntilOrder =
+        currentStageId != null ? getTutorialUiBehavior(currentStageId).sequentialSubstepsUntilOrder : undefined;
       if (typeof currentOrder === "number" && Number.isFinite(currentOrder)) {
         const next124SubstepIdx = stepsForEtape.findIndex(
-          (s, idx) => idx > currentStepIndex && s.order > currentOrder && s.order < 25
+          (s, idx) =>
+            idx > currentStepIndex &&
+            s.order > currentOrder &&
+            (typeof sequentialSubstepsUntilOrder === "number"
+              ? s.order < sequentialSubstepsUntilOrder
+              : false)
         );
         if (next124SubstepIdx >= 0) {
+          const p2Unit = gameState?.units?.find((u) => Number(u.player) === 2);
+          if (p2Unit && typeof p2Unit.col === "number" && typeof p2Unit.row === "number") {
+            setLastEnemyDeathPosition({ col: p2Unit.col, row: p2Unit.row });
+          } else if (lastKnownEnemyPositionRef.current != null) {
+            setLastEnemyDeathPosition(lastKnownEnemyPositionRef.current);
+          }
           setCurrentStepIndex(next124SubstepIdx);
           setPopupVisible(true);
           return;
@@ -625,6 +708,8 @@ export function TutorialProvider({
         const p2Unit = gameState?.units?.find((u) => Number(u.player) === 2);
         if (p2Unit && typeof p2Unit.col === "number" && typeof p2Unit.row === "number") {
           setLastEnemyDeathPosition({ col: p2Unit.col, row: p2Unit.row });
+        } else if (lastKnownEnemyPositionRef.current != null) {
+          setLastEnemyDeathPosition(lastKnownEnemyPositionRef.current);
         }
         setSpotlightGameLogLastEntry(null);
         setCurrentStepIndex(idx25);
@@ -757,6 +842,8 @@ export function TutorialProvider({
             setSpotlightGameLogLastEntry,
             spotlightGameLogHeader,
             setSpotlightGameLogHeader,
+            spotlightGameLogTopEntriesPositions,
+            setSpotlightGameLogTopEntriesPositions,
             spotlightEnemyUnitAttributes,
             setSpotlightEnemyUnitAttributes,
             spotlightP2UnitRowPositions,
@@ -796,6 +883,8 @@ export function TutorialProvider({
             setSpotlightGameLogLastEntry: () => {},
             spotlightGameLogHeader: null,
             setSpotlightGameLogHeader: () => {},
+            spotlightGameLogTopEntriesPositions: [],
+            setSpotlightGameLogTopEntriesPositions: () => {},
             spotlightEnemyUnitAttributes: null,
             setSpotlightEnemyUnitAttributes: () => {},
             spotlightP2UnitRowPositions: [],
@@ -827,11 +916,13 @@ export function TutorialProvider({
       spotlightRangedWeaponsPositions,
       spotlightGameLogLastEntry,
       spotlightGameLogHeader,
+      spotlightGameLogTopEntriesPositions,
       spotlightEnemyUnitAttributes,
       spotlightP2UnitRowPositions,
       setSpotlightP2UnitRowPositions,
       spotlightBoardUnitPositions,
       setSpotlightBoardUnitPositions,
+      setSpotlightGameLogTopEntriesPositions,
       lastEnemyDeathPosition,
     ]
   );

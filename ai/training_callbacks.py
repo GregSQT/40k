@@ -627,6 +627,8 @@ class MetricsCollectionCallback(BaseCallback):
             # NEW: Unit tracking
             'units_lost': 0,
             'units_killed': 0,
+            'enemy_value_destroyed': 0.0,
+            'ally_value_lost': 0.0,
             
             # NEW: Action tracking
             'valid_actions': 0,
@@ -1063,6 +1065,8 @@ class MetricsCollectionCallback(BaseCallback):
             # Unit tracking
             'units_lost': 0,
             'units_killed': 0,
+            'enemy_value_destroyed': 0.0,
+            'ally_value_lost': 0.0,
             
             # Action tracking
             'valid_actions': 0,

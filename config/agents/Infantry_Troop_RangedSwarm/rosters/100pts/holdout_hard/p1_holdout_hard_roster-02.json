@@ -1,6 +1,6 @@
 {
   "roster_id": "p1_holdout_hard_roster-02",
   "composition": [ 
-    {"unit_type": "Intercessor", "count": 6}
+    {"unit_type": "GreyHunter", "count": 7}
   ]
 }

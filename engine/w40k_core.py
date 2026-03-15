@@ -559,6 +559,8 @@ class W40KEngine(gym.Env):
             'damage_received': 0,
             'units_killed': 0,
             'units_lost': 0,
+            'enemy_value_destroyed': 0.0,
+            'ally_value_lost': 0.0,
             'valid_actions': 0,
             'invalid_actions': 0,
             'wait_actions': 0,
@@ -825,6 +827,8 @@ class W40KEngine(gym.Env):
             'damage_received': 0,
             'units_killed': 0,
             'units_lost': 0,
+            'enemy_value_destroyed': 0.0,
+            'ally_value_lost': 0.0,
             'valid_actions': 0,
             'invalid_actions': 0,
             'wait_actions': 0,
@@ -1338,6 +1342,34 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['units_lost'] = total_ally_units - surviving_ally_units
             self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
             self.episode_tactical_data['total_enemies'] = total_enemy_units
+
+            # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
+            units = require_key(self.game_state, "units")
+            total_ally_value = 0.0
+            total_enemy_value = 0.0
+            for unit in units:
+                unit_player = require_key(unit, "player")
+                unit_value = float(require_key(unit, "VALUE"))
+                if unit_player == controlled_player:
+                    total_ally_value += unit_value
+                else:
+                    total_enemy_value += unit_value
+
+            units_by_id = {str(require_key(unit, "id")): unit for unit in units}
+            surviving_ally_value = 0.0
+            surviving_enemy_value = 0.0
+            for unit_id, cache_entry in units_cache.items():
+                unit_ref = units_by_id.get(str(unit_id))
+                if unit_ref is None:
+                    raise KeyError(f"units_cache contains unknown unit id '{unit_id}' for value metrics")
+                alive_value = float(require_key(unit_ref, "VALUE"))
+                if cache_entry["player"] == controlled_player:
+                    surviving_ally_value += alive_value
+                else:
+                    surviving_enemy_value += alive_value
+
+            self.episode_tactical_data['ally_value_lost'] = max(0.0, total_ally_value - surviving_ally_value)
+            self.episode_tactical_data['enemy_value_destroyed'] = max(0.0, total_enemy_value - surviving_enemy_value)
 
             # Store turn number for metrics filtering (e.g., objectives only on turn 5+)
             self.episode_tactical_data['final_turn'] = self.game_state["turn"]

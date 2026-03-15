@@ -1,0 +1,7 @@
+{
+  "roster_id": "p2_holdout_hard_roster-01",
+  "composition": [
+    {"unit_type": "AssaultIntercessorJumpPack", "count": 6},
+    {"unit_type": "Gargoyle", "count": 1}
+  ]
+}

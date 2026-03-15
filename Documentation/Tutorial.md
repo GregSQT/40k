@@ -80,7 +80,7 @@ Si plus tard on ajoute un vrai mode « script » (actions/dés imposés), on pou
 
 1. L'utilisateur clique sur **« Tutorial »** (depuis `HomePage` ou équivalent).
 2. Le frontend appelle `POST /api/game/start` avec `mode_code: "pvp_test"` (ou un mode dédié) et `scenario_file` pointant vers `config/tutorial/scenario_etape1.json` (puis etape2, etape3 selon les transitions).
-3. Le frontend charge `config/tutorial/tutorial_steps.json` (servi via `/config/tutorial/` ou copie dans `frontend/public/config/tutorial/`).
+3. Le frontend charge `config/tutorial/tutorial_scenario.md` et lit le bloc `json tutorial-steps`.
 4. Le **moteur d'étapes** (TutorialContext / useTutorialEngine) écoute les événements (phase, première action, etc.) et affiche le **TutorialOverlay** (popup) correspondant à l'étape courante.
 5. Le joueur joue normalement ; les popups s'enchaînent. Transition entre étapes : chargement du scénario suivant (etape2 après kill Termagant, etape3 après combat, etc.).
 
@@ -93,16 +93,16 @@ Tous les scénarios et le fichier d'étapes du tutoriel sont dans **`config/tuto
 | `config/tutorial/scenario_etape1.json` | **Créer** — Intercessor (12,20), Termagant (12,0) ; murs = `config/board/25x21/walls/tutorial_walls-01.json`. |
 | `config/tutorial/scenario_etape2.json` | **Créer** — Intercessor + 3 Hormagaunts (positions au contact ou (0,10),(12,0),(24,10)) ; murs = `config/board/25x21/walls/tutorial_walls-01.json`. |
 | `config/tutorial/scenario_etape3.json` (ou réutiliser etape1 + objectifs) | **Créer** — Objectif central, 1 Intercessor ; murs = `config/board/25x21/walls/walls-01.json`. |
-| `config/tutorial/tutorial_steps.json` | **Créer** — Liste des étapes (id, ordre, trigger, title, body), éventuellement par `etape` (1, 2, 3). |
+| `config/tutorial/tutorial_scenario.md` | **Créer** — Source unique runtime: bloc `json tutorial-steps` (étapes) + bloc `json tutorial-ui-rules` (UI/fog/halos). |
 
-Le frontend charge `tutorial_steps.json` depuis ce répertoire (ex. URL `/config/tutorial/tutorial_steps.json` si le serveur sert `config/`, ou copie dans `frontend/public/config/tutorial/`).
+Le frontend charge `tutorial_scenario.md` depuis ce répertoire et parse les blocs JSON taggés `tutorial-steps` et `tutorial-ui-rules`.
 
 ### 3.4 Composants frontend à créer / modifier
 
 | Élément | Rôle |
 |--------|------|
 | **TutorialOverlay.tsx** | Composant React (modal) qui affiche une étape du tutoriel : **titre**, **corps** (texte du message), bouton **« Compris »** (ou « Suivant »), optionnel **« Passer le tutoriel »**. C'est l'UI du popup ; il ne gère pas la logique des étapes, seulement l'affichage et les callbacks (onClose, onSkipTutorial). |
-| **TutorialContext** ou **useTutorialEngine** | **TutorialContext** : contexte React qui fournit à l'arbre l'état du tutoriel (étape courante, steps chargés, popup visible) et les fonctions (avancer d'étape, passer au scénario suivant). **useTutorialEngine** : hook qui encapsule la même logique (chargement de `tutorial_steps.json`, écoute des triggers `phase_enter` / `after_action`, index d'étape, transition etape1 → etape2 → etape3). On peut avoir un context qui utilise le hook en interne. Les deux désignent le **moteur d'étapes** : quel popup montrer et quand, quand recharger le scénario. |
+| **TutorialContext** ou **useTutorialEngine** | **TutorialContext** : contexte React qui fournit à l'arbre l'état du tutoriel (étape courante, steps chargés, popup visible) et les fonctions (avancer d'étape, passer au scénario suivant). **useTutorialEngine** : hook qui encapsule la même logique (chargement de `tutorial_scenario.md` + parse du bloc `tutorial-steps`, écoute des triggers `phase_enter` / `after_action`, index d'étape, transition etape1 → etape2 → etape3). On peut avoir un context qui utilise le hook en interne. Les deux désignent le **moteur d'étapes** : quel popup montrer et quand, quand recharger le scénario. |
 | **Lien « Tutorial » sur HomePage** | Lien ou bouton dont le **libellé visible** est **« Tutorial »** (pas « Didacticiel »). Au clic : navigation vers la partie en mode tutoriel (ex. `/game?mode=tutorial`) et lancement de la partie avec `scenario_file: "config/tutorial/scenario_etape1.json"`. |
 
 | Fichier | Action |
@@ -144,9 +144,9 @@ Réutiliser le format des scénarios existants (voir `config/scenario_pvp.json` 
 
 **Étape 3** : Réutiliser objectif Centre de `scenario_pvp_test` (hex [[12,10],[11,9],[12,9],[13,9],[13,10],[12,11],[11,10]]), 1 Intercessor à placer. **Murs** : `config/board/25x21/walls/walls-01.json`.
 
-### 4.2 Fichier d'étapes `config/tutorial/tutorial_steps.json`
+### 4.2 Source d'étapes `config/tutorial/tutorial_scenario.md`
 
-Fichier unique : **`config/tutorial/tutorial_steps.json`**. Les steps peuvent être organisés par **etape** (1, 2, 3) avec des triggers `on_deploy`, `phase_enter`, `after_action`. Pour l'étape 1 : welcome, phase move, phase shoot, after shoot (kill Termagant) → transition vers scénario etape2. Pour l'étape 2 : phase fight, after fight → transition vers etape3. Pour l'étape 3 : objectif, end.
+Fichier unique : **`config/tutorial/tutorial_scenario.md`**. Le runtime lit le bloc **`json tutorial-steps`**. Les steps peuvent être organisés par **etape** (1, 2, 3) avec des triggers `on_deploy`, `phase_enter`, `after_action`. Pour l'étape 1 : welcome, phase move, phase shoot, after shoot (kill Termagant) → transition vers scénario etape2. Pour l'étape 2 : phase fight, after fight → transition vers etape3. Pour l'étape 3 : objectif, end.
 
 Structure possible : un tableau par etape, ou un tableau unique avec un champ `etape` (1|2|3) et ordre global. Voir 4.3 pour les types de trigger.
 
@@ -218,7 +218,7 @@ Les phases dans `gameState.phase` doivent correspondre à celles du moteur (voir
 3. **Scénario Étape 1** : créer `config/tutorial/scenario_etape1.json` (Intercessor 12,20 ; Termagant 12,0 ; murs = tutorial_walls-01.json).
 4. **Scénario Étape 2** : créer `config/tutorial/scenario_etape2.json` (Intercessor + 3 Hormagaunts au contact ou (0,10),(12,0),(24,10) ; murs = tutorial_walls-01.json).
 5. **Scénario Étape 3** : créer `config/tutorial/scenario_etape3.json` (objectif central + 1 Intercessor ; murs = `config/board/25x21/walls/walls-01.json`).
-6. **Étapes** : créer `config/tutorial/tutorial_steps.json` avec steps pour etape 1, 2, 3 (triggers, textes).
+6. **Étapes/UI** : créer `config/tutorial/tutorial_scenario.md` avec blocs `tutorial-steps` et `tutorial-ui-rules` pour etape 1, 2, 3 (triggers, textes, fog/halos).
 7. **Popup** : implémenter `TutorialOverlay.tsx` (modal titre/corps/Compris/Passer).
 8. **Moteur d'étapes** : TutorialContext ou useTutorialEngine (chargement steps, triggers, transitions etape1 → etape2 → etape3).
 9. **Entrée** : lien **« Tutorial »** sur HomePage, lancement avec `scenario_file: "config/tutorial/scenario_etape1.json"`.
@@ -227,7 +227,7 @@ Les phases dans `gameState.phase` doivent correspondre à celles du moteur (voir
 
 ## 8. Maintenance et évolutions
 
-- **Règles** : si les phases ou les règles changent (`AI_TURN.md`), mettre à jour les textes dans `config/tutorial/tutorial_steps.json`.
+- **Règles** : si les phases ou les règles changent (`AI_TURN.md`), mettre à jour `config/tutorial/tutorial_scenario.md` (blocs runtime).
 - **Scénarios** : les unités doivent exister dans `config/unit_registry.json`. Adapter les positions si la portée/LoS/charge du moteur change. Tous les fichiers tutoriel restent dans `config/tutorial/`.
 - **Tests** : vérifier manuellement le parcours (etape1 → etape2 → etape3) après chaque changement.
 
@@ -237,10 +237,10 @@ Les phases dans `gameState.phase` doivent correspondre à celles du moteur (voir
 
 | Élément | Décision |
 |---------|----------|
-| Config | Tous les fichiers tutoriel dans **`config/tutorial/`** : `scenario_etape1.json`, `scenario_etape2.json`, `scenario_etape3.json`, `tutorial_steps.json`. |
+| Config | Tous les fichiers tutoriel dans **`config/tutorial/`** : `scenario_etape1.json`, `scenario_etape2.json`, `scenario_etape3.json`, `tutorial_scenario.md`. |
 | Entrée utilisateur | Lien **« Tutorial »** (libellé exact) sur HomePage ; au clic → partie avec `scenario_file: config/tutorial/scenario_etape1.json`. |
 | TutorialOverlay | Composant modal (titre, corps, Compris, optionnel Passer) ; UI uniquement, pas la logique d'étapes. |
-| TutorialContext / useTutorialEngine | Moteur d'étapes : état (étape courante, steps), triggers, transitions etape1→2→3 ; charge `config/tutorial/tutorial_steps.json`. |
+| TutorialContext / useTutorialEngine | Moteur d'étapes : état (étape courante, steps), triggers, transitions etape1→2→3 ; charge `config/tutorial/tutorial_scenario.md` (bloc `tutorial-steps`). |
 | Murs | **Étapes 1 et 2** : `config/board/25x21/walls/tutorial_walls-01.json` (murs extérieurs). **Étape 3** : `config/board/25x21/walls/walls-01.json`. |
 | Étape 1 | Intercessor (12,20), Termagant (12,0). Narrative : Termagant rate, joueur avance et tue. Version simplifiée : skip tour ennemi + popup. |
 | Étape 2 | 3 Hormagaunts (0,10), (12,0), (24,10) ou au contact. Narrative : ils chargent, Marine -1 PV, tue 1 puis 2. Version simplifiée : Hormagaunts déjà au contact, popup « Ils viennent de charger ». |
@@ -267,12 +267,12 @@ Ne pas mettre de chemin (pas de `config/board/...`). L’extension `.json` peut 
 - **scenario_file** : chemin **relatif à la racine du projet** (CWD du serveur). Ex. `"config/tutorial/scenario_etape1.json"`.
 - **mode_code** : aujourd’hui `"tutorial"` n’est pas dans les modes autorisés. Pour le MVP, utiliser **`mode_code: "pvp_test"`** avec **`scenario_file: "config/tutorial/scenario_etape1.json"`**. Option ultérieure : ajouter `"tutorial"` côté backend et imposer le scénario par défaut.
 
-### 10.3 Chargement de tutorial_steps.json
+### 10.3 Chargement de tutorial_scenario.md
 
-Le frontend charge les configs depuis `/config/...` (Vite sert `frontend/public/` à la racine). Pour `tutorial_steps.json` :
+Le frontend charge les configs depuis `/config/...` (Vite sert `frontend/public/` à la racine). Pour `tutorial_scenario.md` :
 
-- soit **copier** (ou symlink) `config/tutorial/tutorial_steps.json` vers **`frontend/public/config/tutorial/tutorial_steps.json`** et faire `fetch("/config/tutorial/tutorial_steps.json")` ;
-- soit exposer un endpoint (ex. **GET /api/config/tutorial/steps**) qui lit `config/tutorial/tutorial_steps.json` côté backend.
+- importer le markdown brut et parser les blocs JSON taggés `tutorial-steps` et `tutorial-ui-rules` côté frontend ;
+- ou exposer un endpoint (ex. **GET /api/config/tutorial/steps**) qui lit `config/tutorial/tutorial_scenario.md` et renvoie les `steps` extraits du bloc `tutorial-steps`.
 
 ### 10.4 Conditions de transition entre étapes
 
@@ -282,7 +282,7 @@ Le frontend charge les configs depuis `/config/...` (Vite sert `frontend/public/
 
 ### 10.5 Bouton « Passer le tutoriel »
 
-Comportement à trancher : (a) désactive uniquement les popups et le moteur d’étapes (la partie continue en mode normal), ou (b) ferme la partie et retourne au menu. Documenter le choix dans ce paragraphe ou dans `tutorial_steps.json`.
+Comportement à trancher : (a) désactive uniquement les popups et le moteur d’étapes (la partie continue en mode normal), ou (b) ferme la partie et retourne au menu. Documenter le choix dans ce paragraphe ou dans `tutorial_scenario.md`.
 
 ### 10.6 Scénario étape 3 — objectifs
 

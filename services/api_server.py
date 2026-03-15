@@ -9,6 +9,7 @@ import os
 import sqlite3
 import sys
 import time
+import yaml
 from pathlib import Path
 import hashlib
 import secrets
@@ -1797,15 +1798,22 @@ def reset_game():
 
 @app.route('/api/config/tutorial/steps', methods=['GET'])
 def get_tutorial_steps():
-    """Sert config/tutorial/tutorial_steps.json (source unique)."""
+    """Serve tutorial steps from tutorial_scenario.yaml (single source of truth)."""
     try:
         project_root = Path(__file__).resolve().parent.parent
-        path = project_root / "config" / "tutorial" / "tutorial_steps.json"
+        path = project_root / "config" / "tutorial" / "tutorial_scenario.yaml"
         if not path.exists():
-            return jsonify({"success": False, "error": "tutorial_steps.json not found"}), 404
-        with open(path, "r", encoding="utf-8-sig") as f:
-            data = json.load(f)
-        return jsonify(data)
+            return jsonify({"success": False, "error": "tutorial_scenario.yaml not found"}), 404
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict) or "steps" not in data or not isinstance(data["steps"], list):
+            return jsonify({
+                "success": False,
+                "error": "tutorial_scenario.yaml must be an object with a steps[] array"
+            }), 500
+
+        return jsonify({"steps": data["steps"]})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

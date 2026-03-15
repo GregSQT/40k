@@ -3,11 +3,9 @@
   "deployment_type": "active",
   "scale": "100pts",
   "p1_roster_seed": 123,
-  "p1_roster_ref": "holdout_regular/p1_holdout_regular_roster-02.json",
-  "p2_roster_ref": "holdout/p2_holdout_roster-02.json",
+  "p1_roster_ref": "holdout_regular_random",
+  "p2_roster_ref": "holdout_regular_random",
   "wall_ref": "walls-01.json",
-  "primary_objectives": [
-    "objectives_control"
-  ],
+  "primary_objectives": ["objectives_control"],
   "objectives_ref": "objectives-01.json"
 }

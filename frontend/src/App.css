@@ -2854,6 +2854,10 @@ textarea:focus {
   height: 48px;
   object-fit: contain;
 }
+.tutorial-overlay-dialog__popup-image--ghost {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
 /* Étape 2-2 : noms d'attributs d'arme en apparence tooltip (badge, survol = description) */
 .tutorial-overlay-dialog__weapon-attr-badge {
   display: inline-block;

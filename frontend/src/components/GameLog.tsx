@@ -187,6 +187,8 @@ interface GameLogProps {
   onLastEntryRect?: (rect: GameLogLastEntryRect | null) => void;
   /** Tutoriel 2-1 : rapporter le rect du titre (header) du Game Log pour halo. */
   onHeaderRect?: (rect: GameLogLastEntryRect | null) => void;
+  /** Tutoriel : rapporter les rects des 2 lignes supérieures (entrées les plus récentes). */
+  onTopTwoEntriesRects?: (rects: GameLogLastEntryRect[]) => void;
 }
 
 export const GameLog: React.FC<GameLogProps> = ({
@@ -196,10 +198,12 @@ export const GameLog: React.FC<GameLogProps> = ({
   debugMode = false,
   onLastEntryRect,
   onHeaderRect,
+  onTopTwoEntriesRects,
 }) => {
   const eventsContainerRef = React.useRef<HTMLDivElement>(null);
   const lastEntryRef = React.useRef<HTMLDivElement>(null);
   const headerRef = React.useRef<HTMLDivElement>(null);
+  const topEntryRefs = React.useRef<Array<HTMLDivElement | null>>([]);
   const ruleDescriptionByLookup = React.useMemo(() => {
     const descriptions = new Map<string, string>();
 
@@ -315,6 +319,7 @@ export const GameLog: React.FC<GameLogProps> = ({
 
   // Display all events (newest first) - sort by timestamp descending, no limit
   const displayedEvents = [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  topEntryRefs.current = [];
 
   // Keep newest entry visible when new events arrive
   React.useEffect(() => {
@@ -358,6 +363,26 @@ export const GameLog: React.FC<GameLogProps> = ({
     });
     return () => onHeaderRect(null);
   }, [onHeaderRect, displayedEvents.length]);
+
+  React.useLayoutEffect(() => {
+    if (!onTopTwoEntriesRects) return;
+    const topEntryCount = Math.min(2, displayedEvents.length);
+    const topTwo = topEntryRefs.current
+      .slice(0, topEntryCount)
+      .filter((node): node is HTMLDivElement => node != null)
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          shape: "rect" as const,
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        };
+      });
+    onTopTwoEntriesRects(topTwo);
+    return () => onTopTwoEntriesRects([]);
+  }, [onTopTwoEntriesRects, displayedEvents.length]);
 
   return (
     <div className="game-log">
@@ -411,7 +436,14 @@ export const GameLog: React.FC<GameLogProps> = ({
               return (
                 <div
                   key={event.id}
-                  ref={index === 0 ? lastEntryRef : undefined}
+                  ref={(node) => {
+                    if (index === 0) {
+                      lastEntryRef.current = node;
+                    }
+                    if (index < 2) {
+                      topEntryRefs.current[index] = node;
+                    }
+                  }}
                   className={`game-log-entry ${getEventTypeClass(event)} ${waitClass} ${objectiveControlClass}`}
                 >
                   <div className="game-log-entry__single-line">

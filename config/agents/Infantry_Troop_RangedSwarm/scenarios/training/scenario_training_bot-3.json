@@ -2,7 +2,7 @@
     "deployment_zone": "hammer",
     "deployment_type": "active",
     "scale": "100pts",
-    "p1_roster_seed": 123,
+    "p1_roster_seed": null,
     "p1_roster_ref": "training_random",
     "p2_roster_ref": "training/p2_training_roster-03.json",
     "wall_ref": "walls-01.json",

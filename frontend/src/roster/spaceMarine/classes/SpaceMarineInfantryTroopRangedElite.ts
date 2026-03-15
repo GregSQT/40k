@@ -7,6 +7,7 @@ export class SpaceMarineInfantryTroopRangedElite {
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
   static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
+  static OFFENSE_TYPE = "Ranged"; // Offensive mode classification
   static TARGET_TYPE = "Elite"; // RangedElite specialist - bolt rifles vs hordes
 
   name: string;

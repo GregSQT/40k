@@ -1,0 +1,7 @@
+{
+  "roster_id": "p2_holdout_hard_roster-02",
+  "composition": [
+    {"unit_type": "HeavyIntercessorHeavyBolter", "count": 1},
+    {"unit_type": "HeavyIntercessor", "count": 3}
+  ]
+}

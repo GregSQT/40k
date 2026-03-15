@@ -7,6 +7,7 @@ export class SpaceMarineInfantryEliteRangedSwarm {
   // AI CLASSIFICATION PROPERTIES - inherited by all extending units
   static TANKING_LEVEL = "Elite"; // Elite: 3+ wounds, 3+ save + invul
   static MOVE_TYPE = "Infantry"; // Standard infantry movement
+  static OFFENSE_TYPE = "Ranged"; // Offensive mode classification
   static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - anti-infantry
 
   name: string;
