@@ -39,6 +39,11 @@
     "description": "The target cannot have the Benefit of Cover against an attack made with this weapon.",
     "has_parameter": false
   },
+  "INDIRECT_FIRE": {
+    "name": "Indirect Fire",
+    "description": "A line of sight on the target is not required to attack with this weapon.",
+    "has_parameter": false
+  },
   "LETHAL_HITS": {
     "name": "Lethal Hits",
     "description": "Each time an attack is made with such a weapon, a Critical Hit automatically wounds the target.",
@@ -52,6 +57,11 @@
   "PISTOL": {
     "name": "Pistol",
     "description": "The bearer can shoot with this weapon even if within Engagement Range of enemy units, but must target one of those enemy units. Cannot be shot alongside any other non-Pistol weapon (except by a Monster or Vehicle).",
+    "has_parameter": false
+  },
+  "PSYCHIC": {
+    "name": "Psychic",
+    "description": "The attack is psychic.",
     "has_parameter": false
   },
   "RAPID_FIRE": {

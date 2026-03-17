@@ -1,0 +1,54 @@
+{
+  "roster_value_mean": 101.0,
+  "roster_value_std": 0.0,
+  "roster_value_p95": 101.0,
+  "rejection_rate_roster_budget": 0.0,
+  "unit_pick_frequency": {
+    "chaos::RaptorPlasmaGun": 1,
+    "spaceMarine::AssaultIntercessorJumpPack": 1,
+    "spaceMarine::HellblasterSergeant": 1,
+    "spaceMarine::Infernus": 1,
+    "spaceMarine::Suppressor": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.5703053701829194,
+    "observed": {
+      "Balance": 0.2,
+      "Melee": 0.2,
+      "Ranged": 0.6
+    },
+    "target": {
+      "Balance": 0.4013531506302348,
+      "Melee": 0.2837995344612249,
+      "Ranged": 0.3148473149085403
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 0.7417986576704249,
+    "observed": {
+      "High": 0.6,
+      "Low": 0.0,
+      "Mid": 0.4
+    },
+    "target": {
+      "High": 0.454257050793509,
+      "Low": 0.3708993288352125,
+      "Mid": 0.17484362037127862
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 1.0573419996049642,
+    "observed": {
+      "AntiElite": 0.4,
+      "Burst": 0.0,
+      "Generalist": 0.4,
+      "Volume": 0.2
+    },
+    "target": {
+      "AntiElite": 0.12195960250839924,
+      "Burst": 0.5174307717870298,
+      "Generalist": 0.14936939768911875,
+      "Volume": 0.2112402280154522
+    }
+  }
+}

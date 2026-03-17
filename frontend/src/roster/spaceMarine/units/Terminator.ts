@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/Terminator.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteMeleeElite } from "../classes/SpaceMarineInfantryEliteMeleeElite";
+import { EliteMeleeElite } from "../classes/EliteMeleeElite";
 
-export class Terminator extends SpaceMarineInfantryEliteMeleeElite {
+export class Terminator extends EliteMeleeElite {
   static NAME = "Terminator";
   static DISPLAY_NAME = "Terminator";
 

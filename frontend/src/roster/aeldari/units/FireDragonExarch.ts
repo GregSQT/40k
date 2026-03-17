@@ -1,9 +1,9 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/FireDragonExarch.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedElite } from "../classes/SwarmRangedElite";
+import { SwarmRangeElite } from "../classes/SwarmRangeElite";
 
-export class FireDragonExarch extends SwarmRangedElite {
+export class FireDragonExarch extends SwarmRangeElite {
   static NAME = "FireDragonExarch";
   static DISPLAY_NAME = "Fire Dragon Exarch";
 

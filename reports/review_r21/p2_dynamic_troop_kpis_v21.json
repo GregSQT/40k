@@ -1,0 +1,53 @@
+{
+  "roster_value_mean": 97.0,
+  "roster_value_std": 0.0,
+  "roster_value_p95": 97.0,
+  "rejection_rate_roster_budget": 0.0,
+  "unit_pick_frequency": {
+    "chaos::RaptorMeltaGun": 2,
+    "aeldari::WarpSpiderExarchSpinner": 1,
+    "spaceMarine::BloodClaw": 1,
+    "spaceMarine::Suppressor": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.9703053701829194,
+    "observed": {
+      "Balance": 0.0,
+      "Melee": 0.2,
+      "Ranged": 0.8
+    },
+    "target": {
+      "Balance": 0.4013531506302348,
+      "Melee": 0.2837995344612249,
+      "Ranged": 0.3148473149085403
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 1.2503127592574428,
+    "observed": {
+      "High": 0.2,
+      "Low": 0.0,
+      "Mid": 0.8
+    },
+    "target": {
+      "High": 0.454257050793509,
+      "Low": 0.3708993288352125,
+      "Mid": 0.17484362037127862
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 0.657341999604964,
+    "observed": {
+      "AntiElite": 0.4,
+      "Burst": 0.2,
+      "Generalist": 0.2,
+      "Volume": 0.2
+    },
+    "target": {
+      "AntiElite": 0.12195960250839924,
+      "Burst": 0.5174307717870298,
+      "Generalist": 0.14936939768911875,
+      "Volume": 0.2112402280154522
+    }
+  }
+}

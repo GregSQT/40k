@@ -2,9 +2,9 @@
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopRangedSwarm } from "../classes/SpaceMarineInfantryTroopRangedSwarm";
+import { TroopRangeSwarm } from "../classes/TroopRangeSwarm";
 
-export class GreyHunter extends SpaceMarineInfantryTroopRangedSwarm {
+export class GreyHunter extends TroopRangeSwarm {
   static NAME = "GreyHunter";
   static DISPLAY_NAME = "Grey Hunter";
   // BASE

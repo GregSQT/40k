@@ -1,9 +1,9 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/SwoopingHawk.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedSwarm } from "../classes/SwarmRangedSwarm";
+import { SwarmRangeSwarm } from "../classes/SwarmRangeSwarm";
 
-export class SwoopingHawk extends SwarmRangedSwarm {
+export class SwoopingHawk extends SwarmRangeSwarm {
   static NAME = "SwoopingHawk";
   static DISPLAY_NAME = "Swooping Hawk";
 

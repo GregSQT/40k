@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/CaptainGravis.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryLeaderEliteMeleeElite } from "../classes/SpaceMarineInfantryLeaderEliteMeleeElite";
+import { LeaderEliteMeleeElite } from "../classes/LeaderEliteMeleeElite";
 
-export class CaptainGravis extends SpaceMarineInfantryLeaderEliteMeleeElite {
+export class CaptainGravis extends LeaderEliteMeleeElite {
   static NAME = "Captain Gravis";
   static DISPLAY_NAME = "Captain (Gravis)";
 

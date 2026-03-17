@@ -1,4 +1,4 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/WarpSpiderExarchPowerblade.ts
 
 import { getWeapons } from "../armory";
 import { SwarmMeleeTroop } from "../classes/SwarmMeleeTroop.ts";

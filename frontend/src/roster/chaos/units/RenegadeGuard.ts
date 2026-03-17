@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/RenegadeGuard.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedSwarm } from "../classes/SwarmRangedSwarm";
+import { SwarmRangeSwarm } from "../classes/SwarmRangeSwarm";
 
-export class RenegadeGuard extends SwarmRangedSwarm {
+export class RenegadeGuard extends SwarmRangeSwarm {
   static NAME = "RenegadeGuard";
   static DISPLAY_NAME = "RenegadeGuard";
   // BASE

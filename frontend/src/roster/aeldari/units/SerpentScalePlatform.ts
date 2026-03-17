@@ -1,9 +1,9 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/SerpentScalePlatform.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedTroop } from "../classes/SwarmRangedTroop";
+import { SwarmRangeTroop } from "../classes/SwarmRangeTroop";
 
-export class SerpentScalePlatform extends SwarmRangedTroop {
+export class SerpentScalePlatform extends SwarmRangeTroop {
   static NAME = "SerpentScalePlatform";
   static DISPLAY_NAME = "Serpent Scale Platform";
 

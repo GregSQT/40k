@@ -1,10 +1,10 @@
-// frontend/src/roster/spaceMarine/units/Intercessor.ts
+// frontend/src/roster/spaceMarine/units/HeavyIntercessorHeavyBolter.ts
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteRangedTroop } from "../classes/SpaceMarineInfantryEliteRangedTroop.ts";
+import { EliteRangeTroop } from "../classes/EliteRangeTroop.ts";
 
-export class HeavyIntercessorHeavyBolter extends SpaceMarineInfantryEliteRangedTroop {
+export class HeavyIntercessorHeavyBolter extends EliteRangeTroop {
   static NAME = "HeavyIntercessorHeavyBolter";
   static DISPLAY_NAME = "Heavy Intercessor (Heavy Bolter)";
   // BASE

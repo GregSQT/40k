@@ -1,4 +1,4 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/StormGuardian.ts
 
 import { getWeapons } from "../armory";
 import { SwarmMeleeSwarm } from "../classes/SwarmMeleeSwarm";

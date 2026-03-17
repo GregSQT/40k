@@ -1,9 +1,9 @@
-// frontend/src/roster/spaceMarine/units/TerminatorAssaultCannon.ts
+// frontend/src/roster/spaceMarine/units/EradicatorMultiMelta.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteRangedTroop } from "../classes/SpaceMarineInfantryEliteRangedTroop";
+import { EliteRangeTroop } from "../classes/EliteRangeTroop";
 
-export class EradicatorMultiMelta extends SpaceMarineInfantryEliteRangedTroop {
+export class EradicatorMultiMelta extends EliteRangeTroop {
   static NAME = "EradicatorMultiMelta";
   static DISPLAY_NAME = "Eradicator (Melta Rifle)";
 

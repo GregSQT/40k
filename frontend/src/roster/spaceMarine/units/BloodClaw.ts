@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/BloodClaw.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopMeleeTroop } from "../classes/SpaceMarineInfantryTroopMeleeTroop";
+import { TroopMeleeTroop } from "../classes/TroopMeleeTroop";
 
-export class BloodClaw extends SpaceMarineInfantryTroopMeleeTroop {
+export class BloodClaw extends TroopMeleeTroop {
   static NAME = "BloodClaw";
   static DISPLAY_NAME = "Blood Claw";
   // BASE

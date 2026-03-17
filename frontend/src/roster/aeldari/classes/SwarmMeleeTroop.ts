@@ -1,4 +1,4 @@
-// frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryEliteMeleeElite.ts
+// frontend/src/roster/spaceMarine/classes/EliteMeleeElite.ts
 
 export class SwarmMeleeTroop {
   static FACTION = "Aeldari";

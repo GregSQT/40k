@@ -1,4 +1,4 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/CustodianAllarusSpear.ts
 
 import { getWeapons } from "../armory";
 import { EliteMeleeTroop } from "../classes/EliteMeleeTroop";

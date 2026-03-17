@@ -1,10 +1,10 @@
-// frontend/src/roster/spaceMarine/units/GreyHunter.ts
+// frontend/src/roster/spaceMarine/units/HellblasterSergeant.ts
 //
 
 import { getWeapons } from "../armory.ts";
-import { SpaceMarineInfantryTroopRangedElite } from "../classes/SpaceMarineInfantryTroopRangedElite.ts";
+import { TroopRangeElite } from "../classes/TroopRangeElite.ts";
 
-export class HellblasterSergeant extends SpaceMarineInfantryTroopRangedElite {
+export class HellblasterSergeant extends TroopRangeElite {
   static NAME = "HellblasterSergeant";
   static DISPLAY_NAME = "Hellblaster (Sergeant)";
   // BASE

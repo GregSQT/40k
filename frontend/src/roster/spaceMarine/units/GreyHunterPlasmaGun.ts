@@ -1,10 +1,10 @@
-// frontend/src/roster/spaceMarine/units/GreyHunter.ts
+// frontend/src/roster/spaceMarine/units/GreyHunterPlasmaGun.ts
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopRangedElite } from "../classes/SpaceMarineInfantryTroopRangedElite.ts";
+import { TroopRangeElite } from "../classes/TroopRangeElite.ts";
 
-export class GreyHunterPlasmaGun extends SpaceMarineInfantryTroopRangedElite {
+export class GreyHunterPlasmaGun extends TroopRangeElite {
   static NAME = "GreyHunterPlasmaGun";
   static DISPLAY_NAME = "Grey Hunter (Plasma Gun)";
   // BASE

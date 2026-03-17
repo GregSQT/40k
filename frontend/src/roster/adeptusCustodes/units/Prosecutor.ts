@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/Prosecutor.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedSwarm } from "../classes/SwarmRangedSwarm";
+import { SwarmRangeSwarm } from "../classes/SwarmRangeSwarm";
 
-export class Prosecutor extends SwarmRangedSwarm {
+export class Prosecutor extends SwarmRangeSwarm {
   static NAME = "Prosecutor";
   static DISPLAY_NAME = "Prosecutor";
   // BASE

@@ -12,6 +12,7 @@
 import type { DiceValue, Weapon } from "../../types/game";
 
 const D6: DiceValue = "D6";
+const D6_PLUS_1: DiceValue = "D6+1";
 //const D3: DiceValue = "D3";
 // ============================================================================
 // TYRANID WEAPONS
@@ -19,6 +20,7 @@ const D6: DiceValue = "D6";
 
 export const AELDARI_ARMORY: Record<string, Weapon> = {
   // Ranged Weapons
+  d_scythe: {display_name: "D-Scythe", RNG: 12, NB: D6, ATK: 7, STR: 7, AP: -3, DMG: 1, WEAPON_RULES: ["TORRENT"],},
   death_spinner: {display_name: "Death Spinner", RNG: 12, NB: D6, ATK: 7, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT"],},
   death_spinner_exarch: {display_name: "Exarch Death Spinner", RNG: 12, NB: D6, ATK: 7, STR: 6, AP: -2, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT"],},
   dragon_fusion_gun: {display_name: "Dragon Fusion Gun", RNG: 12, NB: 1, ATK: 3, STR: 9, AP: -4, DMG: D6, WEAPON_RULES: ["ASSAULT", "MELTA:3"],},
@@ -34,6 +36,8 @@ export const AELDARI_ARMORY: Record<string, Weapon> = {
   shuriken_catapult: {display_name: "Shuriken Catapult", RNG: 18, NB: 2, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT"],},
   shuriken_catapult_avenger: {display_name: "Avenger Shuriken Catapult", RNG: 18, NB: 4, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT"],},
   shuriken_pistol: {display_name: "Shuriken Pistol", RNG: 12, NB: 1, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT", "PISTOL"],},
+  wraithcannon: {display_name: "Wraith Cannon", RNG: 18, NB: 1, ATK: 4, STR: 14, AP: -4, DMG: D6_PLUS_1, WEAPON_RULES: [],},
+
   
   // #########################################################################################
   // #################################### Melee Weapons ######################################
@@ -43,6 +47,7 @@ export const AELDARI_ARMORY: Record<string, Weapon> = {
   biting_blade: {display_name: "Biting Blade", NB: 5, ATK: 3, STR: 5, AP: -1, DMG: 2, WEAPON_RULES: ["SUSTAINED_HITS:1"],},
   close_combat_weapon: {display_name: "Close Combat Weapon", NB: 1, ATK: 3, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: [],},
   close_combat_weapon_aspect_warrior: {display_name: "Close Combat Weapon", NB: 2, ATK: 3, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: [],},
+  close_combat_weapon_wraithguard: {display_name: "Close Combat Weapon", NB: 3, ATK: 4, STR: 5, AP: 0, DMG: 1, WEAPON_RULES: [],},
   mirror_swords: {display_name: "Mirror Swords", NB: 4, ATK: 2, STR: 4, AP: -2, DMG: 2, WEAPON_RULES: [],},
   powerblades_array: {display_name: "Powerblades Array", NB: 10, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["LETHAL_HITS", "TWIN_LINKED"],},
   power_glaive: {display_name: "Power Glaive", NB: 3, ATK: 3, STR: 5, AP: -3, DMG: 1, WEAPON_RULES: [],},

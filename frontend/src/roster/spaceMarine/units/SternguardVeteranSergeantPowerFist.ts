@@ -1,10 +1,10 @@
-// frontend/src/roster/spaceMarine/units/Intercessor.ts
+// frontend/src/roster/spaceMarine/units/SternguardVeteranSergeantPowerFist.ts
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopMeleeElite } from "../classes/SpaceMarineInfantryTroopMeleeElite.ts";
+import { TroopMeleeElite } from "../classes/TroopMeleeElite.ts";
 
-export class SternguardVeteranSergeantPowerFist extends SpaceMarineInfantryTroopMeleeElite {
+export class SternguardVeteranSergeantPowerFist extends TroopMeleeElite {
   static NAME = "SternguardVeteranSergeantPowerFist";
   static DISPLAY_NAME = "Sternguard Veteran (Sergeant, Power Fist)";
   // BASE

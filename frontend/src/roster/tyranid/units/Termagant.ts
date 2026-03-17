@@ -2,9 +2,9 @@
 //
 
 import { getWeapons } from "../armory";
-import { TyranidInfantrySwarmRangedSwarm } from "../classes/TyranidInfantrySwarmRangedSwarm";
+import { SwarmRangeSwarm } from "../classes/SwarmRangeSwarm";
 
-export class Termagant extends TyranidInfantrySwarmRangedSwarm {
+export class Termagant extends SwarmRangeSwarm {
   static NAME = "Termagant";
   static DISPLAY_NAME = "Termagant";
   // BASE

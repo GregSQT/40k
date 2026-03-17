@@ -1,0 +1,53 @@
+{
+  "roster_value_mean": 102.0,
+  "roster_value_std": 0.0,
+  "rejection_rate_roster_budget": 0.5,
+  "unit_pick_frequency": {
+    "aeldari::FireDragonExarch": 1,
+    "spaceMarine::AssaultIntercessor": 1,
+    "spaceMarine::AssaultIntercessorJumpPack": 1,
+    "spaceMarine::AssaultIntercessorJumpPackSergeantPowerFistHandFlamer": 1,
+    "tyranid::TyranidWarriorRanged": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 1.0324009310775502,
+    "observed": {
+      "Balance": 0.0,
+      "Melee": 0.8,
+      "Ranged": 0.2
+    },
+    "target": {
+      "Balance": 0.4013531506302348,
+      "Melee": 0.2837995344612249,
+      "Ranged": 0.3148473149085403
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 0.8503127592574428,
+    "observed": {
+      "High": 0.2,
+      "Low": 0.2,
+      "Mid": 0.6
+    },
+    "target": {
+      "High": 0.454257050793509,
+      "Low": 0.3708993288352125,
+      "Mid": 0.17484362037127862
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 1.333600338952297,
+    "observed": {
+      "AntiElite": 0.4,
+      "Burst": 0.0,
+      "Generalist": 0.0,
+      "Volume": 0.6
+    },
+    "target": {
+      "AntiElite": 0.12195960250839924,
+      "Burst": 0.5174307717870298,
+      "Generalist": 0.14936939768911875,
+      "Volume": 0.2112402280154522
+    }
+  }
+}

@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/AssaultIntercessor.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopMeleeSwarm } from "../classes/SpaceMarineInfantryTroopMeleeSwarm";
+import { TroopMeleeSwarm } from "../classes/TroopMeleeSwarm";
 
-export class AssaultIntercessor extends SpaceMarineInfantryTroopMeleeSwarm {
+export class AssaultIntercessor extends TroopMeleeSwarm {
   static NAME = "AssaultIntercessor";
   static DISPLAY_NAME = "Assault Intercessor";
   // BASE

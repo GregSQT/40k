@@ -1,9 +1,9 @@
 // frontend/src/roster/tyranid/units/Genestealer.ts
 
 import { getWeapons } from "../armory";
-import { TyranidInfantryTroopMeleeTroop } from "../classes/TyranidInfantryTroopMeleeTroop";
+import { TroopMeleeTroop } from "../classes/TroopMeleeTroop";
 
-export class Genestealer extends TyranidInfantryTroopMeleeTroop {
+export class Genestealer extends TroopMeleeTroop {
   static NAME = "Genestealer";
   static DISPLAY_NAME = "Genestealer";
   // BASE

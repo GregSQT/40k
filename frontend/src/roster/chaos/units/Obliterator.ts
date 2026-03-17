@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/Obliterator.ts
 
 import { getWeapons } from "../armory";
-import { EliteRangedElite } from "../classes/EliteRangedElite.ts";
+import { EliteRangeElite } from "../classes/EliteRangeElite.ts";
 
-export class Obliterator extends EliteRangedElite {
+export class Obliterator extends EliteRangeElite {
   static NAME = "Obliterator";
   static DISPLAY_NAME = "Obliterator";
   // BASE

@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/TerminatorHeavyFlamer.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteRangedTroop } from "../classes/SpaceMarineInfantryEliteRangedTroop";
+import { EliteRangeTroop } from "../classes/EliteRangeTroop";
 
-export class TerminatorHeavyFlamer extends SpaceMarineInfantryEliteRangedTroop {
+export class TerminatorHeavyFlamer extends EliteRangeTroop {
   static NAME = "TerminatorHeavyFlamer";
   static DISPLAY_NAME = "Terminator (Assault Cannon)";
 

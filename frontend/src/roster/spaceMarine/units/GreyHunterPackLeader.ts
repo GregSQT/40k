@@ -2,9 +2,9 @@
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopMeleeElite } from "../classes/SpaceMarineInfantryTroopMeleeElite";
+import { TroopMeleeElite } from "../classes/TroopMeleeElite";
 
-export class GreyHunterPackLeader extends SpaceMarineInfantryTroopMeleeElite {
+export class GreyHunterPackLeader extends TroopMeleeElite {
   static NAME = "GreyHunterPackLeader";
   static DISPLAY_NAME = "Grey Hunter (Pack Leader)";
   // BASE

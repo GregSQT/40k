@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/ChosenPlasma.ts
 
 import { getWeapons } from "../armory";
-import { TroopRangedTroop } from "../classes/TroopRangedTroop";
+import { TroopRangeTroop } from "../classes/TroopRangeTroop";
 
-export class ChosenPlasma extends TroopRangedTroop {
+export class ChosenPlasma extends TroopRangeTroop {
   static NAME = "ChosenPlasma";
   static DISPLAY_NAME = "ChosenPlasma";
   // BASE

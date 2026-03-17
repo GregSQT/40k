@@ -1,10 +1,10 @@
-// frontend/src/roster/spaceMarine/units/Intercessor.ts
+// frontend/src/roster/spaceMarine/units/SternguardVeteranBoltRifle.ts
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopRangedSwarm } from "../classes/SpaceMarineInfantryTroopRangedSwarm";
+import { TroopRangeSwarm } from "../classes/TroopRangeSwarm";
 
-export class SternguardVeteranBoltRifle extends SpaceMarineInfantryTroopRangedSwarm {
+export class SternguardVeteranBoltRifle extends TroopRangeSwarm {
   static NAME = "SternguardVeteranBoltRifle";
   static DISPLAY_NAME = "Sternguard Veteran (Bolt Rifle)";
   // BASE

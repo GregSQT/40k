@@ -1,9 +1,9 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/WarpSpider.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedTroop } from "../classes/SwarmRangedTroop";
+import { SwarmRangeTroop } from "../classes/SwarmRangeTroop";
 
-export class WarpSpider extends SwarmRangedTroop {
+export class WarpSpider extends SwarmRangeTroop {
   static NAME = "WarpSpider";
   static DISPLAY_NAME = "Dark Reaper";
 

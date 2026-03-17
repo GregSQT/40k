@@ -2,9 +2,9 @@
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantrySwarmMeleeSwarm } from "../classes/SpaceMarineInfantrySwarmMeleeSwarm.ts";
+import { SwarmMeleeSwarm } from "../classes/SwarmMeleeSwarm.ts";
 
-export class FenrisianWolf extends SpaceMarineInfantrySwarmMeleeSwarm {
+export class FenrisianWolf extends SwarmMeleeSwarm {
   static NAME = "FenrisianWolf";
   static DISPLAY_NAME = "Fenrisian Wolf";
   // BASE

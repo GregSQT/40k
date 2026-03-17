@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/RaptorMeltaGun.ts
 
 import { getWeapons } from "../armory";
-import { TroopRangedElite } from "../classes/TroopRangedElite.ts";
+import { TroopRangeElite } from "../classes/TroopRangeElite.ts";
 
-export class RaptorMeltaGun extends TroopRangedElite {
+export class RaptorMeltaGun extends TroopRangeElite {
   static NAME = "RaptorMeltaGun";
   static DISPLAY_NAME = "RaptorMeltaGun";
   // BASE

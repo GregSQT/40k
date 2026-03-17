@@ -2,9 +2,9 @@
 //
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopRangedSwarm } from "../classes/SpaceMarineInfantryTroopRangedSwarm";
+import { TroopRangeSwarm } from "../classes/TroopRangeSwarm";
 
-export class Intercessor extends SpaceMarineInfantryTroopRangedSwarm {
+export class Intercessor extends TroopRangeSwarm {
   static NAME = "Intercessor";
   static DISPLAY_NAME = "Intercessor";
   // BASE

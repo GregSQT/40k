@@ -1,9 +1,9 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/StrikingScorpion.ts
 
 import { getWeapons } from "../armory";
-import { SwarmMeleetroop } from "../classes/SwarmMeleeTroop";
+import { SwarmMeleeTroop } from "../classes/SwarmMeleeTroop";
 
-export class StrikingScorpion extends SwarmMeleetroop {
+export class StrikingScorpion extends SwarmMeleeTroop {
   static NAME = "StrikingScorpionExarch";
   static DISPLAY_NAME = "Striking Scorpion Exarch";
 

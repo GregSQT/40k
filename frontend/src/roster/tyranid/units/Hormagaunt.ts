@@ -1,9 +1,9 @@
 // frontend/src/roster/tyranid/units/Hormagaunt.ts
 
 import { getWeapons } from "../armory";
-import { TyranidInfantrySwarmMeleeSwarm } from "../classes/TyranidInfantrySwarmMeleeSwarm";
+import { SwarmMeleeSwarm } from "../classes/SwarmMeleeSwarm";
 
-export class Hormagaunt extends TyranidInfantrySwarmMeleeSwarm {
+export class Hormagaunt extends SwarmMeleeSwarm {
   static NAME = "Hormagaunt";
   static DISPLAY_NAME = "Hormagaunt";
   // BASE

@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Hormagaunt.ts
+// frontend/src/roster/tyranid/units/Gargoyle.ts
 
 import { getWeapons } from "../armory";
-import { TyranidInfantrySwarmMeleeSwarm } from "../classes/TyranidInfantrySwarmMeleeSwarm";
+import { SwarmMeleeSwarm } from "../classes/SwarmMeleeSwarm";
 
-export class Gargoyle extends TyranidInfantrySwarmMeleeSwarm {
+export class Gargoyle extends SwarmMeleeSwarm {
   static NAME = "Gargoyle";
   static DISPLAY_NAME = "Gargoyle";
   // BASE

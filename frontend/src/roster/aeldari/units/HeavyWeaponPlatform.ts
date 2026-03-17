@@ -1,9 +1,9 @@
-// frontend/src/roster/spaceMarine/units/Aggressor.ts
+// frontend/src/roster/spaceMarine/units/HeavyWeaponPlatform.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedTroop } from "../classes/SwarmRangedTroop";
+import { SwarmRangeTroop } from "../classes/SwarmRangeTroop";
 
-export class HeavyWeaponPlatform extends SwarmRangedTroop {
+export class HeavyWeaponPlatform extends SwarmRangeTroop {
   static NAME = "HeavyWeaponPlatform";
   static DISPLAY_NAME = "Heavy Weapon Platform";
 

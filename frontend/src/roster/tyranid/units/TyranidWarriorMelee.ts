@@ -1,10 +1,10 @@
-// frontend/src/roster/tyranid/units/TyranidWarriorRanged.ts
+// frontend/src/roster/tyranid/units/TyranidWarriorMelee.ts
 //
 
 import { getWeapons } from "../armory";
-import { TyranidInfantryTroopMeleeTroop } from "../classes/TyranidInfantryTroopMeleeTroop";
+import { TroopMeleeTroop } from "../classes/TroopMeleeTroop";
 
-export class TyranidWarriorMelee extends TyranidInfantryTroopMeleeTroop {
+export class TyranidWarriorMelee extends TroopMeleeTroop {
   static NAME = "TyranidWarriorMelee";
   static DISPLAY_NAME = "Tyranid Warrior (Melee)";
   // BASE

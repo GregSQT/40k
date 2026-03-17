@@ -52,6 +52,8 @@ class TargetProfile:
 @dataclass(frozen=True)
 class UnitData:
     unit_id: str
+    name: str
+    value: int
     display_name: str
     rng_codes: Tuple[str, ...]
     cc_codes: Tuple[str, ...]
@@ -137,8 +139,31 @@ def _parse_inherited_static_string(unit_file: Path, unit_contents: str, field_na
         return None
 
 
+def _parse_inherited_static_number(unit_file: Path, unit_contents: str, field_name: str) -> Optional[int]:
+    extends_match = re.search(r"export\s+class\s+\w+\s+extends\s+(\w+)", unit_contents)
+    if extends_match is None:
+        return None
+    parent_class_name = extends_match.group(1)
+    parent_file = _resolve_imported_class_file(unit_file, unit_contents, parent_class_name)
+    if parent_file is None:
+        return None
+    parent_contents = parent_file.read_text(encoding="utf-8")
+    try:
+        return _parse_static_number(parent_contents, field_name)
+    except ValueError:
+        return None
+
+
 def _parse_unit_file(path: Path) -> UnitData:
     contents = path.read_text(encoding="utf-8")
+    unit_name = _parse_static_string(contents, "NAME")
+    try:
+        value = _parse_static_number(contents, "VALUE")
+    except ValueError:
+        inherited_value = _parse_inherited_static_number(path, contents, "VALUE")
+        if inherited_value is None:
+            raise ValueError("Missing required static numeric field 'VALUE' (including inherited)")
+        value = inherited_value
     try:
         declared_offense_type = _parse_static_string(contents, "OFFENSE_TYPE")
     except ValueError:
@@ -153,7 +178,9 @@ def _parse_unit_file(path: Path) -> UnitData:
         declared_tanking_level = _parse_inherited_static_string(path, contents, "TANKING_LEVEL")
 
     return UnitData(
-        unit_id=_parse_static_string(contents, "NAME"),
+        unit_id=unit_name,
+        name=unit_name,
+        value=value,
         display_name=_parse_static_string(contents, "DISPLAY_NAME"),
         rng_codes=_parse_static_string_array(contents, "RNG_WEAPON_CODES"),
         cc_codes=_parse_static_string_array(contents, "CC_WEAPON_CODES"),
@@ -514,6 +541,7 @@ def _print_table(rows: List[Dict[str, str]], verbous: bool) -> None:
     if verbous:
         headers = [
             "Roster",
+            "Value",
             "UniteID",
             "Tanking",
             "BlendCategory",
@@ -531,7 +559,6 @@ def _print_table(rows: List[Dict[str, str]], verbous: bool) -> None:
             "TTK_M_Swarm",
             "TTK_M_Troop",
             "TTK_M_Elite",
-            "TargetType",
             "Perf_Target_Swarm",
             "Perf_Target_Troop",
             "Perf_Target_Elite",
@@ -545,12 +572,12 @@ def _print_table(rows: List[Dict[str, str]], verbous: bool) -> None:
     else:
         headers = [
             "Roster",
+            "Value",
             "UniteID",
             "Tanking",
             "BlendCategory",
             "Blend_R",
             "Ratio_R_M",
-            "TargetType",
         ]
     widths = {h: len(h) for h in headers}
     for row in rows:
@@ -791,7 +818,10 @@ def main() -> None:
 
             row = {
                 "Roster": roster_name,
+                "Value": str(unit.value),
                 "UniteID": unit.unit_id,
+                "NAME": unit.name,
+                "VALUE": str(unit.value),
                 "Tanking": metric["tank_category"],
                 "BlendCategory": metric["blend_category"],
                 "BlendGroup": _blend_group_from_category(metric["blend_category"]),
@@ -830,9 +860,10 @@ def main() -> None:
             row["ProjectionScore"] = f"{projection_score:.2f}"
             row["WeaponProfile"] = weapon_profile
             rows.append(row)
+            csv_base_row = {k: v for k, v in row.items() if k != "Value"}
             csv_rows.append(
                 {
-                    **row,
+                    **csv_base_row,
                     "DisplayName": unit.display_name,
                     "Declared_TANKING_LEVEL": unit.declared_tanking_level if unit.declared_tanking_level is not None else "",
                     "Declared_OFFENSE_TYPE": unit.declared_offense_type if unit.declared_offense_type is not None else "",
@@ -867,7 +898,9 @@ def main() -> None:
         raise ValueError("No eligible rosters produced results. Check roster composition and TANKING_LEVEL coverage.")
     fieldnames = [
         "Roster",
+        "VALUE",
         "UniteID",
+        "NAME",
         "DisplayName",
         "Tanking",
         "BlendCategory",

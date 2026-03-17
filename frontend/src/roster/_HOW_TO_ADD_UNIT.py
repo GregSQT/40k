@@ -1,6 +1,6 @@
 /*  EXAMPLE for HeavyIntercessor
 1 : Rempalce HeavyIntercessor by the name of the unit
-2 : Replace SpaceMarineInfantryEliteRangedTroop by the class of the unit
+2 : Replace EliteRangeTroop by the class of the unit
 3 : Update the values of the unit
 4 : Update the weapons of the unit
 5 : Update the armory.ts if the weapon is a new one. example: frontend/src/roster/spaceMarine/armory.ts
@@ -17,9 +17,9 @@
 // frontend/src/roster/spaceMarine/units/HeavyIntercessor.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteRangedTroop } from "../classes/SpaceMarineInfantryEliteRangedTroop.ts";
+import { EliteRangeTroop } from "../classes/EliteRangeTroop.ts";
 
-export class HeavyIntercessor extends SpaceMarineInfantryEliteRangedTroop {
+export class HeavyIntercessor extends EliteRangeTroop {
   static NAME = "HeavyIntercessor";
   static DISPLAY_NAME = "Heavy Intercessor";
   // BASE

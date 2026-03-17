@@ -1,4 +1,4 @@
-// frontend/src/roster/tyranid/classes/TyranidInfantryEliteMeleeElite.ts
+// frontend/src/roster/tyranid/classes/EliteMeleeElite.ts
 
 export class SwarmMeleeSwarm {
   static FACTION = "Chaos";

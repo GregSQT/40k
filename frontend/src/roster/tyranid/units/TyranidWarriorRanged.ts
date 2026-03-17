@@ -2,9 +2,9 @@
 //
 
 import { getWeapons } from "../armory";
-import { TyranidInfantryTroopRangedTroop } from "../classes/TyranidInfantryTroopRangedTroop";
+import { TroopRangeTroop } from "../classes/TroopRangeTroop";
 
-export class TyranidWarriorRanged extends TyranidInfantryTroopRangedTroop {
+export class TyranidWarriorRanged extends TroopRangeTroop {
   static NAME = "TyranidWarriorRanged";
   static DISPLAY_NAME = "Tyranid Warrior (Ranged)";
   // BASE

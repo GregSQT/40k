@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/CultistFirebrand.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedSwarm } from "../classes/SwarmRangedSwarm";
+import { SwarmRangeSwarm } from "../classes/SwarmRangeSwarm";
 
-export class CultistFirebrand extends SwarmRangedSwarm {
+export class CultistFirebrand extends SwarmRangeSwarm {
   static NAME = "CultistFirebrand";
   static DISPLAY_NAME = "CultistFirebrand";
   // BASE

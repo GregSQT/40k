@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/Aggressor.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryEliteRangedSwarm } from "../classes/SpaceMarineInfantryEliteRangedSwarm";
+import { EliteRangeSwarm } from "../classes/EliteRangeSwarm";
 
-export class AggressorBoltStorm extends SpaceMarineInfantryEliteRangedSwarm {
+export class AggressorBoltStorm extends EliteRangeSwarm {
   static NAME = "AggressorBoltStorm";
   static DISPLAY_NAME = "Aggressor (Bolt Storm)";
 

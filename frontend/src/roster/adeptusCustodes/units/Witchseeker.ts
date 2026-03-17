@@ -1,9 +1,9 @@
-// frontend/src/roster/tyranid/units/Carnifex.ts
+// frontend/src/roster/tyranid/units/Witchseeker.ts
 
 import { getWeapons } from "../armory";
-import { SwarmRangedSwarm } from "../classes/SwarmRangedSwarm";
+import { SwarmRangeSwarm } from "../classes/SwarmRangeSwarm";
 
-export class Witchseeker extends SwarmRangedSwarm {
+export class Witchseeker extends SwarmRangeSwarm {
   static NAME = "Witchseeker";
   static DISPLAY_NAME = "Witchseeker";
   // BASE

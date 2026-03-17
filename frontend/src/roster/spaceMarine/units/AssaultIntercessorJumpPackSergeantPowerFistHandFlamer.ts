@@ -1,9 +1,9 @@
 // frontend/src/roster/spaceMarine/units/AssaultIntercessor.ts
 
 import { getWeapons } from "../armory";
-import { SpaceMarineInfantryTroopMeleeTroop } from "../classes/SpaceMarineInfantryTroopMeleeTroop";
+import { TroopMeleeTroop } from "../classes/TroopMeleeTroop";
 
-export class AssaultIntercessorJumpPackSergeantPowerFistHandFlamer extends SpaceMarineInfantryTroopMeleeTroop {
+export class AssaultIntercessorJumpPackSergeantPowerFistHandFlamer extends TroopMeleeTroop {
   static NAME = "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer";
   static DISPLAY_NAME = "Assault Intercessor Jump Pack (Sergeant, Power Fist, Hand Flamer)";
   // BASE

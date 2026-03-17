@@ -104,17 +104,17 @@ else:
         #"config/units/tyranids.json", # Unit Definitions   
         
         # config/roster/spaceMarine
-        #"config/roster/spaceMarine/classes/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
-        #"config/roster/spaceMarine/classes/SpaceMarineInfantryTroopMeleeTroop.ts",
-        #"config/roster/spaceMarine/classes/SpaceMarineInfantryTroopRangedSwarm.ts",
+        #"config/roster/spaceMarine/classes/LeaderEliteMeleeElite.ts",
+        #"config/roster/spaceMarine/classes/TroopMeleeTroop.ts",
+        #"config/roster/spaceMarine/classes/TroopRangeSwarm.ts",
         #"config/roster/spaceMarine/units/Intercessor.ts",
         #"config/roster/spaceMarine/units/AssaultIntercessor.ts",
         #"config/roster/spaceMarine/units/CaptainGravis.ts",
 
         # config/roster/tyranid
-        #"config/roster/tyranid/classes/TyranidInfantryEliteMeleeElite.ts",
-        #"config/roster/tyranid/classes/TyranidInfantrySwarmMeleeSwarm.ts",
-        #"config/roster/tyranid/classes/TyranidInfantrySwarmRangedSwarm.ts",
+        #"config/roster/tyranid/classes/EliteMeleeElite.ts",
+        #"config/roster/tyranid/classes/SwarmMeleeSwarm.ts",
+        #"config/roster/tyranid/classes/SwarmRangeSwarm.ts",
         #"config/roster/tyranid/units/Termagant.ts",
         #"config/roster/tyranid/units/Hormagaunt.ts",
         #"config/roster/tyranid/units/Carnifex.ts",
@@ -220,18 +220,18 @@ else:
         "frontend/src/pages/ReplayPage.tsx",
         
         # Frontend/src/roster/spaceMarine
-        "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryLeaderEliteMeleeElite.ts",
-        "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryTroopMeleeTroop.ts",
-        "frontend/src/roster/spaceMarine/classes/SpaceMarineInfantryTroopRangedSwarm.ts",
+        "frontend/src/roster/spaceMarine/classes/LeaderEliteMeleeElite.ts",
+        "frontend/src/roster/spaceMarine/classes/TroopMeleeTroop.ts",
+        "frontend/src/roster/spaceMarine/classes/TroopRangeSwarm.ts",
         "frontend/src/roster/spaceMarine/units/Intercessor.ts",
         "frontend/src/roster/spaceMarine/units/AssaultIntercessor.ts",
         "frontend/src/roster/spaceMarine/units/CaptainGravis.ts",
 
         # Frontend/src/roster/tyranid
-        "frontend/src/roster/tyranid/classes/TyranidInfantryEliteMeleeElite.ts",
-        "frontend/src/roster/tyranid/classes/TyranidInfantrySwarmMeleeSwarm.ts",
-        "frontend/src/roster/tyranid/classes/TyranidInfantrySwarmRangedSwarm.ts",
-        "frontend/src/roster/tyranid/classes/TyranidInfantryTroopMeleeTroop.ts",
+        "frontend/src/roster/tyranid/classes/EliteMeleeElite.ts",
+        "frontend/src/roster/tyranid/classes/SwarmMeleeSwarm.ts",
+        "frontend/src/roster/tyranid/classes/SwarmRangeSwarm.ts",
+        "frontend/src/roster/tyranid/classes/TroopMeleeTroop.ts",
         "frontend/src/roster/tyranid/units/Termagant.ts",
         "frontend/src/roster/tyranid/units/Hormagaunt.ts",
         "frontend/src/roster/tyranid/units/Carnifex.ts",
