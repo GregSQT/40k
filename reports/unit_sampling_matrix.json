@@ -1,0 +1,542 @@
+{
+  "by_tanking": {
+    "Elite": {
+      "counts": {
+        "mobility": {
+          "High": 1,
+          "Low": 9,
+          "Mid": 12
+        },
+        "weapon_profile": {
+          "AntiElite": 12,
+          "Burst": 2,
+          "Generalist": 7,
+          "Volume": 1
+        }
+      },
+      "weights": {
+        "mobility_weights": {
+          "High": 0.6165195926981433,
+          "Low": 0.20550653089938106,
+          "Mid": 0.17797387640247575
+        },
+        "weapon_profile_weights": {
+          "AntiElite": 0.1216116161178834,
+          "Burst": 0.29788640628404073,
+          "Generalist": 0.1592269817846035,
+          "Volume": 0.42127499581347244
+        }
+      }
+    },
+    "Swarm": {
+      "counts": {
+        "mobility": {
+          "High": 4,
+          "Low": 7,
+          "Mid": 15
+        },
+        "weapon_profile": {
+          "AntiElite": 3,
+          "Burst": 2,
+          "Generalist": 16,
+          "Volume": 5
+        }
+      },
+      "weights": {
+        "mobility_weights": {
+          "High": 0.44007755960989214,
+          "Low": 0.3326673658022793,
+          "Mid": 0.2272550745878285
+        },
+        "weapon_profile_weights": {
+          "AntiElite": 0.2913452194445607,
+          "Burst": 0.35682356331918275,
+          "Generalist": 0.12615618065507078,
+          "Volume": 0.22567503658118576
+        }
+      }
+    },
+    "Troop": {
+      "counts": {
+        "mobility": {
+          "High": 3,
+          "Low": 4,
+          "Mid": 19
+        },
+        "weapon_profile": {
+          "AntiElite": 15,
+          "Burst": 1,
+          "Generalist": 4,
+          "Volume": 6
+        }
+      },
+      "weights": {
+        "mobility_weights": {
+          "High": 0.4418161077328196,
+          "Low": 0.38262397309778406,
+          "Mid": 0.17555991916939642
+        },
+        "weapon_profile_weights": {
+          "AntiElite": 0.11918079153077302,
+          "Burst": 0.4615852207865019,
+          "Generalist": 0.23079261039325094,
+          "Volume": 0.1884413772894742
+        }
+      }
+    }
+  },
+  "cells": [
+    {
+      "blend_group": "Balance",
+      "count": 3,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "chaos::Obliterator",
+        "spaceMarine::TerminatorAssaultCannon",
+        "spaceMarine::TerminatorCyclone"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Balance",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "spaceMarine::IntercessorTest"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "High",
+      "tanking": "Elite",
+      "units": [
+        "tyranid::Carnifex"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 5,
+      "mobility_bucket": "Low",
+      "tanking": "Elite",
+      "units": [
+        "spaceMarine::AggressorBoltStorm",
+        "spaceMarine::AggressorFlamestorm",
+        "spaceMarine::AssaultTerminator",
+        "spaceMarine::Captain Gravis",
+        "spaceMarine::TerminatorHeavyFlamer"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "Low",
+      "tanking": "Elite",
+      "units": [
+        "tyranid::GenestealerPrime"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "Low",
+      "tanking": "Elite",
+      "units": [
+        "adeptusCustodes::CustodianGuardBlade"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "spaceMarine::Terminator"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 2,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "adeptusCustodes::CustodianAllarusAxe",
+        "adeptusCustodes::CustodianAllarusSpear"
+      ],
+      "weapon_profile": "Burst"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 3,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "adeptusCustodes::CustodianGuardSpear",
+        "adeptusCustodes::CustodianWardenAxe",
+        "adeptusCustodes::CustodianWardenSpear"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 2,
+      "mobility_bucket": "Low",
+      "tanking": "Elite",
+      "units": [
+        "spaceMarine::EradicatorMeltaRifle",
+        "spaceMarine::EradicatorMultiMelta"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 2,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "spaceMarine::HeavyIntercessor",
+        "spaceMarine::HeavyIntercessorHeavyBolter"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Balance",
+      "count": 1,
+      "mobility_bucket": "High",
+      "tanking": "Swarm",
+      "units": [
+        "tyranid::Gargoyle"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Balance",
+      "count": 2,
+      "mobility_bucket": "Low",
+      "tanking": "Swarm",
+      "units": [
+        "chaos::CultistMob",
+        "chaos::RenegadeGuard"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Balance",
+      "count": 4,
+      "mobility_bucket": "Mid",
+      "tanking": "Swarm",
+      "units": [
+        "adeptusCustodes::Prosecutor",
+        "aeldari::StormGuardian",
+        "tyranid::Termagant",
+        "tyranid::TermagantTuto"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "Low",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::SerpentScalePlatform"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "Low",
+      "tanking": "Swarm",
+      "units": [
+        "tyranid::Genestealer"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 5,
+      "mobility_bucket": "Mid",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::DireAvengerExarch",
+        "aeldari::HowlingBanshee",
+        "aeldari::HowlingBansheeExarch",
+        "spaceMarine::FenrisianWolf",
+        "tyranid::Hormagaunt"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::StrikingScorpion"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "High",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::DarkReaper"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "High",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::SwoopingHawkExarch"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "High",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::SwoopingHawk"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "Low",
+      "tanking": "Swarm",
+      "units": [
+        "chaos::ChosenPlasma"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "Low",
+      "tanking": "Swarm",
+      "units": [
+        "adeptusCustodes::Witchseeker"
+      ],
+      "weapon_profile": "Burst"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "Low",
+      "tanking": "Swarm",
+      "units": [
+        "chaos::CultistFirebrand"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::FireDragon"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::WarpSpider"
+      ],
+      "weapon_profile": "Burst"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 2,
+      "mobility_bucket": "Mid",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::GuardianDefender",
+        "aeldari::HeavyWeaponPlatform"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Swarm",
+      "units": [
+        "aeldari::DireAvenger"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Balance",
+      "count": 2,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::AssaultIntercessorJumpPackPlasmaPistol",
+        "spaceMarine::BloodClawPackLeader"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Balance",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::Intercessor"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "High",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::AssaultIntercessorJumpPack"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 2,
+      "mobility_bucket": "Low",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::AssaultIntercessorSergeant",
+        "spaceMarine::IntercessorSergeant"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 2,
+      "mobility_bucket": "Low",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::AssaultIntercessor",
+        "tyranid::TyranidWarriorMelee"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 3,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "aeldari::StrikingScorpionExarch",
+        "spaceMarine::AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+        "spaceMarine::GreyHunterPackLeader"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::GreyHunter"
+      ],
+      "weapon_profile": "Generalist"
+    },
+    {
+      "blend_group": "Melee",
+      "count": 3,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "aeldari::WarpSpiderExarchPowerblade",
+        "spaceMarine::BloodClaw",
+        "tyranid::TyranidWarriorRanged"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 2,
+      "mobility_bucket": "High",
+      "tanking": "Troop",
+      "units": [
+        "aeldari::DarkReaperExarch",
+        "chaos::RaptorPlasmaGun"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 6,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "aeldari::FireDragonExarch",
+        "chaos::RaptorMeltaGun",
+        "spaceMarine::GreyHunterPlasmaGun",
+        "spaceMarine::Hellblaster",
+        "spaceMarine::HellblasterSergeant",
+        "spaceMarine::IntercessorGrenadeLauncher"
+      ],
+      "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "aeldari::WarpSpiderExarchSpinner"
+      ],
+      "weapon_profile": "Burst"
+    },
+    {
+      "blend_group": "Ranged",
+      "count": 2,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::SternguardVeteranBoltRifle",
+        "spaceMarine::SternguardVeteranSergeantPowerFist"
+      ],
+      "weapon_profile": "Generalist"
+    }
+  ],
+  "criteria": {
+    "mobility": {
+      "buckets": {
+        "High": "projection_score >= 16",
+        "Low": "projection_score < 10",
+        "Mid": "10 <= projection_score < 16"
+      },
+      "projection_score": "MOVE + 0.25 * max_ranged_range"
+    },
+    "weapon_profile_priority": [
+      "AntiElite: STR>=8 and AP<=-2 and DMG_avg>=2",
+      "Volume: NB_avg>=4 and DMG_avg<=1.5",
+      "Burst: dice-based NB/DMG or MELTA:* or HAZARDOUS",
+      "Generalist: otherwise"
+    ],
+    "weights": "normalized inverse-sqrt per tanking bucket: 1/sqrt(count)"
+  },
+  "version": "v1"
+}

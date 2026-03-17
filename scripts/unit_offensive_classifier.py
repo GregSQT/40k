@@ -178,7 +178,7 @@ def _dice_expectation(value: Any) -> float:
         return float(value)
     if not isinstance(value, str):
         raise TypeError(f"Unsupported dice value type: {type(value).__name__}")
-    mapping = {"D3": 2.0, "D6": 3.5, "2D6": 7.0, "D6+1": 4.5}
+    mapping = {"D3": 2.0, "D6": 3.5, "2D6": 7.0, "D6+1": 4.5, "D6+2": 5.5, "D6+3": 6.5}
     if value not in mapping:
         raise ValueError(f"Unsupported dice expression: {value}")
     return mapping[value]

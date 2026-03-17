@@ -30,15 +30,19 @@ class ArmoryParser:
         """Get path to TypeScript armory file for faction."""
         # Normalize faction name (SpaceMarine -> spaceMarine, Tyranid -> tyranid)
         faction_lower = faction[0].lower() + faction[1:] if faction else faction
-        
-        armory_path = self._project_root / "frontend" / "src" / "roster" / faction_lower / "armory.ts"
-        
-        if not armory_path.exists():
-            raise FileNotFoundError(
-                f"Armory file not found for faction '{faction}': {armory_path}"
-            )
-        
-        return armory_path
+
+        # Prefer canonical lowerCamel folder, but support exact-case faction folders too.
+        canonical_path = self._project_root / "frontend" / "src" / "roster" / faction_lower / "armory.ts"
+        if canonical_path.exists():
+            return canonical_path
+
+        exact_case_path = self._project_root / "frontend" / "src" / "roster" / faction / "armory.ts"
+        if exact_case_path.exists():
+            return exact_case_path
+
+        raise FileNotFoundError(
+            f"Armory file not found for faction '{faction}': {canonical_path}"
+        )
     
     def _parse_armory_file(self, armory_path: Path) -> Dict[str, Dict[str, Any]]:
         """
@@ -111,21 +115,21 @@ class ArmoryParser:
                 weapon['COMBI_WEAPON'] = combi_match.group(1)
             
             # Numeric properties: RNG, NB, ATK, STR, AP, DMG
-            # NB/DMG can be dice expressions (D3, D6, 2D6, D6+1) in addition to ints
+            # NB/DMG can be dice expressions (D3, D6, 2D6, D6+1/2/3) in addition to ints
             for prop in ['RNG', 'NB', 'ATK', 'STR', 'AP', 'DMG']:
                 if prop in ['NB', 'DMG']:
-                    prop_match = re.search(rf'{prop}:\s*([A-Z0-9_]+|D6\+1|2D6|D[36]|-?\d+)', weapon_body)
+                    prop_match = re.search(rf'{prop}:\s*([A-Z0-9_]+|D6\+[123]|2D6|D[36]|-?\d+)', weapon_body)
                     if prop_match:
                         raw_value = prop_match.group(1)
-                        if raw_value in ['D3', 'D6', '2D6', 'D6+1']:
+                        if raw_value in ['D3', 'D6', '2D6', 'D6+1', 'D6+2', 'D6+3']:
                             weapon[prop] = raw_value
                         elif raw_value in dice_constant_map:
                             resolved_value = dice_constant_map[raw_value]
-                            if resolved_value not in ['D3', 'D6', '2D6', 'D6+1']:
+                            if resolved_value not in ['D3', 'D6', '2D6', 'D6+1', 'D6+2', 'D6+3']:
                                 raise ValueError(
                                     f"Weapon '{weapon.get('display_name', weapon_code)}' has unsupported "
                                     f"{prop} DiceValue constant {raw_value}={resolved_value!r} in {armory_path}. "
-                                    "Allowed dice values: D3, D6, 2D6, D6+1."
+                                    "Allowed dice values: D3, D6, 2D6, D6+1, D6+2, D6+3."
                                 )
                             weapon[prop] = resolved_value
                         else:

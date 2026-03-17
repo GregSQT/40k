@@ -31,8 +31,17 @@ _los_thresholds_cache: Optional[Tuple[float, float]] = None
 MAX_D3 = 3
 MAX_D6 = 6
 MAX_D6_PLUS_1 = 7
+MAX_D6_PLUS_2 = 8
+MAX_D6_PLUS_3 = 9
 MAX_2D6 = 12
-DICE_MAX_VALUES = {"D3": MAX_D3, "D6": MAX_D6, "D6+1": MAX_D6_PLUS_1, "2D6": MAX_2D6}
+DICE_MAX_VALUES = {
+    "D3": MAX_D3,
+    "D6": MAX_D6,
+    "D6+1": MAX_D6_PLUS_1,
+    "D6+2": MAX_D6_PLUS_2,
+    "D6+3": MAX_D6_PLUS_3,
+    "2D6": MAX_2D6,
+}
 PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
 
@@ -41,7 +50,7 @@ def max_dice_value(value: Any, context: str) -> int:
     """
     Resolve a dice value to its maximum possible roll (no RNG).
 
-    Supported dice strings: "D3", "D6", "D6+1", "2D6".
+    Supported dice strings: "D3", "D6", "D6+1", "D6+2", "D6+3", "2D6".
     """
     if isinstance(value, int):
         return value

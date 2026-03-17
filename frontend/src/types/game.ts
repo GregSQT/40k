@@ -31,7 +31,7 @@ export interface Position {
   row: number;
 }
 
-export type DiceValue = number | "D3" | "D6" | "2D6" | "D6+1";
+export type DiceValue = number | "D3" | "D6" | "2D6" | "D6+1" | "D6+2" | "D6+3";
 
 export interface PrimaryObjectiveRule {
   id: string;

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import re
 import sys
@@ -57,6 +58,7 @@ class UnitData:
     declared_offense_type: Optional[str]
     declared_target_type: Optional[str]
     declared_tanking_level: Optional[str]
+    move: int
     toughness: int
     armor_save: int
     invul_save: int
@@ -71,7 +73,7 @@ WEAPON_PROFILES: Tuple[WeaponProfile, ...] = (
 
 # Display-only benchmark targets (for TTK columns).
 TARGETS: Tuple[TargetProfile, ...] = (
-    TargetProfile(name="Swarm", toughness=3, armor_save=6, invul_save=7, hp=1),
+    TargetProfile(name="Swarm", toughness=3, armor_save=5, invul_save=7, hp=1),
     TargetProfile(name="Troop", toughness=4, armor_save=3, invul_save=7, hp=2),
     TargetProfile(name="Elite", toughness=6, armor_save=2, invul_save=7, hp=3),
 )
@@ -158,6 +160,7 @@ def _parse_unit_file(path: Path) -> UnitData:
         declared_offense_type=declared_offense_type,
         declared_target_type=declared_target_type,
         declared_tanking_level=declared_tanking_level,
+        move=_parse_static_number(contents, "MOVE"),
         toughness=_parse_static_number(contents, "T"),
         armor_save=_parse_static_number(contents, "ARMOR_SAVE"),
         invul_save=_parse_static_number(contents, "INVUL_SAVE"),
@@ -235,7 +238,7 @@ def _dice_expectation(value: Any) -> float:
         return float(value)
     if not isinstance(value, str):
         raise TypeError(f"Unsupported dice value type: {type(value).__name__}")
-    mapping = {"D3": 2.0, "D6": 3.5, "2D6": 7.0, "D6+1": 4.5}
+    mapping = {"D3": 2.0, "D6": 3.5, "2D6": 7.0, "D6+1": 4.5, "D6+2": 5.5, "D6+3": 6.5}
     if value not in mapping:
         raise ValueError(f"Unsupported dice expression: {value}")
     return mapping[value]
@@ -562,6 +565,118 @@ def _print_table(rows: List[Dict[str, str]], verbous: bool) -> None:
     print(sep)
 
 
+def _blend_group_from_category(blend_category: str) -> str:
+    if blend_category == "MeleePure":
+        return "Melee"
+    if blend_category in {"MeleeLean", "Balanced", "RangedLean"}:
+        return "Balance"
+    if blend_category == "RangedPure":
+        return "Ranged"
+    raise ValueError(f"Unknown BlendCategory for recap: {blend_category}")
+
+
+def _print_effectifs_recap(rows: List[Dict[str, str]]) -> None:
+    tanking_order = ("Swarm", "Troop", "Elite")
+    group_order = ("Melee", "Balance", "Ranged")
+    counts: Dict[str, Dict[str, int]] = {
+        tanking: {group: 0 for group in group_order} for tanking in tanking_order
+    }
+
+    for row in rows:
+        tanking = row["Tanking"]
+        if tanking not in counts:
+            raise ValueError(f"Unknown Tanking category for recap: {tanking}")
+        group = _blend_group_from_category(row["BlendCategory"])
+        counts[tanking][group] += 1
+
+    print()
+    print("Effectifs recap (Tanking x Offense group):")
+    for tanking in tanking_order:
+        melee = counts[tanking]["Melee"]
+        balance = counts[tanking]["Balance"]
+        ranged = counts[tanking]["Ranged"]
+        total = melee + balance + ranged
+        print(f"- {tanking}: Melee={melee} | Balance={balance} | Ranged={ranged} | Total={total}")
+
+
+def _max_ranged_range(armory: Dict[str, Dict[str, Any]], rng_codes: Tuple[str, ...]) -> int:
+    max_range = 0
+    for code in rng_codes:
+        if code not in armory:
+            raise KeyError(f"Weapon code '{code}' not found in armory")
+        weapon = armory[code]
+        max_range = max(max_range, int(weapon.get("RNG", 0) or 0))
+    return max_range
+
+
+def _classify_mobility_bucket(move: int, max_ranged_range: int) -> Tuple[str, float]:
+    projection_score = float(move) + (0.25 * float(max_ranged_range))
+    if projection_score < 10.0:
+        return "Low", projection_score
+    if projection_score < 16.0:
+        return "Mid", projection_score
+    return "High", projection_score
+
+
+def _classify_weapon_profile(
+    armory: Dict[str, Dict[str, Any]],
+    rng_codes: Tuple[str, ...],
+    cc_codes: Tuple[str, ...],
+) -> str:
+    any_anti_elite = False
+    any_volume = False
+    any_burst = False
+
+    for code in tuple(dict.fromkeys(rng_codes + cc_codes)):
+        if code not in armory:
+            raise KeyError(f"Weapon code '{code}' not found in armory")
+        weapon = armory[code]
+        strength = int(weapon["STR"])
+        ap = int(weapon["AP"])
+        dmg_raw = weapon["DMG"]
+        nb_raw = weapon["NB"]
+        dmg_avg = _dice_expectation(dmg_raw)
+        nb_avg = _dice_expectation(nb_raw)
+        rules = weapon.get("WEAPON_RULES", [])
+        if not isinstance(rules, list):
+            raise TypeError(f"WEAPON_RULES must be list, got {type(rules).__name__}")
+
+        if strength >= 8 and ap <= -2 and dmg_avg >= 2.0:
+            any_anti_elite = True
+        if nb_avg >= 4.0 and dmg_avg <= 1.5:
+            any_volume = True
+        if isinstance(nb_raw, str) or isinstance(dmg_raw, str):
+            any_burst = True
+        if "HAZARDOUS" in rules:
+            any_burst = True
+        if any(str(rule).startswith("MELTA:") for rule in rules):
+            any_burst = True
+
+    if any_anti_elite:
+        return "AntiElite"
+    if any_volume:
+        return "Volume"
+    if any_burst:
+        return "Burst"
+    return "Generalist"
+
+
+def _normalized_inverse_sqrt_weights(counts: Dict[str, int], labels: Tuple[str, ...]) -> Dict[str, float]:
+    if any(label not in counts for label in labels):
+        raise ValueError("Missing label in counts for inverse-sqrt weighting")
+    raw: Dict[str, float] = {}
+    for label in labels:
+        c = int(counts[label])
+        if c <= 0:
+            raw[label] = 0.0
+        else:
+            raw[label] = 1.0 / math.sqrt(float(c))
+    total = sum(raw.values())
+    if total <= 0.0:
+        raise ValueError("Cannot normalize weights: all counts are zero")
+    return {label: (raw[label] / total) for label in labels}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Classify units by tanking and offensive profile")
     parser.add_argument(
@@ -585,6 +700,11 @@ def main() -> None:
         help="Deprecated: fixed internally to 1.1; kept for backward-compatible CLI.",
     )
     parser.add_argument("--output-csv", default="reports/unit_classification.csv", help="Output CSV")
+    parser.add_argument(
+        "--output-matrix-json",
+        default="reports/unit_sampling_matrix.json",
+        help="Output sampling matrix JSON (mobility/weapon profile buckets and weights)",
+    )
     args = parser.parse_args()
 
     if args.attacker_bs < 2 or args.attacker_bs > 6:
@@ -610,21 +730,10 @@ def main() -> None:
             raise FileNotFoundError(f"No .ts files found in {units_dir}")
         armory = get_armory_parser().get_armory(roster_name)
         units = [_parse_unit_file(path) for path in unit_files]
-        roster_stats.append((roster_name, len(units)))
 
         archetype_vectors = {name: _tanking_vector(profile, args.attacker_bs) for name, profile in ARCHETYPES.items()}
 
-        defender_pools: Dict[str, List[UnitData]] = {"Swarm": [], "Troop": [], "Elite": []}
-        for unit in units:
-            pool_label = _map_tanking_level_to_target_label(unit.declared_tanking_level)
-            if pool_label is None:
-                raise ValueError(
-                    f"Unit '{unit.unit_id}' missing mappable TANKING_LEVEL: {unit.declared_tanking_level!r}"
-                )
-            defender_pools[pool_label].append(unit)
-        for label, pool in defender_pools.items():
-            if not pool:
-                raise ValueError(f"Roster '{roster_name}' has empty defender pool for target category {label}")
+        roster_stats.append((roster_name, len(units)))
 
         unit_metrics: List[Dict[str, Any]] = []
         for unit in units:
@@ -650,32 +759,6 @@ def main() -> None:
             offense_category = _offensive_category(ratio, args.ratio_threshold)
             offense_check = _compute_offense_check(offense_category, unit.declared_offense_type)
 
-            pool_ttk_by_target: Dict[str, float] = {}
-            for target_label, defenders in defender_pools.items():
-                defender_ttks: List[float] = []
-                for defender in defenders:
-                    defender_profile = _unit_as_target(defender)
-                    best_ranged_dps = _best_dpr_for_mode(
-                        armory,
-                        unit.rng_codes,
-                        defender_profile,
-                        args.uptime_rapid,
-                        args.uptime_heavy,
-                        cap_damage_to_target_hp=True,
-                    )
-                    best_melee_dps = _best_dpr_for_mode(
-                        armory,
-                        unit.cc_codes,
-                        defender_profile,
-                        args.uptime_rapid,
-                        args.uptime_heavy,
-                        cap_damage_to_target_hp=True,
-                    )
-                    preferred_dps = best_ranged_dps if offense_category == "Ranged" else best_melee_dps
-                    defender_ttks.append(_ttk(defender_profile.hp, preferred_dps))
-                finite_ttks = [x for x in defender_ttks if not math.isinf(x)]
-                pool_ttk_by_target[target_label] = float("inf") if not finite_ttks else _median(finite_ttks)
-
             unit_metrics.append(
                 {
                     "unit": unit,
@@ -690,28 +773,17 @@ def main() -> None:
                     "blend_category": blend_category,
                     "offense_category": offense_category,
                     "offense_check": offense_check,
-                    "pool_ttk_by_target": pool_ttk_by_target,
                 }
             )
-
-        baseline_ttk_by_target: Dict[str, float] = {}
-        for target_label in ("Swarm", "Troop", "Elite"):
-            values = [
-                metric["pool_ttk_by_target"][target_label]
-                for metric in unit_metrics
-                if not math.isinf(metric["pool_ttk_by_target"][target_label])
-            ]
-            if not values:
-                raise ValueError(f"Cannot compute baseline TTK for roster '{roster_name}' target category {target_label}")
-            baseline_ttk_by_target[target_label] = _median(values)
 
         for metric in unit_metrics:
             unit = metric["unit"]
             target_perf_scores: Dict[str, float] = {}
-            for target_label in ("Swarm", "Troop", "Elite"):
-                unit_ttk = metric["pool_ttk_by_target"][target_label]
-                baseline_ttk = baseline_ttk_by_target[target_label]
-                target_perf_scores[target_label] = 0.0 if math.isinf(unit_ttk) or unit_ttk <= 0 else baseline_ttk / unit_ttk
+            target_labels = ("Swarm", "Troop", "Elite")
+            preferred_ttks = metric["r_ttks"] if metric["offense_category"] == "Ranged" else metric["m_ttks"]
+            for idx, target_label in enumerate(target_labels):
+                ttk_value = preferred_ttks[idx]
+                target_perf_scores[target_label] = 0.0 if math.isinf(ttk_value) or ttk_value <= 0 else 1.0 / ttk_value
 
             target_preferences = _compute_target_preferences(target_perf_scores)
             target_type = _suggest_target_type_from_preferences(target_preferences, TARGET_MARGIN_FIXED)
@@ -722,9 +794,13 @@ def main() -> None:
                 "UniteID": unit.unit_id,
                 "Tanking": metric["tank_category"],
                 "BlendCategory": metric["blend_category"],
+                "BlendGroup": _blend_group_from_category(metric["blend_category"]),
                 "Blend_R": f"{metric['blend_ranged']:.3f}",
                 "Ratio_R_M": _format_float(metric["ratio"]),
                 "TargetType": target_type,
+                "MobilityBucket": "",
+                "ProjectionScore": "",
+                "WeaponProfile": "",
                 "TankDist_Swarm": _format_float(metric["tank_distances"]["Swarm"]),
                 "TankDist_Troop": _format_float(metric["tank_distances"]["Troop"]),
                 "TankDist_Elite": _format_float(metric["tank_distances"]["Elite"]),
@@ -747,6 +823,12 @@ def main() -> None:
                 "OffenseCheck": metric["offense_check"],
                 "TargetCheck": target_check,
             }
+            max_ranged_range = _max_ranged_range(armory, unit.rng_codes)
+            mobility_bucket, projection_score = _classify_mobility_bucket(unit.move, max_ranged_range)
+            weapon_profile = _classify_weapon_profile(armory, unit.rng_codes, unit.cc_codes)
+            row["MobilityBucket"] = mobility_bucket
+            row["ProjectionScore"] = f"{projection_score:.2f}"
+            row["WeaponProfile"] = weapon_profile
             rows.append(row)
             csv_rows.append(
                 {
@@ -781,15 +863,21 @@ def main() -> None:
 
     output = Path(args.output_csv)
     output.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        raise ValueError("No eligible rosters produced results. Check roster composition and TANKING_LEVEL coverage.")
     fieldnames = [
         "Roster",
         "UniteID",
         "DisplayName",
         "Tanking",
         "BlendCategory",
+        "BlendGroup",
         "Blend_R",
         "Ratio_R_M",
         "TargetType",
+        "MobilityBucket",
+        "ProjectionScore",
+        "WeaponProfile",
         "TankCheck",
         "OffenseCheck",
         "TargetCheck",
@@ -820,6 +908,84 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(csv_rows)
 
+    tanking_labels = ("Swarm", "Troop", "Elite")
+    mobility_labels = ("Low", "Mid", "High")
+    weapon_profile_labels = ("Generalist", "Volume", "AntiElite", "Burst")
+    matrix_by_tanking: Dict[str, Dict[str, Any]] = {}
+    for tanking in tanking_labels:
+        subset = [row for row in rows if row["Tanking"] == tanking]
+        mobility_counts = {label: 0 for label in mobility_labels}
+        weapon_counts = {label: 0 for label in weapon_profile_labels}
+        for row in subset:
+            mobility_counts[row["MobilityBucket"]] += 1
+            weapon_counts[row["WeaponProfile"]] += 1
+        if len(subset) == 0:
+            mobility_weights = {label: 0.0 for label in mobility_labels}
+            weapon_profile_weights = {label: 0.0 for label in weapon_profile_labels}
+        else:
+            mobility_weights = _normalized_inverse_sqrt_weights(mobility_counts, mobility_labels)
+            weapon_profile_weights = _normalized_inverse_sqrt_weights(weapon_counts, weapon_profile_labels)
+        matrix_by_tanking[tanking] = {
+            "counts": {
+                "mobility": mobility_counts,
+                "weapon_profile": weapon_counts,
+            },
+            "weights": {
+                "mobility_weights": mobility_weights,
+                "weapon_profile_weights": weapon_profile_weights,
+            },
+        }
+
+    cells_map: Dict[Tuple[str, str, str, str], List[str]] = {}
+    for row in rows:
+        key = (
+            row["Tanking"],
+            row["BlendGroup"],
+            row["MobilityBucket"],
+            row["WeaponProfile"],
+        )
+        cells_map.setdefault(key, [])
+        cells_map[key].append(f"{row['Roster']}::{row['UniteID']}")
+    cells: List[Dict[str, Any]] = []
+    for (tanking, blend_group, mobility_bucket, weapon_profile), units in sorted(cells_map.items()):
+        cells.append(
+            {
+                "tanking": tanking,
+                "blend_group": blend_group,
+                "mobility_bucket": mobility_bucket,
+                "weapon_profile": weapon_profile,
+                "count": len(units),
+                "units": sorted(units),
+            }
+        )
+
+    matrix_output = Path(args.output_matrix_json)
+    matrix_output.parent.mkdir(parents=True, exist_ok=True)
+    matrix_payload = {
+        "version": "v1",
+        "criteria": {
+            "mobility": {
+                "projection_score": "MOVE + 0.25 * max_ranged_range",
+                "buckets": {
+                    "Low": "projection_score < 10",
+                    "Mid": "10 <= projection_score < 16",
+                    "High": "projection_score >= 16",
+                },
+            },
+            "weapon_profile_priority": [
+                "AntiElite: STR>=8 and AP<=-2 and DMG_avg>=2",
+                "Volume: NB_avg>=4 and DMG_avg<=1.5",
+                "Burst: dice-based NB/DMG or MELTA:* or HAZARDOUS",
+                "Generalist: otherwise",
+            ],
+            "weights": "normalized inverse-sqrt per tanking bucket: 1/sqrt(count)",
+        },
+        "by_tanking": matrix_by_tanking,
+        "cells": cells,
+    }
+    with matrix_output.open("w", encoding="utf-8") as f:
+        json.dump(matrix_payload, f, indent=2, ensure_ascii=True, sort_keys=True)
+
     print(f"Rosters parsed: {', '.join(name for name, _ in roster_stats)}")
     print(f"Units parsed: {sum(count for _, count in roster_stats)}")
     print(f"Attacker BS assumption (tanking): {args.attacker_bs}+")
@@ -830,8 +996,10 @@ def main() -> None:
     print("Sort order: Tanking -> Blend_R -> Roster -> UniteID")
     print(f"Table mode: {'verbous' if args.verbous else 'compact'}")
     print(f"CSV exported: {output}")
+    print(f"Matrix JSON exported: {matrix_output}")
     print()
     _print_table(rows, verbous=args.verbous)
+    _print_effectifs_recap(rows)
 
 
 if __name__ == "__main__":

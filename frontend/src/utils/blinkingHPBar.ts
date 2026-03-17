@@ -94,8 +94,8 @@ export function buildWeaponSignature(weapon: {
   ATK: number;
   STR: number;
   AP: number;
-  DMG: number | "D3" | "D6" | "2D6" | "D6+1";
-  NB: number | "D3" | "D6" | "2D6" | "D6+1";
+  DMG: number | "D3" | "D6" | "2D6" | "D6+1" | "D6+2" | "D6+3";
+  NB: number | "D3" | "D6" | "2D6" | "D6+1" | "D6+2" | "D6+3";
 }): string {
   return [weapon.display_name, weapon.ATK, weapon.STR, weapon.AP, weapon.DMG, weapon.NB].join("|");
 }

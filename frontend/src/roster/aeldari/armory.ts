@@ -9,124 +9,45 @@
  * - Validation stricte: toutes les armes référencées doivent exister
  * - No duplicate Python armory needed - parsed at runtime
  */
-
 import type { DiceValue, Weapon } from "../../types/game";
 
-const D3: DiceValue = "D3";
-//const D6: DiceValue = "D6";
+const D6: DiceValue = "D6";
+//const D3: DiceValue = "D3";
 // ============================================================================
 // TYRANID WEAPONS
 // ============================================================================
 
-export const TYRANID_ARMORY: Record<string, Weapon> = {
+export const AELDARI_ARMORY: Record<string, Weapon> = {
   // Ranged Weapons
-  deathspitter: {
-    display_name: "Deathspitter",
-    RNG: 24,
-    NB: 3,
-    ATK: 4,
-    STR: 5,
-    AP: -1,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  fleshborer: {
-    display_name: "Fleshborer",
-    RNG: 18,
-    NB: 1,
-    ATK: 4,
-    STR: 5,
-    AP: 0,
-    DMG: 1,
-    WEAPON_RULES: ["ASSAULT"],
-  },
-  heavy_venom_cannon: {
-    display_name: "Heavy Venom Cannon",
-    RNG: 36,
-    NB: D3,
-    ATK: 4,
-    STR: 9,
-    AP: -2,
-    DMG: 3,
-    WEAPON_RULES: [],
-  },
-
+  death_spinner: {display_name: "Death Spinner", RNG: 12, NB: D6, ATK: 7, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT"],},
+  death_spinner_exarch: {display_name: "Exarch Death Spinner", RNG: 12, NB: D6, ATK: 7, STR: 6, AP: -2, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT"],},
+  dragon_fusion_gun: {display_name: "Dragon Fusion Gun", RNG: 12, NB: 1, ATK: 3, STR: 9, AP: -4, DMG: D6, WEAPON_RULES: ["ASSAULT", "MELTA:3"],},
+  exarch_dragon_fusion_gun: {display_name: "Exarch Dragon Fusion Gun", RNG: 12, NB: 1, ATK: 3, STR: 9, AP: -4, DMG: D6, WEAPON_RULES: ["ASSAULT", "MELTA:6"],},
+  firepike: {display_name: "Dragon Fusion Gun", RNG: 18, NB: 1, ATK: 3, STR: 12, AP: -4, DMG: D6, WEAPON_RULES: ["ASSAULT", "MELTA:3"],},
+  hawk_talons: {display_name: "Hawk's Talons", RNG: 24, NB: 2, ATK: 3, STR: 6, AP: -2, DMG: 2, WEAPON_RULES: ["LETHAL_HITS"],},
+  lasblaster: {display_name: "Lasblaster", RNG: 24, NB: 4, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["ASSAULT", "LETHAL_HITS"],},
+  missile_launcher_starshot: {display_name: "Missile Launcher (Starhot)", COMBI_WEAPON: "missile_launcher", RNG: 48, NB: 1, ATK: 2, STR: 10, AP: -2, DMG: D6, WEAPON_RULES: ["IGNORES_COVER"],},
+  missile_launcher_starswarm: {display_name: "Missile Launcher (Starswarm)", COMBI_WEAPON: "missile_launcher", RNG: 48, NB: D6, ATK: 2, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["IGNORES_COVER"],},
+  reaper_launcher_starshot: {display_name: "Reaper Launcher (Starhot)", COMBI_WEAPON: "reaper_launcher", RNG: 48, NB: 1, ATK: 3, STR: 10, AP: -2, DMG: 3, WEAPON_RULES: ["IGNORES_COVER"],},
+  reaper_launcher_starswarm: {display_name: "Reaper Launcher (Starswarm)", COMBI_WEAPON: "reaper_launcher", RNG: 48, NB: 2, ATK: 3, STR: 5, AP: -1, DMG: 2, WEAPON_RULES: ["IGNORES_COVER"],},
+  shuriken_cannon: {display_name: "Shuriken Cannon", RNG: 24, NB: 3, ATK: 3, STR: 6, AP: -1, DMG: 2, WEAPON_RULES: ["SUSTAINED_HITS:1"],},
+  shuriken_catapult: {display_name: "Shuriken Catapult", RNG: 18, NB: 2, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT"],},
+  shuriken_catapult_avenger: {display_name: "Avenger Shuriken Catapult", RNG: 18, NB: 4, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT"],},
+  shuriken_pistol: {display_name: "Shuriken Pistol", RNG: 12, NB: 1, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT", "PISTOL"],},
+  
   // #########################################################################################
   // #################################### Melee Weapons ######################################
   // #########################################################################################
-
-  bio_weapon_warrior: {
-    display_name: "Bio-Weapon",
-    NB: 6,
-    ATK: 3,
-    STR: 5,
-    AP: -2,
-    DMG: 1,
-    WEAPON_RULES: ["TWIN_LINKED"],
-  },
-  blinding_venom: {
-    display_name: "Blinding Venom",
-    NB: 1,
-    ATK: 4,
-    STR: 3,
-    AP: 0,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  flesh_hooks: {
-    display_name: "Flesh Hooks",
-    NB: 1,
-    ATK: 4,
-    STR: 3,
-    AP: 0,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  monstrous_scything_talons: {
-    display_name: "Monstrous Scything Talons",
-    NB: 6,
-    ATK: 4,
-    STR: 9,
-    AP: -2,
-    DMG: 3,
-    WEAPON_RULES: [],
-  },
-  rending_claws: {
-    display_name: "Rending Claws",
-    NB: 4,
-    ATK: 2,
-    STR: 4,
-    AP: -2,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  rending_claws_prime: {
-    display_name: "Rending Claws",
-    NB: 5,
-    ATK: 2,
-    STR: 6,
-    AP: -2,
-    DMG: 2,
-    WEAPON_RULES: ["DEVASTATING_WOUNDS", "TWIN_LINKED"],
-  },
-  bio_weapons: {
-    display_name: "Bio-Weapons",
-    NB: 5,
-    ATK: 3,
-    STR: 5,
-    AP: -1,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
-  scything_talons: {
-    display_name: "Scything Talons",
-    NB: 3,
-    ATK: 4,
-    STR: 3,
-    AP: -1,
-    DMG: 1,
-    WEAPON_RULES: [],
-  },
+  aeldari_power_weapon: {display_name: "Aeldari Power Weapon", NB: 2, ATK: 3, STR: 4, AP: -2, DMG: 1, WEAPON_RULES: [],},
+  banshees_blade: {display_name: "Banshee Blade", NB: 2, ATK: 2, STR: 4, AP: -2, DMG: 2, WEAPON_RULES: [],},
+  biting_blade: {display_name: "Biting Blade", NB: 5, ATK: 3, STR: 5, AP: -1, DMG: 2, WEAPON_RULES: ["SUSTAINED_HITS:1"],},
+  close_combat_weapon: {display_name: "Close Combat Weapon", NB: 1, ATK: 3, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: [],},
+  close_combat_weapon_aspect_warrior: {display_name: "Close Combat Weapon", NB: 2, ATK: 3, STR: 3, AP: 0, DMG: 1, WEAPON_RULES: [],},
+  mirror_swords: {display_name: "Mirror Swords", NB: 4, ATK: 2, STR: 4, AP: -2, DMG: 2, WEAPON_RULES: [],},
+  powerblades_array: {display_name: "Powerblades Array", NB: 10, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["LETHAL_HITS", "TWIN_LINKED"],},
+  power_glaive: {display_name: "Power Glaive", NB: 3, ATK: 3, STR: 5, AP: -3, DMG: 1, WEAPON_RULES: [],},
+  scorpion_chainsword: {display_name: "Scorpion Chainsword",   NB: 4,  ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["SUSTAINED_HITS:1"],},
+  scorpion_claws: {display_name: "Scorpion's Claw", NB: 3, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: [],},
 };
 
 /**
@@ -139,7 +60,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
  * @returns Weapon or undefined if not found
  */
 export function getWeapon(codeName: string): Weapon | undefined {
-  return TYRANID_ARMORY[codeName];
+  return AELDARI_ARMORY[codeName];
 }
 
 /**
@@ -156,7 +77,7 @@ export function getWeapons(codeNames: string[]): Weapon[] {
   for (const codeName of codeNames) {
     const weapon = getWeapon(codeName);
     if (!weapon) {
-      const availableWeapons = Object.keys(TYRANID_ARMORY).join(", ");
+      const availableWeapons = Object.keys(AELDARI_ARMORY).join(", ");
       throw new Error(
         `Weapon '${codeName}' not found in Tyranid armory. ` +
           `Available weapons: ${availableWeapons}`

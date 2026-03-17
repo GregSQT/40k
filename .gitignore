@@ -193,6 +193,7 @@ pids/
 *.csv
 *.xlsx
 *.json.bak
+frontend/src/roster/pdf/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/

@@ -19,23 +19,27 @@ EXPECTED_D3 = 2.0
 EXPECTED_D6 = 3.5
 EXPECTED_2D6 = 7.0
 EXPECTED_D6_PLUS_1 = 4.5
+EXPECTED_D6_PLUS_2 = 5.5
+EXPECTED_D6_PLUS_3 = 6.5
 
 
 def resolve_dice_value(value: DiceValue, roll_context: str) -> int:
     """
     Resolve a dice expression or integer into a concrete roll.
 
-    Supported dice strings: "D3", "D6", "2D6", "D6+1".
+    Supported dice strings: "D3", "D6", "2D6", "D6+1", "D6+2", "D6+3".
     - D3: roll a D6, divide by 2 and round up (1-3).
     - D6: roll a D6 (1-6).
     - 2D6: roll two D6 and sum (2-12).
     - D6+1: roll a D6 and add 1 (2-7).
+    - D6+2: roll a D6 and add 2 (3-8).
+    - D6+3: roll a D6 and add 3 (4-9).
     """
     if isinstance(value, int):
         return value
     if not isinstance(value, str):
         raise TypeError(f"Invalid dice value type for {roll_context}: {type(value).__name__}")
-    if value not in {"D3", "D6", "2D6", "D6+1"}:
+    if value not in {"D3", "D6", "2D6", "D6+1", "D6+2", "D6+3"}:
         raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
 
     import random
@@ -45,6 +49,10 @@ def resolve_dice_value(value: DiceValue, roll_context: str) -> int:
         return d6_roll + second_d6_roll
     if value == "D6+1":
         return d6_roll + 1
+    if value == "D6+2":
+        return d6_roll + 2
+    if value == "D6+3":
+        return d6_roll + 3
     if value == "D6":
         return d6_roll
     return (d6_roll + 1) // 2
@@ -54,11 +62,13 @@ def expected_dice_value(value: DiceValue, roll_context: str) -> float:
     """
     Resolve a dice expression or integer into its expected value (no RNG).
 
-    Supported dice strings: "D3", "D6", "2D6", "D6+1".
+    Supported dice strings: "D3", "D6", "2D6", "D6+1", "D6+2", "D6+3".
     - D3 expected value: 2.0
     - D6 expected value: 3.5
     - 2D6 expected value: 7.0
     - D6+1 expected value: 4.5
+    - D6+2 expected value: 5.5
+    - D6+3 expected value: 6.5
     """
     if isinstance(value, int):
         return float(value)
@@ -72,6 +82,10 @@ def expected_dice_value(value: DiceValue, roll_context: str) -> float:
         return EXPECTED_2D6
     if value == "D6+1":
         return EXPECTED_D6_PLUS_1
+    if value == "D6+2":
+        return EXPECTED_D6_PLUS_2
+    if value == "D6+3":
+        return EXPECTED_D6_PLUS_3
     raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
 
 # ============================================================================
