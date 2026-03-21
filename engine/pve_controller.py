@@ -6,8 +6,6 @@ pve_controller.py - PvE mode AI opponent
 import torch
 import numpy as np
 import os
-import json
-from pathlib import Path
 from typing import Dict, Any, Tuple, List
 from engine.combat_utils import calculate_hex_distance, calculate_pathfinding_distance, normalize_coordinates, get_unit_coordinates
 from engine.phase_handlers.shared_utils import is_unit_alive
@@ -60,41 +58,15 @@ class PvEController:
             if debug_mode:
                 print(f"DEBUG: MaskablePPO import successful")
             
-            macro_config = self._load_macro_controller_config(game_state)
-            self.macro_model_key = require_key(macro_config, "macro_model_key")
-            pve_controller_mode = require_key(macro_config, "pve_controller_mode")
-            if not isinstance(pve_controller_mode, str):
-                raise ValueError(
-                    f"pve_controller_mode must be string (got {type(pve_controller_mode).__name__})"
-                )
-            if pve_controller_mode not in {"micro_only", "macro_micro"}:
-                raise ValueError(
-                    f"Invalid pve_controller_mode '{pve_controller_mode}'. "
-                    f"Allowed: ['micro_only', 'macro_micro']"
-                )
             config = get_config_loader()
             models_root = config.get_models_root()
-            macro_model_storage_key = config._resolve_agent_config_key(self.macro_model_key)
-            macro_model_path = os.path.join(
-                models_root,
-                macro_model_storage_key,
-                f"model_{macro_model_storage_key}.zip"
-            )
-            if debug_mode:
-                print(f"DEBUG: Macro model path: {macro_model_path}")
-                print(f"DEBUG: Macro model exists: {os.path.exists(macro_model_path)}")
-            macro_disabled = pve_controller_mode == "micro_only"
-            if not macro_disabled:
-                if not os.path.exists(macro_model_path):
-                    raise FileNotFoundError(f"Macro model required for PvE mode not found: {macro_model_path}")
-                self.macro_model = MaskablePPO.load(macro_model_path)
-                self.ai_model = self.macro_model
-                engine._ai_model = self.macro_model
-            else:
-                self.macro_model = None
-                self.ai_model = None
-                if not self.quiet:
-                    print("PvE: Macro disabled (pve_controller_mode='micro_only')")
+            # PvE runtime is explicitly micro-only (CoreAgent); MacroController is disabled.
+            self.macro_model_key = None
+            self.macro_model = None
+            self.ai_model = None
+            engine._ai_model = None
+            if not self.quiet:
+                print("PvE: Macro controller disabled (micro-only CoreAgent mode)")
             
             # Wrap engine with ActionMasker for micro models (action space = 13)
             def mask_fn(env):
@@ -118,23 +90,37 @@ class PvEController:
             
             self.micro_models = {}
             self.micro_model_paths = {}
+            shared_micro_model_key = require_key(self.config, "controlled_agent")
+            if not isinstance(shared_micro_model_key, str) or not shared_micro_model_key.strip():
+                raise ValueError(
+                    f"controlled_agent must be a non-empty string in PvE config "
+                    f"(got {shared_micro_model_key!r})"
+                )
+            shared_micro_model_storage_key = config._resolve_agent_config_key(
+                shared_micro_model_key.strip()
+            )
             for model_key in micro_model_keys:
-                model_storage_key = config._resolve_agent_config_key(model_key)
                 model_path = os.path.join(
                     models_root,
-                    model_storage_key,
-                    f"model_{model_storage_key}.zip"
+                    shared_micro_model_storage_key,
+                    f"model_{shared_micro_model_storage_key}.zip"
                 )
                 if debug_mode:
+                    print(
+                        f"DEBUG: Micro model key '{model_key}' mapped to shared "
+                        f"storage key '{shared_micro_model_storage_key}'"
+                    )
                     print(f"DEBUG: Micro model path: {model_path}")
                     print(f"DEBUG: Micro model exists: {os.path.exists(model_path)}")
                 if not os.path.exists(model_path):
                     raise FileNotFoundError(f"Micro model required for PvE mode not found: {model_path}")
                 self.micro_models[model_key] = MaskablePPO.load(model_path, env=masked_env)
                 self.micro_model_paths[model_key] = model_path
+
+            # Marker to indicate PvE micro models are loaded (used by W40KEngine reset guard).
+            self.ai_model = self.micro_models
             
             if not self.quiet:
-                print(f"PvE: Loaded macro model: {self.macro_model_key}")
                 print(f"PvE: Loaded micro models: {sorted(self.micro_models.keys())}")
                 
         except Exception as e:
@@ -864,32 +850,6 @@ class PvEController:
             raise ValueError("No objectives available for macro target selection")
         return int(best_index)
 
-    def _load_macro_controller_config(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
-        """Load macro controller config from context-specific config paths."""
-        from config_loader import get_config_loader
-        config_loader = get_config_loader()
-        core_config = config_loader.load_config("config", force_reload=False)
-        paths = require_key(core_config, "paths")
-        gym_training_mode = require_key(game_state, "gym_training_mode")
-        if not isinstance(gym_training_mode, bool):
-            raise ValueError(
-                f"gym_training_mode must be boolean (got {type(gym_training_mode).__name__})"
-            )
-        if gym_training_mode:
-            macro_config_path = require_key(paths, "macro_controller_config_training")
-        else:
-            macro_config_path = require_key(paths, "macro_controller_config_app")
-        if not isinstance(macro_config_path, str) or not macro_config_path:
-            raise ValueError(
-                f"Invalid macro controller config path for gym_training_mode={gym_training_mode}: "
-                f"{macro_config_path}"
-            )
-        full_path = Path(config_loader.root_path) / macro_config_path
-        if not full_path.exists():
-            raise FileNotFoundError(f"Macro controller config not found: {full_path}")
-        with open(full_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
     def _get_micro_model_for_unit_id(self, unit_id: str, game_state: Dict[str, Any]):
         """Get micro model for a specific unit id."""
         model, _ = self._get_micro_model_and_path_for_unit_id(unit_id, game_state)
@@ -927,7 +887,13 @@ class PvEController:
         masked_env = ActionMasker(engine, mask_fn)
         config = get_config_loader()
         models_root = config.get_models_root()
-        model_storage_key = config._resolve_agent_config_key(model_key)
+        shared_micro_model_key = require_key(self.config, "controlled_agent")
+        if not isinstance(shared_micro_model_key, str) or not shared_micro_model_key.strip():
+            raise ValueError(
+                f"controlled_agent must be a non-empty string in PvE config "
+                f"(got {shared_micro_model_key!r})"
+            )
+        model_storage_key = config._resolve_agent_config_key(shared_micro_model_key.strip())
         model_path = os.path.join(
             models_root,
             model_storage_key,
@@ -940,7 +906,10 @@ class PvEController:
         self.micro_models[model_key] = MaskablePPO.load(model_path, env=masked_env)
         self.micro_model_paths[model_key] = model_path
         if not self.quiet:
-            print(f"PvE: Lazy-loaded micro model: {model_key}")
+            print(
+                f"PvE: Lazy-loaded micro model for '{model_key}' "
+                f"using shared model '{model_storage_key}'"
+            )
 
     def _normalize_obs_for_inference(self, obs: np.ndarray, model_path: str) -> np.ndarray:
         """Normalize observation for inference if model was trained with VecNormalize."""

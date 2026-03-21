@@ -24,6 +24,8 @@ export class Hormagaunt extends SwarmMeleeSwarm {
 
   // UNIT RULES
   static UNIT_RULES = [{ ruleId: "charge_after_advance", displayName: "Bounding Leap" }];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { charge_after_advance: 2 };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "hormagaunt"}];

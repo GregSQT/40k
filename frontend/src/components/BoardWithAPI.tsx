@@ -22,6 +22,7 @@ import {
   TUTORIAL_STEP_TITLES_HALO_LEFT,
   TUTORIAL_STEP_TITLES_MOVE_BUTTON_HALO,
   TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO,
+  type TutorialSpotlightPosition,
   TutorialProvider,
   useTutorial,
 } from "../contexts/TutorialContext";
@@ -214,7 +215,7 @@ function TutorialOverlayGate(): React.ReactNode {
     : [];
   const spotlightCatalog: Record<
     TutorialSpotlightId,
-    import("../contexts/TutorialContext").TutorialSpotlightPosition[]
+    TutorialSpotlightPosition[]
   > = {
     "board.activeUnit": tutorial.spotlightPosition ? [tutorial.spotlightPosition] : [],
     "table.p1.nameM":
@@ -243,6 +244,12 @@ function TutorialOverlayGate(): React.ReactNode {
       (isStep2_1 || isStep2_4 || isStep1_25) && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : [],
     "gamelog.last2Entries": gameLogTopEntriesSpotlights ?? [],
   };
+  const getSpotlightPositionsById = (id: string): TutorialSpotlightPosition[] => {
+    if (!(id in spotlightCatalog)) {
+      throw new Error(`Unknown tutorial spotlight id: ${id}`);
+    }
+    return spotlightCatalog[id as TutorialSpotlightId];
+  };
   const legacySpotlights = [
     tutorial.spotlightPosition ?? null,
     ...tableSpotlights,
@@ -251,15 +258,15 @@ function TutorialOverlayGate(): React.ReactNode {
     ...(needsTurnPhaseHalo && turnPhaseSpotlights ? turnPhaseSpotlights : []),
     ...((isHaloLeft || isStage2_11Or12) && leftPanelSpotlight ? [leftPanelSpotlight] : []),
     ...gameLogSpotlights,
-  ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[];
+  ].filter(Boolean) as TutorialSpotlightPosition[];
   const spotlights =
     configuredSpotlightIds != null
-      ? configuredSpotlightIds.flatMap((id) => spotlightCatalog[id])
+      ? configuredSpotlightIds.flatMap((id) => getSpotlightPositionsById(id))
       : legacySpotlights;
   const configuredAllowedClickIds = currentStep.allowedClickSpotlightIds;
   const allowedClickSpotlights =
     configuredAllowedClickIds != null
-      ? configuredAllowedClickIds.flatMap((id) => spotlightCatalog[id])
+      ? configuredAllowedClickIds.flatMap((id) => getSpotlightPositionsById(id))
       : configuredSpotlightIds != null
         ? spotlights
         : isStep2_2
@@ -272,16 +279,17 @@ function TutorialOverlayGate(): React.ReactNode {
                 ? [gameLogLastEntrySpotlight]
                 : []),
               ...((isStep2_1 || isStep2_4) && gameLogHeaderSpotlight ? [gameLogHeaderSpotlight] : []),
-            ].filter(Boolean) as import("../contexts/TutorialContext").TutorialSpotlightPosition[])
+            ].filter(Boolean) as TutorialSpotlightPosition[])
           : spotlights;
   const debugSpotlightLabels =
     debugMode && configuredSpotlightIds != null
-      ? configuredSpotlightIds.flatMap((id) =>
-          spotlightCatalog[id].map((position, idx) => ({
-            id: spotlightCatalog[id].length > 1 ? `${id}[${idx}]` : id,
+      ? configuredSpotlightIds.flatMap((id) => {
+          const positions = getSpotlightPositionsById(id);
+          return positions.map((position, idx) => ({
+            id: positions.length > 1 ? `${id}[${idx}]` : id,
             position,
-          }))
-        )
+          }));
+        })
       : [];
 
   // 1-15 : fog rects 2 bandes. 2-11 : pas de fog rect (l'overlay masque déjà tout sauf le halo board bas).
@@ -2498,6 +2506,7 @@ export const BoardWithAPI: React.FC = () => {
             onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
             onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
             getAdvanceDestinations={apiProps.getAdvanceDestinations}
+            availableCellsOverride={apiProps.availableCellsOverride}
             advanceRoll={apiProps.advanceRoll}
             advancingUnitId={apiProps.advancingUnitId}
             advanceWarningPopup={apiProps.advanceWarningPopup}

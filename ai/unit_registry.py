@@ -146,7 +146,8 @@ class UnitRegistry:
         # Handle different naming patterns
         if 'Melee' in base_class:
             role = 'Melee'
-        elif 'Ranged' in base_class:
+        elif 'Ranged' in base_class or 'Range' in base_class:
+            # Support both legacy "...Ranged..." and current "...Range..." class naming.
             role = 'Ranged'
         elif 'Support' in base_class:
             role = 'Support'
@@ -334,6 +335,24 @@ class UnitRegistry:
                             f"choice_timing.active_player_scope is required for trigger '{trigger_value}' in rule '{rule_id}'"
                         )
 
+                rule_args_match = re.search(r'rule_args\s*:\s*\{([\s\S]*?)\}', rule_object)
+                rule_args_value = None
+                if rule_args_match:
+                    rule_args_block = rule_args_match.group(1)
+                    parsed_rule_args = {}
+                    for arg_match in re.finditer(
+                        r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?\d+)',
+                        rule_args_block,
+                    ):
+                        arg_key = arg_match.group(1)
+                        arg_value = int(arg_match.group(2))
+                        parsed_rule_args[arg_key] = arg_value
+                    if not parsed_rule_args:
+                        raise ValueError(
+                            f"Invalid rule_args for '{rule_id}': expected at least one numeric key:value pair"
+                        )
+                    rule_args_value = parsed_rule_args
+
                 unit_rule_entry = {
                     "ruleId": rule_id,
                     "displayName": display_name,
@@ -343,6 +362,8 @@ class UnitRegistry:
                     unit_rule_entry["usage"] = usage_value
                 if choice_timing_value is not None:
                     unit_rule_entry["choice_timing"] = choice_timing_value
+                if rule_args_value is not None:
+                    unit_rule_entry["rule_args"] = rule_args_value
                 unit_rules.append(unit_rule_entry)
             properties["UNIT_RULES"] = unit_rules
         else:

@@ -24,6 +24,8 @@ export class AssaultIntercessorJumpPackPlasmaPistol extends TroopMeleeTroop {
 
   // UNIT RULES
   static UNIT_RULES = [{ ruleId: "charge_impact", displayName: "Hammer of wrath" }];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { charge_impact: 2 };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "jump_pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "assault intercessors with jump packs"}];

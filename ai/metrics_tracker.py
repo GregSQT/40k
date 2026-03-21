@@ -145,6 +145,17 @@ class W40KMetricsTracker:
         
         # NEW: Bot evaluation combined score for 0_critical/ dashboard
         self.bot_eval_combined = None
+
+        # Unit-rule forcing instrumentation (episode exposure + bot-eval impact)
+        self.forcing_tracking = {
+            'episodes_total': 0,
+            'episodes_with_forced_unit': 0,
+            'forced_unit_instances_total': 0,
+            'per_unit_episode_counts': {},   # unit_name -> episodes where present
+            'per_unit_instance_counts': {},  # unit_name -> total instances
+            'baseline_combined': None,       # first combined after forcing exposure starts
+            'baseline_worst_bot': None,      # first worst_bot_score after forcing exposure starts
+        }
         
         # NEW: Latest VALUE trade ratio for 0_critical/ dashboard
         self.latest_value_trade_ratio = None
@@ -159,7 +170,7 @@ class W40KMetricsTracker:
         if show_banner:
             print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
             print(f"📊 Metric System:")
-            print(f"   🎯 0_critical/ (12) - Essential hyperparameter tuning metrics")
+            print(f"   🎯 0_critical/ (13) - Essential hyperparameter tuning metrics")
             print(f"   🎮 game_critical/ (5) - Core gameplay indicators")
             print(f"   ⚙️  training_critical/ (6) - PPO algorithm health")
             print(f"   💡 TIP: Start with 0_critical/ - everything you need for tuning")
@@ -289,6 +300,69 @@ class W40KMetricsTracker:
         if total_actions > 0:
             wait_frequency = wait_actions / total_actions
             self.writer.add_scalar('game_tactical/wait_frequency', wait_frequency, self.episode_count)
+
+        # FORCING METRICS: Exposure of units with configured UNIT_RULES.
+        has_forcing_fields = 'forced_unit_episode_has_controlled' in tactical_data
+        if has_forcing_fields:
+            forced_episode_has_controlled = int(require_key(tactical_data, 'forced_unit_episode_has_controlled'))
+            forced_unit_instances_controlled = int(require_key(tactical_data, 'forced_unit_instances_controlled'))
+            forced_unit_counts_controlled = require_key(tactical_data, 'forced_unit_counts_controlled')
+            if not isinstance(forced_unit_counts_controlled, dict):
+                raise TypeError(
+                    "tactical_data['forced_unit_counts_controlled'] must be a dict "
+                    f"(got {type(forced_unit_counts_controlled).__name__})"
+                )
+
+            self.forcing_tracking['episodes_total'] += 1
+            self.forcing_tracking['forced_unit_instances_total'] += forced_unit_instances_controlled
+            if forced_episode_has_controlled not in (0, 1):
+                raise ValueError(
+                    f"forced_unit_episode_has_controlled must be 0 or 1 "
+                    f"(got {forced_episode_has_controlled})"
+                )
+            self.forcing_tracking['episodes_with_forced_unit'] += forced_episode_has_controlled
+
+            episodes_total = int(self.forcing_tracking['episodes_total'])
+            episodes_with_forced = int(self.forcing_tracking['episodes_with_forced_unit'])
+            forcing_ratio = episodes_with_forced / episodes_total
+            mean_instances = float(self.forcing_tracking['forced_unit_instances_total']) / float(episodes_total)
+
+            self.writer.add_scalar('forcing/episodes_with_forced_unit_ratio', forcing_ratio, self.episode_count)
+            self.writer.add_scalar('forcing/forced_unit_instances_mean', mean_instances, self.episode_count)
+            self.writer.add_scalar(
+                'forcing/episodes_with_forced_unit',
+                float(episodes_with_forced),
+                self.episode_count
+            )
+
+            for unit_name, raw_count in forced_unit_counts_controlled.items():
+                unit_count = int(raw_count)
+                if unit_count <= 0:
+                    raise ValueError(
+                        f"forced_unit_counts_controlled['{unit_name}'] must be > 0 (got {unit_count})"
+                    )
+                per_unit_episode_counts = require_key(self.forcing_tracking, 'per_unit_episode_counts')
+                per_unit_instance_counts = require_key(self.forcing_tracking, 'per_unit_instance_counts')
+                if unit_name not in per_unit_episode_counts:
+                    per_unit_episode_counts[unit_name] = 0
+                if unit_name not in per_unit_instance_counts:
+                    per_unit_instance_counts[unit_name] = 0
+                per_unit_episode_counts[unit_name] = int(per_unit_episode_counts[unit_name]) + 1
+                per_unit_instance_counts[unit_name] = int(per_unit_instance_counts[unit_name]) + unit_count
+
+                unit_slug = self._metric_slug(unit_name)
+                unit_episode_ratio = per_unit_episode_counts[unit_name] / episodes_total
+                unit_instance_mean = per_unit_instance_counts[unit_name] / episodes_total
+                self.writer.add_scalar(
+                    f'forcing/unit_episode_exposure/{unit_slug}',
+                    unit_episode_ratio,
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'forcing/unit_instance_mean/{unit_slug}',
+                    unit_instance_mean,
+                    self.episode_count
+                )
     
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""
@@ -726,28 +800,29 @@ class W40KMetricsTracker:
     
     def log_critical_dashboard(self):
         """
-        🎯 CRITICAL DASHBOARD - 11 Essential Hyperparameter Tuning Metrics
+        🎯 CRITICAL DASHBOARD - 13 Essential Hyperparameter Tuning Metrics
 
         This dashboard contains ONLY the metrics you need to tune PPO hyperparameters.
         All metrics are smoothed (20-episode rolling average) for clear trends.
 
-        GAME PERFORMANCE (4 metrics):
+        GAME PERFORMANCE (5 metrics):
         - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
         - 0_critical/b_worst_bot_score      - Min(random, greedy, defensive)
-        - 0_critical/c_win_rate_100ep       - Training opponent performance
-        - 0_critical/d_episode_reward_smooth  - Learning progress
+        - 0_critical/c_holdout_hard_mean    - Hard holdout aggregate robustness
+        - 0_critical/d_win_rate_100ep       - Training opponent performance
+        - 0_critical/e_episode_reward_smooth  - Learning progress
 
         PPO HEALTH (5 metrics):
-        - 0_critical/e_loss_mean           - Overall learning health
-        - 0_critical/f_explained_variance  - >0.3 -> Value function working
-        - 0_critical/g_clip_fraction       - [0.1-0.3] -> Tune learning_rate
-        - 0_critical/h_approx_kl           - <0.02 -> Policy stability
-        - 0_critical/i_entropy_loss        - [0.5-2.0] -> Tune ent_coef
+        - 0_critical/f_loss_mean           - Overall learning health
+        - 0_critical/g_explained_variance  - >0.3 -> Value function working
+        - 0_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
+        - 0_critical/i_approx_kl           - <0.02 -> Policy stability
+        - 0_critical/j_entropy_loss        - [0.5-2.0] -> Tune ent_coef
 
         TECHNICAL HEALTH (3 metrics):
-        - 0_critical/j_gradient_norm       - <10 -> No gradient explosion
-        - 0_critical/k_value_trade_ratio   - VALUE destroyed / VALUE lost
-        - 0_critical/l_value_loss_smooth   - Smoothed critic loss
+        - 0_critical/k_gradient_norm       - <10 -> No gradient explosion
+        - 0_critical/l_value_trade_ratio   - VALUE destroyed / VALUE lost
+        - 0_critical/m_value_loss_smooth   - Smoothed critic loss
 
         NOTE: position_score moved to combat/ category
         """
@@ -764,12 +839,12 @@ class W40KMetricsTracker:
         # 1. Win Rate (100-episode rolling window) - SORTS FIRST alphabetically
         if len(self.win_rate_window) >= 1:
             win_rate = np.mean(self.win_rate_window)
-            self.writer.add_scalar('0_critical/c_win_rate_100ep', win_rate, self.episode_count)
+            self.writer.add_scalar('0_critical/d_win_rate_100ep', win_rate, self.episode_count)
 
         # 2. Episode Reward (smoothed) - Training signal strength
         if len(self.all_episode_rewards) >= 1:
             reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
-            self.writer.add_scalar('0_critical/d_episode_reward_smooth', reward_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/e_episode_reward_smooth', reward_smooth, self.episode_count)
 
         # NOTE: position_score moved to combat/ category
 
@@ -782,28 +857,28 @@ class W40KMetricsTracker:
             clip_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['clip_fractions'], window_size=20
             )
-            self.writer.add_scalar('0_critical/g_clip_fraction', clip_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/h_clip_fraction', clip_smooth, self.episode_count)
 
         # 4. Approx KL - Policy change magnitude
         if len(self.hyperparameter_tracking['approx_kls']) >= 1:
             kl_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['approx_kls'], window_size=20
             )
-            self.writer.add_scalar('0_critical/h_approx_kl', kl_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/i_approx_kl', kl_smooth, self.episode_count)
 
         # 5. Explained Variance - Value function quality
         if len(require_key(self.hyperparameter_tracking, 'explained_variances')) >= 1:
             ev_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['explained_variances'], window_size=20
             )
-            self.writer.add_scalar('0_critical/f_explained_variance', ev_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/g_explained_variance', ev_smooth, self.episode_count)
 
         # 6. Entropy Loss - Exploration health
         if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
             entropy_smooth = self._calculate_smoothed_metric(
                 self.hyperparameter_tracking['entropy_losses'], window_size=20
             )
-            self.writer.add_scalar('0_critical/i_entropy_loss', entropy_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/j_entropy_loss', entropy_smooth, self.episode_count)
 
         # 7. Loss Mean (combined policy + value loss) - Training stability
         if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
@@ -813,9 +888,9 @@ class W40KMetricsTracker:
             recent_value = self.hyperparameter_tracking['value_losses'][-20:]
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = np.mean(combined_losses)
-            self.writer.add_scalar('0_critical/e_loss_mean', loss_mean, self.episode_count)
+            self.writer.add_scalar('0_critical/f_loss_mean', loss_mean, self.episode_count)
             value_loss_smooth = float(np.mean(recent_value))
-            self.writer.add_scalar('0_critical/l_value_loss_smooth', value_loss_smooth, self.episode_count)
+            self.writer.add_scalar('0_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
         
         # ==========================================
         # TECHNICAL HEALTH (3 metrics)
@@ -823,12 +898,12 @@ class W40KMetricsTracker:
         
         # 8. Gradient Norm (direct value from latest training step) - Technical health
         if hasattr(self, 'latest_gradient_norm') and self.latest_gradient_norm is not None:
-            self.writer.add_scalar('0_critical/j_gradient_norm', self.latest_gradient_norm, self.episode_count)
+            self.writer.add_scalar('0_critical/k_gradient_norm', self.latest_gradient_norm, self.episode_count)
         else:
             # Log placeholder if gradient_norm not available from stable-baselines3
             # This keeps the metric visible in TensorBoard even if SB3 doesn't log it
             if self.episode_count <= 1:
-                self.writer.add_scalar('0_critical/j_gradient_norm', 0.0, self.episode_count)
+                self.writer.add_scalar('0_critical/k_gradient_norm', 0.0, self.episode_count)
         
         # 10. Reward-Victory Gap (reward alignment: mean reward when won vs lost)
         # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory
@@ -846,7 +921,7 @@ class W40KMetricsTracker:
 
         # 11. VALUE trade ratio (destroyed/lost) - Attrition robustness
         if self.latest_value_trade_ratio is not None:
-            self.writer.add_scalar('0_critical/k_value_trade_ratio', self.latest_value_trade_ratio, self.episode_count)
+            self.writer.add_scalar('0_critical/l_value_trade_ratio', self.latest_value_trade_ratio, self.episode_count)
         
         # 12. Bot Evaluation Combined Score (logged immediately in log_bot_evaluations())
         # NOTE: This metric is logged in log_bot_evaluations() to avoid duplicate/stale values
@@ -883,6 +958,19 @@ class W40KMetricsTracker:
             worst_bot_score = min(bot_results['random'], bot_results['greedy'], bot_results['defensive'])
             self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, x)
             self.writer.add_scalar('0_critical/b_worst_bot_score', worst_bot_score, x)
+            if self.forcing_tracking['episodes_total'] > 0:
+                if self.forcing_tracking['baseline_worst_bot'] is None:
+                    self.forcing_tracking['baseline_worst_bot'] = float(worst_bot_score)
+                baseline_worst = float(require_key(self.forcing_tracking, 'baseline_worst_bot'))
+                self.writer.add_scalar(
+                    'forcing/delta_worst_bot_vs_forcing_start',
+                    float(worst_bot_score) - baseline_worst,
+                    x
+                )
+        if 'holdout_hard_mean' in bot_results:
+            holdout_hard_mean = float(bot_results['holdout_hard_mean'])
+            self.writer.add_scalar('bot_eval/holdout_hard_mean', holdout_hard_mean, x)
+            self.writer.add_scalar('0_critical/c_holdout_hard_mean', holdout_hard_mean, x)
 
         # Store combined score and log immediately to both namespaces
         if 'combined' in bot_results:
@@ -891,6 +979,15 @@ class W40KMetricsTracker:
             self.writer.add_scalar('bot_eval/combined', bot_results['combined'], x)
             # Log IMMEDIATELY to 0_critical/ namespace (don't wait for next episode)
             self.writer.add_scalar('0_critical/a_bot_eval_combined', bot_results['combined'], x)
+            if self.forcing_tracking['episodes_total'] > 0:
+                if self.forcing_tracking['baseline_combined'] is None:
+                    self.forcing_tracking['baseline_combined'] = float(bot_results['combined'])
+                baseline_combined = float(require_key(self.forcing_tracking, 'baseline_combined'))
+                self.writer.add_scalar(
+                    'forcing/delta_combined_vs_forcing_start',
+                    float(bot_results['combined']) - baseline_combined,
+                    x
+                )
 
     def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
         """Log holdout split aggregates to TensorBoard."""
@@ -943,6 +1040,14 @@ class W40KMetricsTracker:
         # Use last N values for rolling mean
         recent_values = values[-window_size:]
         return np.mean(recent_values)
+
+    @staticmethod
+    def _metric_slug(name: str) -> str:
+        """Convert a unit name to a TensorBoard-safe metric suffix."""
+        normalized = "".join(ch if ch.isalnum() else "_" for ch in str(name)).strip("_").lower()
+        if not normalized:
+            raise ValueError(f"Cannot build metric slug from empty unit name: {name!r}")
+        return normalized
     
     def get_performance_summary(self) -> Dict[str, float]:
         """Get current performance summary for monitoring"""

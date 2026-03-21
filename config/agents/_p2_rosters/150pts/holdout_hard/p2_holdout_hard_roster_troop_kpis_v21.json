@@ -1,0 +1,70 @@
+{
+  "roster_value_mean": 148.66666666666666,
+  "roster_value_std": 1.4907119849998598,
+  "roster_value_p95": 151.0,
+  "rejection_rate_roster_budget": 0.25,
+  "unit_pick_frequency": {
+    "spaceMarine::SanguinaryGuardInferno": 4,
+    "spaceMarine::SanguinaryGuardAngelus": 3,
+    "spaceMarine::SternguardVeteranSergeantPowerFist": 3,
+    "spaceMarine::Suppressor": 2,
+    "tyranid::TyranidWarriorMelee": 2,
+    "aeldari::DarkReaperExarch": 1,
+    "aeldari::FireDragonExarch": 1,
+    "aeldari::WarpSpiderExarchPowerblade": 1,
+    "aeldari::WarpSpiderExarchSpinner": 1,
+    "chaos::RaptorPlasmaGun": 1,
+    "spaceMarine::AssaultIntercessor": 1,
+    "spaceMarine::AssaultIntercessorJumpPack": 1,
+    "spaceMarine::AssaultIntercessorJumpPackPlasmaPistol": 1,
+    "spaceMarine::DeathCompanyMarineEviscerator": 1,
+    "spaceMarine::HellblasterSergeant": 1,
+    "spaceMarine::Infernus": 1,
+    "spaceMarine::Intercessor": 1,
+    "spaceMarine::IntercessorSergeant": 1,
+    "spaceMarine::Scout": 1,
+    "spaceMarine::SternguardVeteranBoltRifle": 1,
+    "tyranid::TyranidWarriorRanged": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.2693729679271362,
+    "observed": {
+      "Balance": 0.26666666666666666,
+      "Melee": 0.36666666666666664,
+      "Ranged": 0.36666666666666664
+    },
+    "target": {
+      "Balance": 0.4013531506302348,
+      "Melee": 0.2837995344612249,
+      "Ranged": 0.3148473149085403
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 0.9836460925907762,
+    "observed": {
+      "High": 0.16666666666666666,
+      "Low": 0.16666666666666666,
+      "Mid": 0.6666666666666666
+    },
+    "target": {
+      "High": 0.454257050793509,
+      "Low": 0.3708993288352125,
+      "Mid": 0.17484362037127862
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 0.9906753329382973,
+    "observed": {
+      "AntiElite": 0.3333333333333333,
+      "Burst": 0.03333333333333333,
+      "Generalist": 0.43333333333333335,
+      "Volume": 0.2
+    },
+    "target": {
+      "AntiElite": 0.12195960250839924,
+      "Burst": 0.5174307717870298,
+      "Generalist": 0.14936939768911875,
+      "Volume": 0.2112402280154522
+    }
+  }
+}

@@ -2,7 +2,7 @@
   "game_rules": {
     "max_turns": 5,
     "max_steps_per_turn": 500,
-    "max_steps_per_turn_detail": "nb units (20) * nb actions per turn (7) = 140 + marge",
+    "max_steps_per_turn_detail": "nb units (50) * nb actions per turn (7) = 350 + marge",
     "turn_limit_penalty": -1,
     "los_visibility_min_ratio": 0.12,
     "cover_ratio": 0.75,

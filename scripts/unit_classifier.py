@@ -991,6 +991,15 @@ def main() -> None:
                 "units": sorted(units),
             }
         )
+    unit_values: Dict[str, int] = {}
+    for row in rows:
+        unit_key = f"{row['Roster']}::{row['UniteID']}"
+        unit_value = int(row["VALUE"])
+        if unit_key in unit_values and unit_values[unit_key] != unit_value:
+            raise ValueError(
+                f"Inconsistent VALUE for unit key '{unit_key}': {unit_values[unit_key]} vs {unit_value}"
+            )
+        unit_values[unit_key] = unit_value
 
     matrix_output = Path(args.output_matrix_json)
     matrix_output.parent.mkdir(parents=True, exist_ok=True)
@@ -1015,6 +1024,7 @@ def main() -> None:
         },
         "by_tanking": matrix_by_tanking,
         "cells": cells,
+        "unit_values": unit_values,
     }
     with matrix_output.open("w", encoding="utf-8") as f:
         json.dump(matrix_payload, f, indent=2, ensure_ascii=True, sort_keys=True)

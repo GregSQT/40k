@@ -366,6 +366,7 @@ class W40KEngine(gym.Env):
             # AI_TURN.md required tracking sets
             "units_moved": set(),
             "units_fled": set(),
+            "units_cannot_charge": set(),
             "units_shot": set(),
             "units_charged": set(),
             "units_attacked": set(),
@@ -472,26 +473,8 @@ class W40KEngine(gym.Env):
         # Initialize units from config AFTER game_state exists
         self._initialize_units()
 
-        # Build reward_configs for all units present in the scenario (no defaults)
-        from config_loader import get_config_loader
-        config_loader = get_config_loader()
-        reward_configs = {}
-        controlled_agent = self.config.get("controlled_agent")
-        if controlled_agent:
-            base_agent_key = controlled_agent
-            for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
-                if controlled_agent.endswith(phase_suffix):
-                    base_agent_key = controlled_agent[:-len(phase_suffix)]
-                    break
-            agent_rewards = config_loader.load_agent_rewards_config(base_agent_key)
-            reward_configs[controlled_agent] = require_key(agent_rewards, base_agent_key)
-        units = require_key(self.game_state, "units")
-        for unit in units:
-            unit_type = require_key(unit, "unitType")
-            model_key = self.unit_registry.get_model_key(unit_type)
-            if model_key not in reward_configs:
-                agent_rewards = config_loader.load_agent_rewards_config(model_key)
-                reward_configs[model_key] = require_key(agent_rewards, model_key)
+        # Build reward configs for all units present in the scenario.
+        reward_configs = self._build_reward_configs_for_current_units()
         self.game_state["reward_configs"] = reward_configs
         self.game_state["rewards_configs"] = reward_configs
 
@@ -569,6 +552,53 @@ class W40KEngine(gym.Env):
         
         # ==================================================
 
+    @staticmethod
+    def _strip_phase_suffix(agent_key: str) -> str:
+        """Strip optional phase suffix (_phase1.._phase4) from an agent key."""
+        base_agent_key = agent_key
+        for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
+            if agent_key.endswith(phase_suffix):
+                base_agent_key = agent_key[:-len(phase_suffix)]
+                break
+        return base_agent_key
+
+    def _build_reward_configs_for_current_units(self) -> Dict[str, Dict[str, Any]]:
+        """Build reward config mapping for all units in current game state."""
+        from config_loader import get_config_loader
+        config_loader = get_config_loader()
+
+        reward_configs: Dict[str, Dict[str, Any]] = {}
+        controlled_agent = self.config.get("controlled_agent")
+        units = require_key(self.game_state, "units")
+
+        # Single-policy mode: use controlled agent rewards for every unit model key.
+        if controlled_agent:
+            base_agent_key = self._strip_phase_suffix(controlled_agent)
+            agent_rewards = config_loader.load_agent_rewards_config(base_agent_key)
+            controlled_rewards = require_key(agent_rewards, base_agent_key)
+            reward_configs[controlled_agent] = controlled_rewards
+
+            mapped_model_keys: Set[str] = set()
+            for unit in units:
+                unit_type = require_key(unit, "unitType")
+                model_key = self.unit_registry.get_model_key(unit_type)
+                if model_key in mapped_model_keys:
+                    continue
+                reward_configs[model_key] = controlled_rewards
+                mapped_model_keys.add(model_key)
+            return reward_configs
+
+        # Legacy mode: no controlled agent; load rewards per model key.
+        for unit in units:
+            unit_type = require_key(unit, "unitType")
+            model_key = self.unit_registry.get_model_key(unit_type)
+            if model_key in reward_configs:
+                continue
+            agent_rewards = config_loader.load_agent_rewards_config(model_key)
+            reward_configs[model_key] = require_key(agent_rewards, model_key)
+
+        return reward_configs
+
     # ============================================================================
     # GYM INTERFACE - KEEP THESE CORE METHODS
     # ============================================================================
@@ -592,26 +622,8 @@ class W40KEngine(gym.Env):
         # RANDOM SCENARIO SELECTION: Pick a random scenario for this episode
         if should_reload_scenario:
             self._reload_scenario(self._current_scenario_file)
-            # Rebuild reward configs for units in the new scenario (no defaults)
-            from config_loader import get_config_loader
-            config_loader = get_config_loader()
-            reward_configs = {}
-            controlled_agent = self.config.get("controlled_agent")
-            if controlled_agent:
-                base_agent_key = controlled_agent
-                for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
-                    if controlled_agent.endswith(phase_suffix):
-                        base_agent_key = controlled_agent[:-len(phase_suffix)]
-                        break
-                agent_rewards = config_loader.load_agent_rewards_config(base_agent_key)
-                reward_configs[controlled_agent] = require_key(agent_rewards, base_agent_key)
-            units = require_key(self.game_state, "units")
-            for unit in units:
-                unit_type = require_key(unit, "unitType")
-                model_key = self.unit_registry.get_model_key(unit_type)
-                if model_key not in reward_configs:
-                    agent_rewards = config_loader.load_agent_rewards_config(model_key)
-                    reward_configs[model_key] = require_key(agent_rewards, model_key)
+            # Rebuild reward configs for units in the new scenario.
+            reward_configs = self._build_reward_configs_for_current_units()
             self.game_state["reward_configs"] = reward_configs
             self.game_state["rewards_configs"] = reward_configs
 
@@ -648,6 +660,7 @@ class W40KEngine(gym.Env):
             "macro_target_unit_id": None,
             "units_moved": set(),
             "units_fled": set(),
+            "units_cannot_charge": set(),
             "units_shot": set(),
             "units_charged": set(),
             "units_attacked": set(),
@@ -1373,6 +1386,48 @@ class W40KEngine(gym.Env):
 
             # Store turn number for metrics filtering (e.g., objectives only on turn 5+)
             self.episode_tactical_data['final_turn'] = self.game_state["turn"]
+
+            # Unit-rule forcing exposure metrics:
+            # Count units that have at least one configured UNIT_RULES entry.
+            forced_unit_counts_controlled: Dict[str, int] = {}
+            forced_unit_counts_all: Dict[str, int] = {}
+            for unit in units:
+                unit_rules = require_key(unit, "UNIT_RULES")
+                if not isinstance(unit_rules, list):
+                    raise TypeError(
+                        f"UNIT_RULES must be list for unit {require_key(unit, 'id')} "
+                        f"(got {type(unit_rules).__name__})"
+                    )
+                if len(unit_rules) == 0:
+                    continue
+                unit_name = str(require_key(unit, "unitType"))
+                unit_player = require_key(unit, "player")
+                if unit_name not in forced_unit_counts_all:
+                    forced_unit_counts_all[unit_name] = 0
+                forced_unit_counts_all[unit_name] += 1
+                if unit_player == controlled_player:
+                    if unit_name not in forced_unit_counts_controlled:
+                        forced_unit_counts_controlled[unit_name] = 0
+                    forced_unit_counts_controlled[unit_name] += 1
+
+            self.episode_tactical_data['forced_unit_episode_has_controlled'] = (
+                1 if len(forced_unit_counts_controlled) > 0 else 0
+            )
+            self.episode_tactical_data['forced_unit_episode_has_any'] = (
+                1 if len(forced_unit_counts_all) > 0 else 0
+            )
+            self.episode_tactical_data['forced_unit_instances_controlled'] = int(
+                sum(forced_unit_counts_controlled.values())
+            )
+            self.episode_tactical_data['forced_unit_instances_all'] = int(
+                sum(forced_unit_counts_all.values())
+            )
+            self.episode_tactical_data['forced_unit_counts_controlled'] = dict(
+                sorted(forced_unit_counts_controlled.items(), key=lambda item: item[0])
+            )
+            self.episode_tactical_data['forced_unit_counts_all'] = dict(
+                sorted(forced_unit_counts_all.items(), key=lambda item: item[0])
+            )
 
             # Count controlled objectives for Player 1 (learning agent)
             obj_counts = self.state_manager.count_controlled_objectives(self.game_state)
@@ -2693,7 +2748,7 @@ class W40KEngine(gym.Env):
                                         "save_target": attack_result["save_target"],
                                         "save_target_base": attack_result.get("save_target_base"),
                                         "save_cover_applied": attack_result.get("save_cover_applied", False),
-                                        "save_cover_bonus": attack_result.get("save_cover_bonus", 0),
+                                        "save_cover_bonus": require_key(attack_result, "save_cover_bonus"),
                                         "save_skipped": attack_result.get("save_skipped", False),
                                         "save_skip_reason": attack_result.get("save_skip_reason"),
                                         "critical_wound_unmodified": attack_result.get("critical_wound_unmodified", False),
@@ -3364,6 +3419,7 @@ class W40KEngine(gym.Env):
         """Clear tracking sets at the VERY BEGINNING of movement phase."""
         self.game_state["units_moved"] = set()
         self.game_state["units_fled"] = set()
+        self.game_state["units_cannot_charge"] = set()
         self.game_state["units_shot"] = set()
         self.game_state["units_charged"] = set()
         self.game_state["units_fought"] = set()

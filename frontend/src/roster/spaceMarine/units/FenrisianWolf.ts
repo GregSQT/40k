@@ -30,6 +30,8 @@ export class FenrisianWolf extends SwarmMeleeSwarm {
       displayName: "Predator Instinct",
     },
   ];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { reactive_move: 2 };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "beasts"}, { keywordId: "imperium"}, { keywordId: "fenrisian wolves"}];

@@ -17,7 +17,6 @@ import argparse
 import json
 import math
 import random
-import re
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +24,6 @@ from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ROSTER_ROOT = PROJECT_ROOT / "frontend" / "src" / "roster"
 
 
 @dataclass(frozen=True)
@@ -64,47 +62,41 @@ def _require_key(mapping: Dict[str, Any], key: str) -> Any:
     return mapping[key]
 
 
-def _parse_static_string(contents: str, field_name: str) -> str:
-    match = re.search(rf"static\s+{re.escape(field_name)}\s*(?::[^=]+)?=\s*\"([^\"]+)\"", contents)
-    if match is None:
-        raise ValueError(f"Missing required static field '{field_name}'")
-    return match.group(1)
-
-
-def _parse_static_number(contents: str, field_name: str) -> int:
-    match = re.search(rf"static\s+{re.escape(field_name)}\s*(?::[^=]+)?=\s*(-?\d+)", contents)
-    if match is None:
-        raise ValueError(f"Missing required static numeric field '{field_name}'")
-    return int(match.group(1))
-
-
 def _load_matrix(path: Path) -> Dict[str, Any]:
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"Matrix file not found: {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
     _require_key(data, "by_tanking")
     _require_key(data, "cells")
+    if "unit_values" not in data:
+        raise ValueError(
+            "Matrix JSON is missing required key 'unit_values'. "
+            "Rebuild it with: python scripts/unit_classifier.py --roster all"
+        )
     return data
 
 
-def _load_unit_metadata() -> Dict[str, UnitMeta]:
-    if not ROSTER_ROOT.exists() or not ROSTER_ROOT.is_dir():
-        raise FileNotFoundError(f"Invalid roster root: {ROSTER_ROOT}")
-
-    unit_files = sorted(ROSTER_ROOT.glob("*/units/*.ts"))
-    if not unit_files:
-        raise FileNotFoundError(f"No unit files found under {ROSTER_ROOT}")
+def _load_unit_metadata_from_matrix(matrix: Dict[str, Any]) -> Dict[str, UnitMeta]:
+    unit_values = _require_key(matrix, "unit_values")
+    if not isinstance(unit_values, dict):
+        raise TypeError("matrix.unit_values must be a dictionary")
+    if not unit_values:
+        raise ValueError("matrix.unit_values is empty")
 
     units_by_key: Dict[str, UnitMeta] = {}
-    for unit_file in unit_files:
-        faction = unit_file.parent.parent.name
-        contents = unit_file.read_text(encoding="utf-8")
-        unit_type = _parse_static_string(contents, "NAME")
-        value = _parse_static_number(contents, "VALUE")
-        key = f"{faction}::{unit_type}"
-        if key in units_by_key:
-            raise ValueError(f"Duplicate unit key detected: {key}")
-        units_by_key[key] = UnitMeta(faction=faction, unit_type=unit_type, value=value)
+    for unit_key, raw_value in unit_values.items():
+        if not isinstance(unit_key, str) or "::" not in unit_key:
+            raise ValueError(
+                f"Invalid unit key in matrix.unit_values: {unit_key!r}. "
+                "Expected format 'roster::unit_type'."
+            )
+        faction, unit_type = unit_key.split("::", 1)
+        if not faction or not unit_type:
+            raise ValueError(f"Invalid unit key in matrix.unit_values: {unit_key!r}")
+        value = int(raw_value)
+        if value <= 0:
+            raise ValueError(f"Non-positive VALUE for '{unit_key}': {value}")
+        units_by_key[unit_key] = UnitMeta(faction=faction, unit_type=unit_type, value=value)
     return units_by_key
 
 
@@ -689,7 +681,7 @@ def main() -> None:
         raise ValueError(f"--max-matchup-build-attempts must be > 0 (got {args.max_matchup_build_attempts})")
 
     matrix = _load_matrix(Path(args.matrix))
-    units_meta = _load_unit_metadata()
+    units_meta = _load_unit_metadata_from_matrix(matrix)
     matrix_unit_keys = _extract_matrix_unit_keys(matrix)
     _validate_matrix_units_exist(matrix_unit_keys, units_meta)
     unit_value_by_type = _build_unit_type_value_index_strict(matrix_unit_keys, units_meta)

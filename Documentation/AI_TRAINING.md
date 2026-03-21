@@ -31,10 +31,13 @@
   - [Best Practices](#best-practices)
 - [Training Strategy](#-training-strategy)
   - [Unified Training (No Curriculum)](#unified-training-no-curriculum)
+  - [Dynamic Roster Generation (150pts)](#dynamic-roster-generation-150pts)
+  - [Organisation Training — Agent Unique](#organisation-training--agent-unique)
   - [Reward Design Philosophy](#reward-design-philosophy)
   - [Target Priority & Positioning](#target-priority--positioning)
 - [Configuration Files](#️-configuration-files)
   - [training_config.json Structure](#trainingconfigjson-structure)
+  - [Unit Rules Implementation Flags (`RULES_STATUS`)](#unit-rules-implementation-flags-rules_status)
   - [rewards_config.json Structure](#rewardsconfigjson-structure)
 - [Monitoring Training](#-monitoring-training)
   - [TensorBoard Metrics](#tensorboard-metrics)
@@ -371,6 +374,100 @@ Research and testing show curriculum learning **fails** for tactical games like 
 
 ---
 
+### Dynamic Roster Generation (150pts)
+
+Le pipeline utilise `scripts/build_dynamic_rosters.py` (version consolidée v21) pour générer des rosters dynamiques compatibles avec le format compact attendu par les scénarios.
+
+**Entrées nécessaires**
+- `reports/unit_sampling_matrix.json` (généré par `scripts/unit_classifier.py`)
+- `matrix["unit_values"]` est requis (mapping `"roster::unit_type" -> VALUE`)
+
+**Important**
+- Le générateur de rosters ne parse plus les fichiers TypeScript pour `NAME/VALUE`.
+- Si `unit_values` est absent de la matrice, le script échoue explicitement.
+
+**Ce que fait le script**
+- Génère des rosters par `target_tanking` (`Swarm|Troop|Elite`) avec budget `points-scale +/- points-tolerance` (défaut `150 +/- 2`).
+- Utilise des poids issus de la matrice:
+  - `blend_group` (inverse-sqrt),
+  - `mobility_weights`,
+  - `weapon_profile_weights`,
+  - densité de cellule (`count`).
+- Applique des contraintes de robustesse:
+  - faisabilité budget en cours de construction (lookahead),
+  - `max-copies-per-unit`,
+  - anti-répétition globale (`anti-repeat-window`, `anti-repeat-penalty`).
+- Génère des matchups optionnels avec buckets VALUE:
+  - `strict/medium/wide`,
+  - ratios configurables (`matchup-ratio-*`),
+  - équilibrage optionnel du signe des gaps (`--enforce-matchup-sign-balance`) sans inversion de rôles P1/P2.
+- Exporte des KPIs de génération (`..._kpis_v21.json`) et matchups (`..._matchups.json`).
+
+**Workflow recommandé**
+```bash
+# 1) Rebuild classification + matrix (inclut unit_values)
+python scripts/unit_classifier.py --roster all
+
+# 2) Génération training (exemple Troop)
+python scripts/build_dynamic_rosters.py \
+  --target-tanking Troop \
+  --points-scale 150 \
+  --num-rosters 200 \
+  --units-per-roster 5 \
+  --split training
+
+# 3) Génération holdout (exemple Troop)
+python scripts/build_dynamic_rosters.py \
+  --target-tanking Troop \
+  --points-scale 150 \
+  --num-rosters 60 \
+  --units-per-roster 5 \
+  --split holdout
+```
+
+**Sorties par défaut**
+- `config/agents/_p2_rosters/150pts/training/`
+- `config/agents/_p2_rosters/150pts/holdout/`
+
+---
+
+### Organisation Training — Agent Unique
+
+Ce mode vise un **seul agent PPO** entraîné sur une distribution de situations variées, plutôt que 3 agents séparés par tanking.
+
+**Principe**
+- Un seul `agent_key` en entraînement (`ai/train.py --agent <agent_key>`).
+- La diversité est apportée par:
+  - les rosters dynamiques (mix de profils),
+  - les buckets de gap VALUE (`strict/medium/wide`),
+  - les bots d’entraînement pondérés.
+- Le tanking reste un signal observé, mais ne sert plus à définir des modèles distincts.
+
+**Organisation pratique**
+1. Rebuild matrix (`unit_classifier.py --roster all`) après chaque update roster.
+2. Générer les rosters P2 150pts (training/holdout) avec `build_dynamic_rosters.py`.
+3. Pointer les scénarios training/holdout vers les refs rosters 150pts.
+4. Entraîner un seul agent sur ce flux.
+5. Valider via holdout régulier + holdout dur + robust gating.
+
+**KPIs à suivre en priorité**
+- `rejection_rate_roster_budget`
+- `distribution_drift_blend/mobility/weapon_profile`
+- `matchup_value_gap_mean`, `matchup_value_gap_p95`
+- `%matchups_in_strict/medium/wide_bucket`
+- métriques RL standard (`0_critical/*`, `bot_eval/*`)
+
+**Commande type (agent unique)**
+```bash
+python ai/train.py \
+  --agent <agent_unique_key> \
+  --training-config default \
+  --rewards-config <agent_unique_key> \
+  --scenario bot
+```
+
+---
+
 ### Reward Design Philosophy
 
 **Key Principles:**
@@ -475,7 +572,7 @@ Règles:
     },
 
     "observation_params": {
-      "obs_size": 300,                   // Total observation vector size
+      "obs_size": 355,                   // Total observation vector size (CoreAgent v2.4 rule-aware; legacy mode = 323)
       "perception_radius": 25,           // Fog of war radius
       "max_nearby_units": 10,            // Max units to observe
       "max_valid_targets": 5             // Max targets to track
@@ -509,6 +606,44 @@ Règles:
 | `n_steps` | 256 | 4096 | Larger batches (slower, more stable) |
 | `batch_size` | 64 | 256 | Training speed vs memory |
 | `gamma` | 0.90 | 0.99 | Long-term vs short-term rewards |
+
+---
+
+### Unit Rules Implementation Flags (`RULES_STATUS`)
+
+Cette feature sert a distinguer une regle **declaree** d'une regle **effectivement appliquee** dans le moteur.
+
+Conventions dans les fichiers d'unites (`frontend/src/roster/**/units/*.ts`):
+
+- `UNIT_RULES`: regles declarees/capacites de l'unite (source metier)
+- `RULES_STATUS`: statut d'implementation technique de chaque `ruleId`
+
+Exemple:
+
+```ts
+static UNIT_RULES = [{ ruleId: "closest_target_penetration", displayName: "Close-quarter firepower" }];
+static RULES_STATUS = { closest_target_penetration: 2 };
+```
+
+Valeurs de `RULES_STATUS`:
+
+- `0` = `NOT_IMPLEMENTED`
+- `1` = `NOT_IMPLEMENTABLE_YET`
+- `2` = `IMPLEMENTED`
+
+Regles pratiques:
+
+- Une regle ne passe a `2` que si son effet est valide dans les handlers runtime (pas seulement declaree).
+- Pour les regles composees (`grants_rule_ids`), il faut statuer le `ruleId` parent et les regles accordees.
+- En cas d'ambiguite, laisser `0` tant que le test runtime n'est pas valide.
+
+Note de nomenclature:
+
+- Correction appliquee: `move_after_shouting` -> `move_after_shooting`.
+
+Reference audit:
+
+- `Documentation/RULES_IMPLEMENTATION_AUDIT_CHECKLIST.md`
 
 ---
 
@@ -1037,9 +1172,9 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 
 ### Common Errors
 
-**Error**: `Observation size mismatch (expected 295, got 150)`
-- **Cause**: Old model trained with different observation size
-- **Fix**: Train new model from scratch or update observation_params
+**Error**: `Observation size mismatch (expected 355, got 323)` (or inverse)
+- **Cause**: Model trained with a different observation layout (`v2.4` rule-aware = 355, legacy = 323)
+- **Fix**: Train new model from scratch with the target `obs_size`, or align `observation_params.obs_size` with the model
 
 **Error**: `Reward key not found: SpaceMarineXXX`
 - **Cause**: Unit archetype not defined in the agent rewards config
@@ -1076,8 +1211,9 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 - [PPO Paper (Schulman et al.)](https://arxiv.org/abs/1707.06347)
 
 ### Observation Space Internals
-- See `w40k_core.py:build_observation()` for implementation
-- 295 floats = 72 ally + 138 enemy + 35 targets + 50 self-state
+- See `engine/observation_builder.py:ObservationBuilder.build_observation()` for implementation
+- Canonical layout reference: `Documentation/AI_OBSERVATION.md`
+- Current CoreAgent layout (`v2.4`): 355 floats = legacy 323 + rules block 32
 
 ### Reward Calculation Logic
 - See `reward_mapper.py:calculate_reward()` for implementation

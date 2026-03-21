@@ -20,6 +20,7 @@ from engine.phase_handlers.shooting_handlers import _calculate_save_target, _cal
 from engine.phase_handlers.shared_utils import (
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position,
+    unit_has_rule_effect,
 )
 from engine.macro_intents import (
     INTENT_COUNT,
@@ -31,6 +32,55 @@ from engine.macro_intents import (
 
 class ObservationBuilder:
     """Builds observations for the agent."""
+
+    LEGACY_OBS_SIZE = 323
+    RULE_AWARE_OBS_SIZE = 355
+    RULE_FEATURE_BASE_IDX = 314
+    RULE_FEATURE_COUNT = 32
+    RULE_AWARE_MACRO_BASE_IDX = 346
+
+    _UNIT_RULE_FEATURE_IDS = (
+        "charge_after_advance",
+        "charge_after_flee",
+        "charge_impact",
+        "closest_target_penetration",
+        "reactive_move",
+        "reroll_1_save_fight",
+        "reroll_1_tohit_fight",
+        "reroll_1_towound",
+        "reroll_towound_target_on_objective",
+        "shoot_after_advance",
+        "shoot_after_flee",
+        "move_after_shooting",
+    )
+
+    _WEAPON_RULE_FEATURE_IDS = (
+        "ANTI_VEHICLE",
+        "ASSAULT",
+        "BLAST",
+        "DEVASTATING_WOUNDS",
+        "EXTRA_ATTACKS",
+        "HAZARDOUS",
+        "HEAVY",
+        "IGNORES_COVER",
+        "INDIRECT_FIRE",
+        "LETHAL_HITS",
+        "MELTA",
+        "PISTOL",
+        "PSYCHIC",
+        "RAPID_FIRE",
+        "SUSTAINED_HITS",
+        "TORRENT",
+        "TWIN_LINKED",
+    )
+
+    _WEAPON_RULES_WITH_PARAMETER = frozenset({
+        "ANTI_VEHICLE",
+        "MELTA",
+        "RAPID_FIRE",
+        "SUSTAINED_HITS",
+    })
+    _WEAPON_RULE_PARAMETER_NORMALIZATION = 6.0
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -1124,7 +1174,7 @@ class ObservationBuilder:
         Build asymmetric egocentric observation vector with R=25 perception radius.
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access, no state copying.
 
-        Structure (323 floats):
+        Structure (323 floats, legacy):
         - [0:15]    Global context (15 floats) - includes objective control
         - [15:37]   Active unit capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md
         - [37:69]   Directional terrain (32 floats: 8 directions × 4 features)
@@ -1133,6 +1183,13 @@ class ObservationBuilder:
         - [273:313] Valid targets (40 floats: 5 targets × 8 features)
         - [314:318] Macro target (4 floats)
         - [318:323] Macro intent (5 floats)
+
+        Structure (355 floats, rule-aware):
+        - Legacy blocks [0:313]
+        - [314:346] Rules features (32 floats):
+          unit rules (12), FLY (1), invul flags (2), weapon rules (17)
+        - [346:350] Macro target (4 floats)
+        - [350:355] Macro intent (5 floats)
 
         Asymmetric design: More complete information about enemies than allies.
         Agent discovers optimal tactical combinations through training.
@@ -1259,10 +1316,20 @@ class ObservationBuilder:
             obs, active_unit, game_state, base_idx=274,
             valid_targets=valid_targets, six_enemies=six_enemies, positions=positions
         )
-        # === SECTION 7: Macro target + intent (9 floats) ===
-        if self.obs_size < 323:
-            raise ValueError(f"obs_size too small for macro target features: {self.obs_size}")
-        self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=314, positions=positions)
+        # === SECTION 7: Rule-aware extension + Macro target + intent ===
+        if self.obs_size == self.LEGACY_OBS_SIZE:
+            self._encode_macro_intent_context(obs, active_unit, game_state, base_idx=314, positions=positions)
+        elif self.obs_size == self.RULE_AWARE_OBS_SIZE:
+            self._encode_rule_features(obs, active_unit, game_state, base_idx=self.RULE_FEATURE_BASE_IDX)
+            self._encode_macro_intent_context(
+                obs, active_unit, game_state, base_idx=self.RULE_AWARE_MACRO_BASE_IDX, positions=positions
+            )
+        else:
+            raise ValueError(
+                "Unsupported observation size. "
+                f"Expected {self.LEGACY_OBS_SIZE} (legacy) or {self.RULE_AWARE_OBS_SIZE} (rule-aware), "
+                f"got {self.obs_size}"
+            )
         return obs
 
     def build_observation_for_unit(self, game_state: Dict[str, Any], unit_id: str) -> np.ndarray:
@@ -1333,6 +1400,151 @@ class ObservationBuilder:
                     obs[base_idx + i] = 0.0  # Contested/empty
             else:
                 obs[base_idx + i] = 0.0  # No objective in this slot
+
+    def _encode_rule_features(
+        self,
+        obs: np.ndarray,
+        active_unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+        base_idx: int,
+    ) -> None:
+        """
+        Encode explicit rule features from config/unit_rules.json and config/weapon_rules.json.
+        """
+        feature_idx = base_idx
+
+        # 1) Unit rules: 12 binary features (alias-aware via shared helper)
+        for rule_id in self._UNIT_RULE_FEATURE_IDS:
+            obs[feature_idx] = 1.0 if unit_has_rule_effect(active_unit, rule_id) else 0.0
+            feature_idx += 1
+
+        # 2) Movement keyword: FLY
+        obs[feature_idx] = 1.0 if self._unit_has_keyword(active_unit, "fly") else 0.0
+        feature_idx += 1
+
+        # 3) Invulnerable save features (availability + quality)
+        invul_save = require_key(active_unit, "INVUL_SAVE")
+        if not isinstance(invul_save, int):
+            raise TypeError(f"INVUL_SAVE must be int for unit {active_unit.get('id')}, got {type(invul_save).__name__}")
+        if invul_save < 2 or invul_save > 7:
+            raise ValueError(f"INVUL_SAVE must be in [2, 7] for unit {active_unit.get('id')}, got {invul_save}")
+        has_invul = invul_save < 7
+        obs[feature_idx] = 1.0 if has_invul else 0.0
+        feature_idx += 1
+        obs[feature_idx] = ((7 - invul_save) / 5.0) if has_invul else 0.0
+        feature_idx += 1
+
+        # 4) Weapon rules from selected ranged + melee weapons
+        weapon_rule_features = self._collect_selected_weapon_rule_features(active_unit)
+        for rule_id in self._WEAPON_RULE_FEATURE_IDS:
+            obs[feature_idx] = weapon_rule_features[rule_id]
+            feature_idx += 1
+
+        if feature_idx != base_idx + self.RULE_FEATURE_COUNT:
+            raise ValueError(
+                f"Rule feature encoding size mismatch: expected {self.RULE_FEATURE_COUNT}, "
+                f"got {feature_idx - base_idx}"
+            )
+
+    def _unit_has_keyword(self, unit: Dict[str, Any], keyword_id: str) -> bool:
+        """
+        Check unit keyword presence in UNIT_KEYWORDS list.
+        """
+        unit_keywords = require_key(unit, "UNIT_KEYWORDS")
+        if not isinstance(unit_keywords, list):
+            raise TypeError(f"UNIT_KEYWORDS must be list for unit {unit.get('id')}")
+        target = keyword_id.strip().lower()
+        for keyword_entry in unit_keywords:
+            if not isinstance(keyword_entry, dict):
+                raise TypeError(f"UNIT_KEYWORDS entry must be dict for unit {unit.get('id')}: {keyword_entry!r}")
+            current_id = require_key(keyword_entry, "keywordId")
+            if not isinstance(current_id, str) or not current_id.strip():
+                raise ValueError(f"Invalid keywordId in UNIT_KEYWORDS for unit {unit.get('id')}: {current_id!r}")
+            if current_id.strip().lower() == target:
+                return True
+        return False
+
+    def _collect_selected_weapon_rule_features(
+        self,
+        unit: Dict[str, Any],
+    ) -> Dict[str, float]:
+        """
+        Build dense feature map for weapon rules from selected ranged/melee weapons.
+        For parameterized rules, stores normalized parameter in [0, 1].
+        For boolean rules, stores 1.0 when present.
+        """
+        from engine.utils.weapon_helpers import get_selected_ranged_weapon, get_selected_melee_weapon
+
+        features = {rule_id: 0.0 for rule_id in self._WEAPON_RULE_FEATURE_IDS}
+        known_rule_ids = set(self._WEAPON_RULE_FEATURE_IDS)
+
+        selected_weapons = [
+            get_selected_ranged_weapon(unit),
+            get_selected_melee_weapon(unit),
+        ]
+        for weapon in selected_weapons:
+            if weapon is None:
+                continue
+            weapon_rules = require_key(weapon, "WEAPON_RULES")
+            if not isinstance(weapon_rules, list):
+                raise TypeError(f"WEAPON_RULES must be list for weapon {weapon.get('display_name')}")
+            for raw_rule in weapon_rules:
+                rule_name, parameter = self._parse_weapon_rule_entry(raw_rule)
+                if rule_name not in known_rule_ids:
+                    raise KeyError(
+                        f"Weapon rule '{rule_name}' not mapped in observation features "
+                        f"(unit={unit.get('id')}, weapon={weapon.get('display_name')})"
+                    )
+                if rule_name in self._WEAPON_RULES_WITH_PARAMETER:
+                    if parameter is None:
+                        raise ValueError(
+                            f"Weapon rule '{rule_name}' requires parameter for "
+                            f"unit={unit.get('id')} weapon={weapon.get('display_name')}"
+                        )
+                    normalized_value = min(1.0, float(parameter) / self._WEAPON_RULE_PARAMETER_NORMALIZATION)
+                    if normalized_value > features[rule_name]:
+                        features[rule_name] = normalized_value
+                else:
+                    features[rule_name] = 1.0
+
+        return features
+
+    def _parse_weapon_rule_entry(self, raw_rule: Any) -> Tuple[str, Optional[int]]:
+        """
+        Parse one weapon rule entry from string or ParsedWeaponRule object.
+        """
+        if hasattr(raw_rule, "rule"):
+            rule_name = getattr(raw_rule, "rule")
+            parameter = getattr(raw_rule, "parameter", None)
+            if not isinstance(rule_name, str) or not rule_name.strip():
+                raise ValueError(f"Invalid ParsedWeaponRule.rule value: {rule_name!r}")
+            if parameter is not None:
+                if not isinstance(parameter, int):
+                    raise TypeError(f"ParsedWeaponRule.parameter must be int or None, got {parameter!r}")
+                if parameter <= 0:
+                    raise ValueError(f"ParsedWeaponRule.parameter must be > 0, got {parameter}")
+            return rule_name.strip(), parameter
+
+        if isinstance(raw_rule, str):
+            normalized = raw_rule.strip()
+            if not normalized:
+                raise ValueError("Weapon rule string cannot be empty")
+            if ":" not in normalized:
+                return normalized, None
+            rule_name, raw_parameter = normalized.split(":", 1)
+            clean_rule_name = rule_name.strip()
+            clean_parameter = raw_parameter.strip()
+            if not clean_rule_name:
+                raise ValueError(f"Invalid weapon rule id in entry: {raw_rule!r}")
+            try:
+                parameter = int(clean_parameter)
+            except ValueError as exc:
+                raise ValueError(f"Invalid weapon rule parameter '{clean_parameter}' in entry '{raw_rule}'") from exc
+            if parameter <= 0:
+                raise ValueError(f"Weapon rule parameter must be > 0 in entry '{raw_rule}'")
+            return clean_rule_name, parameter
+
+        raise TypeError(f"Unsupported weapon rule entry type: {type(raw_rule).__name__} ({raw_rule!r})")
 
     def _encode_macro_intent_context(
         self,

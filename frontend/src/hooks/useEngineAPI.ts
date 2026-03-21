@@ -144,6 +144,7 @@ export interface APIGameState {
     name: string;
     hexes: Array<{ col: number; row: number } | [number, number]>;
   }>;
+  wall_hexes?: Array<{ col: number; row: number } | [number, number]>;
   game_over?: boolean;
   winner?: number | null;
   pending_rule_choice_queue?: RuleChoicePrompt[];
@@ -207,7 +208,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     destCol: number;
     destRow: number;
   } | null>(null);
-  const [pendingPreviewAction, setPendingPreviewAction] = useState<"move" | "advance" | null>(
+  const [pendingPreviewAction, setPendingPreviewAction] = useState<
+    "move" | "advance" | "move_after_shooting" | null
+  >(
     null
   );
   const [attackPreview, setAttackPreview] = useState<{
@@ -228,6 +231,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     unitId: number;
     timestamp: number;
   } | null>(null);
+  const [postShootMoveDestinations, setPostShootMoveDestinations] = useState<
+    Array<{ col: number; row: number }>
+  >([]);
   const [targetPreview, setTargetPreview] = useState<{
     shooterId: number;
     targetId: number;
@@ -534,6 +540,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAttackPreview(null);
       setChargeDestinations([]);
       setAdvanceDestinations([]);
+      setPostShootMoveDestinations([]);
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
     }
@@ -834,6 +841,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setMode("select");
             // Clear advance state when mode resets
             setAdvanceDestinations([]);
+            setPostShootMoveDestinations([]);
             setAdvancingUnitId(null);
             setAdvanceRoll(null);
           }
@@ -842,6 +850,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(null);
             // Clear advance state when selected unit is cleared
             setAdvanceDestinations([]);
+            setPostShootMoveDestinations([]);
             setAdvancingUnitId(null);
             setAdvanceRoll(null);
           }
@@ -1029,12 +1038,40 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
             setAdvanceDestinations(data.result.advance_destinations);
+            setPostShootMoveDestinations([]);
             setAdvanceRoll(data.result.advance_roll);
             setAdvancingUnitId(parseInt(data.result.unitId, 10));
             setSelectedUnitId(parseInt(data.result.unitId, 10));
             setMovePreview(null);
             setPendingPreviewAction(null);
             setMode("advancePreview" as GameMode);
+          }
+          // Handle post-shoot optional move (move_after_shooting) destination selection for human players
+          else if (
+            data.game_state?.phase === "shoot" &&
+            data.result?.waiting_for_player === true &&
+            data.result?.action === "move_after_shooting_select_destination" &&
+            Array.isArray(data.result?.move_after_shooting_destinations)
+          ) {
+            if (targetPreview?.blinkTimer) {
+              clearInterval(targetPreview.blinkTimer);
+            }
+            setTargetPreview(null);
+            setAttackPreview(null);
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+            setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
+
+            const unitId = parseInt(data.result.unitId, 10);
+            setPostShootMoveDestinations(data.result.move_after_shooting_destinations);
+            setAdvanceDestinations([]);
+            setAdvanceRoll(null);
+            setAdvancingUnitId(null);
+            setMovePreview(null);
+            setSelectedUnitId(unitId);
+            setPendingPreviewAction("move_after_shooting");
+            setMode("select");
           }
           // Handle movement activation response with valid destinations
           else if (
@@ -1594,6 +1631,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setChargeDestinations([]);
       } else if (numericUnitId === null && mode === "advancePreview") {
         setAdvanceDestinations([]);
+        setPostShootMoveDestinations([]);
         setAdvancingUnitId(null);
         setAdvanceRoll(null);
       }
@@ -1658,6 +1696,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handleStartMovePreview = useCallback(
     (unitId: number | string, col: number | string, row: number | string) => {
+      if (gameState?.phase === "shoot") {
+        if (pendingPreviewAction !== "move_after_shooting") {
+          return;
+        }
+        setMovePreview({
+          unitId: typeof unitId === "string" ? parseInt(unitId, 10) : unitId,
+          destCol: typeof col === "string" ? parseInt(col, 10) : col,
+          destRow: typeof row === "string" ? parseInt(row, 10) : row,
+        });
+        setMode("movePreview");
+        return;
+      }
       setMovePreview({
         unitId: typeof unitId === "string" ? parseInt(unitId, 10) : unitId,
         destCol: typeof col === "string" ? parseInt(col, 10) : col,
@@ -1666,7 +1716,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPendingPreviewAction("move");
       setMode("movePreview");
     },
-    []
+    [gameState?.phase, pendingPreviewAction]
   );
 
   const handleDirectMove = useCallback(
@@ -1776,11 +1826,55 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return;
     }
 
+    if (pendingPreviewAction === "move_after_shooting") {
+      await executeAction({
+        action: "move_after_shooting",
+        unitId: movePreview.unitId.toString(),
+        destCol: movePreview.destCol,
+        destRow: movePreview.destRow,
+      });
+      setMovePreview(null);
+      setPendingPreviewAction(null);
+      setPostShootMoveDestinations([]);
+      setMode("select");
+      return;
+    }
+
     await handleDirectMove(movePreview.unitId, movePreview.destCol, movePreview.destRow);
     setPendingPreviewAction(null);
   }, [movePreview, pendingPreviewAction, executeAction, handleDirectMove]);
 
-  const handleCancelMove = useCallback(() => {
+  const handleCancelMove = useCallback(async () => {
+    if (pendingPreviewAction === "move_after_shooting") {
+      // In confirmation sub-step: go back to destination selection.
+      if (mode === "movePreview") {
+        setMovePreview(null);
+        setMode("select");
+        return;
+      }
+
+      // In destination-selection step: explicitly skip post-shoot move in backend.
+      if (mode === "select" && gameState?.phase === "shoot") {
+        const activeShooterId = gameState.active_shooting_unit ?? selectedUnitId?.toString();
+        if (!activeShooterId) {
+          throw new Error(
+            "Cannot skip move_after_shooting: missing active_shooting_unit and selectedUnitId"
+          );
+        }
+        await executeAction({
+          action: "move_after_shooting",
+          unitId: activeShooterId.toString(),
+          skip_move_after_shooting: true,
+        });
+        setPostShootMoveDestinations([]);
+        setMovePreview(null);
+        setPendingPreviewAction(null);
+        setSelectedUnitId(null);
+        setMode("select");
+        return;
+      }
+    }
+
     const isAdvancePreviewConfirmation = pendingPreviewAction === "advance";
     setMovePreview(null);
     setPendingPreviewAction(null);
@@ -1789,7 +1883,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return;
     }
     setMode("select");
-  }, [pendingPreviewAction]);
+  }, [pendingPreviewAction, mode, gameState, selectedUnitId, executeAction]);
 
   // Backend handles all shooting logic - frontend just sends clicks
   const handleShoot = useCallback(
@@ -1809,6 +1903,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (gameState?.phase !== "shoot") {
         return;
       }
+      if (pendingPreviewAction === "move_after_shooting" && actionType === "action") {
+        await handleCancelMove();
+        return;
+      }
       // Convert to right_click or skip action
       if (actionType === "wait") {
         await handleRightClick(typeof unitId === "string" ? parseInt(unitId, 10) : unitId);
@@ -1819,7 +1917,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         });
       }
     },
-    [handleRightClick, executeAction, gameState]
+    [handleRightClick, executeAction, gameState, pendingPreviewAction, handleCancelMove]
   );
 
   // Charge activation - sends left_click to trigger 2d6 roll and destination building
@@ -1914,6 +2012,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
     // Clear advance state
     setAdvanceDestinations([]);
+    setPostShootMoveDestinations([]);
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
     setMovePreview(null);
@@ -1964,6 +2063,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // Clear all advance-related state and reset to selection mode
     // Don't send skip - keep unit in pool for re-activation
     setAdvanceDestinations([]);
+    setPostShootMoveDestinations([]);
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
     setMovePreview(null);
@@ -2039,6 +2139,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         throw new Error("Advance preview is only supported during shoot phase");
       }
 
+      if (pendingPreviewAction === "move_after_shooting") {
+        setMovePreview({
+          unitId: numericUnitId,
+          destCol,
+          destRow,
+        });
+        setSelectedUnitId(numericUnitId);
+        setMode("movePreview");
+        return;
+      }
+
       const canShowShootPreviewAfterAdvance = unitCanShootAfterAdvance(numericUnitId);
 
       if (canShowShootPreviewAfterAdvance) {
@@ -2063,7 +2174,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Don't reset advance state here - let backend cleanup signals handle it
       // This allows the advance roll badge to be displayed before cleanup
     },
-    [executeAction, gameState, unitCanShootAfterAdvance]
+    [executeAction, gameState, unitCanShootAfterAdvance, pendingPreviewAction]
   );
 
   const handleFightAttack = useCallback(
@@ -2378,6 +2489,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkingUnits.unitIds,
   ]);
 
+  const moveSelectionCellsOverride = useMemo(() => {
+    if (
+      gameState?.phase === "shoot" &&
+      mode === "select" &&
+      pendingPreviewAction === "move_after_shooting" &&
+      postShootMoveDestinations.length > 0
+    ) {
+      return postShootMoveDestinations;
+    }
+    return undefined;
+  }, [gameState?.phase, mode, pendingPreviewAction, postShootMoveDestinations]);
+
   // Memoize isBlinkingActive to prevent re-renders when only blinkState toggles
   const isBlinkingActiveMemo = useMemo(() => {
     return blinkingUnits.blinkTimer !== null;
@@ -2577,6 +2700,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onConfirmAdvanceWarning: async () => {},
       onCancelAdvanceWarning: () => {},
       onSkipAdvanceWarning: async () => {},
+      availableCellsOverride: undefined,
       blinkingUnits: [],
       blinkingAttackerId: null,
       isBlinkingActive: false,
@@ -2652,6 +2776,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onConfirmAdvanceWarning: handleConfirmAdvanceWarning,
     onCancelAdvanceWarning: handleCancelAdvanceWarning,
     onSkipAdvanceWarning: handleSkipAdvanceWarning,
+    availableCellsOverride: moveSelectionCellsOverride,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnitsIds,
     blinkingAttackerId: (() => {

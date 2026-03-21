@@ -84,6 +84,10 @@ export interface WeaponSelectionState {
 export interface UnitRule {
   ruleId: string;
   displayName: string;
+  rule_args?: {
+    distance?: number;
+    [key: string]: number | undefined;
+  };
   grants_rule_ids?: string[];
   usage?: "and" | "or" | "unique" | "always";
   choice_timing?: {

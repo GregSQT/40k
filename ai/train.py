@@ -56,7 +56,7 @@ import glob
 import shutil
 import random
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Set
 
 # Fix import paths - Add both script dir and project root
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -129,6 +129,170 @@ def _make_learning_rate_schedule(lr_config):
             return initial + (final - initial) * (1 - progress_remaining)
         return schedule
     raise ValueError(f"learning_rate must be float or dict with initial/final, got {type(lr_config)}")
+
+
+def _load_configured_unit_rule_ids(project_root_path: str) -> Set[str]:
+    """Load configured rule IDs from config/unit_rules.json."""
+    unit_rules_path = os.path.join(project_root_path, "config", "unit_rules.json")
+    with open(unit_rules_path, "r", encoding="utf-8") as f:
+        raw_rules = json.load(f)
+    if not isinstance(raw_rules, dict):
+        raise TypeError(
+            f"config/unit_rules.json must be an object mapping rule keys to rule definitions "
+            f"(got {type(raw_rules).__name__})"
+        )
+    configured_rule_ids: Set[str] = set()
+    for rule_key, rule_data in raw_rules.items():
+        if not isinstance(rule_data, dict):
+            raise TypeError(
+                f"Rule entry '{rule_key}' must be an object in config/unit_rules.json "
+                f"(got {type(rule_data).__name__})"
+            )
+        configured_id = require_key(rule_data, "id")
+        if not isinstance(configured_id, str) or not configured_id.strip():
+            raise ValueError(f"Rule entry '{rule_key}' has invalid id: {configured_id!r}")
+        configured_rule_ids.add(configured_id.strip())
+    if len(configured_rule_ids) == 0:
+        raise ValueError("config/unit_rules.json does not contain any configured rule id")
+    return configured_rule_ids
+
+
+def _scenario_has_forced_controlled_unit(
+    scenario_file: str,
+    unit_registry: Any,
+    configured_rule_ids: Set[str],
+) -> bool:
+    """Return True if scenario includes at least one controlled unit with configured rule."""
+    from engine.game_state import GameStateManager
+
+    temp_manager = GameStateManager({"board": {}}, unit_registry)
+    scenario_result = temp_manager.load_units_from_scenario(scenario_file, unit_registry)
+    units = require_key(scenario_result, "units")
+    if not isinstance(units, list):
+        raise TypeError(
+            f"Scenario '{scenario_file}' must resolve to a list of units "
+            f"(got {type(units).__name__})"
+        )
+
+    for unit in units:
+        unit_player = require_key(unit, "player")
+        if unit_player != 1:
+            continue
+        unit_rules = require_key(unit, "UNIT_RULES")
+        if not isinstance(unit_rules, list):
+            raise TypeError(
+                f"UNIT_RULES must be list for unit {require_key(unit, 'id')} "
+                f"in scenario '{scenario_file}' (got {type(unit_rules).__name__})"
+            )
+        for entry in unit_rules:
+            if not isinstance(entry, dict):
+                raise TypeError(
+                    f"Each UNIT_RULES entry must be object for unit {require_key(unit, 'id')} "
+                    f"in scenario '{scenario_file}' (got {type(entry).__name__})"
+                )
+            rule_id = require_key(entry, "ruleId")
+            if not isinstance(rule_id, str) or not rule_id.strip():
+                raise ValueError(
+                    f"Invalid ruleId for unit {require_key(unit, 'id')} in scenario '{scenario_file}': {rule_id!r}"
+                )
+            if rule_id in configured_rule_ids:
+                return True
+    return False
+
+
+def _apply_unit_rule_forcing_weights(
+    scenario_list: List[str],
+    training_config: Dict[str, Any],
+    unit_registry: Any,
+) -> List[str]:
+    """Increase weights of scenarios with controlled units having configured unit rules."""
+    forcing_cfg = training_config.get("unit_rule_forcing")
+    if forcing_cfg is None:
+        return scenario_list
+    if not isinstance(forcing_cfg, dict):
+        raise TypeError(
+            f"unit_rule_forcing must be an object in training config "
+            f"(got {type(forcing_cfg).__name__})"
+        )
+
+    enabled = require_key(forcing_cfg, "enabled")
+    if not isinstance(enabled, bool):
+        raise TypeError(f"unit_rule_forcing.enabled must be bool (got {type(enabled).__name__})")
+    if not enabled:
+        return scenario_list
+
+    target_ratio = require_key(forcing_cfg, "target_controlled_episode_ratio")
+    if not isinstance(target_ratio, (int, float)):
+        raise TypeError(
+            f"unit_rule_forcing.target_controlled_episode_ratio must be number "
+            f"(got {type(target_ratio).__name__})"
+        )
+    target_ratio = float(target_ratio)
+    if target_ratio <= 0.0 or target_ratio > 1.0:
+        raise ValueError(
+            "unit_rule_forcing.target_controlled_episode_ratio must be in (0, 1]"
+        )
+
+    max_scenario_weight = require_key(forcing_cfg, "max_scenario_weight")
+    if not isinstance(max_scenario_weight, int):
+        raise TypeError(
+            f"unit_rule_forcing.max_scenario_weight must be integer "
+            f"(got {type(max_scenario_weight).__name__})"
+        )
+    if max_scenario_weight < 1:
+        raise ValueError("unit_rule_forcing.max_scenario_weight must be >= 1")
+
+    configured_rule_ids = _load_configured_unit_rule_ids(project_root)
+    scenario_counts: Dict[str, int] = {}
+    for scenario_path in scenario_list:
+        if scenario_path not in scenario_counts:
+            scenario_counts[scenario_path] = 0
+        scenario_counts[scenario_path] += 1
+
+    forced_scenarios: List[str] = []
+    for scenario_path in scenario_counts.keys():
+        if _scenario_has_forced_controlled_unit(scenario_path, unit_registry, configured_rule_ids):
+            forced_scenarios.append(scenario_path)
+
+    if len(forced_scenarios) == 0:
+        raise ValueError(
+            "unit_rule_forcing.enabled=true but no scenario contains a controlled unit "
+            "with configured UNIT_RULES"
+        )
+
+    total_weight = sum(scenario_counts.values())
+    forced_weight = sum(scenario_counts[path] for path in forced_scenarios)
+    current_ratio = forced_weight / float(total_weight)
+    if current_ratio >= target_ratio:
+        return scenario_list
+
+    weighted_forced = sorted(forced_scenarios)
+    idx = 0
+    while (forced_weight / float(total_weight)) < target_ratio:
+        scenario_to_boost = weighted_forced[idx % len(weighted_forced)]
+        current_weight = scenario_counts[scenario_to_boost]
+        if current_weight < max_scenario_weight:
+            scenario_counts[scenario_to_boost] = current_weight + 1
+            forced_weight += 1
+            total_weight += 1
+        idx += 1
+        if idx >= len(weighted_forced) and all(
+            scenario_counts[path] >= max_scenario_weight for path in weighted_forced
+        ):
+            break
+
+    final_ratio = forced_weight / float(total_weight)
+    if final_ratio < target_ratio:
+        raise ValueError(
+            "unit_rule_forcing target cannot be reached with current scenarios and max_scenario_weight. "
+            f"target={target_ratio:.4f}, reached={final_ratio:.4f}, "
+            f"forced_scenarios={len(weighted_forced)}, max_scenario_weight={max_scenario_weight}"
+        )
+
+    weighted_scenario_list: List[str] = []
+    for scenario_path, weight in sorted(scenario_counts.items(), key=lambda item: item[0]):
+        weighted_scenario_list.extend([scenario_path] * weight)
+    return weighted_scenario_list
 
 
 # Multi-agent orchestration imports
@@ -247,6 +411,9 @@ def _read_tensorboard_run_meta(model_path: str) -> Dict[str, Any]:
 def _write_tensorboard_run_meta(model_path: str, run_dir: str) -> None:
     """Persist active TensorBoard run directory alongside model path."""
     meta_path = _get_tensorboard_run_meta_path(model_path)
+    model_dir = os.path.dirname(model_path)
+    if model_dir:
+        os.makedirs(model_dir, exist_ok=True)
     payload = {"run_dir": run_dir}
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -1328,6 +1495,25 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         if not silent_chunk:
             print(message)
 
+    # Load agent-specific training config to get model parameters
+    training_config = training_config_override if training_config_override is not None else config.load_agent_training_config(agent_key, training_config_name)
+
+    from ai.unit_registry import UnitRegistry
+    unit_registry = UnitRegistry()
+    initial_weighted_entries = len(scenario_list)
+    scenario_list = _apply_unit_rule_forcing_weights(
+        scenario_list=scenario_list,
+        training_config=training_config,
+        unit_registry=unit_registry,
+    )
+    if len(scenario_list) > initial_weighted_entries:
+        forcing_cfg = training_config.get("unit_rule_forcing")
+        if isinstance(forcing_cfg, dict) and forcing_cfg.get("enabled") is True:
+            target_ratio = require_key(forcing_cfg, "target_controlled_episode_ratio")
+            chunk_log(
+                f"🎯 Unit-rule forcing enabled: target controlled exposure ratio={float(target_ratio):.2f}"
+            )
+
     chunk_log(f"\n{'='*80}")
     chunk_log("🔄 MULTI-SCENARIO TRAINING")
     chunk_log(f"{'='*80}")
@@ -1353,9 +1539,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Check GPU availability (match single-scenario training output)
     gpu_available = check_gpu_availability() if not silent_chunk else torch.cuda.is_available()
     
-    # Load agent-specific training config to get model parameters
-    training_config = training_config_override if training_config_override is not None else config.load_agent_training_config(agent_key, training_config_name)
-
     # Require n_envs for consistency with single-scenario training
     n_envs = require_key(training_config, "n_envs")
 
@@ -1363,9 +1546,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     if "max_turns_per_episode" not in training_config:
         raise KeyError(f"max_turns_per_episode missing from {agent_key} training config phase {training_config_name}")
 
-    from ai.unit_registry import UnitRegistry
     from engine.game_state import GameStateManager
-    unit_registry = UnitRegistry()
 
     # AUTO-CALCULATE max_steps_per_turn = num_units × num_phases
     # Load first scenario to count units (supports legacy and thin scenario formats)

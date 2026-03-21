@@ -23,7 +23,15 @@ export class Gargoyle extends SwarmMeleeSwarm {
   static CC_WEAPONS = getWeapons(Gargoyle.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "move_after_shouting", displayName: "Winged Swarm" }];
+  static UNIT_RULES = [
+    {
+      ruleId: "move_after_shooting",
+      displayName: "Winged Swarm",
+      rule_args: { distance: 6 },
+    },
+  ];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { move_after_shooting: 2 };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "gargoyle"}];

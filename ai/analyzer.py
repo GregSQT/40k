@@ -861,6 +861,7 @@ def parse_step_log(filepath: str) -> Dict:
     unit_attack_limits = {}  # unit_type -> {'rng_nb_by_weapon': Dict[str, int], 'cc_nb_by_weapon': Dict[str, int], 'rapid_fire_by_weapon': Dict[str, int]}
     unit_combi_by_weapon = {}  # unit_type -> {weapon_display_name: combi_key}
     unit_rules_by_type = {}  # unit_type -> set(ruleId)
+    unit_move_after_shooting_distance_by_type: Dict[str, int] = {}
     unit_is_fly_by_type: Dict[str, bool] = {}
     unit_choice_effect_to_source_rules: Dict[str, Dict[str, Set[str]]] = {}
     display_rule_name_to_ids: Dict[str, Set[str]] = {}
@@ -958,7 +959,8 @@ def parse_step_log(filepath: str) -> Dict:
         choice_effect_to_source_rules_for_unit: Dict[str, Set[str]] = {}
         for rule in unit_rules:
             direct_rule_id = require_key(rule, "ruleId")
-            expanded_rule_ids.add(resolve_effect_rule_id_to_technical(direct_rule_id))
+            direct_rule_technical = resolve_effect_rule_id_to_technical(direct_rule_id)
+            expanded_rule_ids.add(direct_rule_technical)
             if "grants_rule_ids" in rule:
                 granted_rule_ids = rule["grants_rule_ids"]
             else:
@@ -974,6 +976,38 @@ def parse_step_log(filepath: str) -> Dict:
                 if granted_rule_technical not in choice_effect_to_source_rules_for_unit:
                     choice_effect_to_source_rules_for_unit[granted_rule_technical] = set()
                 choice_effect_to_source_rules_for_unit[granted_rule_technical].add(direct_rule_id)
+            rule_effect_ids = {direct_rule_technical, *[resolve_effect_rule_id_to_technical(str(rid)) for rid in granted_rule_ids]}
+            if "move_after_shooting" in rule_effect_ids:
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict):
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args for move_after_shooting"
+                    )
+                if "distance" not in rule_args:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing rule_args.distance for move_after_shooting"
+                    )
+                move_after_shooting_distance = rule_args["distance"]
+                if not isinstance(move_after_shooting_distance, int):
+                    raise TypeError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance must be int, "
+                        f"got {type(move_after_shooting_distance).__name__}"
+                    )
+                if move_after_shooting_distance <= 0:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance must be > 0, "
+                        f"got {move_after_shooting_distance}"
+                    )
+                existing_distance = unit_move_after_shooting_distance_by_type.get(unit_type)
+                if (
+                    existing_distance is not None
+                    and existing_distance != move_after_shooting_distance
+                ):
+                    raise ValueError(
+                        f"Unit '{unit_type}' has conflicting move_after_shooting distances: "
+                        f"{existing_distance} vs {move_after_shooting_distance}"
+                    )
+                unit_move_after_shooting_distance_by_type[unit_type] = move_after_shooting_distance
         unit_rules_by_type[unit_type] = expanded_rule_ids
         unit_choice_effect_to_source_rules[unit_type] = choice_effect_to_source_rules_for_unit
 
@@ -1051,6 +1085,8 @@ def parse_step_log(filepath: str) -> Dict:
         'dead_unit_advancing': {1: 0, 2: 0},
         'shoot_through_wall': {1: 0, 2: 0},
         'shoot_after_flee': {1: 0, 2: 0},
+        'move_after_shooting': {1: 0, 2: 0},
+        'move_after_shooting_distance_over_limit': {1: 0, 2: 0},
         'shoot_at_friendly': {1: 0, 2: 0},
         'shoot_at_engaged_enemy': {1: 0, 2: 0},
         'shoot_dead_unit': {1: 0, 2: 0},
@@ -1143,6 +1179,7 @@ def parse_step_log(filepath: str) -> Dict:
             'dead_unit_advancing': {1: None, 2: None},
             'shoot_through_wall': {1: None, 2: None},
             'shoot_after_flee': {1: None, 2: None},
+            'move_after_shooting_distance_over_limit': {1: None, 2: None},
             'shoot_at_friendly': {1: None, 2: None},
             'shoot_at_engaged_enemy': {1: None, 2: None},
             'shoot_dead_unit': {1: None, 2: None},
@@ -3521,11 +3558,21 @@ def parse_step_log(filepath: str) -> Dict:
                             start_row = int(move_match.group(5))
                             dest_col = int(move_match.group(6))
                             dest_row = int(move_match.group(7))
+                            is_move_after_shooting = re.search(
+                                r'MOVED\s+\[MOVE_AFTER_SHOOTING(?::\d+)?\]\s+from',
+                                action_desc,
+                                re.IGNORECASE
+                            ) is not None
+                            move_unit_type = require_key(unit_types, move_unit_id)
                             move_is_fly = re.search(
                                 r'MOVED\s+\[FLY\]\s+from',
                                 action_desc,
                                 re.IGNORECASE
                             ) is not None
+                            if is_move_after_shooting:
+                                move_is_fly = bool(require_key(unit_is_fly_by_type, move_unit_type))
+                                stats['move_after_shooting'][player] += 1
+                                stats['special_rule_usage'][("move_after_shooting", move_unit_type)][player] += 1
                             _track_action_phase_accuracy(stats, "move", phase, current_episode_num, line)
                             
                             stats['position_log_mismatch']['move']['total'] += 1
@@ -3725,19 +3772,33 @@ def parse_step_log(filepath: str) -> Dict:
                                 # If a unit dies AFTER movement but BEFORE check, we should use its HP at movement time
                                 unit_hp_at_movement = dict(unit_hp)
 
-                                move_range_raw = require_key(unit_move, move_unit_id)
-                                move_range = int(move_range_raw)
+                                if is_move_after_shooting:
+                                    move_range = require_key(
+                                        unit_move_after_shooting_distance_by_type,
+                                        move_unit_type,
+                                    )
+                                else:
+                                    move_range_raw = require_key(unit_move, move_unit_id)
+                                    move_range = int(move_range_raw)
                                 occupied_positions = _build_occupied_positions(positions_at_movement, unit_hp_at_movement, move_unit_id)
                                 enemy_adjacent_hexes = _build_enemy_adjacent_hexes(positions_at_movement, unit_player, unit_hp_at_movement, player)
                                 if move_is_fly:
                                     fly_distance = calculate_hex_distance(start_col, start_row, dest_col, dest_row)
                                     if fly_distance > move_range:
-                                        stats['move_distance_over_limit']['move'][player] += 1
-                                        if stats['first_error_lines']['move_distance_over_limit']['move'][player] is None:
-                                            stats['first_error_lines']['move_distance_over_limit']['move'][player] = {
-                                                'episode': current_episode_num,
-                                                'line': line.strip()
-                                            }
+                                        if is_move_after_shooting:
+                                            stats['move_after_shooting_distance_over_limit'][player] += 1
+                                            if stats['first_error_lines']['move_after_shooting_distance_over_limit'][player] is None:
+                                                stats['first_error_lines']['move_after_shooting_distance_over_limit'][player] = {
+                                                    'episode': current_episode_num,
+                                                    'line': line.strip()
+                                                }
+                                        else:
+                                            stats['move_distance_over_limit']['move'][player] += 1
+                                            if stats['first_error_lines']['move_distance_over_limit']['move'][player] is None:
+                                                stats['first_error_lines']['move_distance_over_limit']['move'][player] = {
+                                                    'episode': current_episode_num,
+                                                    'line': line.strip()
+                                                }
                                 else:
                                     shortest_steps = _bfs_shortest_path_length(
                                         start_col,
@@ -3757,12 +3818,20 @@ def parse_step_log(filepath: str) -> Dict:
                                                 'line': line.strip()
                                             }
                                     elif shortest_steps > move_range:
-                                        stats['move_distance_over_limit']['move'][player] += 1
-                                        if stats['first_error_lines']['move_distance_over_limit']['move'][player] is None:
-                                            stats['first_error_lines']['move_distance_over_limit']['move'][player] = {
-                                                'episode': current_episode_num,
-                                                'line': line.strip()
-                                            }
+                                        if is_move_after_shooting:
+                                            stats['move_after_shooting_distance_over_limit'][player] += 1
+                                            if stats['first_error_lines']['move_after_shooting_distance_over_limit'][player] is None:
+                                                stats['first_error_lines']['move_after_shooting_distance_over_limit'][player] = {
+                                                    'episode': current_episode_num,
+                                                    'line': line.strip()
+                                                }
+                                        else:
+                                            stats['move_distance_over_limit']['move'][player] += 1
+                                            if stats['first_error_lines']['move_distance_over_limit']['move'][player] is None:
+                                                stats['first_error_lines']['move_distance_over_limit']['move'][player] = {
+                                                    'episode': current_episode_num,
+                                                    'line': line.strip()
+                                                }
                                 
                                 # RULE: Position collision
                                 # CRITICAL: Check for collisions BEFORE updating position
@@ -5243,6 +5312,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if bot_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][2]:
             first_err = stats['first_error_lines']['move_distance_over_limit']['move'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        agent_mas_over = stats['move_after_shooting_distance_over_limit'][1]
+        bot_mas_over = stats['move_after_shooting_distance_over_limit'][2]
+        log_print(f"MoveAfterShoot > rule dist:  {agent_mas_over:6d}           {bot_mas_over:6d}")
+        if agent_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]:
+            first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]:
+            first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_move_blocked = stats['move_path_blocked']['move'][1]
         bot_move_blocked = stats['move_path_blocked']['move'][2]
         log_print(f"Move path blocked (BFS):     {agent_move_blocked:6d}           {bot_move_blocked:6d}")
@@ -5898,6 +5976,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['move_to_adjacent_enemy'][1] + stats['move_to_adjacent_enemy'][2] +
         stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2] +
         stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
+        stats['move_after_shooting_distance_over_limit'][1] + stats['move_after_shooting_distance_over_limit'][2] +
         stats['move_path_blocked']['move'][1] + stats['move_path_blocked']['move'][2] +
         stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
         stats['reactive_move_checks']['to_adjacent_enemy'][1] + stats['reactive_move_checks']['to_adjacent_enemy'][2] +

@@ -18,6 +18,7 @@
 
 - [Why Metrics Matter](#why-metrics-matter)
 - [Core Metrics Explained](#core-metrics-explained)
+  - [Unit-Rule Forcing Metrics](#unit-rule-forcing-metrics)
   - [Training Metrics (PPO Internals)](#training-metrics-ppo-internals)
   - [Critical Metrics Quick Reference](#-critical-metrics-quick-reference) ⭐ **START HERE**
     - [0_critical/ Dashboard](#-start-here-0_critical-dashboard) ⭐⭐ **PRIMARY DASHBOARD**
@@ -233,6 +234,46 @@ Quand `n_envs > 1`, le système ajuste automatiquement `n_steps` par env pour ga
 - **Training config** : `config/agents/<agent>/<agent>_training_config.json`
 - **Récompenses** : `config/agents/<agent>/<agent>_rewards_config.json`
 - **Métriques détaillées** : sections suivantes de ce document (Why Metrics Matter, Core Metrics Explained, Pattern Library, etc.).
+
+---
+
+## Unit-Rule Forcing Metrics
+
+This section documents the dedicated metrics used when training emphasizes units that have
+configured `UNIT_RULES` entries.
+
+### What is measured
+
+- `forcing/episodes_with_forced_unit_ratio`
+  - Share of episodes where the controlled player roster contains at least one unit with `UNIT_RULES`.
+- `forcing/forced_unit_instances_mean`
+  - Mean number of forced-unit instances per episode (controlled player only).
+- `forcing/episodes_with_forced_unit`
+  - Cumulative count of episodes containing at least one forced unit.
+- `forcing/unit_episode_exposure/<unit_slug>`
+  - Per-unit episode exposure ratio (episodes where this unit appeared / total tracked episodes).
+- `forcing/unit_instance_mean/<unit_slug>`
+  - Per-unit average instances per episode.
+
+### Impact on evaluation KPIs
+
+To monitor whether forcing improves or degrades robustness:
+
+- `forcing/delta_worst_bot_vs_forcing_start`
+  - `current_worst_bot_score - baseline_worst_bot_score`  
+  Baseline is the first bot evaluation after forcing exposure starts.
+- `forcing/delta_combined_vs_forcing_start`
+  - `current_combined - baseline_combined`  
+  Baseline is the first bot evaluation after forcing exposure starts.
+
+### Interpretation guide
+
+- Exposure rises, `delta_worst_bot` stable or positive:
+  - forcing improves or preserves robustness.
+- Exposure rises, `delta_worst_bot` negative for a sustained period:
+  - forcing is likely too aggressive or too narrow; rebalance roster/scenario diversity.
+- Exposure concentrated on only 1-2 units:
+  - forcing is not distributed; adjust scenario/roster generation to cover more forced units.
 
 ---
 

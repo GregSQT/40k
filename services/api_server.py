@@ -701,7 +701,7 @@ def initialize_pve_engine(scenario_file: str = None):
     """
     return initialize_test_engine(scenario_file=scenario_file)
 
-def initialize_test_engine(scenario_file: str = None):
+def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = None):
     """Initialize the W40K engine for PvE mode with configurable scenario."""
     global engine
     try:
@@ -784,32 +784,64 @@ def initialize_test_engine(scenario_file: str = None):
         
         print(f"DEBUG: Found {len(agent_keys)} unique agent(s) in scenario: {agent_keys}")
         
-        # For PvE mode, load configs for all agents.
+        # For PvE mode, load configs for all agents by default.
+        # In mono-agent mode, a forced agent key can provide shared configs
+        # for every scenario agent key.
         all_rewards_configs = {}
         all_training_configs = {}
-        
-        for agent_key in agent_keys:
+
+        if forced_agent_key is not None:
+            if not isinstance(forced_agent_key, str) or not forced_agent_key.strip():
+                raise ValueError(
+                    "forced_agent_key must be a non-empty string when provided"
+                )
+            resolved_forced_agent_key = forced_agent_key.strip()
+            print(
+                f"DEBUG: PvE mono-agent mode enabled. "
+                f"Using '{resolved_forced_agent_key}' configs for all scenario agents: {agent_keys}"
+            )
             try:
-                agent_rewards = config_loader.load_agent_rewards_config(agent_key)
-                # Load entire config file (contains "default" and "debug" phases)
-                agent_training_full = config_loader.load_agent_training_config(agent_key)
-                
-                # Store agent-specific configs
-                all_rewards_configs[agent_key] = agent_rewards
-                all_training_configs[agent_key] = agent_training_full  # Store full config for engine
-                
-                print(f"✅ Loaded configs for agent: {agent_key}")
+                shared_rewards = config_loader.load_agent_rewards_config(resolved_forced_agent_key)
+                shared_training_full = config_loader.load_agent_training_config(resolved_forced_agent_key)
+                training_config_default = config_loader.load_agent_training_config(
+                    resolved_forced_agent_key, "default"
+                )
             except FileNotFoundError as e:
                 raise FileNotFoundError(
-                    f"Missing config for agent '{agent_key}' found in scenario.\n{e}\n"
+                    f"Missing config for forced mono-agent '{resolved_forced_agent_key}'.\n{e}\n"
                     f"Create required files:\n"
-                    f"  - config/agents/{agent_key}/{agent_key}_rewards_config.json\n"
-                    f"  - config/agents/{agent_key}/{agent_key}_training_config.json"
+                    f"  - config/agents/{resolved_forced_agent_key}/{resolved_forced_agent_key}_rewards_config.json\n"
+                    f"  - config/agents/{resolved_forced_agent_key}/{resolved_forced_agent_key}_training_config.json"
                 )
-        
-        # Use first agent's training config for observation params
-        first_agent = list(agent_keys)[0]
-        training_config_default = config_loader.load_agent_training_config(first_agent, "default")
+
+            for agent_key in agent_keys:
+                all_rewards_configs[agent_key] = shared_rewards
+                all_training_configs[agent_key] = shared_training_full
+            print(f"✅ Loaded shared configs from forced mono-agent: {resolved_forced_agent_key}")
+            first_agent = resolved_forced_agent_key
+        else:
+            for agent_key in agent_keys:
+                try:
+                    agent_rewards = config_loader.load_agent_rewards_config(agent_key)
+                    # Load entire config file (contains "default" and "debug" phases)
+                    agent_training_full = config_loader.load_agent_training_config(agent_key)
+
+                    # Store agent-specific configs
+                    all_rewards_configs[agent_key] = agent_rewards
+                    all_training_configs[agent_key] = agent_training_full  # Store full config for engine
+
+                    print(f"✅ Loaded configs for agent: {agent_key}")
+                except FileNotFoundError as e:
+                    raise FileNotFoundError(
+                        f"Missing config for agent '{agent_key}' found in scenario.\n{e}\n"
+                        f"Create required files:\n"
+                        f"  - config/agents/{agent_key}/{agent_key}_rewards_config.json\n"
+                        f"  - config/agents/{agent_key}/{agent_key}_training_config.json"
+                    )
+
+            # Use first agent's training config for observation params
+            first_agent = list(agent_keys)[0]
+            training_config_default = config_loader.load_agent_training_config(first_agent, "default")
         
         # PvE mode configuration
         config["pve_mode"] = True
@@ -1096,13 +1128,19 @@ def start_game():
             engine.is_pve_mode = False
         elif requested_mode == "pve":
             print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
-            if not initialize_test_engine(scenario_file=scenario_file):
+            if not initialize_test_engine(
+                scenario_file=scenario_file,
+                forced_agent_key="CoreAgent",
+            ):
                 return jsonify({"success": False, "error": "PvE engine initialization failed"}), 500
         elif requested_mode == "pve_test":
             print("DEBUG: Initializing engine for PvE Test mode")
             if scenario_file is None:
                 scenario_file = os.path.join("config", "scenario_pve_test.json")
-            if not initialize_test_engine(scenario_file=scenario_file):
+            if not initialize_test_engine(
+                scenario_file=scenario_file,
+                forced_agent_key="CoreAgent",
+            ):
                 return jsonify({"success": False, "error": "PvE Test engine initialization failed"}), 500
         else:
             print("DEBUG: Initializing engine for PvP mode")
@@ -1677,20 +1715,10 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     game_state["units"] = combined_units
     game_state["unit_by_id"] = {str(u["id"]): u for u in combined_units}
 
-    # Rebuild reward config mappings for updated roster unit types.
-    # Required so AI target selection and handlers can resolve every new model key.
-    from config_loader import get_config_loader
-    from ai.unit_registry import UnitRegistry
-    config_loader = get_config_loader()
-    unit_registry = UnitRegistry()
-    reward_configs: Dict[str, Any] = {}
-    for unit in combined_units:
-        unit_type = require_key(unit, "unitType")
-        model_key = unit_registry.get_model_key(unit_type)
-        if model_key in reward_configs:
-            continue
-        agent_rewards = config_loader.load_agent_rewards_config(model_key)
-        reward_configs[model_key] = require_key(agent_rewards, model_key)
+    # Rebuild reward config mappings using engine centralized logic.
+    # This preserves mono-agent CoreAgent behavior by mapping all model keys
+    # to controlled_agent rewards in single-policy mode.
+    reward_configs = engine_instance._build_reward_configs_for_current_units()
     game_state["reward_configs"] = reward_configs
     game_state["rewards_configs"] = reward_configs
 

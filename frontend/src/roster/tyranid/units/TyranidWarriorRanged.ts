@@ -40,6 +40,12 @@ export class TyranidWarriorRanged extends TroopRangeTroop {
       usage: "and",
     },
   ];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = {
+    adaptable_predators: 2,
+    adaptable_predators_shoot_after_flee: 2,
+    adaptable_predators_charge_after_flee: 2,
+  };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "tyranid warrior with ranged bio-weapon"}];

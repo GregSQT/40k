@@ -22,6 +22,7 @@ Index des documents à la racine de `Documentation/`. Les sous-dossiers (TODO, P
 | **[AI_TRAINING.md](AI_TRAINING.md)** | **Référence unique** training/tuning : pipeline (train.py, env, wrappers), configs, monitoring, bots, anti-overfitting, dépannage ; inclut la section « Évolutions prévues : League / curriculum training ». |
 | **[AI_METRICS.md](AI_METRICS.md)** | Métriques et tuning : guide de tuning rapide (0_critical, problèmes courants, matrice → paramètres) + analyse experte (patterns, diagnostics, études de cas). |
 | **[AI_OBSERVATION.md](AI_OBSERVATION.md)** | Système d’observation (vecteur, asymétrie, intégration training). |
+| **[AI_TUNING_JOURNAL_2026-03.md](AI_TUNING_JOURNAL_2026-03.md)** | Journal factuel de tuning (runs, variantes, résultats, décisions) pour la campagne de mars 2026. |
 | **[Macro_agent.md](Macro_agent.md)** | Agent macro : architecture macro/micro, scénarios, config, évaluation. |
 
 ---

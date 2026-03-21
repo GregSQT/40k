@@ -35,6 +35,12 @@ export class GreyHunterPackLeader extends TroopMeleeElite {
       usage: "and",
     },
   ];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = {
+    cunning_hunters: 2,
+    cunning_hunters_shoot_after_advance: 2,
+    cunning_hunters_shoot_after_flee: 2,
+  };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "grey hunters"}];

@@ -25,6 +25,8 @@ export class Termagant extends SwarmRangeSwarm {
 
   // UNIT RULES
   static UNIT_RULES = [{ ruleId: "reactive_move", displayName: "Skulking Horrors" }];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { reactive_move: 2 };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "termagant"}];

@@ -165,6 +165,11 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             if not _unit_has_rule(unit, "charge_after_flee"):
                 continue  # Fled units cannot charge without explicit rule effect
 
+        # Post-shoot movement restriction: cannot charge until end of turn.
+        units_cannot_charge = require_key(game_state, "units_cannot_charge")
+        if unit_id_str in units_cannot_charge:
+            continue
+
         # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
         units_advanced = require_key(game_state, "units_advanced")
         if unit_id_str in units_advanced:
@@ -689,6 +694,14 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
         return False, {"error": "unit_has_fled", "unitId": unit["id"], "action": "charge"}
+
+    # Post-shoot movement restriction: cannot charge until end of turn.
+    if unit_id_str in require_key(game_state, "units_cannot_charge"):
+        return False, {
+            "error": "unit_cannot_charge_after_move_after_shooting",
+            "unitId": unit["id"],
+            "action": "charge",
+        }
     
     # NOTE: Pool is already built in charge_destination_selection_handler() after roll.
     # Since system is sequential, no need to rebuild here. Only verify destination is in pool.

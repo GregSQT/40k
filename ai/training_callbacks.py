@@ -17,7 +17,9 @@ import os
 import time
 import re
 import shutil
+import tempfile
 from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
 from typing import Dict, Optional, Any, List
@@ -202,6 +204,10 @@ class EpisodeTerminationCallback(BaseCallback):
         self.max_episode_duration_seconds = 0.0
         self.total_episode_duration_seconds = 0.0
         self.episode_duration_stats_count = 0
+        self.episode_duration_window_size = 200
+        self.recent_episode_durations_seconds: deque[float] = deque(
+            maxlen=self.episode_duration_window_size
+        )
         self._episode_action_counts_by_env = None
         self._last_step_perf_time: Optional[float] = None
         self._ema_env_actions_per_second: Optional[float] = None
@@ -288,6 +294,7 @@ class EpisodeTerminationCallback(BaseCallback):
                     self.max_episode_duration_seconds,
                     episode_duration_seconds
                 )
+                self.recent_episode_durations_seconds.append(float(episode_duration_seconds))
 
         episode_ended = episodes_finished > 0
         if episode_ended:
@@ -374,13 +381,13 @@ class EpisodeTerminationCallback(BaseCallback):
                     speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
                     time_info = f"{elapsed_str}<{eta_str}, {speed_str}"
 
-                avg_duration_value = (
-                    self.total_episode_duration_seconds / self.episode_duration_stats_count
-                    if self.episode_duration_stats_count > 0
-                    else 0.0
-                )
+                if self.recent_episode_durations_seconds:
+                    recent_durations = np.array(self.recent_episode_durations_seconds, dtype=np.float64)
+                    recent_avg_duration = float(np.mean(recent_durations))
+                else:
+                    recent_avg_duration = 0.0
                 duration_display = (
-                    f"{avg_duration_value:.2f}s/ep, "
+                    f"{recent_avg_duration:.2f}s/ep, "
                     f"max {self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"
@@ -399,7 +406,9 @@ class EpisodeTerminationCallback(BaseCallback):
                 # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
                 prev_len = self._last_progress_line_len
                 if self.gate_display_state is not None:
-                    prev_len = max(prev_len, self.gate_display_state.get("last_progress_line_len", 0))
+                    if "last_progress_line_len" not in self.gate_display_state:
+                        self.gate_display_state["last_progress_line_len"] = 0
+                    prev_len = max(prev_len, int(require_key(self.gate_display_state, "last_progress_line_len")))
                 clear_padding = " " * max(0, prev_len - len(progress_line))
                 print(f"\r{progress_line}{clear_padding}", end='', flush=True)
                 self._last_progress_line_len = len(progress_line)
@@ -1130,7 +1139,8 @@ class BotEvaluationCallback(BaseCallback):
                  show_eval_progress: bool = False,
                  phase_progress_total_episodes: Optional[int] = None,
                  phase_progress_episode_offset: int = 0,
-                 scenario_pool: str = "training"):
+                 scenario_pool: str = "training",
+                 async_eval_enabled: bool = True):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -1187,6 +1197,11 @@ class BotEvaluationCallback(BaseCallback):
             )
         self.last_eval_episode = int(initial_episode_marker)
         self.last_eval_marker: Optional[int] = None
+        if not isinstance(async_eval_enabled, bool):
+            raise ValueError(
+                f"async_eval_enabled must be boolean (got {type(async_eval_enabled).__name__})"
+            )
+        self.async_eval_enabled = async_eval_enabled
         self.show_eval_progress = show_eval_progress
         self.phase_progress_total_episodes = phase_progress_total_episodes
         self.phase_progress_episode_offset = int(phase_progress_episode_offset)
@@ -1218,6 +1233,7 @@ class BotEvaluationCallback(BaseCallback):
                     )
         self.gating_pass_count = 0
         self.gating_fail_count = 0
+        self.gating_skipped_unreliable_count = 0
         self.last_gate_pass: Optional[bool] = None
         self.gating_history: List[Dict[str, Any]] = []
         self.best_gating_criteria_mean: Optional[float] = None
@@ -1241,6 +1257,15 @@ class BotEvaluationCallback(BaseCallback):
         self.best_robust_worst_holdout_hard_combined: Optional[float] = None
         self.final_summary_target_episodes = final_summary_target_episodes
         self.last_eval_results: Optional[Dict[str, Any]] = None
+        self._async_eval_executor: Optional[ThreadPoolExecutor] = (
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="bot-eval")
+            if self.async_eval_enabled
+            else None
+        )
+        self._pending_eval_future: Optional[Future] = None
+        self._pending_eval_marker: Optional[int] = None
+        self._pending_eval_snapshot_path: Optional[str] = None
+        self.async_eval_skipped_count = 0
         self.curriculum_phase_progress_bar_length = _require_progress_bar_width(
             "curriculum_phase_width"
         )
@@ -1338,6 +1363,27 @@ class BotEvaluationCallback(BaseCallback):
 
         return gate_pass
 
+    def _mark_unreliable_eval_skip(self, eval_marker: int, failed_episodes: int) -> None:
+        """Record a skipped gate decision when eval results are marked unreliable."""
+        self.last_gate_pass = False
+        self.gating_skipped_unreliable_count += 1
+
+        marker_name = "episodes" if self.use_episode_freq else "timesteps"
+        self.gating_history.append(
+            {
+                "marker_name": marker_name,
+                "marker_value": int(eval_marker),
+                "status": "SKIP_UNRELIABLE",
+                "criteria_mean": None,
+                "has_improved_mean": False,
+                "thresholds_ever_passed": self.thresholds_ever_passed,
+                "reason": f"total_failed_episodes={failed_episodes}",
+                "checks": [],
+            }
+        )
+        if self.gate_display_state is not None:
+            self.gate_display_state["label"] = "Gate ⚠️ SKIP"
+
     @staticmethod
     def _ensure_zip_path(model_path: str) -> str:
         """Return a model path that always ends with .zip."""
@@ -1427,6 +1473,7 @@ class BotEvaluationCallback(BaseCallback):
         Metrics namespace:
           bot_eval/scenario/<slug>/combined
           bot_eval/scenario/<slug>/worst_bot_score
+          1_evals/<holdout_regular_scenario_name> (worst_bot_score)
         """
         scenario_scores = results.get("scenario_scores")
         if scenario_scores is None:
@@ -1451,6 +1498,15 @@ class BotEvaluationCallback(BaseCallback):
                     f"bot_eval/scenario/{slug}/worst_bot_score",
                     float(require_key(values, "worst_bot_score"))
                 )
+                scenario_name_str = str(scenario_name)
+                if (
+                    scenario_name_str.startswith("holdout_regular_")
+                    or scenario_name_str.startswith("holdout_hard_")
+                ):
+                    self.model.logger.record(
+                        f"1_evals/{scenario_name_str}",
+                        float(require_key(values, "worst_bot_score"))
+                    )
             scenario_split_scores = results.get("scenario_split_scores")
             if scenario_split_scores is not None:
                 if not isinstance(scenario_split_scores, dict):
@@ -1525,6 +1581,126 @@ class BotEvaluationCallback(BaseCallback):
             "worst_holdout_hard_combined": worst_holdout_hard_combined,
         }
 
+    def _apply_eval_results(self, results: Dict[str, Any], eval_marker: int) -> None:
+        """Apply evaluation results (gating, logging, checkpoints)."""
+        self.last_eval_results = results
+        self.last_eval_marker = int(eval_marker)
+
+        total_failed_episodes = int(require_key(results, "total_failed_episodes"))
+        eval_duration_seconds = float(require_key(results, "eval_duration_seconds"))
+        if total_failed_episodes > 0:
+            raise RuntimeError(
+                "Bot evaluation failed episodes detected: "
+                f"marker={eval_marker}, failed_episodes={total_failed_episodes}, "
+                f"duration_seconds={eval_duration_seconds:.1f}. "
+                "Training stops immediately to enforce strict evaluation reliability."
+            )
+        gate_pass = self._evaluate_model_gate(results, eval_marker)
+
+        combined_win_rate = require_key(results, 'combined')
+
+        if self.metrics_tracker:
+            bot_results = {
+                'random': results['random'],
+                'greedy': results['greedy'],
+                'defensive': results['defensive'],
+                'combined': combined_win_rate
+            }
+            if 'holdout_hard_mean' in results:
+                bot_results['holdout_hard_mean'] = float(results['holdout_hard_mean'])
+            self.metrics_tracker.log_bot_evaluations(bot_results, step=int(eval_marker))
+
+        if hasattr(self.model, 'logger') and self.model.logger:
+            self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
+        self._log_scenario_scores(results)
+
+        if gate_pass and combined_win_rate > self.best_combined_win_rate:
+            self.best_combined_win_rate = combined_win_rate
+            if self.best_model_save_path:
+                save_path = f"{self.best_model_save_path}/best_model"
+                self._save_model_with_vecnormalize(save_path)
+
+        self.combined_history.append(combined_win_rate)
+        if gate_pass and self.save_best_robust and len(self.combined_history) >= self.robust_window:
+            current_peak = max(self.combined_history)
+            current_drawdown = current_peak - combined_win_rate
+            moving_average = float(np.mean(self.combined_history))
+            robust_score = moving_average - (self.robust_drawdown_penalty * current_drawdown)
+
+            if robust_score > self.best_robust_score:
+                previous_robust_model_path = self.best_robust_model_path
+                self.best_robust_score = robust_score
+                self.best_robust_combined = combined_win_rate
+                self.best_robust_eval_marker = eval_marker
+                robust_worst_cases = self._extract_robust_worst_cases(results)
+                self.best_robust_worst_bot_name = robust_worst_cases["worst_bot_name"]
+                self.best_robust_worst_bot_score = robust_worst_cases["worst_bot_score"]
+                self.best_robust_worst_scenario_name = robust_worst_cases["worst_scenario_name"]
+                self.best_robust_worst_scenario_combined = robust_worst_cases["worst_scenario_combined"]
+                self.best_robust_worst_holdout_regular_name = robust_worst_cases["worst_holdout_regular_name"]
+                self.best_robust_worst_holdout_regular_combined = robust_worst_cases["worst_holdout_regular_combined"]
+                self.best_robust_worst_holdout_hard_name = robust_worst_cases["worst_holdout_hard_name"]
+                self.best_robust_worst_holdout_hard_combined = robust_worst_cases["worst_holdout_hard_combined"]
+                if self.best_model_save_path:
+                    robust_model_zip_path = self._build_robust_model_zip_path(robust_score)
+                    saved_robust_zip_path = self._save_model_with_vecnormalize(robust_model_zip_path)
+                    self.best_robust_model_path = saved_robust_zip_path
+                    self._cleanup_legacy_best_robust_artifacts()
+
+                    if (
+                        previous_robust_model_path is not None
+                        and previous_robust_model_path != self.best_robust_model_path
+                    ):
+                        self._remove_model_artifacts(previous_robust_model_path)
+
+                    canonical_model_path = self._build_canonical_model_path()
+                    self._copy_model_artifacts(self.best_robust_model_path, canonical_model_path)
+
+    def _cleanup_pending_snapshot(self) -> None:
+        """Delete pending async snapshot artifacts if they exist."""
+        if self._pending_eval_snapshot_path:
+            self._remove_model_artifacts(self._pending_eval_snapshot_path)
+            self._pending_eval_snapshot_path = None
+
+    def _consume_async_eval_if_ready(self, force_wait: bool = False) -> None:
+        """Consume completed async evaluation result and apply it."""
+        if self._pending_eval_future is None:
+            return
+        if not force_wait and not self._pending_eval_future.done():
+            return
+        if self._pending_eval_marker is None:
+            raise RuntimeError("Pending async eval marker is missing")
+        eval_marker = self._pending_eval_marker
+        try:
+            results = self._pending_eval_future.result()
+        finally:
+            self._pending_eval_future = None
+            self._pending_eval_marker = None
+            self._cleanup_pending_snapshot()
+        self._apply_eval_results(results, eval_marker)
+
+    def _submit_async_eval(self, eval_marker: int) -> None:
+        """Submit async bot evaluation using a frozen model snapshot."""
+        if self._async_eval_executor is None:
+            self._async_eval_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="bot-eval",
+            )
+        if self._pending_eval_future is not None:
+            self.async_eval_skipped_count += 1
+            return
+
+        fd, snapshot_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        snapshot_zip_path = self._save_model_with_vecnormalize(snapshot_path)
+        self._pending_eval_snapshot_path = snapshot_zip_path
+        self._pending_eval_marker = int(eval_marker)
+        self._pending_eval_future = self._async_eval_executor.submit(
+            self._evaluate_against_bots,
+            int(eval_marker),
+            snapshot_zip_path,
+        )
+
     def _on_step(self) -> bool:
         if not EVALUATION_BOTS_AVAILABLE:
             return True
@@ -1540,85 +1716,34 @@ class BotEvaluationCallback(BaseCallback):
                 # so trigger when we have progressed by at least eval_freq episodes.
                 if current_episode > 0 and (current_episode - self.last_eval_episode) >= self.eval_freq:
                     should_evaluate = True
-                    self.last_eval_episode = current_episode
                     eval_marker = int(current_episode)
         else:
             # Timestep-based evaluation (original behavior)
             if self.num_timesteps % self.eval_freq == 0:
                 should_evaluate = True
 
+        # In async mode, harvest completed evals without blocking training.
+        if self.async_eval_enabled:
+            self._consume_async_eval_if_ready(force_wait=False)
+
         if should_evaluate:
             self.eval_count += 1
-            results = self._evaluate_against_bots(eval_marker)
-            self.last_eval_results = results
-            self.last_eval_marker = int(eval_marker)
-            gate_pass = self._evaluate_model_gate(results, eval_marker)
-
-            # Use combined metric computed by evaluate_against_bots from agent config.
-            combined_win_rate = require_key(results, 'combined')
-
-            # Log to metrics_tracker (0_critical/ and bot_eval/ namespaces)
-            if self.metrics_tracker:
-                bot_results = {
-                    'random': results['random'],
-                    'greedy': results['greedy'],
-                    'defensive': results['defensive'],
-                    'combined': combined_win_rate
-                }
-                self.metrics_tracker.log_bot_evaluations(bot_results, step=int(eval_marker))
-
-            # Also log to model's logger (backup)
-            if hasattr(self.model, 'logger') and self.model.logger:
-                self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
-            self._log_scenario_scores(results)
-
-            # Save best model based on combined performance
-            if gate_pass and combined_win_rate > self.best_combined_win_rate:
-                self.best_combined_win_rate = combined_win_rate
-                if self.best_model_save_path:
-                    save_path = f"{self.best_model_save_path}/best_model"
-                    self._save_model_with_vecnormalize(save_path)
-
-            # Optional robust checkpoint selection: moving average penalized by drawdown.
-            self.combined_history.append(combined_win_rate)
-            if gate_pass and self.save_best_robust and len(self.combined_history) >= self.robust_window:
-                current_peak = max(self.combined_history)
-                current_drawdown = current_peak - combined_win_rate
-                moving_average = float(np.mean(self.combined_history))
-                robust_score = moving_average - (self.robust_drawdown_penalty * current_drawdown)
-
-                if robust_score > self.best_robust_score:
-                    previous_robust_model_path = self.best_robust_model_path
-                    self.best_robust_score = robust_score
-                    self.best_robust_combined = combined_win_rate
-                    self.best_robust_eval_marker = eval_marker
-                    robust_worst_cases = self._extract_robust_worst_cases(results)
-                    self.best_robust_worst_bot_name = robust_worst_cases["worst_bot_name"]
-                    self.best_robust_worst_bot_score = robust_worst_cases["worst_bot_score"]
-                    self.best_robust_worst_scenario_name = robust_worst_cases["worst_scenario_name"]
-                    self.best_robust_worst_scenario_combined = robust_worst_cases["worst_scenario_combined"]
-                    self.best_robust_worst_holdout_regular_name = robust_worst_cases["worst_holdout_regular_name"]
-                    self.best_robust_worst_holdout_regular_combined = robust_worst_cases["worst_holdout_regular_combined"]
-                    self.best_robust_worst_holdout_hard_name = robust_worst_cases["worst_holdout_hard_name"]
-                    self.best_robust_worst_holdout_hard_combined = robust_worst_cases["worst_holdout_hard_combined"]
-                    if self.best_model_save_path:
-                        robust_model_zip_path = self._build_robust_model_zip_path(robust_score)
-                        saved_robust_zip_path = self._save_model_with_vecnormalize(robust_model_zip_path)
-                        self.best_robust_model_path = saved_robust_zip_path
-                        self._cleanup_legacy_best_robust_artifacts()
-
-                        if (
-                            previous_robust_model_path is not None
-                            and previous_robust_model_path != self.best_robust_model_path
-                        ):
-                            self._remove_model_artifacts(previous_robust_model_path)
-
-                        canonical_model_path = self._build_canonical_model_path()
-                        self._copy_model_artifacts(self.best_robust_model_path, canonical_model_path)
+            if self.use_episode_freq and self.metrics_tracker is not None:
+                self.last_eval_episode = int(self.metrics_tracker.episode_count)
+            if self.async_eval_enabled:
+                self._submit_async_eval(eval_marker)
+            else:
+                results = self._evaluate_against_bots(eval_marker)
+                self._apply_eval_results(results, eval_marker)
         return True
 
     def _on_training_end(self) -> None:
         """Print robust-checkpoint summary at end of training."""
+        if self.async_eval_enabled:
+            self._consume_async_eval_if_ready(force_wait=True)
+            if self._async_eval_executor is not None:
+                self._async_eval_executor.shutdown(wait=True)
+                self._async_eval_executor = None
         if self.final_summary_target_episodes is not None:
             if self.metrics_tracker is None:
                 return
@@ -1628,16 +1753,20 @@ class BotEvaluationCallback(BaseCallback):
             print("\n🧱 Model gating summary")
             print(f"   Evaluations gated: {len(self.gating_history)}")
             print(f"   PASS: {self.gating_pass_count} | FAIL: {self.gating_fail_count}")
+            print(f"   SKIP_UNRELIABLE: {self.gating_skipped_unreliable_count}")
             if self.gating_history:
                 marker_name = self.gating_history[0]["marker_name"]
                 latest = self.gating_history[-1]
                 print(
                     f"   Latest eval: {marker_name}={latest['marker_value']} -> {latest['status']}"
                 )
-                for row in latest["checks"]:
-                    print(
-                        f"   - {row['label']:<24} {row['actual']:.3f} >= {row['threshold']:.3f} [{row['status']}]"
-                    )
+                if latest["status"] == "SKIP_UNRELIABLE":
+                    print(f"   - Reason: {latest['reason']}")
+                else:
+                    for row in latest["checks"]:
+                        print(
+                            f"   - {row['label']:<24} {row['actual']:.3f} >= {row['threshold']:.3f} [{row['status']}]"
+                        )
 
                 # Keep output compact: show only FAIL history entries (most actionable).
                 fail_history = [entry for entry in self.gating_history if entry["status"] == "FAIL"]
@@ -1660,7 +1789,11 @@ class BotEvaluationCallback(BaseCallback):
             if self.model_gating_enabled:
                 print("\n📌 Robust checkpoint summary")
                 print("   No robust checkpoint selected (all gated evaluations failed or no eligible eval window).")
-                print(f"   Gating stats: pass={self.gating_pass_count}, fail={self.gating_fail_count}")
+                print(
+                    "   Gating stats: "
+                    f"pass={self.gating_pass_count}, fail={self.gating_fail_count}, "
+                    f"skip_unreliable={self.gating_skipped_unreliable_count}"
+                )
             return
         print("\n📌 Robust checkpoint summary")
         marker_name = "episodes" if self.use_episode_freq else "timesteps"
@@ -1709,7 +1842,11 @@ class BotEvaluationCallback(BaseCallback):
         if self.best_robust_model_path:
             print(f"   Robust model path: {self.best_robust_model_path}")
         if self.model_gating_enabled:
-            print(f"   Gating stats: pass={self.gating_pass_count}, fail={self.gating_fail_count}")
+            print(
+                "   Gating stats: "
+                f"pass={self.gating_pass_count}, fail={self.gating_fail_count}, "
+                f"skip_unreliable={self.gating_skipped_unreliable_count}"
+            )
 
     def _build_eval_progress_prefix(self, eval_marker: int) -> Optional[str]:
         """Build phase progress prefix for inline evaluation display."""
@@ -1724,7 +1861,11 @@ class BotEvaluationCallback(BaseCallback):
         bar = '█' * filled + '░' * (bar_length - filled)
         return f"{progress_pct:3.0f}% {bar} {bounded_episodes}/{self.phase_progress_total_episodes}"
 
-    def _evaluate_against_bots(self, eval_marker: int) -> Dict[str, Any]:
+    def _evaluate_against_bots(
+        self,
+        eval_marker: int,
+        model_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Evaluate agent against bots using standalone function"""
         import os
         import time
@@ -1739,8 +1880,10 @@ class BotEvaluationCallback(BaseCallback):
             )
             sys.stderr.flush()
         from ai.bot_evaluation import evaluate_against_bots
+        # Avoid terminal output collisions in async mode: keep training bar only.
+        effective_show_eval_progress = self.show_eval_progress and not self.async_eval_enabled
         eval_progress_prefix = None
-        if self.show_eval_progress and self.gate_display_state is not None:
+        if effective_show_eval_progress and self.gate_display_state is not None:
             eval_progress_prefix = self.gate_display_state.get("training_prefix", "")
         results = evaluate_against_bots(
             model=self.model,
@@ -1748,13 +1891,14 @@ class BotEvaluationCallback(BaseCallback):
             rewards_config_name=self.rewards_config_name,
             n_episodes=self.n_eval_episodes,
             controlled_agent=self.rewards_config_name,
-            show_progress=self.show_eval_progress,
+            show_progress=effective_show_eval_progress,
             deterministic=self.eval_deterministic,
-            eval_progress_label=f"Eval {self.eval_count}" if self.show_eval_progress else None,
-            show_summary=not self.show_eval_progress,
+            eval_progress_label=f"Eval {self.eval_count}" if effective_show_eval_progress else None,
+            show_summary=not effective_show_eval_progress,
             eval_progress_prefix=eval_progress_prefix,
             line_length_state=self.gate_display_state,
             scenario_pool=self.scenario_pool,
+            model_path=model_path,
         )
         if self.gate_display_state is not None:
             self.gate_display_state["total_eval_time"] = (

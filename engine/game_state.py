@@ -743,7 +743,7 @@ class GameStateManager:
                     except (json.JSONDecodeError, KeyError):
                         continue
 
-        # Fallback: require ref to match expected_split (scenario path context)
+        # Strict split validation: ref must match expected_split (scenario path context)
         prefix = f"{expected_split}/"
         if not normalized.startswith(prefix):
             raise ValueError(

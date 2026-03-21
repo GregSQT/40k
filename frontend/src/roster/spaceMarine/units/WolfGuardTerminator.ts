@@ -29,7 +29,7 @@ export class WolfGuardTerminator extends EliteMeleeElite {
   static TARGET_TYPE = "Troop"; // MeleeTroop specialist - hunt troop targets
   
   // UNIT KEYWORDS
-  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "wolf guard"}, { keywordid: "wolf guard terminator squad"}];
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "wolf guard terminator squad"}];
   
   static ICON = "/icons/WolfGuardTerminator.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon

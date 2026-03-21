@@ -36,6 +36,7 @@ from .shared_utils import (
 # Cache key: (pid, id(game_state), episode_num, turn, unit_id, col, row, advance_status, adjacent_status, player)
 _target_pool_cache = {}  # per-process, per-env, per-episode; invalidates when unit/weapon changes
 _cache_size_limit = 100  # Prevent memory leak in long episodes
+_MOVE_AFTER_SHOOTING_DISTANCE_ARG = "distance"
 
 
 def clear_target_pool_cache() -> None:
@@ -264,6 +265,46 @@ def _get_source_unit_rule_id_for_effect(unit: Dict[str, Any], effect_rule_id: st
 def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_rule_id: str) -> Optional[str]:
     """Return source UNIT_RULES.displayName for an effect rule; None if absent."""
     return shared_get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
+
+
+def _get_required_rule_int_argument(
+    unit: Dict[str, Any], effect_rule_id: str, argument_key: str
+) -> int:
+    """Read required integer argument from source UNIT_RULES entry for an effect rule."""
+    source_rule_id = _get_source_unit_rule_id_for_effect(unit, effect_rule_id)
+    if source_rule_id is None:
+        raise ValueError(
+            f"Rule effect '{effect_rule_id}' is not present on unit "
+            f"{require_key(unit, 'id')}"
+        )
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for unit_rule_entry in unit_rules:
+        if str(require_key(unit_rule_entry, "ruleId")) != str(source_rule_id):
+            continue
+        rule_args = unit_rule_entry.get("rule_args")
+        if not isinstance(rule_args, dict):
+            raise ValueError(
+                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} must define rule_args"
+            )
+        if argument_key not in rule_args:
+            raise ValueError(
+                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} "
+                f"missing required argument '{argument_key}'"
+            )
+        raw_value = rule_args[argument_key]
+        if not isinstance(raw_value, int):
+            raise TypeError(
+                f"Rule '{source_rule_id}' argument '{argument_key}' must be int, "
+                f"got {type(raw_value).__name__}"
+            )
+        if raw_value <= 0:
+            raise ValueError(
+                f"Rule '{source_rule_id}' argument '{argument_key}' must be > 0, got {raw_value}"
+            )
+        return raw_value
+    raise ValueError(
+        f"Source rule '{source_rule_id}' not found in UNIT_RULES for unit {require_key(unit, 'id')}"
+    )
 
 
 def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any]) -> bool:
@@ -977,10 +1018,19 @@ def preview_shoot_valid_targets_from_position(
         state_copy["weapon_rule"] = 1
     # Initialize weapon.shot = 0 (required by weapon_availability_check; move phase has no shooting init)
     current_player = int(require_key(unit_copy, "player"))
-    for u in state_copy.get("units", []):
-        if int(u.get("player", 0)) != current_player:
+    units = require_key(state_copy, "units")
+    if not isinstance(units, list):
+        raise TypeError(f"state_copy['units'] must be list (got {type(units).__name__})")
+    for u in units:
+        if int(require_key(u, "player")) != current_player:
             continue
-        for weapon in u.get("RNG_WEAPONS", []):
+        rng_weapons = require_key(u, "RNG_WEAPONS")
+        if not isinstance(rng_weapons, list):
+            raise TypeError(
+                f"Unit {require_key(u, 'id')} RNG_WEAPONS must be list "
+                f"(got {type(rng_weapons).__name__})"
+            )
+        for weapon in rng_weapons:
             if "shot" not in weapon:
                 weapon["shot"] = 0
     if "los_cache" in unit_copy:
@@ -2044,8 +2094,8 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Invalid unit player value: {unit_player}") from exc
     unit["player"] = unit_player_int
-    episode_num = game_state.get("episode_number", 0)
-    turn_num = game_state.get("turn", 0)
+    episode_num = require_key(game_state, "episode_number")
+    turn_num = require_key(game_state, "turn")
     # Hash enemy positions so cache invalidates when any target moves
     units_cache = require_key(game_state, "units_cache")
     enemy_pos_hash = tuple(
@@ -2055,9 +2105,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
             if int(e.get("player", -1)) != unit_player_int and is_unit_alive(tid, game_state)
         )
     )
-    wall_hexes_tuple = tuple(
-        sorted(tuple(w) if isinstance(w, list) else w for w in game_state.get("wall_hexes", []))
-    )
+    wall_hexes = require_key(game_state, "wall_hexes")
+    if not isinstance(wall_hexes, list):
+        raise TypeError(f"wall_hexes must be list (got {type(wall_hexes).__name__})")
+    wall_hexes_tuple = tuple(sorted(tuple(w) if isinstance(w, list) else w for w in wall_hexes))
     cache_key = (os.getpid(), gs_instance_id, episode_num, turn_num, unit_id_str, unit_col, unit_row, advance_status, adjacent_status, unit_player_int, enemy_pos_hash, wall_hexes_tuple)
 
     # Check cache
@@ -2561,7 +2612,7 @@ def _get_los_visibility_state(
     end_row: int,
 ) -> Tuple[float, bool, bool]:
     """Return (visibility_ratio, can_see, in_cover) using los_topology (required).
-    Topology is the single source of truth for LoS; no fallback."""
+    Topology is the single source of truth for LoS; no implicit recovery."""
     los_topology = game_state.get("los_topology")
     if los_topology is None:
         raise KeyError(
@@ -2986,6 +3037,14 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_manual_weapon_selected"]
     if "_shoot_activation_started" in unit:
         del unit["_shoot_activation_started"]
+    if "_pending_move_after_shooting" in unit:
+        del unit["_pending_move_after_shooting"]
+    if "_move_after_shooting_destinations" in unit:
+        del unit["_move_after_shooting_destinations"]
+    if "_move_after_shooting_resolved" in unit:
+        del unit["_move_after_shooting_resolved"]
+    if "_move_after_shooting_distance" in unit:
+        del unit["_move_after_shooting_distance"]
     unit["SHOOT_LEFT"] = 0
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
@@ -2995,6 +3054,132 @@ def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> s
         return "target_selected"
     else:
         return "no_target_selected"
+
+
+def _build_move_after_shooting_destinations(
+    game_state: Dict[str, Any], unit: Dict[str, Any], move_distance: int
+) -> List[Tuple[int, int]]:
+    """Build legal destinations for move_after_shooting (normal move up to rule distance)."""
+    from engine.phase_handlers.movement_handlers import movement_build_valid_destinations_pool
+
+    unit_id = require_key(unit, "id")
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    original_move = require_key(unit, "MOVE")
+    unit["MOVE"] = move_distance
+    try:
+        valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
+    finally:
+        unit["MOVE"] = original_move
+
+    return [
+        (int(col), int(row))
+        for (col, row) in valid_destinations
+        if int(col) != int(unit_col) or int(row) != int(unit_row)
+    ]
+
+
+def _select_move_after_shooting_destination_for_ai(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    destinations: List[Tuple[int, int]],
+) -> Tuple[int, int]:
+    """Select one post-shoot move destination for gym/PvE automation."""
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(require_key(unit, "player"))
+    enemies = [
+        enemy_id
+        for enemy_id, cache_entry in units_cache.items()
+        if int(cache_entry["player"]) != unit_player
+    ]
+    if not enemies:
+        return destinations[0]
+
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    nearest_enemy_id = min(
+        enemies,
+        key=lambda enemy_id: _calculate_hex_distance(
+            unit_col,
+            unit_row,
+            *require_unit_position(enemy_id, game_state),
+        ),
+    )
+    nearest_enemy_col, nearest_enemy_row = require_unit_position(nearest_enemy_id, game_state)
+    return min(
+        destinations,
+        key=lambda destination: _calculate_hex_distance(
+            int(destination[0]),
+            int(destination[1]),
+            nearest_enemy_col,
+            nearest_enemy_row,
+        ),
+    )
+
+
+def _apply_move_after_shooting(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    dest_col: int,
+    dest_row: int,
+    move_distance: int,
+) -> Dict[str, Any]:
+    """Apply move_after_shooting movement and refresh positional caches."""
+    from .movement_handlers import _invalidate_all_destination_pools_after_movement
+
+    unit_id_str = str(require_key(unit, "id"))
+    orig_col, orig_row = require_unit_position(unit, game_state)
+    dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
+    if dest_col_int == orig_col and dest_row_int == orig_row:
+        raise ValueError("move_after_shooting destination must differ from current position")
+
+    set_unit_coordinates(unit, dest_col_int, dest_row_int)
+    update_units_cache_position(game_state, unit_id_str, dest_col_int, dest_row_int)
+    moved_unit_player = int(require_key(unit, "player"))
+    update_enemy_adjacent_caches_after_unit_move(
+        game_state,
+        moved_unit_player=moved_unit_player,
+        old_col=orig_col,
+        old_row=orig_row,
+        new_col=dest_col_int,
+        new_row=dest_row_int,
+    )
+    _invalidate_los_cache_for_moved_unit(game_state, unit_id_str, old_col=orig_col, old_row=orig_row)
+    build_unit_los_cache(game_state, unit_id_str)
+    _invalidate_all_destination_pools_after_movement(game_state)
+    maybe_resolve_reactive_move(
+        game_state=game_state,
+        moved_unit_id=unit_id_str,
+        from_col=orig_col,
+        from_row=orig_row,
+        to_col=dest_col_int,
+        to_row=dest_row_int,
+        move_kind="move",
+        move_cause="normal",
+    )
+    require_key(game_state, "units_cannot_charge").add(unit_id_str)
+
+    action_logs = require_key(game_state, "action_logs")
+    action_logs.append({
+        "type": "move_after_shooting",
+        "message": (
+            f"Unit {unit_id_str}({orig_col}, {orig_row}) MOVED [MOVE_AFTER_SHOOTING:{move_distance}] "
+            f"from ({orig_col}, {orig_row}) to ({dest_col_int}, {dest_row_int}) and cannot charge this turn"
+        ),
+        "turn": game_state.get("turn", 1),
+        "phase": "shoot",
+        "unitId": unit_id_str,
+        "player": require_key(unit, "player"),
+        "fromCol": orig_col,
+        "fromRow": orig_row,
+        "toCol": dest_col_int,
+        "toRow": dest_row_int,
+        "timestamp": "server_time",
+    })
+    return {
+        "fromCol": orig_col,
+        "fromRow": orig_row,
+        "toCol": dest_col_int,
+        "toRow": dest_row_int,
+    }
 
 def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                                      arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1,
@@ -3021,6 +3206,56 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
         Tuple[bool, Dict] - (success, result) where result may contain phase_complete (but not next_phase)
     """
     from engine.phase_handlers.generic_handlers import end_activation
+
+    # Optional post-shoot movement rule: move_after_shooting.
+    # Only relevant when a real shooting activation is ending.
+    if (
+        arg5 == 1
+        and arg1 == ACTION
+        and arg3 == SHOOTING
+        and not unit.get("_move_after_shooting_resolved", False)
+        and _unit_has_rule(unit, "move_after_shooting")
+    ):
+        move_after_shooting_distance = _get_required_rule_int_argument(
+            unit, "move_after_shooting", _MOVE_AFTER_SHOOTING_DISTANCE_ARG
+        )
+        if not _is_adjacent_to_enemy_within_cc_range(game_state, unit):
+            destinations = _build_move_after_shooting_destinations(
+                game_state, unit, move_after_shooting_distance
+            )
+            if destinations:
+                cfg = require_key(game_state, "config")
+                is_gym_training = bool(cfg.get("gym_training_mode", False) or game_state.get("gym_training_mode", False))
+                is_pve_ai = bool(cfg.get("pve_mode", False)) and int(require_key(unit, "player")) == 2
+                if is_gym_training or is_pve_ai:
+                    chosen_destination = _select_move_after_shooting_destination_for_ai(
+                        game_state, unit, destinations
+                    )
+                    move_result = _apply_move_after_shooting(
+                        game_state,
+                        unit,
+                        int(chosen_destination[0]),
+                        int(chosen_destination[1]),
+                        move_after_shooting_distance,
+                    )
+                    unit["_move_after_shooting_resolved"] = True
+                    game_state["last_move_after_shooting"] = move_result
+                else:
+                    unit["_pending_move_after_shooting"] = True
+                    unit["_move_after_shooting_destinations"] = destinations
+                    unit["_move_after_shooting_distance"] = move_after_shooting_distance
+                    game_state["active_shooting_unit"] = require_key(unit, "id")
+                    return True, {
+                        "waiting_for_player": True,
+                        "action": "move_after_shooting_select_destination",
+                        "unitId": require_key(unit, "id"),
+                        "move_after_shooting_destinations": [
+                            {"col": int(col), "row": int(row)} for (col, row) in destinations
+                        ],
+                        "highlight_color": "orange",
+                        "can_skip_move_after_shooting": True,
+                    }
+        unit["_move_after_shooting_resolved"] = True
     
     # CRITICAL: Only clear state if actually ending activation (arg5=1)
     # If arg5=0 (NOT_REMOVED), we continue activation, so keep state intact
@@ -3088,6 +3323,11 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
                 result["action"] = action_type
                 if "waiting_for_player" not in result:
                     result["waiting_for_player"] = False
+
+    move_after_shooting_result = game_state.get("last_move_after_shooting")
+    if isinstance(move_after_shooting_result, dict):
+        result.update(move_after_shooting_result)
+        del game_state["last_move_after_shooting"]
     
     return True, result
 
@@ -3414,6 +3654,72 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     
     return True, response
 
+
+def _handle_move_after_shooting_action(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    action: Dict[str, Any],
+    config: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Resolve optional move_after_shooting player choice, then end activation."""
+    del config  # Handler uses game_state/config already embedded.
+    if not unit.get("_pending_move_after_shooting", False):
+        return False, {"error": "no_pending_move_after_shooting", "unitId": require_key(unit, "id")}
+
+    unit_id_str = str(require_key(unit, "id"))
+    destinations = require_key(unit, "_move_after_shooting_destinations")
+    normalized_destinations = {(int(col), int(row)) for (col, row) in destinations}
+
+    move_payload: Dict[str, Any] = {}
+    skip_move = bool(action.get("skip_move_after_shooting", False))
+    dest_col_raw = action.get("destCol")
+    dest_row_raw = action.get("destRow")
+
+    if not skip_move and dest_col_raw is not None and dest_row_raw is not None:
+        dest_col_int, dest_row_int = normalize_coordinates(dest_col_raw, dest_row_raw)
+        if (dest_col_int, dest_row_int) not in normalized_destinations:
+            return False, {
+                "error": "invalid_move_after_shooting_destination",
+                "unitId": unit_id_str,
+                "destination": (dest_col_int, dest_row_int),
+            }
+        move_after_shooting_distance = require_key(unit, "_move_after_shooting_distance")
+        if not isinstance(move_after_shooting_distance, int) or move_after_shooting_distance <= 0:
+            raise ValueError(
+                f"_move_after_shooting_distance must be positive int for unit {require_key(unit, 'id')}, "
+                f"got {move_after_shooting_distance!r}"
+            )
+        move_payload = _apply_move_after_shooting(
+            game_state,
+            unit,
+            dest_col_int,
+            dest_row_int,
+            move_after_shooting_distance,
+        )
+
+    unit["_move_after_shooting_resolved"] = True
+    if "_pending_move_after_shooting" in unit:
+        del unit["_pending_move_after_shooting"]
+    if "_move_after_shooting_destinations" in unit:
+        del unit["_move_after_shooting_destinations"]
+    if "_move_after_shooting_distance" in unit:
+        del unit["_move_after_shooting_distance"]
+
+    success, result = _handle_shooting_end_activation(
+        game_state,
+        unit,
+        ACTION,
+        1,
+        SHOOTING,
+        SHOOTING,
+        1,
+        action_type="shoot",
+        include_attack_results=True,
+    )
+    result.update(move_payload)
+    return success, result
+
+
 def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md EXACT: Complete action routing with full phase lifecycle management
@@ -3565,25 +3871,27 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     
     # STRICT AI_TURN: shoot/advance must ALWAYS follow activation start
     # No shooting/advance allowed for a different unit while one is active
-    if action_type in ["shoot", "advance"]:
+    if action_type in ["shoot", "advance", "move_after_shooting"]:
         unit_id_str = str(unit_id)
         active_unit_id = str(active_shooting_unit) if active_shooting_unit is not None else None
         if active_unit_id and active_unit_id != unit_id_str:
             raise ValueError(
-                f"shoot/advance called for non-active unit: active_shooting_unit={active_unit_id} unit_id={unit_id_str}"
+                f"shoot/advance/move_after_shooting called for non-active unit: "
+                f"active_shooting_unit={active_unit_id} unit_id={unit_id_str}"
             )
         if not unit.get("_shoot_activation_started", False):
             # Verify unit is still in pool before activation (defense in depth)
             pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
             if unit_id_str not in pool_ids:
                 return False, {"error": "unit_not_eligible", "unitId": unit_id}
-            activation_result = shooting_unit_activation_start(game_state, unit_id)
-            if activation_result.get("error"):
-                return False, activation_result
-            if (activation_result.get("empty_target_pool")
-                    or activation_result.get("action") == "empty_target_advance_available"
-                    or activation_result.get("skip_reason")):
-                return True, activation_result
+            if action_type != "move_after_shooting":
+                activation_result = shooting_unit_activation_start(game_state, unit_id)
+                if activation_result.get("error"):
+                    return False, activation_result
+                if (activation_result.get("empty_target_pool")
+                        or activation_result.get("action") == "empty_target_advance_available"
+                        or activation_result.get("skip_reason")):
+                    return True, activation_result
     
     # CRITICAL FIX: Validate unit is current player's unit to prevent self-targeting
     # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
@@ -3710,6 +4018,9 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     elif action_type == "advance":
         # ADVANCE_IMPLEMENTATION: Handle advance action during shooting phase
         return _handle_advance_action(game_state, unit, action, config)
+
+    elif action_type == "move_after_shooting":
+        return _handle_move_after_shooting_action(game_state, unit, action, config)
     
     elif action_type == "select_weapon":
         # WEAPON_SELECTION: Handle weapon selection action
@@ -3736,8 +4047,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         unit_id_str = str(unit_id)
         gs_instance_id = game_state.get("_cache_instance_id", id(game_state))
         pid = os.getpid()
-        ep = game_state.get("episode_number", 0)
-        turn_num = game_state.get("turn", 0)
+        ep = require_key(game_state, "episode_number")
+        turn_num = require_key(game_state, "turn")
         keys_to_remove = [
             key for key in _target_pool_cache.keys()
             if len(key) >= 7 and key[0] == pid and key[1] == gs_instance_id and key[2] == ep and key[3] == turn_num

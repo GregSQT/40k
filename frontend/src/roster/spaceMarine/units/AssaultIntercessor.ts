@@ -34,6 +34,12 @@ export class AssaultIntercessor extends TroopMeleeSwarm {
       usage: "and",
     },
   ];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = {
+    targeted_intercession: 2,
+    targeted_intercession_reroll_1_towound: 2,
+    targeted_intercession_reroll_towound_target_on_objective: 2,
+  };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "assault intercessor squad"}];

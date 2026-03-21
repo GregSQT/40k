@@ -45,6 +45,12 @@ export class TyranidWarriorMelee extends TroopMeleeTroop {
       },
     },
   ];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = {
+    adrenalised_onslaught: 2,
+    aggression_imperative: 2,
+    preservation_imperative: 2,
+  };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "tyranids"}, { keywordId: "tyranid warrior with melee bio-weapon"}];

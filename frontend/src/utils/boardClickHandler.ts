@@ -48,8 +48,11 @@ export function setupBoardClickHandler(callbacks: {
       }>
     ).detail;
 
-    // Ignore unit clicks in advancePreview mode - hex clicks are handled by hex handler
     if (mode === "advancePreview") {
+      // Keep advancePreview mostly hex-driven, but allow right-click cancel on active unit.
+      if (phase === "shoot" && selectedUnitId === unitId && clickType === "right") {
+        callbacks.onCancelMove?.();
+      }
       return;
     }
 
@@ -211,6 +214,11 @@ export function setupBoardClickHandler(callbacks: {
     } else if (mode === "select" && selectedUnitId !== null && phase === "move") {
       if (!callbacks.onStartMovePreview) {
         throw new Error("onStartMovePreview callback is required during move phase");
+      }
+      callbacks.onStartMovePreview(selectedUnitId, col, row);
+    } else if (mode === "select" && selectedUnitId !== null && phase === "shoot") {
+      if (!callbacks.onStartMovePreview) {
+        throw new Error("onStartMovePreview callback is required during shoot phase move preview");
       }
       callbacks.onStartMovePreview(selectedUnitId, col, row);
     } else if (mode === "advancePreview" && selectedUnitId !== null && phase === "shoot") {

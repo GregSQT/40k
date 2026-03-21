@@ -1,0 +1,61 @@
+{
+  "roster_value_mean": 150.0,
+  "roster_value_std": 1.632993161855452,
+  "roster_value_p95": 151.8,
+  "rejection_rate_roster_budget": 0.4,
+  "unit_pick_frequency": {
+    "spaceMarine::SanguinaryGuardAngelus": 2,
+    "spaceMarine::SanguinaryGuardInferno": 2,
+    "tyranid::TyranidWarriorMelee": 2,
+    "chaos::RaptorPlasmaGun": 1,
+    "spaceMarine::GreyHunterPackLeader": 1,
+    "spaceMarine::Incursor": 1,
+    "spaceMarine::Infernus": 1,
+    "spaceMarine::IntercessorGrenadeLauncher": 1,
+    "spaceMarine::Scout": 1,
+    "spaceMarine::SternguardVeteranBoltRifle": 1,
+    "spaceMarine::Suppressor": 1,
+    "tyranid::Zoanthrope": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.13603963459380292,
+    "observed": {
+      "Balance": 0.3333333333333333,
+      "Melee": 0.3333333333333333,
+      "Ranged": 0.3333333333333333
+    },
+    "target": {
+      "Balance": 0.4013531506302348,
+      "Melee": 0.2837995344612249,
+      "Ranged": 0.3148473149085403
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 1.1169794259241095,
+    "observed": {
+      "High": 0.13333333333333333,
+      "Low": 0.13333333333333333,
+      "Mid": 0.7333333333333333
+    },
+    "target": {
+      "High": 0.454257050793509,
+      "Low": 0.3708993288352125,
+      "Mid": 0.17484362037127862
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 1.1906753329382973,
+    "observed": {
+      "AntiElite": 0.4,
+      "Burst": 0.0,
+      "Generalist": 0.4666666666666667,
+      "Volume": 0.13333333333333333
+    },
+    "target": {
+      "AntiElite": 0.12195960250839924,
+      "Burst": 0.5174307717870298,
+      "Generalist": 0.14936939768911875,
+      "Volume": 0.2112402280154522
+    }
+  }
+}

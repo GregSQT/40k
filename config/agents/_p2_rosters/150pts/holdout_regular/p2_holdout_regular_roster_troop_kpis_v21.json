@@ -1,0 +1,69 @@
+{
+  "roster_value_mean": 149.83333333333334,
+  "roster_value_std": 1.6749792701868151,
+  "roster_value_p95": 152.0,
+  "rejection_rate_roster_budget": 0.5384615384615384,
+  "unit_pick_frequency": {
+    "spaceMarine::SanguinaryGuardAngelus": 6,
+    "spaceMarine::SternguardVeteranSergeantPowerFist": 3,
+    "spaceMarine::BladeguardVeteranSergeant": 2,
+    "spaceMarine::BloodClaw": 2,
+    "spaceMarine::SanguinaryGuardInferno": 2,
+    "aeldari::DarkReaperExarch": 1,
+    "aeldari::FireDragonExarch": 1,
+    "aeldari::WarpSpiderExarchPowerblade": 1,
+    "spaceMarine::BloodClawPackLeader": 1,
+    "spaceMarine::DeathCompanyMarineEviscerator": 1,
+    "spaceMarine::GreyHunterPackLeader": 1,
+    "spaceMarine::GreyHunterPlasmaGun": 1,
+    "spaceMarine::HellblasterSergeant": 1,
+    "spaceMarine::Intercessor": 1,
+    "spaceMarine::IntercessorGrenadeLauncher": 1,
+    "spaceMarine::IntercessorSergeant": 1,
+    "spaceMarine::SternguardVeteranBoltRifle": 1,
+    "spaceMarine::Suppressor": 1,
+    "tyranid::TyranidWarriorMelee": 1,
+    "tyranid::TyranidWarriorRanged": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.4027063012604696,
+    "observed": {
+      "Balance": 0.2,
+      "Melee": 0.4666666666666667,
+      "Ranged": 0.3333333333333333
+    },
+    "target": {
+      "Balance": 0.4013531506302348,
+      "Melee": 0.2837995344612249,
+      "Ranged": 0.3148473149085403
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 1.1836460925907764,
+    "observed": {
+      "High": 0.06666666666666667,
+      "Low": 0.16666666666666666,
+      "Mid": 0.7666666666666667
+    },
+    "target": {
+      "High": 0.454257050793509,
+      "Low": 0.3708993288352125,
+      "Mid": 0.17484362037127862
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 1.1240086662716307,
+    "observed": {
+      "AntiElite": 0.4,
+      "Burst": 0.0,
+      "Generalist": 0.43333333333333335,
+      "Volume": 0.16666666666666666
+    },
+    "target": {
+      "AntiElite": 0.12195960250839924,
+      "Burst": 0.5174307717870298,
+      "Generalist": 0.14936939768911875,
+      "Volume": 0.2112402280154522
+    }
+  }
+}

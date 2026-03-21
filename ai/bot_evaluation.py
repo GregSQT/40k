@@ -378,7 +378,10 @@ def _eval_worker_init(
     )
 
 
-def _eval_worker_task(task: Dict[str, Any]) -> Dict[str, Any]:
+def _eval_worker_task(
+    task: Dict[str, Any],
+    progress_callback: Optional[Callable[[], None]] = None,
+) -> Dict[str, Any]:
     """
     Exécuté dans un processus séparé (ou en sérial). Utilise _worker_model et _worker_obs_normalizer
     chargés par _eval_worker_init.
@@ -443,11 +446,14 @@ def _eval_worker_task(task: Dict[str, Any]) -> Dict[str, Any]:
             draws += 1
         else:
             losses += 1
+        if progress_callback is not None:
+            progress_callback()
 
     shoot_stats = env.get_shoot_stats() if hasattr(env, "get_shoot_stats") else {}
     env.close()
     return {
         "wins": wins, "losses": losses, "draws": draws,
+        "failed_episodes": 0,
         "shoot_stats": shoot_stats,
         "bot_name": task["bot_name"],
         "scenario_name": task["scenario_name"],
@@ -468,6 +474,7 @@ def _get_result_with_timeout(
         logging.warning(f"Eval task timeout: bot={bot_name} scenario={scenario_name}")
         return {
             "wins": 0, "losses": 0, "draws": 0,
+            "failed_episodes": int(task["n_episodes"]),
             "timeout": True,
             "bot_name": bot_name,
             "scenario_name": scenario_name,
@@ -476,6 +483,7 @@ def _get_result_with_timeout(
         logging.exception(f"Eval task failed: bot={bot_name} scenario={scenario_name} error={e}")
         return {
             "wins": 0, "losses": 0, "draws": 0,
+            "failed_episodes": int(task["n_episodes"]),
             "error": str(e),
             "bot_name": bot_name,
             "scenario_name": scenario_name,
@@ -512,6 +520,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     import time
 
     # Import evaluation bots for testing
+    eval_wall_start = time.time()
     try:
         from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
         EVALUATION_BOTS_AVAILABLE = True
@@ -583,14 +592,21 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         f"model_{base_agent_key}.zip"
     )
 
-    # model_path pour workers : toujours sauvegarder le modèle courant en temp pour l'éval.
-    # Pendant l'entraînement, le fichier canonique (model_agent.zip) n'est mis à jour qu'à la fin.
-    # Si on utilisait ce fichier, les workers chargeraient un modèle obsolète → a_bot_eval_combined plat.
-    import tempfile
-    _fd, effective_model_path = tempfile.mkstemp(suffix=".zip")
-    os.close(_fd)
-    model.save(effective_model_path)
-    _temp_model_path = effective_model_path
+    # model_path optionnel : permet d'évaluer un snapshot explicite (mode async).
+    # Si absent, on sauvegarde un snapshot temporaire du modèle courant.
+    _temp_model_path = None
+    if model_path:
+        effective_model_path = model_path
+        if not os.path.exists(effective_model_path):
+            raise FileNotFoundError(f"Evaluation snapshot not found: {effective_model_path}")
+    else:
+        # Pendant l'entraînement, le fichier canonique (model_agent.zip) n'est mis à jour qu'à la fin.
+        # On snapshot donc le modèle courant pour éviter d'évaluer un artefact obsolète.
+        import tempfile
+        _fd, effective_model_path = tempfile.mkstemp(suffix=".zip")
+        os.close(_fd)
+        model.save(effective_model_path)
+        _temp_model_path = effective_model_path
 
     bot_eval_cfg = _load_bot_eval_params(config, base_agent_key, training_config_name)
     eval_weights = bot_eval_cfg["weights"]
@@ -724,6 +740,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         if line_length_state is not None:
             line_length_state["last_progress_line_len"] = len(line)
 
+    if show_progress:
+        _print_progress(0, total_episodes)
+
     try:
         if use_subprocess and n_workers > 1:
             ctx = mp.get_context("spawn")
@@ -740,17 +759,23 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     task = future_to_task[future]
                     result = _get_result_with_timeout(future, task, task_timeout_seconds)
                     results_list.append(result)
-                    completed_episodes += result.get("wins", 0) + result.get("losses", 0) + result.get("draws", 0)
+                    completed_episodes += (
+                        int(require_key(result, "wins"))
+                        + int(require_key(result, "losses"))
+                        + int(require_key(result, "draws"))
+                    )
                     _print_progress(completed_episodes, total_episodes)
         else:
             _eval_worker_init(*initargs)
             results_list = []
             completed_episodes = 0
-            for t in tasks:
-                result = _eval_worker_task(t)
-                results_list.append(result)
-                completed_episodes += result.get("wins", 0) + result.get("losses", 0) + result.get("draws", 0)
+            def _on_episode_completed() -> None:
+                nonlocal completed_episodes
+                completed_episodes += 1
                 _print_progress(completed_episodes, total_episodes)
+            for t in tasks:
+                result = _eval_worker_task(t, progress_callback=_on_episode_completed)
+                results_list.append(result)
     finally:
         if _temp_model_path and os.path.exists(_temp_model_path):
             try:
@@ -790,8 +815,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 "draws": r["draws"],
             }
 
-    total_failed_episodes = sum(1 for r in results_list if r.get("timeout") or r.get("error"))
+    total_failed_episodes = sum(int(require_key(r, "failed_episodes")) for r in results_list)
     results["total_failed_episodes"] = total_failed_episodes
+    results["eval_reliable"] = total_failed_episodes == 0
+    results["eval_duration_seconds"] = float(time.time() - eval_wall_start)
 
     results["combined"] = (
         eval_weights["random"] * results["random"] +

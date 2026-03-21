@@ -3,7 +3,7 @@
 import { getWeapons } from "../armory";
 import { SwarmMeleeTroop } from "../classes/SwarmMeleeTroop";
 
-export class StrikingScorpion extends SwarmMeleeTroop {
+export class StrikingScorpionExarch extends SwarmMeleeTroop {
   static NAME = "StrikingScorpionExarch";
   static DISPLAY_NAME = "Striking Scorpion Exarch";
 
@@ -19,9 +19,9 @@ export class StrikingScorpion extends SwarmMeleeTroop {
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["shuriken_pistol"];
-  static RNG_WEAPONS = getWeapons(StrikingScorpion.RNG_WEAPON_CODES);
+  static RNG_WEAPONS = getWeapons(StrikingScorpionExarch.RNG_WEAPON_CODES);
   static CC_WEAPON_CODES = ["scorpion_claws"];
-  static CC_WEAPONS = getWeapons(StrikingScorpion.CC_WEAPON_CODES);
+  static CC_WEAPONS = getWeapons(StrikingScorpionExarch.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Striking Scorpion"}];
@@ -36,6 +36,6 @@ export class StrikingScorpion extends SwarmMeleeTroop {
   static ICON_SCALE = 1.6; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, StrikingScorpion.HP_MAX, startPos);
+    super(name, StrikingScorpionExarch.HP_MAX, startPos);
   }
 }
