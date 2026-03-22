@@ -1,11 +1,11 @@
 // frontend/src/components/BoardWithAPI.tsx
 import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
 import type { MutableRefObject } from "react";
-import { clearAuthSession, getAuthSession } from "../auth/authStorage";
+import { clearAuthSession, getAuthSession, markTutorialComplete } from "../auth/authStorage";
 import {
   getTutorialUiBehavior,
   isTutorialUiDebugModeEnabled,
@@ -1042,7 +1042,16 @@ export const BoardWithAPI: React.FC = () => {
 
   // Detect game mode from URL
   const location = useLocation();
+  const navigate = useNavigate();
   const isTutorialMode = location.pathname === "/game" && location.search.includes("mode=tutorial");
+  const handleTutorialComplete = useCallback(async () => {
+    try {
+      await markTutorialComplete();
+      navigate("/game?mode=pve", { replace: true });
+    } catch (err) {
+      console.error("Failed to mark tutorial complete:", err);
+    }
+  }, [navigate]);
   const gameMode = location.pathname.includes("/replay")
     ? "training"
     : isTutorialMode
@@ -2423,6 +2432,7 @@ export const BoardWithAPI: React.FC = () => {
       startGameWithScenario={apiProps.startGameWithScenario}
       onPauseAIChange={setPauseAIForTutorial}
       stopAiAfterPhaseChangeRef={stopAiAfterPhaseChangeRef}
+      onTutorialComplete={handleTutorialComplete}
     >
       <TutorialShootOptionsSync getTutorialShootOptionsRef={getTutorialShootOptionsRef} />
       <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>

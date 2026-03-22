@@ -1,6 +1,7 @@
 // frontend/src/components/SharedLayout.tsx
 import type React from "react";
 import { useLocation } from "react-router-dom";
+import { getAuthSession } from "../auth/authStorage";
 import { ErrorBoundary } from "./ErrorBoundary";
 import TooltipWrapper from "./TooltipWrapper";
 
@@ -17,6 +18,8 @@ interface NavigationProps {
 
 const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
   const location = useLocation();
+  const authSession = getAuthSession();
+  const tutorialCompleted = authSession?.tutorial_completed ?? true;
 
   const getButtonClass = (path: string) => {
     const isPvPTestMode = location.pathname === "/game" && location.search.includes("mode=pvp_test");
@@ -69,48 +72,61 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
       }}
     >
       <nav className="navigation">
-        <button
-          type="button"
-          onClick={() => (window.location.href = "/game")}
-          className={getButtonClass("/game")}
-        >
-          PvP
-        </button>
-        <button
-          type="button"
-          onClick={() => (window.location.href = "/game?mode=pve")}
-          className={getButtonClass("/game?mode=pve")}
-        >
-          PvE
-        </button>
-        <button
-          type="button"
-          onClick={() => (window.location.href = "/game?mode=tutorial")}
-          className={getButtonClass("/game?mode=tutorial")}
-        >
-          Tutorial
-        </button>
-        <button
-          type="button"
-          onClick={() => (window.location.href = "/game?mode=pvp_test")}
-          className={getButtonClass("/game?mode=pvp_test")}
-        >
-          PvP Test
-        </button>
-        <button
-          type="button"
-          onClick={() => (window.location.href = "/game?mode=pve_test")}
-          className={getButtonClass("/game?mode=pve_test")}
-        >
-          PvE Test
-        </button>
-        <button
-          type="button"
-          onClick={() => (window.location.href = "/game?mode=replay")}
-          className={getButtonClass("/replay")}
-        >
-          Replay
-        </button>
+        {!tutorialCompleted && (
+          <button
+            type="button"
+            onClick={() => (window.location.href = "/game?mode=tutorial")}
+            className={getButtonClass("/game?mode=tutorial")}
+          >
+            Tutorial
+          </button>
+        )}
+        {tutorialCompleted && (
+          <>
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/game")}
+              className={getButtonClass("/game")}
+            >
+              PvP
+            </button>
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/game?mode=pve")}
+              className={getButtonClass("/game?mode=pve")}
+            >
+              PvE
+            </button>
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/game?mode=tutorial")}
+              className={getButtonClass("/game?mode=tutorial")}
+            >
+              Tutorial
+            </button>
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/game?mode=pvp_test")}
+              className={getButtonClass("/game?mode=pvp_test")}
+            >
+              PvP Test
+            </button>
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/game?mode=pve_test")}
+              className={getButtonClass("/game?mode=pve_test")}
+            >
+              PvE Test
+            </button>
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/game?mode=replay")}
+              className={getButtonClass("/replay")}
+            >
+              Replay
+            </button>
+          </>
+        )}
       </nav>
 
       {onOpenSettings && (

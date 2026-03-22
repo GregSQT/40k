@@ -1,6 +1,8 @@
 {
-  "primary_objectives": ["objectives_control"],
+  "deployment_zone": "hammer",
+  "deployment_type": "active",
   "wall_ref": "walls-01.json",
+  "primary_objectives": ["objectives_control"],
   "units": [
     {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 14, "row": 12},
     {"id": 2, "unit_type": "Intercessor", "player": 1, "col": 20, "row": 7},

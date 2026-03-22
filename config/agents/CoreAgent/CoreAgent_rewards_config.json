@@ -29,8 +29,8 @@
       "draw": 0.0
     },
     "objective_rewards": {
-      "reward_per_objective": 3.0,
-      "reward_for_objective_lead": 5.0,
+      "reward_per_objective": 5.0,
+      "reward_for_objective_lead": 10.0,
       "use_objective_lead": true,
       "reward_per_objective_turn5": 0.0
     },

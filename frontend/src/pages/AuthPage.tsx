@@ -21,6 +21,7 @@ interface LoginResponse {
     };
   };
   default_redirect_mode: string;
+  tutorial_completed: boolean;
 }
 
 export default function AuthPage() {
@@ -83,9 +84,10 @@ export default function AuthPage() {
         user: loginPayload.user,
         permissions: loginPayload.permissions,
         default_redirect_mode: loginPayload.default_redirect_mode,
+        tutorial_completed: loginPayload.tutorial_completed ?? false,
       });
 
-      navigate("/game?mode=pve", { replace: true });
+      navigate(`/game?mode=${loginPayload.default_redirect_mode}`, { replace: true });
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Erreur inconnue");
     } finally {

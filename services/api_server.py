@@ -236,7 +236,8 @@ def _get_authenticated_user_or_response():
     try:
         row = connection.execute(
             """
-            SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code
+            SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code,
+                   COALESCE(u.tutorial_completed, 0) AS tutorial_completed
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             JOIN profiles p ON p.id = u.profile_id
@@ -323,6 +324,11 @@ def initialize_auth_db() -> None:
             );
             """
         )
+        # Migration: add tutorial_completed for first-login → tutorial flow
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN tutorial_completed INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         cursor.execute(
             "INSERT OR IGNORE INTO profiles (code, label) VALUES (?, ?)",
@@ -347,6 +353,10 @@ def initialize_auth_db() -> None:
         cursor.execute(
             "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
             ("pvp_test", "Player vs Player Test"),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            ("tutorial", "Tutoriel"),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO options (code, label) VALUES (?, ?)",
@@ -388,7 +398,17 @@ def initialize_auth_db() -> None:
             "SELECT id FROM game_modes WHERE code = ?",
             ("pvp_test",),
         ).fetchone()
-        if pve_row is None or pve_test_row is None or pvp_row is None or pvp_test_row is None:
+        tutorial_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            ("tutorial",),
+        ).fetchone()
+        if (
+            pve_row is None
+            or pve_test_row is None
+            or pvp_row is None
+            or pvp_test_row is None
+            or tutorial_row is None
+        ):
             raise RuntimeError("Failed to seed required game modes")
 
         cursor.execute(
@@ -409,6 +429,10 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (profile_id, tutorial_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (admin_profile_id, pve_row["id"]),
         )
         cursor.execute(
@@ -422,6 +446,10 @@ def initialize_auth_db() -> None:
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (admin_profile_id, pvp_test_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, tutorial_row["id"]),
         )
 
         warning_option_row = cursor.execute(
@@ -968,7 +996,8 @@ def login_user():
     try:
         user_row = connection.execute(
             """
-            SELECT u.id AS user_id, u.login, u.password_hash, p.id AS profile_id, p.code AS profile_code
+            SELECT u.id AS user_id, u.login, u.password_hash, p.id AS profile_id, p.code AS profile_code,
+                   COALESCE(u.tutorial_completed, 0) AS tutorial_completed
             FROM users u
             JOIN profiles p ON p.id = u.profile_id
             WHERE u.login = ?
@@ -989,6 +1018,7 @@ def login_user():
         permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
         connection.commit()
 
+        tutorial_completed = bool(user_row.get("tutorial_completed", 0))
         return jsonify(
             {
                 "success": True,
@@ -999,11 +1029,34 @@ def login_user():
                     "profile": user_row["profile_code"],
                 },
                 "permissions": permissions,
-                "default_redirect_mode": "pve",
+                "default_redirect_mode": "tutorial" if not tutorial_completed else "pve",
+                "tutorial_completed": tutorial_completed,
             }
         )
     finally:
         connection.close()
+
+
+@app.route('/api/auth/tutorial-complete', methods=['POST'])
+def tutorial_complete():
+    """Mark the current user's tutorial as completed (called when user finishes or skips tutorial)."""
+    user_row, error_response = _get_authenticated_user_or_response()
+    if error_response is not None:
+        return error_response
+    if user_row is None:
+        return jsonify({"success": False, "error": "authentication failed"}), 401
+
+    connection = _get_auth_db_connection()
+    try:
+        connection.execute(
+            "UPDATE users SET tutorial_completed = 1 WHERE id = ?",
+            (user_row["user_id"],),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    return jsonify({"success": True, "tutorial_completed": True})
 
 
 @app.route('/api/auth/me', methods=['GET'])
@@ -1021,6 +1074,7 @@ def current_user():
     finally:
         connection.close()
 
+    tutorial_completed = bool(user_row.get("tutorial_completed", 0))
     return jsonify(
         {
             "success": True,
@@ -1030,9 +1084,11 @@ def current_user():
                 "profile": user_row["profile_code"],
             },
             "permissions": permissions,
-            "default_redirect_mode": "pve",
+            "default_redirect_mode": "tutorial" if not tutorial_completed else "pve",
+            "tutorial_completed": tutorial_completed,
         }
     )
+
 
 @app.route('/api/debug/engine-test', methods=['GET'])
 def test_engine():

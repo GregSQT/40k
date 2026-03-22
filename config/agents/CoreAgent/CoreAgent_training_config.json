@@ -2,7 +2,7 @@
   "default": {
   "type": "################################################### Default ###################################################",
   "seed": 22345,
-  "total_episodes": 30000,
+  "total_episodes": 20000,
   "total_episodes_normal": "20000 -violet 1000 ep / minute -> 12k ep / hour",
   "bot_eval_scenario_pool": "holdout",
   "bot_eval_show_progress": true,
@@ -41,7 +41,7 @@
   "step_log_buffer_size": 200,
   "model_params": {
     "policy": "MlpPolicy",
-    "learning_rate": {"initial": 0.0001, "final": 0.00002},
+    "learning_rate": {"initial": 0.0001, "final": 0.00003},
     "n_steps": 16384,
     "batch_size": 4096,
     "n_epochs": 3,

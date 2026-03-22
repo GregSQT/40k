@@ -343,6 +343,8 @@ interface TutorialProviderProps {
   onPauseAIChange?: (pause: boolean) => void;
   /** Ref pour indiquer à useEngineAPI d'arrêter la boucle AI après chaque phase (étapes 2-11/2-12/2-13). */
   stopAiAfterPhaseChangeRef?: React.MutableRefObject<boolean>;
+  /** Callback appelé quand le tutoriel est terminé (fin complète ou clic "Passer le tutoriel"). */
+  onTutorialComplete?: () => void | Promise<void>;
   children: React.ReactNode;
 }
 
@@ -355,6 +357,7 @@ export function TutorialProvider({
   onStepChange,
   onPauseAIChange,
   stopAiAfterPhaseChangeRef,
+  onTutorialComplete,
   children,
 }: TutorialProviderProps) {
   const [steps, setSteps] = useState<TutorialStepDef[]>([]);
@@ -791,6 +794,7 @@ export function TutorialProvider({
         }
       } else {
         setPopupVisible(false);
+        onTutorialComplete?.();
       }
     }
   }, [
@@ -801,12 +805,14 @@ export function TutorialProvider({
     startGameWithScenario,
     gameState,
     onPauseAIChange,
+    onTutorialComplete,
   ]);
 
   const onSkipTutorial = useCallback(() => {
     setSkipped(true);
     setPopupVisible(false);
-  }, []);
+    onTutorialComplete?.();
+  }, [onTutorialComplete]);
 
   const value = useMemo<TutorialContextValue>(
     () =>
