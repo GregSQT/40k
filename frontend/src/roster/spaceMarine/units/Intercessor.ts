@@ -23,8 +23,8 @@ export class Intercessor extends TroopRangeSwarm {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(Intercessor.CC_WEAPON_CODES);
 
-    // UNIT KEYWORDS
-    static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "intercessor squad"}];
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "intercessor squad"}];
 
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save

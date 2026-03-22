@@ -495,7 +495,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                          step_logger=None, debug_mode=False, eval_progress_label: Optional[str] = None,
                          show_summary: bool = True, eval_progress_prefix: Optional[str] = None,
                          scenario_pool: str = "training", model_path: Optional[str] = None,
-                         line_length_state: Optional[Dict[str, Any]] = None):
+                         line_length_state: Optional[Dict[str, Any]] = None,
+                         scenario_list_override: Optional[List[str]] = None):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -616,31 +617,43 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         "defensive": eval_randomness.get("defensive", 0.15),
     }
 
-    if scenario_pool not in ("training", "holdout"):
-        raise ValueError(
-            f"scenario_pool must be 'training' or 'holdout' (got {scenario_pool!r})"
-        )
+    if scenario_list_override is not None:
+        if not isinstance(scenario_list_override, list):
+            raise TypeError(
+                f"scenario_list_override must be list or None (got {type(scenario_list_override).__name__})"
+            )
+        if len(scenario_list_override) == 0:
+            raise ValueError("scenario_list_override cannot be empty")
+        scenario_list = [str(path) for path in scenario_list_override]
+        for scenario_path in scenario_list:
+            if not os.path.isfile(scenario_path):
+                raise FileNotFoundError(f"scenario_list_override contains missing file: {scenario_path}")
+    else:
+        if scenario_pool not in ("training", "holdout"):
+            raise ValueError(
+                f"scenario_pool must be 'training' or 'holdout' (got {scenario_pool!r})"
+            )
 
-    scenario_list = get_scenario_list_for_phase(
-        config,
-        base_agent_key,
-        training_config_name,
-        scenario_type=scenario_pool
-    )
-
-    if len(scenario_list) == 0:
-        expected_dir = os.path.join(
-            config.config_dir,
-            "agents",
+        scenario_list = get_scenario_list_for_phase(
+            config,
             base_agent_key,
-            "scenarios",
-            scenario_pool
+            training_config_name,
+            scenario_type=scenario_pool
         )
-        raise FileNotFoundError(
-            f"No {scenario_pool} scenarios found for agent '{base_agent_key}'. "
-            f"Expected files in: {expected_dir} with naming '{base_agent_key}_*.json'."
-        )
-    scenario_list = _filter_scenarios_from_config(training_cfg, scenario_list, base_agent_key)
+
+        if len(scenario_list) == 0:
+            expected_dir = os.path.join(
+                config.config_dir,
+                "agents",
+                base_agent_key,
+                "scenarios",
+                scenario_pool
+            )
+            raise FileNotFoundError(
+                f"No {scenario_pool} scenarios found for agent '{base_agent_key}'. "
+                f"Expected files in: {expected_dir} with naming '{base_agent_key}_*.json'."
+            )
+        scenario_list = _filter_scenarios_from_config(training_cfg, scenario_list, base_agent_key)
 
     if n_episodes <= 0:
         raise ValueError("n_episodes must be > 0 for bot evaluation")

@@ -1,0 +1,32 @@
+{
+  "deployment_zone": "hammer",
+  "deployment_type": "active",
+  "scale": "100pts",
+  "wall_ref": "walls-01.json",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "objectives_ref": "objectives-01.json",
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "Hormagaunt",
+      "player": 1
+    },
+    {
+      "id": 2,
+      "unit_type": "Hormagaunt",
+      "player": 1
+    },
+    {
+      "id": 101,
+      "unit_type": "AssaultIntercessorJumpPack",
+      "player": 2
+    },
+    {
+      "id": 102,
+      "unit_type": "AssaultIntercessorJumpPack",
+      "player": 2
+    }
+  ]
+}

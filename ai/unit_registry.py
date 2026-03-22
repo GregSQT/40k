@@ -16,6 +16,7 @@ from shared.data_validation import require_key, require_present
 
 class UnitRegistry:
     """Dynamic unit discovery and faction-role management system."""
+    CORE_AGENT_KEY = "CoreAgent"
     
     def __init__(self, project_root: str = None):
         if project_root is None:
@@ -492,16 +493,15 @@ class UnitRegistry:
         # Initialize faction containers
         for faction in self.factions:
             self.faction_role_matrix[faction] = []
-        
-        # Inter-faction agent mapping: MoveType_TankingLevel_AttackTypeTarget
+
+        # Current project mode: single shared agent for all units.
         for unit_type, unit_data in self.units.items():
-            # Generate inter-faction key based on unit characteristics
-            agent_key = self._generate_advanced_agent_key(unit_type, unit_data)
-            
+            agent_key = self.CORE_AGENT_KEY
+
             # Add to matrix
             if agent_key not in self.faction_role_matrix:
                 self.faction_role_matrix[agent_key] = []
-            
+
             self.faction_role_matrix[agent_key].append(unit_type)
     
     def _generate_advanced_agent_key(self, unit_type: str, unit_data: Dict) -> str:
@@ -554,20 +554,15 @@ class UnitRegistry:
         return f"{role}{unit_data['TARGET_TYPE']}"
     
     def get_model_key(self, unit_type: str) -> str:
-        """Get the model key for a given unit type using 4-part advanced mapping."""
+        """Get the model key for a given unit type (single-agent mode)."""
         if unit_type not in self.units:
             raise ValueError(f"Unknown unit type: {unit_type}")
-        
-        unit_data = self.units[unit_type]
-        return self._generate_advanced_agent_key(unit_type, unit_data)
+
+        return self.CORE_AGENT_KEY
     
     def get_required_models(self) -> List[str]:
-        """Get list of all required model keys using 4-part agent keys."""
-        model_keys = set()
-        for unit_type, unit_data in self.units.items():
-            agent_key = self._generate_advanced_agent_key(unit_type, unit_data)
-            model_keys.add(agent_key)
-        return sorted(list(model_keys))
+        """Get list of required model keys (single-agent mode)."""
+        return [self.CORE_AGENT_KEY]
     
     def get_all_model_keys(self) -> List[str]:
         """Get all available model keys (alias for get_required_models)."""

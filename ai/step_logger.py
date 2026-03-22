@@ -374,6 +374,25 @@ class StepLogger:
 
             return base_msg
 
+        elif action_type == "move_after_shooting" and details:
+            if "start_pos" not in details or details["start_pos"] is None:
+                raise KeyError("Move_after_shooting action missing required start_pos")
+            if "end_pos" not in details or details["end_pos"] is None:
+                raise KeyError("Move_after_shooting action missing required end_pos")
+            start_col, start_row = details["start_pos"]
+            end_col, end_row = details["end_pos"]
+            ability_display_name = details.get("ability_display_name")
+            if not isinstance(ability_display_name, str) or not ability_display_name.strip():
+                raise KeyError("Move_after_shooting action missing required ability_display_name")
+            source_rule_id = details.get("source_rule_id")
+            if not isinstance(source_rule_id, str) or not source_rule_id.strip():
+                raise KeyError("Move_after_shooting action missing required source_rule_id")
+            base_msg = (
+                f"{unit_label} MOVED AFTER SHOOTING [{ability_display_name.strip().upper()}] "
+                f"from ({start_col},{start_row}) to ({end_col},{end_row})"
+            )
+            return base_msg
+
         elif action_type == "deploy_unit" and details:
             if (
                 "start_pos" in details

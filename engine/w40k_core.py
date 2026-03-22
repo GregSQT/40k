@@ -701,6 +701,35 @@ class W40KEngine(gym.Env):
             raise KeyError("Config missing required 'units' field during reset")
         unit_configs = self.config["units"]
         for unit in self.game_state["units"]:
+            # Clear transient shooting state from previous episode.
+            # These fields are activation-scoped and must never leak across reset.
+            transient_shoot_fields = (
+                "valid_target_pool",
+                "_pool_from_cache",
+                "_pool_cache_key",
+                "TOTAL_ATTACK_LOG",
+                "selected_target_id",
+                "activation_position",
+                "_shooting_with_pistol",
+                "_manual_weapon_selected",
+                "_shoot_activation_started",
+                "_pending_move_after_shooting",
+                "_move_after_shooting_destinations",
+                "_move_after_shooting_resolved",
+                "_move_after_shooting_distance",
+                "_current_shoot_nb",
+                "_rapid_fire_context_weapon_index",
+                "_rapid_fire_base_nb",
+                "_rapid_fire_shots_fired",
+                "_rapid_fire_bonus_total",
+                "_rapid_fire_rule_value",
+                "_rapid_fire_bonus_shot_current",
+                "_rapid_fire_bonus_applied_by_weapon",
+            )
+            for field_name in transient_shoot_fields:
+                if field_name in unit:
+                    del unit[field_name]
+
             unit["HP_CUR"] = unit["HP_MAX"]
 
             # CRITICAL: Reset shooting state per episode
@@ -1678,6 +1707,12 @@ class W40KEngine(gym.Env):
         # Training mode is fully programmatic: never block on manual rule choices.
         if self.gym_training_mode:
             return False
+        current_mode_code = self.game_state.get("current_mode_code")
+        if not isinstance(current_mode_code, str) or not current_mode_code:
+            current_mode_code = getattr(self, "current_mode_code", None)
+        if current_mode_code == "pve_test":
+            # PvE test mode exposes rule-choice prompts for both players.
+            return True
         player_types = self.game_state.get("player_types")
         if isinstance(player_types, dict) and str(player) in player_types:
             return player_types[str(player)] == "human"
@@ -2196,6 +2231,7 @@ class W40KEngine(gym.Env):
         # Log action with result (before cascade modifies it)
         if (self.step_logger and self.step_logger.enabled):
             try:
+                move_after_shooting_logged = False
                 
                 # CHANGE 1: Read action from result dict FIRST (handlers populate actual executed action)
                 # Diagnostic proved: result.get('action')='move' but action.get('action')='activate_unit'
@@ -2211,18 +2247,23 @@ class W40KEngine(gym.Env):
                 if action_type is None:
                     # Check if this is a phase transition without action (system response, not an action)
                     if result.get("phase_complete") or result.get("phase_transition"):
-                        # CRITICAL: Check if there are attack results to log before phase transition
-                        # This handles cases where attacks were executed just before phase completion
-                        all_attack_results = require_key(result, "all_attack_results")
+                        # CRITICAL: Check if there are attack results to log before phase transition.
+                        # Use pre_action_phase (captured before handler execution), because current
+                        # game_state phase may already have transitioned (shoot->charge / fight->command).
+                        all_attack_results = result.get("all_attack_results", [])
+                        if not isinstance(all_attack_results, list):
+                            raise TypeError(
+                                f"result['all_attack_results'] must be a list when provided, got "
+                                f"{type(all_attack_results).__name__}"
+                            )
                         if all_attack_results:
                             # Has attacks to log - infer action type from phase or attack results
-                            current_phase = self.game_state.get("phase", "unknown")
-                            if current_phase == "shoot":
+                            if pre_action_phase == "shoot":
                                 action_type = "shoot"
                                 # Need unitId for logging - try to get from first attack result
                                 if not result.get("unitId") and all_attack_results:
                                     result["unitId"] = all_attack_results[0].get("shooterId")
-                            elif current_phase == "fight":
+                            elif pre_action_phase == "fight":
                                 action_type = "combat"
                                 # Need unitId for logging - try to get from first attack result
                                 if not result.get("unitId") and all_attack_results:
@@ -2262,6 +2303,11 @@ class W40KEngine(gym.Env):
                             f"action_logs entry must be a dict, got {type(raw_log).__name__}"
                         )
                     raw_type = raw_log.get("type")
+                    if raw_type == "move_after_shooting":
+                        # Keep post-shoot movement in the standard flush order.
+                        # Logging it here would place "MOVED AFTER SHOOTING" before "SHOT"
+                        # and create false analyzer errors (adjacency/engaged checks).
+                        continue
                     if raw_type == "reactive_move":
                         # Keep reactive moves in standard flush order (after triggering MOVE/FLED log).
                         continue
@@ -2411,6 +2457,28 @@ class W40KEngine(gym.Env):
                         self._step_calls_since_increment = 0
                         early_logged_action_log_ids.add(id(raw_log))
                 
+                # Canonicalize attack action type BEFORE skip-routing.
+                # If handlers already produced concrete attack payloads, logging must
+                # always use shoot/combat paths even if an intermediate action leaked.
+                if isinstance(result, dict):
+                    early_attack_results = result.get("all_attack_results")
+                else:
+                    early_attack_results = None
+                if isinstance(early_attack_results, list) and early_attack_results:
+                    if pre_action_phase == "shoot":
+                        action_type = "shoot"
+                    elif pre_action_phase == "fight":
+                        action_type = "combat"
+                    # Ensure downstream routing sees the canonical action.
+                    result["action"] = action_type
+                    if "unitId" not in result or result.get("unitId") is None:
+                        first_attack = early_attack_results[0]
+                        if isinstance(first_attack, dict):
+                            if action_type == "shoot":
+                                result["unitId"] = first_attack.get("shooterId")
+                            elif action_type == "combat":
+                                result["unitId"] = first_attack.get("attackerId")
+
                 # Skip logging for system actions and intermediate actions
                 skip_logging_action_types = [
                     "advance_phase",  # System action
@@ -2445,7 +2513,11 @@ class W40KEngine(gym.Env):
                         all_attack_results = []
                         is_action_with_attacks = False
                     
-                    if waiting_for_player and not is_action_with_attacks:
+                    if (
+                        waiting_for_player
+                        and not is_action_with_attacks
+                        and action_type not in ["combat", "shoot"]
+                    ):
                         # Skip logging - waiting for player input, action not yet complete
                         # Will be logged when the actual action completes (e.g., move after destination selection)
                         pass
@@ -2630,17 +2702,229 @@ class W40KEngine(gym.Env):
                             # Single path avoids divergence between direct logging and handler-side logs.
                             action_logged = True
 
-                        # If handler returned attack results, ensure we log them even if action_type was mutated
+                        # If handler returned attack results, force canonical action_type for logging.
+                        # Keep an if/elif/else chain so charge-specific actions don't fall into generic logging.
                         if action_logged:
                             pass
-                        elif "all_attack_results" in result and action_type not in ["combat", "shoot"]:
-                            action_type = require_key(result, "action")
-                            if action_type not in ["combat", "shoot"]:
-                                raise ValueError(
-                                    f"Action type must be 'combat' or 'shoot' when all_attack_results is present. "
-                                    f"action_type={action_type}, unit_id={unit_id}"
+                        elif result.get("all_attack_results"):
+                            raw_attack_results = result.get("all_attack_results")
+                            if not isinstance(raw_attack_results, list):
+                                raise TypeError(
+                                    f"result['all_attack_results'] must be a list when non-empty, got "
+                                    f"{type(raw_attack_results).__name__}"
                                 )
-                        
+                            if pre_action_phase == "shoot":
+                                action_type = "shoot"
+                            elif pre_action_phase == "fight":
+                                action_type = "combat"
+                            elif action_type not in ["combat", "shoot"]:
+                                raise ValueError(
+                                    f"Cannot infer action type for all_attack_results outside shoot/fight phase. "
+                                    f"phase={pre_action_phase}, action_type={action_type}, unit_id={unit_id}"
+                                )
+
+                            # Log combat or shoot action - handlers MUST return all_attack_results complete
+                            all_attack_results = require_key(result, "all_attack_results")
+                            
+                            if not all_attack_results:
+                                # No attack results - check if waiting for player input
+                                waiting_for_player = require_key(result, "waiting_for_player")
+                                if waiting_for_player:
+                                    # Waiting for player to select target - no attacks executed yet
+                                    # Skip logging for now, will be logged when target is selected
+                                    pass
+                                else:
+                                    # This is an error - combat/shoot action should have attack results
+                                    raise ValueError(
+                                        f"{action_type} action missing all_attack_results - handlers must return complete data. "
+                                        f"unit_id={unit_id}, result keys={list(result.keys())}"
+                                    )
+                            else:
+                                # Log EACH attack individually for proper step log output
+                                step_reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+
+                                for i, attack_result in enumerate(all_attack_results):
+                                    # CRITICAL: Validate attack_result has all required fields
+                                    required_fields = ["hit_roll", "wound_roll", "save_roll", "damage", "hit_success", "wound_success", "save_success", "hit_target", "wound_target", "save_target", "target_died", "weapon_name"]
+                                    missing_fields = [field for field in required_fields if field not in attack_result]
+                                    if missing_fields:
+                                        raise KeyError(
+                                            f"attack_result[{i}] in all_attack_results missing required fields: {missing_fields}. "
+                                            f"attack_result keys: {list(attack_result.keys())}. "
+                                            f"action_type={action_type}, unit_id={unit_id}"
+                                        )
+                                    
+                                    # CRITICAL: Use shooterId for shoot, attackerId for combat
+                                    if action_type == "combat":
+                                        actual_shooter_id = require_key(attack_result, "attackerId")
+                                    else:
+                                        actual_shooter_id = require_key(attack_result, "shooterId")
+                                    target_id = require_key(attack_result, "targetId")
+                                    
+                                    # Validate that actual_shooter_id matches the unit_id from result
+                                    if str(actual_shooter_id) != str(unit_id):
+                                        # Log warning but continue - this indicates a potential bug
+                                        episode = self.game_state.get("episode_number", "?")
+                                        turn = self.game_state.get("turn", "?")
+                                        from engine.game_utils import add_console_log, safe_print
+                                        warning_msg = f"[CRITICAL LOGGING BUG] E{episode} T{turn} shoot logging: attack_result.shooterId={actual_shooter_id} but result.unitId={unit_id} - using shooterId from attack_result"
+                                        add_console_log(self.game_state, warning_msg)
+                                        safe_print(self.game_state, warning_msg)
+                                    
+                                    # Get actual shooter unit for coordinates.
+                                    # Shooter may be absent from units_cache after HAZARDOUS self-destruction.
+                                    actual_shooter_unit = self._get_unit_by_id(str(actual_shooter_id)) if actual_shooter_id else updated_unit
+                                    target_unit = self._get_unit_by_id(str(target_id)) if target_id else None
+                                    target_coords = None
+                                    if action_type == "combat":
+                                        target_coords = require_key(attack_result, "target_coords")
+                                    elif action_type == "shoot":
+                                        target_coords = require_key(attack_result, "target_coords")
+                                    if action_type == "shoot":
+                                        shooter_coords = require_key(attack_result, "shooter_coords")
+                                        if not isinstance(shooter_coords, tuple) or len(shooter_coords) != 2:
+                                            raise ValueError(
+                                                f"attack_result.shooter_coords must be tuple(col,row), got {shooter_coords!r}"
+                                            )
+                                        unit_col, unit_row = shooter_coords
+                                        shooter_player_for_log = require_key(attack_result, "shooter_player")
+                                        shooter_display_name_for_log = attack_result.get("shooter_display_name")
+                                    elif actual_shooter_unit is not None:
+                                        # Combat logs should reflect current attacker position from units_cache.
+                                        try:
+                                            unit_col, unit_row = require_unit_position(actual_shooter_unit, self.game_state)
+                                            shooter_player_for_log = require_key(actual_shooter_unit, "player")
+                                            shooter_display_name_for_log = actual_shooter_unit.get("DISPLAY_NAME")
+                                        except ValueError:
+                                            shooter_coords = require_key(attack_result, "shooter_coords")
+                                            if not isinstance(shooter_coords, tuple) or len(shooter_coords) != 2:
+                                                raise ValueError(
+                                                    f"attack_result.shooter_coords must be tuple(col,row), got {shooter_coords!r}"
+                                                )
+                                            unit_col, unit_row = shooter_coords
+                                            shooter_player_for_log = require_key(attack_result, "shooter_player")
+                                            shooter_display_name_for_log = attack_result.get("shooter_display_name")
+                                    else:
+                                        shooter_coords = require_key(attack_result, "shooter_coords")
+                                        if not isinstance(shooter_coords, tuple) or len(shooter_coords) != 2:
+                                            raise ValueError(
+                                                f"attack_result.shooter_coords must be tuple(col,row), got {shooter_coords!r}"
+                                            )
+                                        unit_col, unit_row = shooter_coords
+                                        shooter_player_for_log = require_key(attack_result, "shooter_player")
+                                        shooter_display_name_for_log = attack_result.get("shooter_display_name")
+                                    
+                                    if action_type == "shoot":
+                                        save_cover_bonus = require_key(attack_result, "save_cover_bonus")
+                                    elif action_type == "combat":
+                                        # Cover bonus does not apply in melee fights.
+                                        save_cover_bonus = 0
+                                    else:
+                                        raise ValueError(
+                                            f"Unexpected action_type while building attack_details: {action_type}"
+                                        )
+
+                                    attack_details = {
+                                        "current_turn": pre_action_turn,
+                                        "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
+                                        "unit_display_name": shooter_display_name_for_log,
+                                        "unit_with_coords": f"{actual_shooter_id}({unit_col},{unit_row})",
+                                        "action": action,
+                                        "target_id": target_id,
+                                        "target_coords": target_coords,
+                                        "target_display_name": target_unit.get("DISPLAY_NAME") if target_unit else None,
+                                        "hit_roll": attack_result["hit_roll"],
+                                        "wound_roll": attack_result["wound_roll"],
+                                        "save_roll": attack_result["save_roll"],
+                                        "damage_dealt": attack_result["damage"],
+                                        "hit_result": "HIT" if attack_result["hit_success"] else "MISS",
+                                        "wound_result": "WOUND" if attack_result["wound_success"] else "FAIL",
+                                        "save_result": "SAVED" if attack_result["save_success"] else "FAIL",
+                                        "hit_target_base": attack_result.get("hit_target_base"),
+                                        "hit_target": attack_result["hit_target"],
+                                        "hit_rule_modifier": attack_result.get("hit_rule_modifier"),
+                                        "wound_target": attack_result["wound_target"],
+                                        "save_target": attack_result["save_target"],
+                                        "save_target_base": attack_result.get("save_target_base"),
+                                        "save_cover_applied": attack_result.get("save_cover_applied", False),
+                                        "save_cover_bonus": save_cover_bonus,
+                                        "save_skipped": attack_result.get("save_skipped", False),
+                                        "save_skip_reason": attack_result.get("save_skip_reason"),
+                                        "critical_wound_unmodified": attack_result.get("critical_wound_unmodified", False),
+                                        "devastating_wounds_expected": attack_result.get("devastating_wounds_expected", False),
+                                        "devastating_wounds_applied": attack_result.get("devastating_wounds_applied", False),
+                                        "devastating_wounds_flag": attack_result.get("devastating_wounds_flag", False),
+                                        "ability_display_name": attack_result.get("ability_display_name"),
+                                        "wound_ability_display_name": attack_result.get("wound_ability_display_name"),
+                                        "ap_modifier_ability_display_name": attack_result.get("ap_modifier_ability_display_name"),
+                                        "rapid_fire_bonus_shot": attack_result.get("rapid_fire_bonus_shot", False),
+                                        "rapid_fire_rule_value": attack_result.get("rapid_fire_rule_value"),
+                                        "hazardous_test_required": attack_result.get("hazardous_test_required", False),
+                                        "hazardous_test_roll": attack_result.get("hazardous_test_roll"),
+                                        "hazardous_triggered": attack_result.get("hazardous_triggered", False),
+                                        "hazardous_mortal_wounds": (
+                                            attack_result["hazardous_mortal_wounds"]
+                                            if "hazardous_mortal_wounds" in attack_result
+                                            else 0
+                                        ),
+                                        "hazardous_self_died": attack_result.get("hazardous_self_died", False),
+                                        "target_died": attack_result["target_died"],
+                                        "weapon_name": attack_result["weapon_name"],
+                                        "reward": step_reward if i == 0 else 0.0
+                                    }
+                                    if action_type == "combat":
+                                        fight_subphase = require_key(result, "fight_subphase")
+                                        if fight_subphase is None:
+                                            raise ValueError(
+                                                f"fight_subphase is None during combat logging: "
+                                                f"unit_id={unit_id}, turn={pre_action_turn}"
+                                            )
+                                        charging_pool = require_key(self.game_state, "charging_activation_pool")
+                                        active_pool = require_key(self.game_state, "active_alternating_activation_pool")
+                                        non_active_pool = require_key(self.game_state, "non_active_alternating_activation_pool")
+                                        attack_details["fight_subphase"] = fight_subphase
+                                        attack_details["charging_activation_pool"] = list(charging_pool)
+                                        attack_details["active_alternating_activation_pool"] = list(active_pool)
+                                        attack_details["non_active_alternating_activation_pool"] = list(non_active_pool)
+                                    
+                                    # Déterminer step_increment selon le type d'action et success
+                                    # Pour combat/shoot, step_increment seulement pour la première attaque ET si success
+                                    step_increment = (i == 0) and success
+                                    step_calls = self._step_calls_since_increment if step_increment else None
+                                    self.step_logger.log_action(
+                                        unit_id=actual_shooter_id,  # CRITICAL: Use actual shooter ID from attack_result
+                                        action_type=action_type,
+                                        phase=pre_action_phase,
+                                        player=shooter_player_for_log,
+                                        success=success,
+                                        step_increment=step_increment,
+                                        action_details=attack_details,
+                                        step_calls_since_last=step_calls
+                                    )
+                                    if step_increment:
+                                        self._step_calls_since_increment = 0
+                                    if (
+                                        action_type == "shoot"
+                                        and attack_result.get("hazardous_triggered", False)
+                                    ):
+                                        hazardous_details = dict(attack_details)
+                                        hazardous_details["reward"] = None
+                                        self.step_logger.log_action(
+                                            unit_id=actual_shooter_id,
+                                            action_type="hazardous",
+                                            phase=pre_action_phase,
+                                            player=shooter_player_for_log,
+                                            success=True,
+                                            step_increment=False,
+                                            action_details=hazardous_details,
+                                            step_calls_since_last=None,
+                                        )
+                                
+                                # Clear attack results after logging to prevent duplicate log entries
+                                if action_type == "shoot" and "shoot_attack_results" in self.game_state:
+                                    self.game_state["shoot_attack_results"] = []
+                                elif action_type == "combat" and "fight_attack_results" in self.game_state:
+                                    self.game_state["fight_attack_results"] = []
                         elif action_type in ["combat", "shoot"]:
                             # Log combat or shoot action - handlers MUST return all_attack_results complete
                             all_attack_results = require_key(result, "all_attack_results")
@@ -2699,9 +2983,17 @@ class W40KEngine(gym.Env):
                                         target_coords = require_key(attack_result, "target_coords")
                                     elif action_type == "shoot":
                                         target_coords = require_key(attack_result, "target_coords")
-                                    if actual_shooter_unit is not None:
-                                        # Use units_cache position when shooter is alive; if shooter died (e.g. HAZARDOUS),
-                                        # fall back to attack-time coordinates captured by shooting handler.
+                                    if action_type == "shoot":
+                                        shooter_coords = require_key(attack_result, "shooter_coords")
+                                        if not isinstance(shooter_coords, tuple) or len(shooter_coords) != 2:
+                                            raise ValueError(
+                                                f"attack_result.shooter_coords must be tuple(col,row), got {shooter_coords!r}"
+                                            )
+                                        unit_col, unit_row = shooter_coords
+                                        shooter_player_for_log = require_key(attack_result, "shooter_player")
+                                        shooter_display_name_for_log = attack_result.get("shooter_display_name")
+                                    elif actual_shooter_unit is not None:
+                                        # Combat logs should reflect current attacker position from units_cache.
                                         try:
                                             unit_col, unit_row = require_unit_position(actual_shooter_unit, self.game_state)
                                             shooter_player_for_log = require_key(actual_shooter_unit, "player")
@@ -2725,6 +3017,16 @@ class W40KEngine(gym.Env):
                                         shooter_player_for_log = require_key(attack_result, "shooter_player")
                                         shooter_display_name_for_log = attack_result.get("shooter_display_name")
                                     
+                                    if action_type == "shoot":
+                                        save_cover_bonus = require_key(attack_result, "save_cover_bonus")
+                                    elif action_type == "combat":
+                                        # Cover bonus does not apply in melee fights.
+                                        save_cover_bonus = 0
+                                    else:
+                                        raise ValueError(
+                                            f"Unexpected action_type while building attack_details: {action_type}"
+                                        )
+
                                     attack_details = {
                                         "current_turn": pre_action_turn,
                                         "current_episode": pre_action_episode,  # CRITICAL: Use episode captured BEFORE action execution
@@ -2748,7 +3050,7 @@ class W40KEngine(gym.Env):
                                         "save_target": attack_result["save_target"],
                                         "save_target_base": attack_result.get("save_target_base"),
                                         "save_cover_applied": attack_result.get("save_cover_applied", False),
-                                        "save_cover_bonus": require_key(attack_result, "save_cover_bonus"),
+                                        "save_cover_bonus": save_cover_bonus,
                                         "save_skipped": attack_result.get("save_skipped", False),
                                         "save_skip_reason": attack_result.get("save_skip_reason"),
                                         "critical_wound_unmodified": attack_result.get("critical_wound_unmodified", False),
@@ -3060,6 +3362,78 @@ class W40KEngine(gym.Env):
                                     step_calls_since_last=self._step_calls_since_increment,
                                 )
                                 self._step_calls_since_increment = 0
+                            elif raw_type == "move_after_shooting":
+                                move_unit_id = require_key(raw_log, "unitId")
+                                move_player = require_key(raw_log, "player")
+                                from_col = require_key(raw_log, "fromCol")
+                                from_row = require_key(raw_log, "fromRow")
+                                to_col = require_key(raw_log, "toCol")
+                                to_row = require_key(raw_log, "toRow")
+                                move_after_shooting_details = {
+                                    "current_turn": pre_action_turn,
+                                    "current_episode": pre_action_episode,
+                                    "unit_with_coords": f"{move_unit_id}({to_col},{to_row})",
+                                    "start_pos": (from_col, from_row),
+                                    "end_pos": (to_col, to_row),
+                                    "col": to_col,
+                                    "row": to_row,
+                                    "move_distance": require_key(raw_log, "move_distance"),
+                                    "ability_display_name": require_key(raw_log, "ability_display_name"),
+                                    "source_rule_id": require_key(raw_log, "source_rule_id"),
+                                    "reward": 0.0,
+                                }
+
+                                self.step_logger.log_action(
+                                    unit_id=move_unit_id,
+                                    action_type="move_after_shooting",
+                                    phase="shoot",
+                                    player=move_player,
+                                    success=True,
+                                    step_increment=False,
+                                    action_details=move_after_shooting_details,
+                                    step_calls_since_last=None,
+                                )
+                                move_after_shooting_logged = True
+
+                        # Safety net: when a post-shoot move exists in result but was not
+                        # persisted via action_logs flush paths, emit it once here.
+                        if (
+                            action_type == "shoot"
+                            and not move_after_shooting_logged
+                            and isinstance(result, dict)
+                            and result.get("fromCol") is not None
+                            and result.get("fromRow") is not None
+                            and result.get("toCol") is not None
+                            and result.get("toRow") is not None
+                            and isinstance(result.get("ability_display_name"), str)
+                            and result.get("ability_display_name").strip()
+                            and isinstance(result.get("source_rule_id"), str)
+                            and result.get("source_rule_id").strip()
+                            and result.get("move_distance") is not None
+                        ):
+                            fallback_move_details = {
+                                "current_turn": pre_action_turn,
+                                "current_episode": pre_action_episode,
+                                "unit_with_coords": f"{unit_id}({result['toCol']},{result['toRow']})",
+                                "start_pos": (result["fromCol"], result["fromRow"]),
+                                "end_pos": (result["toCol"], result["toRow"]),
+                                "col": result["toCol"],
+                                "row": result["toRow"],
+                                "move_distance": result["move_distance"],
+                                "ability_display_name": result["ability_display_name"].strip(),
+                                "source_rule_id": result["source_rule_id"].strip(),
+                                "reward": 0.0,
+                            }
+                            self.step_logger.log_action(
+                                unit_id=unit_id,
+                                action_type="move_after_shooting",
+                                phase="shoot",
+                                player=pre_action_player,
+                                success=True,
+                                step_increment=False,
+                                action_details=fallback_move_details,
+                                step_calls_since_last=None,
+                            )
 
             except Exception as e:
                 # CRITICAL: Logging errors must NOT interrupt action execution

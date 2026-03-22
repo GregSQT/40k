@@ -1,0 +1,407 @@
+[
+  {
+    "unit_type": "CustodianAllarusAxe",
+    "file": "frontend/src/roster/adeptusCustodes/units/CustodianAllarusAxe.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CustodianAllarusSpear",
+    "file": "frontend/src/roster/adeptusCustodes/units/CustodianAllarusSpear.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CustodianGuardBlade",
+    "file": "frontend/src/roster/adeptusCustodes/units/CustodianGuardBlade.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CustodianGuardSpear",
+    "file": "frontend/src/roster/adeptusCustodes/units/CustodianGuardSpear.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CustodianWardenAxe",
+    "file": "frontend/src/roster/adeptusCustodes/units/CustodianWardenAxe.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CustodianWardenSpear",
+    "file": "frontend/src/roster/adeptusCustodes/units/CustodianWardenSpear.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Prosecutor",
+    "file": "frontend/src/roster/adeptusCustodes/units/Prosecutor.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Witchseeker",
+    "file": "frontend/src/roster/adeptusCustodes/units/Witchseeker.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DarkReaper",
+    "file": "frontend/src/roster/aeldari/units/DarkReaper.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DarkReaperExarch",
+    "file": "frontend/src/roster/aeldari/units/DarkReaperExarch.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DireAvenger",
+    "file": "frontend/src/roster/aeldari/units/DireAvenger.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DireAvengerExarch",
+    "file": "frontend/src/roster/aeldari/units/DireAvengerExarch.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "FireDragon",
+    "file": "frontend/src/roster/aeldari/units/FireDragon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "FireDragonExarch",
+    "file": "frontend/src/roster/aeldari/units/FireDragonExarch.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "GuardianDefender",
+    "file": "frontend/src/roster/aeldari/units/GuardianDefender.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HeavyWeaponPlatform",
+    "file": "frontend/src/roster/aeldari/units/HeavyWeaponPlatform.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HowlingBanshee",
+    "file": "frontend/src/roster/aeldari/units/HowlingBanshee.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HowlingBansheeExarch",
+    "file": "frontend/src/roster/aeldari/units/HowlingBansheeExarch.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "SerpentScalePlatform",
+    "file": "frontend/src/roster/aeldari/units/SerpentScalePlatform.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "StormGuardian",
+    "file": "frontend/src/roster/aeldari/units/StormGuardian.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "StrikingScorpion",
+    "file": "frontend/src/roster/aeldari/units/StrikingScorpion.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "StrikingScorpionExarch",
+    "file": "frontend/src/roster/aeldari/units/StrikingScorpionExarch.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "SwoopingHawk",
+    "file": "frontend/src/roster/aeldari/units/SwoopingHawk.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "SwoopingHawkExarch",
+    "file": "frontend/src/roster/aeldari/units/SwoopingHawkExarch.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WarpSpider",
+    "file": "frontend/src/roster/aeldari/units/WarpSpider.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WarpSpiderExarchPowerblade",
+    "file": "frontend/src/roster/aeldari/units/WarpSpiderExarchPowerblade.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WarpSpiderExarchSpinner",
+    "file": "frontend/src/roster/aeldari/units/WarpSpiderExarchSpinner.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WraithguardDScythe",
+    "file": "frontend/src/roster/aeldari/units/WraithguardDScythe.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WraithguardWraithcannon",
+    "file": "frontend/src/roster/aeldari/units/WraithguardWraithcannon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "ChosenPlasma",
+    "file": "frontend/src/roster/chaos/units/ChosenPlasma.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CultistFirebrand",
+    "file": "frontend/src/roster/chaos/units/CultistFirebrand.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CultistMob",
+    "file": "frontend/src/roster/chaos/units/CultistMob.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Obliterator",
+    "file": "frontend/src/roster/chaos/units/Obliterator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "RaptorMeltaGun",
+    "file": "frontend/src/roster/chaos/units/RaptorMeltaGun.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "RaptorPlasmaGun",
+    "file": "frontend/src/roster/chaos/units/RaptorPlasmaGun.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "RenegadeGuard",
+    "file": "frontend/src/roster/chaos/units/RenegadeGuard.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "AssaultTerminator",
+    "file": "frontend/src/roster/spaceMarine/units/AssaultTerminator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "BladeguardVeteran",
+    "file": "frontend/src/roster/spaceMarine/units/BladeguardVeteran.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "BladeguardVeteranSergeant",
+    "file": "frontend/src/roster/spaceMarine/units/BladeguardVeteranSergeant.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainGravis",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainGravis.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DeathCompanyMarineEviscerator",
+    "file": "frontend/src/roster/spaceMarine/units/DeathCompanyEviscerator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DeathCompanyJumpPackEviscerator",
+    "file": "frontend/src/roster/spaceMarine/units/DeathCompanyJumpPackEviscerator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DeathCompanyMarineEviscerator",
+    "file": "frontend/src/roster/spaceMarine/units/DeathCompanyMarineEviscerator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DeathwingTerminatorPlasmaCannon",
+    "file": "frontend/src/roster/spaceMarine/units/DeathwingTerminatorPlasmaCannon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "EradicatorMeltaRifle",
+    "file": "frontend/src/roster/spaceMarine/units/EradicatorMeltaRifle.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "EradicatorMultiMelta",
+    "file": "frontend/src/roster/spaceMarine/units/EradicatorMultiMelta.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HeavyIntercessor",
+    "file": "frontend/src/roster/spaceMarine/units/HeavyIntercessor.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HeavyIntercessorHeavyBolter",
+    "file": "frontend/src/roster/spaceMarine/units/HeavyIntercessorHeavyBolter.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Hellblaster",
+    "file": "frontend/src/roster/spaceMarine/units/Hellblaster.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HellblasterSergeant",
+    "file": "frontend/src/roster/spaceMarine/units/HellblasterSergeant.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "InceptorBolter",
+    "file": "frontend/src/roster/spaceMarine/units/InceptorBolter.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "InceptorPlasma",
+    "file": "frontend/src/roster/spaceMarine/units/InceptorPlasma.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Incursor",
+    "file": "frontend/src/roster/spaceMarine/units/Incursor.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Infernus",
+    "file": "frontend/src/roster/spaceMarine/units/Infernus.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Intercessor",
+    "file": "frontend/src/roster/spaceMarine/units/Intercessor.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "IntercessorGrenadeLauncher",
+    "file": "frontend/src/roster/spaceMarine/units/IntercessorGrenadeLauncher.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "IntercessorSergeant",
+    "file": "frontend/src/roster/spaceMarine/units/IntercessorSergeant.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "SanguinaryGuardAngelus",
+    "file": "frontend/src/roster/spaceMarine/units/SanguinaryGuardAngelus.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "SanguinaryGuardInferno",
+    "file": "frontend/src/roster/spaceMarine/units/SanguinaryGuardInferno.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Scout",
+    "file": "frontend/src/roster/spaceMarine/units/Scout.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "SternguardVeteranBoltRifle",
+    "file": "frontend/src/roster/spaceMarine/units/SternguardVeteranBoltRifle.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "SternguardVeteranSergeantPowerFist",
+    "file": "frontend/src/roster/spaceMarine/units/SternguardVeteranSergeantPowerFist.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Suppressor",
+    "file": "frontend/src/roster/spaceMarine/units/Suppressor.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Terminator",
+    "file": "frontend/src/roster/spaceMarine/units/Terminator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "TerminatorAssaultCannon",
+    "file": "frontend/src/roster/spaceMarine/units/TerminatorAssaultCannon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "TerminatorCyclone",
+    "file": "frontend/src/roster/spaceMarine/units/TerminatorCyclone.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "TerminatorHeavyFlamer",
+    "file": "frontend/src/roster/spaceMarine/units/TerminatorHeavyFlamer.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WolfGuardTerminator",
+    "file": "frontend/src/roster/spaceMarine/units/WolfGuardTerminator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Biovore",
+    "file": "frontend/src/roster/tyranid/units/Biovore.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Carnifex",
+    "file": "frontend/src/roster/tyranid/units/Carnifex.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Genestealer",
+    "file": "frontend/src/roster/tyranid/units/Genestealer.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "GenestealerPrime",
+    "file": "frontend/src/roster/tyranid/units/GenestealerPrime.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HiveGuardImpalerCannon",
+    "file": "frontend/src/roster/tyranid/units/HiveGuardImpalerCannon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "HiveGuardShockcannon",
+    "file": "frontend/src/roster/tyranid/units/HiveGuardShockcannon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Pyrovore",
+    "file": "frontend/src/roster/tyranid/units/Pyrovore.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "RipperSwarm",
+    "file": "frontend/src/roster/tyranid/units/RipperSwarm.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "TermagantTuto",
+    "file": "frontend/src/roster/tyranid/units/TermagantTuto.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "TyrantGuardBoneCleaver",
+    "file": "frontend/src/roster/tyranid/units/TyrantGuardBoneCleaver.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "TyrantGuardCrushingClaws",
+    "file": "frontend/src/roster/tyranid/units/TyrantGuardCrushingClaws.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "TyrantGuardScytingTalon",
+    "file": "frontend/src/roster/tyranid/units/TyrantGuardScytingTalon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Zoanthrope",
+    "file": "frontend/src/roster/tyranid/units/Zoanthrope.ts",
+    "reason": "RULES_STATUS missing"
+  }
+]

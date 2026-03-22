@@ -1966,10 +1966,11 @@ def execute_ai_turn():
         
         if not success:
             error_type = result.get("error", "unknown_error")
-            print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
             if error_type == "not_pve_mode":
+                print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
                 return jsonify({"success": False, "error": result}), 400
             if error_type == "not_ai_player_turn":
+                print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
                 serializable_state = make_json_serializable(_game_state_for_json(engine))
                 _sync_units_hp_from_cache(serializable_state, engine.game_state)
                 _attach_player_types(serializable_state, engine)
@@ -1987,6 +1988,7 @@ def execute_ai_turn():
                     "action_logs": action_logs,
                 })
             else:
+                print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
                 return jsonify({"success": False, "error": result}), 500
 
         # Convert game state to JSON-serializable format

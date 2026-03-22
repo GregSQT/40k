@@ -90,6 +90,20 @@ def _resolve_scenario_path(scenario_name: str) -> str:
         return existing_paths[0]
     if len(existing_paths) > 1:
         raise ValueError(f"Ambiguous scenario path for '{scenario_name}': {existing_paths}")
+    # Rule-checker scenarios are generated in config/rule_checker/scenarios.
+    rule_checker_root = os.path.join(project_root, "config", "rule_checker", "scenarios")
+    if os.path.exists(rule_checker_root):
+        rule_checker_matches = []
+        for name in candidate_names:
+            candidate = os.path.join(rule_checker_root, name)
+            if os.path.exists(candidate):
+                rule_checker_matches.append(candidate)
+        if len(rule_checker_matches) == 1:
+            return rule_checker_matches[0]
+        if len(rule_checker_matches) > 1:
+            raise ValueError(
+                f"Ambiguous scenario path for '{scenario_name}' in rule_checker scenarios: {rule_checker_matches}"
+            )
     scenarios_root = os.path.join(project_root, "config", "agents")
     if os.path.exists(scenarios_root):
         matches = []
@@ -675,6 +689,7 @@ def _track_action_phase_accuracy(
     """Track action/phase alignment accuracy."""
     expected_phase_by_action = {
         "move": "MOVE",
+        "move_after_shooting": "SHOOT",
         "fled": "MOVE",
         "shoot": "SHOOT",
         "advance": "SHOOT",
@@ -1075,6 +1090,7 @@ def parse_step_log(filepath: str) -> Dict:
         'death_orders': [],
         'current_episode_deaths': [],
         'unit_types': {},
+        'unit_types_seen': set(),
         'wounded_enemies': {1: set(), 2: set()},
         # Rule violations
         'wall_collisions': {1: 0, 2: 0},
@@ -1307,6 +1323,7 @@ def parse_step_log(filepath: str) -> Dict:
     units_fought = set()
     charged_units_current_fight = set()
     charged_units_fought = set()
+    units_moved_after_shooting_in_turn: Set[str] = set()
     positions_at_turn_start = {}
     positions_at_move_phase_start = {}  # Track positions at start of MOVE phase to detect fled
     last_player = None  # Track last player to detect phase MOVE start for each player
@@ -1372,6 +1389,7 @@ def parse_step_log(filepath: str) -> Dict:
                 units_fought = set()
                 charged_units_current_fight = set()
                 charged_units_fought = set()
+                units_moved_after_shooting_in_turn = set()
                 unit_movement_history = {}  # Reset movement history for new episode
                 shot_sequence_counts = {}
                 fight_sequence_counts = {}
@@ -1498,6 +1516,7 @@ def parse_step_log(filepath: str) -> Dict:
                 _position_cache_set(unit_positions, unit_id, col, row)
                 unit_types[unit_id] = unit_type
                 stats['unit_types'][unit_id] = unit_type
+                require_key(stats, 'unit_types_seen').add(unit_type)
                 unit_move[unit_id] = unit_move_value
                 positions_at_turn_start[unit_id] = (col, row)
                 unit_movement_history[unit_id] = [{"position": (col, row)}]
@@ -1838,7 +1857,19 @@ def parse_step_log(filepath: str) -> Dict:
                         "REACTIVE MOVED" in action_desc_upper
                         or ("MOVED [" in action_desc_upper and " - TRIGGER: UNIT " in action_desc_upper)
                     )
-                    is_move_marker = ") MOVED" in action_desc_upper and not is_reactive_move
+                    is_move_after_shooting_marker = (
+                        "MOVED AFTER SHOOTING" in action_desc_upper
+                        or re.search(
+                            r"MOVED\s+\[MOVE_AFTER_SHOOTING(?::\d+)?\]\s+FROM",
+                            action_desc_upper,
+                            re.IGNORECASE,
+                        ) is not None
+                    )
+                    is_move_marker = (
+                        ") MOVED" in action_desc_upper
+                        and not is_reactive_move
+                        and not is_move_after_shooting_marker
+                    )
                     is_activation_marker = (
                         is_move_marker
                         or " ADVANCED " in action_desc_upper
@@ -1874,6 +1905,7 @@ def parse_step_log(filepath: str) -> Dict:
                     units_fought = set()
                     charged_units_current_fight = set()
                     charged_units_fought = set()
+                    units_moved_after_shooting_in_turn = set()
                     positions_at_turn_start = unit_positions.copy()
                     positions_at_move_phase_start = {}
                     last_player = None  # Reset last player on turn change
@@ -1910,6 +1942,7 @@ def parse_step_log(filepath: str) -> Dict:
                         last_shoot_shooter_id = None
                         last_shoot_weapon = None
                         last_shoot_target_id = None
+                        units_moved_after_shooting_in_turn = set()
                         combi_profile_usage = {}
                         combi_conflicts_seen = set()
                     if phase == 'FIGHT':
@@ -2153,8 +2186,20 @@ def parse_step_log(filepath: str) -> Dict:
                             stats['shoot_invalid'][player]['total'] += 1
                             _track_action_phase_accuracy(stats, "shoot", phase, current_episode_num, line)
                             
-                            # CRITICAL: Update position cache with shooter position from log (source of truth)
-                            _position_cache_set(unit_positions, shooter_id, shooter_col, shooter_row)
+                            # SHOOT lines carry pre-shot shooter coordinates.
+                            # If a post-shot movement was already parsed for this unit in the same turn/phase,
+                            # keep the post-shot position in cache and do not overwrite with pre-shot coordinates.
+                            if (
+                                shooter_id in units_moved_after_shooting_in_turn
+                                and shooter_id in unit_positions
+                                and unit_positions[shooter_id] != (shooter_col, shooter_row)
+                            ):
+                                _debug_log(
+                                    f"[ANALYZER DEBUG] Keep post-shot position for shooter {shooter_id}: "
+                                    f"cache={unit_positions[shooter_id]} shot_line=({shooter_col},{shooter_row})"
+                                )
+                            else:
+                                _position_cache_set(unit_positions, shooter_id, shooter_col, shooter_row)
                             
                             if target_match.group(3) and target_match.group(4):
                                 target_col = int(target_match.group(3))
@@ -2574,6 +2619,9 @@ def parse_step_log(filepath: str) -> Dict:
                                 weapon_key = f"{weapon_display_name} ({shooter_unit_type})"
                                 shooter_pl = require_key(unit_player, shooter_id)
                                 pl_int = int(shooter_pl) if shooter_pl is not None else player
+                                if "TWIN_LINKED" in weapon_rules_list:
+                                    key = ("TWIN_LINKED", weapon_key)
+                                    stats['weapon_rule_usage'][key][pl_int] += 1
                                 if shooter_id in units_advanced and "ASSAULT" in weapon_rules_list:
                                     key = ("ASSAULT", weapon_key)
                                     stats['weapon_rule_usage'][key][pl_int] += 1
@@ -3399,6 +3447,7 @@ def parse_step_log(filepath: str) -> Dict:
 
                 elif (
                     "MOVED from" in action_desc
+                    or "MOVED AFTER SHOOTING" in action_desc
                     or ("MOVED [" in action_desc and " - trigger: Unit " not in action_desc)
                     or "FLED from" in action_desc
                 ):
@@ -3549,7 +3598,7 @@ def parse_step_log(filepath: str) -> Dict:
                             continue  # Skip normal move processing for FLED
                         
                         move_match = re.search(
-                            r'Unit (\d+)\((\d+),\s*(\d+)\)\s+MOVED(?:\s+\[[^\]]+\])?\s+from\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)',
+                            r'Unit (\d+)\((\d+),\s*(\d+)\)\s+MOVED(?:\s+AFTER\s+SHOOTING)?(?:\s+\[[^\]]+\])?\s+from\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)',
                             action_desc
                         )
                         if move_match:
@@ -3559,10 +3608,17 @@ def parse_step_log(filepath: str) -> Dict:
                             dest_col = int(move_match.group(6))
                             dest_row = int(move_match.group(7))
                             is_move_after_shooting = re.search(
-                                r'MOVED\s+\[MOVE_AFTER_SHOOTING(?::\d+)?\]\s+from',
+                                r'MOVED(?:\s+AFTER\s+SHOOTING)?\s+\[([^\]]+)\]\s+from',
                                 action_desc,
                                 re.IGNORECASE
-                            ) is not None
+                            ) is not None and (
+                                "MOVED AFTER SHOOTING" in action_desc.upper()
+                                or re.search(
+                                    r'MOVED\s+\[MOVE_AFTER_SHOOTING(?::\d+)?\]\s+from',
+                                    action_desc,
+                                    re.IGNORECASE
+                                ) is not None
+                            )
                             move_unit_type = require_key(unit_types, move_unit_id)
                             move_is_fly = re.search(
                                 r'MOVED\s+\[FLY\]\s+from',
@@ -3573,7 +3629,11 @@ def parse_step_log(filepath: str) -> Dict:
                                 move_is_fly = bool(require_key(unit_is_fly_by_type, move_unit_type))
                                 stats['move_after_shooting'][player] += 1
                                 stats['special_rule_usage'][("move_after_shooting", move_unit_type)][player] += 1
-                            _track_action_phase_accuracy(stats, "move", phase, current_episode_num, line)
+                                units_moved_after_shooting_in_turn.add(move_unit_id)
+                            if is_move_after_shooting:
+                                _track_action_phase_accuracy(stats, "move_after_shooting", phase, current_episode_num, line)
+                            else:
+                                _track_action_phase_accuracy(stats, "move", phase, current_episode_num, line)
                             
                             stats['position_log_mismatch']['move']['total'] += 1
                             if move_unit_id not in unit_positions:
@@ -4639,6 +4699,65 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         "2.6": "SAMPLE MISSING",
         "2.7": "CORE ISSUES",
     }
+
+    TABLE_LABEL_WIDTH = 38
+    TABLE_VALUE_WIDTH = 18
+    WR_RULE_WIDTH = 28
+    WR_WEAPON_WIDTH = 40
+    WR_VALUE_WIDTH = 10
+    WR_VALID_WIDTH = 10
+
+    def _table_header(title: str) -> None:
+        log_print("-" * 80)
+        log_print(
+            f"{title:<{TABLE_LABEL_WIDTH}} "
+            f"{'Agent (P1)':>{TABLE_VALUE_WIDTH}} "
+            f"{'Bot (P2)':>{TABLE_VALUE_WIDTH}}"
+        )
+        log_print("-" * 80)
+
+    def _table_row(label: str, p1_value: str, p2_value: str) -> None:
+        display_label = label
+        if len(display_label) > TABLE_LABEL_WIDTH:
+            display_label = display_label[: TABLE_LABEL_WIDTH - 3] + "..."
+        log_print(
+            f"{display_label:<{TABLE_LABEL_WIDTH}} "
+            f"{p1_value:>{TABLE_VALUE_WIDTH}} "
+            f"{p2_value:>{TABLE_VALUE_WIDTH}}"
+        )
+
+    def _fmt_count(value: int) -> str:
+        return f"{value:6d}"
+
+    def _fmt_count_pct(value: int, total: int) -> str:
+        pct = (value / total * 100.0) if total > 0 else 0.0
+        return f"{value:6d} ({pct:5.1f}%)"
+
+    def _wr_header() -> None:
+        log_print("-" * 80)
+        log_print(
+            f"{'1.8 WEAPONS RULES USAGE':<{WR_RULE_WIDTH}} "
+            f"{'Weapon':<{WR_WEAPON_WIDTH}} "
+            f"{'P1':>{WR_VALUE_WIDTH}} "
+            f"{'P2':>{WR_VALUE_WIDTH}} "
+            f"{'Validité':>{WR_VALID_WIDTH}}"
+        )
+        log_print("-" * 80)
+
+    def _wr_row(rule_name: str, weapon_name: str, p1_value: int, p2_value: int, validity: str) -> None:
+        display_weapon = weapon_name
+        if len(display_weapon) > WR_WEAPON_WIDTH:
+            display_weapon = display_weapon[: WR_WEAPON_WIDTH - 3] + "..."
+        display_validity = validity
+        if len(display_validity) > WR_VALID_WIDTH:
+            display_validity = display_validity[: WR_VALID_WIDTH - 3] + "..."
+        log_print(
+            f"{rule_name:<{WR_RULE_WIDTH}} "
+            f"{display_weapon:<{WR_WEAPON_WIDTH}} "
+            f"{p1_value:>{WR_VALUE_WIDTH}d} "
+            f"{p2_value:>{WR_VALUE_WIDTH}d} "
+            f"{display_validity:>{WR_VALID_WIDTH}}"
+        )
     if debug_section_filter is not None and debug_section_filter not in debug_sections:
         valid_sections = ", ".join(str(k) for k in sorted(debug_sections))
         raise ValueError(f"Invalid debug section: {debug_section_filter}. Valid sections: {valid_sections}")
@@ -5063,9 +5182,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print("No turn data recorded.")
     
     # ACTIONS BY TYPE
-    log_print("-" * 80)
-    log_print(f"ACTIONS BY TYPE {'Agent (P1)':>12} {'Bot (P2)':>17}")
-    log_print("-" * 80)
+    _table_header("ACTIONS BY TYPE")
     
     all_actions = set(stats['actions_by_player'][1].keys()) | set(stats['actions_by_player'][2].keys())
     action_totals = [(a, stats['actions_by_player'][1][a] + stats['actions_by_player'][2][a])
@@ -5080,12 +5197,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         bot_count = stats['actions_by_player'][2][action_type]
         agent_pct = (agent_count / agent_total * 100) if agent_total > 0 else 0
         bot_pct = (bot_count / bot_total * 100) if bot_total > 0 else 0
-        log_print(f"{action_type:<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+        _table_row(
+            action_type,
+            f"{agent_count:6d} ({agent_pct:5.1f}%)",
+            f"{bot_count:6d} ({bot_pct:5.1f}%)",
+        )
     
     # SHOOTING PHASE BEHAVIOR
-    log_print("-" * 80)
-    log_print(f"SHOOTING BEHAVIOR {'Agent (P1)':>5} {'Bot (P2)':>17}")
-    log_print("-" * 80)
+    _table_header("SHOOTING BEHAVIOR")
     
     agent_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
                         stats['shoot_vs_wait_by_player'][1]['wait'] +
@@ -5101,30 +5220,44 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         bot_count = stats['shoot_vs_wait_by_player'][2][action]
         agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
         bot_pct = (bot_count / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-        log_print(f"{action.capitalize():<12} {agent_count:6d} ({agent_pct:5.1f}%)   {bot_count:6d} ({bot_pct:5.1f}%)")
+        _table_row(
+            action.capitalize(),
+            f"{agent_count:6d} ({agent_pct:5.1f}%)",
+            f"{bot_count:6d} ({bot_pct:5.1f}%)",
+        )
     
     agent_wait_with = stats['shoot_vs_wait_by_player'][1]['wait_with_targets']
     bot_wait_with = stats['shoot_vs_wait_by_player'][2]['wait_with_targets']
     agent_wait_with_pct = (agent_wait_with / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_wait_with_pct = (bot_wait_with / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-    log_print(f"{'Wait (targets)':<12} {agent_wait_with:6d} ({agent_wait_with_pct:5.1f}%)   {bot_wait_with:6d} ({bot_wait_with_pct:5.1f}%)")
+    _table_row(
+        "Wait (targets)",
+        f"{agent_wait_with:6d} ({agent_wait_with_pct:5.1f}%)",
+        f"{bot_wait_with:6d} ({bot_wait_with_pct:5.1f}%)",
+    )
     
     agent_wait_no = stats['shoot_vs_wait_by_player'][1]['wait_no_targets']
     bot_wait_no = stats['shoot_vs_wait_by_player'][2]['wait_no_targets']
     agent_wait_no_pct = (agent_wait_no / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_wait_no_pct = (bot_wait_no / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-    log_print(f"{'Wait (no targets)':<12} {agent_wait_no:6d} ({agent_wait_no_pct:5.1f}%)   {bot_wait_no:6d} ({bot_wait_no_pct:5.1f}%)")
+    _table_row(
+        "Wait (no targets)",
+        f"{agent_wait_no:6d} ({agent_wait_no_pct:5.1f}%)",
+        f"{bot_wait_no:6d} ({bot_wait_no_pct:5.1f}%)",
+    )
     
     agent_shots_after_advance = stats['shots_after_advance'][1]
     bot_shots_after_advance = stats['shots_after_advance'][2]
     agent_pct_after_advance = (agent_shots_after_advance / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
     bot_pct_after_advance = (bot_shots_after_advance / bot_shoot_total * 100) if bot_shoot_total > 0 else 0
-    log_print(f"{'Shoot+Advance':<12} {agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)   {bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)")
+    _table_row(
+        "Shoot+Advance",
+        f"{agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)",
+        f"{bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)",
+    )
     
     # PISTOL WEAPON SHOTS
-    log_print("-" * 80)
-    log_print(f"PISTOL WEAPON SHOTS BY ADJACENCY {'Agent (P1)':>13s} {'Bot (P2)':>16s}")
-    log_print("-" * 80)
+    _table_header("PISTOL WEAPON SHOTS BY ADJACENCY")
     agent_pistol_adj = stats['pistol_shots'][1]['adjacent']
     bot_pistol_adj = stats['pistol_shots'][2]['adjacent']
     agent_pistol_not_adj = stats['pistol_shots'][1]['not_adjacent']
@@ -5137,17 +5270,27 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_pistol_not_adj_pct = (agent_pistol_not_adj / agent_pistol_total * 100) if agent_pistol_total > 0 else 0
     bot_pistol_not_adj_pct = (bot_pistol_not_adj / bot_pistol_total * 100) if bot_pistol_total > 0 else 0
     
-    log_print(f"PISTOL shots (adjacent):       {agent_pistol_adj:6d} ({agent_pistol_adj_pct:5.1f}%)  {bot_pistol_adj:6d} ({bot_pistol_adj_pct:5.1f}%)")
-    log_print(f"PISTOL shots (not adjacent):   {agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)  {bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)")
-    log_print(f"Total PISTOL shots:            {agent_pistol_total:6d}           {bot_pistol_total:6d}")
+    _table_row(
+        "PISTOL shots (adjacent):",
+        f"{agent_pistol_adj:6d} ({agent_pistol_adj_pct:5.1f}%)",
+        f"{bot_pistol_adj:6d} ({bot_pistol_adj_pct:5.1f}%)",
+    )
+    _table_row(
+        "PISTOL shots (not adjacent):",
+        f"{agent_pistol_not_adj:6d} ({agent_pistol_not_adj_pct:5.1f}%)",
+        f"{bot_pistol_not_adj:6d} ({bot_pistol_not_adj_pct:5.1f}%)",
+    )
+    _table_row("Total PISTOL shots:", _fmt_count(agent_pistol_total), _fmt_count(bot_pistol_total))
     
     agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
     bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
-    log_print(f"Non-PISTOL shots (adjacent):   {agent_non_pistol_adj:6d}           {bot_non_pistol_adj:6d}")
+    _table_row(
+        "Non-PISTOL shots (adjacent):",
+        _fmt_count(agent_non_pistol_adj),
+        _fmt_count(bot_non_pistol_adj),
+    )
 
-    log_print("-" * 80)
-    log_print(f"SHOOTING VALIDITY {'Agent (P1)':>28s} {'Bot (P2)':>16s}")
-    log_print("-" * 80)
+    _table_header("SHOOTING VALIDITY")
     agent_invalid_total = (
         stats['shoot_invalid'][1]['no_los'] +
         stats['shoot_invalid'][1]['out_of_range'] +
@@ -5162,10 +5305,26 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     bot_shot_total = stats['shoot_invalid'][2]['total']
     agent_invalid_pct = (agent_invalid_total / agent_shot_total * 100) if agent_shot_total > 0 else 0
     bot_invalid_pct = (bot_invalid_total / bot_shot_total * 100) if bot_shot_total > 0 else 0
-    log_print(f"Invalid shots total:           {agent_invalid_total:6d} ({agent_invalid_pct:5.1f}%)  {bot_invalid_total:6d} ({bot_invalid_pct:5.1f}%)")
-    log_print(f"No LoS:                        {stats['shoot_invalid'][1]['no_los']:6d}           {stats['shoot_invalid'][2]['no_los']:6d}")
-    log_print(f"Out of range:                  {stats['shoot_invalid'][1]['out_of_range']:6d}           {stats['shoot_invalid'][2]['out_of_range']:6d}")
-    log_print(f"Adjacent non-pistol:           {stats['shoot_invalid'][1]['adjacent_non_pistol']:6d}           {stats['shoot_invalid'][2]['adjacent_non_pistol']:6d}")
+    _table_row(
+        "Invalid shots total:",
+        f"{agent_invalid_total:6d} ({agent_invalid_pct:5.1f}%)",
+        f"{bot_invalid_total:6d} ({bot_invalid_pct:5.1f}%)",
+    )
+    _table_row(
+        "No LoS:",
+        _fmt_count(stats['shoot_invalid'][1]['no_los']),
+        _fmt_count(stats['shoot_invalid'][2]['no_los']),
+    )
+    _table_row(
+        "Out of range:",
+        _fmt_count(stats['shoot_invalid'][1]['out_of_range']),
+        _fmt_count(stats['shoot_invalid'][2]['out_of_range']),
+    )
+    _table_row(
+        "Adjacent non-pistol:",
+        _fmt_count(stats['shoot_invalid'][1]['adjacent_non_pistol']),
+        _fmt_count(stats['shoot_invalid'][2]['adjacent_non_pistol']),
+    )
     if stats['first_error_lines']['shoot_invalid'][1]:
         first_err = stats['first_error_lines']['shoot_invalid'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5175,8 +5334,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     
     # WAIT BEHAVIOR
     log_print("\n" + "-" * 80)
-    log_print(f"WAIT BEHAVIOR BY PHASE {'Agent (P1)':>14s} {'Bot (P2)':>16s}")
-    log_print("-" * 80)
+    _table_header("WAIT BEHAVIOR BY PHASE")
     agent_move_wait = stats['wait_by_phase'][1]['move_wait']
     bot_move_wait = stats['wait_by_phase'][2]['move_wait']
     agent_wait_los = stats['wait_by_phase'][1]['wait_with_los']
@@ -5184,14 +5342,13 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_wait_no_los = stats['wait_by_phase'][1]['wait_no_los']
     bot_wait_no_los = stats['wait_by_phase'][2]['wait_no_los']
     
-    log_print(f"MOVE phase waits:             {agent_move_wait:6d}           {bot_move_wait:6d}")
-    log_print(f"SHOOT waits (enemies in LOS): {agent_wait_los:6d}           {bot_wait_los:6d}")
-    log_print(f"SHOOT waits (no LOS):         {agent_wait_no_los:6d}           {bot_wait_no_los:6d}")
+    _table_row("MOVE phase waits:", _fmt_count(agent_move_wait), _fmt_count(bot_move_wait))
+    _table_row("SHOOT waits (enemies in LOS):", _fmt_count(agent_wait_los), _fmt_count(bot_wait_los))
+    _table_row("SHOOT waits (no LOS):", _fmt_count(agent_wait_no_los), _fmt_count(bot_wait_no_los))
     
     # TARGET PRIORITY
     log_print("\n" + "-" * 80)
-    log_print(f"TARGET PRIORITY ANALYSIS {'Agent (P1)':>20s} {'Bot (P2)':>16s}")
-    log_print("-" * 80)
+    _table_header("TARGET PRIORITY ANALYSIS")
     
     agent_bad = stats['target_priority'][1]['shots_at_full_hp_while_wounded_in_los']
     bot_bad = stats['target_priority'][2]['shots_at_full_hp_while_wounded_in_los']
@@ -5205,11 +5362,17 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_good_pct = (agent_good / agent_total_shots * 100) if agent_total_shots > 0 else 0
     bot_good_pct = (bot_good / bot_total_shots * 100) if bot_total_shots > 0 else 0
     
-    log_print(f"FAILURES (shot full HP while")
-    log_print(f"  wounded in LOS):            {agent_bad:6d} ({agent_bad_pct:5.1f}%)  {bot_bad:6d} ({bot_bad_pct:5.1f}%)")
-    log_print(f"SUCCESS (shot wounded or")
-    log_print(f"  no wounded in LOS):         {agent_good:6d} ({agent_good_pct:5.1f}%)  {bot_good:6d} ({bot_good_pct:5.1f}%)")
-    log_print(f"Total shots:                  {agent_total_shots:6d}           {bot_total_shots:6d}")
+    _table_row(
+        "FAILURES (shot full HP while wounded in LOS):",
+        f"{agent_bad:6d} ({agent_bad_pct:5.1f}%)",
+        f"{bot_bad:6d} ({bot_bad_pct:5.1f}%)",
+    )
+    _table_row(
+        "SUCCESS (shot wounded or no wounded in LOS):",
+        f"{agent_good:6d} ({agent_good_pct:5.1f}%)",
+        f"{bot_good:6d} ({bot_good_pct:5.1f}%)",
+    )
+    _table_row("Total shots:", _fmt_count(agent_total_shots), _fmt_count(bot_total_shots))
     
     # DEATH ORDER
     log_print("\n" + "-" * 80)
@@ -5264,11 +5427,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if True:
         active_debug_section = "1.1"
         log_print("\n" + "-" * 80)
-        log_print(f"{('1.1 ' + debug_sections['1.1']):<30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-        log_print("-" * 80)
+        _table_header("1.1 MOVEMENT ERRORS")
         agent_walls = stats['wall_collisions'][1]
         bot_walls = stats['wall_collisions'][2]
-        log_print(f"Moves into walls:             {agent_walls:6d}           {bot_walls:6d}")
+        _table_row("Moves into walls:", _fmt_count(agent_walls), _fmt_count(bot_walls))
         if agent_walls > 0 and stats['first_error_lines']['wall_collisions'][1]:
             first_err = stats['first_error_lines']['wall_collisions'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5277,7 +5439,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_move_adj = stats['move_to_adjacent_enemy'][1]
         bot_move_adj = stats['move_to_adjacent_enemy'][2]
-        log_print(f"Moves to adjacent enemy:      {agent_move_adj:6d}           {bot_move_adj:6d}")
+        _table_row("Moves to adjacent enemy:", _fmt_count(agent_move_adj), _fmt_count(bot_move_adj))
         if agent_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][1]:
             first_err = stats['first_error_lines']['move_to_adjacent_enemy'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5296,7 +5458,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
                 log_print(f"    Adjacent after move: {after_str}")
         agent_adj_before_move = stats['move_adjacent_before_non_flee'][1]
         bot_adj_before_move = stats['move_adjacent_before_non_flee'][2]
-        log_print(f"Move with adjacent_before:   {agent_adj_before_move:6d}           {bot_adj_before_move:6d}")
+        _table_row("Move with adjacent_before:", _fmt_count(agent_adj_before_move), _fmt_count(bot_adj_before_move))
         if agent_adj_before_move > 0 and stats['first_error_lines']['move_adjacent_before_non_flee'][1]:
             first_err = stats['first_error_lines']['move_adjacent_before_non_flee'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5305,7 +5467,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_move_over = stats['move_distance_over_limit']['move'][1]
         bot_move_over = stats['move_distance_over_limit']['move'][2]
-        log_print(f"Move distance > MOVE:        {agent_move_over:6d}           {bot_move_over:6d}")
+        _table_row("Move distance > MOVE:", _fmt_count(agent_move_over), _fmt_count(bot_move_over))
         if agent_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][1]:
             first_err = stats['first_error_lines']['move_distance_over_limit']['move'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5314,7 +5476,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_mas_over = stats['move_after_shooting_distance_over_limit'][1]
         bot_mas_over = stats['move_after_shooting_distance_over_limit'][2]
-        log_print(f"MoveAfterShoot > rule dist:  {agent_mas_over:6d}           {bot_mas_over:6d}")
+        _table_row("MoveAfterShoot > rule dist:", _fmt_count(agent_mas_over), _fmt_count(bot_mas_over))
         if agent_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]:
             first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5323,7 +5485,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_move_blocked = stats['move_path_blocked']['move'][1]
         bot_move_blocked = stats['move_path_blocked']['move'][2]
-        log_print(f"Move path blocked (BFS):     {agent_move_blocked:6d}           {bot_move_blocked:6d}")
+        _table_row("Move path blocked (BFS):", _fmt_count(agent_move_blocked), _fmt_count(bot_move_blocked))
         if agent_move_blocked > 0 and stats['first_error_lines']['move_path_blocked']['move'][1]:
             first_err = stats['first_error_lines']['move_path_blocked']['move'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5333,13 +5495,13 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         reactive_stats = require_key(stats, 'reactive_move_stats')
         agent_reactive_applied = reactive_stats[1]['applied']
         bot_reactive_applied = reactive_stats[2]['applied']
-        log_print(f"Reactive moves applied:      {agent_reactive_applied:6d}           {bot_reactive_applied:6d}")
+        _table_row("Reactive moves applied:", _fmt_count(agent_reactive_applied), _fmt_count(bot_reactive_applied))
         agent_reactive_declined = reactive_stats[1]['declined']
         bot_reactive_declined = reactive_stats[2]['declined']
-        log_print(f"Reactive moves declined:     {agent_reactive_declined:6d}           {bot_reactive_declined:6d}")
+        _table_row("Reactive moves declined:", _fmt_count(agent_reactive_declined), _fmt_count(bot_reactive_declined))
         agent_reactive_abnormal = reactive_stats[1]['abnormal']
         bot_reactive_abnormal = reactive_stats[2]['abnormal']
-        log_print(f"Reactive moves abnormal:     {agent_reactive_abnormal:6d}           {bot_reactive_abnormal:6d}")
+        _table_row("Reactive moves abnormal:", _fmt_count(agent_reactive_abnormal), _fmt_count(bot_reactive_abnormal))
         if agent_reactive_abnormal > 0 and stats['first_error_lines']['reactive_move_abnormal'][1]:
             first_err = stats['first_error_lines']['reactive_move_abnormal'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5349,7 +5511,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         reactive_checks = require_key(stats, 'reactive_move_checks')
         agent_reactive_adj = reactive_checks['to_adjacent_enemy'][1]
         bot_reactive_adj = reactive_checks['to_adjacent_enemy'][2]
-        log_print(f"Reactive to adjacent enemy:  {agent_reactive_adj:6d}           {bot_reactive_adj:6d}")
+        _table_row("Reactive to adjacent enemy:", _fmt_count(agent_reactive_adj), _fmt_count(bot_reactive_adj))
         if agent_reactive_adj > 0 and stats['first_error_lines']['reactive_move_to_adjacent_enemy'][1]:
             first_err = stats['first_error_lines']['reactive_move_to_adjacent_enemy'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5358,7 +5520,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_reactive_wall = reactive_checks['into_wall'][1]
         bot_reactive_wall = reactive_checks['into_wall'][2]
-        log_print(f"Reactive into wall:          {agent_reactive_wall:6d}           {bot_reactive_wall:6d}")
+        _table_row("Reactive into wall:", _fmt_count(agent_reactive_wall), _fmt_count(bot_reactive_wall))
         if agent_reactive_wall > 0 and stats['first_error_lines']['reactive_move_into_wall'][1]:
             first_err = stats['first_error_lines']['reactive_move_into_wall'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5367,7 +5529,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_reactive_blocked = reactive_checks['path_blocked'][1]
         bot_reactive_blocked = reactive_checks['path_blocked'][2]
-        log_print(f"Reactive path blocked (BFS): {agent_reactive_blocked:6d}           {bot_reactive_blocked:6d}")
+        _table_row("Reactive path blocked (BFS):", _fmt_count(agent_reactive_blocked), _fmt_count(bot_reactive_blocked))
         if agent_reactive_blocked > 0 and stats['first_error_lines']['reactive_move_path_blocked'][1]:
             first_err = stats['first_error_lines']['reactive_move_path_blocked'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5376,7 +5538,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_reactive_over_roll = reactive_checks['distance_over_roll'][1]
         bot_reactive_over_roll = reactive_checks['distance_over_roll'][2]
-        log_print(f"Reactive distance > roll:    {agent_reactive_over_roll:6d}           {bot_reactive_over_roll:6d}")
+        _table_row("Reactive distance > roll:", _fmt_count(agent_reactive_over_roll), _fmt_count(bot_reactive_over_roll))
         if agent_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][1]:
             first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5386,8 +5548,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # SHOOTING ERRORS
     active_debug_section = "1.2"
     log_print("\n" + "-" * 80)
-    log_print(f"{('1.2 ' + debug_sections['1.2']):<35} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    log_print("-" * 80)
+    _table_header("1.2 SHOOTING ERRORS")
     agent_shoot_invalid = (
         stats['shoot_invalid'][1]['no_los'] +
         stats['shoot_invalid'][1]['out_of_range'] +
@@ -5398,8 +5559,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['shoot_invalid'][2]['out_of_range'] +
         stats['shoot_invalid'][2]['adjacent_non_pistol']
     )
-    log_print("Tirs invalides")
-    log_print(f"{'(LoS/portée/adjacent non-pistol):':<45} {agent_shoot_invalid:<6}           {bot_shoot_invalid}")
+    _table_row(
+        "Tirs invalides (LoS/portee/adjacent non-pistol):",
+        _fmt_count(agent_shoot_invalid),
+        _fmt_count(bot_shoot_invalid),
+    )
     if agent_shoot_invalid > 0 and stats['first_error_lines']['shoot_invalid'][1]:
         first_err = stats['first_error_lines']['shoot_invalid'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5408,7 +5572,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_over_rng = stats['shoot_over_rng_nb'][1]
     bot_shoot_over_rng = stats['shoot_over_rng_nb'][2]
-    log_print(f"{'Shots over RNG_NB:':<45} {agent_shoot_over_rng:10d}           {bot_shoot_over_rng:6d}")
+    _table_row("Shots over RNG_NB:", _fmt_count(agent_shoot_over_rng), _fmt_count(bot_shoot_over_rng))
     if agent_shoot_over_rng > 0 and stats['first_error_lines']['shoot_over_rng_nb'][1]:
         first_err = stats['first_error_lines']['shoot_over_rng_nb'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5417,7 +5581,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_combi = stats['shoot_combi_profile_conflicts'][1]
     bot_shoot_combi = stats['shoot_combi_profile_conflicts'][2]
-    log_print(f"{'COMBI profiles in same phase:':<45} {agent_shoot_combi:10d}           {bot_shoot_combi:6d}")
+    _table_row("COMBI profiles in same phase:", _fmt_count(agent_shoot_combi), _fmt_count(bot_shoot_combi))
     if agent_shoot_combi > 0 and stats['first_error_lines']['shoot_combi_profile_conflicts'][1]:
         first_err = stats['first_error_lines']['shoot_combi_profile_conflicts'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5426,7 +5590,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_wall = stats['shoot_through_wall'][1]
     bot_shoot_wall = stats['shoot_through_wall'][2]
-    log_print(f"Shoot through wall:           {agent_shoot_wall:6d}           {bot_shoot_wall:6d}")
+    _table_row("Shoot through wall:", _fmt_count(agent_shoot_wall), _fmt_count(bot_shoot_wall))
     if agent_shoot_wall > 0 and stats['first_error_lines']['shoot_through_wall'][1]:
         first_err = stats['first_error_lines']['shoot_through_wall'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5437,14 +5601,18 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     phase_rule_to_units = require_key(stats, 'rule_to_units')
     agent_shoot_flee = stats['shoot_after_flee'][1]
     bot_shoot_flee = stats['shoot_after_flee'][2]
-    log_print(f"Shoot after flee:             {agent_shoot_flee:10d}           {bot_shoot_flee:6d}")
+    _table_row("Shoot after flee:", _fmt_count(agent_shoot_flee), _fmt_count(bot_shoot_flee))
     agent_shoot_flee_rule_used = sum(
         phase_special_rule_usage[k][1] for k in phase_special_rule_usage if k[0] == "shoot_after_flee"
     )
     bot_shoot_flee_rule_used = sum(
         phase_special_rule_usage[k][2] for k in phase_special_rule_usage if k[0] == "shoot_after_flee"
     )
-    log_print(f"Shoot after flee (rule):      {agent_shoot_flee_rule_used:6d}           {bot_shoot_flee_rule_used:6d}")
+    _table_row(
+        "Shoot after flee (rule):",
+        _fmt_count(agent_shoot_flee_rule_used),
+        _fmt_count(bot_shoot_flee_rule_used),
+    )
     if agent_shoot_flee > 0 and stats['first_error_lines']['shoot_after_flee'][1]:
         first_err = stats['first_error_lines']['shoot_after_flee'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5453,7 +5621,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_friendly = stats['shoot_at_friendly'][1]
     bot_shoot_friendly = stats['shoot_at_friendly'][2]
-    log_print(f"Shoot at friendly unit:       {agent_shoot_friendly:10d}           {bot_shoot_friendly:6d}")
+    _table_row("Shoot at friendly unit:", _fmt_count(agent_shoot_friendly), _fmt_count(bot_shoot_friendly))
     if agent_shoot_friendly > 0 and stats['first_error_lines']['shoot_at_friendly'][1]:
         first_err = stats['first_error_lines']['shoot_at_friendly'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5462,7 +5630,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_engaged = stats['shoot_at_engaged_enemy'][1]
     bot_shoot_engaged = stats['shoot_at_engaged_enemy'][2]
-    log_print(f"Shoot at engaged enemy:       {agent_shoot_engaged:10d}           {bot_shoot_engaged:6d}")
+    _table_row("Shoot at engaged enemy:", _fmt_count(agent_shoot_engaged), _fmt_count(bot_shoot_engaged))
     if agent_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][1]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5471,10 +5639,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
     bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
-    log_print(f"Non-pistol adjacent shots:   {agent_non_pistol_adj:10d}           {bot_non_pistol_adj:6d}")
+    _table_row("Non-pistol adjacent shots:", _fmt_count(agent_non_pistol_adj), _fmt_count(bot_non_pistol_adj))
     agent_advance_after_shoot = stats['advance_after_shoot'][1]
     bot_advance_after_shoot = stats['advance_after_shoot'][2]
-    log_print(f"Advance after shoot:          {agent_advance_after_shoot:10d}           {bot_advance_after_shoot:6d}")
+    _table_row("Advance after shoot:", _fmt_count(agent_advance_after_shoot), _fmt_count(bot_advance_after_shoot))
     if agent_advance_after_shoot > 0 and stats['first_error_lines']['advance_after_shoot'][1]:
         first_err = stats['first_error_lines']['advance_after_shoot'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5483,7 +5651,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_advance_twice_shoot = stats['advance_twice_in_shoot_phase'][1]
     bot_advance_twice_shoot = stats['advance_twice_in_shoot_phase'][2]
-    log_print(f"Advance twice in SHOOT:       {agent_advance_twice_shoot:10d}           {bot_advance_twice_shoot:6d}")
+    _table_row(
+        "Advance twice in SHOOT:",
+        _fmt_count(agent_advance_twice_shoot),
+        _fmt_count(bot_advance_twice_shoot),
+    )
     if agent_advance_twice_shoot > 0 and stats['first_error_lines']['advance_twice_in_shoot_phase'][1]:
         first_err = stats['first_error_lines']['advance_twice_in_shoot_phase'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5492,7 +5664,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_adv_over = stats['move_distance_over_limit']['advance'][1]
     bot_adv_over = stats['move_distance_over_limit']['advance'][2]
-    log_print(f"Advance distance > roll:     {agent_adv_over:10d}           {bot_adv_over:6d}")
+    _table_row("Advance distance > roll:", _fmt_count(agent_adv_over), _fmt_count(bot_adv_over))
     if agent_adv_over > 0 and stats['first_error_lines']['move_distance_over_limit']['advance'][1]:
         first_err = stats['first_error_lines']['move_distance_over_limit']['advance'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5501,7 +5673,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_advance_adj = stats['advance_from_adjacent'][1]
     bot_advance_adj = stats['advance_from_adjacent'][2]
-    log_print(f"Advances from adjacent hex:   {agent_advance_adj:10d}           {bot_advance_adj:6d}")
+    _table_row("Advances from adjacent hex:", _fmt_count(agent_advance_adj), _fmt_count(bot_advance_adj))
     if agent_advance_adj > 0 and stats['first_error_lines']['advance_from_adjacent'][1]:
         first_err = stats['first_error_lines']['advance_from_adjacent'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5510,7 +5682,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_adv_blocked = stats['move_path_blocked']['advance'][1]
     bot_adv_blocked = stats['move_path_blocked']['advance'][2]
-    log_print(f"Advance path blocked (BFS):  {agent_adv_blocked:10d}           {bot_adv_blocked:6d}")
+    _table_row("Advance path blocked (BFS):", _fmt_count(agent_adv_blocked), _fmt_count(bot_adv_blocked))
     if agent_adv_blocked > 0 and stats['first_error_lines']['move_path_blocked']['advance'][1]:
         first_err = stats['first_error_lines']['move_path_blocked']['advance'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5521,11 +5693,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # CHARGE ERRORS
     active_debug_section = "1.3"
     log_print("\n" + "-" * 80)
-    log_print(f"{('1.3 ' + debug_sections['1.3']):<30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    log_print("-" * 80)
+    _table_header("1.3 CHARGE ERRORS")
     agent_charge_adj = stats['charge_from_adjacent'][1]
     bot_charge_adj = stats['charge_from_adjacent'][2]
-    log_print(f"Charges from adjacent hex:     {agent_charge_adj:6d}           {bot_charge_adj:6d}")
+    _table_row("Charges from adjacent hex:", _fmt_count(agent_charge_adj), _fmt_count(bot_charge_adj))
     if agent_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][1]:
         first_err = stats['first_error_lines']['charge_from_adjacent'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5534,23 +5705,31 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_charge_flee = stats['charge_invalid'][1]['fled']
     bot_charge_flee = stats['charge_invalid'][2]['fled']
-    log_print(f"Charges after flee:           {agent_charge_flee:6d}           {bot_charge_flee:6d}")
+    _table_row("Charges after flee:", _fmt_count(agent_charge_flee), _fmt_count(bot_charge_flee))
     agent_charge_flee_rule_used = sum(
         phase_special_rule_usage[k][1] for k in phase_special_rule_usage if k[0] == "charge_after_flee"
     )
     bot_charge_flee_rule_used = sum(
         phase_special_rule_usage[k][2] for k in phase_special_rule_usage if k[0] == "charge_after_flee"
     )
-    log_print(f"Charge after flee (rule):     {agent_charge_flee_rule_used:6d}           {bot_charge_flee_rule_used:6d}")
+    _table_row(
+        "Charge after flee (rule):",
+        _fmt_count(agent_charge_flee_rule_used),
+        _fmt_count(bot_charge_flee_rule_used),
+    )
     agent_charge_adv_used = sum(stats['special_rule_usage'][k][1] for k in stats['special_rule_usage'] if k[0] == "charge_after_advance")
     bot_charge_adv_used = sum(stats['special_rule_usage'][k][2] for k in stats['special_rule_usage'] if k[0] == "charge_after_advance")
-    log_print(f"Charge after advance (rule):  {agent_charge_adv_used:6d}           {bot_charge_adv_used:6d}")
+    _table_row(
+        "Charge after advance (rule):",
+        _fmt_count(agent_charge_adv_used),
+        _fmt_count(bot_charge_adv_used),
+    )
     agent_charge_adv = stats['charge_invalid'][1]['advanced']
     bot_charge_adv = stats['charge_invalid'][2]['advanced']
-    log_print(f"Charges after advance:        {agent_charge_adv:6d}           {bot_charge_adv:6d}")
+    _table_row("Charges after advance:", _fmt_count(agent_charge_adv), _fmt_count(bot_charge_adv))
     agent_charge_over = stats['charge_invalid'][1]['distance_over_roll']
     bot_charge_over = stats['charge_invalid'][2]['distance_over_roll']
-    log_print(f"Distance > roll:              {agent_charge_over:6d}           {bot_charge_over:6d}")
+    _table_row("Distance > roll:", _fmt_count(agent_charge_over), _fmt_count(bot_charge_over))
     if stats['first_error_lines']['charge_invalid'][1]:
         first_err = stats['first_error_lines']['charge_invalid'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5561,11 +5740,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # FIGHT ERRORS
     active_debug_section = "1.4"
     log_print("\n" + "-" * 80)
-    log_print(f"{('1.4 ' + debug_sections['1.4']):<30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
-    log_print("-" * 80)
+    _table_header("1.4 FIGHT ERRORS")
     agent_fight_non_adj = stats['fight_from_non_adjacent'][1]
     bot_fight_non_adj = stats['fight_from_non_adjacent'][2]
-    log_print(f"Fight from non-adjacent hex:  {agent_fight_non_adj:6d}           {bot_fight_non_adj:6d}")
+    _table_row("Fight from non-adjacent hex:", _fmt_count(agent_fight_non_adj), _fmt_count(bot_fight_non_adj))
     if agent_fight_non_adj > 0 and stats['first_error_lines']['fight_from_non_adjacent'][1]:
         first_err = stats['first_error_lines']['fight_from_non_adjacent'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5574,7 +5752,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_fight_friendly = stats['fight_friendly'][1]
     bot_fight_friendly = stats['fight_friendly'][2]
-    log_print(f"Fight a friendly unit:        {agent_fight_friendly:6d}           {bot_fight_friendly:6d}")
+    _table_row("Fight a friendly unit:", _fmt_count(agent_fight_friendly), _fmt_count(bot_fight_friendly))
     if agent_fight_friendly > 0 and stats['first_error_lines']['fight_friendly'][1]:
         first_err = stats['first_error_lines']['fight_friendly'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5583,7 +5761,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_fight_over_cc = stats['fight_over_cc_nb'][1]
     bot_fight_over_cc = stats['fight_over_cc_nb'][2]
-    log_print(f"Attacks over CC_NB:           {agent_fight_over_cc:6d}           {bot_fight_over_cc:6d}")
+    _table_row("Attacks over CC_NB:", _fmt_count(agent_fight_over_cc), _fmt_count(bot_fight_over_cc))
     if agent_fight_over_cc > 0 and stats['first_error_lines']['fight_over_cc_nb'][1]:
         first_err = stats['first_error_lines']['fight_over_cc_nb'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5592,7 +5770,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_fight_alt = stats['fight_alternation_violations'][1]
     bot_fight_alt = stats['fight_alternation_violations'][2]
-    log_print(f"Fight alternation violations: {agent_fight_alt:6d}           {bot_fight_alt:6d}")
+    _table_row("Fight alternation violations:", _fmt_count(agent_fight_alt), _fmt_count(bot_fight_alt))
     if agent_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][1]:
         first_err = stats['first_error_lines']['fight_alternation_violations'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5716,15 +5894,22 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # WEAPONS RULES USAGE (by rule and weapon+unit)
     active_debug_section = "1.8"
     log_print("\n" + "-" * 80)
-    log_print(f"1.8 WEAPONS RULES USAGE      {'Weapon':<60} {'P1':>10} {'P2':>10} {'Validité':>10}")
-    log_print("-" * 80)
+    _wr_header()
     weapon_rule_usage = stats.get('weapon_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
     weapon_rule_invalid_usage = require_key(stats, 'weapon_rule_invalid_usage')
     weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
-    wr_usage_keys = sorted(weapon_rule_usage.keys())
-    if wr_usage_keys:
-        for (rule_name, weapon_key) in wr_usage_keys:
-            counts = weapon_rule_usage[(rule_name, weapon_key)]
+    unit_types_seen = set(require_key(stats, "unit_types_seen"))
+    unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
+    expected_wr_keys = {
+        (rule_name, weapon_key)
+        for rule_name, weapon_keys in weapon_rule_to_weapons.items()
+        for weapon_key in weapon_keys
+        if unit_type_suffixes and weapon_key.endswith(unit_type_suffixes)
+    }
+    wr_keys = sorted(set(weapon_rule_usage.keys()) | expected_wr_keys)
+    if wr_keys:
+        for (rule_name, weapon_key) in wr_keys:
+            counts = weapon_rule_usage.get((rule_name, weapon_key), {1: 0, 2: 0})
             p1 = counts.get(1, 0)  # get allowed: optional player counts
             p2 = counts.get(2, 0)  # get allowed: optional player counts
             has_rule = weapon_key in weapon_rule_to_weapons.get(rule_name, set())
@@ -5734,30 +5919,42 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
                 invalid_total = require_key(invalid_counts, 1) + require_key(invalid_counts, 2)
             else:
                 invalid_total = 0
-            if has_rule and invalid_total == 0:
+            if has_rule and (p1 + p2) == 0:
+                validite = "NOT USED"
+            elif has_rule and invalid_total == 0:
                 validite = "OK"
             elif rule_name == "HEAVY" and invalid_total > 0:
                 validite = "INVALID (used after deplacement)"
             else:
                 validite = "INVALID"
             rule_display = rule_name.capitalize() if rule_name else rule_name
-            log_print(f"{rule_display:<28} {weapon_key:<60} {p1:10d} {p2:10d} {validite:>10}")
+            _wr_row(rule_display, weapon_key, p1, p2, validite)
             if rule_name == "HEAVY" and invalid_total > 0:
                 invalid_first = require_key(stats, "weapon_rule_invalid_first_lines")
                 first_err = invalid_first.get((rule_name, weapon_key))
                 if first_err:
                     log_print(f"  First occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        not_used_count = sum(
+            1
+            for (rule_name, weapon_key) in expected_wr_keys
+            if (weapon_rule_usage.get((rule_name, weapon_key), {1: 0, 2: 0}).get(1, 0)
+                + weapon_rule_usage.get((rule_name, weapon_key), {1: 0, 2: 0}).get(2, 0)) == 0
+        )
+        log_print(
+            f"Expected weapon-rule pairs: {len(expected_wr_keys):6d} | "
+            f"Not used: {not_used_count:6d}"
+        )
     else:
         log_print("No weapon rule usage recorded.")
 
     # Rule execution metrics (same section formatting)
     agent_dw_correct = stats['devastating_wounds_correct'][1]
     bot_dw_correct = stats['devastating_wounds_correct'][2]
-    log_print(f"{'Devastating_wounds':<28} {'GLOBAL (correct)':<60} {agent_dw_correct:10d} {bot_dw_correct:10d} {'OK':>10}")
+    _wr_row("Devastating_wounds", "GLOBAL (correct)", agent_dw_correct, bot_dw_correct, "OK")
     agent_dw_incorrect = stats['devastating_wounds_incorrect'][1]
     bot_dw_incorrect = stats['devastating_wounds_incorrect'][2]
     if (agent_dw_incorrect + bot_dw_incorrect) > 0:
-        log_print(f"{'Devastating_wounds':<28} {'GLOBAL (incorrect)':<60} {agent_dw_incorrect:10d} {bot_dw_incorrect:10d} {'INVALID':>10}")
+        _wr_row("Devastating_wounds", "GLOBAL (incorrect)", agent_dw_incorrect, bot_dw_incorrect, "INVALID")
         if agent_dw_incorrect > 0 and stats['first_error_lines']['devastating_wounds_incorrect'][1]:
             first_err = stats['first_error_lines']['devastating_wounds_incorrect'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -5767,11 +5964,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 
     agent_rf_correct = stats['rapid_fire_correct'][1]
     bot_rf_correct = stats['rapid_fire_correct'][2]
-    log_print(f"{'Rapid_fire':<28} {'GLOBAL (correct)':<60} {agent_rf_correct:10d} {bot_rf_correct:10d} {'OK':>10}")
+    _wr_row("Rapid_fire", "GLOBAL (correct)", agent_rf_correct, bot_rf_correct, "OK")
     agent_rf_incorrect = stats['rapid_fire_incorrect'][1]
     bot_rf_incorrect = stats['rapid_fire_incorrect'][2]
     if (agent_rf_incorrect + bot_rf_incorrect) > 0:
-        log_print(f"{'Rapid_fire':<28} {'GLOBAL (incorrect)':<60} {agent_rf_incorrect:10d} {bot_rf_incorrect:10d} {'INVALID':>10}")
+        _wr_row("Rapid_fire", "GLOBAL (incorrect)", agent_rf_incorrect, bot_rf_incorrect, "INVALID")
         if agent_rf_incorrect > 0 and stats['first_error_lines']['rapid_fire_incorrect'][1]:
             first_err = stats['first_error_lines']['rapid_fire_incorrect'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -6041,24 +6238,27 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("\n" + "=" * 80)
     log_print("SUMMARY")
     log_print("=" * 80)
-    def summary_icon(is_warning: bool) -> str:
-        return "⚠️ " if is_warning else "✅"
+    def summary_error_icon(has_error: bool) -> str:
+        return "❌" if has_error else "✅"
+
+    def summary_warning_icon(has_warning: bool) -> str:
+        return "⚠️ " if has_warning else "✅"
 
     long_episode_warn = (max_duration is not None and avg_duration is not None and max_duration > avg_duration * 3)
     actions_episode_warn = (max_length is not None and avg_length is not None and max_length > avg_length * 3)
     log_print("-" * 80)
     log_print("PHASES")
     log_print("-" * 80)
-    log_print(f"{summary_icon(move_errors > 0)} 1.1 Erreurs en phase de move : {move_errors}")
-    log_print(f"{summary_icon(shooting_errors > 0)} 1.2 Erreurs en phase de shooting : {shooting_errors}")
-    log_print(f"{summary_icon(charge_errors > 0)} 1.3 Erreurs en phase de charge : {charge_errors}")
-    log_print(f"{summary_icon(fight_errors > 0)} 1.4 Erreurs en phase de fight : {fight_errors}")
+    log_print(f"{summary_error_icon(move_errors > 0)} 1.1 Erreurs en phase de move : {move_errors}")
+    log_print(f"{summary_error_icon(shooting_errors > 0)} 1.2 Erreurs en phase de shooting : {shooting_errors}")
+    log_print(f"{summary_error_icon(charge_errors > 0)} 1.3 Erreurs en phase de charge : {charge_errors}")
+    log_print(f"{summary_error_icon(fight_errors > 0)} 1.4 Erreurs en phase de fight : {fight_errors}")
     action_phase_accuracy = require_key(stats, "action_phase_accuracy")
     wrong_phase_total = sum(require_key(action_phase_accuracy[key], "wrong") for key in action_phase_accuracy)
-    log_print(f"{summary_icon(wrong_phase_total > 0)} 1.5 Actions occuring in the wrong phase : {wrong_phase_total}")
+    log_print(f"{summary_error_icon(wrong_phase_total > 0)} 1.5 Actions occuring in the wrong phase : {wrong_phase_total}")
     double_activation_by_phase = require_key(stats, "double_activation_by_phase")
     double_activation_total = sum(double_activation_by_phase.values())
-    log_print(f"{summary_icon(double_activation_total > 0)} 1.6 Double-activation par phase : {double_activation_total}")
+    log_print(f"{summary_error_icon(double_activation_total > 0)} 1.6 Double-activation par phase : {double_activation_total}")
     special_rule_usage_total = sum(
         counts.get(1, 0) + counts.get(2, 0)  # get allowed: optional player counts
         for counts in stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()  # get allowed: optional stats
@@ -6072,6 +6272,22 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     special_rule_usage_stats = require_key(stats, 'special_rule_usage')
     weapon_rule_usage_stats = require_key(stats, 'weapon_rule_usage')
     weapon_rule_invalid_usage_stats = require_key(stats, 'weapon_rule_invalid_usage')
+    unit_types_seen = set(require_key(stats, "unit_types_seen"))
+    unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
+    expected_weapon_rule_pairs = {
+        (rule_name, weapon_key)
+        for rule_name, weapon_keys in weapon_rule_to_weapons.items()
+        for weapon_key in weapon_keys
+        if unit_type_suffixes and weapon_key.endswith(unit_type_suffixes)
+    }
+    weapon_rule_not_used_warnings = sum(
+        1
+        for (rule_name, weapon_key) in expected_weapon_rule_pairs
+        if (
+            weapon_rule_usage_stats.get((rule_name, weapon_key), {1: 0, 2: 0}).get(1, 0)
+            + weapon_rule_usage_stats.get((rule_name, weapon_key), {1: 0, 2: 0}).get(2, 0)
+        ) == 0
+    )
     special_rules_invalid = sum(
         1 for (rid, ut) in special_rule_usage_stats.keys()
         if (rid not in rule_to_units) or (ut not in rule_to_units[rid])
@@ -6086,8 +6302,28 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if rname == "HEAVY"
     )
     weapon_rules_invalid += heavy_rule_invalid_usage
-    log_print(f"{summary_icon(special_rules_invalid > 0)} 1.7 Special rules usage : {special_rule_usage_total} utilisations" + (f" ({special_rules_invalid} invalid)" if special_rules_invalid > 0 else ""))
-    log_print(f"{summary_icon(weapon_rules_invalid > 0)} 1.8 Weapon rules usage : {weapon_rule_usage_total} utilisations" + (f" ({weapon_rules_invalid} invalid)" if weapon_rules_invalid > 0 else ""))
+    log_print(f"{summary_error_icon(special_rules_invalid > 0)} 1.7 Special rules usage : {special_rule_usage_total} utilisations" + (f" ({special_rules_invalid} invalid)" if special_rules_invalid > 0 else ""))
+    weapon_rules_has_warning = weapon_rule_not_used_warnings > 0
+    weapon_rules_status_parts: List[str] = []
+    if weapon_rules_invalid > 0:
+        weapon_rules_status_parts.append(f"{weapon_rules_invalid} invalid")
+    if weapon_rules_has_warning:
+        weapon_rules_status_parts.append(f"{weapon_rule_not_used_warnings} not used (warning)")
+    weapon_rules_status_suffix = (
+        f" ({', '.join(weapon_rules_status_parts)})"
+        if weapon_rules_status_parts
+        else ""
+    )
+    if weapon_rules_invalid > 0:
+        weapon_rules_icon = "❌"
+    elif weapon_rules_has_warning:
+        weapon_rules_icon = "⚠️ "
+    else:
+        weapon_rules_icon = "✅"
+    log_print(
+        f"{weapon_rules_icon} 1.8 Weapon rules usage : {weapon_rule_usage_total} utilisations"
+        f"{weapon_rules_status_suffix}"
+    )
     dmg_issues_total = (
         stats['damage_missing_unit_hp'][1] + stats['damage_missing_unit_hp'][2] +
         stats['damage_exceeds_hp'][1] + stats['damage_exceeds_hp'][2]
@@ -6096,25 +6332,25 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     log_print("INTEGRITY")
     log_print("-" * 80)
-    log_print(f"{summary_icon(dead_unit_interactions_total > 0)} 2.1 Dead units interactions : {dead_unit_interactions_total}")
-    log_print(f"{summary_icon(pos_mismatch_total > 0)} 2.2 Positions/logs incohérents : {pos_mismatch_total}")
-    log_print(f"{summary_icon(dmg_issues_total > 0)} 2.3 DMG issues : {dmg_issues_total}")
+    log_print(f"{summary_error_icon(dead_unit_interactions_total > 0)} 2.1 Dead units interactions : {dead_unit_interactions_total}")
+    log_print(f"{summary_error_icon(pos_mismatch_total > 0)} 2.2 Positions/logs incohérents : {pos_mismatch_total}")
+    log_print(f"{summary_error_icon(dmg_issues_total > 0)} 2.3 DMG issues : {dmg_issues_total}")
     if max_duration_episode is not None and avg_duration is not None:
         durations_list = require_key(stats, 'episode_durations')
         min_duration_episode, min_duration = min(durations_list, key=lambda x: x[1])
-        log_print(f"{summary_icon(long_episode_warn)} 2.4 Episodes duration : Min: {min_duration:.2f}s (E{min_duration_episode}) - Avg: {avg_duration:.2f}s - Max: {max_duration:.2f}s (E{max_duration_episode})")
+        log_print(f"{summary_warning_icon(long_episode_warn)} 2.4 Episodes duration : Min: {min_duration:.2f}s (E{min_duration_episode}) - Avg: {avg_duration:.2f}s - Max: {max_duration:.2f}s (E{max_duration_episode})")
     else:
-        log_print(f"{summary_icon(False)} 2.4 Episodes duration : N/A")
+        log_print(f"{summary_warning_icon(False)} 2.4 Episodes duration : N/A")
     if max_length_episode is not None and avg_length is not None:
         lengths_list = require_key(stats, 'episode_lengths')
         min_length_episode, min_length = min(lengths_list, key=lambda x: x[1])
-        log_print(f"{summary_icon(actions_episode_warn)} 2.4 Episodes actions : Min: {min_length} (E{min_length_episode}) - Avg: {avg_length:.1f} - Max: {max_length} (E{max_length_episode})")
+        log_print(f"{summary_warning_icon(actions_episode_warn)} 2.4 Episodes actions : Min: {min_length} (E{min_length_episode}) - Avg: {avg_length:.1f} - Max: {max_length} (E{max_length_episode})")
     else:
-        log_print(f"{summary_icon(False)} 2.4 Episodes actions : N/A")
+        log_print(f"{summary_warning_icon(False)} 2.4 Episodes actions : N/A")
     episodes_ending_total = len(stats['episodes_without_end']) + len(stats['episodes_without_method'])
-    log_print(f"{summary_icon(episodes_ending_total > 0)} 2.5 Episode ending : {episodes_ending_total}")
-    log_print(f"{summary_icon(len(missing_samples) > 0)} 2.6 Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")
-    log_print(f"{summary_icon(core_issues_total > 0)} 2.7 Core issue : {core_issues_total}")
+    log_print(f"{summary_error_icon(episodes_ending_total > 0)} 2.5 Episode ending : {episodes_ending_total}")
+    log_print(f"{summary_error_icon(len(missing_samples) > 0)} 2.6 Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")
+    log_print(f"{summary_error_icon(core_issues_total > 0)} 2.7 Core issue : {core_issues_total}")
 
     log_print("\n" + "#" * 80 + "\n")
 
@@ -6270,6 +6506,22 @@ if __name__ == "__main__":
         weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
         weapon_rule_usage = require_key(stats, 'weapon_rule_usage')
         weapon_rule_invalid_usage = require_key(stats, 'weapon_rule_invalid_usage')
+        unit_types_seen = set(require_key(stats, "unit_types_seen"))
+        unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
+        expected_weapon_rule_pairs = {
+            (rname, wkey)
+            for rname, wkeys in weapon_rule_to_weapons.items()
+            for wkey in wkeys
+            if unit_type_suffixes and wkey.endswith(unit_type_suffixes)
+        }
+        weapon_rule_not_used_warnings = sum(
+            1
+            for (rname, wkey) in expected_weapon_rule_pairs
+            if (
+                weapon_rule_usage.get((rname, wkey), {1: 0, 2: 0}).get(1, 0)
+                + weapon_rule_usage.get((rname, wkey), {1: 0, 2: 0}).get(2, 0)
+            ) == 0
+        )
         weapon_rules_invalid = sum(
             1 for (rname, wkey) in weapon_rule_usage.keys()
             if (rname not in weapon_rule_to_weapons) or (wkey not in weapon_rule_to_weapons[rname])
@@ -6296,12 +6548,17 @@ if __name__ == "__main__":
             weapon_rules_invalid +
             len(missing_samples)
         )
+        total_warnings = weapon_rule_not_used_warnings
 
-        status_line = (
-            f"⚠️  {total_errors} erreur(s) détectée(s)   -   Output : {output_file}"
-            if total_errors > 0
-            else f"✅ Aucune erreur détectée   -   Output : {output_file}"
-        )
+        if total_errors > 0:
+            status_line = f"❌ {total_errors} erreur(s) détectée(s)   -   Output : {output_file}"
+        elif total_warnings > 0:
+            status_line = (
+                f"⚠️  0 erreur, {total_warnings} warning(s) "
+                f"(weapon rules not used)   -   Output : {output_file}"
+            )
+        else:
+            status_line = f"✅ Aucune erreur détectée   -   Output : {output_file}"
 
         def _print_section_lines(lines: List[str]) -> None:
             for line in lines:
@@ -6338,10 +6595,7 @@ if __name__ == "__main__":
             if summary_lines:
                 _print_section_lines(summary_lines)
 
-        if total_errors > 0:
-            _print_section_lines([f"⚠️  {total_errors} erreur(s) détectée(s)   -   Output : {output_file}"])
-        else:
-            _print_section_lines([f"✅ Aucune erreur détectée   -   Output : {output_file}"])
+        _print_section_lines([status_line])
 
     except Exception as e:
         log_print(f"Error: {e}")

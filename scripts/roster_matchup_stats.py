@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,6 +84,164 @@ def _build_scenario_template(scale: str, split: str) -> Dict[str, Any]:
         "primary_objectives": ["objectives_control"],
         "objectives_ref": "objectives-01.json",
     }
+
+
+def _extract_rule_checker_units() -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Return unit_type names where RULES_STATUS has at least one entry == 2.
+
+    Returns:
+      - selected unit_type list
+      - selected details rows
+      - rejected audit rows
+    """
+    units_root = PROJECT_ROOT / "frontend" / "src" / "roster"
+    if not units_root.exists():
+        raise FileNotFoundError(f"Units directory not found: {units_root}")
+
+    selected_units: List[str] = []
+    selected_details: List[Dict[str, Any]] = []
+    rejected_rows: List[Dict[str, Any]] = []
+    class_pattern = re.compile(r"export\s+class\s+(\w+)")
+    rules_status_pattern = re.compile(
+        r"static\s+RULES_STATUS(?:\s*:\s*[^=]+)?\s*=\s*\{([\s\S]*?)\};",
+        re.MULTILINE,
+    )
+    rules_status_entry_pattern = re.compile(r"([A-Za-z0-9_]+)\s*:\s*([0-9]+)")
+
+    for ts_file in sorted(units_root.glob("**/units/*.ts")):
+        content = ts_file.read_text(encoding="utf-8")
+        class_match = class_pattern.search(content)
+        unit_type = class_match.group(1) if class_match else ts_file.stem
+        status_match = rules_status_pattern.search(content)
+        rel_path = str(ts_file.relative_to(PROJECT_ROOT)).replace("\\", "/")
+
+        if status_match is None:
+            rejected_rows.append(
+                {
+                    "unit_type": unit_type,
+                    "file": rel_path,
+                    "reason": "RULES_STATUS missing",
+                }
+            )
+            continue
+
+        status_block = status_match.group(1)
+        entries = rules_status_entry_pattern.findall(status_block)
+        if len(entries) == 0:
+            rejected_rows.append(
+                {
+                    "unit_type": unit_type,
+                    "file": rel_path,
+                    "reason": "RULES_STATUS empty or unparsable",
+                }
+            )
+            continue
+
+        implemented_rule_keys = sorted(
+            [rule_key for rule_key, raw_value in entries if int(raw_value) == 2]
+        )
+        if len(implemented_rule_keys) > 0:
+            selected_units.append(unit_type)
+            selected_details.append(
+                {
+                    "unit_type": unit_type,
+                    "file": rel_path,
+                    "implemented_rules": implemented_rule_keys,
+                }
+            )
+        else:
+            rejected_rows.append(
+                {
+                    "unit_type": unit_type,
+                    "file": rel_path,
+                    "reason": "RULES_STATUS has no value == 2",
+                }
+            )
+
+    selected_sorted = sorted(set(selected_units))
+    if not selected_sorted:
+        raise ValueError(
+            "No unit found with at least one RULES_STATUS entry == 2 in frontend/src/roster/**/units/*.ts"
+        )
+    return selected_sorted, selected_details, rejected_rows
+
+
+def _generate_rule_checker_artifacts(agent_key: str, scale: str) -> None:
+    """
+    Generate dedicated rule-checker scenarios + manifest in config/rule_checker.
+    """
+    from ai.unit_registry import UnitRegistry
+
+    output_dir = PROJECT_ROOT / "config" / "rule_checker"
+    scenarios_dir = output_dir / "scenarios"
+    scenarios_dir.mkdir(parents=True, exist_ok=True)
+
+    selected_units, selected_details, rejected_rows = _extract_rule_checker_units()
+    unit_registry = UnitRegistry()
+
+    # Validate unit types exist in runtime registry.
+    missing_in_registry = [u for u in selected_units if u not in unit_registry.units]
+    if missing_in_registry:
+        raise KeyError(
+            f"Selected unit_type not found in UnitRegistry: {missing_in_registry}"
+        )
+
+    scenario_paths: List[str] = []
+    scenario_index = 1
+    for p1_unit in selected_units:
+        for p2_unit in selected_units:
+            scenario_name = f"scenario_rule_checker_bot-{scenario_index:03d}.json"
+            scenario_path = scenarios_dir / scenario_name
+            scenario_payload = {
+                "deployment_zone": "hammer",
+                "deployment_type": "active",
+                "scale": scale,
+                "wall_ref": "walls-01.json",
+                "primary_objectives": ["objectives_control"],
+                "objectives_ref": "objectives-01.json",
+                "units": [
+                    {"id": 1, "unit_type": p1_unit, "player": 1},
+                    {"id": 2, "unit_type": p1_unit, "player": 1},
+                    {"id": 101, "unit_type": p2_unit, "player": 2},
+                    {"id": 102, "unit_type": p2_unit, "player": 2},
+                ],
+            }
+            scenario_path.write_text(
+                json.dumps(scenario_payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            scenario_paths.append(str(scenario_path))
+            scenario_index += 1
+
+    manifest = {
+        "mode": "rule_checker",
+        "agent": agent_key,
+        "scale": scale,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "rule_filter": {
+            "mode": "any_rule_status_equals",
+            "required_value": 2,
+        },
+        "selected_unit_types": selected_units,
+        "selected_details": selected_details,
+        "scenario_count": len(scenario_paths),
+        "scenario_paths": scenario_paths,
+    }
+    manifest_path = output_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    rejected_path = output_dir / "audit_rejected.json"
+    rejected_path.write_text(
+        json.dumps(rejected_rows, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    print(f"✅ Rule-checker scenarios generated: {len(scenario_paths)}")
+    print(f"📁 Output dir: {output_dir}")
+    print(f"🧾 Manifest: {manifest_path}")
+    print(f"🧾 Rejected audit: {rejected_path}")
 
 
 def _run_matchup_episodes(
@@ -194,7 +353,16 @@ def main() -> None:
                     help="Split to load P2 benchmark from (e.g. holdout). Default: same as --split")
     parser.add_argument("--all-splits", action="store_true",
                     help="Run for training, holdout_regular, and holdout_hard (output: <split>_matchups.json each)")
+    parser.add_argument(
+        "--rule-checker",
+        action="store_true",
+        help="Generate dedicated rule-checker scenarios in config/rule_checker/ using units with at least one RULES_STATUS value == 2",
+    )
     args = parser.parse_args()
+
+    if args.rule_checker:
+        _generate_rule_checker_artifacts(agent_key=args.agent, scale=args.scale)
+        return
 
     if args.p1_benchmark and args.p2_benchmark:
         print("❌ Cannot use both --p1-benchmark and --p2-benchmark")

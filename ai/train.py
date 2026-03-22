@@ -295,6 +295,56 @@ def _apply_unit_rule_forcing_weights(
     return weighted_scenario_list
 
 
+def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
+    """
+    Load rule-checker scenario paths from config/rule_checker/manifest.json.
+    Strict mode: no fallback if manifest/scenarios are missing.
+    """
+    manifest_path = os.path.join(project_root_path, "config", "rule_checker", "manifest.json")
+    if not os.path.isfile(manifest_path):
+        raise FileNotFoundError(
+            f"--rule-checker requires manifest file: {manifest_path}. "
+            "Generate it first with: python scripts/roster_matchup_stats.py --agent <AGENT> --rule-checker"
+        )
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    if not isinstance(manifest, dict):
+        raise TypeError(
+            f"Rule-checker manifest must be JSON object (got {type(manifest).__name__})"
+        )
+    raw_paths = require_key(manifest, "scenario_paths")
+    if not isinstance(raw_paths, list):
+        raise TypeError(
+            f"rule_checker manifest key 'scenario_paths' must be list (got {type(raw_paths).__name__})"
+        )
+    if len(raw_paths) == 0:
+        raise ValueError("rule_checker manifest contains no scenarios")
+
+    resolved_paths: List[str] = []
+    missing_paths: List[str] = []
+    for raw_path in raw_paths:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise ValueError(f"Invalid scenario path in rule_checker manifest: {raw_path!r}")
+        scenario_path = raw_path.strip()
+        if not os.path.isabs(scenario_path):
+            scenario_path = os.path.join(project_root_path, scenario_path)
+        if not os.path.isfile(scenario_path):
+            missing_paths.append(scenario_path)
+            continue
+        resolved_paths.append(scenario_path)
+
+    if missing_paths:
+        raise FileNotFoundError(
+            "rule_checker manifest references missing scenarios. "
+            f"First missing files: {missing_paths[:5]}"
+        )
+
+    deduped = sorted(set(resolved_paths))
+    if len(deduped) == 0:
+        raise ValueError("rule_checker scenario list is empty after validation")
+    return deduped
+
+
 # Multi-agent orchestration imports
 from ai.scenario_manager import ScenarioManager
 from ai.multi_agent_trainer import MultiAgentTrainer
@@ -3245,6 +3295,8 @@ def main():
                        help="MacroController evaluation mode: micro (vs trained agents) or bot (vs evaluation bots)")
     parser.add_argument("--mode", type=str, default=None,
                        help="Force training device: CPU or GPU (case-insensitive). If omitted, auto-selects based on network size and GPU availability.")
+    parser.add_argument("--rule-checker", action="store_true",
+                       help="Train only on scenarios from config/rule_checker/manifest.json (no fallback).")
     parser.add_argument("--debug", action="store_true",
                        help="Enable debug console output (verbose logging)")
     parser.add_argument("--param", action="append", nargs=2, metavar=("KEY", "VALUE"),
@@ -3285,6 +3337,7 @@ def main():
     print(f"Multi-agent: {args.multi_agent}")
     print(f"Orchestrate: {args.orchestrate}")
     print(f"Step logging: {args.step}")
+    print(f"Rule-checker mode: {args.rule_checker}")
     print(f"Debug mode: {args.debug}")
     if args.mode:
         print(f"Device mode: {args.mode}")
@@ -3495,25 +3548,34 @@ def main():
             cfg = get_config_loader()
             unit_registry = UnitRegistry()
 
-            # Test-only mode must evaluate on holdout scenarios only.
-            if args.scenario == "bot":
-                raise ValueError(
-                    "--scenario bot is not allowed in --test-only mode. "
-                    "Use holdout scenarios for evaluation."
+            eval_scenario_list_override = None
+            if args.rule_checker:
+                eval_scenario_list_override = _load_rule_checker_scenarios(project_root)
+                scenario_file = eval_scenario_list_override[0]
+                print(
+                    f"📋 Rule-checker test-only mode: {len(eval_scenario_list_override)} scenario(s) from manifest"
                 )
-            holdout_scenarios = get_scenario_list_for_phase(
-                cfg,
-                args.agent,
-                args.training_config,
-                scenario_type="holdout",
-            )
-            if not holdout_scenarios:
-                raise FileNotFoundError(
-                    f"No holdout scenarios found for agent '{args.agent}' "
-                    f"and phase '{args.training_config}'"
+                print(f"📋 Using first rule-checker scenario for env init: {os.path.basename(scenario_file)}")
+            else:
+                # Test-only mode must evaluate on holdout scenarios only.
+                if args.scenario == "bot":
+                    raise ValueError(
+                        "--scenario bot is not allowed in --test-only mode. "
+                        "Use holdout scenarios for evaluation."
+                    )
+                holdout_scenarios = get_scenario_list_for_phase(
+                    cfg,
+                    args.agent,
+                    args.training_config,
+                    scenario_type="holdout",
                 )
-            scenario_file = holdout_scenarios[0]
-            print(f"📋 Using holdout scenario: {os.path.basename(scenario_file)}")
+                if not holdout_scenarios:
+                    raise FileNotFoundError(
+                        f"No holdout scenarios found for agent '{args.agent}' "
+                        f"and phase '{args.training_config}'"
+                    )
+                scenario_file = holdout_scenarios[0]
+                print(f"📋 Using holdout scenario: {os.path.basename(scenario_file)}")
             
             # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix)
             effective_agent_key = args.rewards_config if args.rewards_config else args.agent
@@ -3571,6 +3633,7 @@ def main():
                 step_logger=step_logger,
                 model_path=model_path,
                 scenario_pool="holdout",
+                scenario_list_override=eval_scenario_list_override,
             )
             
             scenario_scores = require_key(results, "scenario_scores")
@@ -3662,6 +3725,9 @@ def main():
 
         # Single agent training mode
         elif args.agent:
+            if args.rule_checker and args.agent == "MacroController":
+                raise ValueError("--rule-checker is not supported for MacroController")
+
             if args.agent == "MacroController":
                 if args.scenario in ("self", "bot"):
                     raise ValueError("MacroController supports --scenario all, but not self/bot modes")
@@ -3700,6 +3766,48 @@ def main():
                         print("📊 Skipping testing (--test-episodes 0)")
                     return 0
                 return 1
+
+            if args.rule_checker:
+                scenario_list = _load_rule_checker_scenarios(project_root)
+                print(f"🧪 Rule-checker mode: {len(scenario_list)} scenario(s) from config/rule_checker/manifest.json")
+                for scenario_path in scenario_list:
+                    print(f"   - {os.path.basename(scenario_path)}")
+
+                training_config = config.load_agent_training_config(args.agent, args.training_config)
+                if "total_episodes" not in training_config:
+                    raise KeyError(
+                        f"total_episodes missing from {args.agent} training config phase {args.training_config}"
+                    )
+                if args.total_episodes is not None:
+                    total_episodes = args.total_episodes
+                    print(f"📊 Using total_episodes from CLI: {total_episodes}")
+                else:
+                    total_episodes = training_config["total_episodes"]
+                    print(f"📊 Using total_episodes from config: {total_episodes}")
+
+                success, model, env = train_with_scenario_rotation(
+                    config=config,
+                    agent_key=args.agent,
+                    training_config_name=args.training_config,
+                    rewards_config_name=args.rewards_config,
+                    scenario_list=scenario_list,
+                    total_episodes=total_episodes,
+                    new_model=args.new,
+                    append_training=args.append,
+                    debug_mode=args.debug,
+                    use_bots=True,
+                    device_mode=args.mode
+                )
+                if success and args.test_episodes > 0:
+                    test_trained_model(
+                        model,
+                        args.test_episodes,
+                        args.training_config,
+                        args.agent,
+                        args.rewards_config,
+                        debug_mode=args.debug
+                    )
+                return 0 if success else 1
 
             # Curriculum mode: --scenario phaseX
             if args.scenario and args.scenario.startswith("phase"):

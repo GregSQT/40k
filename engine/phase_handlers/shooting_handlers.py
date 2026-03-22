@@ -762,6 +762,31 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             unit = get_unit_by_id(game_state, unit_id)
             if unit is None:
                 raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            # Activation-scoped shooting state must be reset at phase start.
+            # Pool/phase transitions are the source of truth (AI_TURN): no carry-over
+            # of a previous unit activation context into a new shoot phase.
+            transient_shoot_state_fields = (
+                "valid_target_pool",
+                "_pool_from_cache",
+                "_pool_cache_key",
+                "TOTAL_ATTACK_LOG",
+                "selected_target_id",
+                "activation_position",
+                "_shooting_with_pistol",
+                "_manual_weapon_selected",
+                "_shoot_activation_started",
+                "_current_shoot_nb",
+                "_rapid_fire_context_weapon_index",
+                "_rapid_fire_base_nb",
+                "_rapid_fire_shots_fired",
+                "_rapid_fire_bonus_total",
+                "_rapid_fire_rule_value",
+                "_rapid_fire_bonus_shot_current",
+                "_rapid_fire_bonus_applied_by_weapon",
+            )
+            for field_name in transient_shoot_state_fields:
+                if field_name in unit:
+                    del unit[field_name]
             rng_weapons = require_key(unit, "RNG_WEAPONS")
             for weapon in rng_weapons:
                 weapon["shot"] = 0
@@ -2106,9 +2131,17 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
         )
     )
     wall_hexes = require_key(game_state, "wall_hexes")
-    if not isinstance(wall_hexes, list):
-        raise TypeError(f"wall_hexes must be list (got {type(wall_hexes).__name__})")
-    wall_hexes_tuple = tuple(sorted(tuple(w) if isinstance(w, list) else w for w in wall_hexes))
+    if not isinstance(wall_hexes, (list, set, tuple)):
+        raise TypeError(
+            f"wall_hexes must be list/set/tuple (got {type(wall_hexes).__name__})"
+        )
+    normalized_wall_hexes: List[Tuple[int, int]] = []
+    for raw_wall in wall_hexes:
+        if not isinstance(raw_wall, (list, tuple)) or len(raw_wall) != 2:
+            raise ValueError(f"Invalid wall hex format in game_state.wall_hexes: {raw_wall!r}")
+        wall_col, wall_row = normalize_coordinates(raw_wall[0], raw_wall[1])
+        normalized_wall_hexes.append((wall_col, wall_row))
+    wall_hexes_tuple = tuple(sorted(normalized_wall_hexes))
     cache_key = (os.getpid(), gs_instance_id, episode_num, turn_num, unit_id_str, unit_col, unit_row, advance_status, adjacent_status, unit_player_int, enemy_pos_hash, wall_hexes_tuple)
 
     # Check cache
@@ -3045,6 +3078,22 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_move_after_shooting_resolved"]
     if "_move_after_shooting_distance" in unit:
         del unit["_move_after_shooting_distance"]
+    if "_current_shoot_nb" in unit:
+        del unit["_current_shoot_nb"]
+    if "_rapid_fire_context_weapon_index" in unit:
+        del unit["_rapid_fire_context_weapon_index"]
+    if "_rapid_fire_base_nb" in unit:
+        del unit["_rapid_fire_base_nb"]
+    if "_rapid_fire_shots_fired" in unit:
+        del unit["_rapid_fire_shots_fired"]
+    if "_rapid_fire_bonus_total" in unit:
+        del unit["_rapid_fire_bonus_total"]
+    if "_rapid_fire_rule_value" in unit:
+        del unit["_rapid_fire_rule_value"]
+    if "_rapid_fire_bonus_shot_current" in unit:
+        del unit["_rapid_fire_bonus_shot_current"]
+    if "_rapid_fire_bonus_applied_by_weapon" in unit:
+        del unit["_rapid_fire_bonus_applied_by_weapon"]
     unit["SHOOT_LEFT"] = 0
 
 def _get_shooting_context(game_state: Dict[str, Any], unit: Dict[str, Any]) -> str:
@@ -3158,12 +3207,20 @@ def _apply_move_after_shooting(
     require_key(game_state, "units_cannot_charge").add(unit_id_str)
 
     action_logs = require_key(game_state, "action_logs")
+    source_rule_display_name = _get_source_unit_rule_display_name_for_effect(
+        unit, "move_after_shooting"
+    )
+    if not isinstance(source_rule_display_name, str) or not source_rule_display_name.strip():
+        raise ValueError(
+            f"move_after_shooting source rule display name is required for unit {unit_id_str}"
+        )
+    source_rule_id = _get_source_unit_rule_id_for_effect(unit, "move_after_shooting")
+    if not isinstance(source_rule_id, str) or not source_rule_id.strip():
+        raise ValueError(
+            f"move_after_shooting source rule id is required for unit {unit_id_str}"
+        )
     action_logs.append({
         "type": "move_after_shooting",
-        "message": (
-            f"Unit {unit_id_str}({orig_col}, {orig_row}) MOVED [MOVE_AFTER_SHOOTING:{move_distance}] "
-            f"from ({orig_col}, {orig_row}) to ({dest_col_int}, {dest_row_int}) and cannot charge this turn"
-        ),
         "turn": game_state.get("turn", 1),
         "phase": "shoot",
         "unitId": unit_id_str,
@@ -3172,6 +3229,9 @@ def _apply_move_after_shooting(
         "fromRow": orig_row,
         "toCol": dest_col_int,
         "toRow": dest_row_int,
+        "move_distance": move_distance,
+        "ability_display_name": source_rule_display_name.strip(),
+        "source_rule_id": source_rule_id.strip(),
         "timestamp": "server_time",
     })
     return {
@@ -3179,6 +3239,9 @@ def _apply_move_after_shooting(
         "fromRow": orig_row,
         "toCol": dest_col_int,
         "toRow": dest_row_int,
+        "move_distance": move_distance,
+        "ability_display_name": source_rule_display_name.strip(),
+        "source_rule_id": source_rule_id.strip(),
     }
 
 def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
@@ -3980,15 +4043,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                     f"Unit missing required '_current_shoot_nb' after activation start: unit_id={unit.get('id')}"
                 )
         current_weapon_nb = require_key(unit, "_current_shoot_nb") if selected_weapon else None
-        if selected_weapon and (active_shooting_unit != unit_id and unit["SHOOT_LEFT"] == current_weapon_nb):
-            if unit.get("_shoot_activation_started", False):
-                raise ValueError(
-                    f"Attempted to re-activate shooting unit already activated: "
-                    f"unit_id={unit_id}, active_shooting_unit={active_shooting_unit}, "
-                    f"shoot_left={unit['SHOOT_LEFT']} current_weapon_nb={current_weapon_nb}"
-                )
-            # Only initialize if unit hasn't started shooting yet
-            activation_result = shooting_unit_activation_start(game_state, unit_id)
         
         # Auto-select target if not provided (AI mode)
         if not target_id:
@@ -4011,7 +4065,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
                 if shoot_attack_results:
                     result["all_attack_results"] = list(shoot_attack_results)
-                    game_state["shoot_attack_results"] = []
+                    if not result.get("waiting_for_player", False):
+                        game_state["shoot_attack_results"] = []
             return success, result
         return execution_result
     
@@ -4708,7 +4763,16 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         )
         if current_context_weapon_index != selected_weapon_index:
             unit["_rapid_fire_context_weapon_index"] = selected_weapon_index
-            unit["_rapid_fire_base_nb"] = require_key(unit, "_current_shoot_nb")
+            # RAPID_FIRE base shots must come from the current live context.
+            # _current_shoot_nb can be stale across some activation paths; SHOOT_LEFT
+            # at context start is the authoritative rolled NB before RAPID_FIRE bonus.
+            rapid_fire_base_nb = require_key(unit, "SHOOT_LEFT")
+            if not isinstance(rapid_fire_base_nb, int) or rapid_fire_base_nb <= 0:
+                raise ValueError(
+                    f"Invalid SHOOT_LEFT for RAPID_FIRE context init on unit {unit_id}: "
+                    f"{rapid_fire_base_nb!r}"
+                )
+            unit["_rapid_fire_base_nb"] = rapid_fire_base_nb
             unit["_rapid_fire_shots_fired"] = 0
             unit["_rapid_fire_bonus_total"] = 0
             rapid_fire_value = _get_rapid_fire_parameter(selected_weapon)
@@ -4738,12 +4802,31 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                     unit["SHOOT_LEFT"] += rapid_fire_value
                     unit["_rapid_fire_bonus_total"] = rapid_fire_value
 
-        shots_fired = int(require_key(unit, "_rapid_fire_shots_fired"))
+        # RAPID_FIRE bonus tagging uses shot index within current weapon context.
+        # This avoids fragile dependence on SHOOT_LEFT state transitions.
+        shots_fired_in_context = int(require_key(unit, "_rapid_fire_shots_fired"))
         rapid_fire_base_nb = int(require_key(unit, "_rapid_fire_base_nb"))
         rapid_fire_bonus_total = int(require_key(unit, "_rapid_fire_bonus_total"))
-        rapid_fire_bonus_shot_current = shots_fired >= rapid_fire_base_nb and rapid_fire_bonus_total > 0
+        if rapid_fire_base_nb <= 0:
+            raise ValueError(
+                f"Invalid RAPID_FIRE base NB for unit {unit_id}: "
+                f"base_nb={rapid_fire_base_nb}, selected_weapon_index={selected_weapon_index}, "
+                f"context_weapon_index={unit.get('_rapid_fire_context_weapon_index')}, "
+                f"shoot_left={unit.get('SHOOT_LEFT')}, current_shoot_nb={unit.get('_current_shoot_nb')}, "
+                f"shots_fired={shots_fired_in_context}, bonus_total={rapid_fire_bonus_total}"
+            )
+        current_shot_index = shots_fired_in_context + 1
+        max_shots_in_context = rapid_fire_base_nb + rapid_fire_bonus_total
+        if current_shot_index > max_shots_in_context:
+            raise ValueError(
+                f"Invalid RAPID_FIRE shot index for unit {unit_id}: "
+                f"shot_index={current_shot_index}, base_nb={rapid_fire_base_nb}, "
+                f"bonus_total={rapid_fire_bonus_total}, max_shots={max_shots_in_context}"
+            )
+        rapid_fire_bonus_shot_current = (
+            rapid_fire_bonus_total > 0 and current_shot_index > rapid_fire_base_nb
+        )
         unit["_rapid_fire_bonus_shot_current"] = rapid_fire_bonus_shot_current
-
         # Pool is source of truth — no redundant validation
         attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
         
@@ -4859,7 +4942,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
                 if shoot_attack_results:
                     loop_result["all_attack_results"] = list(shoot_attack_results)
-                    game_state["shoot_attack_results"] = []
+                    if not loop_result.get("waiting_for_player", False):
+                        game_state["shoot_attack_results"] = []
                 return success, loop_result
             else:
                 # NO -> All weapons exhausted -> End activation
@@ -4908,7 +4992,8 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             shoot_attack_results = game_state["shoot_attack_results"] if "shoot_attack_results" in game_state else []
             if shoot_attack_results:
                 loop_result["all_attack_results"] = list(shoot_attack_results)
-                game_state["shoot_attack_results"] = []
+                if not loop_result.get("waiting_for_player", False):
+                    game_state["shoot_attack_results"] = []
             return success, loop_result
     
     except Exception as e:
@@ -5483,7 +5568,15 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "wound_success": False,
             "save_roll": 0,
             "save_target": 0,
+            "save_target_base": 0,
+            "save_cover_applied": False,
+            "save_cover_bonus": 0,
             "save_success": False,
+            "save_skipped": False,
+            "save_skip_reason": None,
+            "critical_wound_unmodified": False,
+            "devastating_wounds_expected": False,
+            "devastating_wounds_applied": False,
             "devastating_wounds_flag": False,
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
@@ -5491,6 +5584,8 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "hazardous_test_roll": hazardous_roll,
             "hazardous_triggered": hazardous_triggered,
             "damage": 0,
+            "wound_ability_display_name": None,
+            "ap_modifier_ability_display_name": None,
             "attack_log": attack_log,
             "weapon_name": weapon_name
         }
@@ -5548,7 +5643,15 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "wound_success": False,
             "save_roll": 0,
             "save_target": 0,
+            "save_target_base": 0,
+            "save_cover_applied": False,
+            "save_cover_bonus": 0,
             "save_success": False,
+            "save_skipped": False,
+            "save_skip_reason": None,
+            "critical_wound_unmodified": False,
+            "devastating_wounds_expected": False,
+            "devastating_wounds_applied": False,
             "devastating_wounds_flag": False,
             "rapid_fire_bonus_shot": rapid_fire_bonus_shot,
             "rapid_fire_rule_value": rapid_fire_rule_value,
@@ -5592,6 +5695,9 @@ def _attack_sequence_rng(attacker: Dict[str, Any], target: Dict[str, Any], game_
             "wound_success": True,
             "save_roll": 0,
             "save_target": 0,
+            "save_target_base": 0,
+            "save_cover_applied": False,
+            "save_cover_bonus": 0,
             "save_success": False,
             "save_skipped": True,
             "save_skip_reason": "DEVASTATING_WOUNDS",
