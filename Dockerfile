@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir -r /app/requirements.runtime.txt
 
 COPY . /app
 
+# Generate LoS topology for 25x21 board (required by engine at runtime)
+RUN python scripts/los_topology_builder.py 25x21
+
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
