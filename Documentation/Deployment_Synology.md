@@ -63,7 +63,17 @@ flowchart TB
     USER --> FE
 ```
 
-### 1.2 Fichiers existants
+### 1.2 Topologie LoS (optionnelle au build)
+
+Par défaut, les builds backend **ne régénèrent pas** la topologie LoS (~20 min sur NAS). Les fichiers pré-générés (`config/board/25x21/topology_*.npz`) sont versionnés pour des mises à jour rapides.
+
+Si vous modifiez les murs (`config/board/25x21/walls/*.json`) :
+
+1. Localement : `./scripts/build_topology.sh` ou `python scripts/los_topology_builder.py 25x21`
+2. Commit : `git add config/board/25x21/topology_*.npz && git commit -m "Update LoS topology"`
+3. Ou forcer la régénération au build : `docker build --build-arg BUILD_TOPOLOGY=1 ...`
+
+### 1.3 Fichiers existants
 
 - `Dockerfile` (backend)
 - `frontend/Dockerfile` (frontend)
@@ -75,7 +85,7 @@ flowchart TB
 
 Le `docker-compose.yml` utilise des variables d’environnement obligatoires : `SYNO_CONFIG_PATH`, `SYNO_MODELS_PATH`, `SYNO_RUNTIME_PATH`. Pas de fallback : les variables doivent être définies.
 
-### 1.3 Volumes persistants
+### 1.4 Volumes persistants
 
 Montages en production (configuration validée) :
 
@@ -87,7 +97,7 @@ Objectif : conserver les données après redémarrage/mise à jour, séparer ima
 
 Important : ne pas monter tout `config/` vers `/app/config`, sinon les fichiers de configuration du repo (`scenario_game.json`, `unit_rules.json`, etc.) peuvent être masqués.
 
-### 1.4 Déploiement sur Synology
+### 1.5 Déploiement sur Synology
 
 **Option A — Container Manager (UI)**  
 1. Build et push des images depuis la machine de dev (ou build sur le NAS).  
@@ -104,7 +114,7 @@ Important : ne pas monter tout `config/` vers `/app/config`, sinon les fichiers 
 
 Note Synology : utiliser `sudo /usr/local/bin/docker compose ...` (PATH `sudo` incomplet dans de nombreux environnements DSM).
 
-### 1.5 Compatibilité et sécurité
+### 1.6 Compatibilité et sécurité
 
 - **Architecture** : Vérifier le NAS (amd64 / arm64). Pour multi-arch : buildx et manifest.
 - **Sécurité** : images à jour, secrets via variables d’environnement (jamais en dur dans les Dockerfiles), pas de fallback silencieux si variable critique manquante.

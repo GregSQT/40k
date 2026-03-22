@@ -14,8 +14,10 @@ RUN pip install --no-cache-dir -r /app/requirements.runtime.txt
 
 COPY . /app
 
-# Generate LoS topology for 25x21 board (required by engine at runtime)
-RUN python scripts/los_topology_builder.py 25x21
+# Optional: generate LoS topology (long, ~20 min). Default: use pre-built files from repo.
+# To regenerate (e.g. after changing walls): docker build --build-arg BUILD_TOPOLOGY=1 ...
+ARG BUILD_TOPOLOGY=0
+RUN if [ "$BUILD_TOPOLOGY" = "1" ]; then python scripts/los_topology_builder.py 25x21; fi
 
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser

@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BUILD_TOPOLOGY: "0"
     container_name: wh40k-backend
     restart: unless-stopped
     ports:
