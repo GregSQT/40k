@@ -666,11 +666,11 @@ These metrics measure the agent's tactical combat performance across different p
 ---
 
 #### `combat/e_controlled_objectives`
-**What it is:** Number of objectives controlled by Player 0 (learning agent) at episode end (smoothed over 20 episodes)
+**What it is:** Mean number of objectives controlled by Player 0 (learning agent) between turns 2 and 5 included, then smoothed over 20 episodes.
 
 **Why it matters:** Measures strategic objective control - agent's ability to position units to control victory points.
 
-**Important:** This metric is **only logged when the game reaches turn 5 or the configured turn limit** (objective-based victory condition). Episodes ending early by elimination do not contribute to this metric.
+**Important:** This metric is **only logged when the game reaches turn 5 or the configured turn limit**. Episodes ending early by elimination do not contribute.
 
 **Interpretation:**
 - **Higher values:** Agent controlling more objectives (better strategic positioning)
@@ -686,6 +686,7 @@ These metrics measure the agent's tactical combat performance across different p
 **Special considerations:**
 - **Only appears in TensorBoard for episodes that reached turn 5+**
 - **Missing data points are normal** - indicates early eliminations
+- **Less noisy than end-of-episode snapshot** - captures sustained control over turns 2..5
 - **Compare with win rate** - high objective control should correlate with wins
 
 **Action triggers:**

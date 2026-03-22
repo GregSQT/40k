@@ -1018,7 +1018,7 @@ def login_user():
         permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
         connection.commit()
 
-        tutorial_completed = bool(user_row.get("tutorial_completed", 0))
+        tutorial_completed = bool(dict(user_row).get("tutorial_completed", 0))
         return jsonify(
             {
                 "success": True,
@@ -1074,7 +1074,7 @@ def current_user():
     finally:
         connection.close()
 
-    tutorial_completed = bool(user_row.get("tutorial_completed", 0))
+    tutorial_completed = bool(dict(user_row).get("tutorial_completed", 0))
     return jsonify(
         {
             "success": True,

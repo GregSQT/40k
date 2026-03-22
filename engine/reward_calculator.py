@@ -711,6 +711,16 @@ class RewardCalculator:
 
         obj_counts = self.state_manager.count_controlled_objectives(game_state)
         controlled_objectives = require_key(obj_counts, controlled_player)
+        controlled_objective_samples_turn2_to_5 = require_key(
+            game_state,
+            "controlled_objective_samples_turn2_to_5"
+        )
+        if not isinstance(controlled_objective_samples_turn2_to_5, list):
+            raise TypeError(
+                "game_state['controlled_objective_samples_turn2_to_5'] must be a list"
+            )
+        if 2 <= current_turn <= 5:
+            controlled_objective_samples_turn2_to_5.append(float(controlled_objectives))
         reward_per_objective = objective_rewards["reward_per_objective"]
         total_reward = reward_per_objective * controlled_objectives
 

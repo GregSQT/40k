@@ -39,7 +39,16 @@ export default function AuthPage() {
       body: JSON.stringify({ login: userLogin, password: userPassword }),
     });
 
-    const loginPayload = await loginResponse.json();
+    const text = await loginResponse.text();
+    let loginPayload: LoginResponse & { error?: string };
+    try {
+      loginPayload = text ? (JSON.parse(text) as LoginResponse & { error?: string }) : ({} as LoginResponse);
+    } catch {
+      console.error("Login response (non-JSON):", text.slice(0, 200));
+      throw new Error(
+        "Le serveur a retourné une réponse invalide. Vérifiez que le backend est démarré et accessible."
+      );
+    }
     if (!loginResponse.ok) {
       const errorMessage = loginPayload?.error ?? "Echec de connexion";
       throw new Error(errorMessage);
@@ -71,7 +80,16 @@ export default function AuthPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ login: trimmedLogin, password }),
         });
-        const registerPayload = await registerResponse.json();
+        const text = await registerResponse.text();
+        let registerPayload: { error?: string };
+        try {
+          registerPayload = text ? (JSON.parse(text) as { error?: string }) : {};
+        } catch {
+          console.error("Register response (non-JSON):", text.slice(0, 200));
+          throw new Error(
+            "Le serveur a retourné une réponse invalide. Vérifiez que le backend est démarré et accessible."
+          );
+        }
         if (!registerResponse.ok) {
           const errorMessage = registerPayload?.error ?? "Echec de creation du compte";
           throw new Error(errorMessage);

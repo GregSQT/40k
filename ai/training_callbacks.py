@@ -995,8 +995,10 @@ class MetricsCollectionCallback(BaseCallback):
             # The 'turn_limit_reached' flag is set by fight_handlers when game ends due to turn limit (optional in info)
             turn_limit_reached = info.get('turn_limit_reached', False)  # get allowed
             if turn_limit_reached:
-                controlled_objectives = info['tactical_data']['controlled_objectives'] if 'controlled_objectives' in info['tactical_data'] else 0
-                self.metrics_tracker.log_controlled_objectives(controlled_objectives)
+                controlled_objectives_avg_turn2_5 = float(
+                    require_key(info['tactical_data'], 'controlled_objectives_avg_turn2_5')
+                )
+                self.metrics_tracker.log_controlled_objectives(controlled_objectives_avg_turn2_5)
             else:
                 # Game ended early (elimination) - skip objective logging
                 self.metrics_tracker.skip_controlled_objectives_logging()

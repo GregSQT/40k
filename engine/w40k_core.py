@@ -358,6 +358,7 @@ class W40KEngine(gym.Env):
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
             "objective_rewarded_turns": set(),
+            "controlled_objective_samples_turn2_to_5": [],
             "macro_intent_id": INTENT_TAKE_OBJECTIVE,
             "macro_detail_type": DETAIL_OBJECTIVE,
             "macro_detail_id": 0,
@@ -654,6 +655,8 @@ class W40KEngine(gym.Env):
             "victory_points": {1: 0, 2: 0},
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
+            "objective_rewarded_turns": set(),
+            "controlled_objective_samples_turn2_to_5": [],
             "macro_intent_id": INTENT_TAKE_OBJECTIVE,
             "macro_detail_type": DETAIL_OBJECTIVE,
             "macro_detail_id": 0,
@@ -1461,6 +1464,19 @@ class W40KEngine(gym.Env):
             # Count controlled objectives for Player 1 (learning agent)
             obj_counts = self.state_manager.count_controlled_objectives(self.game_state)
             self.episode_tactical_data['controlled_objectives'] = obj_counts[1]
+            controlled_objective_samples_turn2_to_5 = require_key(
+                self.game_state,
+                "controlled_objective_samples_turn2_to_5"
+            )
+            if not controlled_objective_samples_turn2_to_5:
+                raise ValueError(
+                    "controlled_objective_samples_turn2_to_5 is empty at episode end "
+                    "(expected samples for turns 2 to 5 when turn limit is reached)"
+                )
+            self.episode_tactical_data['controlled_objectives_avg_turn2_5'] = (
+                float(sum(controlled_objective_samples_turn2_to_5))
+                / float(len(controlled_objective_samples_turn2_to_5))
+            )
 
             # Add tactical data to info
             info["tactical_data"] = self.episode_tactical_data.copy()

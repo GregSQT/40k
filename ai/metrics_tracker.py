@@ -114,7 +114,7 @@ class W40KMetricsTracker:
             'shoot_kills': 0,      # Kills from ranged attacks
             'melee_kills': 0,      # Kills from melee attacks
             'charge_successes': 0, # Successful charges (reached target)
-            'controlled_objectives': 0  # Objectives controlled at episode end
+            'controlled_objectives': 0.0  # Avg objectives controlled between turns 2 and 5
         }
 
         # Rolling history for smoothed combat metrics
@@ -548,15 +548,15 @@ class W40KMetricsTracker:
         elif kill_type == 'charge':
             self.combat_effectiveness['charge_successes'] += 1
 
-    def log_controlled_objectives(self, count: int):
-        """Log the number of objectives controlled by the agent at episode end.
+    def log_controlled_objectives(self, count: float):
+        """Log average objectives controlled between turns 2 and 5.
 
         Only called when game reached turn 5+ (natural end, not elimination).
 
         Args:
-            count: Number of objectives controlled by Player 0 (learning agent)
+            count: Mean objectives controlled by learning agent for turns 2..5
         """
-        self.combat_effectiveness['controlled_objectives'] = count
+        self.combat_effectiveness['controlled_objectives'] = float(count)
         self._should_log_controlled_objectives = True
 
     def skip_controlled_objectives_logging(self):
@@ -688,7 +688,7 @@ class W40KMetricsTracker:
             smoothed_value = self._calculate_smoothed_metric(self.combat_history['melee_kills'], window_size=window_size)
             self.writer.add_scalar('combat/d_melee_kills', smoothed_value, self.episode_count)
 
-        # e) Controlled objectives (only logged if game reached turn 5+)
+        # e) Controlled objectives avg over turns 2..5 (only if game reached turn 5+)
         if len(self.combat_history['controlled_objectives']) >= 1:
             smoothed_value = self._calculate_smoothed_metric(self.combat_history['controlled_objectives'], window_size=window_size)
             self.writer.add_scalar('combat/e_controlled_objectives', smoothed_value, self.episode_count)
@@ -698,7 +698,7 @@ class W40KMetricsTracker:
             'shoot_kills': 0,
             'melee_kills': 0,
             'charge_successes': 0,
-            'controlled_objectives': 0
+            'controlled_objectives': 0.0
         }
         self._should_log_controlled_objectives = False
     
