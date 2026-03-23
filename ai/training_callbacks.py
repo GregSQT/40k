@@ -13,6 +13,7 @@ Contains:
 Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
+import json
 import os
 import time
 import re
@@ -323,6 +324,7 @@ class EpisodeTerminationCallback(BaseCallback):
 
                 # Calculate time with EMA for smooth, accurate ETA estimates
                 time_info = ""
+                global_avg_time_per_episode = 0.0
                 if self.start_time is not None and display_episode_count > 0:
                     # Total elapsed time from start
                     elapsed = current_time - self.start_time
@@ -356,15 +358,16 @@ class EpisodeTerminationCallback(BaseCallback):
 
                     # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
                     remaining_episodes = display_total_episodes - display_episode_count
+                    # Global average wall-clock time per episode since training start (includes eval time)
+                    global_avg_time_per_episode = (
+                        elapsed / display_episode_count if display_episode_count > 0 else 0.0
+                    )
+
                     if self.ema_episode_time is not None:
                         eta = self.ema_episode_time * remaining_episodes
-                        eps_speed = 1.0 / self.ema_episode_time if self.ema_episode_time > 0 else 0
                     else:
                         # Use overall average when EMA not yet available (early episodes)
-                        training_elapsed = elapsed - total_eval_now
-                        avg_episode_time = training_elapsed / display_episode_count if display_episode_count > 0 else 0
-                        eta = avg_episode_time * remaining_episodes
-                        eps_speed = display_episode_count / training_elapsed if training_elapsed > 0 else 0
+                        eta = global_avg_time_per_episode * remaining_episodes
 
                     # Format times as HH:MM:SS or MM:SS depending on duration
                     def format_time(seconds):
@@ -378,8 +381,7 @@ class EpisodeTerminationCallback(BaseCallback):
 
                     elapsed_str = format_time(elapsed)
                     eta_str = format_time(eta)
-                    speed_str = f"{eps_speed:.2f}ep/s" if eps_speed >= 0.01 else f"{eps_speed*60:.1f}ep/m"
-                    time_info = f"{elapsed_str}<{eta_str}, {speed_str}"
+                    time_info = f"{elapsed_str}<{eta_str}"
 
                 if self.recent_episode_durations_seconds:
                     recent_durations = np.array(self.recent_episode_durations_seconds, dtype=np.float64)
@@ -387,8 +389,9 @@ class EpisodeTerminationCallback(BaseCallback):
                 else:
                     recent_avg_duration = 0.0
                 duration_display = (
-                    f"{recent_avg_duration:.2f}s/ep, "
-                    f"max {self.max_episode_duration_seconds:.2f}"
+                    f"s/ep: moy {global_avg_time_per_episode:.2f}, "
+                    f"cur {recent_avg_duration:.2f}, "
+                    f"max: {self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"
                 if self.gate_display_state is not None:
@@ -401,7 +404,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
                 progress_line = (
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                    f" [{time_info}] {duration_display}{gate_display}{phase_display}"
+                    f" [{time_info}] [{duration_display}] {gate_label}{phase_display}"
                 )
                 # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
                 prev_len = self._last_progress_line_len
@@ -416,7 +419,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 if self.gate_display_state is not None:
                     self.gate_display_state["training_prefix"] = (
                         f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                        f" [{time_info}] "
+                        f" [{time_info}] [{duration_display}] "
                     )
                     self.gate_display_state["last_progress_line_len"] = len(progress_line)
 
@@ -1426,6 +1429,30 @@ class BotEvaluationCallback(BaseCallback):
         agent_key = self._infer_agent_key()
         return os.path.join(self.best_model_save_path, f"model_{agent_key}.zip")
 
+    def _get_canonical_robust_meta_path(self) -> str:
+        """Path to sidecar file storing robust score of canonical model."""
+        agent_key = self._infer_agent_key()
+        return os.path.join(self.best_model_save_path, f"model_{agent_key}_robust_meta.json")
+
+    def _read_canonical_robust_score(self) -> Optional[float]:
+        """Return robust score of current canonical model, or None if unknown."""
+        meta_path = self._get_canonical_robust_meta_path()
+        canonical_path = self._build_canonical_model_path()
+        if not os.path.exists(meta_path) or not os.path.exists(canonical_path):
+            return None
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return float(require_key(data, "robust_score"))
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return None
+
+    def _write_canonical_robust_meta(self, robust_score: float) -> None:
+        """Persist robust score of canonical model after copy."""
+        meta_path = self._get_canonical_robust_meta_path()
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump({"robust_score": robust_score}, f, indent=0)
+
     def _remove_model_artifacts(self, model_zip_path: str) -> None:
         """Remove model zip and associated VecNormalize stats if they exist."""
         if os.path.exists(model_zip_path):
@@ -1648,7 +1675,12 @@ class BotEvaluationCallback(BaseCallback):
                         self._remove_model_artifacts(previous_robust_model_path)
 
                     canonical_model_path = self._build_canonical_model_path()
-                    self._copy_model_artifacts(self.best_robust_model_path, canonical_model_path)
+                    current_canonical_score = self._read_canonical_robust_score()
+                    if current_canonical_score is not None and current_canonical_score >= robust_score:
+                        pass
+                    else:
+                        self._copy_model_artifacts(self.best_robust_model_path, canonical_model_path)
+                        self._write_canonical_robust_meta(robust_score)
 
     def _cleanup_pending_snapshot(self) -> None:
         """Delete pending async snapshot artifacts if they exist."""

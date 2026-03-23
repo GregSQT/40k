@@ -1,0 +1,29 @@
+{
+  "roster_id": "p2_training_hard_roster_swarm_65",
+  "composition": [
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 2
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 3
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    }
+  ]
+}

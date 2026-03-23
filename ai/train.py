@@ -295,6 +295,132 @@ def _apply_unit_rule_forcing_weights(
     return weighted_scenario_list
 
 
+def _normalize_scenario_name(scenario_path: str) -> str:
+    """Normalize scenario file path to canonical scenario name without prefix/suffix."""
+    if not isinstance(scenario_path, str) or not scenario_path.strip():
+        raise ValueError(f"Invalid scenario path: {scenario_path!r}")
+    scenario_filename = os.path.basename(scenario_path.strip())
+    if not scenario_filename.endswith(".json"):
+        raise ValueError(f"Scenario path must end with .json: {scenario_path}")
+    scenario_name = scenario_filename[:-5]
+    if scenario_name.startswith("scenario_"):
+        scenario_name = scenario_name[len("scenario_"):]
+    if not scenario_name:
+        raise ValueError(f"Cannot normalize scenario name from path: {scenario_path}")
+    return scenario_name
+
+
+def _apply_training_hard_weights(
+    scenario_list: List[str],
+    training_config: Dict[str, Any],
+) -> List[str]:
+    """Increase weights of configured training_hard scenarios to reach target ratio."""
+    training_hard_cfg = training_config.get("training_hard")
+    if training_hard_cfg is None:
+        return scenario_list
+    if not isinstance(training_hard_cfg, dict):
+        raise TypeError(
+            f"training_hard must be an object in training config "
+            f"(got {type(training_hard_cfg).__name__})"
+        )
+
+    enabled = require_key(training_hard_cfg, "enabled")
+    if not isinstance(enabled, bool):
+        raise TypeError(f"training_hard.enabled must be bool (got {type(enabled).__name__})")
+    if not enabled:
+        return scenario_list
+
+    target_ratio = require_key(training_hard_cfg, "target_episode_ratio")
+    if not isinstance(target_ratio, (int, float)):
+        raise TypeError(
+            f"training_hard.target_episode_ratio must be number "
+            f"(got {type(target_ratio).__name__})"
+        )
+    target_ratio = float(target_ratio)
+    if target_ratio <= 0.0 or target_ratio > 1.0:
+        raise ValueError("training_hard.target_episode_ratio must be in (0, 1]")
+
+    max_scenario_weight = require_key(training_hard_cfg, "max_scenario_weight")
+    if not isinstance(max_scenario_weight, int):
+        raise TypeError(
+            f"training_hard.max_scenario_weight must be integer "
+            f"(got {type(max_scenario_weight).__name__})"
+        )
+    if max_scenario_weight < 1:
+        raise ValueError("training_hard.max_scenario_weight must be >= 1")
+
+    raw_scenario_names = require_key(training_hard_cfg, "scenario_names")
+    if not isinstance(raw_scenario_names, list):
+        raise TypeError(
+            f"training_hard.scenario_names must be list "
+            f"(got {type(raw_scenario_names).__name__})"
+        )
+    if len(raw_scenario_names) == 0:
+        raise ValueError("training_hard.enabled=true requires non-empty training_hard.scenario_names")
+
+    configured_scenario_names: Set[str] = set()
+    for raw_name in raw_scenario_names:
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ValueError(f"Invalid entry in training_hard.scenario_names: {raw_name!r}")
+        configured_scenario_names.add(raw_name.strip())
+    if len(configured_scenario_names) == 0:
+        raise ValueError("training_hard.scenario_names must contain at least one non-empty name")
+
+    scenario_counts: Dict[str, int] = {}
+    for scenario_path in scenario_list:
+        if scenario_path not in scenario_counts:
+            scenario_counts[scenario_path] = 0
+        scenario_counts[scenario_path] += 1
+
+    training_hard_scenarios: List[str] = []
+    for scenario_path in scenario_counts.keys():
+        normalized_name = _normalize_scenario_name(scenario_path)
+        if normalized_name in configured_scenario_names:
+            training_hard_scenarios.append(scenario_path)
+
+    if len(training_hard_scenarios) == 0:
+        configured_preview = sorted(configured_scenario_names)
+        raise ValueError(
+            "training_hard.enabled=true but none of scenario_list matches training_hard.scenario_names. "
+            f"Configured names: {configured_preview}"
+        )
+
+    total_weight = sum(scenario_counts.values())
+    training_hard_weight = sum(scenario_counts[path] for path in training_hard_scenarios)
+    current_ratio = training_hard_weight / float(total_weight)
+    if current_ratio >= target_ratio:
+        return scenario_list
+
+    weighted_training_hard = sorted(training_hard_scenarios)
+    idx = 0
+    while (training_hard_weight / float(total_weight)) < target_ratio:
+        scenario_to_boost = weighted_training_hard[idx % len(weighted_training_hard)]
+        current_weight = scenario_counts[scenario_to_boost]
+        if current_weight < max_scenario_weight:
+            scenario_counts[scenario_to_boost] = current_weight + 1
+            training_hard_weight += 1
+            total_weight += 1
+        idx += 1
+        if idx >= len(weighted_training_hard) and all(
+            scenario_counts[path] >= max_scenario_weight for path in weighted_training_hard
+        ):
+            break
+
+    final_ratio = training_hard_weight / float(total_weight)
+    if final_ratio < target_ratio:
+        raise ValueError(
+            "training_hard target cannot be reached with current scenarios and max_scenario_weight. "
+            f"target={target_ratio:.4f}, reached={final_ratio:.4f}, "
+            f"training_hard_scenarios={len(weighted_training_hard)}, "
+            f"max_scenario_weight={max_scenario_weight}"
+        )
+
+    weighted_scenario_list: List[str] = []
+    for scenario_path, weight in sorted(scenario_counts.items(), key=lambda item: item[0]):
+        weighted_scenario_list.extend([scenario_path] * weight)
+    return weighted_scenario_list
+
+
 def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
     """
     Load rule-checker scenario paths from config/rule_checker/manifest.json.
@@ -1551,12 +1677,25 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
     initial_weighted_entries = len(scenario_list)
+    scenario_list = _apply_training_hard_weights(
+        scenario_list=scenario_list,
+        training_config=training_config,
+    )
+    if len(scenario_list) > initial_weighted_entries:
+        training_hard_cfg = training_config.get("training_hard")
+        if isinstance(training_hard_cfg, dict) and training_hard_cfg.get("enabled") is True:
+            target_ratio = require_key(training_hard_cfg, "target_episode_ratio")
+            chunk_log(
+                f"🎯 training_hard enabled: target episode ratio={float(target_ratio):.2f}"
+            )
+
+    forced_initial_weighted_entries = len(scenario_list)
     scenario_list = _apply_unit_rule_forcing_weights(
         scenario_list=scenario_list,
         training_config=training_config,
         unit_registry=unit_registry,
     )
-    if len(scenario_list) > initial_weighted_entries:
+    if len(scenario_list) > forced_initial_weighted_entries:
         forcing_cfg = training_config.get("unit_rule_forcing")
         if isinstance(forcing_cfg, dict) and forcing_cfg.get("enabled") is True:
             target_ratio = require_key(forcing_cfg, "target_controlled_episode_ratio")

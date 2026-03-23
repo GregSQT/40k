@@ -1,0 +1,33 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_42",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

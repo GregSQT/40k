@@ -2,9 +2,34 @@ runtime_config:
   enabled: true
   debugMode: false
   fogBackdropOpacity: 0.82
+assets:
+  action_logo_move: /icons/Action_Logo/2 - Movemement.png
+  action_logo_shoot: /icons/Action_Logo/3 - Shooting.png
+  action_logo_charge: /icons/Action_Logo/4 - Charge.png
+  action_logo_fight: /icons/Action_Logo/5 - Fight.png
+  intercessor: /icons/Intercessor.webp
+  termagant_red: /icons/Termagant_red.webp
 rules:
   - stagePattern: '*'
     behavior: {}
+  - stagePattern: 1-14
+    behavior:
+      afterCursorIcon: null
+  - stagePattern: 1-15
+    behavior:
+      afterCursorIcon: hex
+  - stagePattern: 1-16
+    behavior:
+      afterCursorIcon: intercessor
+  - stagePattern: 1-21
+    behavior:
+      afterCursorIcon: intercessorGreen
+  - stagePattern: 1-22
+    behavior:
+      afterCursorIcon: weaponMenu
+  - stagePattern: 1-24
+    behavior:
+      afterCursorIcon: termagant
   - stagePattern: 1-24-*
     behavior:
       afterCursorIcon: null
@@ -133,9 +158,9 @@ steps:
     trigger:
       type: phase_enter
       phase: move
-    title_icon: /icons/Action_Logo/2 - Movemement.png
+    title_icon: "@action_logo_move"
     advance_on_unit_click: true
-    popup_image: /icons/Intercessor.webp
+    popup_image: "@intercessor"
     popup_first_line_with_icon: true
     layout: Halo sur l'Intercessor (cercle vert) + halo sur le bouton Move du turn phase tracker. Pas de bouton Suivant dans le popup.
     fog:
@@ -153,12 +178,12 @@ steps:
       Intercessor (votre unité)
 
       --------------------
-      <cursor> Cliquez sur l'Intercessor pour l'activer
+      <cursor> <icon:@intercessor> Cliquez sur l'Intercessor pour l'activer
     body_en: |-
       Intercessor (your unit)
 
       --------------------
-      <cursor> Click on the Intercessor to activate it
+      <cursor> <icon:@intercessor> Click on the Intercessor to activate it
 
   ##########################################################################################################################
   # 1-15 Phase de Mouvement
@@ -167,7 +192,7 @@ steps:
     trigger:
       type: phase_enter
       phase: move
-    title_icon: /icons/Action_Logo/2 - Movemement.png
+    title_icon: "@action_logo_move"
     advance_on_move_click: true
     popup_show_move_hex: true
     layout: >-
@@ -203,7 +228,7 @@ steps:
     trigger:
       type: phase_enter
       phase: move
-    title_icon: /icons/Action_Logo/2 - Movemement.png
+    title_icon: "@action_logo_move"
     advance_on_move_click: true
     layout: >-
       Suppression du fog du panneau gauche. Tableau d'unités (unitStatusTable) déplié pour afficher les stats de l'Intercessor et ses armes
@@ -224,7 +249,7 @@ steps:
       Les cases bleues représentent la ligne de vue de l'Intercessor.
       <Hex bleu foncé> vue directe. 
       <Hex bleu clair> vue partielle (la cible sur cette case bénéficie d'un couvert).
-      <icone termagant> Le cercle rouge indique que c'est une unité ennemie.
+      <icon:@termagant_red> Le cercle rouge indique que c'est une unité ennemie.
       La barre de points de vie du Termagant clignotte, indiquant que l'Intercessor a une ligne de vue dessus.
 
       --------------------
@@ -233,7 +258,7 @@ steps:
       The blue hexes represent the line of sight of the Intercessor.
       <Dark blue hex> direct view. 
       <Light blue hex> partial view (the target on this hex benefits from cover).
-      <Termagant icon> 
+      <icon:@termagant_red>
       The hit points bar of the Termagant blinks, indicating that the Intercessor has line of sight on it.
 
       --------------------
@@ -246,7 +271,7 @@ steps:
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. Halo sur les boutons Move et Shoot dans turnphase tracker et sur le titre
       (feature) du Combat Log et sur la ligne qui vient d'apparaitre dans Combat Log.
@@ -263,7 +288,7 @@ steps:
     next_step: Clic sur l'icône de l'Intercessor pour le sélectionner
     advance_on_unit_click: true
     hide_advance_icon: true
-    popup_image: /icons/Intercessor.webp
+    popup_image: "@intercessor"
     popup_show_green_circle: true
     popup_first_line_with_icon: true
     title_fr: 1-21 Phase de Tir
@@ -295,7 +320,7 @@ steps:
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et
       expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et
@@ -323,7 +348,7 @@ steps:
       La ligne de vue réapparaît (en bleu), et le Termagant est une cible potentielle (sa barre de points de vie clignote).
       <Hex bleu foncé> vue directe. 
       <Hex bleu clair> vue partielle (une cible sur cette case bénéficie d'un couvert).
-      <icone termagant> 
+      <icon:@termagant_red>
       La barre de points de vie du Termagant clignote, indiquant que l'Intercessor a une ligne de vue dessus.
 
       --------------------
@@ -332,7 +357,7 @@ steps:
       The line of sight reappears (in blue), and the Termagant is a potential target (its hit points bar blinks).
       <Dark blue hex> direct view. 
       <Light blue hex> partial view (a target on this hex benefits from cover).
-      <Termagant icon> 
+      <icon:@termagant_red>
       The hit points bar of the Termagant blinks, indicating that the Intercessor has line of sight on it.
 
       --------------------
@@ -351,7 +376,7 @@ steps:
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et
       expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et
@@ -407,7 +432,7 @@ steps:
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et
       expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et
@@ -435,14 +460,14 @@ steps:
   - stage: 1-24-1
     hide_advance_icon: true
     advance_on_weapon_click: true
-    popup_image: /icons/Termagant_red.webp
+    popup_image: "@termagant_red"
     popup_position:
       left: 32%
       top: 12%
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et
       expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et
@@ -470,14 +495,14 @@ steps:
   - stage: 1-24-2
     hide_advance_icon: true
     advance_on_weapon_click: true
-    popup_image: /icons/Termagant_red.webp
+    popup_image: "@termagant_red"
     popup_position:
       left: 32%
       top: 12%
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et
       expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et
@@ -505,14 +530,14 @@ steps:
   - stage: 1-24-3
     hide_advance_icon: true
     advance_on_weapon_click: true
-    popup_image: /icons/Termagant_red.webp
+    popup_image: "@termagant_red"
     popup_position:
       left: 32%
       top: 12%
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et
       expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et
@@ -540,14 +565,14 @@ steps:
   - stage: 1-24-4
     hide_advance_icon: true
     advance_on_weapon_click: true
-    popup_image: /icons/Termagant_red.webp
+    popup_image: "@termagant_red"
     popup_position:
       left: 32%
       top: 12%
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir et
       expand du Termagant pour voir ses attributs. Halo sur : boutons Move et Shoot (turn phase tracker); lignes d'arme de l'Intercessor (et
@@ -581,7 +606,7 @@ steps:
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: >-
       Pas de fog sur le panneau gauche. Fog sur le panneau droite. unitstatustable : expand de l'Intercessor jusqu'aux armes de tir. Halo
       sur : boutons Move et Shoot (turn phase tracker), les lignes d'arme de l'Intercessor (et ligne titre) et tout le combat log
@@ -625,7 +650,7 @@ steps:
     trigger:
       type: phase_enter
       phase: move
-    title_icon: /icons/Action_Logo/2 - Movemement.png
+    title_icon: "@action_logo_move"
     layout: >-
       Fog sur le panneau de droite et de la ligne 0 à 8 du board. Unitstatustable expanded pour afficher les units de P2. Halo sur le bouton
       turn 1 et P2 et Move de turnphase tracker et les icones des Termagants de P2.
@@ -665,7 +690,7 @@ steps:
     trigger:
       type: phase_enter
       phase: shoot
-    title_icon: /icons/Action_Logo/2 - Movemement.png
+    title_icon: "@action_logo_move"
     layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de mouvement.
     fog:
       global: false
@@ -695,7 +720,7 @@ steps:
     trigger:
       type: phase_enter
       phase: charge
-    title_icon: /icons/Action_Logo/3 - Shooting.png
+    title_icon: "@action_logo_shoot"
     layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de tir. Au moins 1 Hormagaunt effectue une advance.
     fog:
       global: false
@@ -735,7 +760,7 @@ steps:
     trigger:
       type: phase_enter
       phase: fight
-    title_icon: /icons/Action_Logo/4 - Charge.png
+    title_icon: "@action_logo_charge"
     layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de charge.
     fog:
       global: false
@@ -778,3 +803,79 @@ steps:
       
       --------------------
       <cursor>Click on Next to continue.
+
+  ##########################################################################################################################
+  # 2-15 Phase de combat des Hormagaunts
+  ##########################################################################################################################
+  - stage: 2-15
+    hide_advance_icon: false
+    advance_on_weapon_click: false
+    popup_position:
+      left: 58%
+      top: 25%
+    trigger:
+      type: phase_enter
+      phase: fight
+    title_icon: "@action_logo_fight"
+    layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de charge.
+    fog:
+      global: false
+      leftPanel: false
+      rightPanel: false
+      boardTopBand: false
+    spotlightIds:
+      - turnPhase.all
+      - panel.left
+    next_step: Clic sur Suivant
+    title_fr: 2-15 Phase de combat des Hormagaunts
+    title_en: Fight phase of Hormagaunts
+    body_fr: |-
+      Pendant la phase de combat, une unité combat si elle est adjacent à une unité ennemie.
+      -> Les unités ayant chargé attaquent en premier.
+      --------------------
+      <cursor>Cliquez sur Suivant pour continuer.
+    body_en: |-
+      During the fight phase, a unit fights if it is adjacent to an enemy unit.
+      -> The units that have charged attack first.
+      --------------------
+      <cursor>Click on Next to continue.
+
+##########################################################################################################################
+  # 2-16 Phase de combat de l'Intercessor
+  ##########################################################################################################################
+  - stage: 2-16
+    hide_advance_icon: false
+    advance_on_unit_click: true
+    popup_image: "@intercessor"
+    popup_first_line_with_icon: true
+    popup_position:
+      left: 58%
+      top: 25%
+    trigger:
+      type: phase_enter
+      phase: fight
+    title_icon: "@action_logo_fight"
+    layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de combat.
+    fog:
+      global: false
+      leftPanel: false
+      rightPanel: false
+      boardTopBand: false
+    spotlightIds:
+      - turnPhase.all
+      - panel.left
+    next_step: Clic sur l'Intercessor
+    title_fr: 2-16 Phase de combat de l'Intercessor
+    title_en: Fight phase of Intercessor
+    body_fr: |-
+      Les unités 
+      - Les attaques des unités ayant chargé sont terminées, c'est au tour du joueur non actif de faire attaquer une de ses unités.
+      - Puis, les joueurs alternent les activations de leurs unités jusqu'à ce qu'elles aient toutes attaqué.
+      --------------------
+      <cursor>Cliquez sur l'Intercessor pour l'activer.
+    body_en: |-
+      During the fight phase, a unit fights if it is adjacent to an enemy unit.
+      - The attacks of the units that have charged are finished, it's now the non-active player's turn to attack one of their units.
+      - Then, the players alternate the activations of their units until all units have attacked.
+      --------------------
+      <cursor> Click on the Intercessor to activate it.

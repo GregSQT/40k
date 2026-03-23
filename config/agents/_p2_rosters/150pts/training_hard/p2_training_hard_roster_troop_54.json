@@ -1,0 +1,37 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_54",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

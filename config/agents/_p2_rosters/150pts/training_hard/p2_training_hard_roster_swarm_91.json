@@ -1,0 +1,21 @@
+{
+  "roster_id": "p2_training_hard_roster_swarm_91",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

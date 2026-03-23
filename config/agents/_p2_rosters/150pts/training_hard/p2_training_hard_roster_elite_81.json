@@ -1,0 +1,25 @@
+{
+  "roster_id": "p2_training_hard_roster_elite_81",
+  "composition": [
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMultiMelta",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardWraithcannon",
+      "count": 1
+    }
+  ]
+}

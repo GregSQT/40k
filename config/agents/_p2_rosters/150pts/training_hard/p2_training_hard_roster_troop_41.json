@@ -1,0 +1,33 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_41",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

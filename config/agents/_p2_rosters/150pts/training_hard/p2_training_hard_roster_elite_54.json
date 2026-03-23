@@ -1,0 +1,21 @@
+{
+  "roster_id": "p2_training_hard_roster_elite_54",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    },
+    {
+      "unit_type": "WolfGuardTerminator",
+      "count": 1
+    }
+  ]
+}

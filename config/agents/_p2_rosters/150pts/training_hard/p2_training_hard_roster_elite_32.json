@@ -1,0 +1,25 @@
+{
+  "roster_id": "p2_training_hard_roster_elite_32",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "Terminator",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardScytingTalon",
+      "count": 1
+    }
+  ]
+}

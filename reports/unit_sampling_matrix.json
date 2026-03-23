@@ -8,9 +8,9 @@
           "Mid": 19
         },
         "weapon_profile": {
-          "AntiElite": 16,
+          "AntiElite": 17,
           "Burst": 4,
-          "Generalist": 11,
+          "Generalist": 10,
           "Volume": 4
         }
       },
@@ -21,10 +21,10 @@
           "Mid": 0.19057885815647205
         },
         "weapon_profile_weights": {
-          "AntiElite": 0.16113320787095906,
-          "Burst": 0.3222664157419181,
-          "Generalist": 0.1943339606452046,
-          "Volume": 0.3222664157419181
+          "AntiElite": 0.1555948942786403,
+          "Burst": 0.32076709195882347,
+          "Generalist": 0.20287092180371274,
+          "Volume": 0.32076709195882347
         }
       }
     },
@@ -100,16 +100,6 @@
       "weapon_profile": "AntiElite"
     },
     {
-      "blend_group": "Balance",
-      "count": 1,
-      "mobility_bucket": "Mid",
-      "tanking": "Elite",
-      "units": [
-        "spaceMarine::IntercessorTest"
-      ],
-      "weapon_profile": "Generalist"
-    },
-    {
       "blend_group": "Melee",
       "count": 1,
       "mobility_bucket": "High",
@@ -158,10 +148,11 @@
     },
     {
       "blend_group": "Melee",
-      "count": 1,
+      "count": 2,
       "mobility_bucket": "Mid",
       "tanking": "Elite",
       "units": [
+        "spaceMarine::CaptainTerminator",
         "spaceMarine::Terminator"
       ],
       "weapon_profile": "AntiElite"
@@ -695,6 +686,7 @@
     "spaceMarine::BloodClaw": 13,
     "spaceMarine::BloodClawPackLeader": 18,
     "spaceMarine::Captain Gravis": 80,
+    "spaceMarine::CaptainTerminator": 95,
     "spaceMarine::DeathCompanyJumpPackEviscerator": 17,
     "spaceMarine::DeathCompanyMarineEviscerator": 17,
     "spaceMarine::DeathwingTerminatorPlasmaCannon": 38,
@@ -715,7 +707,6 @@
     "spaceMarine::Intercessor": 18,
     "spaceMarine::IntercessorGrenadeLauncher": 20,
     "spaceMarine::IntercessorSergeant": 21,
-    "spaceMarine::IntercessorTest": 18,
     "spaceMarine::SanguinaryGuardAngelus": 50,
     "spaceMarine::SanguinaryGuardInferno": 50,
     "spaceMarine::Scout": 14,

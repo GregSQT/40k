@@ -1,0 +1,29 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_66",
+  "composition": [
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunter",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    }
+  ]
+}

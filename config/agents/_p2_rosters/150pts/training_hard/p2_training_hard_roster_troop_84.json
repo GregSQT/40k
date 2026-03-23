@@ -1,0 +1,29 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_84",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 2
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

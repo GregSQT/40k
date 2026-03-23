@@ -1,6 +1,0 @@
-{
-  "macro_model_key": "MacroController",
-  "pve_controller_mode": "micro_only",
-  "Parametre pve_controller_mode avec macro": "macro_micro",
-  "Parametre pve_controller_mode sans macro": "micro_only"
-}

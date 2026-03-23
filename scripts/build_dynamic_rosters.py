@@ -166,6 +166,95 @@ def _distribution_drift(observed_counts: Counter[str], target_weights: Dict[str,
     return {"l1": l1, "observed": observed, "target": target}
 
 
+def _parse_csv_values(raw: str, arg_name: str) -> List[str]:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{arg_name} must be a non-empty comma-separated string")
+    values = [token.strip() for token in raw.split(",")]
+    cleaned = [token for token in values if token]
+    if not cleaned:
+        raise ValueError(f"{arg_name} must contain at least one value")
+    return cleaned
+
+
+def _parse_csv_float_weights(raw: str, arg_name: str) -> List[float]:
+    values = _parse_csv_values(raw, arg_name)
+    parsed: List[float] = []
+    for token in values:
+        weight = float(token)
+        if weight < 0.0:
+            raise ValueError(f"{arg_name} cannot contain negative weight: {token}")
+        parsed.append(weight)
+    if sum(parsed) <= 0.0:
+        raise ValueError(f"{arg_name} must contain at least one positive weight")
+    return parsed
+
+
+def _parse_csv_positive_ints(raw: str, arg_name: str) -> List[int]:
+    values = _parse_csv_values(raw, arg_name)
+    parsed: List[int] = []
+    for token in values:
+        parsed_value = int(token)
+        if parsed_value <= 0:
+            raise ValueError(f"{arg_name} values must be > 0 (got {parsed_value})")
+        parsed.append(parsed_value)
+    return parsed
+
+
+def _normalize_weight_map(keys: List[str], raw_weights: List[float], label: str) -> Dict[str, float]:
+    if len(keys) != len(raw_weights):
+        raise ValueError(
+            f"{label}: values/weights length mismatch ({len(keys)} != {len(raw_weights)})"
+        )
+    total_weight = sum(raw_weights)
+    if total_weight <= 0.0:
+        raise ValueError(f"{label}: total weight must be > 0")
+    normalized: Dict[str, float] = {}
+    for idx, key in enumerate(keys):
+        if key in normalized:
+            raise ValueError(f"{label}: duplicate value '{key}' is not allowed")
+        normalized[key] = float(raw_weights[idx]) / float(total_weight)
+    return normalized
+
+
+def _normalize_weight_map_int(keys: List[int], raw_weights: List[float], label: str) -> Dict[int, float]:
+    if len(keys) != len(raw_weights):
+        raise ValueError(
+            f"{label}: values/weights length mismatch ({len(keys)} != {len(raw_weights)})"
+        )
+    total_weight = sum(raw_weights)
+    if total_weight <= 0.0:
+        raise ValueError(f"{label}: total weight must be > 0")
+    normalized: Dict[int, float] = {}
+    for idx, key in enumerate(keys):
+        if key in normalized:
+            raise ValueError(f"{label}: duplicate value '{key}' is not allowed")
+        normalized[key] = float(raw_weights[idx]) / float(total_weight)
+    return normalized
+
+
+def _compose_weighted_target(targets: List[Tuple[Dict[str, float], float]], label: str) -> Dict[str, float]:
+    if not targets:
+        raise ValueError(f"{label}: no target distributions provided")
+    combined_raw: Dict[str, float] = {}
+    total_factor = 0.0
+    for target_map, factor in targets:
+        if factor < 0.0:
+            raise ValueError(f"{label}: negative factor {factor}")
+        if factor == 0.0:
+            continue
+        total_factor += factor
+        for key, value in target_map.items():
+            if value < 0.0:
+                raise ValueError(f"{label}: negative target value for key '{key}'")
+            combined_raw[key] = combined_raw.get(key, 0.0) + (float(value) * float(factor))
+    if total_factor <= 0.0:
+        raise ValueError(f"{label}: total factor must be > 0")
+    combined_sum = sum(combined_raw.values())
+    if combined_sum <= 0.0:
+        raise ValueError(f"{label}: combined target distribution is empty")
+    return {key: value / combined_sum for key, value in combined_raw.items()}
+
+
 def _blend_inverse_sqrt_weights(cells_for_tanking: List[Dict[str, Any]]) -> Dict[str, float]:
     blend_counts: Counter[str] = Counter()
     for cell in cells_for_tanking:
@@ -636,19 +725,28 @@ def _generate_matchups(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build dynamic rosters from sampling matrix (v21)")
     parser.add_argument("--matrix", default="reports/unit_sampling_matrix.json", help="Sampling matrix JSON path")
-    parser.add_argument("--target-tanking", required=True, choices=["Swarm", "Troop", "Elite"])
+    parser.add_argument("--target-tanking", required=False, choices=["Swarm", "Troop", "Elite"], default=None)
+    parser.add_argument("--target-tanking-values", default=None,
+                        help="Comma-separated list of tanking profiles for mixed sampling (e.g. Swarm,Troop,Elite)")
+    parser.add_argument("--target-tanking-weights", default=None,
+                        help="Comma-separated weights aligned with --target-tanking-values")
     parser.add_argument("--points-scale", type=int, default=150)
     parser.add_argument("--points-tolerance", type=int, default=2)
     parser.add_argument("--num-rosters", type=int, required=True)
-    parser.add_argument("--units-per-roster", type=int, required=True)
+    parser.add_argument("--units-per-roster", type=int, required=False, default=None)
+    parser.add_argument("--units-per-roster-values", default=None,
+                        help="Comma-separated unit counts per roster for mixed sampling (e.g. 4,5,6,7,8,9)")
+    parser.add_argument("--units-per-roster-weights", default=None,
+                        help="Comma-separated weights aligned with --units-per-roster-values")
     parser.add_argument("--max-copies-per-unit", type=int, default=2)
     parser.add_argument("--anti-repeat-window", type=int, default=20)
     parser.add_argument("--anti-repeat-penalty", type=float, default=0.35)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--split", choices=["training", "holdout"], default="training")
+    parser.add_argument("--split", choices=["training", "training_hard", "holdout", "holdout_regular", "holdout_hard"], default="training")
     parser.add_argument("--roster-prefix", default="p2_dynamic")
     parser.add_argument("--max-build-attempts", type=int, default=200)
+    parser.add_argument("--max-roster-resample-attempts", type=int, default=40)
     parser.add_argument("--opponent-roster-dir", default=None)
     parser.add_argument("--num-matchups", type=int, default=None)
     parser.add_argument("--matchup-tol-strict", type=int, default=3)
@@ -667,8 +765,6 @@ def main() -> None:
         raise ValueError(f"--points-tolerance must be >= 0 (got {args.points_tolerance})")
     if args.num_rosters <= 0:
         raise ValueError(f"--num-rosters must be > 0 (got {args.num_rosters})")
-    if args.units_per_roster <= 0:
-        raise ValueError(f"--units-per-roster must be > 0 (got {args.units_per_roster})")
     if args.max_copies_per_unit <= 0:
         raise ValueError(f"--max-copies-per-unit must be > 0 (got {args.max_copies_per_unit})")
     if args.anti_repeat_window < 0:
@@ -677,8 +773,76 @@ def main() -> None:
         raise ValueError(f"--anti-repeat-penalty must be in (0,1] (got {args.anti_repeat_penalty})")
     if args.max_build_attempts <= 0:
         raise ValueError(f"--max-build-attempts must be > 0 (got {args.max_build_attempts})")
+    if args.max_roster_resample_attempts <= 0:
+        raise ValueError(
+            f"--max-roster-resample-attempts must be > 0 (got {args.max_roster_resample_attempts})"
+        )
     if args.max_matchup_build_attempts <= 0:
         raise ValueError(f"--max-matchup-build-attempts must be > 0 (got {args.max_matchup_build_attempts})")
+
+    mixed_mode_requested = any([
+        args.target_tanking_values is not None,
+        args.target_tanking_weights is not None,
+        args.units_per_roster_values is not None,
+        args.units_per_roster_weights is not None,
+    ])
+
+    if mixed_mode_requested:
+        if args.target_tanking is not None or args.units_per_roster is not None:
+            raise ValueError(
+                "Mixed mode requires omitting --target-tanking and --units-per-roster. "
+                "Use only --target-tanking-values/weights and --units-per-roster-values/weights."
+            )
+        required_mixed_args = [
+            ("--target-tanking-values", args.target_tanking_values),
+            ("--target-tanking-weights", args.target_tanking_weights),
+            ("--units-per-roster-values", args.units_per_roster_values),
+            ("--units-per-roster-weights", args.units_per_roster_weights),
+        ]
+        missing = [name for name, value in required_mixed_args if value is None]
+        if missing:
+            raise ValueError(f"Mixed mode requires all 4 args, missing: {missing}")
+
+        tanking_values = _parse_csv_values(args.target_tanking_values, "--target-tanking-values")
+        allowed_tanking = {"Swarm", "Troop", "Elite"}
+        for tanking in tanking_values:
+            if tanking not in allowed_tanking:
+                raise ValueError(
+                    f"Invalid tanking '{tanking}' in --target-tanking-values; allowed={sorted(allowed_tanking)}"
+                )
+        tanking_weights = _parse_csv_float_weights(args.target_tanking_weights, "--target-tanking-weights")
+        tanking_distribution = _normalize_weight_map(
+            keys=tanking_values,
+            raw_weights=tanking_weights,
+            label="target_tanking_distribution",
+        )
+
+        units_per_roster_values = _parse_csv_positive_ints(
+            args.units_per_roster_values,
+            "--units-per-roster-values",
+        )
+        units_per_roster_weights = _parse_csv_float_weights(
+            args.units_per_roster_weights,
+            "--units-per-roster-weights",
+        )
+        units_distribution = _normalize_weight_map_int(
+            keys=units_per_roster_values,
+            raw_weights=units_per_roster_weights,
+            label="units_per_roster_distribution",
+        )
+    else:
+        if args.target_tanking is None:
+            raise ValueError("--target-tanking is required in single mode")
+        if args.units_per_roster is None:
+            raise ValueError("--units-per-roster is required in single mode")
+        if args.units_per_roster <= 0:
+            raise ValueError(f"--units-per-roster must be > 0 (got {args.units_per_roster})")
+        tanking_distribution = {str(args.target_tanking): 1.0}
+        units_distribution = {int(args.units_per_roster): 1.0}
+
+    # Naming policy: dedicated roster prefix for training_hard split by default.
+    if args.split == "training_hard" and args.roster_prefix == "p2_dynamic":
+        args.roster_prefix = "p2_training_hard_roster"
 
     matrix = _load_matrix(Path(args.matrix))
     units_meta = _load_unit_metadata_from_matrix(matrix)
@@ -686,11 +850,13 @@ def main() -> None:
     _validate_matrix_units_exist(matrix_unit_keys, units_meta)
     unit_value_by_type = _build_unit_type_value_index_strict(matrix_unit_keys, units_meta)
 
-    weighted_choices, blend_target, mobility_target, weapon_target = _build_feasible_weighted_unit_choices(
-        target_tanking=args.target_tanking,
-        matrix=matrix,
-        units_meta=units_meta,
-    )
+    target_by_tanking: Dict[str, Tuple[List[WeightedUnitChoice], Dict[str, float], Dict[str, float], Dict[str, float]]] = {}
+    for tanking_name in sorted(tanking_distribution.keys()):
+        target_by_tanking[tanking_name] = _build_feasible_weighted_unit_choices(
+            target_tanking=tanking_name,
+            matrix=matrix,
+            units_meta=units_meta,
+        )
 
     if args.output_dir is None:
         output_dir = Path(f"config/agents/_p2_rosters/{args.points_scale}pts/{args.split}")
@@ -703,30 +869,67 @@ def main() -> None:
     written_paths: List[Path] = []
     roster_values: List[int] = []
     all_unit_picks: List[UnitPick] = []
+    selected_tanking_counter: Counter[str] = Counter()
+    selected_units_per_roster_counter: Counter[int] = Counter()
+    selected_unit_count_by_tanking: Counter[str] = Counter()
     total_rejected_attempts = 0
     total_attempts = 0
     generated_roster_values: List[Tuple[str, int]] = []
 
+    tanking_keys = sorted(tanking_distribution.keys())
+    tanking_weights_for_sampling = [tanking_distribution[key] for key in tanking_keys]
+    units_keys = sorted(units_distribution.keys())
+    units_weights_for_sampling = [units_distribution[key] for key in units_keys]
+
     for idx in range(1, args.num_rosters + 1):
-        build_result = _build_one_roster(
-            weighted_choices=weighted_choices,
-            units_meta=units_meta,
-            target_points=args.points_scale,
-            points_tolerance=args.points_tolerance,
-            units_per_roster=args.units_per_roster,
-            max_attempts=args.max_build_attempts,
-            max_copies_per_unit=args.max_copies_per_unit,
-            anti_repeat_window=args.anti_repeat_window,
-            anti_repeat_penalty=args.anti_repeat_penalty,
-            recent_global_picks=recent_global_picks,
-            rng=rng,
-        )
-        roster_id = f"{args.roster_prefix}_{args.target_tanking.lower()}_{idx:02d}"
+        selected_tanking: Optional[str] = None
+        selected_units_per_roster: Optional[int] = None
+        build_result: Optional[RosterBuildResult] = None
+        last_resample_error: Optional[RuntimeError] = None
+
+        for _ in range(args.max_roster_resample_attempts):
+            sampled_tanking = str(_weighted_pick(tanking_keys, tanking_weights_for_sampling, rng))
+            sampled_units_per_roster = int(_weighted_pick(units_keys, units_weights_for_sampling, rng))
+            weighted_choices, _blend_target, _mobility_target, _weapon_target = target_by_tanking[sampled_tanking]
+            try:
+                sampled_result = _build_one_roster(
+                    weighted_choices=weighted_choices,
+                    units_meta=units_meta,
+                    target_points=args.points_scale,
+                    points_tolerance=args.points_tolerance,
+                    units_per_roster=sampled_units_per_roster,
+                    max_attempts=args.max_build_attempts,
+                    max_copies_per_unit=args.max_copies_per_unit,
+                    anti_repeat_window=args.anti_repeat_window,
+                    anti_repeat_penalty=args.anti_repeat_penalty,
+                    recent_global_picks=recent_global_picks,
+                    rng=rng,
+                )
+            except RuntimeError as exc:
+                last_resample_error = exc
+                continue
+            selected_tanking = sampled_tanking
+            selected_units_per_roster = sampled_units_per_roster
+            build_result = sampled_result
+            break
+
+        if build_result is None or selected_tanking is None or selected_units_per_roster is None:
+            raise RuntimeError(
+                "Failed to build roster after resampling tanking/units combinations. "
+                f"max_roster_resample_attempts={args.max_roster_resample_attempts}. "
+                f"Last error: {last_resample_error}"
+            )
+
+        selected_tanking_counter[selected_tanking] += 1
+        selected_units_per_roster_counter[int(selected_units_per_roster)] += 1
+
+        roster_id = f"{args.roster_prefix}_{selected_tanking.lower()}_{idx:02d}"
         written_paths.append(_write_roster_file(output_dir, roster_id, build_result.composition))
         roster_values.append(build_result.roster_value)
         total_rejected_attempts += build_result.rejected_attempts
         total_attempts += build_result.total_attempts
         all_unit_picks.extend(build_result.unit_picks)
+        selected_unit_count_by_tanking[selected_tanking] += len(build_result.unit_picks)
         generated_roster_values.append((roster_id, build_result.roster_value))
 
     if not all_unit_picks:
@@ -737,11 +940,50 @@ def main() -> None:
     picked_mobility_counter = Counter(p.mobility_bucket for p in all_unit_picks)
     picked_weapon_counter = Counter(p.weapon_profile for p in all_unit_picks)
 
+    blend_target = _compose_weighted_target(
+        [
+            (target_by_tanking[tanking][1], float(selected_unit_count_by_tanking[tanking]))
+            for tanking in sorted(selected_unit_count_by_tanking.keys())
+        ],
+        label="blend_target",
+    )
+    mobility_target = _compose_weighted_target(
+        [
+            (target_by_tanking[tanking][2], float(selected_unit_count_by_tanking[tanking]))
+            for tanking in sorted(selected_unit_count_by_tanking.keys())
+        ],
+        label="mobility_target",
+    )
+    weapon_target = _compose_weighted_target(
+        [
+            (target_by_tanking[tanking][3], float(selected_unit_count_by_tanking[tanking]))
+            for tanking in sorted(selected_unit_count_by_tanking.keys())
+        ],
+        label="weapon_target",
+    )
+
+    observed_tanking_distribution = {
+        key: float(selected_tanking_counter[key]) / float(args.num_rosters)
+        for key in sorted(selected_tanking_counter.keys())
+    }
+    observed_units_distribution = {
+        str(key): float(selected_units_per_roster_counter[key]) / float(args.num_rosters)
+        for key in sorted(selected_units_per_roster_counter.keys())
+    }
+
     kpis: Dict[str, Any] = {
         "roster_value_mean": _mean([float(v) for v in roster_values]),
         "roster_value_std": _std([float(v) for v in roster_values]),
         "roster_value_p95": _quantile([float(v) for v in roster_values], 0.95),
         "rejection_rate_roster_budget": total_rejected_attempts / total_attempts if total_attempts > 0 else 0.0,
+        "sampling_target_tanking_distribution": {
+            key: float(value) for key, value in sorted(tanking_distribution.items(), key=lambda item: item[0])
+        },
+        "sampling_observed_tanking_distribution": observed_tanking_distribution,
+        "sampling_target_units_per_roster_distribution": {
+            str(key): float(value) for key, value in sorted(units_distribution.items(), key=lambda item: item[0])
+        },
+        "sampling_observed_units_per_roster_distribution": observed_units_distribution,
         "unit_pick_frequency": dict(sorted(picked_units_counter.items(), key=lambda item: (-item[1], item[0]))),
         "distribution_drift_blend": _distribution_drift(picked_blend_counter, blend_target),
         "distribution_drift_mobility": _distribution_drift(picked_mobility_counter, mobility_target),
@@ -774,21 +1016,41 @@ def main() -> None:
             rng=rng,
         )
         matchup_payload = {
-            "target_tanking": args.target_tanking,
+            "target_tanking_distribution": {
+                key: float(value) for key, value in sorted(tanking_distribution.items(), key=lambda item: item[0])
+            },
             "num_matchups": len(matchups),
             "matchups": matchups,
         }
-        matchup_path = output_dir / f"{args.roster_prefix}_{args.target_tanking.lower()}_matchups.json"
+        matchup_tanking_label = (
+            str(args.target_tanking).lower()
+            if args.target_tanking is not None
+            else "mixed"
+        )
+        matchup_path = output_dir / f"{args.roster_prefix}_{matchup_tanking_label}_matchups.json"
         matchup_path.write_text(json.dumps(matchup_payload, indent=2), encoding="utf-8")
         kpis.update(matchup_kpis)
 
-    kpi_path = output_dir / f"{args.roster_prefix}_{args.target_tanking.lower()}_kpis_v21.json"
+    kpi_tanking_label = (
+        str(args.target_tanking).lower()
+        if args.target_tanking is not None
+        else "mixed"
+    )
+    kpi_path = output_dir / f"{args.roster_prefix}_{kpi_tanking_label}_kpis_v21.json"
     kpi_path.write_text(json.dumps(kpis, indent=2), encoding="utf-8")
 
     print(f"Generated rosters: {len(written_paths)}")
-    print(f"Target tanking: {args.target_tanking}")
+    print(
+        "Target tanking distribution: "
+        f"{dict(sorted(tanking_distribution.items(), key=lambda item: item[0]))}"
+    )
+    print(f"Observed tanking distribution: {observed_tanking_distribution}")
     print(f"Points budget: {args.points_scale} +/- {args.points_tolerance}")
-    print(f"Units per roster: {args.units_per_roster}")
+    print(
+        "Target units-per-roster distribution: "
+        f"{dict(sorted(((str(k), v) for k, v in units_distribution.items()), key=lambda item: item[0]))}"
+    )
+    print(f"Observed units-per-roster distribution: {observed_units_distribution}")
     print(f"Max copies per unit: {args.max_copies_per_unit}")
     print(f"Anti-repeat window: {args.anti_repeat_window}")
     print(f"Anti-repeat penalty: {args.anti_repeat_penalty}")

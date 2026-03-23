@@ -1,0 +1,21 @@
+{
+  "roster_id": "p2_training_hard_roster_elite_120",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 2
+    }
+  ]
+}

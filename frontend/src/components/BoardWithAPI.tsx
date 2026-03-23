@@ -1630,8 +1630,12 @@ export const BoardWithAPI: React.FC = () => {
             }
           }
           if (apiProps.executeAITurn) {
+            // Tutorial flow must always pause after each phase transition
+            // so the next phase popup can be displayed deterministically.
+            const mustStopAfterPhaseChange =
+              gameMode === "tutorial" ? true : stopAiAfterPhaseChangeRef.current;
             await apiProps.executeAITurn({
-              stopAfterPhaseChange: stopAiAfterPhaseChangeRef.current,
+              stopAfterPhaseChange: mustStopAfterPhaseChange,
             });
             // Don't set lastProcessedTurn here - allow multiple activations in same phase
             // lastProcessedTurn will be set when phase actually changes (via useEffect dependency)
@@ -1666,7 +1670,7 @@ export const BoardWithAPI: React.FC = () => {
       //   turnKeyMatches: lastProcessedTurn === turnKey
       // });
     }
-  }, [isAiMode, apiProps, lastProcessedTurn, pauseAIForTutorial]);
+  }, [isAiMode, apiProps, gameMode, lastProcessedTurn, pauseAIForTutorial]);
 
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {

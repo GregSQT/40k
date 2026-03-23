@@ -181,21 +181,9 @@ function MiniTermagantIcon(): React.ReactElement {
 }
 
 function resolveDefaultAfterCursorIcon(stepStage: string): TutorialAfterCursorIconKey | null {
-  switch (stepStage) {
-    case "1-14":
-    case "1-16":
-      return "intercessor";
-    case "1-21":
-      return "intercessorGreen";
-    case "1-15":
-      return "hex";
-    case "1-22":
-      return "weaponMenu";
-    case "1-24":
-      return "termagant";
-    default:
-      return null;
-  }
+  // No implicit icon by stage: icon display must be explicit in YAML.
+  void stepStage;
+  return null;
 }
 
 function renderAfterCursorIcon(iconKey: TutorialAfterCursorIconKey | null): React.ReactNode {
@@ -272,7 +260,7 @@ function renderBodyWithClickIcon(
             {hasPlaceholder
               ? parts.map((part, j) => (
                   <span key={`part-${i}-${part.slice(0, 20)}-${j}`}>
-                    {part}
+                    {replaceCursorInText(part)}
                     {j < parts.length - 1 && (
                       <>
                         <CursorIcon />
@@ -282,7 +270,7 @@ function renderBodyWithClickIcon(
                     )}
                   </span>
                 ))
-              : line}
+              : replaceCursorInText(line)}
             {i < lines.length - 1 ? "\n" : ""}
           </span>
         );
@@ -470,12 +458,47 @@ function replaceCursorInText(
 ): React.ReactNode {
   const afterCursor = options?.afterCursor;
   const boltRifleBold = options?.boltRifleBold === true;
-  const renderSegment = (seg: string): React.ReactNode => {
+  const renderTextDecorators = (seg: string): React.ReactNode => {
     const withBolt = boltRifleBold ? highlightBoltRifleInSegment(seg) : seg;
     if (typeof withBolt === "string") {
       return highlightBoundingLeapInSegment(withBolt);
     }
     return withBolt;
+  };
+  const renderSegment = (seg: string): React.ReactNode => {
+    if (!seg.includes("<icon:")) {
+      return renderTextDecorators(seg);
+    }
+    const parts = seg.split(/(<icon:[^>]+>)/g);
+    const keyCounts: Record<string, number> = {};
+    const nextKey = (base: string): string => {
+      const n = (keyCounts[base] ?? 0) + 1;
+      keyCounts[base] = n;
+      return `${base}-${n}`;
+    };
+    return (
+      <>
+        {parts.map((part) => {
+          const m = part.match(/^<icon:\s*([^>]+)\s*>$/);
+          if (m != null) {
+            const src = m[1].trim();
+            if (src === "") {
+              throw new Error("Invalid empty inline icon source in tutorial body");
+            }
+            return (
+              <img
+                key={nextKey(`inline-icon-${src}`)}
+                src={src}
+                alt=""
+                className={MINI_ICON_CLASS}
+                aria-hidden
+              />
+            );
+          }
+          return <Fragment key={nextKey(`inline-text-${part}`)}>{renderTextDecorators(part)}</Fragment>;
+        })}
+      </>
+    );
   };
   if (!text.includes("<cursor>")) {
     return renderSegment(text);

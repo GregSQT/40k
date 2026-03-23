@@ -1,0 +1,25 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_61",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 3
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

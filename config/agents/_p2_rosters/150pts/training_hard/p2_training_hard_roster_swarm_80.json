@@ -1,0 +1,37 @@
+{
+  "roster_id": "p2_training_hard_roster_swarm_80",
+  "composition": [
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
+      "count": 1
+    },
+    {
+      "unit_type": "GuardianDefender",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyWeaponPlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

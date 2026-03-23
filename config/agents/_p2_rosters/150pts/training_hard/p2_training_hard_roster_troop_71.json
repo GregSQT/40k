@@ -1,0 +1,33 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_71",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

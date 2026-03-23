@@ -1,0 +1,21 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_30",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 2
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    }
+  ]
+}

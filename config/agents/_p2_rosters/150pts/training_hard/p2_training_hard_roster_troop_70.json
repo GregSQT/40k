@@ -1,0 +1,33 @@
+{
+  "roster_id": "p2_training_hard_roster_troop_70",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "Scout",
+      "count": 2
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}
