@@ -33,6 +33,10 @@
     "id": "reroll_1_towound",
     "description": "When this unit makes an attack, it can reroll rolls of 1 for the wound rolls."
   },
+  "reroll_charge": {
+    "id": "reroll_charge",
+    "description": "When this unit makes a charge, it can reroll the charge roll."
+  },
   "reroll_towound_target_on_objective": {
     "id": "reroll_towound_target_on_objective",
     "description": "When this unit makes an attack, it can reroll the wound rolls if the target unit is on an objective."

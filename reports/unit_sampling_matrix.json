@@ -5,26 +5,26 @@
         "mobility": {
           "High": 2,
           "Low": 14,
-          "Mid": 18
+          "Mid": 19
         },
         "weapon_profile": {
           "AntiElite": 16,
           "Burst": 4,
-          "Generalist": 10,
+          "Generalist": 11,
           "Volume": 4
         }
       },
       "weights": {
         "mobility_weights": {
-          "High": 0.584351827188531,
-          "Low": 0.22086423041529213,
-          "Mid": 0.19478394239617702
+          "High": 0.5874034909447973,
+          "Low": 0.2220176508987307,
+          "Mid": 0.19057885815647205
         },
         "weapon_profile_weights": {
-          "AntiElite": 0.159619185296267,
-          "Burst": 0.319238370592534,
-          "Generalist": 0.2019040735186649,
-          "Volume": 0.319238370592534
+          "AntiElite": 0.16113320787095906,
+          "Burst": 0.3222664157419181,
+          "Generalist": 0.1943339606452046,
+          "Volume": 0.3222664157419181
         }
       }
     },
@@ -60,27 +60,27 @@
       "counts": {
         "mobility": {
           "High": 4,
-          "Low": 6,
+          "Low": 7,
           "Mid": 27
         },
         "weapon_profile": {
           "AntiElite": 18,
           "Burst": 1,
-          "Generalist": 12,
+          "Generalist": 13,
           "Volume": 6
         }
       },
       "weights": {
         "mobility_weights": {
-          "High": 0.454257050793509,
-          "Low": 0.3708993288352125,
-          "Mid": 0.17484362037127862
+          "High": 0.46710874216858683,
+          "Low": 0.35310101914350583,
+          "Mid": 0.17979023868790742
         },
         "weapon_profile_weights": {
-          "AntiElite": 0.12195960250839924,
-          "Burst": 0.5174307717870298,
-          "Generalist": 0.14936939768911875,
-          "Volume": 0.2112402280154522
+          "AntiElite": 0.12267848892968945,
+          "Burst": 0.5204807485674132,
+          "Generalist": 0.14435538668089914,
+          "Volume": 0.2124853758219982
         }
       }
     }
@@ -98,6 +98,16 @@
         "spaceMarine::TerminatorCyclone"
       ],
       "weapon_profile": "AntiElite"
+    },
+    {
+      "blend_group": "Balance",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "spaceMarine::IntercessorTest"
+      ],
+      "weapon_profile": "Generalist"
     },
     {
       "blend_group": "Melee",
@@ -502,10 +512,11 @@
     },
     {
       "blend_group": "Melee",
-      "count": 1,
+      "count": 2,
       "mobility_bucket": "Low",
       "tanking": "Troop",
       "units": [
+        "spaceMarine::DeathCompanyMarineEviscerator",
         "spaceMarine::DeathCompanyMarineEviscerator"
       ],
       "weapon_profile": "Generalist"
@@ -704,6 +715,7 @@
     "spaceMarine::Intercessor": 18,
     "spaceMarine::IntercessorGrenadeLauncher": 20,
     "spaceMarine::IntercessorSergeant": 21,
+    "spaceMarine::IntercessorTest": 18,
     "spaceMarine::SanguinaryGuardAngelus": 50,
     "spaceMarine::SanguinaryGuardInferno": 50,
     "spaceMarine::Scout": 14,

@@ -82,6 +82,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   power_fist: {display_name: "Power Fist", NB: 3, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: [],},
   power_fist_pack_leader: {display_name: "Power Fist", NB: 2, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: [],},
   power_weapon_pack_leader: {display_name: "Power Weapon", NB: 4, ATK: 3, STR: 5, AP: -2, DMG: 1, WEAPON_RULES: [],},
+  relic_fist: {display_name: "Relic Fist", NB: 5, ATK: 2, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: [],},
   sternguard_close_combat_weapon: {display_name: "Close Combat Weapon", NB: 4, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: [],},
   thunder_hammer_terminator: {display_name: "Thunder Hammer", NB: 3, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: ["DEVASTATING_WOUNDS"],},
   // #########################################################################################

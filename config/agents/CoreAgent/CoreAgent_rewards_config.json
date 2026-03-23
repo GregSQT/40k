@@ -4,8 +4,8 @@
     "Unit": "######################### CoreAgent ######################################################",
     "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
     "base_actions": {
-      "ranged_attack": 0.4,
-      "melee_attack": 0.2,
+      "ranged_attack": 0.3,
+      "melee_attack": 0.3,
       "charge_success": 0.05,
       "wait": -0.1
     },

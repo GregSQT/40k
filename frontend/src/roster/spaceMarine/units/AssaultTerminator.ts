@@ -23,8 +23,9 @@ export class AssaultTerminator extends EliteMeleeElite {
   static CC_WEAPON_CODES = ["thunder_hammer_terminator"];
   static CC_WEAPONS = getWeapons(AssaultTerminator.CC_WEAPON_CODES);
 
-      // UNIT KEYWORDS
-      static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "terminator assault squad"}];
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "terminator assault squad"}];
+  
   // AI CLASSIFICATION
   static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
   static MOVE_TYPE = "Infantry"; // Standard infantry movement

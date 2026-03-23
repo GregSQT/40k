@@ -109,12 +109,12 @@ class W40KMetricsTracker:
         }
 
         # NEW: Combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
-        # These 3 metrics tell you if the agent learns combat properly
+        # These metrics tell you if the agent learns combat properly
         self.combat_effectiveness = {
             'shoot_kills': 0,      # Kills from ranged attacks
             'melee_kills': 0,      # Kills from melee attacks
             'charge_successes': 0, # Successful charges (reached target)
-            'controlled_objectives': 0.0  # Avg objectives controlled between turns 2 and 5
+            'victory_points_cumulative': 0.0  # Cumulative victory points at episode end
         }
 
         # Rolling history for smoothed combat metrics
@@ -122,12 +122,8 @@ class W40KMetricsTracker:
             'shoot_kills': [],
             'melee_kills': [],
             'charge_successes': [],
-            'controlled_objectives': []
+            'victory_points_cumulative': []
         }
-
-        # Flag to track if controlled_objectives should be logged this episode
-        # Only True when game reached turn 5+ (not early elimination)
-        self._should_log_controlled_objectives = False
         
         # NEW: Hyperparameter tracking for PPO tuning
         self.hyperparameter_tracking = {
@@ -159,6 +155,7 @@ class W40KMetricsTracker:
         
         # NEW: Latest VALUE trade ratio for 0_critical/ dashboard
         self.latest_value_trade_ratio = None
+        self.value_trade_ratio_history: List[float] = []
         
         # NEW: Episode tactical data for invalid_action_rate tracking
         self.episode_tactical_data = {
@@ -269,8 +266,19 @@ class W40KMetricsTracker:
         self.writer.add_scalar('combat/g_value_lost', ally_value_lost, self.episode_count)
         if ally_value_lost > 0 and enemy_value_destroyed > 0:
             value_trade_ratio = enemy_value_destroyed / ally_value_lost
-            self.latest_value_trade_ratio = value_trade_ratio
-            self.writer.add_scalar('combat/h_value_trade_ratio', value_trade_ratio, self.episode_count)
+            self.value_trade_ratio_history.append(value_trade_ratio)
+            if len(self.value_trade_ratio_history) > 200:
+                self.value_trade_ratio_history.pop(0)
+            value_trade_ratio_mean_200 = self._calculate_smoothed_metric(
+                self.value_trade_ratio_history,
+                window_size=200
+            )
+            self.latest_value_trade_ratio = value_trade_ratio_mean_200
+            self.writer.add_scalar(
+                'combat/h_value_trade_ratio',
+                value_trade_ratio_mean_200,
+                self.episode_count
+            )
         
         # GAME CRITICAL: Unit trade ratio (killed/lost) - Core success metric
         if units_lost > 0 and units_killed > 0:
@@ -548,23 +556,13 @@ class W40KMetricsTracker:
         elif kill_type == 'charge':
             self.combat_effectiveness['charge_successes'] += 1
 
-    def log_controlled_objectives(self, count: float):
-        """Log average objectives controlled between turns 2 and 5.
-
-        Only called when game reached turn 5+ (natural end, not elimination).
+    def log_victory_points_cumulative(self, points: float):
+        """Log cumulative victory points for the controlled player at episode end.
 
         Args:
-            count: Mean objectives controlled by learning agent for turns 2..5
+            points: Cumulative victory points for the learning agent for the episode.
         """
-        self.combat_effectiveness['controlled_objectives'] = float(count)
-        self._should_log_controlled_objectives = True
-
-    def skip_controlled_objectives_logging(self):
-        """Mark that controlled_objectives should NOT be logged this episode.
-
-        Called when game ended early (elimination before turn 5).
-        """
-        self._should_log_controlled_objectives = False
+        self.combat_effectiveness['victory_points_cumulative'] = float(points)
 
     def log_phase_performance(self, phase_data: Dict[str, Any]):
         """Accumulate phase-specific performance metrics during episode.
@@ -650,22 +648,22 @@ class W40KMetricsTracker:
 
         # Log combat effectiveness metrics (per RL_TRAINING_ROADMAP.md)
         # Store current episode values in history for smoothing
-        # Note: controlled_objectives handled separately (only logged on turn 5+)
+        # victory_points_cumulative is logged for every episode.
         for key in ['shoot_kills', 'melee_kills', 'charge_successes']:
             self.combat_history[key].append(self.combat_effectiveness[key])
             # Keep last 100 episodes
             if len(self.combat_history[key]) > 100:
                 self.combat_history[key].pop(0)
 
-        # controlled_objectives: Only add to history if game reached turn 5+
-        if self._should_log_controlled_objectives:
-            self.combat_history['controlled_objectives'].append(self.combat_effectiveness['controlled_objectives'])
-            if len(self.combat_history['controlled_objectives']) > 100:
-                self.combat_history['controlled_objectives'].pop(0)
+        self.combat_history['victory_points_cumulative'].append(
+            self.combat_effectiveness['victory_points_cumulative']
+        )
+        if len(self.combat_history['victory_points_cumulative']) > 100:
+            self.combat_history['victory_points_cumulative'].pop(0)
 
         # Log smoothed combat metrics (20-episode rolling average)
         # Prefixes control TensorBoard sort order:
-        # a_position_score, b_shoot_kills, c_charge_successes, d_melee_kills, e_controlled_objectives
+        # a_position_score, b_shoot_kills, c_charge_successes, d_melee_kills, e_victory_points_cumulative_mean
         window_size = 20
 
         # a) Position score (movement quality)
@@ -688,19 +686,21 @@ class W40KMetricsTracker:
             smoothed_value = self._calculate_smoothed_metric(self.combat_history['melee_kills'], window_size=window_size)
             self.writer.add_scalar('combat/d_melee_kills', smoothed_value, self.episode_count)
 
-        # e) Controlled objectives avg over turns 2..5 (only if game reached turn 5+)
-        if len(self.combat_history['controlled_objectives']) >= 1:
-            smoothed_value = self._calculate_smoothed_metric(self.combat_history['controlled_objectives'], window_size=window_size)
-            self.writer.add_scalar('combat/e_controlled_objectives', smoothed_value, self.episode_count)
+        # e) Mean cumulative victory points per episode (smoothed over 200 episodes)
+        if len(self.combat_history['victory_points_cumulative']) >= 1:
+            smoothed_value = self._calculate_smoothed_metric(
+                self.combat_history['victory_points_cumulative'],
+                window_size=200
+            )
+            self.writer.add_scalar('combat/e_victory_points_cumulative_mean', smoothed_value, self.episode_count)
 
         # Reset combat effectiveness and flags for next episode
         self.combat_effectiveness = {
             'shoot_kills': 0,
             'melee_kills': 0,
             'charge_successes': 0,
-            'controlled_objectives': 0.0
+            'victory_points_cumulative': 0.0
         }
-        self._should_log_controlled_objectives = False
     
     def log_training_metrics(self, model_stats: Dict[str, Any]):
         """
@@ -843,7 +843,7 @@ class W40KMetricsTracker:
 
         # 2. Episode Reward (smoothed) - Training signal strength
         if len(self.all_episode_rewards) >= 1:
-            reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=20)
+            reward_smooth = self._calculate_smoothed_metric(self.all_episode_rewards, window_size=200)
             self.writer.add_scalar('0_critical/e_episode_reward_smooth', reward_smooth, self.episode_count)
 
         # NOTE: position_score moved to combat/ category

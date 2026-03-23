@@ -990,18 +990,10 @@ class MetricsCollectionCallback(BaseCallback):
             # Engine provides complete tactical data - use it directly
             self.episode_tactical_data.update(info['tactical_data'])
 
-            # Log controlled objectives ONLY if game completed turn 5 (turn limit reached)
-            # Early termination (elimination) should not log objectives
-            # The 'turn_limit_reached' flag is set by fight_handlers when game ends due to turn limit (optional in info)
-            turn_limit_reached = info.get('turn_limit_reached', False)  # get allowed
-            if turn_limit_reached:
-                controlled_objectives_avg_turn2_5 = float(
-                    require_key(info['tactical_data'], 'controlled_objectives_avg_turn2_5')
-                )
-                self.metrics_tracker.log_controlled_objectives(controlled_objectives_avg_turn2_5)
-            else:
-                # Game ended early (elimination) - skip objective logging
-                self.metrics_tracker.skip_controlled_objectives_logging()
+            victory_points_cumulative_episode = float(
+                require_key(info['tactical_data'], 'victory_points_cumulative_episode')
+            )
+            self.metrics_tracker.log_victory_points_cumulative(victory_points_cumulative_episode)
 
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
