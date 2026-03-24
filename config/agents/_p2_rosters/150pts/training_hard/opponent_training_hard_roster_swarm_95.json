@@ -1,0 +1,37 @@
+{
+  "roster_id": "opponent_training_hard_roster_swarm_95",
+  "composition": [
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyWeaponPlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "StormGuardian",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 2
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

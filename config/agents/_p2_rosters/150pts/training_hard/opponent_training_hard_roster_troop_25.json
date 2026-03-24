@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_25",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    }
+  ]
+}

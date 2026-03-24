@@ -1794,6 +1794,7 @@ export const BoardReplay: React.FC = () => {
             <UnitStatusTable
               units={currentState.units || []}
               player={1}
+              playerTypes={currentState.player_types}
               selectedUnitId={null}
               clickedUnitId={null}
               onSelectUnit={() => {}}
@@ -1808,6 +1809,7 @@ export const BoardReplay: React.FC = () => {
             <UnitStatusTable
               units={currentState.units || []}
               player={2}
+              playerTypes={currentState.player_types}
               selectedUnitId={null}
               clickedUnitId={null}
               onSelectUnit={() => {}}

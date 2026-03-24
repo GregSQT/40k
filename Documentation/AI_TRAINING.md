@@ -19,6 +19,14 @@
   - [Chargement de la config](#chargement-de-la-config)
   - [Création de l’environnement](#création-de-lenvironnement)
   - [Modèle et boucle d’entraînement](#modèle-et-boucle-dentraînement)
+- [Seat-Aware Training (P1/P2/Random)](#-seat-aware-training-p1--p2--random)
+  - [Concept](#concept)
+  - [Architecture](#architecture-seat)
+  - [Observation égocentrique](#observation-égocentrique)
+  - [Reward seat-aware](#reward-seat-aware)
+  - [Configuration](#configuration-seat)
+  - [Évaluation cross-seat](#évaluation-cross-seat)
+  - [Contraintes connues](#contraintes-connues)
 - [Macro Training Status](#-macro-training-status)
   - [Implémenté aujourd'hui](#implémente-aujourdhui)
   - [Recommandations / non implémenté](#recommandations--non-implémente)
@@ -79,9 +87,10 @@
 ### Run Training
 ```bash
 # From project root (--agent obligatoire pour entraînement ciblé)
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot   # Entraînement standard
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --step  # + step logging (step.log)
-python ai/train.py --agent <agent_key> --scenario bot --test-only --step --test-episodes 50   # Test rapide avec logs
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot   # Entraînement standard (P1)
+python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode p2                         # Entraînement en P2
+python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode random                     # Entraînement seat aléatoire
+python ai/train.py --agent <agent_key> --scenario bot --test-only --step --test-episodes 50                    # Test rapide avec logs
 ```
 
 ### Continue Existing Model
@@ -137,15 +146,16 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
 #### Scénarios minces + rosters compacts
 
 - Un scénario peut rester en format legacy (`"units": [...]`) ou pointer vers des rosters via:
-  - `"scale"` (ex: `"100pts"`),
-  - `"p1_roster_ref"`,
-  - `"p2_roster_ref"`.
-- En holdout, `p1_roster_ref` doit être explicite et séparé par difficulté:
+  - `"scale"` (ex: `"150pts"`),
+  - `"agent_roster_ref"` : roster de l'agent (chargé depuis `config/agents/<agent>/rosters/<scale>/`),
+  - `"opponent_roster_ref"` : roster de l'adversaire (chargé depuis `config/agents/_p2_rosters/<scale>/`).
+- Le mapping agent/opponent → Player 1/2 est résolu au runtime par `controlled_player` (voir [Seat-Aware Training](#-seat-aware-training-p1--p2--random)).
+- En holdout, `agent_roster_ref` doit être explicite et séparé par difficulté:
   - `holdout_regular/...` pour les scénarios dans `scenarios/holdout_regular/`
   - `holdout_hard/...` pour les scénarios dans `scenarios/holdout_hard/`
-- Pour `p1_roster_ref`, un alias explicite est supporté en training:
+- Pour `agent_roster_ref`, un alias est supporté en training:
   - `"training_random"` -> tirage aléatoire d’un roster dans `rosters/<scale>/training/` (liste triée avant tirage).
-- Optionnel: `"p1_roster_seed"` (int >= 0) pour forcer un tirage déterministe local du roster P1.
+- Optionnel: `"agent_roster_seed"` (int >= 0) pour forcer un tirage déterministe local du roster agent.
 - Un scénario peut aussi référencer des données de carte partagées via:
   - `"wall_ref"` (au lieu de `"wall_hexes"`),
   - `"objectives_ref"` (au lieu de `"objectives"` / `"objective_hexes"`).
@@ -156,7 +166,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - IDs P1 déterministes: `1..N`.
   - IDs P2 déterministes: `101..(100+N2)`.
   - Pas de `col/row` dans le roster compact: le déploiement est géré par le scénario (`deployment_type`/`deployment_zone`).
-- En training, `p1_roster_ref` peut être une liste pour tirage aléatoire par épisode; en holdout, utiliser une ref unique déterministe.
+- En training, `agent_roster_ref` peut être une liste pour tirage aléatoire par épisode; en holdout, utiliser une ref unique déterministe.
 - `step.log` journalise les rosters sélectionnés en début d’épisode (`Rosters: ...`).
 
 ### Création de l’environnement
@@ -168,7 +178,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
 2. **Step logger** (si `--step`) : `StepLogger("step.log", ...)` attaché à `base_env.step_logger` ; désactivé pour les envs vectorisés (SubprocVecEnv).
 3. **ActionMasker** : wrapper SB3 `ActionMasker(base_env, mask_fn)` avec `mask_fn(env) = env.get_action_mask()` pour MaskablePPO.
 4. **Adversaire** :
-   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)`. Les bots sont instanciés à partir de `training_config` (ratios, randomness) ou par défaut (RandomBot, GreedyBot, DefensiveBot avec randomness 0.10).
+   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry, agent_seat_mode=..., global_seed=..., env_rank=...)`. Les bots sont instanciés à partir de `training_config` (ratios, randomness) ou par défaut (RandomBot, GreedyBot, DefensiveBot avec randomness 0.10). Le `agent_seat_mode` détermine quel joueur l'agent contrôle (voir [Seat-Aware Training](#-seat-aware-training-p1--p2--random)).
    - **Self-play** : `SelfPlayWrapper(masked_env, ...)` (autre joueur = copie du modèle, mise à jour périodique).
 5. **Monitor** : `Monitor(wrapped_env)` pour les stats d’épisode (reward, length) utilisées par TensorBoard et les callbacks.
 
@@ -181,6 +191,115 @@ Pour l’entraînement vectorisé, `make_training_env()` dans `ai/training_utils
 - **Boucle** : `model.learn(total_timesteps=...)` (ou équivalent selon le mode). Chaque step : `action = model.predict(obs, action_masks=mask)` puis `env.step(action)`.
 
 **Références code** : `ai/train.py`, `ai/training_utils.py` (`make_training_env`), `ai/env_wrappers.py` (BotControlledEnv, SelfPlayWrapper), `engine/w40k_core.py` (W40KEngine).
+
+---
+
+## 🎮 SEAT-AWARE TRAINING (P1 / P2 / RANDOM)
+
+L'agent peut être entraîné en tant que Player 1, Player 2, ou en alternance aléatoire par épisode. Le pipeline garantit que toutes les observations, rewards et métriques sont **égocentriques** : l'agent voit toujours "mes unités" vs "unités ennemies", indépendamment du numéro de joueur.
+
+### Concept
+
+Trois modes d'entraînement via `agent_seat_mode` :
+
+| Mode | `controlled_player` | Comportement |
+|------|---------------------|-------------|
+| `p1` | Toujours 1 | Agent = Player 1, Bot = Player 2 |
+| `p2` | Toujours 2 | Agent = Player 2, Bot = Player 1 |
+| `random` | 1 ou 2 par épisode | Tirage déterministe par `(global_seed, env_rank, episode_index)` |
+
+En mode `random`, le tirage est indépendant par sous-env vectorisé. Seuils d'audit : écart épisodes ≤ 5%, écart timesteps ≤ 10%, fenêtre ≥ 2000 épisodes.
+
+### Architecture (seat)
+
+Le seat est résolu à chaque `reset()` d'épisode dans `BotControlledEnv` :
+
+1. `_resolve_controlled_player_for_episode()` → détermine `controlled_player` (1 ou 2)
+2. `_apply_episode_seat()` → écrit dans `engine.config` et `game_state` :
+   - `controlled_player` : joueur contrôlé par l'agent
+   - `opponent_player` : joueur contrôlé par le bot
+3. `_play_bot_until_control_returns()` → le bot joue jusqu'à ce que l'agent ait une décision à prendre
+
+**Source de vérité unique** : `engine.config["controlled_player"]` est la seule source runtime. Écriture autorisée uniquement au reset d'épisode. Toute logique reward/metrics/eval lit cette valeur.
+
+**Roster mapping** : Les scénarios définissent `agent_roster_ref` et `opponent_roster_ref`. Au chargement (`game_state.py:_load_units_from_roster_refs`), l'agent roster est assigné au `controlled_player` et l'opponent roster au `opponent_player`. Les IDs d'unités suivent la convention historique : Player 1 = `[1..N]`, Player 2 = `[101..N]`.
+
+### Observation égocentrique
+
+Toutes les features de l'observation flat sont relatives à l'unité active (qui appartient toujours au `controlled_player`) :
+
+| Feature | Encodage | Référence |
+|---------|----------|-----------|
+| `obs[0]` (turn ownership) | `1.0` si c'est le tour de l'unité active, `0.0` sinon | `current_player == active_unit["player"]` |
+| Objective control (`obs[11:16]`) | `+1.0` = contrôlé par mon camp, `-1.0` = ennemi | `active_unit["player"]` pour my/enemy OC |
+| Allied units | Filtré par `unit["player"] == active_unit["player"]` | Positions/HP relatifs à l'unité active |
+| Enemy units | Filtré par `unit["player"] != active_unit["player"]` | Idem |
+| Army value diff (macro) | `my_value - enemy_value` basé sur `current_player` | `_calculate_army_value_diff()` |
+| Macro objective control_state | `+1.0`/`-1.0` recalculé à chaque observation | Cache `macro_objectives` invalidé par `build_observation()` |
+| Directional helpers (friendly/enemy) | `unit["player"]` pour target_player | `_find_nearest_in_direction()` |
+
+**Invariant critique** : Pendant `build_observation()`, `game_state["current_player"] == active_unit["player"]`. Toute utilisation de `current_player` dans les helpers est donc correcte dans ce contexte.
+
+**Cache `macro_objectives`** : Ce cache contient des `control_state` relatifs au joueur courant. Il est invalidé (`game_state.pop("macro_objectives", None)`) au début de chaque `build_observation()` pour éviter qu'un calcul fait pendant le tour du bot ne pollue l'observation de l'agent.
+
+### Reward seat-aware
+
+Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par joueur :
+
+1. **Actions non-contrôlées** : si `acting_unit["player"] != controlled_player` → seuls les rewards objectifs par tour et situationnels (game_over) sont retournés. Pas de reward d'action pour les coups du bot.
+
+2. **Actions contrôlées** : reward complète (base_action + result_bonuses + tactical_bonuses + situational).
+
+3. **Reward situationnelle** (`_get_situational_reward`) :
+   - `winner == controlled_player` → bonus win
+   - `winner == opponent_player` → pénalité lose
+   - `winner == -1` → reward draw
+   - Si toutes les unités contrôlées sont éliminées (`_get_controlled_player_unit() is None`) : le penalty lose/draw est quand même appliqué via la config rewards.
+
+4. **Reward objectifs par tour** (`_calculate_objective_reward_per_turn`) : nombre d'objectifs contrôlés par `controlled_player` × `reward_per_objective`. Appliqué une fois par tour à la transition vers la phase move.
+
+5. **Victory Points** : scorés par joueur absolu (P1 et P2 scorent indépendamment). Le winner est déterminé par comparaison VP à la fin du turn 5.
+
+### Configuration (seat)
+
+**training_config.json** :
+```json
+{
+  "agent_seat_mode": "p1",
+  "agent_seat_seed": 42
+}
+```
+
+- `agent_seat_mode` : `"p1"` | `"p2"` | `"random"` (obligatoire)
+- `agent_seat_seed` : seed pour le mode random (obligatoire si `random`)
+
+**CLI override** :
+```bash
+python ai/train.py --agent CoreAgent --scenario bot --new --param agent_seat_mode p2
+python ai/train.py --agent CoreAgent --scenario bot --new --param agent_seat_mode random
+```
+
+Le `--param` override s'applique à tous les chargements de config via monkey-patch sur `config_loader.load_agent_training_config`.
+
+### Évaluation cross-seat
+
+L'évaluation bot (`evaluate_against_bots`) lit `agent_seat_mode` depuis la training config. Le `--param` override fonctionne aussi en mode `--eval` :
+
+```bash
+# Évaluer le modèle courant en tant que P1
+python ai/train.py --agent CoreAgent --eval --param agent_seat_mode p1 --test-episodes 100
+
+# Évaluer le même modèle en tant que P2
+python ai/train.py --agent CoreAgent --eval --param agent_seat_mode p2 --test-episodes 100
+```
+
+**Protocole de validation cross-seat** : pour vérifier si un gap de performance P1/P2 est structurel (going-second) ou dû à un bug, évaluer un même modèle dans les deux seats. Un drop symétrique (~10-15 pts) en P2 confirme le désavantage going-second.
+
+### Contraintes connues
+
+**Désavantage going-second** : En W40K, Player 1 agit en premier chaque tour (move → shoot → charge → fight). Player 2 subit les actions de P1 avant de pouvoir réagir. Cela crée un désavantage structurel pour P2 (~10-15 pts win_rate) qui n'est pas un bug mais une propriété du jeu. Un modèle entraîné en mode `random` apprend à compenser ce désavantage.
+
+**Métriques seat-aware** : Les métriques TensorBoard (`win_rate_100ep`, `episode_reward_smooth`, `victory_points_cumulative_mean`) sont toutes calculées du point de vue du `controlled_player`. Comparer directement les courbes P1 vs P2 nécessite de prendre en compte le going-second.
 
 ---
 

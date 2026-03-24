@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_02",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 2
+    }
+  ]
+}

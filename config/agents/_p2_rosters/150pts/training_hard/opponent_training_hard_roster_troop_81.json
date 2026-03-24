@@ -1,0 +1,37 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_81",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    }
+  ]
+}

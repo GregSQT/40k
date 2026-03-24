@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_12",
+  "composition": [
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

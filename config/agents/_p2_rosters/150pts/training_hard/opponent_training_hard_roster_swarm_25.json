@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_hard_roster_swarm_25",
+  "composition": [
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 3
+    },
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    }
+  ]
+}

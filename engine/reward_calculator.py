@@ -133,12 +133,13 @@ class RewardCalculator:
         if objective_turn_reward:
             reward_breakdown['tactical_bonuses'] += objective_turn_reward
 
-        # CRITICAL: Only give rewards to the controlled player (P1 during training)
-        # Player 2's actions are part of the environment, not the learning agent
-        controlled_player = self.config.get("controlled_player", 1)
+        # CRITICAL: Only give rewards to the controlled player.
+        # The opponent's actions are part of the environment, not the learning agent.
+        controlled_player = require_key(self.config, "controlled_player")
         if require_key(acting_unit, "player") != controlled_player:
-            # No action rewards for opponent, BUT check if game ended
-            # If P1's action ended the game, P0 still needs the win/lose reward!
+            # No action rewards for opponent, BUT check if game ended.
+            # If the opponent ends the game, the controlled player still needs
+            # the terminal win/lose/draw situational reward.
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
@@ -501,60 +502,6 @@ class RewardCalculator:
         else:
             base_reward = 0.0
         
-        # Add win/lose bonuses from situational_modifiers
-        if game_state["game_over"]:
-            # AI_TURN.md COMPLIANCE: Direct access with validation
-            if "situational_modifiers" not in unit_rewards:
-                raise KeyError("Unit rewards missing required 'situational_modifiers' section")
-            modifiers = unit_rewards["situational_modifiers"]
-            winner = self._determine_winner(game_state)
-
-            # Player 1 is always the controlled player during training
-            if winner == 1:  # Player 1 wins
-                if "win" not in modifiers:
-                    raise KeyError(f"Situational modifiers missing required 'win' reward")
-                win_bonus = modifiers["win"]
-                base_reward += win_bonus
-
-                # CRITICAL FIX: Track win bonus in game_state for metrics
-                game_state['last_reward_breakdown'] = {
-                    'base_actions': base_reward - win_bonus,
-                    'result_bonuses': 0.0,
-                    'tactical_bonuses': 0.0,
-                    'situational': win_bonus,
-                    'penalties': 0.0
-                }
-
-            elif winner == 2:  # Player 2 wins (controlled player loses)
-                if "lose" not in modifiers:
-                    raise KeyError(f"Situational modifiers missing required 'lose' reward")
-                lose_penalty = modifiers["lose"]
-                base_reward += lose_penalty
-
-                # CRITICAL FIX: Track lose penalty in game_state for metrics
-                game_state['last_reward_breakdown'] = {
-                    'base_actions': base_reward - lose_penalty,
-                    'result_bonuses': 0.0,
-                    'tactical_bonuses': 0.0,
-                    'situational': lose_penalty,
-                    'penalties': 0.0
-                }
-                
-            elif winner == -1:  # Draw
-                if "draw" not in modifiers:
-                    raise KeyError(f"Situational modifiers missing required 'draw' reward")
-                draw_reward = modifiers["draw"]
-                base_reward += draw_reward
-                
-                # Track draw reward in game_state for metrics
-                game_state['last_reward_breakdown'] = {
-                    'base_actions': base_reward - draw_reward,
-                    'result_bonuses': 0.0,
-                    'tactical_bonuses': 0.0,
-                    'situational': draw_reward,
-                    'penalties': 0.0
-                }
-        
         return base_reward
     
     # ============================================================================
@@ -588,63 +535,66 @@ class RewardCalculator:
         """
         Get situational reward (win/lose/draw) for current game state.
         Called when game ends to add final outcome bonus/penalty.
-
-        CRITICAL: The learning agent is ALWAYS Player 0 during training.
-        Player 1 is the opponent (frozen model in self-play, or bot).
         """
         if not game_state.get("game_over", False):
             return 0.0
 
-        # Get any Player 0 unit to access reward config (learning agent is P0)
-        # CRITICAL FIX: Learning agent is Player 1, not Player 2!
-        acting_unit = None
-        units_cache = require_key(game_state, "units_cache")
-        for unit_id, cache_entry in units_cache.items():
-            if cache_entry["player"] == 1:  # Learning agent is Player 1
-                acting_unit = get_unit_by_id(unit_id, game_state)
-                if not acting_unit:
-                    raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-                break
-
+        acting_unit = self._get_controlled_player_unit(game_state)
         if not acting_unit:
+            # Controlled player has no living units — use any unit type's config
+            # to retrieve the loss penalty (all unit types share situational_modifiers).
+            controlled_player = int(require_key(self.config, "controlled_player"))
+            winner = self._determine_winner(game_state)
+            opponent_player = 2 if controlled_player == 1 else 1
+            if winner == opponent_player:
+                agent_key = require_key(self.config, "controlled_agent")
+                unit_rewards = self.rewards_config[agent_key]
+                modifiers = require_key(unit_rewards, "situational_modifiers")
+                return float(require_key(modifiers, "lose"))
+            elif winner == -1:
+                agent_key = require_key(self.config, "controlled_agent")
+                unit_rewards = self.rewards_config[agent_key]
+                modifiers = require_key(unit_rewards, "situational_modifiers")
+                return float(require_key(modifiers, "draw"))
             return 0.0
 
-        try:
-            unit_rewards = self._get_unit_reward_config(acting_unit)
-            
-            # Calculate base win/lose/draw reward (if situational_modifiers exists)
-            base_reward = 0.0
-            if "situational_modifiers" in unit_rewards:
-                modifiers = unit_rewards["situational_modifiers"]
-                winner = self._determine_winner(game_state)
+        unit_rewards = self._get_unit_reward_config(acting_unit)
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        opponent_player = 2 if controlled_player == 1 else 1
+        winner = self._determine_winner(game_state)
 
-                # CRITICAL FIX: Learning agent is Player 1!
-                # winner == 1 means Player 1 (learning agent) wins
-                # winner == 2 means Player 2 (opponent) wins, so learning agent loses
-                if winner == 1:  # Learning agent wins
-                    base_reward = modifiers.get("win", 0.0)
-                elif winner == 2:  # Learning agent loses
-                    base_reward = modifiers.get("lose", 0.0)
-                elif winner == -1:  # Draw
-                    base_reward = modifiers.get("draw", 0.0)
+        # Calculate base win/lose/draw reward (if situational_modifiers exists)
+        base_reward = 0.0
+        if "situational_modifiers" in unit_rewards:
+            modifiers = unit_rewards["situational_modifiers"]
+            if winner == controlled_player:
+                base_reward = float(require_key(modifiers, "win"))
+            elif winner == opponent_player:
+                base_reward = float(require_key(modifiers, "lose"))
+            elif winner == -1:
+                base_reward = float(require_key(modifiers, "draw"))
+            else:
+                raise ValueError(
+                    f"Unexpected winner value in _get_situational_reward: {winner!r} "
+                    f"(controlled_player={controlled_player}, opponent_player={opponent_player})"
+                )
 
-            # Add objective control reward at end of turn 5
-            # CRITICAL: Calculate objective reward even if situational_modifiers is missing
-            objective_reward = self._calculate_objective_reward_turn5(game_state, unit_rewards)
-            
-            # Diagnostic logging (only if not quiet)
-            if not self.quiet and objective_reward > 0:
-                current_turn = require_key(game_state, "turn")
-                obj_counts = self.state_manager.count_controlled_objectives(game_state) if self.state_manager else {}
-                p0_count = obj_counts[0] if 0 in obj_counts else 0
-                print(f"🎯 OBJECTIVE REWARD: Turn={current_turn}, P0 objectives={p0_count}, Reward={objective_reward:.1f}")
-            
-            return base_reward + objective_reward
-        except (KeyError, ValueError) as e:
-            # Log error but return 0 to avoid breaking training
-            if not self.quiet:
-                print(f"⚠️  WARNING: Failed to calculate situational reward: {e}")
-            return 0.0
+        # Add objective control reward at end of turn 5
+        # CRITICAL: Calculate objective reward even if situational_modifiers is missing
+        objective_reward = self._calculate_objective_reward_turn5(game_state, unit_rewards)
+
+        # Diagnostic logging (only if not quiet)
+        if not self.quiet and objective_reward > 0:
+            current_turn = require_key(game_state, "turn")
+            obj_counts = self.state_manager.count_controlled_objectives(game_state) if self.state_manager else {}
+            controlled_count = require_key(obj_counts, controlled_player) if obj_counts else 0
+            print(
+                f"🎯 OBJECTIVE REWARD: Turn={current_turn}, "
+                f"controlled_player={controlled_player}, "
+                f"controlled_objectives={controlled_count}, Reward={objective_reward:.1f}"
+            )
+
+        return base_reward + objective_reward
     
     def _get_primary_objective_config(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Return primary objective config if present, else None."""
@@ -661,7 +611,7 @@ class RewardCalculator:
 
     def _get_controlled_player_unit(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Return one unit for the controlled player (if any)."""
-        controlled_player = self.config.get("controlled_player", 1)
+        controlled_player = require_key(self.config, "controlled_player")
         units_cache = require_key(game_state, "units_cache")
         for unit_id, cache_entry in units_cache.items():
             if int(cache_entry["player"]) == int(controlled_player):
@@ -690,7 +640,7 @@ class RewardCalculator:
             return 0.0
 
         objective_rewarded_turns = require_key(game_state, "objective_rewarded_turns")
-        controlled_player = int(self.config.get("controlled_player", 1))
+        controlled_player = int(require_key(self.config, "controlled_player"))
         reward_key = (current_turn, controlled_player)
         if reward_key in objective_rewarded_turns:
             return 0.0
@@ -740,19 +690,19 @@ class RewardCalculator:
         """
         Calculate reward for objective control at end of turn 5.
         
-        Simple approach: Reward per objective controlled by Player 0 (learning agent).
+        Simple approach: Reward per objective controlled by the controlled player.
         Only applies when game ends at turn 5 (not elimination).
         Reward value is read from config: objective_rewards.reward_per_objective_turn5
         
         Returns:
-            Reward value (reward_per_objective * number of objectives controlled by P0)
+            Reward value (reward_per_objective * number of objectives controlled by the controlled player)
         """
         # Only apply at end of turn 5 (not elimination)
         current_turn = require_key(game_state, "turn")
         turn_limit_reached = game_state.get("turn_limit_reached", False)
         
         # Check if game ended at turn 5
-        # Either: turn_limit_reached is True (P1 just completed turn 5)
+        # Either: turn_limit_reached is True (turn limit reached)
         # Or: turn > 5 (standard end of turn 5)
         is_turn5_end = turn_limit_reached or (current_turn > 5)
         
@@ -774,13 +724,13 @@ class RewardCalculator:
         if len(living_units_by_player) < 2:
             return 0.0
         
-        # Both players still alive - game ended at turn 5
-        # Calculate objectives controlled by Player 0
+        # Both players still alive - game ended at turn 5.
+        # Calculate objectives controlled by the controlled player.
         if not self.state_manager:
             return 0.0
         
         obj_counts = self.state_manager.count_controlled_objectives(game_state)
-        controlled_player = int(self.config.get("controlled_player", 1))
+        controlled_player = int(require_key(self.config, "controlled_player"))
         controlled_objectives = require_key(obj_counts, controlled_player)
         
         # Get reward per objective from config (REQUIRED - raise error if missing)

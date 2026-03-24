@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_12",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    }
+  ]
+}

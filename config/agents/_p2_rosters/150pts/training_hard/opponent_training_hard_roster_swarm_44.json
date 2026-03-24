@@ -1,0 +1,37 @@
+{
+  "roster_id": "opponent_training_hard_roster_swarm_44",
+  "composition": [
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    }
+  ]
+}

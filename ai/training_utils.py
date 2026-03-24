@@ -143,7 +143,8 @@ def setup_imports():
 
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
-                     scenario_files=None, debug_mode=False, use_bots=False, training_bots=None):
+                     scenario_files=None, debug_mode=False, use_bots=False, training_bots=None,
+                     agent_seat_mode=None, global_seed=None):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -196,7 +197,16 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
 
         # Bot training or self-play
         if use_bots and training_bots:
-            wrapped_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
+            if agent_seat_mode is None:
+                raise KeyError("agent_seat_mode is required when use_bots=True")
+            wrapped_env = BotControlledEnv(
+                masked_env,
+                bots=training_bots,
+                unit_registry=unit_registry,
+                agent_seat_mode=agent_seat_mode,
+                global_seed=global_seed,
+                env_rank=rank,
+            )
         else:
             wrapped_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
 

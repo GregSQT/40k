@@ -404,6 +404,7 @@ steps:
       <S> Force d'attaque de l'arme (à opposer à l'Endurance de la cible).
       <AP> Pouvoir de pénétration de l'arme.
       <DMG> Dommage infligé par l'arme.
+      Note : par défaut, le jeu choisira la meilleure arme disponible.
 
       --------------------
       <cursor>Selectionnez le Bolt Rifle.
@@ -416,6 +417,7 @@ steps:
       <S> Attack strength of the weapon (to oppose to the target's Endurance).
       <AP> Penetration power of the weapon.
       <DMG> Damage inflicted by the weapon.
+      Note : by default, the game will select the best weapon available.
 
       --------------------
       <cursor>Select the Bolt Rifle.

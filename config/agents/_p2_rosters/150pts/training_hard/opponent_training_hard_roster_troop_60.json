@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_60",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

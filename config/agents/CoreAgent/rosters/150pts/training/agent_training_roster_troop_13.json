@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_troop_13",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
+      "count": 1
+    }
+  ]
+}

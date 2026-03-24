@@ -161,42 +161,56 @@ def _scenario_has_forced_controlled_unit(
     scenario_file: str,
     unit_registry: Any,
     configured_rule_ids: Set[str],
+    controlled_player_mode: str,
 ) -> bool:
     """Return True if scenario includes at least one controlled unit with configured rule."""
     from engine.game_state import GameStateManager
 
-    temp_manager = GameStateManager({"board": {}}, unit_registry)
-    scenario_result = temp_manager.load_units_from_scenario(scenario_file, unit_registry)
-    units = require_key(scenario_result, "units")
-    if not isinstance(units, list):
-        raise TypeError(
-            f"Scenario '{scenario_file}' must resolve to a list of units "
-            f"(got {type(units).__name__})"
+    if controlled_player_mode not in {"p1", "p2", "random"}:
+        raise ValueError(
+            f"controlled_player_mode must be one of 'p1', 'p2', 'random' "
+            f"(got {controlled_player_mode!r})"
         )
+    if controlled_player_mode == "p1":
+        seats_to_check = [1]
+    elif controlled_player_mode == "p2":
+        seats_to_check = [2]
+    else:
+        seats_to_check = [1, 2]
 
-    for unit in units:
-        unit_player = require_key(unit, "player")
-        if unit_player != 1:
-            continue
-        unit_rules = require_key(unit, "UNIT_RULES")
-        if not isinstance(unit_rules, list):
+    for seat in seats_to_check:
+        temp_manager = GameStateManager({"board": {}, "controlled_player": seat}, unit_registry)
+        scenario_result = temp_manager.load_units_from_scenario(scenario_file, unit_registry)
+        units = require_key(scenario_result, "units")
+        if not isinstance(units, list):
             raise TypeError(
-                f"UNIT_RULES must be list for unit {require_key(unit, 'id')} "
-                f"in scenario '{scenario_file}' (got {type(unit_rules).__name__})"
+                f"Scenario '{scenario_file}' must resolve to a list of units "
+                f"(got {type(units).__name__})"
             )
-        for entry in unit_rules:
-            if not isinstance(entry, dict):
+
+        for unit in units:
+            unit_player = require_key(unit, "player")
+            if unit_player != seat:
+                continue
+            unit_rules = require_key(unit, "UNIT_RULES")
+            if not isinstance(unit_rules, list):
                 raise TypeError(
-                    f"Each UNIT_RULES entry must be object for unit {require_key(unit, 'id')} "
-                    f"in scenario '{scenario_file}' (got {type(entry).__name__})"
+                    f"UNIT_RULES must be list for unit {require_key(unit, 'id')} "
+                    f"in scenario '{scenario_file}' (got {type(unit_rules).__name__})"
                 )
-            rule_id = require_key(entry, "ruleId")
-            if not isinstance(rule_id, str) or not rule_id.strip():
-                raise ValueError(
-                    f"Invalid ruleId for unit {require_key(unit, 'id')} in scenario '{scenario_file}': {rule_id!r}"
-                )
-            if rule_id in configured_rule_ids:
-                return True
+            for entry in unit_rules:
+                if not isinstance(entry, dict):
+                    raise TypeError(
+                        f"Each UNIT_RULES entry must be object for unit {require_key(unit, 'id')} "
+                        f"in scenario '{scenario_file}' (got {type(entry).__name__})"
+                    )
+                rule_id = require_key(entry, "ruleId")
+                if not isinstance(rule_id, str) or not rule_id.strip():
+                    raise ValueError(
+                        f"Invalid ruleId for unit {require_key(unit, 'id')} in scenario '{scenario_file}': {rule_id!r}"
+                    )
+                if rule_id in configured_rule_ids:
+                    return True
     return False
 
 
@@ -204,6 +218,7 @@ def _apply_unit_rule_forcing_weights(
     scenario_list: List[str],
     training_config: Dict[str, Any],
     unit_registry: Any,
+    controlled_player_mode: str,
 ) -> List[str]:
     """Increase weights of scenarios with controlled units having configured unit rules."""
     forcing_cfg = training_config.get("unit_rule_forcing")
@@ -251,7 +266,12 @@ def _apply_unit_rule_forcing_weights(
 
     forced_scenarios: List[str] = []
     for scenario_path in scenario_counts.keys():
-        if _scenario_has_forced_controlled_unit(scenario_path, unit_registry, configured_rule_ids):
+        if _scenario_has_forced_controlled_unit(
+            scenario_path,
+            unit_registry,
+            configured_rule_ids,
+            controlled_player_mode,
+        ):
             forced_scenarios.append(scenario_path)
 
     if len(forced_scenarios) == 0:
@@ -664,6 +684,8 @@ _PARAM_ALIASES = {
     "clip_range": "model_params.clip_range",
     "ent_coef": "model_params.ent_coef",
     "vf_coef": "model_params.vf_coef",
+    # Seat-aware training keys
+    "seed": "agent_seat_seed",
     # Root-level keys (no mapping needed, but listed for clarity)
     "n_envs": "n_envs",
     "total_episodes": "total_episodes",
@@ -1207,11 +1229,43 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
         use_bot_env = "bot" in scenario_name.lower()
 
         if use_bot_env and EVALUATION_BOTS_AVAILABLE:
+            agent_seat_mode = require_key(training_config, "agent_seat_mode")
+            if agent_seat_mode not in {"p1", "p2", "random"}:
+                raise ValueError(
+                    f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+                    f"(got {agent_seat_mode!r})"
+                )
+            agent_seat_seed = None
+            if agent_seat_mode == "random":
+                if "agent_seat_seed" in training_config:
+                    agent_seat_seed_raw = require_key(training_config, "agent_seat_seed")
+                elif "seed" in training_config:
+                    agent_seat_seed_raw = require_key(training_config, "seed")
+                else:
+                    raise KeyError(
+                        "agent_seat_mode='random' requires a seed key in training config. "
+                        "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
+                    )
+                if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
+                    raise TypeError(
+                        "Seat seed must be an integer when agent_seat_mode='random' "
+                        "(from 'agent_seat_seed' or 'seed')."
+                    )
+                agent_seat_seed = int(agent_seat_seed_raw)
             # Use BotControlledEnv with GreedyBot for bot scenarios
             training_bot = GreedyBot(randomness=0.15)
-            bot_env = BotControlledEnv(masked_env, training_bot, unit_registry)
+            bot_env = BotControlledEnv(
+                masked_env,
+                training_bot,
+                unit_registry,
+                agent_seat_mode=agent_seat_mode,
+                global_seed=agent_seat_seed,
+            )
             env = Monitor(bot_env)
-            print(f"🤖 Using GreedyBot (randomness=0.15) for Player 1 (detected 'bot' in scenario name)")
+            print(
+                f"🤖 Using GreedyBot (randomness=0.15) with agent_seat_mode={agent_seat_mode!r} "
+                f"(detected 'bot' in scenario name)"
+            )
         else:
             # CRITICAL: Wrap with SelfPlayWrapper for proper self-play training
             # Without this, P1 never takes actions and the game is broken
@@ -1690,17 +1744,28 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             )
 
     forced_initial_weighted_entries = len(scenario_list)
+    forcing_controlled_player_mode = "p1"
+    if use_bots:
+        forcing_controlled_player_mode = require_key(training_config, "agent_seat_mode")
+        if forcing_controlled_player_mode not in {"p1", "p2", "random"}:
+            raise ValueError(
+                f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+                f"(got {forcing_controlled_player_mode!r})"
+            )
     scenario_list = _apply_unit_rule_forcing_weights(
         scenario_list=scenario_list,
         training_config=training_config,
         unit_registry=unit_registry,
+        controlled_player_mode=forcing_controlled_player_mode,
     )
     if len(scenario_list) > forced_initial_weighted_entries:
         forcing_cfg = training_config.get("unit_rule_forcing")
         if isinstance(forcing_cfg, dict) and forcing_cfg.get("enabled") is True:
             target_ratio = require_key(forcing_cfg, "target_controlled_episode_ratio")
             chunk_log(
-                f"🎯 Unit-rule forcing enabled: target controlled exposure ratio={float(target_ratio):.2f}"
+                "🎯 Unit-rule forcing enabled: "
+                f"target controlled exposure ratio={float(target_ratio):.2f} "
+                f"(seat_mode={forcing_controlled_player_mode})"
             )
 
     chunk_log(f"\n{'='*80}")
@@ -1745,7 +1810,20 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     if isinstance(scenario_data, dict) and "units" in scenario_data:
         num_units = len(require_key(scenario_data, "units"))
     else:
-        temp_manager = GameStateManager({"board": {}}, unit_registry)
+        scenario_probe_controlled_player = 1
+        if use_bots:
+            probe_seat_mode = require_key(training_config, "agent_seat_mode")
+            if probe_seat_mode not in {"p1", "p2", "random"}:
+                raise ValueError(
+                    f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+                    f"(got {probe_seat_mode!r})"
+                )
+            if probe_seat_mode == "p2":
+                scenario_probe_controlled_player = 2
+        temp_manager = GameStateManager(
+            {"board": {}, "controlled_player": scenario_probe_controlled_player},
+            unit_registry
+        )
         scenario_result = temp_manager.load_units_from_scenario(first_scenario, unit_registry)
         num_units = len(require_key(scenario_result, "units"))
     if num_units <= 0:
@@ -1782,12 +1860,37 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Create bots for bot training mode (random selection per episode)
     training_bots = None
+    agent_seat_mode = None
+    agent_seat_seed = None
     if use_bots:
         if EVALUATION_BOTS_AVAILABLE:
             training_bots = _build_training_bots_from_config(training_config)
+            agent_seat_mode = require_key(training_config, "agent_seat_mode")
+            if agent_seat_mode not in {"p1", "p2", "random"}:
+                raise ValueError(
+                    f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+                    f"(got {agent_seat_mode!r})"
+                )
+            if agent_seat_mode == "random":
+                if "agent_seat_seed" in training_config:
+                    agent_seat_seed_raw = require_key(training_config, "agent_seat_seed")
+                elif "seed" in training_config:
+                    agent_seat_seed_raw = require_key(training_config, "seed")
+                else:
+                    raise KeyError(
+                        "agent_seat_mode='random' requires a seed key in training config. "
+                        "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
+                    )
+                if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
+                    raise TypeError(
+                        "Seat seed must be an integer when agent_seat_mode='random' "
+                        "(from 'agent_seat_seed' or 'seed')."
+                    )
+                agent_seat_seed = int(agent_seat_seed_raw)
             ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})  # get allowed: ratios optional with defaults
             r, g, d = ratios.get("random", 0.2) * 100, ratios.get("greedy", 0.4) * 100, ratios.get("defensive", 0.4) * 100
             chunk_log(f"🤖 Bot training ratios: {r:.0f}% Random, {g:.0f}% Greedy, {d:.0f}% Defensive")
+            chunk_log(f"🤖 Agent seat mode: {agent_seat_mode}")
         else:
             raise ImportError("Evaluation bots not available but use_bots=True")
 
@@ -1806,7 +1909,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 scenario_files=scenario_list,
                 debug_mode=debug_mode,
                 use_bots=use_bots,
-                training_bots=training_bots
+                training_bots=training_bots,
+                agent_seat_mode=agent_seat_mode,
+                global_seed=agent_seat_seed,
             )
             for i in range(n_envs)
         ])
@@ -1834,7 +1939,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             return env.get_action_mask()
         masked_env = ActionMasker(base_env, mask_fn)
         if use_bots and training_bots:
-            bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
+            bot_env = BotControlledEnv(
+                masked_env,
+                bots=training_bots,
+                unit_registry=unit_registry,
+                agent_seat_mode=agent_seat_mode,
+                global_seed=agent_seat_seed,
+            )
             env = Monitor(bot_env)
         else:
             env = Monitor(masked_env)
@@ -2037,7 +2148,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         )
         masked_env = ActionMasker(base_env, mask_fn)
         if use_bots:
-            bot_env = BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry)
+            bot_env = BotControlledEnv(
+                masked_env,
+                bots=training_bots,
+                unit_registry=unit_registry,
+                agent_seat_mode=agent_seat_mode,
+                global_seed=agent_seat_seed,
+            )
             env = Monitor(bot_env)
         else:
             if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:

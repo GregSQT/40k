@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_76",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 2
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

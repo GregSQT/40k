@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_troop_04",
+  "composition": [
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

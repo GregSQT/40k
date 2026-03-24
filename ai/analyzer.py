@@ -1571,9 +1571,9 @@ def parse_step_log(filepath: str) -> Dict:
                     winner = int(winner_match.group(1))
                     win_method = method_match.group(1) if method_match else None
 
-                    if winner == 1:
+                    if winner == PLAYER_ONE_ID:
                         stats['wins_by_scenario'][current_scenario]['p1'] += 1
-                    elif winner == 2:
+                    elif winner == PLAYER_TWO_ID:
                         stats['wins_by_scenario'][current_scenario]['p2'] += 1
                     elif winner == -1:
                         stats['wins_by_scenario'][current_scenario]['draws'] += 1
@@ -5994,9 +5994,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     without_method_unknown = 0
     for ep in stats['episodes_without_method']:
         winner = ep.get('winner')
-        if winner == 1:
+        if winner == PLAYER_ONE_ID:
             without_method_p1 += 1
-        elif winner == 2:
+        elif winner == PLAYER_TWO_ID:
             without_method_p2 += 1
         else:
             without_method_unknown += 1

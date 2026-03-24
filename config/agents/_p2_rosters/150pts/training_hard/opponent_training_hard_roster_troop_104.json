@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_104",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 2
+    },
+    {
+      "unit_type": "GreyHunterPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    }
+  ]
+}

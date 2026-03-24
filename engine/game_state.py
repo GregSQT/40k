@@ -150,7 +150,11 @@ class GameStateManager:
                 basic_units = scenario_data
             elif isinstance(scenario_data, dict) and "units" in scenario_data:
                 basic_units = scenario_data["units"]
-            elif isinstance(scenario_data, dict) and "p1_roster_ref" in scenario_data and "p2_roster_ref" in scenario_data:
+            elif (
+                isinstance(scenario_data, dict)
+                and "agent_roster_ref" in scenario_data
+                and "opponent_roster_ref" in scenario_data
+            ):
                 basic_units, scenario_roster_info = self._load_units_from_roster_refs(
                     scenario_data=scenario_data,
                     scenario_file=scenario_file
@@ -158,7 +162,7 @@ class GameStateManager:
             else:
                 raise ValueError(
                     f"Invalid scenario format in {scenario_file}: must have 'units' array or "
-                    f"'p1_roster_ref'+'p2_roster_ref'"
+                    f"'agent_roster_ref'+'opponent_roster_ref'"
                 )
             
             if not basic_units:
@@ -497,7 +501,7 @@ class GameStateManager:
         scenario_data: Dict[str, Any],
         scenario_file: str
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-        """Load P1/P2 units from compact roster references."""
+        """Load agent/opponent units from compact roster references."""
         scale = require_key(scenario_data, "scale")
         if not isinstance(scale, str) or not scale.strip():
             raise ValueError(f"Scenario '{scenario_file}' has invalid 'scale': {scale!r}")
@@ -541,72 +545,88 @@ class GameStateManager:
                     f"Holdout scenario '{scenario_file}' must be in holdout_regular/ or holdout_hard/"
                 )
 
-        p1_ref_value = require_key(scenario_data, "p1_roster_ref")
-        p2_ref_value = require_key(scenario_data, "p2_roster_ref")
-        p1_roster_seed = scenario_data.get("p1_roster_seed")
-        if p1_roster_seed is not None:
-            if not isinstance(p1_roster_seed, int) or isinstance(p1_roster_seed, bool) or p1_roster_seed < 0:
+        agent_ref_value = require_key(scenario_data, "agent_roster_ref")
+        opponent_ref_value = require_key(scenario_data, "opponent_roster_ref")
+        agent_roster_seed = scenario_data.get("agent_roster_seed")
+        if agent_roster_seed is not None:
+            if not isinstance(agent_roster_seed, int) or isinstance(agent_roster_seed, bool) or agent_roster_seed < 0:
                 raise ValueError(
-                    f"Scenario '{scenario_file}' has invalid 'p1_roster_seed': {p1_roster_seed!r} "
+                    f"Scenario '{scenario_file}' has invalid 'agent_roster_seed': {agent_roster_seed!r} "
                     f"(expected non-negative integer)"
                 )
 
-        p1_ref, p1_ref_randomized = self._resolve_roster_ref(
-            p1_ref_value,
+        agent_ref, agent_ref_randomized = self._resolve_roster_ref(
+            agent_ref_value,
             expected_split=(split if split == "training" else str(holdout_split_for_p1)),
             scenario_file=scenario_file,
-            field_name="p1_roster_ref",
+            field_name="agent_roster_ref",
             allow_random=(split in {"training", "holdout"}),
             scenario_agent_key=scenario_agent_key,
             scale_name=scale_name,
-            roster_kind="p1",
-            random_seed=p1_roster_seed
+            roster_kind="agent",
+            random_seed=agent_roster_seed
         )
-        p2_ref, _ = self._resolve_roster_ref(
-            p2_ref_value,
+        opponent_ref, _ = self._resolve_roster_ref(
+            opponent_ref_value,
             expected_split=(split if split == "training" else str(holdout_split_for_p2)),
             scenario_file=scenario_file,
-            field_name="p2_roster_ref",
+            field_name="opponent_roster_ref",
             allow_random=(split == "holdout"),
             scenario_agent_key=scenario_agent_key,
             scale_name=scale_name,
-            roster_kind="p2",
+            roster_kind="opponent",
             random_seed=None
         )
 
         project_root = Path(__file__).resolve().parent.parent
-        p1_roster_path = (
-            project_root / "config" / "agents" / scenario_agent_key / "rosters" / scale_name / p1_ref
+        agent_roster_path = (
+            project_root / "config" / "agents" / scenario_agent_key / "rosters" / scale_name / agent_ref
         )
-        p2_roster_path = (
-            project_root / "config" / "agents" / "_p2_rosters" / scale_name / p2_ref
+        opponent_roster_path = (
+            project_root / "config" / "agents" / "_p2_rosters" / scale_name / opponent_ref
         )
 
-        p1_roster_data = self._load_compact_roster_file(p1_roster_path, "P1")
-        p2_roster_data = self._load_compact_roster_file(p2_roster_path, "P2")
+        agent_roster_data = self._load_compact_roster_file(agent_roster_path, "AGENT")
+        opponent_roster_data = self._load_compact_roster_file(opponent_roster_path, "OPPONENT")
 
-        p1_units = self._expand_compact_roster_to_basic_units(
-            roster_data=p1_roster_data,
-            player=1,
-            id_start=1,
-            roster_path=str(p1_roster_path)
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        if controlled_player not in {1, 2}:
+            raise ValueError(
+                f"config['controlled_player'] must be 1 or 2 for roster scenario loading "
+                f"(got {controlled_player})"
+            )
+        opponent_player = 2 if controlled_player == 1 else 1
+
+        # Keep historical id ranges by player to avoid downstream assumptions:
+        # - player 1 units in [1..]
+        # - player 2 units in [101..]
+        agent_id_start = 1 if controlled_player == 1 else 101
+        opponent_id_start = 101 if opponent_player == 2 else 1
+
+        agent_units = self._expand_compact_roster_to_basic_units(
+            roster_data=agent_roster_data,
+            player=controlled_player,
+            id_start=agent_id_start,
+            roster_path=str(agent_roster_path)
         )
-        p2_units = self._expand_compact_roster_to_basic_units(
-            roster_data=p2_roster_data,
-            player=2,
-            id_start=101,
-            roster_path=str(p2_roster_path)
+        opponent_units = self._expand_compact_roster_to_basic_units(
+            roster_data=opponent_roster_data,
+            player=opponent_player,
+            id_start=opponent_id_start,
+            roster_path=str(opponent_roster_path)
         )
 
         roster_info = {
             "scale": scale_name,
-            "p1_roster_ref": p1_ref,
-            "p2_roster_ref": p2_ref,
-            "p1_roster_id": str(require_key(p1_roster_data, "roster_id")),
-            "p2_roster_id": str(require_key(p2_roster_data, "roster_id")),
-            "p1_ref_randomized": p1_ref_randomized
+            "agent_roster_ref": agent_ref,
+            "opponent_roster_ref": opponent_ref,
+            "agent_roster_id": str(require_key(agent_roster_data, "roster_id")),
+            "opponent_roster_id": str(require_key(opponent_roster_data, "roster_id")),
+            "agent_ref_randomized": agent_ref_randomized,
+            "agent_player": controlled_player,
+            "opponent_player": opponent_player,
         }
-        return p1_units + p2_units, roster_info
+        return agent_units + opponent_units, roster_info
 
     def _resolve_roster_ref(
         self,
@@ -623,7 +643,7 @@ class GameStateManager:
         """Resolve roster reference to '<expected_split>/file.json'."""
         import random
 
-        if roster_kind not in {"p1", "p2"}:
+        if roster_kind not in {"agent", "opponent"}:
             raise ValueError(f"Invalid roster_kind: {roster_kind!r}")
 
         rng = random.Random(random_seed) if random_seed is not None else random
@@ -635,7 +655,7 @@ class GameStateManager:
             random_token = f"{expected_split}_random"
             if normalized_ref == random_token:
                 project_root = Path(__file__).resolve().parent.parent
-                if roster_kind == "p1":
+                if roster_kind == "agent":
                     base_dir = (
                         project_root
                         / "config"
@@ -645,7 +665,7 @@ class GameStateManager:
                         / scale_name
                         / expected_split
                     )
-                    pattern = f"p1_{expected_split}_roster-*.json"
+                    pattern = f"agent_{expected_split}_roster-*.json"
                 else:
                     base_dir = (
                         project_root
@@ -655,7 +675,7 @@ class GameStateManager:
                         / scale_name
                         / expected_split
                     )
-                    pattern = f"p2_{expected_split}_roster-*.json"
+                    pattern = f"opponent_{expected_split}_roster-*.json"
                 if not base_dir.exists():
                     raise FileNotFoundError(
                         f"Scenario '{scenario_file}' {field_name}={random_token!r} but directory does not exist: {base_dir}"
@@ -701,15 +721,15 @@ class GameStateManager:
             normalized = f"{normalized}.json"
 
         ref_split, _, ref_filename = normalized.partition("/")
-        VALID_P1_SPLITS = {"training", "holdout_regular", "holdout_hard"}
-        VALID_P2_SPLITS = {"training", "holdout", "holdout_regular", "holdout_hard"}
-        valid_splits = VALID_P1_SPLITS if roster_kind == "p1" else VALID_P2_SPLITS
+        VALID_AGENT_SPLITS = {"training", "holdout_regular", "holdout_hard"}
+        VALID_OPPONENT_SPLITS = {"training", "holdout", "holdout_regular", "holdout_hard"}
+        valid_splits = VALID_AGENT_SPLITS if roster_kind == "agent" else VALID_OPPONENT_SPLITS
         project_root = Path(__file__).resolve().parent.parent
 
         # Allow explicit split in ref (e.g. holdout_regular/... when scenario is in training/)
         # Enables cross-split evaluation (P1 holdout vs P2 training)
         if ref_split in valid_splits:
-            if roster_kind == "p1":
+            if roster_kind == "agent":
                 explicit_base = (
                     project_root
                     / "config"
@@ -751,7 +771,7 @@ class GameStateManager:
                 f"(or explicit valid split) but got '{normalized}'"
             )
         filename = ref_filename
-        if roster_kind == "p1":
+        if roster_kind == "agent":
             base_dir = (
                 project_root
                 / "config"

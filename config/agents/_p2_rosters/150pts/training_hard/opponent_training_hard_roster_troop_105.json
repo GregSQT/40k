@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_105",
+  "composition": [
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_troop_14",
+  "composition": [
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

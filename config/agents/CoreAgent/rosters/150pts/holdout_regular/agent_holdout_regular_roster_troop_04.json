@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_regular_roster_troop_04",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

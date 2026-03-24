@@ -181,15 +181,15 @@ class StepLogger:
                 if roster_info:
                     if not isinstance(roster_info, dict):
                         raise ValueError(f"roster_info must be dict when provided, got {type(roster_info).__name__}")
-                    p1_roster_id = require_key(roster_info, "p1_roster_id")
-                    p2_roster_id = require_key(roster_info, "p2_roster_id")
-                    p1_roster_ref = require_key(roster_info, "p1_roster_ref")
-                    p2_roster_ref = require_key(roster_info, "p2_roster_ref")
+                    agent_roster_id = require_key(roster_info, "agent_roster_id")
+                    opponent_roster_id = require_key(roster_info, "opponent_roster_id")
+                    agent_roster_ref = require_key(roster_info, "agent_roster_ref")
+                    opponent_roster_ref = require_key(roster_info, "opponent_roster_ref")
                     scale = require_key(roster_info, "scale")
                     f.write(
                         f"[{timestamp}] Rosters: scale={scale} "
-                        f"P1={p1_roster_id} ({p1_roster_ref}) "
-                        f"P2={p2_roster_id} ({p2_roster_ref})\n"
+                        f"AGENT={agent_roster_id} ({agent_roster_ref}) "
+                        f"OPPONENT={opponent_roster_id} ({opponent_roster_ref})\n"
                     )
 
                 if effective_bot_name:

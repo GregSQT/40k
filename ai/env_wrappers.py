@@ -14,10 +14,14 @@ from typing import Optional, Any
 import random
 import os
 import time
+import hashlib
+import numpy as np
 from shared.data_validation import require_key, require_present
 from engine.action_decoder import ActionValidationError
 
 __all__ = ['BotControlledEnv', 'SelfPlayWrapper']
+PLAYER_ONE_ID = 1
+PLAYER_TWO_ID = 2
 
 
 class BotControlledEnv(gym.Wrapper):
@@ -28,7 +32,17 @@ class BotControlledEnv(gym.Wrapper):
     - bots: list of bot instances (for training, random selection per episode)
     """
 
-    def __init__(self, base_env, bot=None, unit_registry=None, bots=None):
+    def __init__(
+        self,
+        base_env,
+        bot=None,
+        unit_registry=None,
+        bots=None,
+        agent_seat_mode: str = "p1",
+        global_seed: Optional[int] = None,
+        env_rank: int = 0,
+        episode_start_index: int = 0,
+    ):
         super().__init__(base_env)
         # Support: bots=[...] for random selection, or bot=X for single opponent
         # Also accept legacy positional: BotControlledEnv(env, bot, unit_registry)
@@ -45,6 +59,27 @@ class BotControlledEnv(gym.Wrapper):
         self.unit_registry = unit_registry
         self.episode_reward = 0.0
         self.episode_length = 0
+        if agent_seat_mode not in {"p1", "p2", "random"}:
+            raise ValueError(
+                f"agent_seat_mode must be one of 'p1', 'p2', 'random' (got {agent_seat_mode!r})"
+            )
+        self.agent_seat_mode = agent_seat_mode
+        if self.agent_seat_mode == "random":
+            if global_seed is None:
+                raise ValueError("global_seed is required when agent_seat_mode='random'")
+            self._global_seed = int(global_seed)
+        else:
+            self._global_seed = None
+        if episode_start_index < 0:
+            raise ValueError(f"episode_start_index must be >= 0 (got {episode_start_index})")
+        self._episode_index = int(episode_start_index)
+        self._env_rank = int(env_rank)
+        self.controlled_player = 1
+        self.bot_player = 2
+        self.episodes_agent_p1 = 0
+        self.episodes_agent_p2 = 0
+        self.timesteps_agent_p1 = 0
+        self.timesteps_agent_p2 = 0
 
         # Unwrap ActionMasker to get actual engine
         # self.env is set by gym.Wrapper.__init__ to base_env
@@ -65,11 +100,238 @@ class BotControlledEnv(gym.Wrapper):
         # LOG TEMPORAIRE: time between step() return and next step() call (--debug)
         self._last_step_return_time = None
 
+    def _run_bot_until_not_bot_turn(
+        self,
+        terminated: bool,
+        truncated: bool,
+        obs: Any,
+        info: dict,
+        debug_mode: bool,
+        accumulate_reward: bool,
+        cumulative_reward: float,
+    ) -> tuple[Any, bool, bool, dict, float]:
+        """Execute consecutive bot turns until control leaves bot player or episode ends."""
+        bot_loop_count = 0
+        max_bot_iterations = 1000
+        while not (terminated or truncated):
+            decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
+            if decision_owner != self.bot_player:
+                break
+            if not has_valid_actions:
+                raise RuntimeError(
+                    "BotControlledEnv detected bot-owned eligible units with empty action mask. "
+                    "Engine must expose at least one legal action for eligible owner."
+                )
+            bot_loop_count += 1
+            if bot_loop_count > max_bot_iterations:
+                current_phase = require_key(self.engine.game_state, "phase")
+                print(
+                    f"\n[DEBUG] BotControlledEnv: Infinite loop detected! "
+                    f"Loop count: {bot_loop_count}, episode_length: {self.episode_length}, phase: {current_phase}",
+                    flush=True,
+                )
+                raise RuntimeError(
+                    f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={current_phase}"
+                )
+            debug_bot = self.episode_length < 10
+            bot_action = self._get_bot_action(debug=debug_bot)
+            t0_bot = time.perf_counter() if debug_mode else None
+            obs, reward, terminated, truncated, info = self.env.step(bot_action)
+            if accumulate_reward:
+                cumulative_reward += float(reward)
+                self.episode_reward += float(reward)
+            if debug_mode and t0_bot is not None:
+                ep = int(require_key(self.engine.game_state, "episode_number"))
+                step_idx = int(require_key(self.engine.game_state, "episode_steps"))
+                duration_s = time.perf_counter() - t0_bot
+                try:
+                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+                except (OSError, IOError):
+                    pass
+            self.episode_length += 1
+        return obs, terminated, truncated, info, cumulative_reward
+
+    def _get_decision_owner_from_mask(self) -> tuple[Optional[int], bool, int]:
+        """
+        Determine which player currently owns the decision from eligible units/action mask.
+
+        Returns:
+            (decision_owner, has_valid_actions, eligible_count)
+            - decision_owner: 1|2 when eligible units exist, None when no eligible unit
+        """
+        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(
+            self.engine.game_state
+        )
+        has_valid_actions = bool(np.any(np.asarray(action_mask, dtype=bool)))
+        if not eligible_units:
+            return None, has_valid_actions, 0
+
+        owners = {int(require_key(unit, "player")) for unit in eligible_units}
+        if len(owners) != 1:
+            raise RuntimeError(
+                f"Eligible unit pool has mixed owners: {owners}. "
+                "Pool must contain units from a single acting side."
+            )
+        return owners.pop(), has_valid_actions, len(eligible_units)
+
+    def _ensure_actionable_controlled_turn(
+        self,
+        terminated: bool,
+        truncated: bool,
+        obs: Any,
+        info: dict,
+        debug_mode: bool,
+        accumulate_reward: bool,
+        cumulative_reward: float,
+    ) -> tuple[Any, bool, bool, dict, float]:
+        """
+        Advance deterministic no-choice states so controlled player always gets a non-empty mask.
+        """
+        while not (terminated or truncated):
+            decision_owner, has_valid_actions, eligible_count = self._get_decision_owner_from_mask()
+
+            if decision_owner == self.bot_player:
+                obs, terminated, truncated, info, cumulative_reward = self._run_bot_until_not_bot_turn(
+                    terminated=terminated,
+                    truncated=truncated,
+                    obs=obs,
+                    info=info,
+                    debug_mode=debug_mode,
+                    accumulate_reward=accumulate_reward,
+                    cumulative_reward=cumulative_reward,
+                )
+                continue
+
+            if decision_owner == self.controlled_player:
+                if has_valid_actions:
+                    break
+                # Controlled owner selected but no valid action: try explicit WAIT to advance.
+            elif decision_owner is None:
+                # No eligible units: can be phase transition edge or terminal.
+                pass
+            else:
+                current_player = int(require_key(self.engine.game_state, "current_player"))
+                raise RuntimeError(
+                    f"Unexpected decision owner {decision_owner} in BotControlledEnv "
+                    f"(controlled_player={self.controlled_player}, bot_player={self.bot_player}, "
+                    f"current_player={current_player})"
+                )
+
+            # If controlled player has no eligible units and game is over, terminate cleanly.
+            if eligible_count == 0:
+                self.engine.game_state["game_over"] = self.engine._check_game_over()
+                if self.engine.game_state["game_over"]:
+                    terminated = True
+                    obs = self.engine._build_observation()
+                    winner, win_method = self.engine._determine_winner_with_method()
+                    info = {
+                        "winner": winner,
+                        "win_method": win_method,
+                        "phase_auto_advanced": True,
+                    }
+                    break
+
+            # No actionable decision for controlled player: force WAIT to advance phase/turn.
+            t0_wait = time.perf_counter() if debug_mode else None
+            try:
+                obs, reward, terminated, truncated, info = self.env.step(11)
+            except RuntimeError as e:
+                err = str(e)
+                if "advance_phase failed" in err and "game_over" in err:
+                    self.engine.game_state["game_over"] = True
+                    terminated = True
+                    obs = self.engine._build_observation()
+                    winner, win_method = self.engine._determine_winner_with_method()
+                    info = {
+                        "winner": winner,
+                        "win_method": win_method,
+                        "phase_auto_advanced": True,
+                    }
+                    break
+                raise
+            if accumulate_reward:
+                cumulative_reward += float(reward)
+                self.episode_reward += float(reward)
+            if debug_mode and t0_wait is not None:
+                ep = int(require_key(self.engine.game_state, "episode_number"))
+                step_idx = int(require_key(self.engine.game_state, "episode_steps"))
+                duration_s = time.perf_counter() - t0_wait
+                try:
+                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+                except (OSError, IOError):
+                    pass
+            self.episode_length += 1
+
+        return obs, terminated, truncated, info, cumulative_reward
+
+    def _resolve_controlled_player_for_episode(self) -> int:
+        """Resolve controlled player for this episode from seat mode."""
+        if self.agent_seat_mode == "p1":
+            return 1
+        if self.agent_seat_mode == "p2":
+            return 2
+        # random mode
+        seed_material = f"{self._global_seed}:{self._env_rank}:{self._episode_index}"
+        seed_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
+        selector = int(seed_hash[:8], 16)
+        return 1 if selector % 2 == 0 else 2
+
+    def _apply_episode_seat(self) -> None:
+        """Set controlled/opponent players in engine config and game_state."""
+        self.controlled_player = self._resolve_controlled_player_for_episode()
+        self.bot_player = 2 if self.controlled_player == 1 else 1
+        self.engine.config["controlled_player"] = self.controlled_player
+        self.engine.config["opponent_player"] = self.bot_player
+        self.engine.config["agent_seat_mode"] = self.agent_seat_mode
+
+    def _play_bot_until_control_returns(self, debug_mode: bool):
+        """
+        Advance environment until controlled player has an actionable decision state.
+
+        This includes:
+        - executing consecutive bot turns,
+        - executing forced controlled WAIT when controlled player has no legal action.
+
+        Returns:
+            obs, cumulative_reward, terminated, truncated, info
+        """
+        obs = None
+        info = {}
+        obs, terminated, truncated, info, cumulative_reward = self._ensure_actionable_controlled_turn(
+            terminated=False,
+            truncated=False,
+            obs=obs,
+            info=info,
+            debug_mode=debug_mode,
+            accumulate_reward=True,
+            cumulative_reward=0.0,
+        )
+        if obs is None:
+            # Keep vectorized env stacking stable: always return a real observation.
+            obs = self.engine._build_observation()
+        return obs, float(cumulative_reward), terminated, truncated, info
+
     def reset(self, seed=None, options=None):
+        self._apply_episode_seat()
         # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
         debug_mode = require_key(self.engine.game_state, "debug_mode")
         t0 = time.perf_counter() if debug_mode else None
         obs, info = self.env.reset(seed=seed, options=options)
+        self._episode_index += 1
+        game_state = self.engine.game_state
+        game_state["controlled_player"] = self.controlled_player
+        game_state["opponent_player"] = self.bot_player
+        if self.controlled_player == 1:
+            self.episodes_agent_p1 += 1
+        else:
+            self.episodes_agent_p2 += 1
+        info["controlled_player"] = self.controlled_player
+        info["opponent_player"] = self.bot_player
+        info["agent_seat_mode"] = self.agent_seat_mode
         if debug_mode and t0 is not None:
             reset_s = time.perf_counter() - t0
             ep = int(require_key(self.engine.game_state, "episode_number"))
@@ -95,7 +357,34 @@ class BotControlledEnv(gym.Wrapper):
         self.ai_shoot_opportunities = 0
         self.ai_shoot_actions = 0
         self.ai_wait_actions = 0
+
+        # CRITICAL FIX: Ensure reset() always returns an observation from the controlled player's turn.
+        # Without this, in seat mode p2, the first action of each episode is selected from a stale bot-turn observation.
+        bot_obs, _, terminated, truncated, bot_info = self._play_bot_until_control_returns(debug_mode=debug_mode)
+        if bot_obs is not None:
+            obs = bot_obs
+        if bot_info:
+            info.update(bot_info)
+        if terminated or truncated:
+            raise RuntimeError(
+                "Episode ended before controlled player received a turn during reset. "
+                "Scenario/turn flow is invalid for RL training."
+            )
+
+        # Defensive validation: wrapper must return on actionable controlled decision owner.
+        decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
+        if decision_owner != self.controlled_player or not has_valid_actions:
+            current_player = require_key(self.engine.game_state, "current_player")
+            raise RuntimeError(
+                "BotControlledEnv reset returned non-actionable controlled state: "
+                f"decision_owner={decision_owner}, has_valid_actions={has_valid_actions}, "
+                f"current_player={current_player}, controlled_player={self.controlled_player}"
+            )
+
         self._last_step_return_time = None
+        info["controlled_player"] = self.controlled_player
+        info["opponent_player"] = self.bot_player
+        info["agent_seat_mode"] = self.agent_seat_mode
         return obs, info
 
     def step(self, agent_action):
@@ -111,59 +400,54 @@ class BotControlledEnv(gym.Wrapper):
                     f.write(f"BETWEEN_STEP_TIMING episode={ep} step_index={step_idx} duration_s={between_s:.6f}\n")
             except (OSError, IOError):
                 pass
+        # Ensure it's really the controlled decision owner's turn before applying agent_action.
+        terminated = False
+        truncated = False
+        obs = None
+        reward = 0.0
+        cumulative_reward = 0.0
+        info = {}
+        obs, bot_reward_before, terminated, truncated, info = self._play_bot_until_control_returns(
+            debug_mode=debug_mode
+        )
+        cumulative_reward += float(bot_reward_before)
+        if not (terminated or truncated):
+            decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
+            if decision_owner != self.controlled_player or not has_valid_actions:
+                raise RuntimeError(
+                    "BotControlledEnv.step reached non-actionable controlled state before policy action: "
+                    f"decision_owner={decision_owner}, has_valid_actions={has_valid_actions}, "
+                    f"controlled_player={self.controlled_player}"
+                )
+
         # DIAGNOSTIC: Track AI shoot phase decisions BEFORE executing action
         # PERFORMANCE: Only track if diagnostics are enabled (shoot stats will be collected)
         # Skip get_action_mask() call here to avoid redundant computation - action_masks are already computed
         # by ActionMasker wrapper and passed to model.predict() in bot_evaluation.py
-        game_state = self.engine.game_state
-        current_phase = require_key(game_state, "phase")
-        
-        # Track actions for diagnostics WITHOUT calling get_action_mask() (performance optimization)
-        # We can infer shoot opportunities from action type instead of checking mask
-        if current_phase == "shoot":
-            # Infer shoot opportunity from action type (action 4-8 are shoot actions)
-            # This avoids expensive get_action_mask() call
-            if agent_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
-                self.ai_shoot_opportunities += 1  # If agent shot, opportunity existed
-                self.ai_shoot_actions += 1
-            elif agent_action == 11:  # Wait action
-                self.ai_wait_actions += 1
+        if not (terminated or truncated):
+            game_state = self.engine.game_state
+            current_phase = require_key(game_state, "phase")
+            # Track actions for diagnostics WITHOUT calling get_action_mask() (performance optimization)
+            # We can infer shoot opportunities from action type instead of checking mask
+            if current_phase == "shoot":
+                # Infer shoot opportunity from action type (action 4-8 are shoot actions)
+                # This avoids expensive get_action_mask() call
+                if agent_action in [4, 5, 6, 7, 8]:  # Shoot actions (target slots 0-4)
+                    self.ai_shoot_opportunities += 1  # If agent shot, opportunity existed
+                    self.ai_shoot_actions += 1
+                elif agent_action == 11:  # Wait action
+                    self.ai_wait_actions += 1
 
-        # Execute agent action
-        # LOG TEMPORAIRE: time full env.step() call (--debug) to compare with STEP_TIMING
-        t0_agent = time.perf_counter() if debug_mode else None
-        obs, reward, terminated, truncated, info = self.env.step(agent_action)
-        if debug_mode and t0_agent is not None:
-            ep = int(require_key(self.engine.game_state, "episode_number"))
-            step_idx = int(require_key(self.engine.game_state, "episode_steps"))
-            duration_s = time.perf_counter() - t0_agent
-            try:
-                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
-                    f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
-            except (OSError, IOError):
-                pass
-        self.episode_reward += reward
-        self.episode_length += 1
-
-        # CRITICAL FIX: Loop through ALL bot turns until control returns to agent
-        bot_loop_count = 0
-        max_bot_iterations = 1000  # Safety guard against infinite loops
-        while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
-            bot_loop_count += 1
-            if bot_loop_count > max_bot_iterations:
-                current_phase = require_key(self.engine.game_state, "phase")
-                print(f"\n[DEBUG] BotControlledEnv: Infinite loop detected! Loop count: {bot_loop_count}, episode_length: {self.episode_length}, phase: {current_phase}", flush=True)
-                raise RuntimeError(f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={current_phase}")
-            debug_bot = self.episode_length < 10
-            bot_action = self._get_bot_action(debug=debug_bot)
-            # LOG TEMPORAIRE: time full env.step(bot_action) (--debug)
-            t0_bot = time.perf_counter() if debug_mode else None
-            obs, reward, terminated, truncated, info = self.env.step(bot_action)
-            if debug_mode and t0_bot is not None:
+            # Execute agent action
+            # LOG TEMPORAIRE: time full env.step() call (--debug) to compare with STEP_TIMING
+            t0_agent = time.perf_counter() if debug_mode else None
+            obs, reward, terminated, truncated, info = self.env.step(agent_action)
+            cumulative_reward += float(reward)
+            self.episode_reward += float(reward)
+            if debug_mode and t0_agent is not None:
                 ep = int(require_key(self.engine.game_state, "episode_number"))
                 step_idx = int(require_key(self.engine.game_state, "episode_steps"))
-                duration_s = time.perf_counter() - t0_bot
+                duration_s = time.perf_counter() - t0_agent
                 try:
                     debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
                     with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
@@ -172,9 +456,24 @@ class BotControlledEnv(gym.Wrapper):
                     pass
             self.episode_length += 1
 
+        # Execute bot turns only while episode is still running.
+        if not (terminated or truncated):
+            obs, bot_reward_after, terminated, truncated, info = self._play_bot_until_control_returns(
+                debug_mode=debug_mode
+            )
+            cumulative_reward += float(bot_reward_after)
+
         if debug_mode:
             self._last_step_return_time = time.perf_counter()
-        return obs, reward, terminated, truncated, info
+        if terminated or truncated:
+            if self.controlled_player == 1:
+                self.timesteps_agent_p1 += self.episode_length
+            else:
+                self.timesteps_agent_p2 += self.episode_length
+        info["controlled_player"] = self.controlled_player
+        info["opponent_player"] = self.bot_player
+        info["agent_seat_mode"] = self.agent_seat_mode
+        return obs, float(cumulative_reward), terminated, truncated, info
 
     def _get_bot_action(self, debug=False) -> int:
         game_state = self.engine.game_state
@@ -251,6 +550,26 @@ class BotControlledEnv(gym.Wrapper):
             'ai_wait_actions': self.ai_wait_actions,
             'ai_shoot_rate': ai_shoot_rate,
             'ai_wait_rate': ai_wait_rate
+        }
+
+    def get_seat_stats(self) -> dict:
+        """Return seat distribution stats for audit."""
+        total_episodes = self.episodes_agent_p1 + self.episodes_agent_p2
+        total_timesteps = self.timesteps_agent_p1 + self.timesteps_agent_p2
+        p1_episode_share = (self.episodes_agent_p1 / total_episodes * 100.0) if total_episodes > 0 else 0.0
+        p2_episode_share = (self.episodes_agent_p2 / total_episodes * 100.0) if total_episodes > 0 else 0.0
+        p1_timestep_share = (self.timesteps_agent_p1 / total_timesteps * 100.0) if total_timesteps > 0 else 0.0
+        p2_timestep_share = (self.timesteps_agent_p2 / total_timesteps * 100.0) if total_timesteps > 0 else 0.0
+        return {
+            "agent_seat_mode": self.agent_seat_mode,
+            "episodes_agent_p1": self.episodes_agent_p1,
+            "episodes_agent_p2": self.episodes_agent_p2,
+            "timesteps_agent_p1": self.timesteps_agent_p1,
+            "timesteps_agent_p2": self.timesteps_agent_p2,
+            "episode_share_agent_p1_pct": p1_episode_share,
+            "episode_share_agent_p2_pct": p2_episode_share,
+            "timestep_share_agent_p1_pct": p1_timestep_share,
+            "timestep_share_agent_p2_pct": p2_timestep_share,
         }
 
 
@@ -445,9 +764,9 @@ class SelfPlayWrapper(gym.Wrapper):
 
             # Track wins/losses
             winner = require_present(require_key(info, "winner"), "winner")
-            if winner == 1:
+            if winner == PLAYER_ONE_ID:
                 self.player1_wins += 1
-            elif winner == 2:
+            elif winner == PLAYER_TWO_ID:
                 self.player2_wins += 1
             else:
                 self.draws += 1

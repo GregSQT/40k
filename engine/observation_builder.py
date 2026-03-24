@@ -366,19 +366,20 @@ class ObservationBuilder:
         return entries
     
     def _calculate_army_value_diff(self, units_cache: Dict[str, Any], game_state: Dict[str, Any]) -> int:
-        """Compute sum(VALUE) alive for P1 minus P2."""
-        p1_value = 0
-        p2_value = 0
+        """Compute sum(VALUE) alive for current_player minus opponent (egocentric)."""
+        current_player = int(require_key(game_state, "current_player"))
+        my_value = 0
+        enemy_value = 0
         for unit_id, cache_entry in units_cache.items():
             unit = get_unit_by_id(str(unit_id), game_state)
             if unit is None:
                 raise KeyError(f"Unit {unit_id} missing from game_state['units']")
             unit_value = require_key(unit, "VALUE")
-            if cache_entry["player"] == 1:
-                p1_value += unit_value
-            elif cache_entry["player"] == 2:
-                p2_value += unit_value
-        return p1_value - p2_value
+            if int(cache_entry["player"]) == current_player:
+                my_value += unit_value
+            else:
+                enemy_value += unit_value
+        return my_value - enemy_value
     
     def _build_macro_unit_entry(
         self,
@@ -1196,6 +1197,7 @@ class ObservationBuilder:
         """
         # PERFORMANCE: Clear per-observation cache (same pairs recalculated multiple times)
         self._danger_probability_cache = {}
+        game_state.pop("macro_objectives", None)
 
         obs = np.zeros(self.obs_size, dtype=np.float32)
         
@@ -1213,7 +1215,12 @@ class ObservationBuilder:
         positions = {uid: (e["col"], e["row"]) for uid, e in units_cache.items()}
 
         # === SECTION 1: Global Context (15 floats) - includes objective control ===
-        obs[0] = float(game_state["current_player"])
+        # Encode turn ownership in a seat-agnostic [0, 1] scale.
+        # 1.0 means the current decision belongs to the active unit's side.
+        # This avoids leaking absolute player IDs (1/2) and keeps observation values within Box[0,1].
+        current_player = int(require_key(game_state, "current_player"))
+        active_player = int(require_key(active_unit, "player"))
+        obs[0] = 1.0 if current_player == active_player else 0.0
         phase_encoding = {"deployment": 0.0, "command": 0.0, "move": 0.25, "shoot": 0.5, "charge": 0.75, "fight": 1.0}
         if game_state["phase"] not in phase_encoding:
             raise KeyError(f"Unknown phase for observation: {game_state['phase']}")

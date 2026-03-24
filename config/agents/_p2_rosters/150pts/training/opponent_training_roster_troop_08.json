@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_08",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

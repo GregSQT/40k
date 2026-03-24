@@ -60,7 +60,8 @@ class W40KMetricsTracker:
         # Rolling window for win rate only (100 episodes)
         self.win_rate_window = deque(maxlen=100)
         
-        # Reward-victory correlation: (reward, winner) pairs for last N episodes
+        # Reward-victory correlation: (reward, outcome_flag) pairs for last N episodes.
+        # outcome_flag: 1 = agent win, 0 = agent loss, -1 = draw.
         self.episode_reward_winner_pairs = deque(maxlen=200)
         
         # FULL TRAINING DURATION TRACKING
@@ -163,6 +164,13 @@ class W40KMetricsTracker:
             'invalid_actions': 0,
             'valid_actions': 0
         }
+        # Seat-aware tracking (controlled player can be P1 or P2 per episode)
+        self.seat_aware = {
+            'episodes_agent_p1': 0,
+            'episodes_agent_p2': 0,
+            'wins_agent_p1': 0.0,
+            'wins_agent_p2': 0.0,
+        }
         
         if show_banner:
             print(f"✅ Metrics tracker initialized for {agent_key} -> {self.log_dir}")
@@ -180,21 +188,24 @@ class W40KMetricsTracker:
         total_reward = require_key(episode_data, 'total_reward')
         winner = require_key(episode_data, 'winner')
         episode_length = require_key(episode_data, 'episode_length')
+        controlled_player = int(require_key(episode_data, 'controlled_player'))
         
         # GAME CRITICAL: Episode reward - Individual episode rewards
         self.writer.add_scalar('game_critical/episode_reward', total_reward, self.episode_count)
         self.all_episode_rewards.append(total_reward)
         
-        # Reward-victory correlation tracking (for reward alignment diagnosis)
-        self.episode_reward_winner_pairs.append((total_reward, winner))
-        
         # GAME CRITICAL: Win rate - Cumulative win rate (FULL DURATION)
-        # CRITICAL FIX: Learning agent is Player 1 in training configs
-        # winner == 1 means the learning agent won
         if winner is not None:
-            agent_won = 1.0 if winner == 1 else 0.0
+            agent_won = 1.0 if winner == controlled_player else 0.0
             self.all_episode_wins.append(agent_won)
             self.win_rate_window.append(agent_won)
+            if winner == -1:
+                outcome_flag = -1
+            elif winner == controlled_player:
+                outcome_flag = 1
+            else:
+                outcome_flag = 0
+            self.episode_reward_winner_pairs.append((total_reward, outcome_flag))
             
             # Calculate cumulative win rate over ENTIRE training
             cumulative_win_rate = np.mean(self.all_episode_wins)
@@ -204,6 +215,49 @@ class W40KMetricsTracker:
             if len(self.win_rate_window) >= 10:
                 rolling_win_rate = np.mean(self.win_rate_window)
                 self.writer.add_scalar('game_critical/win_rate_100ep', rolling_win_rate, self.episode_count)
+
+            # SEAT-AWARE: cumulative win rates by controlled seat + global
+            if controlled_player == 1:
+                self.seat_aware['episodes_agent_p1'] += 1
+                self.seat_aware['wins_agent_p1'] += agent_won
+            elif controlled_player == 2:
+                self.seat_aware['episodes_agent_p2'] += 1
+                self.seat_aware['wins_agent_p2'] += agent_won
+            else:
+                raise ValueError(f"controlled_player must be 1 or 2 (got {controlled_player})")
+
+            total_seat_episodes = (
+                self.seat_aware['episodes_agent_p1'] + self.seat_aware['episodes_agent_p2']
+            )
+            total_seat_wins = self.seat_aware['wins_agent_p1'] + self.seat_aware['wins_agent_p2']
+            if total_seat_episodes > 0:
+                self.writer.add_scalar(
+                    'seat_aware/winrate_global',
+                    float(total_seat_wins / total_seat_episodes),
+                    self.episode_count
+                )
+            if self.seat_aware['episodes_agent_p1'] > 0:
+                self.writer.add_scalar(
+                    'seat_aware/winrate_agent_p1',
+                    float(self.seat_aware['wins_agent_p1'] / self.seat_aware['episodes_agent_p1']),
+                    self.episode_count
+                )
+            if self.seat_aware['episodes_agent_p2'] > 0:
+                self.writer.add_scalar(
+                    'seat_aware/winrate_agent_p2',
+                    float(self.seat_aware['wins_agent_p2'] / self.seat_aware['episodes_agent_p2']),
+                    self.episode_count
+                )
+            self.writer.add_scalar(
+                'seat_aware/episodes_agent_p1',
+                float(self.seat_aware['episodes_agent_p1']),
+                self.episode_count
+            )
+            self.writer.add_scalar(
+                'seat_aware/episodes_agent_p2',
+                float(self.seat_aware['episodes_agent_p2']),
+                self.episode_count
+            )
         
         # GAME CRITICAL: Episode length - Episode duration stability
         if episode_length > 0:
@@ -308,6 +362,11 @@ class W40KMetricsTracker:
         if total_actions > 0:
             wait_frequency = wait_actions / total_actions
             self.writer.add_scalar('game_tactical/wait_frequency', wait_frequency, self.episode_count)
+
+        # GAME CRITICAL: VP differential from controlled perspective (seat-aware).
+        if 'victory_points_diff_controlled_minus_opponent' in tactical_data:
+            vp_diff = float(require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent'))
+            self.writer.add_scalar('game_critical/victory_points_diff', vp_diff, self.episode_count)
 
         # FORCING METRICS: Exposure of units with configured UNIT_RULES.
         has_forcing_fields = 'forced_unit_episode_has_controlled' in tactical_data
@@ -909,8 +968,8 @@ class W40KMetricsTracker:
         # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory
         if len(self.episode_reward_winner_pairs) >= 20:
             recent = list(self.episode_reward_winner_pairs)[-100:]
-            rewards_when_won = [r for r, w in recent if w == 1]
-            rewards_when_lost = [r for r, w in recent if w == 2]
+            rewards_when_won = [r for r, outcome in recent if outcome == 1]
+            rewards_when_lost = [r for r, outcome in recent if outcome == 0]
             if len(rewards_when_won) >= 5 and len(rewards_when_lost) >= 5:
                 mean_won = float(np.mean(rewards_when_won))
                 mean_lost = float(np.mean(rewards_when_lost))

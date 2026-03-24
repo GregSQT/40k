@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_14",
+  "composition": [
+    {
+      "unit_type": "GreyHunter",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

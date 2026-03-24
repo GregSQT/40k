@@ -282,6 +282,31 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     getMaxTurnsFromConfig().then(setMaxTurnsFromConfig);
   }, []);
 
+  const activeRuleChoicePromptFromState = gameState?.active_rule_choice_prompt ?? null;
+
+  // Keep rule choice popup state synchronized with backend game_state.
+  // This is required in PvE when phase transitions/AI processing update game_state
+  // without going through the "waiting_for_rule_choice" executeAction branch.
+  useEffect(() => {
+    if (activeRuleChoicePromptFromState) {
+      if (ruleChoicePreviousSelectedUnitIdRef.current === null) {
+        ruleChoicePreviousSelectedUnitIdRef.current = selectedUnitId;
+      }
+      setRuleChoicePrompt(activeRuleChoicePromptFromState);
+      const promptUnitId = Number.parseInt(activeRuleChoicePromptFromState.unit_id, 10);
+      if (!Number.isNaN(promptUnitId)) {
+        setSelectedUnitId(promptUnitId);
+      }
+      return;
+    }
+
+    setRuleChoicePrompt(null);
+    if (ruleChoicePreviousSelectedUnitIdRef.current !== null) {
+      setSelectedUnitId(ruleChoicePreviousSelectedUnitIdRef.current);
+      ruleChoicePreviousSelectedUnitIdRef.current = null;
+    }
+  }, [activeRuleChoicePromptFromState, selectedUnitId]);
+
   // Initialize game - FIXED: Added ref to prevent multiple calls
   const gameInitialized = useRef(false);
 

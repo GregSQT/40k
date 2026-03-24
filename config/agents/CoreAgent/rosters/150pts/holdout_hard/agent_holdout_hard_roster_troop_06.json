@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_hard_roster_troop_06",
+  "composition": [
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

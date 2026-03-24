@@ -2387,6 +2387,7 @@ export const BoardWithAPI: React.FC = () => {
         <UnitStatusTablePlayer1WithTutorial
           units={apiProps.gameState?.units ?? []}
           player={1}
+          playerTypes={apiProps.gameState?.player_types}
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
           guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}
@@ -2404,6 +2405,7 @@ export const BoardWithAPI: React.FC = () => {
         <UnitStatusTablePlayer2WithTutorial
           units={apiProps.gameState?.units ?? []}
           player={2}
+          playerTypes={apiProps.gameState?.player_types}
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
           guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}

@@ -561,9 +561,12 @@ class EpisodeBasedEvalCallback(BaseCallback):
             episode_rewards.append(episode_reward)
             episode_lengths.append(episode_length)
 
-            # Track wins - CRITICAL FIX: Learning agent is Player 0, not Player 1!
-            if final_info and 'winner' in final_info and final_info['winner'] == 0:
-                wins += 1
+            # Seat-aware win tracking: agent wins when winner matches controlled_player.
+            if final_info and 'winner' in final_info:
+                winner = require_key(final_info, 'winner')
+                controlled_player = int(require_key(final_info, 'controlled_player'))
+                if winner == controlled_player:
+                    wins += 1
         
         # Calculate statistics
         mean_reward = sum(episode_rewards) / len(episode_rewards)
@@ -834,8 +837,10 @@ class MetricsCollectionCallback(BaseCallback):
             # Process info dict for action tracking
             if 'infos' in self.locals:
                 for idx, info in enumerate(self.locals['infos']):
+                    is_controlled_action = bool(info.get('is_controlled_action', False))
+
                     # Track action validity
-                    if 'success' in info:
+                    if 'success' in info and is_controlled_action:
                         if info['success']:
                             self.episode_tactical_data['valid_actions'] += 1
                         else:
@@ -844,16 +849,16 @@ class MetricsCollectionCallback(BaseCallback):
                         self.episode_tactical_data['total_actions'] += 1
 
                     # Track wait actions (action type in info; optional per step)
-                    if info.get('action') == 'wait' or info.get('action') == 'skip':  # get allowed
+                    if is_controlled_action and (info.get('action') == 'wait' or info.get('action') == 'skip'):  # get allowed
                         self.episode_tactical_data['wait_actions'] += 1
 
                     # Track damage from combat results
-                    if 'totalDamage' in info:
+                    if is_controlled_action and 'totalDamage' in info:
                         damage_dealt = info['totalDamage']
                         self.episode_tactical_data['damage_dealt'] += damage_dealt
 
                     # COMBAT KILL TRACKING: Log kills to metrics tracker (optional per step)
-                    if info.get('target_died', False):  # get allowed
+                    if is_controlled_action and info.get('target_died', False):  # get allowed
                         phase = info.get('phase', 'unknown')  # get allowed
                         if phase == 'shoot':
                             self.metrics_tracker.log_combat_kill('shoot')
@@ -864,7 +869,7 @@ class MetricsCollectionCallback(BaseCallback):
                             self.metrics_tracker.log_combat_kill('melee')
 
                     # CHARGE SUCCESS TRACKING: Log successful charges (optional per step)
-                    if info.get('charge_succeeded', False):  # get allowed
+                    if is_controlled_action and info.get('charge_succeeded', False):  # get allowed
                         self.metrics_tracker.log_combat_kill('charge')
 
                     # Handle episode end - check for 'episode' key (Monitor wrapper adds this)
@@ -961,6 +966,12 @@ class MetricsCollectionCallback(BaseCallback):
             'total_reward': float(ep['r']),
             'episode_length': int(ep['l']),
             'winner': info['winner'] if 'winner' in info else None,
+            'controlled_player': int(require_key(info, 'controlled_player')),
+            'win_method': (
+                str(require_key(info, 'win_method'))
+                if ('winner' in info and info['winner'] is not None)
+                else None
+            ),
         }
 
         # GAMMA MONITORING: Track discount factor effects
@@ -992,6 +1003,10 @@ class MetricsCollectionCallback(BaseCallback):
         if 'tactical_data' in info:
             # Engine provides complete tactical data - use it directly
             self.episode_tactical_data.update(info['tactical_data'])
+            if 'total_actions' not in info['tactical_data']:
+                valid_actions = int(require_key(info['tactical_data'], 'valid_actions'))
+                invalid_actions = int(require_key(info['tactical_data'], 'invalid_actions'))
+                self.episode_tactical_data['total_actions'] = valid_actions + invalid_actions
 
             victory_points_cumulative_episode = float(
                 require_key(info['tactical_data'], 'victory_points_cumulative_episode')
@@ -1008,6 +1023,7 @@ class MetricsCollectionCallback(BaseCallback):
             total_reward = episode_data['total_reward']
             episode_length = episode_data['episode_length']
             winner = episode_data['winner']
+            win_method = episode_data['win_method']
             
             # Game critical metrics
             self.model.logger.record('game_critical/episode_reward', total_reward)
@@ -1018,9 +1034,88 @@ class MetricsCollectionCallback(BaseCallback):
                 self.win_rate_window = deque(maxlen=100)
 
             if winner is not None:
-                # Training uses controlled player 1 (engine config)
-                agent_won = 1.0 if winner == 1 else 0.0
+                controlled_player = int(require_key(episode_data, 'controlled_player'))
+                agent_won = 1.0 if winner == controlled_player else 0.0
                 self.win_rate_window.append(agent_won)
+                if win_method is None:
+                    raise ValueError("win_method is required when winner is not None")
+
+                # SEAT-AWARE metrics for TensorBoard (global + per controlled side)
+                if not hasattr(self, 'seat_aware_counts'):
+                    self.seat_aware_counts = {
+                        'episodes_agent_p1': 0,
+                        'episodes_agent_p2': 0,
+                        'wins_agent_p1': 0.0,
+                        'wins_agent_p2': 0.0,
+                    }
+                if controlled_player == 1:
+                    self.seat_aware_counts['episodes_agent_p1'] += 1
+                    self.seat_aware_counts['wins_agent_p1'] += agent_won
+                elif controlled_player == 2:
+                    self.seat_aware_counts['episodes_agent_p2'] += 1
+                    self.seat_aware_counts['wins_agent_p2'] += agent_won
+                else:
+                    raise ValueError(f"controlled_player must be 1 or 2 (got {controlled_player})")
+
+                total_seat_episodes = (
+                    self.seat_aware_counts['episodes_agent_p1'] + self.seat_aware_counts['episodes_agent_p2']
+                )
+                total_seat_wins = (
+                    self.seat_aware_counts['wins_agent_p1'] + self.seat_aware_counts['wins_agent_p2']
+                )
+                if total_seat_episodes > 0:
+                    self.model.logger.record(
+                        'seat_aware/winrate_global',
+                        float(total_seat_wins / total_seat_episodes)
+                    )
+                if self.seat_aware_counts['episodes_agent_p1'] > 0:
+                    self.model.logger.record(
+                        'seat_aware/winrate_agent_p1',
+                        float(
+                            self.seat_aware_counts['wins_agent_p1']
+                            / self.seat_aware_counts['episodes_agent_p1']
+                        )
+                    )
+                if self.seat_aware_counts['episodes_agent_p2'] > 0:
+                    self.model.logger.record(
+                        'seat_aware/winrate_agent_p2',
+                        float(
+                            self.seat_aware_counts['wins_agent_p2']
+                            / self.seat_aware_counts['episodes_agent_p2']
+                        )
+                    )
+                self.model.logger.record(
+                    'seat_aware/episodes_agent_p1',
+                    float(self.seat_aware_counts['episodes_agent_p1'])
+                )
+                self.model.logger.record(
+                    'seat_aware/episodes_agent_p2',
+                    float(self.seat_aware_counts['episodes_agent_p2'])
+                )
+
+                # Win-method diagnostics: helps identify objective/tiebreaker seat bias.
+                if not hasattr(self, 'win_method_counts'):
+                    self.win_method_counts = {
+                        'objectives': 0,
+                        'value_tiebreaker': 0,
+                        'draw': 0,
+                    }
+                if win_method not in self.win_method_counts:
+                    raise ValueError(f"Unexpected win_method '{win_method}'")
+                self.win_method_counts[win_method] += 1
+                win_method_total = float(sum(self.win_method_counts.values()))
+                self.model.logger.record(
+                    'game_critical/win_method_objectives_rate',
+                    float(self.win_method_counts['objectives']) / win_method_total
+                )
+                self.model.logger.record(
+                    'game_critical/win_method_value_tiebreaker_rate',
+                    float(self.win_method_counts['value_tiebreaker']) / win_method_total
+                )
+                self.model.logger.record(
+                    'game_critical/win_method_draw_rate',
+                    float(self.win_method_counts['draw']) / win_method_total
+                )
 
                 if len(self.win_rate_window) >= 10:
                     rolling_win_rate = np.mean(self.win_rate_window)
@@ -1038,6 +1133,10 @@ class MetricsCollectionCallback(BaseCallback):
             if total_actions > 0:
                 invalid_rate = self.episode_tactical_data['invalid_actions'] / total_actions
                 self.model.logger.record('game_critical/invalid_action_rate', invalid_rate)
+
+            if 'victory_points_diff_controlled_minus_opponent' in self.episode_tactical_data:
+                vp_diff = float(self.episode_tactical_data['victory_points_diff_controlled_minus_opponent'])
+                self.model.logger.record('game_critical/victory_points_diff', vp_diff)
             
             # Dump metrics to TensorBoard
             self.model.logger.dump(step=self.model.num_timesteps)

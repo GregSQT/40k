@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_20",
+  "composition": [
+    {
+      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragonExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 2
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

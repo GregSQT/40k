@@ -5361,8 +5361,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Calculate reward for this action using progressive bonus system
     # OPTIMIZATION: Only calculate rewards for controlled player's units
     # Bot units don't need rewards since they don't learn
-    cfg = game_state["config"] if "config" in game_state else None
-    controlled_player = cfg["controlled_player"] if cfg and "controlled_player" in cfg else 1
+    cfg = require_key(game_state, "config")
+    controlled_player = int(require_key(cfg, "controlled_player"))
 
     # Skip reward calculation for bot units (not the controlled player)
     if shooter["player"] != controlled_player:

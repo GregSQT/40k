@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_87",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 2
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

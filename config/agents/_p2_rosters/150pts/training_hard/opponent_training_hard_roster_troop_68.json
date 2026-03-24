@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_68",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

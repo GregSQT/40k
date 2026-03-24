@@ -38,6 +38,7 @@ const getWeaponRuleDisplay = (ruleId: string): { displayName: string; tooltipTex
 interface UnitStatusTableProps {
   units: Unit[];
   player: 1 | 2;
+  playerTypes?: Record<string, "human" | "ai" | "bot">;
   selectedUnitId: UnitId | null;
   guidedFocusUnitId?: UnitId | null;
   clickedUnitId?: UnitId | null;
@@ -1123,6 +1124,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
   ({
     units,
     player,
+    playerTypes,
     selectedUnitId,
     guidedFocusUnitId = null,
     clickedUnitId,
@@ -1366,17 +1368,26 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     ]);
 
     const getPlayerTypeLabel = (playerNumber: 1 | 2): string => {
-      if (gameMode === "training") {
-        if (isReplay) {
-          return playerNumber === 2 ? "Player 2 - Bot" : "Player 1 - AI";
-        }
-        return playerNumber === 2 ? "Player 1 - AI" : "Player 2 - Bot";
-      } else if (gameMode === "pve") {
-        return playerNumber === 1 ? "Player 1 - Human" : "Player 2 - AI";
-      } else {
-        // pvp
-        return playerNumber === 1 ? "Player 1 - Human" : "Player 2 - Human";
+      if (!playerTypes) {
+        throw new Error("UnitStatusTable requires game_state.player_types for player header labels");
       }
+      const runtimePlayerType = playerTypes[String(playerNumber)];
+      if (runtimePlayerType === "human") {
+        return `Player ${playerNumber} - Human`;
+      }
+      if (runtimePlayerType === "ai") {
+        if (gameMode === "training" || isReplay) {
+          return `Player ${playerNumber} - AI/Bot`;
+        }
+        return `Player ${playerNumber} - AI`;
+      }
+      if (runtimePlayerType === "bot") {
+        return `Player ${playerNumber} - Bot`;
+      }
+      throw new Error(
+        `Invalid player type for player ${playerNumber}: ${String(runtimePlayerType)}. ` +
+          "Expected 'human', 'ai', or 'bot'."
+      );
     };
 
     if (playerUnits.length === 0) {

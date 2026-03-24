@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_training_hard_roster_swarm_70",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    }
+  ]
+}

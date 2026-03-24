@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_troop_06",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragonExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_02",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    }
+  ]
+}

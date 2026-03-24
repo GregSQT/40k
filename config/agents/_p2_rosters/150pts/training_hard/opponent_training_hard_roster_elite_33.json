@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_training_hard_roster_elite_33",
+  "composition": [
+    {
+      "unit_type": "EradicatorMultiMelta",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 2
+    },
+    {
+      "unit_type": "WolfGuardTerminator",
+      "count": 1
+    }
+  ]
+}

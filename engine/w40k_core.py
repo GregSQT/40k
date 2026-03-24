@@ -209,8 +209,8 @@ class W40KEngine(gym.Env):
             self._scenario_objectives = scenario_objectives
             self._scenario_primary_objective = primary_objective_config
             self._scenario_roster_info = scenario_roster_info
-            self._scenario_has_random_p1_roster = bool(
-                scenario_roster_info and scenario_roster_info.get("p1_ref_randomized")
+            self._scenario_has_random_agent_roster = bool(
+                scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
             )
 
             # Extract scenario name from file path for logging
@@ -242,6 +242,7 @@ class W40KEngine(gym.Env):
                 "deployment_zone": scenario_deployment_zone,
                 "deployment_pools": scenario_deployment_pools
             }
+            self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
         else:
             # Use provided config directly and add gym_training_mode
             self.config = config.copy()
@@ -252,11 +253,17 @@ class W40KEngine(gym.Env):
                 self.config["pve_mode"] = config.get("pve_mode", False)
             # CHANGE 5: Ensure controlled_player is set
             if "controlled_player" not in self.config:
-                self.config["controlled_player"] = 1  # FIXED: Agent controls player 1 (matches scenario setup)
+                if gym_training_mode:
+                    raise KeyError(
+                        "Training mode requires explicit config['controlled_player']; "
+                        "fallback defaults are forbidden."
+                    )
+                self.config["controlled_player"] = 1  # Legacy non-training default
 
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config["rewards_config"] if "rewards_config" in config else {}
-            self._scenario_has_random_p1_roster = False
+            self._scenario_has_random_agent_roster = False
+            self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
             
             # CRITICAL: Extract training_config from config dict for observation_params access
             # API server provides training_configs dict with agent keys, or training_config_name to select phase
@@ -548,6 +555,7 @@ class W40KEngine(gym.Env):
             'valid_actions': 0,
             'invalid_actions': 0,
             'wait_actions': 0,
+            'total_actions': 0,
             'total_enemies': 0
         }
         
@@ -614,10 +622,13 @@ class W40KEngine(gym.Env):
             random.seed(seed)
 
         should_reload_scenario = False
+        current_controlled_player = int(require_key(self.config, "controlled_player"))
+        if getattr(self, "_scenario_loaded_for_controlled_player", None) != current_controlled_player:
+            should_reload_scenario = True
         if self._random_scenario_mode and len(self._scenario_files) > 1:
             self._current_scenario_file = random.choice(self._scenario_files)
             should_reload_scenario = True
-        elif getattr(self, "_scenario_has_random_p1_roster", False):
+        elif getattr(self, "_scenario_has_random_agent_roster", False):
             should_reload_scenario = True
 
         # RANDOM SCENARIO SELECTION: Pick a random scenario for this episode
@@ -877,6 +888,7 @@ class W40KEngine(gym.Env):
             'valid_actions': 0,
             'invalid_actions': 0,
             'wait_actions': 0,
+            'total_actions': 0,
             'total_enemies': 0
         }
         
@@ -1087,6 +1099,7 @@ class W40KEngine(gym.Env):
         # CRITICAL: Capture pre-action state for replay_logger BEFORE action execution
         # These are needed for replay logging (independent of step_logger)
         pre_action_phase = self.game_state.get("phase", "unknown")
+        pre_action_player = int(require_key(self.game_state, "current_player"))
         pre_action_positions = {}
         if "unitId" in semantic_action:
             unit_id = semantic_action["unitId"]
@@ -1333,6 +1346,13 @@ class W40KEngine(gym.Env):
         truncated = False
         info = result.copy() if isinstance(result, dict) else {}
         info["success"] = success
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        opponent_player = 2 if controlled_player == 1 else 1
+        is_controlled_action = pre_action_player == controlled_player
+        info["controlled_player"] = controlled_player
+        info["opponent_player"] = opponent_player
+        info["acting_player"] = pre_action_player
+        info["is_controlled_action"] = is_controlled_action
         
         # CRITICAL: Copy turn_limit_reached from result to game_state if present
         # This must happen BEFORE calling _determine_winner_with_method()
@@ -1343,11 +1363,17 @@ class W40KEngine(gym.Env):
         self.episode_reward_accumulator += reward
         self.episode_length_accumulator += 1
         
-        # Track action validity
-        if success:
-            self.episode_tactical_data['valid_actions'] += 1
-        else:
-            self.episode_tactical_data['invalid_actions'] += 1
+        # Track action metrics for controlled agent only (seat-aware).
+        if is_controlled_action:
+            self.episode_tactical_data['total_actions'] += 1
+            if success:
+                self.episode_tactical_data['valid_actions'] += 1
+            else:
+                self.episode_tactical_data['invalid_actions'] += 1
+            if isinstance(result, dict):
+                action_name = result.get("action")
+                if action_name in {"wait", "skip"}:
+                    self.episode_tactical_data['wait_actions'] += 1
         
         # Add winner info when game ends
         if terminated:
@@ -1370,8 +1396,8 @@ class W40KEngine(gym.Env):
             }
             
             # Calculate units killed/lost
-            # Controlled agent is always player 1 in training
-            controlled_player = 1
+            # Controlled player is explicit in engine config (seat-aware).
+            controlled_player = int(require_key(self.config, "controlled_player"))
             
             units_cache = require_key(self.game_state, "units_cache")
             surviving_ally_units = sum(1 for _uid, entry in units_cache.items()
@@ -1462,8 +1488,13 @@ class W40KEngine(gym.Env):
             )
 
             victory_points = require_key(self.game_state, "victory_points")
-            self.episode_tactical_data['victory_points_cumulative_episode'] = float(
-                require_key(victory_points, 1)
+            controlled_vp = float(require_key(victory_points, controlled_player))
+            opponent_vp = float(require_key(victory_points, opponent_player))
+            self.episode_tactical_data['victory_points_cumulative_episode'] = controlled_vp
+            self.episode_tactical_data['victory_points_controlled_episode'] = controlled_vp
+            self.episode_tactical_data['victory_points_opponent_episode'] = opponent_vp
+            self.episode_tactical_data['victory_points_diff_controlled_minus_opponent'] = (
+                controlled_vp - opponent_vp
             )
 
             # Add tactical data to info
@@ -3989,8 +4020,15 @@ class W40KEngine(gym.Env):
 
     def _load_units_from_scenario(self, scenario_file, unit_registry):
         """Load units from scenario - delegates to state_manager."""
-        # Create temporary state_manager just for loading during init
-        temp_manager = GameStateManager({"board": {}}, unit_registry)
+        # Create temporary state_manager just for loading during init.
+        # During early bootstrap, self.config may not exist yet; default bootstrap seat is player 1.
+        bootstrap_controlled_player = 1
+        if hasattr(self, "config") and isinstance(self.config, dict) and "controlled_player" in self.config:
+            bootstrap_controlled_player = int(require_key(self.config, "controlled_player"))
+        temp_manager = GameStateManager(
+            {"board": {}, "controlled_player": bootstrap_controlled_player},
+            unit_registry
+        )
         return temp_manager.load_units_from_scenario(scenario_file, unit_registry)
 
     def _reload_scenario(self, scenario_file: str):
@@ -4109,9 +4147,10 @@ class W40KEngine(gym.Env):
         self.config["deployment_pools"] = scenario_deployment_pools
         self._scenario_primary_objective = primary_objective_config
         self._scenario_roster_info = scenario_roster_info
-        self._scenario_has_random_p1_roster = bool(
-            scenario_roster_info and scenario_roster_info.get("p1_ref_randomized")
+        self._scenario_has_random_agent_roster = bool(
+            scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
         )
+        self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
 
         # Extract scenario name from file path for logging
         scenario_name = scenario_file

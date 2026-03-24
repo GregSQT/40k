@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_troop_11",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
+      "count": 1
+    }
+  ]
+}

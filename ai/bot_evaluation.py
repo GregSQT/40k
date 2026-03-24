@@ -288,6 +288,8 @@ def _create_eval_env(
     controlled_agent: str,
     base_agent_key: str,
     debug_mode: bool,
+    agent_seat_mode: str,
+    agent_seat_seed: Optional[int],
 ) -> "BotControlledEnv":
     """
     Crée un env d'éval. Utilisé en mode sérial et dans les workers.
@@ -325,7 +327,14 @@ def _create_eval_env(
         debug_mode=debug_mode,
     )
     masked_env = ActionMasker(base_env, mask_fn)
-    return BotControlledEnv(masked_env, bot, unit_registry)
+    return BotControlledEnv(
+        masked_env,
+        bot,
+        unit_registry,
+        agent_seat_mode=agent_seat_mode,
+        global_seed=agent_seat_seed,
+        env_rank=0,
+    )
 
 
 def _build_eval_obs_normalizer_for_worker(
@@ -408,7 +417,7 @@ def _eval_worker_task(
         scenario_file=task["scenario_file"],
         **{k: config_params[k] for k in [
             "training_config_name", "rewards_config_name", "controlled_agent",
-            "base_agent_key", "debug_mode"
+            "base_agent_key", "debug_mode", "agent_seat_mode", "agent_seat_seed"
         ] if k in config_params},
     )
 
@@ -440,7 +449,8 @@ def _eval_worker_task(
             obs, reward, terminated, truncated, info = env.step(action_scalar)
             done = bool(terminated or truncated)
         winner = info.get("winner")
-        if winner == 1:
+        controlled_player = require_key(info, "controlled_player")
+        if winner == controlled_player:
             wins += 1
         elif winner == -1:
             draws += 1
@@ -558,6 +568,29 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 break
 
     training_cfg = config.load_agent_training_config(base_agent_key, training_config_name)
+    agent_seat_mode = require_key(training_cfg, "agent_seat_mode")
+    if agent_seat_mode not in {"p1", "p2", "random"}:
+        raise ValueError(
+            f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+            f"(got {agent_seat_mode!r})"
+        )
+    agent_seat_seed = None
+    if agent_seat_mode == "random":
+        if "agent_seat_seed" in training_cfg:
+            agent_seat_seed_raw = require_key(training_cfg, "agent_seat_seed")
+        elif "seed" in training_cfg:
+            agent_seat_seed_raw = require_key(training_cfg, "seed")
+        else:
+            raise KeyError(
+                "agent_seat_mode='random' requires a seed key in training config. "
+                "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
+            )
+        if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
+            raise TypeError(
+                "Seat seed must be an integer when agent_seat_mode='random' "
+                "(from 'agent_seat_seed' or 'seed')."
+            )
+        agent_seat_seed = int(agent_seat_seed_raw)
     vec_norm_cfg = require_key(training_cfg, "vec_normalize")
     if not isinstance(vec_norm_cfg, dict):
         raise TypeError(f"vec_normalize must be a dict (got {type(vec_norm_cfg).__name__})")
@@ -680,6 +713,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         "vec_normalize_enabled": vec_normalize_enabled,
         "vec_model_path": vec_model_path,
         "debug_mode": debug_mode,
+        "agent_seat_mode": agent_seat_mode,
+        "agent_seat_seed": agent_seat_seed,
     }
     if not use_subprocess and step_logger and step_logger.enabled:
         config_params["step_logger"] = step_logger

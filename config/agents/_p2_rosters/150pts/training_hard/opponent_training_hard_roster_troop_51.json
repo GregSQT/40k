@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_hard_roster_troop_51",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragonExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    }
+  ]
+}

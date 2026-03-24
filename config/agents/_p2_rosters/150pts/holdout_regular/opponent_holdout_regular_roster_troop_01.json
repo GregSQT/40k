@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_troop_01",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    }
+  ]
+}

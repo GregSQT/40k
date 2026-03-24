@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_11",
+  "composition": [
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}
