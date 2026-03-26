@@ -42,6 +42,14 @@ class BotControlledEnv(gym.Wrapper):
         global_seed: Optional[int] = None,
         env_rank: int = 0,
         episode_start_index: int = 0,
+        self_play_opponent_enabled: bool = False,
+        self_play_ratio_start: Optional[float] = None,
+        self_play_ratio_end: Optional[float] = None,
+        self_play_total_episodes: Optional[int] = None,
+        self_play_warmup_episodes: Optional[int] = None,
+        self_play_snapshot_path: Optional[str] = None,
+        self_play_snapshot_refresh_episodes: Optional[int] = None,
+        self_play_deterministic: bool = False,
     ):
         super().__init__(base_env)
         # Support: bots=[...] for random selection, or bot=X for single opponent
@@ -80,6 +88,84 @@ class BotControlledEnv(gym.Wrapper):
         self.episodes_agent_p2 = 0
         self.timesteps_agent_p1 = 0
         self.timesteps_agent_p2 = 0
+        self._self_play_opponent_enabled = bool(self_play_opponent_enabled)
+        self._episode_uses_self_play_opponent = False
+        self._self_play_ratio_current = 0.0
+        self._self_play_episodes = 0
+        self._bot_episodes = 0
+        self._frozen_model = None
+        self._frozen_model_mtime: Optional[float] = None
+        self._episodes_since_snapshot_refresh = 0
+        self._self_play_deterministic = bool(self_play_deterministic)
+        if self._self_play_opponent_enabled:
+            if self_play_ratio_start is None:
+                raise KeyError(
+                    "self_play_ratio_start is required when self_play_opponent_enabled=true"
+                )
+            if self_play_ratio_end is None:
+                raise KeyError(
+                    "self_play_ratio_end is required when self_play_opponent_enabled=true"
+                )
+            if self_play_total_episodes is None:
+                raise KeyError(
+                    "self_play_total_episodes is required when self_play_opponent_enabled=true"
+                )
+            if self_play_warmup_episodes is None:
+                raise KeyError(
+                    "self_play_warmup_episodes is required when self_play_opponent_enabled=true"
+                )
+            if self_play_snapshot_path is None or not str(self_play_snapshot_path).strip():
+                raise KeyError(
+                    "self_play_snapshot_path is required when self_play_opponent_enabled=true"
+                )
+            if self_play_snapshot_refresh_episodes is None:
+                raise KeyError(
+                    "self_play_snapshot_refresh_episodes is required when self_play_opponent_enabled=true"
+                )
+            self._self_play_ratio_start = float(self_play_ratio_start)
+            self._self_play_ratio_end = float(self_play_ratio_end)
+            self._self_play_total_episodes = int(self_play_total_episodes)
+            self._self_play_warmup_episodes = int(self_play_warmup_episodes)
+            self._self_play_snapshot_path = str(self_play_snapshot_path)
+            self._self_play_snapshot_refresh_episodes = int(self_play_snapshot_refresh_episodes)
+            if not (0.0 <= self._self_play_ratio_start <= 1.0):
+                raise ValueError(
+                    f"self_play_ratio_start must be in [0,1] "
+                    f"(got {self._self_play_ratio_start})"
+                )
+            if not (0.0 <= self._self_play_ratio_end <= 1.0):
+                raise ValueError(
+                    f"self_play_ratio_end must be in [0,1] "
+                    f"(got {self._self_play_ratio_end})"
+                )
+            if self._self_play_total_episodes <= 0:
+                raise ValueError(
+                    f"self_play_total_episodes must be > 0 "
+                    f"(got {self._self_play_total_episodes})"
+                )
+            if self._self_play_warmup_episodes < 0:
+                raise ValueError(
+                    f"self_play_warmup_episodes must be >= 0 "
+                    f"(got {self._self_play_warmup_episodes})"
+                )
+            if self._self_play_warmup_episodes > self._self_play_total_episodes:
+                raise ValueError(
+                    "self_play_warmup_episodes must be <= self_play_total_episodes "
+                    f"(got {self._self_play_warmup_episodes} > "
+                    f"{self._self_play_total_episodes})"
+                )
+            if self._self_play_snapshot_refresh_episodes <= 0:
+                raise ValueError(
+                    "self_play_snapshot_refresh_episodes must be > 0 "
+                    f"(got {self._self_play_snapshot_refresh_episodes})"
+                )
+        else:
+            self._self_play_ratio_start = 0.0
+            self._self_play_ratio_end = 0.0
+            self._self_play_total_episodes = 1
+            self._self_play_warmup_episodes = 0
+            self._self_play_snapshot_path = ""
+            self._self_play_snapshot_refresh_episodes = 1
 
         # Unwrap ActionMasker to get actual engine
         # self.env is set by gym.Wrapper.__init__ to base_env
@@ -134,7 +220,7 @@ class BotControlledEnv(gym.Wrapper):
                     f"BotControlledEnv infinite loop: {bot_loop_count} iterations, phase={current_phase}"
                 )
             debug_bot = self.episode_length < 10
-            bot_action = self._get_bot_action(debug=debug_bot)
+            bot_action = self._get_opponent_action(debug=debug_bot)
             t0_bot = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(bot_action)
             if accumulate_reward:
@@ -288,6 +374,96 @@ class BotControlledEnv(gym.Wrapper):
         self.engine.config["opponent_player"] = self.bot_player
         self.engine.config["agent_seat_mode"] = self.agent_seat_mode
 
+    def _compute_self_play_ratio_for_episode(self) -> float:
+        """Compute scheduled self-play ratio for current episode index."""
+        if not self._self_play_opponent_enabled:
+            return 0.0
+        current_idx = self._episode_index
+        if current_idx <= self._self_play_warmup_episodes:
+            return self._self_play_ratio_start
+        effective_idx = current_idx - self._self_play_warmup_episodes
+        effective_total = self._self_play_total_episodes - self._self_play_warmup_episodes
+        if effective_total <= 0:
+            return self._self_play_ratio_end
+        progress = min(1.0, max(0.0, float(effective_idx) / float(effective_total)))
+        return self._self_play_ratio_start + (
+            (self._self_play_ratio_end - self._self_play_ratio_start) * progress
+        )
+
+    def _reload_self_play_snapshot_if_needed(self, force: bool = False) -> None:
+        """Load/reload frozen model snapshot used as self-play opponent."""
+        if not self._self_play_opponent_enabled:
+            return
+        snapshot_path = self._self_play_snapshot_path
+        if not os.path.exists(snapshot_path):
+            raise FileNotFoundError(
+                f"Self-play snapshot not found: {snapshot_path}. "
+                "Training loop must publish snapshot before self-play episodes."
+            )
+        current_mtime = float(os.path.getmtime(snapshot_path))
+        if (
+            not force
+            and self._frozen_model is not None
+            and self._frozen_model_mtime is not None
+            and current_mtime == self._frozen_model_mtime
+            and self._episodes_since_snapshot_refresh < self._self_play_snapshot_refresh_episodes
+        ):
+            return
+        from sb3_contrib import MaskablePPO
+        self._frozen_model = MaskablePPO.load(snapshot_path)
+        self._frozen_model_mtime = current_mtime
+        self._episodes_since_snapshot_refresh = 0
+
+    def _select_opponent_mode_for_episode(self) -> None:
+        """Choose bot opponent or frozen self-play opponent for current episode."""
+        self._episode_uses_self_play_opponent = False
+        self._self_play_ratio_current = 0.0
+        if not self._self_play_opponent_enabled:
+            self._bot_episodes += 1
+            return
+        ratio = self._compute_self_play_ratio_for_episode()
+        self._self_play_ratio_current = ratio
+        seed_material = f"{self._global_seed}:{self._env_rank}:{self._episode_index}:self_play"
+        draw_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
+        draw = int(draw_hash[:8], 16) / float(0xFFFFFFFF)
+        self._episode_uses_self_play_opponent = bool(draw < ratio)
+        if self._episode_uses_self_play_opponent:
+            self._reload_self_play_snapshot_if_needed(force=False)
+            self._self_play_episodes += 1
+        else:
+            self._bot_episodes += 1
+
+    def _get_self_play_opponent_action(self) -> int:
+        """Get action from frozen self-play opponent model."""
+        action_mask, eligible_units = self.engine.action_decoder.get_action_mask_and_eligible_units(
+            self.engine.game_state
+        )
+        if not eligible_units:
+            return 11
+        valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
+        if not valid_actions:
+            raise RuntimeError(
+                "BotControlledEnv self-play opponent encountered empty action mask. "
+                "Engine must advance phase/turn instead of exposing empty masks."
+            )
+        if self._frozen_model is None:
+            raise RuntimeError(
+                "Self-play opponent model is not loaded while episode is in self-play mode."
+            )
+        obs = self.engine._build_observation()
+        action, _ = self._frozen_model.predict(
+            obs,
+            deterministic=self._self_play_deterministic,
+            action_masks=action_mask,
+        )
+        return int(action)
+
+    def _get_opponent_action(self, debug: bool = False) -> int:
+        """Get action from selected opponent mode for current episode."""
+        if self._episode_uses_self_play_opponent:
+            return self._get_self_play_opponent_action()
+        return self._get_bot_action(debug=debug)
+
     def _play_bot_until_control_returns(self, debug_mode: bool):
         """
         Advance environment until controlled player has an actionable decision state.
@@ -347,6 +523,9 @@ class BotControlledEnv(gym.Wrapper):
         # Random bot selection: pick a new opponent for this episode
         if self._use_random_bots:
             self.bot = random.choice(self._bots)
+        if self._self_play_opponent_enabled:
+            self._episodes_since_snapshot_refresh += 1
+        self._select_opponent_mode_for_episode()
 
         # DIAGNOSTIC: Reset shoot tracking for new episode
         self.shoot_opportunities = 0
@@ -385,6 +564,10 @@ class BotControlledEnv(gym.Wrapper):
         info["controlled_player"] = self.controlled_player
         info["opponent_player"] = self.bot_player
         info["agent_seat_mode"] = self.agent_seat_mode
+        info["opponent_mode"] = (
+            "self_play" if self._episode_uses_self_play_opponent else "bot"
+        )
+        info["self_play_ratio_current"] = self._self_play_ratio_current
         return obs, info
 
     def step(self, agent_action):
@@ -473,6 +656,10 @@ class BotControlledEnv(gym.Wrapper):
         info["controlled_player"] = self.controlled_player
         info["opponent_player"] = self.bot_player
         info["agent_seat_mode"] = self.agent_seat_mode
+        info["opponent_mode"] = (
+            "self_play" if self._episode_uses_self_play_opponent else "bot"
+        )
+        info["self_play_ratio_current"] = self._self_play_ratio_current
         return obs, float(cumulative_reward), terminated, truncated, info
 
     def _get_bot_action(self, debug=False) -> int:
@@ -564,6 +751,8 @@ class BotControlledEnv(gym.Wrapper):
             "agent_seat_mode": self.agent_seat_mode,
             "episodes_agent_p1": self.episodes_agent_p1,
             "episodes_agent_p2": self.episodes_agent_p2,
+            "episodes_vs_bots": self._bot_episodes,
+            "episodes_vs_self_play": self._self_play_episodes,
             "timesteps_agent_p1": self.timesteps_agent_p1,
             "timesteps_agent_p2": self.timesteps_agent_p2,
             "episode_share_agent_p1_pct": p1_episode_share,

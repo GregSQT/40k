@@ -1862,6 +1862,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     training_bots = None
     agent_seat_mode = None
     agent_seat_seed = None
+    opponent_mix_config = None
+    self_play_snapshot_path = None
+    self_play_snapshot_update_freq = None
+    self_play_snapshot_enabled = False
     if use_bots:
         if EVALUATION_BOTS_AVAILABLE:
             training_bots = _build_training_bots_from_config(training_config)
@@ -1891,6 +1895,77 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             r, g, d = ratios.get("random", 0.2) * 100, ratios.get("greedy", 0.4) * 100, ratios.get("defensive", 0.4) * 100
             chunk_log(f"🤖 Bot training ratios: {r:.0f}% Random, {g:.0f}% Greedy, {d:.0f}% Defensive")
             chunk_log(f"🤖 Agent seat mode: {agent_seat_mode}")
+            if "opponent_mix" in training_config:
+                mix_cfg = require_key(training_config, "opponent_mix")
+                if not isinstance(mix_cfg, dict):
+                    raise TypeError(
+                        "training_config.opponent_mix must be a mapping when provided."
+                    )
+                mix_enabled = bool(require_key(mix_cfg, "enabled"))
+                if mix_enabled:
+                    self_play_ratio_start_raw = require_key(mix_cfg, "self_play_ratio_start")
+                    self_play_ratio_end_raw = require_key(mix_cfg, "self_play_ratio_end")
+                    warmup_raw = require_key(mix_cfg, "warmup_episodes")
+                    snapshot_path_raw = require_key(mix_cfg, "snapshot_model_path")
+                    snapshot_refresh_raw = require_key(mix_cfg, "snapshot_update_freq_episodes")
+                    deterministic_raw = require_key(mix_cfg, "self_play_deterministic")
+
+                    self_play_ratio_start = float(self_play_ratio_start_raw)
+                    self_play_ratio_end = float(self_play_ratio_end_raw)
+                    warmup_episodes = int(warmup_raw)
+                    snapshot_path = str(snapshot_path_raw)
+                    snapshot_refresh_episodes = int(snapshot_refresh_raw)
+                    self_play_deterministic = bool(deterministic_raw)
+
+                    if not (0.0 <= self_play_ratio_start <= 1.0):
+                        raise ValueError(
+                            "opponent_mix.self_play_ratio_start must be in [0,1] "
+                            f"(got {self_play_ratio_start})"
+                        )
+                    if not (0.0 <= self_play_ratio_end <= 1.0):
+                        raise ValueError(
+                            "opponent_mix.self_play_ratio_end must be in [0,1] "
+                            f"(got {self_play_ratio_end})"
+                        )
+                    if warmup_episodes < 0:
+                        raise ValueError(
+                            "opponent_mix.warmup_episodes must be >= 0 "
+                            f"(got {warmup_episodes})"
+                        )
+                    if not snapshot_path.strip():
+                        raise ValueError(
+                            "opponent_mix.snapshot_model_path must be a non-empty string."
+                        )
+                    if snapshot_refresh_episodes <= 0:
+                        raise ValueError(
+                            "opponent_mix.snapshot_update_freq_episodes must be > 0 "
+                            f"(got {snapshot_refresh_episodes})"
+                        )
+                    snapshot_dir = os.path.dirname(snapshot_path)
+                    if not snapshot_dir:
+                        raise ValueError(
+                            "opponent_mix.snapshot_model_path must include a directory "
+                            f"(got {snapshot_path!r})"
+                        )
+                    os.makedirs(snapshot_dir, exist_ok=True)
+                    opponent_mix_config = {
+                        "enabled": True,
+                        "self_play_ratio_start": self_play_ratio_start,
+                        "self_play_ratio_end": self_play_ratio_end,
+                        "warmup_episodes": warmup_episodes,
+                        "total_episodes": int(total_episodes),
+                        "snapshot_model_path": snapshot_path,
+                        "snapshot_refresh_episodes": snapshot_refresh_episodes,
+                        "deterministic": self_play_deterministic,
+                    }
+                    self_play_snapshot_enabled = True
+                    self_play_snapshot_path = snapshot_path
+                    self_play_snapshot_update_freq = snapshot_refresh_episodes
+                    chunk_log(
+                        "🤝 Opponent mix enabled: "
+                        f"self-play ratio {self_play_ratio_start:.2f}->{self_play_ratio_end:.2f} "
+                        f"(warmup={warmup_episodes} ep, snapshot every {snapshot_refresh_episodes} ep)"
+                    )
         else:
             raise ImportError("Evaluation bots not available but use_bots=True")
 
@@ -1912,6 +1987,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 training_bots=training_bots,
                 agent_seat_mode=agent_seat_mode,
                 global_seed=agent_seat_seed,
+                opponent_mix_config=opponent_mix_config,
             )
             for i in range(n_envs)
         ])
@@ -1945,6 +2021,44 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 unit_registry=unit_registry,
                 agent_seat_mode=agent_seat_mode,
                 global_seed=agent_seat_seed,
+                self_play_opponent_enabled=(
+                    bool(opponent_mix_config is not None and opponent_mix_config.get("enabled") is True)
+                ),
+                self_play_ratio_start=(
+                    float(opponent_mix_config["self_play_ratio_start"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else None
+                ),
+                self_play_ratio_end=(
+                    float(opponent_mix_config["self_play_ratio_end"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else None
+                ),
+                self_play_total_episodes=(
+                    int(opponent_mix_config["total_episodes"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else None
+                ),
+                self_play_warmup_episodes=(
+                    int(opponent_mix_config["warmup_episodes"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else None
+                ),
+                self_play_snapshot_path=(
+                    str(opponent_mix_config["snapshot_model_path"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else None
+                ),
+                self_play_snapshot_refresh_episodes=(
+                    int(opponent_mix_config["snapshot_refresh_episodes"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else None
+                ),
+                self_play_deterministic=(
+                    bool(opponent_mix_config["deterministic"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else False
+                ),
             )
             env = Monitor(bot_env)
         else:
@@ -2237,11 +2351,20 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # - repeatedly call learn() with a small, fixed chunk of timesteps
     # - after each chunk, check how many episodes actually completed (via metrics_tracker)
     # - stop when we reach the exact desired episode count (total_episodes)
+    def _publish_self_play_snapshot() -> None:
+        if not self_play_snapshot_enabled:
+            return
+        if self_play_snapshot_path is None:
+            raise RuntimeError("self_play_snapshot_enabled=True but snapshot path is missing.")
+        model.save(self_play_snapshot_path)
 
     # reset_num_timesteps semantics:
     # - --append: keep monotonic timesteps (never reset) for true continuation.
     # - --new: fresh run directory allows reset from zero without overwriting prior runs.
     target_episode_count = callback_global_episode_offset + total_episodes
+    last_snapshot_episode_count = metrics_tracker.episode_count
+    if self_play_snapshot_enabled:
+        _publish_self_play_snapshot()
     while metrics_tracker.episode_count < target_episode_count:
         # As a safety guard, we still use the same chunk_timesteps. 
         # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
@@ -2253,6 +2376,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
             progress_bar=False  # Disabled - using episode-based progress
         )
+        if self_play_snapshot_enabled:
+            if self_play_snapshot_update_freq is None:
+                raise RuntimeError(
+                    "self_play_snapshot_enabled=True but snapshot update frequency is missing."
+                )
+            episodes_since_snapshot = metrics_tracker.episode_count - last_snapshot_episode_count
+            if episodes_since_snapshot >= self_play_snapshot_update_freq:
+                _publish_self_play_snapshot()
+                last_snapshot_episode_count = metrics_tracker.episode_count
 
     # Final episode count
     episodes_trained = metrics_tracker.episode_count - callback_global_episode_offset

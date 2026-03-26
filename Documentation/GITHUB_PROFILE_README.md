@@ -1,4 +1,4 @@
-# Hi, I'm Grégory (GregSQT) 👋
+# Hi, I'm Grégory 👋
 
 <p>
   Concepteur développeur d'applications (RNCP 6) orienté <strong>Python</strong>, <strong>React/TypeScript</strong> et <strong>IA appliquée</strong>.<br/>

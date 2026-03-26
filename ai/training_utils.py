@@ -144,7 +144,7 @@ def setup_imports():
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
                      scenario_files=None, debug_mode=False, use_bots=False, training_bots=None,
-                     agent_seat_mode=None, global_seed=None):
+                     agent_seat_mode=None, global_seed=None, opponent_mix_config=None):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -199,6 +199,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         if use_bots and training_bots:
             if agent_seat_mode is None:
                 raise KeyError("agent_seat_mode is required when use_bots=True")
+            mix_enabled = bool(opponent_mix_config is not None and opponent_mix_config.get("enabled") is True)
             wrapped_env = BotControlledEnv(
                 masked_env,
                 bots=training_bots,
@@ -206,6 +207,28 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
                 agent_seat_mode=agent_seat_mode,
                 global_seed=global_seed,
                 env_rank=rank,
+                self_play_opponent_enabled=mix_enabled,
+                self_play_ratio_start=(
+                    float(opponent_mix_config["self_play_ratio_start"]) if mix_enabled else None
+                ),
+                self_play_ratio_end=(
+                    float(opponent_mix_config["self_play_ratio_end"]) if mix_enabled else None
+                ),
+                self_play_total_episodes=(
+                    int(opponent_mix_config["total_episodes"]) if mix_enabled else None
+                ),
+                self_play_warmup_episodes=(
+                    int(opponent_mix_config["warmup_episodes"]) if mix_enabled else None
+                ),
+                self_play_snapshot_path=(
+                    str(opponent_mix_config["snapshot_model_path"]) if mix_enabled else None
+                ),
+                self_play_snapshot_refresh_episodes=(
+                    int(opponent_mix_config["snapshot_refresh_episodes"]) if mix_enabled else None
+                ),
+                self_play_deterministic=(
+                    bool(opponent_mix_config["deterministic"]) if mix_enabled else False
+                ),
             )
         else:
             wrapped_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
