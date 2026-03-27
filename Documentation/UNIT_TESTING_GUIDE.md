@@ -1,313 +1,345 @@
-# Guide expert des tests unitaires
+# Guide unitaire definitif (repo 40k)
 
-Ce document explique :
+Objectif: fournir une reference unique, executable et maintenable pour mettre en place les tests unitaires sur ce repo.
 
-1. le fonctionnement des tests unitaires (et leurs limites) ;
-2. comment les mettre en place proprement sur l'ensemble de l'application ;
-3. comment industrialiser leur exécution dans le workflow d'équipe.
-
-Le périmètre couvre le moteur de jeu (`engine/`), l'IA (`ai/`), l'API Flask (`services/`), et le frontend React/TypeScript.
-
----
-
-## 1) Définition et objectif
-
-Un test unitaire vérifie le comportement d'une unité de code isolée (fonction, méthode, petit module) avec :
-
-- des entrées maîtrisées ;
-- un résultat attendu explicite ;
-- des dépendances externes neutralisées (mock/stub/fake) quand nécessaire.
-
-Objectif : détecter vite les régressions fonctionnelles, avec un feedback court et déterministe.
+Ce document remplace les versions de travail precedentes et fige:
+- la strategie de priorisation;
+- les conventions techniques;
+- les commandes locales et CI;
+- la Definition of Done (DoD) tests.
 
 ---
 
-## 2) Ce qu'un test unitaire n'est pas
+## 1) Decisions figees
 
-Un test unitaire ne remplace pas :
-
-- les tests d'intégration (interaction réelle entre modules) ;
-- les tests E2E (parcours complet API/UI) ;
-- les tests de performance/profiling.
-
-Un projet robuste combine ces niveaux ; les tests unitaires en sont la base rapide.
+1. **Python unitaire**: `pytest` lance depuis la racine du repo.
+2. **Frontend unitaire**: stack unique dans `frontend/` avec `vitest` + Testing Library.
+3. **Priorite fonctionnelle**: `engine/` + `shared/` d'abord, puis `services/`, puis `ai/`, puis frontend.
+4. **Qualite > volume**: assertions metier fortes avant objectifs de couverture.
 
 ---
 
-## 3) Pourquoi c'est critique pour ce projet
+## 2) Principes non negociables
 
-Dans ce repo, les risques principaux sont :
-
-- régressions de règles de jeu dans `engine/` ;
-- incohérences de validation de données dans `shared/` ;
-- erreurs de mapping requête/réponse dans `services/` ;
-- transformations erronées côté `ai/` ;
-- régressions d'utilitaires/hooks côté frontend.
-
-Les tests unitaires réduisent ces risques à coût faible si on cible d'abord les zones à fort impact.
+- Unitaire = test deterministe, rapide, isole, explicite.
+- Aucune dependance externe reelle (reseau, DB, I/O lourd) en test unitaire.
+- Aucun fallback pour "faire passer" un test.
+- Toute correction de bug inclut un test de non-regression.
+- Toute logique critique nouvelle arrive avec tests associes.
 
 ---
 
-## 4) Principes de conception (qualité des tests)
+## 3) Contrat d'erreurs (aligne code actuel)
 
-### 4.1 Méthode AAA
+Reference implementation:
+- `shared/data_validation.py`
+  - `require_key(...)` leve `ConfigurationError` si la cle est absente.
+  - `require_present(...)` leve `ConfigurationError` si la valeur est `None`.
 
-Chaque test suit la structure :
+Regle de test:
+- verifier **le type d'exception reel** (`ConfigurationError`);
+- verifier un message d'erreur utile (nom du champ/cle), avec un `match`
+  cible sur des fragments stables plutot qu'une phrase complete.
+- ne pas substituer `KeyError`/`ValueError` dans les tests de ce module, sauf migration explicite du contrat.
 
-- **Arrange** : préparer les données minimales utiles ;
-- **Act** : appeler l'unité testée ;
-- **Assert** : vérifier précisément le contrat attendu.
+Exemple:
 
-### 4.2 Propriétés d'un bon test
+```python
+import pytest
+from shared.data_validation import require_key, ConfigurationError
 
-- **Rapide** : quelques ms à dizaines de ms ;
-- **Déterministe** : même résultat à chaque exécution ;
-- **Isolé** : pas de dépendance réseau/DB réelle ;
-- **Lisible** : intention claire dans le nom et les assertions ;
-- **Focalisé** : une intention principale par test.
 
-### 4.3 Erreurs à éviter
-
-- tester des détails d'implémentation au lieu du comportement ;
-- assertions floues ou trop nombreuses sans intention claire ;
-- fixtures massives illisibles ;
-- dépendance à l'ordre d'exécution ;
-- mocks excessifs qui masquent les bugs métier.
-
----
-
-## 5) Pyramide de tests recommandée
-
-Répartition cible :
-
-- majorité de tests unitaires ;
-- moins de tests d'intégration ;
-- peu de tests E2E ciblés.
-
-Pour ce projet : investir d'abord dans l'unitaire sur les règles de jeu et validations strictes.
+def test_require_key_raises_configuration_error_when_missing() -> None:
+    with pytest.raises(ConfigurationError, match=r"Required key 'MOVE'"):
+        require_key({}, "MOVE")
+```
 
 ---
 
-## 6) Mise en place backend Python (engine, ai, services)
-
-### 6.1 Outils recommandés
-
-- `pytest` : exécution des tests ;
-- `pytest-cov` : couverture ;
-- `pytest-mock` : mocks propres ;
-- `hypothesis` (optionnel) : tests de propriétés pour invariants.
-
-### 6.2 Arborescence proposée
+## 4) Structure cible des tests
 
 ```text
 tests/
+  conftest.py
   unit/
     engine/
-    ai/
-    services/
     shared/
+    services/
+    ai/
   integration/
-  fixtures/
 ```
 
-Convention : `test_<module>.py`.
+Conventions:
+- fichier: `test_<module>.py`
+- test: `test_<comportement>_<condition>_<resultat>`
 
-### 6.3 Configuration `pytest.ini` (base solide)
+---
+
+## 5) Configuration Python (copier-coller)
+
+### 5.1 `pytest.ini` (racine)
 
 ```ini
 [pytest]
 testpaths = tests
 python_files = test_*.py
-python_classes = Test*
 python_functions = test_*
-addopts = -q --strict-markers --disable-warnings
+addopts = -q --strict-markers
+markers =
+    unit: fast deterministic unit tests
+    integration: cross-module tests
 ```
 
-### 6.4 Commandes utiles
+Note:
+- `--maxfail=1` reste recommande en local pour la boucle de dev rapide,
+  mais n'est pas force dans la config partagee.
 
-- run global : `pytest -q`
-- fichier ciblé : `pytest tests/unit/engine/test_x.py -q`
-- couverture : `pytest --cov=engine --cov=ai --cov=services --cov=shared --cov-report=term-missing`
+### 5.2 `tests/conftest.py` (determinisme)
 
----
+```python
+import random
+import numpy as np
+import pytest
 
-## 7) Mise en place frontend TypeScript (React + Vite)
+try:
+    import torch
+except ImportError:  # pragma: no cover
+    torch = None
 
-### 7.1 Outils recommandés
 
-- `vitest` ;
-- `@testing-library/react` ;
-- `@testing-library/jest-dom` ;
-- `msw` pour mock API.
-
-### 7.2 Règles de base
-
-- tester comportement visible (texte, interactions, états) ;
-- éviter de tester les détails internes React ;
-- isoler les appels réseau avec `msw`.
-
-### 7.3 Scripts standard
-
-- `test` : exécution interactive ;
-- `test:run` : run CI ;
-- `test:coverage` : couverture frontend.
+@pytest.fixture(autouse=True)
+def deterministic_seed() -> None:
+    seed = 12345
+    random.seed(seed)
+    np.random.seed(seed)
+    if torch is not None:
+        torch.manual_seed(seed)
+```
 
 ---
 
-## 8) Stratégie de priorisation (ordre d'attaque)
+## 6) Decision frontend figee (unique)
 
-Prioriser par impact métier et fréquence d'exécution :
+Le frontend de reference est `frontend/` (Vite).
 
-1. `engine/` : logique de phases/actions et invariants ;
-2. `shared/` : validation stricte et erreurs explicites ;
-3. `services/` : validation payload + mapping erreurs HTTP ;
-4. `ai/` : parsing config/transformation observation-action ;
-5. frontend : utilitaires, hooks, composants critiques.
+Dependances dev a ajouter dans `frontend/`:
+- `vitest`
+- `@testing-library/react`
+- `@testing-library/jest-dom`
+- `jsdom`
+- `msw`
 
-Règle pratique : commencer par les fonctions pures et déterministes.
+Scripts a avoir dans `frontend/package.json`:
 
----
+```json
+{
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  }
+}
+```
 
-## 9) Matrice de couverture réaliste
+Commandes locales frontend:
 
-La couverture n'est pas une preuve de qualité ; c'est un indicateur.
-
-Objectifs progressifs recommandés :
-
-- **Phase 1** : 50-60% global, 80%+ sur modules `engine` critiques ;
-- **Phase 2** : 65-75% global ;
-- **Phase 3** : seuils par dossier critique avec blocage CI.
-
-Mieux vaut peu de tests pertinents que beaucoup de tests superficiels.
-
----
-
-## 10) Conception des données de test
-
-### 10.1 Fixtures minimales
-
-- créer des fixtures compactes et explicites ;
-- ne garder que les champs utiles au comportement testé ;
-- nommer les fixtures par intention métier.
-
-### 10.2 Données invalides (obligatoire)
-
-Tester aussi les cas d'erreur :
-
-- clé obligatoire absente ;
-- type invalide ;
-- valeur incohérente.
-
-Le test doit vérifier l'erreur explicite attendue.
+```bash
+npm --prefix frontend run test
+npm --prefix frontend run test:run
+npm --prefix frontend run test:coverage
+```
 
 ---
 
-## 11) Mocking : quand et comment
+## 7) Matrice de tracabilite (invariants -> tests)
 
-### 11.1 À mocker
-
-- réseau ;
-- base de données ;
-- accès disque lourd ;
-- chargement de modèle RL coûteux ;
-- temps système si logique temporelle.
-
-### 11.2 À garder réel
-
-- logique métier pure ;
-- validations ;
-- transformations déterministes.
-
-### 11.3 Risque du sur-mock
-
-Un test trop mocké valide parfois le mock, pas le code réel. Mock seulement ce qui rendrait le test lent, non déterministe ou externe.
+| Invariant critique | Code cible | Test cible | Priorite |
+|---|---|---|---|
+| Validation stricte sans fallback | `shared/data_validation.py` | `tests/unit/shared/test_data_validation.py` | P0 |
+| Normalisation coordonnees | `engine/combat_utils.py` | `tests/unit/engine/test_combat_utils.py` | P0 |
+| Fin d'activation conforme (tracking/step/log) | `engine/phase_handlers/generic_handlers.py` | `tests/unit/engine/test_generic_handlers.py` | P0 |
+| HP source unique via cache | `engine/phase_handlers/shared_utils.py` | `tests/unit/engine/test_shared_utils_units_cache.py` | P0 |
+| Mapping erreurs HTTP explicites | handlers `services/` | `tests/unit/services/test_*` | P1 |
+| Parsing/transformation IA deterministes | `ai/` | `tests/unit/ai/test_*` | P1 |
 
 ---
 
-## 12) CI/CD : industrialiser le contrôle qualité
+## 8) Les 10 premiers tests obligatoires
 
-Pipeline recommandé :
+1. `test_require_key_raises_configuration_error_when_missing`
+2. `test_require_present_raises_configuration_error_when_none`
+3. `test_get_unit_coordinates_normalizes_numeric_strings`
+4. `test_get_unit_coordinates_raises_key_error_when_missing_row`
+5. `test_end_activation_wait_adds_wait_log_with_position`
+6. `test_end_activation_arg2_increments_episode_steps`
+7. `test_end_activation_arg3_fled_marks_units_moved_and_units_fled`
+8. `test_update_units_cache_hp_updates_entry_when_hp_positive`
+9. `test_update_units_cache_hp_removes_unit_when_hp_zero_or_less`
+10. `test_get_hp_from_cache_returns_none_when_unit_absent`
 
-1. installation dépendances ;
-2. lint/typecheck ;
-3. tests unitaires Python ;
-4. tests unitaires frontend ;
-5. publication rapport de couverture.
-
-Gates minimales :
-
-- échec si tests rouges ;
-- échec si baisse de couverture sous seuil défini ;
-- rapport lisible en artefact CI.
-
----
-
-## 13) Plan de déploiement en 4 semaines
-
-### Semaine 1
-
-- installer et configurer outillage Python + frontend ;
-- écrire premier lot de tests `engine/shared` (cas nominaux + erreurs).
-
-### Semaine 2
-
-- couvrir validations API et utilitaires IA ;
-- stabiliser fixtures et helpers de test.
-
-### Semaine 3
-
-- couvrir frontend (hooks/utilitaires/composants critiques) ;
-- ajouter couverture et seuils progressifs.
-
-### Semaine 4
-
-- durcir CI (gates) ;
-- documenter conventions ;
-- fermer les trous critiques identifiés.
+Ces tests constituent le socle minimal de protection metier.
 
 ---
 
-## 14) Checklist qualité pour chaque nouveau test
+## 9) Commandes locales officielles
 
-- nom explicite orienté comportement ;
-- structure AAA ;
-- données minimales ;
-- assertions précises ;
-- cas nominal + cas erreur utile ;
-- pas de dépendance externe réelle non contrôlée ;
-- exécution rapide et déterministe.
+Python (depuis racine):
 
----
+```bash
+pytest tests/unit -q
+pytest tests/unit -q --cov=engine --cov=shared --cov=services --cov=ai --cov-report=term-missing --cov-fail-under=55
+pytest tests/unit/engine -q --cov=engine --cov-fail-under=70
+pytest tests/unit/shared -q --cov=shared --cov-fail-under=80
+pytest tests/unit -q --maxfail=1
+```
 
-## 15) Risques et limites (avis honnête)
+Note:
+- le gate coverage local officiel est `--cov-fail-under=55` (aligne CI phase 1).
+- des gates critiques par package (`engine`, `shared`) sont appliques en
+  complement pour eviter l'effet "compensation" du seuil global.
 
-- Les tests unitaires ne garantissent pas l'absence de bug d'intégration.
-- Une couverture élevée peut cacher des assertions faibles.
-- Le coût de maintenance existe : un test mal conçu devient du bruit.
-- Le ROI est maximal quand les tests protègent des invariants métier critiques.
+Frontend (depuis racine):
 
-Conclusion honnête : pour ce projet, le gain le plus fort vient d'un noyau de tests unitaires exigeants sur `engine/` + validations strictes, puis d'une montée progressive.
-
----
-
-## 16) Standard d'équipe recommandé
-
-À imposer dans les revues :
-
-- toute nouvelle logique critique doit être livrée avec tests unitaires ;
-- toute correction de bug doit inclure un test de non-régression ;
-- aucun merge si tests unitaires en échec ;
-- seuils de couverture progressifs, pas arbitrairement agressifs au départ.
+```bash
+npm --prefix frontend run test:run
+npm --prefix frontend run test:coverage
+```
 
 ---
 
-## 17) Démarrage rapide (minimum viable)
+## 10) CI executable (GitHub Actions)
 
-1. Ajouter l'outillage (`pytest`, `pytest-cov`, `vitest`) ;
-2. Créer l'arborescence `tests/unit/...` ;
-3. Ajouter 10 tests à forte valeur métier (`engine/shared`) ;
-4. Brancher exécution dans CI ;
-5. Ajouter seuil de couverture initial modéré ;
-6. Augmenter progressivement selon la stabilité.
+Exemple minimal coherant avec la structure du repo:
 
-Ce chemin donne un bénéfice immédiat sans bloquer le développement.
+```yaml
+name: unit-tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  python-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.runtime.txt
+          pip install pytest pytest-cov pytest-mock
+
+      - name: Run Python unit tests
+        run: |
+          pytest tests/unit -q --cov=engine --cov=shared --cov=services --cov=ai --cov-fail-under=55
+          pytest tests/unit/engine -q --cov=engine --cov-fail-under=70
+          pytest tests/unit/shared -q --cov=shared --cov-fail-under=80
+
+  frontend-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend unit tests
+        run: npm --prefix frontend run test:coverage
+```
+
+---
+
+## 11) Couverture et seuils
+
+Seuil initial recommande:
+- Python global: 55%
+- Cible critique `engine`: gate initial 70% (hausse progressive)
+- Cible critique `shared`: gate initial 80% (hausse progressive)
+- Frontend global: 40% initial, hausse par sprint
+
+Important:
+- la couverture ne remplace pas des assertions fortes;
+- un test faible couvert a 100% reste un mauvais test.
+
+---
+
+## 12) DoD stricte "tests"
+
+Une PR n'est pas complete si un des points suivants manque:
+
+- changement metier critique sans test unitaire associe;
+- bug fixe sans test de non-regression;
+- tests unitaires rouges local/CI;
+- un ou plusieurs tests P0 de la section "Les 10 premiers tests obligatoires" manquants ou rouges;
+- exception attendue non verifiee (type + message utile);
+- test non deterministe (flaky).
+
+Template review (copier-coller):
+- [ ] Cas nominal couvre le comportement attendu
+- [ ] Cas d'erreur metier pertinent couvre l'echec attendu
+- [ ] Assertions explicites et lisibles
+- [ ] Pas de dependance externe reelle en unitaire
+- [ ] Test de non-regression present si bugfix
+
+---
+
+## 13) Risques residuels (a ne pas confondre)
+
+Le socle unitaire **ne couvre pas**:
+- les regressions d'integration inter-modules;
+- les regressions de parcours API complet;
+- les regressions UI de bout en bout.
+
+Minimum a ajouter ensuite:
+1. quelques tests d'integration critiques (`engine` <-> `services`);
+2. quelques tests API scenario-driven;
+3. quelques tests UI E2E cibles sur parcours majeurs.
+
+---
+
+## 14) Plan d'execution (7 jours)
+
+Jour 1:
+- creer `tests/`, `pytest.ini`, `tests/conftest.py`
+- ecrire 4 tests `shared` + `combat_utils`
+
+Jour 2-3:
+- ecrire 6 tests `generic_handlers` + `shared_utils`
+
+Jour 4:
+- brancher job Python CI
+
+Jour 5:
+- installer stack frontend test et scripts
+
+Jour 6:
+- ajouter 3-5 tests frontend utiles
+
+Jour 7:
+- activer seuils coverage initiaux + template review PR
+
+---
+
+## 15) Verdict pratique
+
+Version definitive cible:
+- explicite sur les contrats reels;
+- executable en local et CI sans ambiguite;
+- centree sur invariants metier critiques;
+- progressive pour maximiser le ROI.
+
+Si ces sections sont appliquees telles quelles, le projet gagne une protection concrete contre les regressions majeures, sans freiner le developpement.

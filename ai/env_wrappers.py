@@ -49,6 +49,7 @@ class BotControlledEnv(gym.Wrapper):
         self_play_warmup_episodes: Optional[int] = None,
         self_play_snapshot_path: Optional[str] = None,
         self_play_snapshot_refresh_episodes: Optional[int] = None,
+        self_play_snapshot_device: Optional[str] = None,
         self_play_deterministic: bool = False,
     ):
         super().__init__(base_env)
@@ -122,12 +123,17 @@ class BotControlledEnv(gym.Wrapper):
                 raise KeyError(
                     "self_play_snapshot_refresh_episodes is required when self_play_opponent_enabled=true"
                 )
+            if self_play_snapshot_device is None or not str(self_play_snapshot_device).strip():
+                raise KeyError(
+                    "self_play_snapshot_device is required when self_play_opponent_enabled=true"
+                )
             self._self_play_ratio_start = float(self_play_ratio_start)
             self._self_play_ratio_end = float(self_play_ratio_end)
             self._self_play_total_episodes = int(self_play_total_episodes)
             self._self_play_warmup_episodes = int(self_play_warmup_episodes)
             self._self_play_snapshot_path = str(self_play_snapshot_path)
             self._self_play_snapshot_refresh_episodes = int(self_play_snapshot_refresh_episodes)
+            self._self_play_snapshot_device = str(self_play_snapshot_device).strip().lower()
             if not (0.0 <= self._self_play_ratio_start <= 1.0):
                 raise ValueError(
                     f"self_play_ratio_start must be in [0,1] "
@@ -159,6 +165,11 @@ class BotControlledEnv(gym.Wrapper):
                     "self_play_snapshot_refresh_episodes must be > 0 "
                     f"(got {self._self_play_snapshot_refresh_episodes})"
                 )
+            if self._self_play_snapshot_device not in {"cpu", "auto"}:
+                raise ValueError(
+                    "self_play_snapshot_device must be either 'cpu' or 'auto' "
+                    f"(got {self._self_play_snapshot_device!r})"
+                )
         else:
             self._self_play_ratio_start = 0.0
             self._self_play_ratio_end = 0.0
@@ -166,6 +177,7 @@ class BotControlledEnv(gym.Wrapper):
             self._self_play_warmup_episodes = 0
             self._self_play_snapshot_path = ""
             self._self_play_snapshot_refresh_episodes = 1
+            self._self_play_snapshot_device = "auto"
 
         # Unwrap ActionMasker to get actual engine
         # self.env is set by gym.Wrapper.__init__ to base_env
@@ -410,7 +422,10 @@ class BotControlledEnv(gym.Wrapper):
         ):
             return
         from sb3_contrib import MaskablePPO
-        self._frozen_model = MaskablePPO.load(snapshot_path)
+        self._frozen_model = MaskablePPO.load(
+            snapshot_path,
+            device=self._self_play_snapshot_device,
+        )
         self._frozen_model_mtime = current_mtime
         self._episodes_since_snapshot_refresh = 0
 
@@ -492,83 +507,101 @@ class BotControlledEnv(gym.Wrapper):
         return obs, float(cumulative_reward), terminated, truncated, info
 
     def reset(self, seed=None, options=None):
-        self._apply_episode_seat()
-        # LOG TEMPORAIRE: time reset() when --debug (to explain slow step index 0)
         debug_mode = require_key(self.engine.game_state, "debug_mode")
-        t0 = time.perf_counter() if debug_mode else None
-        obs, info = self.env.reset(seed=seed, options=options)
-        self._episode_index += 1
-        game_state = self.engine.game_state
-        game_state["controlled_player"] = self.controlled_player
-        game_state["opponent_player"] = self.bot_player
-        if self.controlled_player == 1:
-            self.episodes_agent_p1 += 1
-        else:
-            self.episodes_agent_p2 += 1
-        info["controlled_player"] = self.controlled_player
-        info["opponent_player"] = self.bot_player
-        info["agent_seat_mode"] = self.agent_seat_mode
-        if debug_mode and t0 is not None:
-            reset_s = time.perf_counter() - t0
-            ep = int(require_key(self.engine.game_state, "episode_number"))
-            try:
-                debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
-                    f.write(f"RESET_TIMING episode={ep} duration_s={reset_s:.6f}\n")
-            except (OSError, IOError):
-                pass
-        self.episode_reward = 0.0
-        self.episode_length = 0
+        max_reset_attempts = 64
+        last_failure: Optional[str] = None
 
-        # Random bot selection: pick a new opponent for this episode
-        if self._use_random_bots:
-            self.bot = random.choice(self._bots)
-        if self._self_play_opponent_enabled:
-            self._episodes_since_snapshot_refresh += 1
-        self._select_opponent_mode_for_episode()
-
-        # DIAGNOSTIC: Reset shoot tracking for new episode
-        self.shoot_opportunities = 0
-        self.shoot_actions = 0
-        self.wait_actions = 0
-
-        # DIAGNOSTIC: Reset AI shoot tracking
-        self.ai_shoot_opportunities = 0
-        self.ai_shoot_actions = 0
-        self.ai_wait_actions = 0
-
-        # CRITICAL FIX: Ensure reset() always returns an observation from the controlled player's turn.
-        # Without this, in seat mode p2, the first action of each episode is selected from a stale bot-turn observation.
-        bot_obs, _, terminated, truncated, bot_info = self._play_bot_until_control_returns(debug_mode=debug_mode)
-        if bot_obs is not None:
-            obs = bot_obs
-        if bot_info:
-            info.update(bot_info)
-        if terminated or truncated:
-            raise RuntimeError(
-                "Episode ended before controlled player received a turn during reset. "
-                "Scenario/turn flow is invalid for RL training."
+        for attempt_idx in range(max_reset_attempts):
+            self._apply_episode_seat()
+            t0 = time.perf_counter() if debug_mode else None
+            obs, info = self.env.reset(
+                seed=seed if attempt_idx == 0 else None,
+                options=options,
             )
+            self._episode_index += 1
+            game_state = self.engine.game_state
+            game_state["controlled_player"] = self.controlled_player
+            game_state["opponent_player"] = self.bot_player
+            if self.controlled_player == 1:
+                self.episodes_agent_p1 += 1
+            else:
+                self.episodes_agent_p2 += 1
+            info["controlled_player"] = self.controlled_player
+            info["opponent_player"] = self.bot_player
+            info["agent_seat_mode"] = self.agent_seat_mode
+            if debug_mode and t0 is not None:
+                reset_s = time.perf_counter() - t0
+                ep = int(require_key(self.engine.game_state, "episode_number"))
+                try:
+                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                        f.write(f"RESET_TIMING episode={ep} duration_s={reset_s:.6f}\n")
+                except (OSError, IOError):
+                    pass
+            self.episode_reward = 0.0
+            self.episode_length = 0
 
-        # Defensive validation: wrapper must return on actionable controlled decision owner.
-        decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
-        if decision_owner != self.controlled_player or not has_valid_actions:
-            current_player = require_key(self.engine.game_state, "current_player")
-            raise RuntimeError(
-                "BotControlledEnv reset returned non-actionable controlled state: "
-                f"decision_owner={decision_owner}, has_valid_actions={has_valid_actions}, "
-                f"current_player={current_player}, controlled_player={self.controlled_player}"
+            # Random bot selection: pick a new opponent for this episode
+            if self._use_random_bots:
+                self.bot = random.choice(self._bots)
+            if self._self_play_opponent_enabled:
+                self._episodes_since_snapshot_refresh += 1
+            self._select_opponent_mode_for_episode()
+
+            # DIAGNOSTIC: Reset shoot tracking for new episode
+            self.shoot_opportunities = 0
+            self.shoot_actions = 0
+            self.wait_actions = 0
+
+            # DIAGNOSTIC: Reset AI shoot tracking
+            self.ai_shoot_opportunities = 0
+            self.ai_shoot_actions = 0
+            self.ai_wait_actions = 0
+
+            # Enforce reset contract for policy learning: return only controlled actionable states.
+            bot_obs, _, terminated, truncated, bot_info = self._play_bot_until_control_returns(
+                debug_mode=debug_mode
             )
+            if bot_obs is not None:
+                obs = bot_obs
+            if bot_info:
+                info.update(bot_info)
+            if terminated or truncated:
+                winner = self.engine.game_state.get("winner")
+                episode_number = self.engine.game_state.get("episode_number")
+                last_failure = (
+                    "Episode ended before first controlled decision during reset "
+                    f"(attempt={attempt_idx + 1}, controlled_player={self.controlled_player}, "
+                    f"opponent_player={self.bot_player}, winner={winner}, "
+                    f"episode_number={episode_number})"
+                )
+                continue
 
-        self._last_step_return_time = None
-        info["controlled_player"] = self.controlled_player
-        info["opponent_player"] = self.bot_player
-        info["agent_seat_mode"] = self.agent_seat_mode
-        info["opponent_mode"] = (
-            "self_play" if self._episode_uses_self_play_opponent else "bot"
+            # Defensive validation: wrapper must return on actionable controlled decision owner.
+            decision_owner, has_valid_actions, _eligible_count = self._get_decision_owner_from_mask()
+            if decision_owner != self.controlled_player or not has_valid_actions:
+                current_player = require_key(self.engine.game_state, "current_player")
+                raise RuntimeError(
+                    "BotControlledEnv reset returned non-actionable controlled state: "
+                    f"decision_owner={decision_owner}, has_valid_actions={has_valid_actions}, "
+                    f"current_player={current_player}, controlled_player={self.controlled_player}"
+                )
+
+            self._last_step_return_time = None
+            info["controlled_player"] = self.controlled_player
+            info["opponent_player"] = self.bot_player
+            info["agent_seat_mode"] = self.agent_seat_mode
+            info["opponent_mode"] = (
+                "self_play" if self._episode_uses_self_play_opponent else "bot"
+            )
+            info["self_play_ratio_current"] = self._self_play_ratio_current
+            return obs, info
+
+        raise RuntimeError(
+            "BotControlledEnv reset exceeded max attempts without reaching a controlled actionable state "
+            f"(max_reset_attempts={max_reset_attempts}). "
+            f"Last failure: {last_failure}"
         )
-        info["self_play_ratio_current"] = self._self_play_ratio_current
-        return obs, info
 
     def step(self, agent_action):
         # LOG TEMPORAIRE: time between previous step() return and this step() call (SB3 loop = predict + overhead, --debug)

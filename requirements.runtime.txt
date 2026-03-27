@@ -12,3 +12,7 @@ torchvision==0.20.1
 gymnasium==1.1.1
 stable-baselines3==2.6.0
 sb3-contrib==2.6.0
+tensorboard==2.20.0
+# setuptools>=82 supprime pkg_resources (TensorBoard 2.20 l'utilise encore)
+setuptools>=70,<82
+tqdm==4.67.1

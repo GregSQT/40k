@@ -87,6 +87,7 @@
     "warmup_episodes": 2000,
     "snapshot_model_path": "ai/models/CoreAgent/model_CoreAgent_selfplay_snapshot.zip",
     "snapshot_update_freq_episodes": 1000,
+    "self_play_snapshot_device": "cpu",
     "self_play_deterministic": false
   },
   "training_hard": {
@@ -191,11 +192,12 @@
   },
   "opponent_mix": {
     "enabled": true,
-    "self_play_ratio_start": 0.01,
+    "self_play_ratio_start": 0.00,
     "self_play_ratio_end": 0.30,
-    "warmup_episodes": 5000,
+    "warmup_episodes": 1000,
     "snapshot_model_path": "ai/models/CoreAgent/model_CoreAgent_selfplay_snapshot.zip",
     "snapshot_update_freq_episodes": 1000,
+    "self_play_snapshot_device": "cpu",
     "self_play_deterministic": false
   },
   "training_hard": {

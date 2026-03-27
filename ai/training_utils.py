@@ -226,6 +226,9 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
                 self_play_snapshot_refresh_episodes=(
                     int(opponent_mix_config["snapshot_refresh_episodes"]) if mix_enabled else None
                 ),
+                self_play_snapshot_device=(
+                    str(opponent_mix_config["snapshot_device"]) if mix_enabled else None
+                ),
                 self_play_deterministic=(
                     bool(opponent_mix_config["deterministic"]) if mix_enabled else False
                 ),

@@ -8,6 +8,7 @@ import os
 import sys
 import io
 import argparse
+import tempfile
 
 # Fix Windows encoding for emoji/Unicode output with line buffering
 if sys.platform == 'win32':
@@ -1908,6 +1909,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     warmup_raw = require_key(mix_cfg, "warmup_episodes")
                     snapshot_path_raw = require_key(mix_cfg, "snapshot_model_path")
                     snapshot_refresh_raw = require_key(mix_cfg, "snapshot_update_freq_episodes")
+                    snapshot_device_raw = require_key(mix_cfg, "self_play_snapshot_device")
                     deterministic_raw = require_key(mix_cfg, "self_play_deterministic")
 
                     self_play_ratio_start = float(self_play_ratio_start_raw)
@@ -1915,6 +1917,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     warmup_episodes = int(warmup_raw)
                     snapshot_path = str(snapshot_path_raw)
                     snapshot_refresh_episodes = int(snapshot_refresh_raw)
+                    snapshot_device = str(snapshot_device_raw).strip().lower()
                     self_play_deterministic = bool(deterministic_raw)
 
                     if not (0.0 <= self_play_ratio_start <= 1.0):
@@ -1941,6 +1944,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                             "opponent_mix.snapshot_update_freq_episodes must be > 0 "
                             f"(got {snapshot_refresh_episodes})"
                         )
+                    if snapshot_device not in {"cpu", "auto"}:
+                        raise ValueError(
+                            "opponent_mix.self_play_snapshot_device must be either 'cpu' or 'auto' "
+                            f"(got {snapshot_device!r})"
+                        )
                     snapshot_dir = os.path.dirname(snapshot_path)
                     if not snapshot_dir:
                         raise ValueError(
@@ -1956,6 +1964,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                         "total_episodes": int(total_episodes),
                         "snapshot_model_path": snapshot_path,
                         "snapshot_refresh_episodes": snapshot_refresh_episodes,
+                        "snapshot_device": snapshot_device,
                         "deterministic": self_play_deterministic,
                     }
                     self_play_snapshot_enabled = True
@@ -2051,6 +2060,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 ),
                 self_play_snapshot_refresh_episodes=(
                     int(opponent_mix_config["snapshot_refresh_episodes"])
+                    if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
+                    else None
+                ),
+                self_play_snapshot_device=(
+                    str(opponent_mix_config["snapshot_device"])
                     if opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
                     else None
                 ),
@@ -2272,7 +2286,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             env = Monitor(bot_env)
         else:
             if episodes_trained - last_frozen_model_update >= frozen_model_update_frequency or frozen_model is None:
-                import tempfile
                 with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as f:
                     temp_path = f.name
                 model.save(temp_path)
@@ -2284,7 +2297,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             selfplay_env = SelfPlayWrapper(masked_env, frozen_model=frozen_model, update_frequency=frozen_model_update_frequency)
             env = Monitor(selfplay_env)
         if vec_normalize_enabled:
-            import tempfile
             tmp_dir = tempfile.mkdtemp()
             tmp_model_path = os.path.join(tmp_dir, "model.zip")
             try:
@@ -2356,7 +2368,25 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             return
         if self_play_snapshot_path is None:
             raise RuntimeError("self_play_snapshot_enabled=True but snapshot path is missing.")
-        model.save(self_play_snapshot_path)
+        snapshot_dir = os.path.dirname(self_play_snapshot_path)
+        if not snapshot_dir:
+            raise RuntimeError(
+                "self_play_snapshot_enabled=True but snapshot path has no parent directory."
+            )
+        os.makedirs(snapshot_dir, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            suffix=".zip",
+            dir=snapshot_dir,
+            delete=False,
+        ) as tmp_file:
+            tmp_snapshot_path = tmp_file.name
+        try:
+            model.save(tmp_snapshot_path)
+            os.replace(tmp_snapshot_path, self_play_snapshot_path)
+        finally:
+            if os.path.exists(tmp_snapshot_path):
+                os.remove(tmp_snapshot_path)
 
     # reset_num_timesteps semantics:
     # - --append: keep monotonic timesteps (never reset) for true continuation.
