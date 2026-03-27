@@ -309,6 +309,11 @@ Minimum a ajouter ensuite:
 2. quelques tests API scenario-driven;
 3. quelques tests UI E2E cibles sur parcours majeurs.
 
+Anomalies connues detectees par les tests:
+- consigner chaque anomalie dans `Documentation/KNOWN_ANOMALIES.md`;
+- ajouter un test sentinelle explicite (idealement `xfail`) lie a l'anomalie;
+- referencer l'identifiant d'anomalie dans le message `reason` du test.
+
 ---
 
 ## 14) Plan d'execution (7 jours)

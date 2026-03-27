@@ -634,8 +634,9 @@ def main():
     def log_print(*args, **kwargs):
         """Print to both console and file (used only for final summary line)"""
         print(*args, **kwargs)
-        print(*args, file=output_f, **kwargs)
-        output_f.flush()
+        if not output_f.closed:
+            print(*args, file=output_f, **kwargs)
+            output_f.flush()
     
     total_issues = 0
     try:
@@ -650,22 +651,18 @@ def main():
             debug_log_path = 'debug.log'
             if not os.path.exists(debug_log_path):
                 file_print("❌ ERREUR: debug.log introuvable")
-                output_f.close()
                 return
         except Exception as e:
             file_print(f"❌ ERREUR: {e}")
-            output_f.close()
             return
         
         try:
             step_log_path = 'step.log'
             if not os.path.exists(step_log_path):
                 file_print("❌ ERREUR: step.log introuvable")
-                output_f.close()
                 return
         except Exception as e:
             file_print(f"❌ ERREUR: {e}")
-            output_f.close()
             return
         
         # Parse logs - OPTIMIZED: Process files line by line to avoid OOM
@@ -785,7 +782,7 @@ def main():
         file_print("\n" + "=" * 80)
         file_print("3. ATTAQUES MANQUANTES EN PHASE FIGHT (unités avec cibles valides mais AUCUNE attaque)")
         file_print("=" * 80)
-        missing_attacks = check_missing_fight_attacks(fight_activations, step_attacks, movement_log)
+        missing_attacks = check_missing_fight_attacks(fight_activations, step_attacks, "")
         if missing_attacks:
             file_print(f"⚠️  {len(missing_attacks)} unité(s) avec cibles valides mais SANS AUCUNE attaque loguée:")
             for missing in missing_attacks[:20]:  # Show first 20
@@ -832,7 +829,8 @@ def main():
             log_print(f"⚠️ hidden_action_finder.py :  {total_issues} erreur(s) détectée(s)   -   Output : {output_file}")
         else:
             log_print(f"✅ hidden_action_finder.py : Aucune erreur détectée   -   Output : {output_file}")
-        output_f.close()
+        if not output_f.closed:
+            output_f.close()
 
 if __name__ == '__main__':
     main()

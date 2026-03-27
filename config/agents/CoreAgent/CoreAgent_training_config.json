@@ -8,7 +8,7 @@
   "bot_eval_scenario_pool": "holdout",
   "bot_eval_show_progress": true,
   "bot_eval_use_subprocess": true,
-  "bot_eval_n_workers": 12,
+  "bot_eval_n_workers": 6,
   "max_turns_per_episode": 5,
   "n_envs": 48,
   "callback_params": {
@@ -20,6 +20,7 @@
     "bot_eval_use_episodes": true,
     "bot_eval_intermediate": 250,
     "bot_eval_final": 500,
+    "bot_eval_worker_device": "cpu",
     "save_best_robust": true,
     "save_best_robust_normal": true,
     "robust_window": 5,
@@ -118,7 +119,7 @@
   "bot_eval_scenario_pool": "holdout",
   "bot_eval_show_progress": true,
   "bot_eval_use_subprocess": true,
-  "bot_eval_n_workers": 12,
+  "bot_eval_n_workers": 6,
   "max_turns_per_episode": 5,
   "n_envs": 48,
   "callback_params": {
@@ -130,6 +131,7 @@
     "bot_eval_use_episodes": true,
     "bot_eval_intermediate": 250,
     "bot_eval_final": 500,
+    "bot_eval_worker_device": "cpu",
     "save_best_robust": false,
     "save_best_robust_normal": true,
     "robust_window": 5,

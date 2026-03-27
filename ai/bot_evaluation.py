@@ -369,6 +369,7 @@ def _episode_seed(base_seed: int, bot_name: str, scenario_idx: int, ep_idx: int)
 
 def _eval_worker_init(
     model_path: str,
+    worker_model_device: str,
     vec_model_path: Optional[str],
     vec_normalize_enabled: bool,
     vec_eval_enabled: bool,
@@ -381,7 +382,7 @@ def _eval_worker_init(
     global _worker_model, _worker_obs_normalizer
     from sb3_contrib import MaskablePPO
 
-    _worker_model = MaskablePPO.load(model_path)
+    _worker_model = MaskablePPO.load(model_path, device=worker_model_device)
     _worker_obs_normalizer = _build_eval_obs_normalizer_for_worker(
         _worker_model, vec_model_path, vec_normalize_enabled, vec_eval_enabled
     )
@@ -696,6 +697,13 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
     callback_params = require_key(training_cfg, "callback_params")
     use_subprocess = callback_params.get("bot_eval_use_subprocess", True)
+    worker_model_device_raw = require_key(callback_params, "bot_eval_worker_device")
+    worker_model_device = str(worker_model_device_raw).strip().lower()
+    if worker_model_device not in {"cpu", "auto"}:
+        raise ValueError(
+            "callback_params.bot_eval_worker_device must be either 'cpu' or 'auto' "
+            f"(got {worker_model_device!r})"
+        )
     if step_logger and step_logger.enabled:
         use_subprocess = False
     if debug_mode:
@@ -748,6 +756,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
     initargs = (
         effective_model_path,
+        worker_model_device,
         vec_model_path,
         vec_normalize_enabled,
         vec_eval_enabled,
