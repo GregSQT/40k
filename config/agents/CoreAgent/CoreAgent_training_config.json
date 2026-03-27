@@ -2,7 +2,7 @@
   "default": {
   "type": "################################################### Default ###################################################",
   "seed": 22345,
-  "total_episodes": 100000,
+  "total_episodes": 50000,
   "total_episodes_normal": "20000 -violet 1000 ep / minute -> 12k ep / hour",
   "agent_seat_mode": "random",
   "bot_eval_scenario_pool": "holdout",
@@ -12,7 +12,8 @@
   "max_turns_per_episode": 5,
   "n_envs": 48,
   "callback_params": {
-    "checkpoint_save_freq": 500000,
+    "checkpoint_save_freq": 10000,
+    "max_checkpoints": 5,
     "checkpoint_name_prefix": "ppo_checkpoint",
     "eval_deterministic": true,
     "eval_render": false,
@@ -124,6 +125,7 @@
   "n_envs": 48,
   "callback_params": {
     "checkpoint_save_freq": 500000,
+    "max_checkpoints": 5,
     "checkpoint_name_prefix": "ppo_checkpoint",
     "eval_deterministic": true,
     "eval_render": false,
@@ -230,6 +232,7 @@
     "n_envs": 1,
     "callback_params": {
       "checkpoint_save_freq": 50000,
+      "max_checkpoints": 5,
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,

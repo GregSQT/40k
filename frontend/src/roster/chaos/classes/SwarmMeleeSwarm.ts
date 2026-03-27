@@ -4,10 +4,6 @@ export class SwarmMeleeSwarm {
   static FACTION = "Chaos";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Swarm"; // Swarm: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - bolt rifles vs hordes
 
   name: string;
   hp: number;

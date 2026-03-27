@@ -4,10 +4,6 @@ export class SwarmRangeSwarm {
   static FACTION = "Tyranid";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - anti-infantry
 
   name: string;
   hp: number;

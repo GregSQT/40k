@@ -4,11 +4,6 @@ export class LeaderEliteMeleeElite {
   static FACTION = "Space Marines";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "LeaderElite"; // LeaderElite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static OFFENSE_TYPE = "Melee"; // Offensive mode classification
-  static TARGET_TYPE = "Elite"; // MeleeElite specialist - hunt elite targets
 
   name: string;
   hp: number;

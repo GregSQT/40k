@@ -26,10 +26,6 @@ export class Zoanthrope extends TroopRangeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "psyker"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "synapse"}, { keywordId: "zoanthrope"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - anti-infantry
 
   static ICON = "/icons/Zoanthrope.webp"; // Path relative to public folder
   static ICON_SCALE = 1.8; // Size of the icon

@@ -25,10 +25,6 @@ export class Obliterator extends EliteRangeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "chaos"}, { keywordId: "daemon"}, { keywordId: "obliterator"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
 
   static ICON = "/icons/Obliterator.webp"; // Path relative to public folder
   static ICON_SCALE = 2.2; // Size of the icon

@@ -394,17 +394,38 @@ class EpisodeTerminationCallback(BaseCallback):
                     f"max: {self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"
+                learning_status_circle = "⚪"
+                learning_status_streak = 0
+                robust_status_text = ""
                 if self.gate_display_state is not None:
                     label_value = self.gate_display_state.get("label")
                     if isinstance(label_value, str) and label_value.strip():
                         gate_label = label_value.strip()
-                gate_display = f" | {gate_label}"
+                    circle_value = self.gate_display_state.get("learning_status_circle")
+                    if isinstance(circle_value, str) and circle_value.strip():
+                        learning_status_circle = circle_value.strip()
+                    streak_value = self.gate_display_state.get("learning_status_streak_count")
+                    if isinstance(streak_value, int) and streak_value > 0:
+                        learning_status_streak = streak_value
+                    robust_value = self.gate_display_state.get("best_robust_score")
+                    robust_trend = self.gate_display_state.get("robust_trend_symbol")
+                    if isinstance(robust_value, (float, int)) and robust_value > -float("inf"):
+                        robust_status_text = f" | robust={float(robust_value):.4f}"
+                        if isinstance(robust_trend, str) and robust_trend.strip():
+                            robust_status_text += f" {robust_trend.strip()}"
+                status_display = (
+                    f"{learning_status_circle}x{learning_status_streak}"
+                    if learning_status_streak > 0
+                    else learning_status_circle
+                )
+                gate_display = f" | {gate_label} {status_display}"
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
                 progress_line = (
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                    f" [{time_info}] [{duration_display}] {gate_label}{phase_display}"
+                    f" [{time_info}] [{duration_display}] {gate_label} {status_display}"
+                    f"{robust_status_text}{phase_display}"
                 )
                 # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
                 prev_len = self._last_progress_line_len
@@ -667,6 +688,64 @@ class MetricsCollectionCallback(BaseCallback):
         # Q-value tracking with history
         self.q_value_history = []
         self.max_q_value_history = 100  # Keep last 100 Q-value samples
+        self.episode_observation_phase_data = {
+            'shoot': {
+                'best_kill_probability': [],
+                'danger_to_me': [],
+                'valid_target_count': []
+            },
+            'fight': {
+                'best_kill_probability': [],
+                'danger_to_me': [],
+                'valid_target_count': []
+            },
+            'charge': {
+                'best_kill_probability': [],
+                'danger_to_me': [],
+                'valid_target_count': []
+            },
+        }
+
+    def _get_observation_batch_from_locals(self):
+        """Get current observation batch from callback locals."""
+        if not hasattr(self, 'locals'):
+            return None
+        if 'new_obs' in self.locals:
+            return self.locals['new_obs']
+        if 'obs' in self.locals:
+            return self.locals['obs']
+        return None
+
+    def _extract_valid_target_metrics_from_obs(self, obs_vector: np.ndarray) -> Dict[str, List[float]]:
+        """
+        Extract valid-target metrics from observation vector.
+        Valid target block: 5 slots × 8 features at [273:313].
+        """
+        if obs_vector.ndim != 1:
+            raise ValueError(f"Expected 1D observation vector, got shape={obs_vector.shape}")
+        if obs_vector.shape[0] < 313:
+            raise ValueError(f"Observation size too small for valid target block: size={obs_vector.shape[0]}")
+
+        base_idx = 273
+        slot_size = 8
+        max_slots = 5
+        kill_values: List[float] = []
+        danger_values: List[float] = []
+        valid_count = 0
+
+        for slot_idx in range(max_slots):
+            slot_base = base_idx + (slot_idx * slot_size)
+            is_valid = float(obs_vector[slot_base + 0])
+            if is_valid > 0.5:
+                valid_count += 1
+                kill_values.append(float(obs_vector[slot_base + 2]))
+                danger_values.append(float(obs_vector[slot_base + 3]))
+
+        return {
+            'best_kill_probability': kill_values,
+            'danger_to_me': danger_values,
+            'valid_target_count': [float(valid_count)],
+        }
     
     def _on_training_start(self) -> None:
         """Called when training starts.
@@ -826,6 +905,7 @@ class MetricsCollectionCallback(BaseCallback):
     
     def _on_step(self) -> bool:
         """Collect step-level data including actions, damage, and unit changes"""
+        obs_batch = self._get_observation_batch_from_locals()
         # Track step-level reward and length
         if hasattr(self, 'locals'):
             if 'rewards' in self.locals:
@@ -838,6 +918,42 @@ class MetricsCollectionCallback(BaseCallback):
             if 'infos' in self.locals:
                 for idx, info in enumerate(self.locals['infos']):
                     is_controlled_action = bool(info.get('is_controlled_action', False))
+                    phase_name = info.get('phase')
+                    if (
+                        is_controlled_action
+                        and isinstance(phase_name, str)
+                        and phase_name in self.episode_observation_phase_data
+                        and obs_batch is not None
+                    ):
+                        if isinstance(obs_batch, np.ndarray) and obs_batch.ndim == 2:
+                            if idx >= obs_batch.shape[0]:
+                                raise IndexError(
+                                    f"Observation batch index out of range: idx={idx}, shape={obs_batch.shape}"
+                                )
+                            obs_vector = obs_batch[idx]
+                        elif isinstance(obs_batch, np.ndarray) and obs_batch.ndim == 1:
+                            obs_vector = obs_batch
+                        elif isinstance(obs_batch, list):
+                            if idx >= len(obs_batch):
+                                raise IndexError(
+                                    f"Observation batch index out of range: idx={idx}, len={len(obs_batch)}"
+                                )
+                            obs_vector = np.asarray(obs_batch[idx], dtype=np.float32)
+                        else:
+                            raise TypeError(
+                                f"Unsupported observation batch type for metrics extraction: {type(obs_batch).__name__}"
+                            )
+
+                        extracted = self._extract_valid_target_metrics_from_obs(np.asarray(obs_vector))
+                        self.episode_observation_phase_data[phase_name]['best_kill_probability'].extend(
+                            extracted['best_kill_probability']
+                        )
+                        self.episode_observation_phase_data[phase_name]['danger_to_me'].extend(
+                            extracted['danger_to_me']
+                        )
+                        self.episode_observation_phase_data[phase_name]['valid_target_count'].extend(
+                            extracted['valid_target_count']
+                        )
 
                     # Track action validity
                     if 'success' in info and is_controlled_action:
@@ -1016,6 +1132,7 @@ class MetricsCollectionCallback(BaseCallback):
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
+        self.metrics_tracker.log_observation_phase_metrics(self.episode_observation_phase_data)
         
         # CRITICAL FIX: Write game_critical metrics directly to model.logger
         # This ensures metrics appear in same TensorBoard directory as train/ metrics
@@ -1183,6 +1300,23 @@ class MetricsCollectionCallback(BaseCallback):
             'phases_completed': 0,
             'total_phases': 6
         }
+        self.episode_observation_phase_data = {
+            'shoot': {
+                'best_kill_probability': [],
+                'danger_to_me': [],
+                'valid_target_count': []
+            },
+            'fight': {
+                'best_kill_probability': [],
+                'danger_to_me': [],
+                'valid_target_count': []
+            },
+            'charge': {
+                'best_kill_probability': [],
+                'danger_to_me': [],
+                'valid_target_count': []
+            },
+        }
     
     def _calculate_immediate_vs_future_ratio(self, info):
         """Calculate ratio of immediate vs future-oriented actions"""
@@ -1337,6 +1471,11 @@ class BotEvaluationCallback(BaseCallback):
         self.gate_display_state = gate_display_state
         if self.gate_display_state is not None:
             self.gate_display_state["label"] = "Gate 🧱"
+            self.gate_display_state["learning_status_circle"] = "⚪"
+            self.gate_display_state["learning_status_streak_count"] = 0
+            self.gate_display_state["learning_status_streak_circle"] = "⚪"
+            self.gate_display_state["best_robust_score"] = -float("inf")
+            self.gate_display_state["robust_trend_symbol"] = "→"
         self.eval_deterministic = eval_deterministic
         self.combined_history = deque(maxlen=robust_window)
         self.best_robust_score = -float("inf")
@@ -1375,6 +1514,46 @@ class BotEvaluationCallback(BaseCallback):
             }
         else:
             self.bots = {}
+
+    def _update_learning_status_display(self, circle: str) -> None:
+        """Update consecutive status streak shown in progress bar."""
+        if self.gate_display_state is None:
+            return
+        previous_circle = self.gate_display_state.get("learning_status_streak_circle")
+        previous_count = self.gate_display_state.get("learning_status_streak_count")
+        count = previous_count if isinstance(previous_count, int) and previous_count > 0 else 0
+        if previous_circle == circle:
+            count += 1
+        else:
+            count = 1
+        self.gate_display_state["learning_status_circle"] = circle
+        self.gate_display_state["learning_status_streak_circle"] = circle
+        self.gate_display_state["learning_status_streak_count"] = count
+
+    def _compute_robust_trend_symbol(self, valid_window_size: int = 5) -> str:
+        """Compute robust trend symbol from last valid gating evaluations."""
+        valid_entries: List[Dict[str, Any]] = []
+        for entry in reversed(self.gating_history):
+            status = entry.get("status")
+            criteria_mean = entry.get("criteria_mean")
+            if status in {"PASS", "FAIL"} and isinstance(criteria_mean, (float, int)):
+                valid_entries.append(entry)
+            if len(valid_entries) >= valid_window_size:
+                break
+        if len(valid_entries) < 2:
+            return "→"
+        oldest = float(valid_entries[-1]["criteria_mean"])
+        newest = float(valid_entries[0]["criteria_mean"])
+        delta = newest - oldest
+        if delta >= 0.02:
+            return "↗↗"
+        if delta >= 0.008:
+            return "↗"
+        if delta <= -0.02:
+            return "↘↘"
+        if delta <= -0.008:
+            return "↘"
+        return "→"
 
     def _evaluate_model_gate(self, results: Dict[str, Any], eval_marker: int) -> bool:
         """Evaluate model gating thresholds and store explicit PASS/FAIL history."""
@@ -1449,13 +1628,24 @@ class BotEvaluationCallback(BaseCallback):
             }
         )
         if self.gate_display_state is not None:
+            self.gate_display_state["robust_trend_symbol"] = self._compute_robust_trend_symbol(
+                valid_window_size=5
+            )
+        if self.gate_display_state is not None:
             if self.thresholds_ever_passed:
                 if gate_pass or has_improved_mean:
-                    self.gate_display_state["label"] = "Gate 🏁 ✅"
+                    self.gate_display_state["label"] = "Gate 🏁"
+                    self._update_learning_status_display("🟢")
                 else:
-                    self.gate_display_state["label"] = "Gate 🏁 ❌"
+                    self.gate_display_state["label"] = "Gate 🏁"
+                    self._update_learning_status_display("🔴")
             else:
-                self.gate_display_state["label"] = "Gate 🧱 ✅" if has_improved_mean else "Gate 🧱 ❌"
+                if has_improved_mean:
+                    self.gate_display_state["label"] = "Gate 🧱"
+                    self._update_learning_status_display("🟠")
+                else:
+                    self.gate_display_state["label"] = "Gate 🧱"
+                    self._update_learning_status_display("🔴")
 
         return gate_pass
 
@@ -1478,7 +1668,12 @@ class BotEvaluationCallback(BaseCallback):
             }
         )
         if self.gate_display_state is not None:
-            self.gate_display_state["label"] = "Gate ⚠️ SKIP"
+            self.gate_display_state["robust_trend_symbol"] = self._compute_robust_trend_symbol(
+                valid_window_size=5
+            )
+        if self.gate_display_state is not None:
+            self.gate_display_state["label"] = "Gate ⚠️"
+            self._update_learning_status_display("🟠")
 
     @staticmethod
     def _ensure_zip_path(model_path: str) -> str:
@@ -1780,6 +1975,8 @@ class BotEvaluationCallback(BaseCallback):
                     else:
                         self._copy_model_artifacts(self.best_robust_model_path, canonical_model_path)
                         self._write_canonical_robust_meta(robust_score)
+                if self.gate_display_state is not None:
+                    self.gate_display_state["best_robust_score"] = float(self.best_robust_score)
 
     def _cleanup_pending_snapshot(self) -> None:
         """Delete pending async snapshot artifacts if they exist."""

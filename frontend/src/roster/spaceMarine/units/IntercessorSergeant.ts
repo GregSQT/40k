@@ -26,10 +26,6 @@ export class IntercessorSergeant extends TroopMeleeElite {
     // UNIT KEYWORDS
     static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "intercessor squad"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // MeleeElite specialist - backbone melee
 
   static ICON = "/icons/IntercessorSergeant.webp"; // Path relative to public folder
   static ICON_SCALE = 1.7; // Size of the icon

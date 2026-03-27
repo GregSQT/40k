@@ -26,11 +26,6 @@ export class WraithguardDScythe extends SwarmRangeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "wraith construct"}, { keywordId: "wraithguard"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // Elite specialist - hunt elite targets
-
 
   static ICON = "/icons/WraithguardDScythe.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6; // Size of the icon

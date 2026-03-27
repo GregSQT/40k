@@ -133,7 +133,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `--training-config <name>` : clé du bloc dans `*_training_config.json` (ex. `default`, `debug`).
   - `--rewards-config <name>` : en pratique le même que `--agent` ou un alias ; utilisé comme `rewards_config_name` et pour charger `*_rewards_config.json`.
   - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un ou plusieurs bots (RandomBot, GreedyBot, DefensiveBot).
-- **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--test-episodes N`, `--append` (reprendre un modèle existant), `--new-model` (partir de zéro).
+- **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--new-model` (partir de zéro).
 
 ### Chargement de la config
 
@@ -681,6 +681,10 @@ Règles:
       "bot_eval_use_episodes": true,     // true = freq in episodes, false = timesteps
       "bot_eval_intermediate": 30,       // Episodes per bot per eval (30 = good precision/speed balance)
       "bot_eval_final": 0,               // Final eval episodes (0 = skip)
+      "bot_eval_use_subprocess": true,   // ProcessPoolExecutor for eval tasks (set false to force serial)
+      "bot_eval_n_workers": 6,           // Number of eval workers when subprocess mode is enabled
+      "bot_eval_task_timeout_seconds": 300, // Per-task timeout in parallel eval
+      "bot_eval_worker_device": "cpu",   // Model device in eval workers: "cpu" or "auto"
       "save_best_robust": true,          // If true, canonical model comes from robust selection
       "robust_window": 3,                // Moving window size for robust score
       "robust_drawdown_penalty": 0.5,    // Drawdown penalty applied to robust score
@@ -940,10 +944,28 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 
 # Manual evaluation (test-only, no training)
 python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episodes 20
+# Equivalent alias:
+python ai/train.py --agent <agent_key> --scenario bot --eval --test-episodes 20
 # Uses model at ai/models/<agent_key>/model_<agent_key>.zip
 ```
 
-**Eval parameters** (`callback_params`): `bot_eval_freq` (how often), `bot_eval_intermediate` (episodes per bot — 30 recommended for stable estimates without long runs).
+### Runtime architecture (current implementation)
+
+- `evaluate_against_bots()` (`ai/bot_evaluation.py`) est le point unique d’évaluation.
+- Mode parallèle: `ProcessPoolExecutor` avec contexte `spawn` (isolation process stricte).
+- Worker initializer: le modèle + normalizer sont chargés une seule fois par worker.
+- Fallback sérial forcé si `step_logger` actif ou `debug_mode=true` (évite objets non picklables et facilite le debug).
+- Seeds d’épisode déterministes via `hashlib.md5` (`_episode_seed`).
+- En mode parallèle, la collecte est robuste aux hangs:
+  - polling non-bloquant (`wait(..., FIRST_COMPLETED)`),
+  - deadline par tâche (`bot_eval_task_timeout_seconds`),
+  - arrêt forcé du pool si timeout détecté,
+  - marquage des tâches restantes en timeout (`failed_episodes`).
+
+**Eval parameters** (`callback_params`) :
+- fréquence/volume: `bot_eval_freq`, `bot_eval_intermediate`, `bot_eval_final`, `bot_eval_use_episodes`
+- parallélisation: `bot_eval_use_subprocess`, `bot_eval_n_workers`, `bot_eval_worker_device`
+- robustesse runtime: `bot_eval_task_timeout_seconds`
 
 **Model gating (production)**:
 - `model_gating_enabled=true` active un gate dur avant promotion de modèle.
@@ -959,6 +981,12 @@ python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episode
 **Résolution des `callback_params`**:
 - Une clé absente ou `null` dans le config agent est résolue via `config/agents/_training_common.json`.
 - Si la clé manque aussi dans `_training_common.json`: erreur explicite (fail fast).
+
+**Sorties runtime d'évaluation** (`evaluate_against_bots`) :
+- `total_failed_episodes`: nombre total d’épisodes échoués (timeouts/erreurs agrégés)
+- `eval_reliable`: `true` si `total_failed_episodes == 0`, sinon `false`
+- `eval_duration_seconds`: durée murale de l’évaluation
+- `scenario_bot_stats` / `scenario_scores`: agrégats par scénario (utilisés par les gates robustesse)
 
 ### Win Rate Benchmarks
 

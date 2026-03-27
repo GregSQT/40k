@@ -26,11 +26,6 @@ export class StormGuardian extends SwarmMeleeSwarm {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "guardians"}, { keywordId: "guardian defenders"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Elite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - bolt rifles vs hordes
-
 
   static ICON = "/icons/StormGuardian.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6; // Size of the icon

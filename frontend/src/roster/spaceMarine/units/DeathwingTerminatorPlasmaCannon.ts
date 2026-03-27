@@ -26,10 +26,6 @@ export class DeathwingTerminatorPlasmaCannon extends EliteRangeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "deathwing"}, { keywordId: "deathwing terminator squad"}];
  
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // RangedElite specialist - plasma rifles vs hordes
 
   static ICON = "/icons/DeathwingTerminatorPlasmaCannon.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon

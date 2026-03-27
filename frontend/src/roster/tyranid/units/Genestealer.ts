@@ -25,10 +25,6 @@ export class Genestealer extends TroopMeleeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "genestealer"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // // Troop: 2 wounds, 3+ save / 5+ Invu
-  static MOVE_TYPE = "Infantry"; // Fast infantry movement
-  static TARGET_TYPE = "Troop"; // MeleeTroop specialist - mob assault
 
   static ICON = "/icons/Genestealer.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6; // Size of the icon

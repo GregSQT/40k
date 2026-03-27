@@ -4,11 +4,6 @@ export class SwarmMeleeSwarm {
   static FACTION = "Space Marines";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static OFFENSE_TYPE = "Melee"; // Offensive mode classification
-  static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
   name: string;
   hp: number;

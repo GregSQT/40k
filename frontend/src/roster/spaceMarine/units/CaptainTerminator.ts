@@ -32,10 +32,6 @@ export class CaptainTerminator extends LeaderEliteMeleeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "captain terminator"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "LeaderElite"; // LeaderElite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // MeleeElite specialist - hunt elite targets
 
   static ICON = "/icons/CaptainTerminator.webp"; // Path relative to public folder
   static ICON_SCALE = 1.9; // Size of the icon

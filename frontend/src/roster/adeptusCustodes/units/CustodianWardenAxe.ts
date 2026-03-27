@@ -25,10 +25,6 @@ export class CustodianWardenAxe extends EliteMeleeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "imperium"}, { keywordId: "custodian warden"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 8 wounds, 2+ save - heavy armor
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Troop"; // MeleeTroop specialist - monster vs troop
 
   static ICON = "/icons/CustodianWardenAxe.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon

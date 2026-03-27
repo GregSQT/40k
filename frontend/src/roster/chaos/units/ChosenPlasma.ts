@@ -25,10 +25,6 @@ export class ChosenPlasma extends TroopRangeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "chaos"}, { keywordId: "chosen"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
 
   static ICON = "/icons/ChosenPlasma.webp"; // Path relative to public folder
   static ICON_SCALE = 1.5; // Size of the icon

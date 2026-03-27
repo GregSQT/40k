@@ -36,10 +36,6 @@ export class Gargoyle extends SwarmMeleeSwarm {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "fly"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "gargoyle"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Fast infantry movement
-  static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
   // ICON
   static ICON = "/icons/Gargoyle.webp"; // Path relative to public folder

@@ -26,11 +26,6 @@ export class FireDragon extends SwarmRangeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Fire Dragon"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Elite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // Elite specialist - hunt elite targets
-
 
   static ICON = "/icons/FireDragon.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6; // Size of the icon

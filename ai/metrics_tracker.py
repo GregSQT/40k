@@ -1077,6 +1077,86 @@ class W40KMetricsTracker:
                 float(value),
                 self.episode_count
             )
+
+    def log_observation_phase_metrics(self, phase_metrics: Dict[str, Dict[str, List[float]]]) -> None:
+        """
+        Log observation-centric metrics under flat obs namespace.
+
+        Expected keys per phase:
+          - best_kill_probability: list[float]
+          - danger_to_me: list[float]
+          - valid_target_count: list[float]
+        """
+        for phase_name, metrics in phase_metrics.items():
+            kill_values = [float(v) for v in metrics.get('best_kill_probability', [])]
+            danger_values = [float(v) for v in metrics.get('danger_to_me', [])]
+            count_values = [float(v) for v in metrics.get('valid_target_count', [])]
+
+            if kill_values:
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_best_kill_probability_mean',
+                    float(np.mean(kill_values)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_best_kill_probability_p50',
+                    float(np.percentile(kill_values, 50)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_best_kill_probability_p90',
+                    float(np.percentile(kill_values, 90)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_best_kill_probability_count',
+                    float(len(kill_values)),
+                    self.episode_count
+                )
+
+            if danger_values:
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_danger_to_me_mean',
+                    float(np.mean(danger_values)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_danger_to_me_p50',
+                    float(np.percentile(danger_values, 50)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_danger_to_me_p90',
+                    float(np.percentile(danger_values, 90)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_danger_to_me_count',
+                    float(len(danger_values)),
+                    self.episode_count
+                )
+
+            if count_values:
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_valid_target_count_mean',
+                    float(np.mean(count_values)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_valid_target_count_p50',
+                    float(np.percentile(count_values, 50)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_valid_target_count_p90',
+                    float(np.percentile(count_values, 90)),
+                    self.episode_count
+                )
+                self.writer.add_scalar(
+                    f'obs/{phase_name}_valid_target_count_count',
+                    float(len(count_values)),
+                    self.episode_count
+                )
     
     def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
         """

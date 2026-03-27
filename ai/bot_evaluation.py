@@ -13,9 +13,10 @@ import logging
 import multiprocessing as mp
 import os
 import sys
+import time
 import numpy as np
 import re
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from typing import Callable, Optional, Dict, List, Any, Tuple
 
 from shared.data_validation import require_key
@@ -501,6 +502,115 @@ def _get_result_with_timeout(
         }
 
 
+def _force_terminate_process_pool(pool: ProcessPoolExecutor) -> None:
+    """
+    Force-stop worker processes to avoid hangs when a task exceeds timeout.
+
+    This uses ProcessPoolExecutor internals intentionally as a last-resort safety
+    mechanism for robust evaluation runs.
+    """
+    processes = getattr(pool, "_processes", None)
+    if not isinstance(processes, dict):
+        return
+    for process in processes.values():
+        if process is None:
+            continue
+        if process.is_alive():
+            process.terminate()
+    for process in processes.values():
+        if process is None:
+            continue
+        process.join(timeout=1.0)
+
+
+def _collect_parallel_results_with_timeouts(
+    pool: ProcessPoolExecutor,
+    future_to_task: Dict[Any, Dict[str, Any]],
+    task_timeout_seconds: int,
+) -> List[Dict[str, Any]]:
+    """
+    Collect parallel eval results with per-task deadline enforcement.
+
+    Unlike as_completed(), this loop never blocks indefinitely on a hung worker.
+    If any running task exceeds timeout, the pool is force-terminated and all
+    remaining pending tasks are marked as failed timeouts.
+    """
+    if task_timeout_seconds <= 0:
+        raise ValueError(
+            f"task_timeout_seconds must be > 0 for parallel collection (got {task_timeout_seconds})"
+        )
+
+    pending = set(future_to_task.keys())
+    task_start_times: Dict[Any, float] = {future: time.monotonic() for future in pending}
+    results_list: List[Dict[str, Any]] = []
+    must_abort_pool = False
+
+    while pending:
+        done, not_done = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+        now = time.monotonic()
+
+        # Collect completed tasks.
+        for future in done:
+            task = require_key(future_to_task, future)
+            # Already done -> timeout=0 is safe and non-blocking.
+            result = _get_result_with_timeout(future, task, timeout_seconds=0)
+            results_list.append(result)
+
+        # Enforce per-task timeout on still-running tasks.
+        timed_out_futures: List[Any] = []
+        for future in not_done:
+            task = require_key(future_to_task, future)
+            elapsed = now - require_key(task_start_times, future)
+            if elapsed >= task_timeout_seconds:
+                scenario_name = task.get("scenario_name") or os.path.basename(
+                    require_key(task, "scenario_file")
+                ).replace(".json", "")
+                results_list.append(
+                    {
+                        "wins": 0,
+                        "losses": 0,
+                        "draws": 0,
+                        "failed_episodes": int(require_key(task, "n_episodes")),
+                        "timeout": True,
+                        "bot_name": require_key(task, "bot_name"),
+                        "scenario_name": scenario_name,
+                    }
+                )
+                timed_out_futures.append(future)
+                must_abort_pool = True
+
+        # Remove handled futures from pending.
+        for future in done:
+            pending.discard(future)
+        for future in timed_out_futures:
+            pending.discard(future)
+
+        # A single timeout indicates potential hung worker process.
+        # Abort the whole pool to guarantee we don't hang forever.
+        if must_abort_pool:
+            break
+
+    if must_abort_pool:
+        _force_terminate_process_pool(pool)
+        for future in list(pending):
+            task = require_key(future_to_task, future)
+            scenario_name = task.get("scenario_name") or os.path.basename(
+                require_key(task, "scenario_file")
+            ).replace(".json", "")
+            results_list.append(
+                {
+                    "wins": 0,
+                    "losses": 0,
+                    "draws": 0,
+                    "failed_episodes": int(require_key(task, "n_episodes")),
+                    "timeout": True,
+                    "bot_name": require_key(task, "bot_name"),
+                    "scenario_name": scenario_name,
+                }
+            )
+    return results_list
+
+
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
                          step_logger=None, debug_mode=False, eval_progress_label: Optional[str] = None,
@@ -529,7 +639,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                        'random_wins', 'greedy_wins', 'defensive_wins'
     """
     from config_loader import get_config_loader
-    import time
 
     # Import evaluation bots for testing
     eval_wall_start = time.time()
@@ -810,18 +919,20 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 initargs=initargs,
             ) as pool:
                 future_to_task = {pool.submit(_eval_worker_task, t): t for t in tasks}
-                results_list = []
+                results_list = _collect_parallel_results_with_timeouts(
+                    pool=pool,
+                    future_to_task=future_to_task,
+                    task_timeout_seconds=int(task_timeout_seconds),
+                )
                 completed_episodes = 0
-                for future in as_completed(future_to_task):
-                    task = future_to_task[future]
-                    result = _get_result_with_timeout(future, task, task_timeout_seconds)
-                    results_list.append(result)
+                for result in results_list:
                     completed_episodes += (
                         int(require_key(result, "wins"))
                         + int(require_key(result, "losses"))
                         + int(require_key(result, "draws"))
+                        + int(require_key(result, "failed_episodes"))
                     )
-                    _print_progress(completed_episodes, total_episodes)
+                    _print_progress(min(completed_episodes, total_episodes), total_episodes)
         else:
             _eval_worker_init(*initargs)
             results_list = []

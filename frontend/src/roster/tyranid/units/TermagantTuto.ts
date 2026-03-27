@@ -26,10 +26,6 @@ export class TermagantTuto extends SwarmRangeSwarm {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "termagant"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - anti-infantry
 
   static ICON = "/icons/Termagant.webp"; // Path relative to public folder
   static ICON_SCALE = 1.2; // Size of the icon

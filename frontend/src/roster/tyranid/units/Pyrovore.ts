@@ -26,10 +26,6 @@ export class Pyrovore extends EliteRangeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "harvester"}, { keywordId: "pyrovore"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 3+ wounds, 4+ save - medium armor
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // RangedElite specialist - anti-elite
 
   static ICON = "/icons/Pyrovore.webp"; // Path relative to public folder
   static ICON_SCALE = 2.2; // Size of the icon

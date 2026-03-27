@@ -45,10 +45,6 @@ export class GreyHunterPackLeader extends TroopMeleeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "grey hunters"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // RangedElite specialist - bolt rifles vs hordes
 
   static ICON = "/icons/GreyHunterPackLeader.webp"; // Path relative to public folder
   static ICON_SCALE = 1.7; // Size of the icon

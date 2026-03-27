@@ -25,10 +25,6 @@ export class Carnifex extends EliteMeleeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "monster"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "carnifex"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 8 wounds, 2+ save - heavy armor
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Elite"; // MeleeElite specialist - monster vs elite
 
   static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
   static ICON_SCALE = 2.6; // Size of the icon

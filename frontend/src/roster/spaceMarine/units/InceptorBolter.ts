@@ -26,10 +26,6 @@ export class InceptorBolter extends EliteRangeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "jump pack"}, { keywordId: "fly"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "inceptor squad"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 3+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
 
   static ICON = "/icons/InceptorBolter.webp"; // Path relative to public folder
   static ICON_SCALE = 1.8; // Size of the icon

@@ -30,10 +30,6 @@ export class Hormagaunt extends SwarmMeleeSwarm {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "battleline"}, { keywordId: "great devourer"}, { keywordId: "endless multitude"}, { keywordId: "tyranids"}, { keywordId: "hormagaunt"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Fast infantry movement
-  static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
   // ICON
   static ICON = "/icons/Hormagaunt2.webp"; // Path relative to public folder

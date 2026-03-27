@@ -36,10 +36,6 @@ export class FenrisianWolf extends SwarmMeleeSwarm {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "beasts"}, { keywordId: "imperium"}, { keywordId: "fenrisian wolves"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
   static ICON = "/icons/FenrisianWolf.webp"; // Path relative to public folder
   static ICON_SCALE = 1.4; // Size of the icon

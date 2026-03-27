@@ -4,10 +4,6 @@ export class EliteRangeElite {
   static FACTION = "Chaos";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Elite"; // Elite: 8 wounds, 2+ save - heavy armor
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Elite"; // RangedElite specialist - bolt rifles vs elites
 
   name: string;
   hp: number;

@@ -25,10 +25,6 @@ export class GenestealerPrime extends EliteMeleeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyranids"}, { keywordId: "genestealer"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // // Troop: 2 wounds, 3+ save / 5+ Invu
-  static MOVE_TYPE = "Infantry"; // Fast infantry movement
-  static TARGET_TYPE = "Elite"; // MeleeTroop specialist - mob assault
 
   static ICON = "/icons/GenestealerPrime.webp"; // Path relative to public folder
   static ICON_SCALE = 1.8; // Size of the icon

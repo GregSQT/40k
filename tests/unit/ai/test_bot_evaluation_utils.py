@@ -1,3 +1,4 @@
+from itertools import chain, repeat
 from types import SimpleNamespace
 
 import numpy as np
@@ -391,3 +392,67 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
     )
     assert env.engine.step_logger is marker_logger
     assert result["wins"] == 1
+
+
+def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FutureDone:
+        def result(self, timeout=None):
+            _ = timeout
+            return {
+                "wins": 1,
+                "losses": 0,
+                "draws": 0,
+                "failed_episodes": 0,
+                "bot_name": "random",
+                "scenario_name": "training_bot-1",
+            }
+
+    class _FutureHung:
+        pass
+
+    done_future = _FutureDone()
+    hung_future = _FutureHung()
+
+    wait_calls = {"n": 0}
+
+    def _fake_wait(pending, timeout=None, return_when=None):
+        _ = timeout, return_when
+        wait_calls["n"] += 1
+        if wait_calls["n"] == 1:
+            return {done_future}, {hung_future}
+        return set(), {hung_future}
+
+    monotonic_values = chain([0.0, 2.0], repeat(2.0))  # keep returning timed-out clock value
+    monkeypatch.setattr(be, "wait", _fake_wait)
+    monkeypatch.setattr(be.time, "monotonic", lambda: next(monotonic_values))
+
+    force_called = {"v": False}
+    monkeypatch.setattr(be, "_force_terminate_process_pool", lambda pool: force_called.__setitem__("v", True))
+
+    task_map = {
+        done_future: {"bot_name": "random", "scenario_name": "training_bot-1", "scenario_file": "/tmp/a.json", "n_episodes": 1},
+        hung_future: {"bot_name": "greedy", "scenario_file": "/tmp/hung.json", "n_episodes": 3},
+    }
+
+    out = be._collect_parallel_results_with_timeouts(
+        pool=object(),
+        future_to_task=task_map,
+        task_timeout_seconds=1,
+    )
+
+    assert force_called["v"] is True
+    assert any(r.get("bot_name") == "random" and r.get("wins") == 1 for r in out)
+    timed_out = [r for r in out if r.get("bot_name") == "greedy" and r.get("timeout") is True]
+    assert len(timed_out) == 1
+    assert timed_out[0]["failed_episodes"] == 3
+
+
+def test_collect_parallel_results_with_timeouts_rejects_non_positive_timeout() -> None:
+    with pytest.raises(ValueError, match=r"must be > 0"):
+        be._collect_parallel_results_with_timeouts(
+            pool=object(),
+            future_to_task={},
+            task_timeout_seconds=0,
+        )

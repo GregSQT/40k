@@ -1803,40 +1803,60 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     from engine.game_state import GameStateManager
 
-    # AUTO-CALCULATE max_steps_per_turn = num_units × num_phases
-    # Load first scenario to count units (supports legacy and thin scenario formats)
-    first_scenario = scenario_list[0]
-    with open(first_scenario, "r", encoding="utf-8-sig") as f:
-        scenario_data = json.load(f)
-    if isinstance(scenario_data, dict) and "units" in scenario_data:
-        num_units = len(require_key(scenario_data, "units"))
-    else:
-        scenario_probe_controlled_player = 1
-        if use_bots:
-            probe_seat_mode = require_key(training_config, "agent_seat_mode")
-            if probe_seat_mode not in {"p1", "p2", "random"}:
-                raise ValueError(
-                    f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
-                    f"(got {probe_seat_mode!r})"
+    # AUTO-CALCULATE max_steps_per_turn = max_units_across_scenarios × num_phases
+    # Use the scenario with the highest unit count to avoid underestimating step budget.
+    scenario_probe_players: List[int] = [1]
+    if use_bots:
+        probe_seat_mode = require_key(training_config, "agent_seat_mode")
+        if probe_seat_mode not in {"p1", "p2", "random"}:
+            raise ValueError(
+                f"training_config.agent_seat_mode must be one of 'p1', 'p2', 'random' "
+                f"(got {probe_seat_mode!r})"
+            )
+        if probe_seat_mode == "p2":
+            scenario_probe_players = [2]
+        elif probe_seat_mode == "random":
+            scenario_probe_players = [1, 2]
+
+    unique_scenario_files = sorted(set(scenario_list))
+    max_units = 0
+    max_units_scenario: Optional[str] = None
+    for scenario_file in unique_scenario_files:
+        with open(scenario_file, "r", encoding="utf-8-sig") as f:
+            scenario_data = json.load(f)
+        if isinstance(scenario_data, dict) and "units" in scenario_data:
+            scenario_unit_count = len(require_key(scenario_data, "units"))
+        else:
+            scenario_unit_count_candidates: List[int] = []
+            for probe_player in scenario_probe_players:
+                temp_manager = GameStateManager(
+                    {"board": {}, "controlled_player": probe_player},
+                    unit_registry
                 )
-            if probe_seat_mode == "p2":
-                scenario_probe_controlled_player = 2
-        temp_manager = GameStateManager(
-            {"board": {}, "controlled_player": scenario_probe_controlled_player},
-            unit_registry
-        )
-        scenario_result = temp_manager.load_units_from_scenario(first_scenario, unit_registry)
-        num_units = len(require_key(scenario_result, "units"))
-    if num_units <= 0:
-        raise ValueError(f"Scenario '{first_scenario}' resolved to zero units")
+                scenario_result = temp_manager.load_units_from_scenario(scenario_file, unit_registry)
+                scenario_unit_count_candidates.append(len(require_key(scenario_result, "units")))
+            scenario_unit_count = max(scenario_unit_count_candidates)
+        if scenario_unit_count <= 0:
+            raise ValueError(f"Scenario '{scenario_file}' resolved to zero units")
+        if scenario_unit_count > max_units:
+            max_units = scenario_unit_count
+            max_units_scenario = scenario_file
+
+    if max_units_scenario is None:
+        raise ValueError("No scenario available to compute max_steps_per_turn")
 
     # Import GAME_PHASES from action_decoder - single source of truth
     from engine.action_decoder import GAME_PHASES
     num_phases = len(GAME_PHASES)
 
     # Calculate max_steps_per_turn dynamically
-    max_steps = num_units * num_phases
-    chunk_log(f"📊 Auto-calculated max_steps_per_turn: {num_units} units × {num_phases} phases = {max_steps}")
+    max_steps = max_units * num_phases
+    max_units_scenario_name = os.path.basename(max_units_scenario)
+    chunk_log(
+        "📊 Auto-calculated max_steps_per_turn: "
+        f"{max_units} units × {num_phases} phases = {max_steps} "
+        f"(max units from {max_units_scenario_name})"
+    )
 
     # Calculate average steps per episode for timestep conversion
     max_turns = training_config["max_turns_per_episode"]
@@ -2660,11 +2680,54 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     if "checkpoint_name_prefix" not in callback_params:
         raise KeyError("callback_params missing required 'checkpoint_name_prefix' field")
         
-    checkpoint_callback = CheckpointCallback(
-        save_freq=callback_params["checkpoint_save_freq"],
-        save_path=os.path.dirname(model_path),
-        name_prefix=callback_params["checkpoint_name_prefix"]
-    )
+    max_checkpoints = callback_params.get("max_checkpoints")
+    if max_checkpoints is not None:
+        if not isinstance(max_checkpoints, int) or isinstance(max_checkpoints, bool):
+            raise ValueError(
+                "callback_params.max_checkpoints must be an integer when provided "
+                f"(got {type(max_checkpoints).__name__})"
+            )
+        if max_checkpoints <= 0:
+            raise ValueError(
+                f"callback_params.max_checkpoints must be > 0 when provided (got {max_checkpoints})"
+            )
+
+        class RotatingCheckpointCallback(CheckpointCallback):
+            """Checkpoint callback that keeps only the most recent N checkpoints."""
+
+            def __init__(self, max_checkpoints: int, **kwargs):
+                super().__init__(**kwargs)
+                self.max_checkpoints = max_checkpoints
+
+            def _cleanup_old_checkpoints(self) -> None:
+                pattern = os.path.join(self.save_path, f"{self.name_prefix}_*_steps.zip")
+                checkpoint_files = sorted(
+                    glob.glob(pattern),
+                    key=lambda p: os.path.getmtime(p),
+                    reverse=True,
+                )
+                for old_checkpoint in checkpoint_files[self.max_checkpoints:]:
+                    if os.path.exists(old_checkpoint):
+                        os.remove(old_checkpoint)
+
+            def _on_step(self) -> bool:
+                continue_training = super()._on_step()
+                if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
+                    self._cleanup_old_checkpoints()
+                return continue_training
+
+        checkpoint_callback = RotatingCheckpointCallback(
+            max_checkpoints=max_checkpoints,
+            save_freq=callback_params["checkpoint_save_freq"],
+            save_path=os.path.dirname(model_path),
+            name_prefix=callback_params["checkpoint_name_prefix"],
+        )
+    else:
+        checkpoint_callback = CheckpointCallback(
+            save_freq=callback_params["checkpoint_save_freq"],
+            save_path=os.path.dirname(model_path),
+            name_prefix=callback_params["checkpoint_name_prefix"]
+        )
     callbacks.append(checkpoint_callback)
     
     # Add enhanced bot evaluation callback (replaces standard EvalCallback)

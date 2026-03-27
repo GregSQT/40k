@@ -23,10 +23,6 @@ export class WolfGuardTerminator extends EliteMeleeElite {
   static CC_WEAPON_CODES = ["master_crafted_power_weapon"];
   static CC_WEAPONS = getWeapons(WolfGuardTerminator.CC_WEAPON_CODES);
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Troop"; // MeleeTroop specialist - hunt troop targets
   
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "wolf guard terminator squad"}];

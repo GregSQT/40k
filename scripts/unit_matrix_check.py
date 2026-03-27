@@ -9,12 +9,22 @@ import json
 import sys
 from pathlib import Path
 
+from check_roster_static_labels import collect_violations
 from unit_matrix_generate import generate_matrix
 
 
 def main() -> int:
     """Return 0 when matrix file is up to date, 1 otherwise."""
     project_root = Path(__file__).resolve().parent.parent
+
+    # Guard against reintroduction of deprecated static AI classification labels.
+    roster_violations = collect_violations(project_root)
+    if roster_violations:
+        print("❌ Deprecated static roster labels detected:")
+        for violation in sorted(roster_violations):
+            print(f"  - {violation}")
+        return 1
+
     matrix_path = project_root / "frontend" / "src" / "roster" / "unit_matrix.json"
 
     if not matrix_path.exists():

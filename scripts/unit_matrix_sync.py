@@ -10,10 +10,7 @@ Behavior:
 Required generation fields for missing entries:
 - army
 - unit_name
-- type
-- tanking_type
-- attack_type
-- target_type
+- base_class
 - value
 - melee_weapons (list[str])
 - ranged_weapons (list[str])
@@ -39,10 +36,7 @@ REQUIRED_BASE_STATS = ("MOVE", "T", "ARMOR_SAVE", "INVUL_SAVE", "HP_MAX", "LD", 
 REQUIRED_ROW_FIELDS = (
     "army",
     "unit_name",
-    "type",
-    "tanking_type",
-    "attack_type",
-    "target_type",
+    "base_class",
     "value",
     "melee_weapons",
     "ranged_weapons",
@@ -60,11 +54,18 @@ def _to_camel_case(value: str) -> str:
 
 def _normalize_army(army: str) -> tuple[str, str]:
     """Return (army_key, army_dir) pair."""
-    if army == "SpaceMarine":
-        return ("SpaceMarine", "spaceMarine")
-    if army == "Tyranid":
-        return ("Tyranid", "tyranid")
-    raise ValueError(f"Unsupported army '{army}'. Expected SpaceMarine or Tyranid.")
+    mapping = {
+        "SpaceMarine": ("SpaceMarine", "spaceMarine"),
+        "Tyranid": ("Tyranid", "tyranid"),
+        "Aeldari": ("Aeldari", "aeldari"),
+        "AdeptusCustodes": ("AdeptusCustodes", "adeptusCustodes"),
+        "Chaos": ("Chaos", "chaos"),
+    }
+    if army in mapping:
+        return mapping[army]
+    raise ValueError(
+        f"Unsupported army '{army}'. Expected one of: {sorted(mapping.keys())}"
+    )
 
 
 def _list_existing_unit_names(roster_root: Path) -> set[tuple[str, str]]:
@@ -146,15 +147,11 @@ def _create_unit_file(row: dict[str, Any], roster_root: Path) -> Path:
         raise ValueError(f"icon_scale must be numeric for unit '{row['unit_name']}'.")
 
     base_stats = row["base_stats"]
-    move_type = str(row["type"])
-    tanking_type = str(row["tanking_type"])
-    attack_type = str(row["attack_type"])
-    target_type = str(row["target_type"])
+    base_class = str(row["base_class"])
     value = row["value"]
     if not isinstance(value, int):
         raise ValueError(f"value must be int for unit '{row['unit_name']}'.")
 
-    base_class = f"{army_key}{move_type}{tanking_type}{attack_type}{target_type}"
     armory_import = "../armory"
     class_import = f"../classes/{base_class}"
 
@@ -213,11 +210,6 @@ export class {class_name} extends {base_class} {{
 {unit_rules_block}
   // UNIT KEYWORDS
   {unit_keywords_block}
-
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "{tanking_type}";
-  static MOVE_TYPE = "{move_type}";
-  static TARGET_TYPE = "{target_type}";
 
   static ICON = "{icon}";
   static ICON_SCALE = {icon_scale};

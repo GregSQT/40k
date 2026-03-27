@@ -4,10 +4,6 @@ export class TroopRangeElite {
   static FACTION = "Tyranid";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save / 5+ Invu
-  static MOVE_TYPE = "Infantry"; // Fast infantry movement
-  static TARGET_TYPE = "Elite"; // RangedElite specialist - anti-elite
 
   name: string;
   hp: number;

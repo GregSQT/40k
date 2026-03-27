@@ -41,8 +41,8 @@ Copier-coller:
   - divergence entre la definition TypeScript (source de verite) et le comportement Python en runtime
   - peut biaiser IA, simulation, et affichage derive des stats
 - Reproduction:
-  - test sentinelle: `tests/unit/engine/test_weapon_parser.py` (`xfail`)
-- Statut: ouvert
+  - test sentinelle: `tests/unit/engine/test_weapon_parser.py` (`test_parse_armory_file_extracts_weapon_and_resolves_dice_constant`)
+- Statut: corrige
 - Priorite: haute
 - Detection:
   - detecte pendant la mise en place des tests unitaires (lot parser/rules)

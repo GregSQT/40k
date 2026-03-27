@@ -23,10 +23,6 @@ export class TyranidWarriorRanged extends TroopRangeTroop {
   static CC_WEAPON_CODES = ["rending_claws"];
   static CC_WEAPONS = getWeapons(TyranidWarriorRanged.CC_WEAPON_CODES);
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // Troop: 3 wounds, 4+ save
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Troop"; // RangedTroop specialist - anti-infantry
 
   // UNIT RULES
   static UNIT_RULES = [

@@ -25,10 +25,6 @@ export class RaptorPlasmaGun extends TroopRangeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "fly"}, { keywordId: "jump_pack"}, { keywordId: "chaos"}, { keywordId: "raptor"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
 
   static ICON = "/icons/RaptorPlasmaGun.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6; // Size of the icon

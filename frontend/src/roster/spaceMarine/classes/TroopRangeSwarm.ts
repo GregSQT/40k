@@ -4,11 +4,6 @@ export class TroopRangeSwarm {
   static FACTION = "Space Marines";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static OFFENSE_TYPE = "Ranged"; // Offensive mode classification
-  static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - bolt rifles vs hordes
 
   name: string;
   hp: number;

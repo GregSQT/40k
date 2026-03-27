@@ -26,10 +26,6 @@ export class TyrantGuardCrushingClaws extends EliteMeleeElite {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "great devourer"}, { keywordId: "tyrant guard"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 3+ wounds, 4+ save - medium armor
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Elite"; // RangedElite specialist - anti-elite
 
   static ICON = "/icons/TyrantGuardCrushingClaws.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon

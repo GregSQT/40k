@@ -4,10 +4,6 @@ export class EliteMeleeElite {
   static FACTION = "Tyranid";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Elite"; // Elite: 8 wounds, 2+ save - heavy armor
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Elite"; // MeleeElite specialist - monster vs elite
 
   name: string;
   hp: number;

@@ -11,11 +11,12 @@
 
 **This is THE authoritative reference for:**
 - ✅ Observation system architecture
-- ✅ Training pipeline integration
-- ✅ PPO model configuration
-- ✅ Bot evaluation system
+- ✅ Observation-driven PPO input design
 - ✅ Performance benchmarks
 - ✅ Migration procedures
+
+**For training/evaluation pipeline details:**
+- `AI_TRAINING.md` is the canonical reference (CLI, callbacks, bot evaluation runtime, robust gates).
 
 **Version History:**
 - **v2.4 (March 2026)**: 355-float rule-aware observation (CoreAgent current) ⭐
@@ -27,6 +28,19 @@
 - `AI_TURN.md` → Game state management (authoritative)
 - `AI_IMPLEMENTATION.md` → Handler architecture (authoritative)
 - `AI_TRAINING.md` → Training pipeline details & bot behaviors
+
+### Refactor Plan Integration Status
+
+This section is the canonical consolidation of the observation refactor status.
+
+- ✅ **WP2 implemented**: phase-aware weapon scoring for `best_weapon_index` and `best_kill_probability` in both enemy and valid-target sections.
+- ✅ **WP3 implemented**: `combat_mix_score` and `favorite_target` are dynamic weapon-profile signals (no `unitType` prior).
+- ✅ **WP4 implemented (minimal)**: shared scoring path in `engine/observation_builder.py` for cross-section coherence.
+- ✅ **WP1 instrumentation (observation-centric, by phase)**: TensorBoard logging under flat `obs/` namespace for `shoot`/`fight`/`charge`:
+  - `obs/<phase>_best_kill_probability_mean|p50|p90|count`
+  - `obs/<phase>_danger_to_me_mean|p50|p90|count`
+  - `obs/<phase>_valid_target_count_mean|p50|p90|count`
+- ⏳ **WP5 pending**: B0/B1/B2/B3 ablation + multi-seed robust holdout gates (`overall`, `hard`, `worst_bot`).
 
 ---
 
@@ -54,7 +68,7 @@ The **Rule-Aware Asymmetric Observation System** provides agents with rich tacti
 - ✅ **More enemy info** - 22 features per enemy vs 12 for allies
 - ✅ **Temporal tracking** - movement_direction feature (brilliant encoding)
 - ✅ **Expected damage** - combat_mix_score uses W40K dice mechanics
-- ✅ **Target preferences** - Parsed from unitType (no redundancy)
+- ✅ **Target preferences** - Dynamic weapon-profile signal (STR/AP/DMG), no unitType prior
 - ✅ **Action-target mapping** - Valid targets preserved for fast learning
 - ✅ **Pure RL approach** - Network discovers optimal combinations
 
@@ -157,8 +171,8 @@ obs[37] = ARMOR_SAVE / 6.0           # Armor save
 [ally_base + 5]  = movement_direction               # 0.0-1.0: fled → charged ⭐
 [ally_base + 6]  = distance_normalized              # Distance / 25
 [ally_base + 7]  = combat_mix_score                 # 0.1-0.9: melee → ranged ⭐
-[ally_base + 8]  = ranged_favorite_target           # 0.0-1.0: swarm → monster ⭐
-[ally_base + 9]  = melee_favorite_target            # 0.0-1.0: swarm → monster ⭐
+[ally_base + 8]  = ranged_favorite_target           # 0.0-1.0: low-armor/toughness → high-armor/toughness ⭐
+[ally_base + 9]  = melee_favorite_target            # 0.0-1.0: low-armor/toughness → high-armor/toughness ⭐
 [ally_base + 10] = can_shoot_my_target              # 1.0 if ally can support
 [ally_base + 11] = danger_level                     # 0.0-1.0: threat to me
 ```
@@ -285,13 +299,7 @@ def _calculate_movement_direction(unit, active_unit):
 ```python
 def _calculate_combat_mix_score(unit):
     """
-    Calculate EXPECTED damage against favorite target type.
-    
-    Target stats by specialization:
-    - Swarm: T3 / 5+ save / no invul
-    - Troop: T4 / 3+ save / no invul
-    - Elite: T5 / 2+ save / 4++ invul
-    - Monster: T6 / 3+ save / no invul
+    Calculate dynamic melee/ranged expected effectiveness from current weapon profile.
     
     Returns 0.1-0.9:
     - 0.1-0.3: Melee specialist (CC damage >> RNG damage)
@@ -315,36 +323,29 @@ def _calculate_combat_mix_score(unit):
 
 ---
 
-### ranged/melee_favorite_target ⭐ PARSED FROM UNITTYPE
+### ranged/melee_favorite_target ⭐ DYNAMIC WEAPON PROFILE
 
-**No redundancy** - Extracted directly from unit naming:
+**No static class prior** - Computed from weapon profile only:
 
 ```python
 def _calculate_favorite_target(unit):
     """
-    Parse unitType: "SpaceMarine_Infantry_Troop_RangedSwarm"
-                                                    ^^^^^^^^^^^^
-    
-    Returns 0.0-1.0 encoding:
-    - 0.0 = Swarm specialist (vs HP_MAX ≤ 1)
-    - 0.33 = Troop specialist (vs HP_MAX 2-3)
-    - 0.66 = Elite specialist (vs HP_MAX 4-6)
-    - 1.0 = Monster specialist (vs HP_MAX ≥ 7)
+    Estimate toughness/armor preference from weapon profile.
+
+    Uses max piercing score across all weapons:
+    piercing = 0.5*STR + 0.3*AP + 0.2*DMG (normalized)
+
+    Returns 0.0-1.0:
+    - 0.0 = profile better into low durability targets
+    - 1.0 = profile better into high durability targets
     """
 ```
 
-**Examples:**
-```
-"SpaceMarine_Infantry_Troop_RangedSwarm" → 0.0 (hunts swarms)
-"SpaceMarine_Infantry_Elite_RangedElite" → 0.66 (hunts elites)
-"Tyranid_Infantry_Troop_MeleeTroop" → 0.33 (hunts troops in melee)
-```
-
 **Why This Works:**
-- ✅ Uses designer intent from unit registry
-- ✅ No duplicate data sources
-- ✅ Agent learns type matchups naturally
-- ✅ Network discovers: "My 0.0 unit effective vs 0.0 enemies"
+- ✅ Removes static `unitType` shortcut bias in policy inputs
+- ✅ Uses actual weapon stats (`STR`, `AP`, `DMG`) at runtime
+- ✅ Preserves compact scalar signal for fast learning
+- ✅ Improves transfer across rosters/matchups with different naming schemes
 
 ---
 
@@ -377,9 +378,10 @@ def _calculate_favorite_target(unit):
 - v2.4: Same asymmetric split
 - **Result:** Enemy-focused tactical decision quality is preserved.
 
-**3. Temporal + Combat Encodings (kept):**
-- `movement_direction`, `combat_mix_score`, `favorite_target` unchanged
-- **Result:** No regression risk on proven tactical features.
+**3. Temporal + Combat Encodings (updated):**
+- `movement_direction` unchanged
+- `combat_mix_score` and `favorite_target` switched to dynamic weapon-profile signals (no `unitType` prior)
+- **Result:** Same observation shape, reduced static-bias signal.
 
 **4. Index Shift Only for Macro Block:**
 - v2.3 macro at `[314:323]`
@@ -580,15 +582,16 @@ melee_expected = 2 × (4/6) × (3/6) × (3/6) × 1 = 0.37 damage
 # Agent learns: "This enemy is approaching"
 ```
 
-**favorite_target Parsing:**
+**favorite_target Dynamic Signal:**
 ```python
-# unitType: "SpaceMarine_Infantry_Troop_RangedSwarm"
-#                                              ^^^^^ extract this
+# For each weapon:
+# strength_factor = STR / 10
+# ap_factor = AP / 6
+# damage_factor = DMG / 6
+# piercing = 0.5*strength_factor + 0.3*ap_factor + 0.2*damage_factor
+# favorite_target = max(piercing across weapons)
 
-if "Swarm" in attack_pref:
-    return 0.0  # Prefers HP_MAX ≤ 1 targets
-
-# Agent learns: "My 0.0 unit effective vs 0.0 enemies"
+# Agent learns target durability preference from weapon stats, not class labels
 ```
 
 ---
@@ -663,8 +666,8 @@ print('✅ v2.4 implementation verified!')
 - **Asymmetric enemy focus** — Aligns with the decision problem (engage / target selection) and avoids overloading the network with ally detail. 22 enemy vs 12 ally features is a defensible choice.
 - **Temporal in one float** — `movement_direction` replaces frame stacking and keeps the observation Markovian while still encoding recent behavior. Very efficient.
 - **Valid targets as action scaffolding** — Direct action–observation mapping (action 4 → slot 0) speeds up learning; removing it would likely cost hundreds of episodes.
-- **W40K semantics** — `combat_mix_score` and `favorite_target` encode domain knowledge (dice, unit types) instead of raw stats; the network gets actionable signals.
-- **Fixed layout** — 323 floats, fixed slots for allies/enemies/targets: simple for the policy, no variable-length handling.
+- **W40K semantics** — `combat_mix_score` and `favorite_target` encode actionable domain signal from runtime weapon stats (no static class shortcut).
+- **Fixed layout** — 355 floats in rule-aware mode, fixed slots for allies/enemies/targets: simple for the policy, no variable-length handling.
 
 **Trade-offs and limits:**
 - **Cost of rich enemy features** — Features 14–16 (visibility_to_allies, combined_friendly_threat, melee_charge_preference) are expensive (LoS, danger, pathfinding). The Observation_fix1.md pre-compute LoS plan addresses the main bottleneck; feature 16 can be capped or cached if needed.
@@ -672,7 +675,7 @@ print('✅ v2.4 implementation verified!')
 - **No explicit opponent model** — The observation does not encode "what the other player tends to do"; the network infers it from outcomes. For symmetric PPO vs bots, this is normal.
 - **Redundancy** — Some info appears both in enemy section and valid targets (e.g. kill_prob, danger). That redundancy helps learning (direct mapping) at the cost of a few dozen floats; reasonable.
 
-**Verdict:** The architecture is **appropriate and close to optimal** for the current game and training setup. The main improvement to pursue is **performance** (LoS/pre-compute and possibly feature 16), not a redesign of the observation layout. If you later add more unit types or phases, extending the same pattern (more slots or a few extra global/active features) is enough.
+**Verdict:** The architecture is **appropriate and close to optimal** for the current game and training setup. WP2/WP3/WP4 are integrated and preserve shape/semantics while reducing static-bias priors. The remaining priority is **experimental validation** (WP5 multi-seed ablations) rather than another observation-layout redesign.
 
 ---
 
@@ -686,7 +689,7 @@ print('✅ v2.4 implementation verified!')
 - Enemy units section (132 floats, 6 units × 22 features)
 - movement_direction feature (temporal behavior encoding)
 - combat_mix_score feature (W40K expected damage)
-- favorite_target feature (parsed from unitType; single float for enemy)
+- favorite_target feature (dynamic weapon-profile scalar; single float for enemy)
 - enemy_index reference in valid targets
 - Global: objective control (5 floats), has_advanced
 - Active unit: MULTIPLE_WEAPONS (RNG_WEAPONS[0..2], CC_WEAPONS[0..1])

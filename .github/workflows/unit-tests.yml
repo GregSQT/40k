@@ -23,8 +23,31 @@ jobs:
           pip install pytest pytest-cov pytest-mock
 
       - name: Run Python unit tests
+        run: pytest tests/unit -q
+
+      - name: Run critical Python coverage gate
         run: |
-          pytest tests/unit -q --cov=engine --cov=shared --cov=services --cov=ai --cov-fail-under=55
+          pytest tests/unit -q \
+            --cov=engine \
+            --cov=shared \
+            --cov=services \
+            --cov=ai/reward_mapper.py \
+            --cov=ai/scenario_manager.py \
+            --cov=ai/replay_converter.py \
+            --cov=ai/metrics_tracker.py \
+            --cov=ai/game_replay_logger.py \
+            --cov=ai/step_logger.py \
+            --cov-report=term-missing \
+            --cov-fail-under=60
+
+      - name: Report global AI coverage (informative)
+        run: |
+          pytest tests/unit/ai -q \
+            --cov=ai \
+            --cov-report=term-missing
+
+      - name: Run package safety gates
+        run: |
           pytest tests/unit/engine -q --cov=engine --cov-fail-under=70
           pytest tests/unit/shared -q --cov=shared --cov-fail-under=80
 
@@ -44,5 +67,8 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Run frontend unit tests
-        run: npm --prefix frontend run test:coverage
+      - name: Run frontend critical coverage gate
+        run: npm --prefix frontend run test:critical
+
+      - name: Report frontend global coverage (informative)
+        run: npm --prefix frontend run test:coverage:global

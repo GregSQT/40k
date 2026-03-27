@@ -25,10 +25,6 @@ export class RipperSwarm extends SwarmMeleeSwarm {
    // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "swarm"}, { keywordId: "great devourer"}, { keywordId: "harverster"}, { keywordId: "ripper swarm"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Swarm: 1 wound, fragile
-  static MOVE_TYPE = "Infantry"; // Fast infantry movement
-  static TARGET_TYPE = "Swarm"; // MeleeSwarm specialist - mob assault
 
   // ICON
   static ICON = "/icons/RipperSwarm.webp"; // Path relative to public folder

@@ -25,10 +25,6 @@ export class Prosecutor extends SwarmRangeSwarm {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "anathema psykana"}, { keywordId: "prosecutor"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Swarm: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - bolt rifles vs hordes
 
   static ICON = "/icons/Prosecutor.webp"; // Path relative to public folder
   static ICON_SCALE = 1.5; // Size of the icon

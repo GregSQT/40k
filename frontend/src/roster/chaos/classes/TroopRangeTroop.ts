@@ -4,10 +4,6 @@ export class TroopRangeTroop {
   static FACTION = "Chaos";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save - heavy armor
-  static MOVE_TYPE = "Infantry"; // Monster movement (treated as infantry)
-  static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
 
   name: string;
   hp: number;

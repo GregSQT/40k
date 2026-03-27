@@ -25,10 +25,6 @@ export class BladeguardVeteranSergeant extends TroopMeleeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "grenades"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "bladeguard veteran squad"}];
 
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Troop"; // Troop: 2 wounds, 3+ save
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Troop"; // MeleeTroop specialist - backbone melee
 
   static ICON = "/icons/BladeguardVeteranSergeant.webp"; // Path relative to public folder
   static ICON_SCALE = 1.7; // Size of the icon

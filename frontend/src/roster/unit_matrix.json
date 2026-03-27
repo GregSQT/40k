@@ -1,22 +1,543 @@
 {
   "version": 1,
-  "generated_at": "2026-03-01T13:32:31.164308+00:00",
+  "generated_at": "2026-03-27T17:43:24.895774+00:00",
   "source": "frontend/src/roster/*/units/*.ts",
   "rows": [
     {
+      "army": "AdeptusCustodes",
+      "unit_name": "CustodianAllarusAxe",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
+      "value": 70,
+      "melee_weapons": [
+        "castellan_axe_melee"
+      ],
+      "ranged_weapons": [
+        "castellan_axe_ranged",
+        "balistus_grenade_launcher"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "AdeptusCustodes",
+      "unit_name": "CustodianAllarusSpear",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeTroop",
+      "value": 70,
+      "melee_weapons": [
+        "guardian_spear_melee"
+      ],
+      "ranged_weapons": [
+        "guardian_spear_ranged",
+        "balistus_grenade_launcher"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "AdeptusCustodes",
+      "unit_name": "CustodianGuardBlade",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeTroop",
+      "value": 56,
+      "melee_weapons": [
+        "sentinel_blade_melee"
+      ],
+      "ranged_weapons": [
+        "sentinel_blade_ranged"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "AdeptusCustodes",
+      "unit_name": "CustodianGuardSpear",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeTroop",
+      "value": 56,
+      "melee_weapons": [
+        "guardian_spear_melee"
+      ],
+      "ranged_weapons": [
+        "guardian_spear_ranged"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "AdeptusCustodes",
+      "unit_name": "CustodianWardenAxe",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
+      "value": 65,
+      "melee_weapons": [
+        "castellan_axe_melee"
+      ],
+      "ranged_weapons": [
+        "castellan_axe_ranged"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "AdeptusCustodes",
+      "unit_name": "CustodianWardenSpear",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeTroop",
+      "value": 65,
+      "melee_weapons": [
+        "guardian_spear_melee"
+      ],
+      "ranged_weapons": [
+        "guardian_spear_ranged"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "AdeptusCustodes",
+      "unit_name": "Prosecutor",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 11,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "bolter"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "AdeptusCustodes",
+      "unit_name": "Witchseeker",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 13,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "whitchseeker_flamer"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "DarkReaper",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 16,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "reaper_launcher_starshot",
+        "reaper_launcher_starswarm"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "DarkReaperExarch",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 21,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "missile_launcher_starshot",
+        "missile_launcher_starswarm"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "DireAvenger",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 14,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "shuriken_catapult_avenger"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "DireAvengerExarch",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeTroop",
+      "value": 19,
+      "melee_weapons": [
+        "power_glaive"
+      ],
+      "ranged_weapons": [
+        "shuriken_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "FireDragon",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeElite",
+      "value": 19,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "dragon_fusion_gun"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "FireDragonExarch",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeElite",
+      "value": 24,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "firepike"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "GuardianDefender",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 10,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "shuriken_catapult"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "HeavyWeaponPlatform",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 20,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "shuriken_cannon"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "HowlingBanshee",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeTroop",
+      "value": 16,
+      "melee_weapons": [
+        "banshees_blade"
+      ],
+      "ranged_weapons": [
+        "shuriken_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "HowlingBansheeExarch",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeTroop",
+      "value": 21,
+      "melee_weapons": [
+        "mirror_swords"
+      ],
+      "ranged_weapons": [
+        "shuriken_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "SerpentScalePlatform",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 20,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "StormGuardian",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeSwarm",
+      "value": 10,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "shuriken_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "StrikingScorpion",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeTroop",
+      "value": 14,
+      "melee_weapons": [
+        "scorpion_chainsword"
+      ],
+      "ranged_weapons": [
+        "shuriken_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "StrikingScorpionExarch",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeTroop",
+      "value": 19,
+      "melee_weapons": [
+        "scorpion_claws"
+      ],
+      "ranged_weapons": [
+        "shuriken_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "SwoopingHawk",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 14,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "lasblaster"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "SwoopingHawkExarch",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 19,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "hawk_talons"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "WarpSpider",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 16,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "death_spinner"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "WarpSpiderExarchPowerblade",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeTroop",
+      "value": 21,
+      "melee_weapons": [
+        "powerblades_array"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "WarpSpiderExarchSpinner",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 21,
+      "melee_weapons": [
+        "close_combat_weapon_aspect_warrior"
+      ],
+      "ranged_weapons": [
+        "death_spinner_exarch"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "WraithguardDScythe",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 34,
+      "melee_weapons": [
+        "close_combat_weapon_wraithguard"
+      ],
+      "ranged_weapons": [
+        "d_scythe"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Aeldari",
+      "unit_name": "WraithguardWraithcannon",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeTroop",
+      "value": 34,
+      "melee_weapons": [
+        "close_combat_weapon_wraithguard"
+      ],
+      "ranged_weapons": [
+        "wraithcannon"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Chaos",
+      "unit_name": "ChosenPlasma",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeTroop",
+      "value": 5,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "plasma_pistol_standard",
+        "plasma_pistol_supercharge"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Chaos",
+      "unit_name": "CultistFirebrand",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 60,
+      "melee_weapons": [
+        "close_combat_weapon_firebrand"
+      ],
+      "ranged_weapons": [
+        "balefire_pike"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Chaos",
+      "unit_name": "CultistMob",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 5,
+      "melee_weapons": [
+        "brutal_assault_weapon"
+      ],
+      "ranged_weapons": [
+        "autopistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Chaos",
+      "unit_name": "Obliterator",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeElite",
+      "value": 90,
+      "melee_weapons": [
+        "crushing_fists"
+      ],
+      "ranged_weapons": [
+        "fleshmetal_guns_focused_malice",
+        "fleshmetal_guns_ruinous_salvo",
+        "fleshmetal_guns_warp_hail"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Chaos",
+      "unit_name": "RaptorMeltaGun",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeElite",
+      "value": 24,
+      "melee_weapons": [
+        "close_combat_weapon_a3"
+      ],
+      "ranged_weapons": [
+        "meltagun"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Chaos",
+      "unit_name": "RaptorPlasmaGun",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeTroop",
+      "value": 24,
+      "melee_weapons": [
+        "close_combat_weapon_a3"
+      ],
+      "ranged_weapons": [
+        "plasma_gun_standard",
+        "plasma_gun_supercharge"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Chaos",
+      "unit_name": "RenegadeGuard",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 5,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "autopistol"
+      ],
+      "special_rules": []
+    },
+    {
       "army": "SpaceMarine",
-      "unit_name": "Aggressor",
-      "agent_key": "Infantry_Elite_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "unit_name": "AggressorBoltStorm",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeSwarm",
       "value": 33,
       "melee_weapons": [
         "power_fist"
       ],
       "ranged_weapons": [
-        "storm_bolter"
+        "auto_boltstorm_gauntlets"
+      ],
+      "special_rules": [
+        "Close-quarter firepower"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "AggressorFlamestorm",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeSwarm",
+      "value": 33,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "auto_boltstorm_gauntlets"
       ],
       "special_rules": [
         "Close-quarter firepower"
@@ -25,11 +546,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "AssaultIntercessor",
-      "agent_key": "Infantry_Troop_MeleeTroop",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeSwarm",
       "value": 17,
       "melee_weapons": [
         "assault_intercessor_chainsword"
@@ -44,11 +562,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "AssaultIntercessorJumpPack",
-      "agent_key": "Infantry_Troop_MeleeTroop",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
       "value": 17,
       "melee_weapons": [
         "assault_intercessor_chainsword"
@@ -63,11 +578,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "AssaultIntercessorJumpPackPlasmaPistol",
-      "agent_key": "Infantry_Troop_MeleeTroop",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
       "value": 19,
       "melee_weapons": [
         "assault_intercessor_chainsword"
@@ -83,11 +595,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
-      "agent_key": "Infantry_Troop_MeleeTroop",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
       "value": 20,
       "melee_weapons": [
         "power_fist"
@@ -102,11 +611,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "AssaultIntercessorSergeant",
-      "agent_key": "Infantry_Troop_MeleeTroop",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeElite",
       "value": 22,
       "melee_weapons": [
         "power_fist"
@@ -122,11 +628,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "AssaultTerminator",
-      "agent_key": "Infantry_Elite_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
       "value": 36,
       "melee_weapons": [
         "thunder_hammer_terminator"
@@ -136,12 +639,38 @@
     },
     {
       "army": "SpaceMarine",
+      "unit_name": "BladeguardVeteran",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
+      "value": 15,
+      "melee_weapons": [
+        "master_crafted_power_weapon"
+      ],
+      "ranged_weapons": [
+        "heavy_bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "BladeguardVeteranSergeant",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
+      "value": 18,
+      "melee_weapons": [
+        "master_crafted_power_weapon"
+      ],
+      "ranged_weapons": [
+        "plasma_pistol_standard",
+        "plasma_pistol_supercharge"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
       "unit_name": "BloodClaw",
-      "agent_key": "Infantry_Troop_MeleeSwarm",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Swarm",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
       "value": 13,
       "melee_weapons": [
         "assault_intercessor_chainsword"
@@ -156,11 +685,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "BloodClawPackLeader",
-      "agent_key": "Infantry_Troop_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
       "value": 18,
       "melee_weapons": [
         "power_weapon_pack_leader"
@@ -176,11 +702,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "Captain Gravis",
-      "agent_key": "Infantry_LeaderElite_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "LeaderElite",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "LeaderEliteMeleeElite",
       "value": 80,
       "melee_weapons": [
         "power_fist"
@@ -192,12 +715,118 @@
     },
     {
       "army": "SpaceMarine",
+      "unit_name": "CaptainTerminator",
+      "agent_key": "CoreAgent",
+      "base_class": "LeaderEliteMeleeElite",
+      "value": 95,
+      "melee_weapons": [
+        "relic_fist"
+      ],
+      "ranged_weapons": [
+        "storm_bolter_wolf_guard"
+      ],
+      "special_rules": [
+        "Unstoppable Valour"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "DeathCompanyJumpPackEviscerator",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
+      "value": 17,
+      "melee_weapons": [
+        "eviscerator"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "DeathCompanyMarineEviscerator",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeSwarm",
+      "value": 17,
+      "melee_weapons": [
+        "eviscerator"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "DeathCompanyMarineEviscerator",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeSwarm",
+      "value": 17,
+      "melee_weapons": [
+        "eviscerator"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "DeathwingTerminatorPlasmaCannon",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeElite",
+      "value": 38,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "plasma_cannon_standard",
+        "plasma_cannon_supercharge"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "EradicatorMeltaRifle",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 28,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "melta_rifle"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "EradicatorMultiMelta",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 34,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "melta_rifle"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "FenrisianWolf",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeSwarm",
+      "value": 8,
+      "melee_weapons": [
+        "fenrisian_wolf_teeth_and_claws"
+      ],
+      "ranged_weapons": [],
+      "special_rules": [
+        "Predator Instinct"
+      ]
+    },
+    {
+      "army": "SpaceMarine",
       "unit_name": "GreyHunter",
-      "agent_key": "Infantry_Troop_RangedSwarm",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Ranged",
-      "target_type": "Swarm",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeSwarm",
       "value": 16,
       "melee_weapons": [
         "astartes_chainsword"
@@ -213,11 +842,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "GreyHunterPackLeader",
-      "agent_key": "Infantry_Troop_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeElite",
       "value": 17,
       "melee_weapons": [
         "power_fist_pack_leader"
@@ -233,11 +859,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "GreyHunterPlasmaGun",
-      "agent_key": "Infantry_Troop_RangedElite",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Ranged",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeElite",
       "value": 18,
       "melee_weapons": [
         "astartes_chainsword"
@@ -254,11 +877,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "HeavyIntercessor",
-      "agent_key": "Infantry_Elite_RangedTroop",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Ranged",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
       "value": 19,
       "melee_weapons": [
         "close_combat_weapon"
@@ -272,11 +892,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "HeavyIntercessorHeavyBolter",
-      "agent_key": "Infantry_Elite_RangedTroop",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Ranged",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
       "value": 24,
       "melee_weapons": [
         "close_combat_weapon"
@@ -289,12 +906,101 @@
     },
     {
       "army": "SpaceMarine",
+      "unit_name": "Hellblaster",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeElite",
+      "value": 21,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "plasma_incinerator_standard",
+        "plasma_incineratorl_supercharge",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "HellblasterSergeant",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeElite",
+      "value": 26,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "plasma_incinerator_standard",
+        "plasma_incineratorl_supercharge",
+        "plasma_pistol_standard",
+        "plasma_pistol_supercharge"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "InceptorBolter",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 24,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "assault_bolters"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "InceptorPlasma",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 24,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "plasma_exterminator_standard",
+        "plasma_exterminator_supercharge"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Incursor",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeSwarm",
+      "value": 16,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "occulus_bolt_carabine",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Infernus",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeSwarm",
+      "value": 19,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "bolt_rifle",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
       "unit_name": "Intercessor",
-      "agent_key": "Infantry_Troop_RangedSwarm",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Ranged",
-      "target_type": "Swarm",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeSwarm",
       "value": 18,
       "melee_weapons": [
         "close_combat_weapon"
@@ -308,11 +1014,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "IntercessorGrenadeLauncher",
-      "agent_key": "Infantry_Troop_RangedSwarm",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Ranged",
-      "target_type": "Swarm",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeSwarm",
       "value": 20,
       "melee_weapons": [
         "close_combat_weapon"
@@ -327,11 +1030,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "IntercessorSergeant",
-      "agent_key": "Infantry_Troop_RangedSwarm",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeElite",
       "value": 21,
       "melee_weapons": [
         "intercessor_sergeant_power_fist"
@@ -344,12 +1044,97 @@
     },
     {
       "army": "SpaceMarine",
+      "unit_name": "SanguinaryGuardAngelus",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
+      "value": 50,
+      "melee_weapons": [
+        "encarmine_blade"
+      ],
+      "ranged_weapons": [
+        "angelus_boltgun"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "SanguinaryGuardInferno",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
+      "value": 50,
+      "melee_weapons": [
+        "encarmine_blade"
+      ],
+      "ranged_weapons": [
+        "inferno_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Scout",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeSwarm",
+      "value": 14,
+      "melee_weapons": [
+        "close_combat_weapon_scout"
+      ],
+      "ranged_weapons": [
+        "boltgun",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "SternguardVeteranBoltRifle",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeSwarm",
+      "value": 31,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "sternguard_bolt_rifle",
+        "sternguard_bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "SternguardVeteranSergeantPowerFist",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeElite",
+      "value": 38,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "sternguard_bolt_rifle",
+        "sternguard_bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "Suppressor",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 15,
+      "melee_weapons": [
+        "close_combat_weapon"
+      ],
+      "ranged_weapons": [
+        "accelerator_autocannon",
+        "bolt_pistol"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
       "unit_name": "Terminator",
-      "agent_key": "Infantry_Elite_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
       "value": 33,
       "melee_weapons": [
         "power_fist"
@@ -362,11 +1147,8 @@
     {
       "army": "SpaceMarine",
       "unit_name": "TerminatorAssaultCannon",
-      "agent_key": "Infantry_Elite_RangedElite",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Ranged",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
       "value": 38,
       "melee_weapons": [
         "power_fist"
@@ -377,30 +1159,97 @@
       "special_rules": []
     },
     {
-      "army": "Tyranid",
-      "unit_name": "Carnifex",
-      "agent_key": "Infantry_Elite_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Melee",
-      "target_type": "Elite",
-      "value": 125,
+      "army": "SpaceMarine",
+      "unit_name": "TerminatorCyclone",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 38,
       "melee_weapons": [
-        "monstrous_scything_talons"
+        "power_fist"
       ],
       "ranged_weapons": [
-        "venom_cannon"
+        "cyclone_missile_launcher_frag",
+        "cyclone_missile_launcher_krak"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "TerminatorHeavyFlamer",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 38,
+      "melee_weapons": [
+        "power_fist"
+      ],
+      "ranged_weapons": [
+        "heavy_flamer"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "SpaceMarine",
+      "unit_name": "WolfGuardTerminator",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
+      "value": 33,
+      "melee_weapons": [
+        "master_crafted_power_weapon"
+      ],
+      "ranged_weapons": [
+        "storm_bolter_wolf_guard"
       ],
       "special_rules": []
     },
     {
       "army": "Tyranid",
+      "unit_name": "Biovore",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 45,
+      "melee_weapons": [
+        "chitin_barbed_limb"
+      ],
+      "ranged_weapons": [
+        "spore_mine_launcher"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Carnifex",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
+      "value": 125,
+      "melee_weapons": [
+        "monstrous_scything_talons"
+      ],
+      "ranged_weapons": [
+        "heavy_venom_cannon"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Gargoyle",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeSwarm",
+      "value": 7,
+      "melee_weapons": [
+        "blinding_venom"
+      ],
+      "ranged_weapons": [
+        "fleshborer"
+      ],
+      "special_rules": [
+        "Winged Swarm"
+      ]
+    },
+    {
+      "army": "Tyranid",
       "unit_name": "Genestealer",
-      "agent_key": "Infantry_Troop_MeleeTroop",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Melee",
-      "target_type": "Troop",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
       "value": 19,
       "melee_weapons": [
         "rending_claws"
@@ -411,11 +1260,8 @@
     {
       "army": "Tyranid",
       "unit_name": "GenestealerPrime",
-      "agent_key": "Infantry_Elite_MeleeElite",
-      "type": "Infantry",
-      "tanking_type": "Elite",
-      "attack_type": "Melee",
-      "target_type": "Elite",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
       "value": 90,
       "melee_weapons": [
         "rending_claws_prime"
@@ -425,12 +1271,37 @@
     },
     {
       "army": "Tyranid",
+      "unit_name": "HiveGuardImpalerCannon",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeElite",
+      "value": 32,
+      "melee_weapons": [
+        "chitinous_claws_and_teeth_hive_guard"
+      ],
+      "ranged_weapons": [
+        "impaler_cannon"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "HiveGuardShockcannon",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeElite",
+      "value": 32,
+      "melee_weapons": [
+        "chitinous_claws_and_teeth_hive_guard"
+      ],
+      "ranged_weapons": [
+        "shockcannon"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
       "unit_name": "Hormagaunt",
-      "agent_key": "Infantry_Swarm_MeleeSwarm",
-      "type": "Infantry",
-      "tanking_type": "Swarm",
-      "attack_type": "Melee",
-      "target_type": "Swarm",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeSwarm",
       "value": 7,
       "melee_weapons": [
         "scything_talons"
@@ -442,12 +1313,53 @@
     },
     {
       "army": "Tyranid",
+      "unit_name": "Pyrovore",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteRangeTroop",
+      "value": 30,
+      "melee_weapons": [
+        "chitin_barbed_limb"
+      ],
+      "ranged_weapons": [
+        "flamespurt"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "RipperSwarm",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmMeleeSwarm",
+      "value": 15,
+      "melee_weapons": [
+        "chitinous_claws_and_teeth_ripper_swarm"
+      ],
+      "ranged_weapons": [
+        "spinemaws"
+      ],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
       "unit_name": "Termagant",
-      "agent_key": "Infantry_Swarm_RangedSwarm",
-      "type": "Infantry",
-      "tanking_type": "Swarm",
-      "attack_type": "Ranged",
-      "target_type": "Swarm",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
+      "value": 6,
+      "melee_weapons": [
+        "flesh_hooks"
+      ],
+      "ranged_weapons": [
+        "fleshborer"
+      ],
+      "special_rules": [
+        "Skulking Horrors"
+      ]
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "TermagantTuto",
+      "agent_key": "CoreAgent",
+      "base_class": "SwarmRangeSwarm",
       "value": 6,
       "melee_weapons": [
         "flesh_hooks"
@@ -459,15 +1371,26 @@
     },
     {
       "army": "Tyranid",
-      "unit_name": "Tyranid Warrior Ranged",
-      "agent_key": "Infantry_Troop_RangedTroop",
-      "type": "Infantry",
-      "tanking_type": "Troop",
-      "attack_type": "Ranged",
-      "target_type": "Troop",
+      "unit_name": "TyranidWarriorMelee",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopMeleeTroop",
+      "value": 32,
+      "melee_weapons": [
+        "bio_weapon_warrior"
+      ],
+      "ranged_weapons": [],
+      "special_rules": [
+        "Adrenalised Onslaught"
+      ]
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "TyranidWarriorRanged",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeTroop",
       "value": 24,
       "melee_weapons": [
-        "rending_claws_warrior"
+        "rending_claws"
       ],
       "ranged_weapons": [
         "deathspitter"
@@ -475,6 +1398,57 @@
       "special_rules": [
         "Adaptable Predators"
       ]
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "TyrantGuardBoneCleaver",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeTroop",
+      "value": 32,
+      "melee_weapons": [
+        "bone_cleaver"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "TyrantGuardCrushingClaws",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeElite",
+      "value": 32,
+      "melee_weapons": [
+        "crushing_claws"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "TyrantGuardScytingTalon",
+      "agent_key": "CoreAgent",
+      "base_class": "EliteMeleeTroop",
+      "value": 32,
+      "melee_weapons": [
+        "scything_talons_tyrant_guard"
+      ],
+      "ranged_weapons": [],
+      "special_rules": []
+    },
+    {
+      "army": "Tyranid",
+      "unit_name": "Zoanthrope",
+      "agent_key": "CoreAgent",
+      "base_class": "TroopRangeElite",
+      "value": 30,
+      "melee_weapons": [
+        "chitinous_claws_and_teeth_zoanthrope"
+      ],
+      "ranged_weapons": [
+        "warp_blast_witchfire",
+        "warp_blast_focused_bolt"
+      ],
+      "special_rules": []
     }
   ]
 }

@@ -23,10 +23,7 @@ class ParsedUnit:
 
     army: str
     unit_name: str
-    unit_type: str
-    tanking_type: str
-    attack_type: str
-    target_type: str
+    base_class: str
     value: int
     melee_weapons: list[str]
     ranged_weapons: list[str]
@@ -39,24 +36,6 @@ def _require_match(match: re.Match[str] | None, field_name: str, file_path: Path
     if match is None:
         raise ValueError(f"Missing required field '{field_name}' in {file_path}")
     return match
-
-
-def _infer_move_type(base_class: str) -> str:
-    """Infer movement type from base class naming."""
-    if "Vehicle" in base_class:
-        return "Vehicle"
-    if "Bike" in base_class:
-        return "Bike"
-    return "Infantry"
-
-
-def _infer_tanking_type(hp_max: int, armor_save: int) -> str:
-    """Infer tanking profile from core defensive stats."""
-    if hp_max <= 1:
-        return "Swarm"
-    if hp_max <= 3 and armor_save >= 4:
-        return "Troop"
-    return "Elite"
 
 
 def _parse_unit_file(file_path: Path) -> ParsedUnit:
@@ -81,16 +60,6 @@ def _parse_unit_file(file_path: Path) -> ParsedUnit:
         "static VALUE",
         file_path,
     )
-    hp_max_match = _require_match(
-        re.search(r"static\s+HP_MAX\s*=\s*(-?\d+)\s*;", content),
-        "static HP_MAX",
-        file_path,
-    )
-    armor_save_match = _require_match(
-        re.search(r"static\s+ARMOR_SAVE\s*=\s*(-?\d+)\s*;", content),
-        "static ARMOR_SAVE",
-        file_path,
-    )
     ranged_weapons_match = _require_match(
         re.search(
             r"static\s+RNG_WEAPON_CODES(?:\s*:\s*[^=]+)?\s*=\s*\[([\s\S]*?)\]\s*;",
@@ -110,33 +79,20 @@ def _parse_unit_file(file_path: Path) -> ParsedUnit:
         file_path,
     )
 
-    if "Melee" in base_class:
-        attack_type = "Melee"
-    elif "Ranged" in base_class or "Range" in base_class:
-        attack_type = "Ranged"
-    elif "Support" in base_class:
-        attack_type = "Support"
-    else:
-        raise ValueError(
-            f"Cannot infer attack_type from base class '{base_class}' in {file_path}. "
-            "Base class must contain Melee, Ranged, or Support."
-        )
-
     army_dir = file_path.parts[-3]
-    if army_dir == "spaceMarine":
-        army = "SpaceMarine"
-    elif army_dir == "tyranid":
-        army = "Tyranid"
-    else:
+    army_by_dir = {
+        "spaceMarine": "SpaceMarine",
+        "tyranid": "Tyranid",
+        "aeldari": "Aeldari",
+        "adeptusCustodes": "AdeptusCustodes",
+        "chaos": "Chaos",
+    }
+    if army_dir not in army_by_dir:
         raise ValueError(f"Unknown army directory '{army_dir}' for file {file_path}")
+    army = army_by_dir[army_dir]
 
     unit_name = name_match.group(1).strip()
     value = int(value_match.group(1))
-    hp_max = int(hp_max_match.group(1))
-    armor_save = int(armor_save_match.group(1))
-    move_type = _infer_move_type(base_class)
-    tanking_type = _infer_tanking_type(hp_max, armor_save)
-    target_type = "Dynamic"
     ranged_weapons = re.findall(r'["\']([^"\']+)["\']', ranged_weapons_match.group(1))
     melee_weapons = re.findall(r'["\']([^"\']+)["\']', melee_weapons_match.group(1))
 
@@ -155,10 +111,7 @@ def _parse_unit_file(file_path: Path) -> ParsedUnit:
     return ParsedUnit(
         army=army,
         unit_name=unit_name,
-        unit_type=move_type,
-        tanking_type=tanking_type,
-        attack_type=attack_type,
-        target_type=target_type,
+        base_class=base_class,
         value=value,
         melee_weapons=melee_weapons,
         ranged_weapons=ranged_weapons,
@@ -189,10 +142,7 @@ def generate_matrix(project_root: Path) -> dict[str, Any]:
                 "army": unit.army,
                 "unit_name": unit.unit_name,
                 "agent_key": _build_agent_key(unit),
-                "type": unit.unit_type,
-                "tanking_type": unit.tanking_type,
-                "attack_type": unit.attack_type,
-                "target_type": unit.target_type,
+                "base_class": unit.base_class,
                 "value": unit.value,
                 "melee_weapons": unit.melee_weapons,
                 "ranged_weapons": unit.ranged_weapons,

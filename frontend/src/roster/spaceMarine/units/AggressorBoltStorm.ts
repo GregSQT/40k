@@ -31,11 +31,6 @@ export class AggressorBoltStorm extends EliteRangeSwarm {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "aggressor squad"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Elite"; // Elite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Troop"; // RangedTroop specialist - bolt rifles vs hordes
-
 
   static ICON = "/icons/AggressorBoltstormGauntletFragstormGrenadeLauncher.webp"; // Path relative to public folder
   static ICON_SCALE = 2.0; // Size of the icon

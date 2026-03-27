@@ -118,9 +118,9 @@ class ArmoryParser:
             # NB/DMG can be dice expressions (D3, D6, 2D6, D6+1/2/3) in addition to ints
             for prop in ['RNG', 'NB', 'ATK', 'STR', 'AP', 'DMG']:
                 if prop in ['NB', 'DMG']:
-                    prop_match = re.search(rf'{prop}:\s*([A-Z0-9_]+|D6\+[123]|2D6|D[36]|-?\d+)', weapon_body)
+                    prop_match = re.search(rf'{prop}:\s*([^,\n]+)', weapon_body)
                     if prop_match:
-                        raw_value = prop_match.group(1)
+                        raw_value = prop_match.group(1).strip()
                         if raw_value in ['D3', 'D6', '2D6', 'D6+1', 'D6+2', 'D6+3']:
                             weapon[prop] = raw_value
                         elif raw_value in dice_constant_map:
@@ -132,8 +132,15 @@ class ArmoryParser:
                                     "Allowed dice values: D3, D6, 2D6, D6+1, D6+2, D6+3."
                                 )
                             weapon[prop] = resolved_value
-                        else:
+                        elif re.fullmatch(r'-?\d+', raw_value):
                             weapon[prop] = int(raw_value)
+                        else:
+                            raise ValueError(
+                                f"Weapon '{weapon.get('display_name', weapon_code)}' has unsupported "
+                                f"{prop} value {raw_value!r} in {armory_path}. "
+                                "Allowed values: integer, D3, D6, 2D6, D6+1, D6+2, D6+3, "
+                                "or a DiceValue constant resolving to one of these dice expressions."
+                            )
                 else:
                     prop_match = re.search(rf'{prop}:\s*(-?\d+)', weapon_body)
                     if prop_match:

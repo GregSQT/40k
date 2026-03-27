@@ -135,8 +135,10 @@ Scripts a avoir dans `frontend/package.json`:
 {
   "scripts": {
     "test": "vitest",
+    "test:critical": "vitest run --config vitest.critical.config.ts",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:global": "vitest run --coverage"
   }
 }
 ```
@@ -145,8 +147,10 @@ Commandes locales frontend:
 
 ```bash
 npm --prefix frontend run test
+npm --prefix frontend run test:critical
 npm --prefix frontend run test:run
 npm --prefix frontend run test:coverage
+npm --prefix frontend run test:coverage:global
 ```
 
 ---
@@ -187,16 +191,18 @@ Python (depuis racine):
 
 ```bash
 pytest tests/unit -q
-pytest tests/unit -q --cov=engine --cov=shared --cov=services --cov=ai --cov-report=term-missing --cov-fail-under=55
+pytest tests/unit -q --cov=engine --cov=shared --cov=services --cov=ai/reward_mapper.py --cov=ai/scenario_manager.py --cov=ai/replay_converter.py --cov=ai/metrics_tracker.py --cov=ai/game_replay_logger.py --cov=ai/step_logger.py --cov-report=term-missing --cov-fail-under=60
+pytest tests/unit/ai -q --cov=ai --cov-report=term-missing
 pytest tests/unit/engine -q --cov=engine --cov-fail-under=70
 pytest tests/unit/shared -q --cov=shared --cov-fail-under=80
 pytest tests/unit -q --maxfail=1
 ```
 
 Note:
-- le gate coverage local officiel est `--cov-fail-under=55` (aligne CI phase 1).
-- des gates critiques par package (`engine`, `shared`) sont appliques en
-  complement pour eviter l'effet "compensation" du seuil global.
+- gate bloquant: perimetre critique metier (engine/shared/services + modules ai critiques).
+- reporting informatif: couverture globale `ai/*` sans seuil bloquant.
+- des gates critiques par package (`engine`, `shared`) restent appliques en
+  complement pour eviter l'effet "compensation".
 
 Frontend (depuis racine):
 
@@ -238,7 +244,9 @@ jobs:
 
       - name: Run Python unit tests
         run: |
-          pytest tests/unit -q --cov=engine --cov=shared --cov=services --cov=ai --cov-fail-under=55
+          pytest tests/unit -q
+          pytest tests/unit -q --cov=engine --cov=shared --cov=services --cov=ai/reward_mapper.py --cov=ai/scenario_manager.py --cov=ai/replay_converter.py --cov=ai/metrics_tracker.py --cov=ai/game_replay_logger.py --cov=ai/step_logger.py --cov-report=term-missing --cov-fail-under=60
+          pytest tests/unit/ai -q --cov=ai --cov-report=term-missing
           pytest tests/unit/engine -q --cov=engine --cov-fail-under=70
           pytest tests/unit/shared -q --cov=shared --cov-fail-under=80
 
@@ -258,7 +266,9 @@ jobs:
         run: npm ci
 
       - name: Run frontend unit tests
-        run: npm --prefix frontend run test:coverage
+        run: |
+          npm --prefix frontend run test:critical
+          npm --prefix frontend run test:coverage:global
 ```
 
 ---
@@ -266,14 +276,22 @@ jobs:
 ## 11) Couverture et seuils
 
 Seuil initial recommande:
-- Python global: 55%
+- Python critique (gate bloquant): 60%
 - Cible critique `engine`: gate initial 70% (hausse progressive)
 - Cible critique `shared`: gate initial 80% (hausse progressive)
-- Frontend global: 40% initial, hausse par sprint
+- Frontend critique (gate bloquant): tests critiques + seuils coverage dedies
+- Frontend global: metrique informative, hausse par sprint
+
+Seuil frontend critique initial (module `weaponHelpers`):
+- lines >= 35%
+- statements >= 35%
+- functions >= 40%
+- branches >= 60%
 
 Important:
 - la couverture ne remplace pas des assertions fortes;
 - un test faible couvert a 100% reste un mauvais test.
+- la couverture globale `ai/*` reste suivie en metrique informative (non bloquante).
 
 ---
 

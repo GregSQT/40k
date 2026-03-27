@@ -4,11 +4,6 @@ export class SwarmRangeSwarm {
   static FACTION = "Aeldari";
   static TEAM_COLOR = 0x0078ff; // Example: blue
 
-  // AI CLASSIFICATION PROPERTIES - inherited by all extending units
-  static TANKING_LEVEL = "Swarm"; // Elite: 3+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static OFFENSE_TYPE = "Ranged"; // Offensive mode classification
-  static TARGET_TYPE = "Swarm"; // RangedSwarm specialist - hunt swarm targets
 
   name: string;
   hp: number;

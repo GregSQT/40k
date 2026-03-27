@@ -26,11 +26,6 @@ export class WarpSpiderExarchPowerblade extends SwarmMeleeTroop {
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "aeldari"}, { keywordId: "aspect warrior"}, { keywordId: "Warp Spider"}];
   
-  // AI CLASSIFICATION
-  static TANKING_LEVEL = "Swarm"; // Elite: 6+ wounds, 3+ save + invul
-  static MOVE_TYPE = "Infantry"; // Standard infantry movement
-  static TARGET_TYPE = "Troop"; // Troop specialist - bolt rifles vs hordes
-
 
   static ICON = "/icons/WarpSpiderExarchSpinner.webp"; // Path relative to public folder
   static ICON_SCALE = 1.6; // Size of the icon

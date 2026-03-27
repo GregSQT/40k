@@ -22,13 +22,6 @@ def test_get_armory_path_supports_canonical_and_exact_case(tmp_path: Path) -> No
 
 
 @pytest.mark.anomaly
-@pytest.mark.xfail(
-    reason=(
-        "ANOM-001: parser regex currently truncates D6+1 to D6 in NB/DMG extraction. "
-        "Expected behavior is to preserve full dice expression."
-    ),
-    strict=False,
-)
 def test_parse_armory_file_extracts_weapon_and_resolves_dice_constant(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
