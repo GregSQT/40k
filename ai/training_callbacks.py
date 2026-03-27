@@ -389,8 +389,8 @@ class EpisodeTerminationCallback(BaseCallback):
                 else:
                     recent_avg_duration = 0.0
                 duration_display = (
-                    f"s/ep: moy {global_avg_time_per_episode:.2f}, "
-                    f"cur {recent_avg_duration:.2f}, "
+                    f"s/ep: cur {recent_avg_duration:.2f}, "
+                    f"moy {global_avg_time_per_episode:.2f}, "
                     f"max: {self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"

@@ -41,6 +41,24 @@ def _require_match(match: re.Match[str] | None, field_name: str, file_path: Path
     return match
 
 
+def _infer_move_type(base_class: str) -> str:
+    """Infer movement type from base class naming."""
+    if "Vehicle" in base_class:
+        return "Vehicle"
+    if "Bike" in base_class:
+        return "Bike"
+    return "Infantry"
+
+
+def _infer_tanking_type(hp_max: int, armor_save: int) -> str:
+    """Infer tanking profile from core defensive stats."""
+    if hp_max <= 1:
+        return "Swarm"
+    if hp_max <= 3 and armor_save >= 4:
+        return "Troop"
+    return "Elite"
+
+
 def _parse_unit_file(file_path: Path) -> ParsedUnit:
     """Parse one TypeScript unit file into structured metadata."""
     content = file_path.read_text(encoding="utf-8")
@@ -58,24 +76,19 @@ def _parse_unit_file(file_path: Path) -> ParsedUnit:
         "static NAME",
         file_path,
     )
-    move_type_match = _require_match(
-        re.search(r'static\s+MOVE_TYPE\s*=\s*"([^"]+)"\s*;', content),
-        "static MOVE_TYPE",
-        file_path,
-    )
-    tanking_match = _require_match(
-        re.search(r'static\s+TANKING_LEVEL\s*=\s*"([^"]+)"\s*;', content),
-        "static TANKING_LEVEL",
-        file_path,
-    )
-    target_type_match = _require_match(
-        re.search(r'static\s+TARGET_TYPE\s*=\s*"([^"]+)"\s*;', content),
-        "static TARGET_TYPE",
-        file_path,
-    )
     value_match = _require_match(
         re.search(r"static\s+VALUE\s*=\s*(-?\d+)\s*;", content),
         "static VALUE",
+        file_path,
+    )
+    hp_max_match = _require_match(
+        re.search(r"static\s+HP_MAX\s*=\s*(-?\d+)\s*;", content),
+        "static HP_MAX",
+        file_path,
+    )
+    armor_save_match = _require_match(
+        re.search(r"static\s+ARMOR_SAVE\s*=\s*(-?\d+)\s*;", content),
+        "static ARMOR_SAVE",
         file_path,
     )
     ranged_weapons_match = _require_match(
@@ -99,7 +112,7 @@ def _parse_unit_file(file_path: Path) -> ParsedUnit:
 
     if "Melee" in base_class:
         attack_type = "Melee"
-    elif "Ranged" in base_class:
+    elif "Ranged" in base_class or "Range" in base_class:
         attack_type = "Ranged"
     elif "Support" in base_class:
         attack_type = "Support"
@@ -118,10 +131,12 @@ def _parse_unit_file(file_path: Path) -> ParsedUnit:
         raise ValueError(f"Unknown army directory '{army_dir}' for file {file_path}")
 
     unit_name = name_match.group(1).strip()
-    move_type = move_type_match.group(1).strip()
-    tanking_type = tanking_match.group(1).strip()
-    target_type = target_type_match.group(1).strip()
     value = int(value_match.group(1))
+    hp_max = int(hp_max_match.group(1))
+    armor_save = int(armor_save_match.group(1))
+    move_type = _infer_move_type(base_class)
+    tanking_type = _infer_tanking_type(hp_max, armor_save)
+    target_type = "Dynamic"
     ranged_weapons = re.findall(r'["\']([^"\']+)["\']', ranged_weapons_match.group(1))
     melee_weapons = re.findall(r'["\']([^"\']+)["\']', melee_weapons_match.group(1))
 
@@ -153,8 +168,8 @@ def _parse_unit_file(file_path: Path) -> ParsedUnit:
 
 
 def _build_agent_key(unit: ParsedUnit) -> str:
-    """Build canonical inter-faction agent key."""
-    return f"{unit.unit_type}_{unit.tanking_type}_{unit.attack_type}{unit.target_type}"
+    """Build canonical single-agent key."""
+    return "CoreAgent"
 
 
 def generate_matrix(project_root: Path) -> dict[str, Any]:

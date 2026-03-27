@@ -174,7 +174,7 @@ def test_build_eval_obs_normalizer_for_worker_normalizes_and_squeezes(
 
 def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyPatch) -> None:
     loaded_model = object()
-    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda model_path: loaded_model)
+    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda model_path, device=None: loaded_model)
     monkeypatch.setattr(
         be,
         "_build_eval_obs_normalizer_for_worker",
@@ -185,6 +185,7 @@ def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyP
 
     be._eval_worker_init(
         model_path="/tmp/model.zip",
+        worker_model_device="cpu",
         vec_model_path="/tmp/vec.pkl",
         vec_normalize_enabled=True,
         vec_eval_enabled=True,

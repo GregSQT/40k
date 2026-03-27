@@ -534,8 +534,7 @@ class ObservationBuilder:
     
     def _calculate_combat_mix_score(self, unit: Dict[str, Any]) -> float:
         """
-        Calculate unit's combat preference based on ACTUAL expected damage
-        against their favorite target types (from unitType).
+        Calculate combat preference from dynamic weapon profile only.
         
         Returns 0.1-0.9:
         - 0.1-0.3: Melee specialist (CC damage >> RNG damage)
@@ -544,67 +543,34 @@ class ObservationBuilder:
         
         AI_TURN.md COMPLIANCE: Direct UPPERCASE field access
         """
-        if "unitType" not in unit:
-            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
-        
-        unit_type = unit["unitType"]
-        
-        # Determine favorite target stats based on specialization
-        if "Swarm" in unit_type:
-            target_T = 3
-            target_save = 5
-            target_invul = 7  # No invul (7+ = impossible)
-        elif "Troop" in unit_type:
-            target_T = 4
-            target_save = 3
-            target_invul = 7  # No invul
-        elif "Elite" in unit_type:
-            target_T = 5
-            target_save = 2
-            target_invul = 4  # 4+ invulnerable
-        else:  # Monster/Leader
-            target_T = 6
-            target_save = 3
-            target_invul = 7  # No invul
-        
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate max expected damage from all weapons
-        # Calculate EXPECTED ranged damage per turn (max from all ranged weapons)
+        rng_weapons = require_key(unit, "RNG_WEAPONS")
+        cc_weapons = require_key(unit, "CC_WEAPONS")
+
+        # Dynamic proxy: expected pressure from weapon profile, without static unitType priors.
         ranged_expected = 0.0
-        if unit.get("RNG_WEAPONS"):
-            for weapon in unit["RNG_WEAPONS"]:
-                weapon_expected = self._calculate_expected_damage(
-                    num_attacks=expected_dice_value(require_key(weapon, "NB"), "combat_mix_rng_nb"),
-                    to_hit_stat=require_key(weapon, "ATK"),
-                    strength=require_key(weapon, "STR"),
-                    target_toughness=target_T,
-                    ap=require_key(weapon, "AP"),
-                    target_save=target_save,
-                    target_invul=target_invul,
-                    damage_per_wound=expected_dice_value(require_key(weapon, "DMG"), "combat_mix_rng_dmg")
-                )
-                ranged_expected = max(ranged_expected, weapon_expected)
-        
-        # Calculate EXPECTED melee damage per turn (max from all melee weapons)
+        for weapon in rng_weapons:
+            attacks = expected_dice_value(require_key(weapon, "NB"), "combat_mix_rng_nb")
+            damage = expected_dice_value(require_key(weapon, "DMG"), "combat_mix_rng_dmg")
+            hit_prob = max(0.0, min(1.0, (7 - require_key(weapon, "ATK")) / 6.0))
+            strength_factor = max(0.0, min(1.0, require_key(weapon, "STR") / 10.0))
+            ap_factor = max(0.0, min(1.0, require_key(weapon, "AP") / 6.0))
+            weapon_expected = attacks * damage * hit_prob * (0.5 + (0.3 * strength_factor) + (0.2 * ap_factor))
+            ranged_expected = max(ranged_expected, weapon_expected)
+
         melee_expected = 0.0
-        if unit.get("CC_WEAPONS"):
-            for weapon in unit["CC_WEAPONS"]:
-                weapon_expected = self._calculate_expected_damage(
-                    num_attacks=expected_dice_value(require_key(weapon, "NB"), "combat_mix_cc_nb"),
-                    to_hit_stat=require_key(weapon, "ATK"),
-                    strength=require_key(weapon, "STR"),
-                    target_toughness=target_T,
-                    ap=require_key(weapon, "AP"),
-                    target_save=target_save,
-                    target_invul=target_invul,
-                    damage_per_wound=expected_dice_value(require_key(weapon, "DMG"), "combat_mix_cc_dmg")
-                )
-                melee_expected = max(melee_expected, weapon_expected)
-        
+        for weapon in cc_weapons:
+            attacks = expected_dice_value(require_key(weapon, "NB"), "combat_mix_cc_nb")
+            damage = expected_dice_value(require_key(weapon, "DMG"), "combat_mix_cc_dmg")
+            hit_prob = max(0.0, min(1.0, (7 - require_key(weapon, "ATK")) / 6.0))
+            strength_factor = max(0.0, min(1.0, require_key(weapon, "STR") / 10.0))
+            ap_factor = max(0.0, min(1.0, require_key(weapon, "AP") / 6.0))
+            weapon_expected = attacks * damage * hit_prob * (0.5 + (0.3 * strength_factor) + (0.2 * ap_factor))
+            melee_expected = max(melee_expected, weapon_expected)
+
         total_expected = ranged_expected + melee_expected
-        
         if total_expected == 0:
             return 0.5  # Neutral (no combat power)
-        
+
         # Scale to 0.1-0.9 range
         raw_ratio = ranged_expected / total_expected
         return 0.1 + (raw_ratio * 0.8)
@@ -654,44 +620,27 @@ class ObservationBuilder:
     
     def _calculate_favorite_target(self, unit: Dict[str, Any]) -> float:
         """
-        Extract favorite target type from unitType name.
-        
-        unitType format: "Faction_Movement_PowerLevel_AttackPreference"
-        Example: "SpaceMarine_Infantry_Troop_RangedSwarm"
-                                              ^^^^^^^^^^^^
-                                              Ranged + Swarm
-        
+        Estimate target toughness preference from dynamic weapon profile only.
+
         Returns 0.0-1.0 encoding:
-        - 0.0 = Swarm specialist (vs HP_MAX ≤ 1)
-        - 0.33 = Troop specialist (vs HP_MAX 2-3)
-        - 0.66 = Elite specialist (vs HP_MAX 4-6)
-        - 1.0 = Monster specialist (vs HP_MAX ≥ 7)
-        
-        AI_TURN.md COMPLIANCE: Direct field access
+        - 0.0: low-toughness leaning profile
+        - 1.0: high-toughness leaning profile
         """
-        if "unitType" not in unit:
-            raise KeyError(f"Unit missing required 'unitType' field: {unit}")
-        
-        unit_type = unit["unitType"]
-        
-        # Parse attack preference component (last part after final underscore)
-        parts = unit_type.split("_")
-        if len(parts) < 4:
-            return 0.5  # Default neutral if format unexpected
-        
-        attack_pref = parts[3]  # e.g., "RangedSwarm", "MeleeElite"
-        
-        # Extract target preference from attack_pref
-        if "Swarm" in attack_pref:
-            return 0.0
-        elif "Troop" in attack_pref:
-            return 0.33
-        elif "Elite" in attack_pref:
-            return 0.66
-        elif "Monster" in attack_pref or "Leader" in attack_pref:
-            return 1.0
-        else:
-            return 0.5  # Default neutral
+        rng_weapons = require_key(unit, "RNG_WEAPONS")
+        cc_weapons = require_key(unit, "CC_WEAPONS")
+        all_weapons = list(rng_weapons) + list(cc_weapons)
+        if not all_weapons:
+            return 0.5  # Neutral for non-combat profile
+
+        best_piercing_score = 0.0
+        for weapon in all_weapons:
+            strength_factor = max(0.0, min(1.0, require_key(weapon, "STR") / 10.0))
+            ap_factor = max(0.0, min(1.0, require_key(weapon, "AP") / 6.0))
+            damage_factor = max(0.0, min(1.0, expected_dice_value(require_key(weapon, "DMG"), "favorite_target_dmg") / 6.0))
+            piercing_score = (0.5 * strength_factor) + (0.3 * ap_factor) + (0.2 * damage_factor)
+            best_piercing_score = max(best_piercing_score, piercing_score)
+
+        return best_piercing_score
     
     def _calculate_movement_direction(self, unit: Dict[str, Any],
                                      active_unit: Dict[str, Any],
@@ -915,6 +864,40 @@ class ObservationBuilder:
             return 1.0
         else:
             return min(1.0, expected_damage / target_hp)
+
+    def _use_ranged_scoring_for_phase(self, game_state: Dict[str, Any]) -> bool:
+        """
+        Resolve phase-aware weapon mode for target scoring features.
+
+        Returns:
+            True for ranged scoring, False for melee scoring.
+        """
+        phase = require_key(game_state, "phase")
+        if phase in ("shoot", "move", "command", "deployment"):
+            return True
+        if phase in ("charge", "fight"):
+            return False
+        raise KeyError(f"Unknown phase for phase-aware weapon scoring: {phase}")
+
+    def _get_phase_aware_best_weapon_features(
+        self,
+        attacker: Dict[str, Any],
+        target: Dict[str, Any],
+        game_state: Dict[str, Any],
+    ) -> Tuple[int, float, bool]:
+        """
+        Common scoring service used by enemy and valid-target encoding.
+
+        Returns:
+            (best_weapon_index, best_kill_probability, is_ranged_mode)
+        """
+        from engine.ai.weapon_selector import get_best_weapon_for_target
+
+        is_ranged_mode = self._use_ranged_scoring_for_phase(game_state)
+        best_weapon_idx, best_kill_prob = get_best_weapon_for_target(
+            attacker, target, game_state, is_ranged=is_ranged_mode
+        )
+        return best_weapon_idx, best_kill_prob, is_ranged_mode
     
     def _calculate_danger_probability(self, defender: Dict[str, Any], attacker: Dict[str, Any], game_state: Dict[str, Any],
                                      positions: Optional[Dict[str, Tuple[int, int]]] = None) -> float:
@@ -2044,10 +2027,9 @@ class ObservationBuilder:
                     is_valid = 1.0 if distance <= melee_range else 0.0
                 obs[feature_base + 10] = is_valid
                 
-                # Feature 11-12: best_weapon_index + best_kill_probability (NOUVEAU)
-                from engine.ai.weapon_selector import get_best_weapon_for_target
-                best_weapon_idx, best_kill_prob = get_best_weapon_for_target(
-                    active_unit, enemy, game_state, is_ranged=True
+                # Feature 11-12: best_weapon_index + best_kill_probability (phase-aware)
+                best_weapon_idx, best_kill_prob, _ = self._get_phase_aware_best_weapon_features(
+                    active_unit, enemy, game_state
                 )
                 obs[feature_base + 11] = best_weapon_idx / 2.0 if best_weapon_idx >= 0 else 0.0
                 obs[feature_base + 12] = best_kill_prob
@@ -2134,26 +2116,28 @@ class ObservationBuilder:
                 # Feature 17: target_efficiency (0.0-1.0) - AMÉLIORÉ POST-ÉTAPE 9
                 # TTK avec ma meilleure arme contre cette cible
                 # Normalisé: 1.0 = je peux tuer en 1 tour, 0.0 = je ne peux pas tuer (ou très lent)
-                best_weapon_idx, _ = get_best_weapon_for_target(
-                    active_unit, enemy, game_state, is_ranged=True
+                best_weapon_idx, _, is_ranged_mode = self._get_phase_aware_best_weapon_features(
+                    active_unit, enemy, game_state
                 )
-                
-                if best_weapon_idx >= 0 and active_unit.get("RNG_WEAPONS"):
-                    weapon = active_unit["RNG_WEAPONS"][best_weapon_idx]
+
+                if is_ranged_mode:
+                    weapons = require_key(active_unit, "RNG_WEAPONS")
+                else:
+                    weapons = require_key(active_unit, "CC_WEAPONS")
+
+                if best_weapon_idx >= 0:
+                    if best_weapon_idx >= len(weapons):
+                        raise ValueError(
+                            f"Phase-aware best weapon index out of range: idx={best_weapon_idx}, "
+                            f"weapons_len={len(weapons)}, is_ranged_mode={is_ranged_mode}, "
+                            f"active_unit_id={active_unit.get('id')}, target_id={enemy.get('id')}"
+                        )
+                    weapon = weapons[best_weapon_idx]
                     ttk = calculate_ttk_with_weapon(active_unit, weapon, enemy, game_state)
                     # Normaliser: 1.0 = ttk ≤ 1, 0.0 = ttk ≥ 5
                     obs[feature_base + 17] = max(0.0, min(1.0, 1.0 - (ttk - 1.0) / 4.0))
                 else:
-                    # Pas d'armes ranged, essayer melee
-                    best_melee_weapon_idx, _ = get_best_weapon_for_target(
-                        active_unit, enemy, game_state, is_ranged=False
-                    )
-                    if best_melee_weapon_idx >= 0 and active_unit.get("CC_WEAPONS"):
-                        weapon = active_unit["CC_WEAPONS"][best_melee_weapon_idx]
-                        ttk = calculate_ttk_with_weapon(active_unit, weapon, enemy, game_state)
-                        obs[feature_base + 17] = max(0.0, min(1.0, 1.0 - (ttk - 1.0) / 4.0))
-                    else:
-                        obs[feature_base + 17] = 0.0  # Pas d'armes disponibles
+                    obs[feature_base + 17] = 0.0  # Pas d'armes disponibles dans le mode de phase
                 
                 # Feature 18: is_adjacent (était feature 18 originale) - INCHANGÉ
                 obs[feature_base + 18] = 1.0 if distance <= 1 else 0.0
@@ -2423,21 +2407,23 @@ class ObservationBuilder:
         if "VALUE" not in target:
             raise KeyError(f"Target missing required 'VALUE' field: {target}")
         target_value = target["VALUE"]
-        from engine.utils.weapon_helpers import get_selected_ranged_weapon
-        from engine.ai.weapon_selector import get_best_weapon_for_target
-        best_weapon_idx, _ = get_best_weapon_for_target(
-            active_unit, target, game_state, is_ranged=True
+        best_weapon_idx, _, is_ranged_mode = self._get_phase_aware_best_weapon_features(
+            active_unit, target, game_state
         )
-        if best_weapon_idx >= 0 and active_unit.get("RNG_WEAPONS"):
-            weapon = active_unit["RNG_WEAPONS"][best_weapon_idx]
+        if is_ranged_mode:
+            weapons = require_key(active_unit, "RNG_WEAPONS")
         else:
-            selected_weapon = get_selected_ranged_weapon(active_unit)
-            if selected_weapon:
-                weapon = selected_weapon
-            elif active_unit.get("RNG_WEAPONS"):
-                weapon = active_unit["RNG_WEAPONS"][0]
-            else:
-                return (0.0, distance)
+            weapons = require_key(active_unit, "CC_WEAPONS")
+
+        if best_weapon_idx < 0:
+            return (0.0, distance)
+        if best_weapon_idx >= len(weapons):
+            raise ValueError(
+                f"Phase-aware best weapon index out of range in target priority: idx={best_weapon_idx}, "
+                f"weapons_len={len(weapons)}, is_ranged_mode={is_ranged_mode}, "
+                f"active_unit_id={active_unit.get('id')}, target_id={target.get('id')}"
+            )
+        weapon = weapons[best_weapon_idx]
         unit_attacks = expected_dice_value(require_key(weapon, "NB"), "target_priority_nb")
         unit_bs = weapon["ATK"]
         unit_s = weapon["STR"]
@@ -2546,10 +2532,9 @@ class ObservationBuilder:
                 # Feature 0: Action validity (CRITICAL - tells agent this action works)
                 obs[feature_base + 0] = 1.0
                 
-                # Feature 1: best_weapon_index (NOUVEAU, 0-2, normalisé / 2.0)
-                from engine.ai.weapon_selector import get_best_weapon_for_target
-                best_weapon_idx, best_kill_prob = get_best_weapon_for_target(
-                    active_unit, target, game_state, is_ranged=True
+                # Feature 1-2: best_weapon_index + best_kill_probability (phase-aware)
+                best_weapon_idx, best_kill_prob, _ = self._get_phase_aware_best_weapon_features(
+                    active_unit, target, game_state
                 )
                 obs[feature_base + 1] = best_weapon_idx / 2.0 if best_weapon_idx >= 0 else 0.0
                 

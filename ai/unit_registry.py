@@ -505,15 +505,9 @@ class UnitRegistry:
             self.faction_role_matrix[agent_key].append(unit_type)
     
     def _generate_advanced_agent_key(self, unit_type: str, unit_data: Dict) -> str:
-        """Generate inter-faction key: MoveType_TankingLevel_AttackTypeTarget."""
-        role = unit_data['role']  # "Melee" or "Ranged"
-        
-        # Get all required properties - will raise errors if missing
-        move_type = self._get_move_type(unit_type, unit_data)
-        tanking_level = self._get_tanking_level(unit_type, unit_data)
-        attack_target = self._get_attack_target(unit_type, unit_data, role)
-        
-        return f"{move_type}_{tanking_level}_{attack_target}"
+        """Legacy helper kept for compatibility; single-agent mode always uses CoreAgent."""
+        _ = unit_type, unit_data
+        return self.CORE_AGENT_KEY
     
     def _determine_move_type(self, unit_type: str, unit_data: Dict) -> str:
         """Determine movement type based on unit characteristics."""
@@ -534,24 +528,25 @@ class UnitRegistry:
         return "Infantry"
     
     def _get_tanking_level(self, unit_type: str, unit_data: Dict) -> str:
-        """Get tanking level from unit data - must be explicitly defined in TypeScript."""
-        if 'TANKING_LEVEL' not in unit_data:
-            raise ValueError(f"Unit {unit_type} missing required TANKING_LEVEL property in TypeScript file")
-        return unit_data['TANKING_LEVEL']
+        """Infer tanking level from defensive stats, no static class label dependency."""
+        _ = unit_type
+        hp_max = int(require_key(unit_data, "HP_MAX"))
+        armor_save = int(require_key(unit_data, "ARMOR_SAVE"))
+        if hp_max <= 1:
+            return "Swarm"
+        if hp_max <= 3 and armor_save >= 4:
+            return "Troop"
+        return "Elite"
 
     def _get_move_type(self, unit_type: str, unit_data: Dict) -> str:
-        """Get movement type from unit data - must be explicitly defined in TypeScript."""
-        if 'MOVE_TYPE' not in unit_data:
-            raise ValueError(f"Unit {unit_type} missing required MOVE_TYPE property in TypeScript file")
-        return unit_data['MOVE_TYPE']
+        """Infer movement type from keywords/name, no static class label dependency."""
+        _ = unit_data
+        return self._determine_move_type(unit_type, {})
     
     def _get_attack_target(self, unit_type: str, unit_data: Dict, role: str) -> str:
-        """Get attack type and target from unit data - must be explicitly defined in TypeScript."""
-        if 'TARGET_TYPE' not in unit_data:
-            raise ValueError(f"Unit {unit_type} missing required TARGET_TYPE property in TypeScript file")
-        
-        # Combine role (Melee/Ranged) with target type (Swarm/Troop/Elite)
-        return f"{role}{unit_data['TARGET_TYPE']}"
+        """Return generic dynamic target label; static target archetypes are deprecated."""
+        _ = unit_type, unit_data
+        return f"{role}Dynamic"
     
     def get_model_key(self, unit_type: str) -> str:
         """Get the model key for a given unit type (single-agent mode)."""

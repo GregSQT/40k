@@ -82,7 +82,7 @@
     "defensive_randomness": 0.1
   },
   "opponent_mix": {
-    "enabled": true,
+    "enabled": false,
     "self_play_ratio_start": 0.01,
     "self_play_ratio_end": 0.50,
     "warmup_episodes": 2000,
@@ -113,7 +113,7 @@
   "suite": {
   "type": "################################################### Suite ###################################################",
   "seed": 22345,
-  "total_episodes": 100000,
+  "total_episodes": 10000,
   "total_episodes_normal": "20000 -violet 1000 ep / minute -> 12k ep / hour",
   "agent_seat_mode": "random",
   "bot_eval_scenario_pool": "holdout",

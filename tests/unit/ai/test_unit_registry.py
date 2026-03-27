@@ -39,14 +39,13 @@ def test_determine_move_type_keywords() -> None:
     assert registry._determine_move_type("Termagant", {}) == "Infantry"
 
 
-def test_get_required_explicit_fields_raise_when_missing() -> None:
+def test_dynamic_classification_helpers_without_static_labels() -> None:
     registry = _make_registry_stub()
-    with pytest.raises(ValueError, match=r"TANKING_LEVEL"):
-        registry._get_tanking_level("UnitA", {})
-    with pytest.raises(ValueError, match=r"MOVE_TYPE"):
-        registry._get_move_type("UnitA", {})
-    with pytest.raises(ValueError, match=r"TARGET_TYPE"):
-        registry._get_attack_target("UnitA", {}, "Melee")
+    assert registry._get_tanking_level("UnitA", {"HP_MAX": 1, "ARMOR_SAVE": 6}) == "Swarm"
+    assert registry._get_tanking_level("UnitA", {"HP_MAX": 3, "ARMOR_SAVE": 4}) == "Troop"
+    assert registry._get_tanking_level("UnitA", {"HP_MAX": 6, "ARMOR_SAVE": 3}) == "Elite"
+    assert registry._get_move_type("AttackBike", {}) == "Bike"
+    assert registry._get_attack_target("UnitA", {}, "Melee") == "MeleeDynamic"
 
 
 def test_model_key_and_unit_data_accessors() -> None:
