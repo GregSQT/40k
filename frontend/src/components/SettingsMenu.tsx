@@ -88,25 +88,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           ⚙️ Paramètres
         </h2>
 
-        {canToggleAdvanceWarning && (
-          <div style={{ marginBottom: "16px" }}>
-            <label
-              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
-            >
-              <input
-                type="checkbox"
-                checked={showAdvanceWarning}
-                onChange={(e) => onToggleAdvanceWarning(e.target.checked)}
-                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
-              />
-              <span>Afficher l'avertissement lors du mode Advance</span>
-            </label>
-            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
-              Désactiver cette option permet de passer en mode Advance sans confirmation.
-            </p>
-          </div>
-        )}
-
         <div style={{ marginBottom: "16px" }}>
           <label
             style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
@@ -160,22 +141,45 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
           </div>
         )}
 
-        {onToggleRetreatAlert && (
-          <div style={{ marginBottom: "16px" }}>
-            <label
-              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
-            >
-              <input
-                type="checkbox"
-                checked={retreatAlertEnabled}
-                onChange={(e) => onToggleRetreatAlert(e.target.checked)}
-                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
-              />
-              <span>Alerte de retraite</span>
-            </label>
-            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
-              Affiche une confirmation avant de valider un mouvement de Retraite.
-            </p>
+        {(canToggleAdvanceWarning || onToggleRetreatAlert) && (
+          <div style={{ marginTop: "8px", marginBottom: "16px" }}>
+            <h3 style={{ color: "#e5e7eb", margin: "0 0 10px 0", fontSize: "18px" }}>Alertes</h3>
+            {canToggleAdvanceWarning && (
+              <div style={{ marginBottom: "12px" }}>
+                <label
+                  style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showAdvanceWarning}
+                    onChange={(e) => onToggleAdvanceWarning(e.target.checked)}
+                    style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+                  />
+                  <span>Alerte d'advance</span>
+                </label>
+                <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+                  Affiche une confirmation avant de valider une action Advance.
+                </p>
+              </div>
+            )}
+            {onToggleRetreatAlert && (
+              <div>
+                <label
+                  style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={retreatAlertEnabled}
+                    onChange={(e) => onToggleRetreatAlert(e.target.checked)}
+                    style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+                  />
+                  <span>Alerte de retraite</span>
+                </label>
+                <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+                  Affiche une confirmation avant de valider un mouvement de Retraite.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

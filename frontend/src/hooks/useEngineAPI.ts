@@ -2204,7 +2204,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
       // Check if advance warning popup is enabled (from localStorage)
       const showAdvanceWarningStr = localStorage.getItem("showAdvanceWarning");
-      const showAdvanceWarning = showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : false;
+      const showAdvanceWarning = showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true;
 
       if (showAdvanceWarning) {
         // Show warning popup
