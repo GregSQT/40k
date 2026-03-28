@@ -1105,6 +1105,7 @@ def parse_step_log(filepath: str) -> Dict:
         'move_after_shooting_distance_over_limit': {1: 0, 2: 0},
         'shoot_at_friendly': {1: 0, 2: 0},
         'shoot_at_engaged_enemy': {1: 0, 2: 0},
+        'pistol_engaged_shot_non_adjacent': {1: 0, 2: 0},
         'shoot_dead_unit': {1: 0, 2: 0},
         'shoot_at_dead_unit': {1: 0, 2: 0},
         'shoot_over_rng_nb': {1: 0, 2: 0},
@@ -1198,6 +1199,7 @@ def parse_step_log(filepath: str) -> Dict:
             'move_after_shooting_distance_over_limit': {1: None, 2: None},
             'shoot_at_friendly': {1: None, 2: None},
             'shoot_at_engaged_enemy': {1: None, 2: None},
+            'pistol_engaged_shot_non_adjacent': {1: None, 2: None},
             'shoot_dead_unit': {1: None, 2: None},
             'shoot_at_dead_unit': {1: None, 2: None},
             'shoot_over_rng_nb': {1: None, 2: None},
@@ -2582,12 +2584,27 @@ def parse_step_log(filepath: str) -> Dict:
                             heavy_applied_in_log = re.search(r'(?:\[\s*HEAVY\s*\]|\sHEAVY\s)', action_desc, re.IGNORECASE) is not None
                             if weapon_match and target_pos and weapon_found:
                                 distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
+                                shooter_engaged = is_adjacent_to_enemy(
+                                    shooter_col,
+                                    shooter_row,
+                                    unit_player,
+                                    unit_positions,
+                                    unit_hp,
+                                    player
+                                )
                                 
                                 if is_pistol:
                                     if distance == 1:
                                         stats['pistol_shots'][player]['adjacent'] += 1
                                     else:
                                         stats['pistol_shots'][player]['not_adjacent'] += 1
+                                        if shooter_engaged:
+                                            stats['pistol_engaged_shot_non_adjacent'][player] += 1
+                                            if stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][player] is None:
+                                                stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][player] = {
+                                                    'episode': current_episode_num,
+                                                    'line': line.strip()
+                                                }
                                 else:
                                     if distance == 1:
                                         stats['non_pistol_adjacent_shots'][player] += 1
@@ -5637,6 +5654,19 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_pistol_engaged_non_adj = stats['pistol_engaged_shot_non_adjacent'][1]
+    bot_pistol_engaged_non_adj = stats['pistol_engaged_shot_non_adjacent'][2]
+    _table_row(
+        "PISTOL shot non-adjacent while engaged:",
+        _fmt_count(agent_pistol_engaged_non_adj),
+        _fmt_count(bot_pistol_engaged_non_adj),
+    )
+    if agent_pistol_engaged_non_adj > 0 and stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][1]:
+        first_err = stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_pistol_engaged_non_adj > 0 and stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][2]:
+        first_err = stats['first_error_lines']['pistol_engaged_shot_non_adjacent'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_non_pistol_adj = stats['non_pistol_adjacent_shots'][1]
     bot_non_pistol_adj = stats['non_pistol_adjacent_shots'][2]
     _table_row("Non-pistol adjacent shots:", _fmt_count(agent_non_pistol_adj), _fmt_count(bot_non_pistol_adj))
@@ -6192,6 +6222,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
         stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
         stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
+        stats['pistol_engaged_shot_non_adjacent'][1] + stats['pistol_engaged_shot_non_adjacent'][2] +
         stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
         stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
         stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
@@ -6456,6 +6487,7 @@ if __name__ == "__main__":
             stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
             stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
             stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
+            stats['pistol_engaged_shot_non_adjacent'][1] + stats['pistol_engaged_shot_non_adjacent'][2] +
             stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
             stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
             stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +

@@ -1489,22 +1489,25 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if target_player == shooter_player:
         return False
     
-    # CRITICAL: Check if enemy is adjacent to shooter (melee range)
-    # EXCEPTION: PISTOL weapons can shoot at adjacent enemies
+    # CRITICAL: If shooter is engaged (adjacent to at least one enemy),
+    # it can only shoot with a PISTOL weapon and only at adjacent targets.
     # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
     from engine.utils.weapon_helpers import get_melee_range, get_selected_ranged_weapon
     melee_range = get_melee_range()
     enemy_adjacent_to_shooter = (distance <= melee_range)
-    has_pistol_weapon = False
-    
-    if enemy_adjacent_to_shooter:
-        # Enemy is adjacent to shooter - check if selected weapon has PISTOL rule
-        selected_weapon = get_selected_ranged_weapon(shooter)
-        if selected_weapon and _weapon_has_pistol_rule(selected_weapon):
-            has_pistol_weapon = True
-        else:
-            # Non-PISTOL weapons cannot shoot at adjacent enemies
+    selected_weapon = get_selected_ranged_weapon(shooter)
+    weapon_is_pistol = bool(selected_weapon and _weapon_has_pistol_rule(selected_weapon))
+    shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter)
+
+    if shooter_is_engaged:
+        if not weapon_is_pistol:
             return False
+        # Engaged shooter with PISTOL can only target adjacent enemies.
+        if not enemy_adjacent_to_shooter:
+            return False
+    elif enemy_adjacent_to_shooter and not weapon_is_pistol:
+        # Non-engaged shooter cannot use non-PISTOL against adjacent targets.
+        return False
     
     # W40K RULE: Cannot shoot at enemy engaged in melee with friendly units
     # CRITICAL: This rule applies ONLY when enemy is NOT adjacent to shooter
@@ -1929,9 +1932,9 @@ def valid_target_pool_build(
                 add_console_log(game_state, log_msg)
             continue
         
-        # CRITICAL: Check if enemy is adjacent to shooter (melee range)
-        # EXCEPTION: PISTOL weapons can shoot at adjacent enemies
-        # This check must be done BEFORE checking if enemy is engaged with other friendly units
+        # CRITICAL: If shooter is engaged (adjacent to at least one enemy),
+        # only adjacent targets are valid (and only with PISTOL weapons).
+        # This check must be done BEFORE checking if enemy is engaged with other friendly units.
         from engine.utils.weapon_helpers import get_melee_range
         melee_range = get_melee_range()
         enemy_entry = units_cache.get(target_id_str)
@@ -1942,6 +1945,7 @@ def valid_target_pool_build(
         
         # Check if enemy is adjacent to shooter
         enemy_adjacent_to_shooter = (distance_to_enemy <= melee_range)
+        shooter_is_engaged = adjacent_status == 1
         has_pistol_weapon = False
         
         if enemy_adjacent_to_shooter:
@@ -1964,6 +1968,17 @@ def valid_target_pool_build(
                     )
                 continue
         
+        # Engaged shooter can only target adjacent enemies.
+        if shooter_is_engaged and not enemy_adjacent_to_shooter:
+            if game_state.get("debug_mode", False):
+                from engine.game_utils import add_debug_file_log
+                add_debug_file_log(
+                    game_state,
+                    f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
+                    f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - shooter engaged, non-adjacent target"
+                )
+            continue
+
         # Unit NOT adjacent to friendly unit (excluding active unit)? -> NO -> Skip enemy unit
         # CRITICAL: This rule applies ONLY when enemy is NOT adjacent to shooter
         # If enemy is adjacent to shooter AND we have PISTOL weapon, we can shoot regardless of engagement
