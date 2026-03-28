@@ -64,6 +64,9 @@ const TURN_PHASE_STEP_TITLES = [
   TUTORIAL_STEP_TITLE_PHASES,
 ] as const;
 const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
+const MODE_GUIDE_SEEN_PVE_STORAGE_KEY = "modeGuideSeen:pve";
+const MODE_GUIDE_SEEN_PVP_STORAGE_KEY = "modeGuideSeen:pvp";
+const MODE_GUIDES_ACTIVATED_STORAGE_KEY = "modeGuidesActivated";
 
 function TutorialOverlayGate(): React.ReactNode {
   const tutorial = useTutorial();
@@ -231,6 +234,34 @@ function TutorialOverlayGate(): React.ReactNode {
   )
     ? (tutorial.spotlightBoardUnitPositions ?? [])
     : [];
+  const toSpotlightRect = (element: Element | null): TutorialSpotlightRect[] => {
+    if (!(element instanceof HTMLElement)) return [];
+    const rect = element.getBoundingClientRect();
+    if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
+      return [];
+    }
+    return [
+      {
+        shape: "rect",
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      },
+    ];
+  };
+  const guideP1ChangeRosterSpotlight = toSpotlightRect(
+    document.querySelector(".deployment-panel__change-roster--player1")
+  );
+  const guideP2ChangeRosterSpotlight = toSpotlightRect(
+    document.querySelector(".deployment-panel__change-roster--player2")
+  );
+  const guideStartDeploymentSpotlight = toSpotlightRect(document.querySelector(".test-start-bar__button"));
+  const guideP1RosterSpotlight = toSpotlightRect(document.querySelector(".deployment-panel__roster--player1"));
+  const guideP1DeploymentZoneSpotlight =
+    leftPanelSpotlight != null
+      ? [leftPanelSpotlight]
+      : toSpotlightRect(document.querySelector(".game-board-section"));
   const spotlightCatalog: Record<TutorialSpotlightId, TutorialSpotlightPosition[]> = {
     "board.activeUnit": tutorial.spotlightPosition ? [tutorial.spotlightPosition] : [],
     "table.p1.nameM": (hasConfiguredSpotlights ? hasSpotlight("table.p1.nameM") : isPhaseMoveStep)
@@ -259,6 +290,11 @@ function TutorialOverlayGate(): React.ReactNode {
         ? [gameLogHeaderSpotlight]
         : [],
     "gamelog.last2Entries": gameLogTopEntriesSpotlights ?? [],
+    "guide.p1.changeRoster": guideP1ChangeRosterSpotlight,
+    "guide.p2.changeRoster": guideP2ChangeRosterSpotlight,
+    "guide.startDeployment": guideStartDeploymentSpotlight,
+    "guide.p1.deploymentZone": guideP1DeploymentZoneSpotlight,
+    "guide.p1.roster": guideP1RosterSpotlight,
   };
   const getSpotlightPositionsById = (id: string): TutorialSpotlightPosition[] => {
     if (!(id in spotlightCatalog)) {
@@ -1099,6 +1135,13 @@ export const BoardWithAPI: React.FC = () => {
           : location.pathname === "/game" && location.search.includes("mode=pve")
             ? "pve"
             : "pvp";
+  const modeGuideMode: "pve" | "pvp" | null =
+    !isTutorialMode && gameMode === "pve"
+      ? "pve"
+      : !isTutorialMode && gameMode === "pvp"
+        ? "pvp"
+        : null;
+  const [isModeGuideActive, setIsModeGuideActive] = useState(false);
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
@@ -1402,6 +1445,10 @@ export const BoardWithAPI: React.FC = () => {
     const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
     const retreatAlertEnabledStr = localStorage.getItem(RETREAT_ALERT_STORAGE_KEY);
+    const modeGuidesActivatedStr = localStorage.getItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY);
+    const pveGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY) === "true";
+    const pvpGuideSeen = localStorage.getItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY) === "true";
+    const guidesSeenAtLeastOnce = pveGuideSeen || pvpGuideSeen;
     return {
       showAdvanceWarning:
         canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
@@ -1410,6 +1457,8 @@ export const BoardWithAPI: React.FC = () => {
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
       retreatAlertEnabled: retreatAlertEnabledStr ? JSON.parse(retreatAlertEnabledStr) : true,
+      modeGuidesActivated:
+        modeGuidesActivatedStr != null ? JSON.parse(modeGuidesActivatedStr) : !guidesSeenAtLeastOnce,
     };
   });
 
@@ -1447,6 +1496,49 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleRetreatAlert = (value: boolean) => {
     updateRetreatAlertSetting(value);
   };
+
+  const handleToggleModeGuidesActivated = (value: boolean) => {
+    localStorage.setItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY, JSON.stringify(value));
+    if (value) {
+      localStorage.removeItem(MODE_GUIDE_SEEN_PVE_STORAGE_KEY);
+      localStorage.removeItem(MODE_GUIDE_SEEN_PVP_STORAGE_KEY);
+    }
+    setSettings((prev) => ({ ...prev, modeGuidesActivated: value }));
+    if (!value) {
+      setIsModeGuideActive(false);
+      return;
+    }
+    if (modeGuideMode != null) {
+      setIsModeGuideActive(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!settings.modeGuidesActivated || modeGuideMode == null) {
+      setIsModeGuideActive(false);
+      return;
+    }
+    const key =
+      modeGuideMode === "pve" ? MODE_GUIDE_SEEN_PVE_STORAGE_KEY : MODE_GUIDE_SEEN_PVP_STORAGE_KEY;
+    const raw = localStorage.getItem(key);
+    const alreadySeen = raw != null && raw === "true";
+    setIsModeGuideActive(!alreadySeen);
+  }, [modeGuideMode, settings.modeGuidesActivated]);
+
+  const activeTutorialMode = isTutorialMode || isModeGuideActive;
+  const tutorialScenarioType: "tutorial" | "mode_guide" = isTutorialMode ? "tutorial" : "mode_guide";
+  const handleModeGuideComplete = useCallback(() => {
+    if (modeGuideMode == null) {
+      setIsModeGuideActive(false);
+      return;
+    }
+    const key =
+      modeGuideMode === "pve" ? MODE_GUIDE_SEEN_PVE_STORAGE_KEY : MODE_GUIDE_SEEN_PVP_STORAGE_KEY;
+    localStorage.setItem(key, "true");
+    localStorage.setItem(MODE_GUIDES_ACTIVATED_STORAGE_KEY, JSON.stringify(false));
+    setSettings((prev) => ({ ...prev, modeGuidesActivated: false }));
+    setIsModeGuideActive(false);
+  }, [modeGuideMode]);
 
   useEffect(() => {
     if (apiProps.advanceWarningPopup) {
@@ -1927,7 +2019,10 @@ export const BoardWithAPI: React.FC = () => {
           const canInteractDeployment = isCurrentDeployer && !isTestSetupLocked;
 
           return (
-            <div key={`deployment-roster-${player}`} className="deployment-panel__roster">
+            <div
+              key={`deployment-roster-${player}`}
+              className={`deployment-panel__roster deployment-panel__roster--player${player}`}
+            >
               <div
                 className={`deployment-panel__player-banner ${
                   player === 2
@@ -2498,13 +2593,15 @@ export const BoardWithAPI: React.FC = () => {
 
   return (
     <TutorialProvider
-      isTutorialMode={isTutorialMode}
+      isTutorialMode={activeTutorialMode}
+      scenarioType={tutorialScenarioType}
+      guideMode={isModeGuideActive ? modeGuideMode : null}
       gameState={apiProps.gameState ?? null}
       startGameWithScenario={apiProps.startGameWithScenario}
       onPauseAIChange={setPauseAIForTutorial}
       tutorialPauseAiSyncRef={tutorialPauseAiSyncRef}
       stopAiAfterPhaseChangeRef={stopAiAfterPhaseChangeRef}
-      onTutorialComplete={handleTutorialComplete}
+      onTutorialComplete={isTutorialMode ? handleTutorialComplete : handleModeGuideComplete}
       onGoToPveMode={handleGoToPveMode}
     >
       <TutorialShootOptionsSync getTutorialShootOptionsRef={getTutorialShootOptionsRef} />
@@ -2632,6 +2729,7 @@ export const BoardWithAPI: React.FC = () => {
                     onClick={() => {
                       closeRosterPicker();
                       setTestDeploymentStarted(true);
+                      window.dispatchEvent(new Event("modeGuideStartDeployment"));
                     }}
                   >
                     Start Deployment
@@ -2855,6 +2953,8 @@ export const BoardWithAPI: React.FC = () => {
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
         retreatAlertEnabled={settings.retreatAlertEnabled}
         onToggleRetreatAlert={handleToggleRetreatAlert}
+        modeGuidesActivated={settings.modeGuidesActivated}
+        onToggleModeGuidesActivated={handleToggleModeGuidesActivated}
       />
     </TutorialProvider>
   );

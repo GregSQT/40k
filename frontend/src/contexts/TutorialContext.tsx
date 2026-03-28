@@ -10,7 +10,9 @@ import {
   useState,
 } from "react";
 import {
+  getModeGuideRuntimeData,
   getTutorialScenarioRuntimeData,
+  modeGuideYamlRevision,
   tutorialScenarioYamlRevision,
 } from "../config/tutorialScenarioRuntime";
 import { getTutorialUiBehavior } from "../config/tutorialUiRules";
@@ -203,6 +205,10 @@ export interface TutorialStepDef {
    * - { left: "5%" | 20, top: "10%" | 30 } : coin haut-gauche en % ou px (bord viewport)
    */
   popup_position?: "center" | { left?: string | number; top?: string | number };
+  /** Guide de mode uniquement: pve | pvp */
+  guide_mode?: "pve" | "pvp";
+  /** Si true, ferme le popup et attend un trigger externe pour afficher l'étape suivante. */
+  wait_for_trigger?: boolean;
   fog: TutorialFogConfig;
   spotlightIds?: string[];
   allowedClickSpotlightIds?: string[];
@@ -353,6 +359,8 @@ export function useTutorial(): TutorialContextValue | null {
 
 interface TutorialProviderProps {
   isTutorialMode: boolean;
+  scenarioType?: "tutorial" | "mode_guide";
+  guideMode?: "pve" | "pvp" | null;
   /**
    * Mis à jour à chaque rendu avec shouldPauseAI (même logique que onPauseAIChange).
    * Permet au parent (BoardWithAPI) de bloquer l’orchestration IA sans décalage d’une frame
@@ -387,6 +395,8 @@ const STAGES_AI_PAUSED = ["2-11", "2-12", "2-13", "2-14"] as const;
 
 export function TutorialProvider({
   isTutorialMode,
+  scenarioType = "tutorial",
+  guideMode = null,
   gameState,
   startGameWithScenario,
   onStepChange,
@@ -397,6 +407,7 @@ export function TutorialProvider({
   onGoToPveMode,
   children,
 }: TutorialProviderProps) {
+  const isModeGuideScenario = scenarioType === "mode_guide";
   const [steps, setSteps] = useState<TutorialStepDef[]>([]);
   const [currentEtape, setCurrentEtape] = useState(1);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -465,6 +476,8 @@ export function TutorialProvider({
   const [tutorialLang, setTutorialLang] = useState<TutorialLang>("fr");
   const lastPhaseRef = useRef<string | null>(null);
   const lastFightSubphaseRef = useRef<string | null>(null);
+  const wasTutorialModeActiveRef = useRef(false);
+  const modeGuideInitialPopupShownRef = useRef(false);
   const onDeployShownForEtapeRef = useRef<Set<number>>(new Set());
   /** Après avancement manuel (onClosePopup → étape suivante), ne pas laisser l’effet phase_enter écraser l’index. */
   const skipNextPhaseTriggerRef = useRef(false);
@@ -472,6 +485,27 @@ export function TutorialProvider({
   const transitioningToEtape2Ref = useRef(false);
   /** Étapes 2-11/2-12/2-13 : l'utilisateur a cliqué Suivant → IA libérée pour exécuter la phase. */
   const [releasedSteps, setReleasedSteps] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    const justActivated = isTutorialMode && !wasTutorialModeActiveRef.current;
+    wasTutorialModeActiveRef.current = isTutorialMode;
+    if (!justActivated) return;
+    setSkipped(false);
+    setPopupVisible(false);
+    setCurrentStepIndex(0);
+      if (scenarioType === "mode_guide") {
+        setCurrentEtape(1);
+      } else {
+        setCurrentEtape(1);
+      }
+    setReleasedSteps(new Set());
+    onDeployShownForEtapeRef.current.clear();
+    skipNextPhaseTriggerRef.current = false;
+    transitioningToEtape2Ref.current = false;
+    modeGuideInitialPopupShownRef.current = false;
+    lastPhaseRef.current = null;
+    lastFightSubphaseRef.current = null;
+  }, [isTutorialMode, scenarioType, guideMode]);
 
   /** Remesure des halos (coords viewport) au scroll / resize pendant que le tutoriel est ouvert. */
   useEffect(() => {
@@ -508,6 +542,37 @@ export function TutorialProvider({
         .sort((a, b) => a.order - b.order),
     [steps, currentEtape]
   );
+
+  useEffect(() => {
+    if (!isTutorialMode || steps.length === 0) return;
+    const availableEtapes = Array.from(new Set(steps.map((s) => s.etape)));
+    if (!availableEtapes.includes(currentEtape)) {
+      const nextEtape = Math.min(...availableEtapes);
+      setCurrentEtape(nextEtape);
+      setCurrentStepIndex(0);
+      lastPhaseRef.current = null;
+    }
+  }, [isTutorialMode, steps, currentEtape]);
+
+  useEffect(() => {
+    if (!isTutorialMode || !isModeGuideScenario || skipped) return;
+    if (popupVisible) return;
+    if (modeGuideInitialPopupShownRef.current) return;
+    if (stepsForEtape.length === 0) return;
+    const firstStep = stepsForEtape[0];
+    if (!firstStep) return;
+    const currentPhase = gameState?.phase ?? null;
+    if (
+      firstStep.trigger?.type === "phase_enter" &&
+      typeof firstStep.trigger.phase === "string" &&
+      currentPhase === firstStep.trigger.phase
+    ) {
+      setCurrentStepIndex(0);
+      setPopupVisible(true);
+      modeGuideInitialPopupShownRef.current = true;
+      lastPhaseRef.current = currentPhase;
+    }
+  }, [isTutorialMode, isModeGuideScenario, skipped, popupVisible, stepsForEtape, gameState?.phase]);
 
   const currentStep = useMemo((): TutorialStepDisplay | null => {
     if (stepsForEtape.length === 0 || currentStepIndex >= stepsForEtape.length) {
@@ -580,6 +645,9 @@ export function TutorialProvider({
   const phase = gameState?.phase ?? null;
   const fightSubphase = gameState?.fight_subphase ?? null;
   const shouldPauseAI =
+    isModeGuideScenario
+      ? false
+      :
     transitioningToEtape2Ref.current ||
     (currentEtape === 2 &&
       phase != null &&
@@ -598,9 +666,9 @@ export function TutorialProvider({
 
   useLayoutEffect(() => {
     if (stopAiAfterPhaseChangeRef) {
-      stopAiAfterPhaseChangeRef.current = isTutorialMode && currentEtape === 2;
+      stopAiAfterPhaseChangeRef.current = isTutorialMode && !isModeGuideScenario && currentEtape === 2;
     }
-  }, [isTutorialMode, currentEtape, stopAiAfterPhaseChangeRef]);
+  }, [isTutorialMode, isModeGuideScenario, currentEtape, stopAiAfterPhaseChangeRef]);
 
   /** Reset tous les spotlights quand le popup se ferme. */
   useEffect(() => {
@@ -634,15 +702,27 @@ export function TutorialProvider({
   useEffect(() => {
     if (!isTutorialMode) return;
     try {
-      const runtimeData = getTutorialScenarioRuntimeData();
+      const runtimeData =
+        scenarioType === "mode_guide" ? getModeGuideRuntimeData() : getTutorialScenarioRuntimeData();
       if (!Array.isArray(runtimeData.steps)) {
         throw new Error("Tutorial runtime data does not contain a valid steps[]");
       }
-      setSteps(runtimeData.steps.map((s: Record<string, unknown>) => normalizeStep(s)));
+      const normalizedSteps = runtimeData.steps.map((s: Record<string, unknown>) => normalizeStep(s));
+      const filteredSteps =
+        scenarioType === "mode_guide" && guideMode != null
+          ? normalizedSteps.filter((step) => step.guide_mode === guideMode)
+          : normalizedSteps;
+      setSteps(filteredSteps);
     } catch (err) {
       console.error("Tutorial steps load failed from tutorial_scenario.md:", err);
     }
-  }, [isTutorialMode, tutorialScenarioYamlRevision]);
+  }, [
+    isTutorialMode,
+    scenarioType,
+    guideMode,
+    tutorialScenarioYamlRevision,
+    modeGuideYamlRevision,
+  ]);
 
   const showStepForTrigger = useCallback(
     (triggerType: string, phaseOrSubphase?: string) => {
@@ -669,7 +749,7 @@ export function TutorialProvider({
 
   /** Force étape 2-11 quand on est en étape 2 et phase deployment (évite layout 1-11 après transition). */
   useLayoutEffect(() => {
-    if (!isTutorialMode || skipped || steps.length === 0) return;
+    if (!isTutorialMode || isModeGuideScenario || skipped || steps.length === 0) return;
     const phase = gameState?.phase ?? null;
     if (currentEtape === 2 && phase === "deployment") {
       const stepsForEtape2 = steps.filter((s) => s.etape === 2).sort((a, b) => a.order - b.order);
@@ -679,7 +759,7 @@ export function TutorialProvider({
         setPopupVisible(true);
       }
     }
-  }, [isTutorialMode, skipped, currentEtape, currentStepIndex, gameState?.phase, steps]);
+  }, [isTutorialMode, isModeGuideScenario, skipped, currentEtape, currentStepIndex, gameState?.phase, steps]);
 
   useEffect(() => {
     if (!isTutorialMode || skipped || !gameState || steps.length === 0) return;
@@ -737,6 +817,17 @@ export function TutorialProvider({
     hasOnDeployStepForEtape,
     showStepForTrigger,
   ]);
+
+  useEffect(() => {
+    if (!isTutorialMode || skipped || !isModeGuideScenario) return;
+    const handler = () => {
+      showStepForTrigger("start_deployment_click");
+    };
+    window.addEventListener("modeGuideStartDeployment", handler);
+    return () => {
+      window.removeEventListener("modeGuideStartDeployment", handler);
+    };
+  }, [isTutorialMode, skipped, isModeGuideScenario, showStepForTrigger]);
 
   /** Étapes 2-14 / 2-15 : déclenchées par fight_subphase (étape 2 uniquement). */
   useEffect(() => {
@@ -800,7 +891,7 @@ export function TutorialProvider({
 
   const hadEnemiesLastRef = useRef(true);
   useEffect(() => {
-    if (!isTutorialMode || skipped || !startGameWithScenario) return;
+    if (!isTutorialMode || isModeGuideScenario || skipped || !startGameWithScenario) return;
     // Tant que les étapes ne sont pas chargées, ne pas interpréter « plus d’ennemis » :
     // sinon idx 1-25 introuvable → passage brutal à l’étape 2 sans preserveP1 (Hormagaunts cassés).
     if (steps.length === 0) return;
@@ -869,6 +960,7 @@ export function TutorialProvider({
     }
   }, [
     isTutorialMode,
+    isModeGuideScenario,
     skipped,
     currentEtape,
     currentStepIndex,
@@ -891,8 +983,13 @@ export function TutorialProvider({
 
   const onClosePopup = useCallback(() => {
     const stage = stepsForEtape[currentStepIndex] ? getStageId(stepsForEtape[currentStepIndex]) : "";
+    const currentStepDef = stepsForEtape[currentStepIndex] ?? null;
     if (STAGES_AI_PAUSED.includes(stage as (typeof STAGES_AI_PAUSED)[number])) {
       setReleasedSteps((prev) => new Set(prev).add(stage));
+      setPopupVisible(false);
+      return;
+    }
+    if (currentStepDef?.wait_for_trigger === true) {
       setPopupVisible(false);
       return;
     }
@@ -904,6 +1001,11 @@ export function TutorialProvider({
         setPopupVisible(true);
       }
     } else {
+      if (isModeGuideScenario) {
+        setPopupVisible(false);
+        onTutorialComplete?.();
+        return;
+      }
       const nextEtape = currentEtape + 1;
       const hasNextEtape = steps.some((s) => s.etape === nextEtape);
       if (hasNextEtape) {
@@ -943,6 +1045,7 @@ export function TutorialProvider({
   }, [
     currentStepIndex,
     stepsForEtape,
+    isModeGuideScenario,
     currentEtape,
     steps,
     startGameWithScenario,

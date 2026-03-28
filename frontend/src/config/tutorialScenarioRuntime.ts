@@ -1,11 +1,13 @@
 import { load } from "js-yaml";
 import tutorialScenarioYamlRaw from "../../../config/tutorial/tutorial_scenario.yaml?raw";
+import modeGuideYamlRaw from "../../../config/tutorial/mode_guide.yaml?raw";
 
 /**
  * Référence au YAML brut pour le HMR Vite : quand le fichier change, les modules qui en dépendent
  * (ex. TutorialContext) se réévaluent et peuvent recharger les steps sans rechargement complet de la page.
  */
 export const tutorialScenarioYamlRevision = tutorialScenarioYamlRaw;
+export const modeGuideYamlRevision = modeGuideYamlRaw;
 
 interface TutorialScenarioRuntimeData {
   runtime_config: unknown;
@@ -92,5 +94,43 @@ function buildRuntimeData(): TutorialScenarioRuntimeData {
 
 export function getTutorialScenarioRuntimeData(): TutorialScenarioRuntimeData {
   return buildRuntimeData();
+}
+
+function buildModeGuideRuntimeData(): TutorialScenarioRuntimeData {
+  const parsed = load(modeGuideYamlRaw);
+  if (typeof parsed !== "object" || parsed == null) {
+    throw new Error("mode_guide.yaml must contain an object at top level");
+  }
+  const doc = parsed as Record<string, unknown>;
+  if (doc.runtime_config == null) {
+    throw new Error("mode_guide.yaml missing runtime_config");
+  }
+  if (!Array.isArray(doc.rules)) {
+    throw new Error("mode_guide.yaml missing rules[]");
+  }
+  if (!Array.isArray(doc.steps)) {
+    throw new Error("mode_guide.yaml missing steps[]");
+  }
+  const assets = parseAssets(doc.assets);
+  const resolvedSteps = doc.steps.map((entry, idx) => {
+    if (typeof entry !== "object" || entry == null) {
+      throw new Error(`mode_guide.yaml steps[${idx}] must be an object`);
+    }
+    const step = { ...(entry as Record<string, unknown>) };
+    step.title_icon = resolveAssetRef(step.title_icon, assets, `steps[${idx}].title_icon`);
+    step.popup_image = resolveAssetRef(step.popup_image, assets, `steps[${idx}].popup_image`);
+    step.body_fr = resolveInlineIconRefs(step.body_fr, assets, `steps[${idx}].body_fr`);
+    step.body_en = resolveInlineIconRefs(step.body_en, assets, `steps[${idx}].body_en`);
+    return step;
+  });
+  return {
+    runtime_config: doc.runtime_config,
+    rules: doc.rules,
+    steps: resolvedSteps,
+  };
+}
+
+export function getModeGuideRuntimeData(): TutorialScenarioRuntimeData {
+  return buildModeGuideRuntimeData();
 }
 

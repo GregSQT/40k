@@ -1,0 +1,219 @@
+runtime_config:
+  enabled: true
+  debugMode: false
+  fogBackdropOpacity: 0.82
+
+rules:
+  - stagePattern: "*"
+    behavior: {}
+
+steps:
+  # =========================
+  # PVE GUIDE (first visit)
+  # =========================
+  - stage: 1-1
+    guide_mode: pve
+    trigger:
+      type: phase_enter
+      phase: deployment
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Bienvenue dans le mode PvE !
+    title_en: Welcome to PvE mode!
+    body_fr: |-
+      Dans ce mode, vous allez jouer contre l'IA.
+    body_en: |-
+      In this mode, you will play against the AI.
+
+  - stage: 1-2
+    guide_mode: pve
+    trigger:
+      type: phase_enter
+      phase: deployment
+    popup_position:
+      left: 62%
+      top: 18%
+    spotlightIds:
+      - guide.p1.changeRoster
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Choisissez votre roster
+    title_en: Choose your roster
+    body_fr: |-
+      En cliquant sur ce bouton, vous pouvez changer le roster que vous allez jouer.
+    body_en: |-
+      By clicking this button, you can change the roster you will play.
+
+  - stage: 1-3
+    guide_mode: pve
+    trigger:
+      type: phase_enter
+      phase: deployment
+    popup_position:
+      left: 62%
+      top: 35%
+    spotlightIds:
+      - guide.p2.changeRoster
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Choisissez le roster de l'IA
+    title_en: Choose the AI roster
+    body_fr: |-
+      En cliquant sur ce bouton, vous pouvez changer le roster que vous allez affronter.
+    body_en: |-
+      By clicking this button, you can change the roster you will face.
+
+  - stage: 1-4
+    guide_mode: pve
+    trigger:
+      type: phase_enter
+      phase: deployment
+    spotlightIds:
+      - guide.startDeployment
+    wait_for_trigger: true
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Lancer la partie !
+    title_en: Start the game!
+    body_fr: |-
+      Quand vous êtes prêt, lancez la partie en cliquant sur ce bouton.
+    body_en: |-
+      When you are ready, start the game by clicking this button.
+
+  - stage: 1-5
+    guide_mode: pve
+    trigger:
+      type: start_deployment_click
+    spotlightIds:
+      - guide.p1.deploymentZone
+      - guide.p1.roster
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Zone de déploiement
+    title_en: Deployment zone
+    body_fr: |-
+      Choisissez une de vos unités et déployez-la dans votre zone de déploiement (cases vertes).
+      Votre adversaire en fera autant, et vous alternerez jusqu'à ce que toutes les unités aient été déployées.
+    body_en: |-
+      Choose one of your units and deploy it in your deployment zone (green cases).
+      Your opponent will do the same, and you will alternate until all units are deployed.
+
+  ################################################################################################################
+  # PVP GUIDE (first visit)
+ ################################################################################################################
+  - stage: 1-1
+    guide_mode: pvp
+    trigger:
+      type: phase_enter
+      phase: deployment
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Bienvenue dans le mode PvP !
+    title_en: Welcome to PvP mode!
+    body_fr: |-
+      Dans ce mode, vous allez jouer entre humains.
+    body_en: |-
+      In this mode, you will play between humans.
+
+  - stage: 1-2
+    guide_mode: pvp
+    trigger:
+      type: phase_enter
+      phase: deployment
+    popup_position:
+      left: 62%
+      top: 18%
+    spotlightIds:
+      - guide.p1.changeRoster
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Choisissez le roster du joueur 1
+    title_en: Choose player 1 roster
+    body_fr: |-
+      En cliquant sur ce bouton, vous pouvez changer le roster que le joueur 1 va jouer.
+    body_en: |-
+      By clicking this button, you can change the roster player 1 will play.
+
+  - stage: 1-3
+    guide_mode: pvp
+    trigger:
+      type: phase_enter
+      phase: deployment
+    popup_position:
+      left: 62%
+      top: 35%
+    spotlightIds:
+      - guide.p2.changeRoster
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Choisissez le roster du joueur 2
+    title_en: Choose player 2 roster
+    body_fr: |-
+      En cliquant sur ce bouton, vous pouvez changer le roster que le joueur 2 va jouer.
+    body_en: |-
+      By clicking this button, you can change the roster player 2 will play.
+
+  - stage: 1-4
+    guide_mode: pvp
+    trigger:
+      type: phase_enter
+      phase: deployment
+    spotlightIds:
+      - guide.startDeployment
+    wait_for_trigger: true
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Lancer la partie !
+    title_en: Start the game!
+    body_fr: |-
+      Quand vous êtes prêt, lancez la partie en cliquant sur ce bouton.
+    body_en: |-
+      When you are ready, start the game by clicking this button.
+
+  - stage: 1-5
+    guide_mode: pvp
+    trigger:
+      type: start_deployment_click
+    spotlightIds:
+      - guide.p1.deploymentZone
+      - guide.p1.roster
+    fog:
+      global: true
+      leftPanel: true
+      rightPanel: true
+      boardTopBand: false
+    title_fr: Zone de déploiement
+    title_en: Deployment zone
+    body_fr: |-
+      Choisissez une de vos unités et déployez-la dans votre zone de déploiement.
+      Votre adversaire en fera autant, et vous alternerez jusqu'à ce que toutes les unités aient été déployées.
+    body_en: |-
+      Choose one of your units and deploy it in your deployment zone.
+      Your opponent will do the same, and you will alternate until all units are deployed.

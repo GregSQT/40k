@@ -18,7 +18,12 @@ export type TutorialSpotlightId =
   | "panel.left"
   | "gamelog.lastEntry"
   | "gamelog.header"
-  | "gamelog.last2Entries";
+  | "gamelog.last2Entries"
+  | "guide.p1.changeRoster"
+  | "guide.p2.changeRoster"
+  | "guide.startDeployment"
+  | "guide.p1.deploymentZone"
+  | "guide.p1.roster";
 
 export interface TutorialUiRuntimeConfig {
   /** Master switch for tutorial UI rule resolution. */

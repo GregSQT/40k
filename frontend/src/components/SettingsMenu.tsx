@@ -17,6 +17,8 @@ interface SettingsMenuProps {
   onToggleAutoSelectWeapon: (value: boolean) => void;
   retreatAlertEnabled?: boolean;
   onToggleRetreatAlert?: (value: boolean) => void;
+  modeGuidesActivated?: boolean;
+  onToggleModeGuidesActivated?: (value: boolean) => void;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
@@ -35,6 +37,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onToggleAutoSelectWeapon,
   retreatAlertEnabled = true,
   onToggleRetreatAlert,
+  modeGuidesActivated = true,
+  onToggleModeGuidesActivated,
 }) => {
   if (!isOpen) return null;
 
@@ -180,6 +184,25 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {onToggleModeGuidesActivated && (
+          <div style={{ marginTop: "8px", marginBottom: "16px" }}>
+            <h3 style={{ color: "#e5e7eb", margin: "0 0 10px 0", fontSize: "18px" }}>Guides</h3>
+            <label style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}>
+              <input
+                type="checkbox"
+                checked={modeGuidesActivated}
+                onChange={(e) => onToggleModeGuidesActivated(e.target.checked)}
+                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Modes guides activated</span>
+            </label>
+            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+              Active les guides d&apos;introduction PvE/PvP. Désactivé automatiquement après
+              avoir vu un guide.
+            </p>
           </div>
         )}
 
