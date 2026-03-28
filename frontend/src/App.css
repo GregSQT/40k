@@ -2767,6 +2767,10 @@ textarea:focus {
   line-height: 1.45;
   box-shadow: var(--tutorial-dialog-shadow);
   outline: none;
+  box-sizing: border-box;
+  max-height: min(92vh, calc(100dvh - 16px));
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .tutorial-overlay-dialog:focus {
   outline: none;

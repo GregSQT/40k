@@ -2074,6 +2074,21 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                 save_roll = random.randint(1, 6)
             save_target = _calculate_save_target(target, weapon["AP"])
             save_success = save_roll >= save_target
+            damage_dealt_pending: Optional[int] = None
+            if not save_success:
+                damage_dealt_pending = resolve_dice_value(
+                    require_key(weapon, "DMG"), "fight_damage"
+                )
+                target_hp_preview = require_hp_from_cache(str(target["id"]), game_state)
+                if (
+                    target_hp_preview - damage_dealt_pending <= 0
+                    and _tutorial_fight_lethal_save_prevented(
+                        game_state, str(target["id"])
+                    )
+                ):
+                    save_roll = max(save_roll, save_target)
+                    save_success = True
+                    damage_dealt_pending = None
             if save_ability_display_name is not None:
                 save_log_value = f"{initial_save_roll}->{save_roll}"
             else:
@@ -2093,7 +2108,11 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
                 )
             else:
                 # DAMAGE case - apply damage. HP_CUR single write path: update_units_cache_hp only (Phase 2: from cache)
-                damage_dealt = resolve_dice_value(require_key(weapon, "DMG"), "fight_damage")
+                if damage_dealt_pending is None:
+                    raise RuntimeError(
+                        "fight damage pending missing when save failed (internal bug)"
+                    )
+                damage_dealt = damage_dealt_pending
                 target_hp = require_hp_from_cache(str(target["id"]), game_state)
                 new_hp = max(0, target_hp - damage_dealt)
                 update_units_cache_hp(game_state, str(target["id"]), new_hp)
@@ -2209,6 +2228,21 @@ def _execute_fight_attack_sequence(game_state: Dict[str, Any], attacker: Dict[st
     }
 
 
+
+
+def _tutorial_fight_lethal_save_prevented(
+    game_state: Dict[str, Any], target_unit_id: str
+) -> bool:
+    """True if scenario lists this unit: a failed save that would kill is treated as success."""
+    ids = game_state.get("tutorial_fight_no_death_unit_ids")
+    if ids is None:
+        return False
+    if not isinstance(ids, frozenset):
+        raise TypeError(
+            "tutorial_fight_no_death_unit_ids must be frozenset or None, "
+            f"got {type(ids).__name__}"
+        )
+    return str(target_unit_id) in ids
 
 
 def _calculate_save_target(target: Dict[str, Any], ap: int) -> int:

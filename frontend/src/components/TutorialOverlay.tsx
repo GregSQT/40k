@@ -23,6 +23,30 @@ import type {
   TutorialStepDisplay,
 } from "../contexts/TutorialContext";
 
+/** Fusionne les rects halo Name + M en un cadre englobant (viewport px). */
+function unionTutorialSpotlightRects(rects: TutorialSpotlightRect[]): TutorialSpotlightRect | null {
+  if (rects.length === 0) return null;
+  const first = rects[0];
+  let minL = first.left;
+  let minT = first.top;
+  let maxR = first.left + first.width;
+  let maxB = first.top + first.height;
+  for (let i = 1; i < rects.length; i++) {
+    const r = rects[i];
+    minL = Math.min(minL, r.left);
+    minT = Math.min(minT, r.top);
+    maxR = Math.max(maxR, r.left + r.width);
+    maxB = Math.max(maxB, r.top + r.height);
+  }
+  return {
+    shape: "rect",
+    left: minL,
+    top: minT,
+    width: maxR - minL,
+    height: maxB - minT,
+  };
+}
+
 /** Path SVG (viewport moins trous des spotlights) pour bloquer les clics hors zones autorisées. */
 function buildBlockingPath(
   width: number,
@@ -48,6 +72,33 @@ function buildBlockingPath(
   return [viewport, ...holes].join(" ");
 }
 
+/**
+ * Avec fill-rule="evenodd", un cercle (trou) entièrement contenu dans un rect (trou) réinverse
+ * la zone centrale : le disque redevient « plein » et bloque les clics. On retire les cercles
+ * dont le centre est déjà dans un rect trou pour permettre les clics sur tout le plateau.
+ */
+function filterCircleHolesContainedInRectHoles(
+  holes: TutorialSpotlightPosition[]
+): TutorialSpotlightPosition[] {
+  const rects = holes.filter((h): h is TutorialSpotlightRect => h.shape === "rect");
+  if (rects.length === 0) return holes;
+  return holes.filter((h) => {
+    if (h.shape !== "circle") return true;
+    const c = h as TutorialSpotlightCircle;
+    const cx = c.x;
+    const cy = c.y;
+    const insideSomeRect = rects.some((r) => {
+      const pad = 4;
+      const left = r.left - pad;
+      const top = r.top - pad;
+      const w = r.width + pad * 2;
+      const h = r.height + pad * 2;
+      return cx >= left && cx <= left + w && cy >= top && cy <= top + h;
+    });
+    return !insideSomeRect;
+  });
+}
+
 interface TutorialOverlayProps {
   step: TutorialStepDisplay;
   lang: TutorialLang;
@@ -64,6 +115,14 @@ interface TutorialOverlayProps {
   fogRightPanelRects?: TutorialSpotlightRect[] | null;
   /** Labels debug des spotlights (affichés seulement si fournis). */
   debugSpotlightLabels?: Array<{ id: string; position: TutorialSpotlightPosition }>;
+  /** Étapes 1-11 / 1-12 / 1-13 : ancrage (bord droit du popup sur centre du bouton cible). */
+  tutorialPopupAnchor?: { centerX: number; bottomY: number } | null;
+  /** Halo panneau gauche (board) : repli 1-15 si halo Name+M indisponible. */
+  panelLeftSpotlightForLayout?: TutorialSpotlightRect | null;
+  /** 1-15 : rects halo colonnes Name + M (ligne Intercessor) — popup à gauche de ce bloc. */
+  tableNameMSpotlightRectsForLayout?: TutorialSpotlightRect[] | null;
+  /** 1-16 : halo section RANGED WEAPON(S) — centrage vertical ; bord gauche du popup au bord droit du plateau. */
+  rangedWeaponsSpotlightRectsForLayout?: TutorialSpotlightRect[] | null;
 }
 
 /**
@@ -79,6 +138,34 @@ const FOG_BLUR_FILTER_ID = "tutorial-fog-blur";
 const BLUR_EDGE = 8;
 /** Marge autour du rect de fog pour que le flou ne soit pas coupé. */
 const FOG_BLUR_MARGIN = 24;
+
+/** Popups 1-11 / 1-12 / 1-13 : écart sous la bande / bouton cible (TurnPhaseTracker). */
+const TUTORIAL_POPUP_TRACKER_ANCHOR_GAP_BELOW_PX = 20;
+
+/** 1-14 : écart entre le bord droit du halo unité (board.activeUnit) et le bord gauche du popup (≈ demi-hex). */
+const TUTORIAL_POPUP_1_14_GAP_RIGHT_OF_UNIT_HALO_PX = 24;
+
+/** 1-15 (repli plateau) : écart entre le bord bas du popup et le haut du plateau. */
+const TUTORIAL_POPUP_1_15_GAP_ABOVE_BOARD_TOP_PX = 12;
+/** 1-15 (repli plateau) : hauteur max estimée du dialog si ancrage tableau indisponible. */
+const TUTORIAL_POPUP_1_15_MAX_HEIGHT_ESTIMATE_PX = 420;
+/** 1-15 : écart entre le bord droit du popup et le bord gauche du halo Name/M (plus grand = popup plus à gauche). */
+const TUTORIAL_POPUP_1_15_GAP_LEFT_OF_NAME_M_ROW_PX = 48;
+/** 1-15 : décalage vertical vers le bas par rapport au centre du halo Name/M. */
+const TUTORIAL_POPUP_1_15_SHIFT_DOWN_PX = 100;
+
+/** 1-16 : écart entre le bord gauche du popup et le bord droit du halo plateau (panel.left). */
+const TUTORIAL_POPUP_1_16_GAP_AFTER_BOARD_RIGHT_PX = -100;
+/** 1-16 : décalage vertical (px) sous le centre du halo armes à distance. */
+const TUTORIAL_POPUP_1_16_SHIFT_DOWN_PX = 300;
+
+/** Marge (px) entre le bord du popup tutoriel et les bords du viewport (clamp général). */
+const TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX = 8;
+/**
+ * 1-14 : demi-hauteur estimée (px) pour borner le `top` avec translateY(-50%) et éviter de couper le bas.
+ * Complété par le clamp viewport JS sur le dialog.
+ */
+const TUTORIAL_POPUP_1_14_VERTICAL_CENTER_CLAMP_HALF_EST_PX = 240;
 
 /** Logos des phases (frontend/public/icons/Action_Logo) affichés à gauche du titre. */
 const PHASE_LOGO: Record<string, string> = {
@@ -605,6 +692,18 @@ function renderBodyWithLosPlaceholders(
   return parts.length > 1 ? parts : (parts[0] ?? replaceCursorInText(body, { afterCursor }));
 }
 
+/** Ajoute une translation de correction pour garder le dialog dans le viewport (après positionnement de base). */
+function mergeTutorialDialogViewportTransform(
+  style: React.CSSProperties,
+  nudge: { x: number; y: number }
+): React.CSSProperties {
+  if (nudge.x === 0 && nudge.y === 0) return style;
+  const t = style.transform;
+  const baseT = !t || t === "none" ? "" : String(t);
+  const extra = `translate(${nudge.x}px, ${nudge.y}px)`;
+  return { ...style, transform: baseT ? `${baseT} ${extra}` : extra };
+}
+
 export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   step,
   lang,
@@ -616,6 +715,10 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   fogLeftPanelRects = [],
   fogRightPanelRects = [],
   debugSpotlightLabels = [],
+  tutorialPopupAnchor = null,
+  panelLeftSpotlightForLayout = null,
+  tableNameMSpotlightRectsForLayout = null,
+  rangedWeaponsSpotlightRectsForLayout = null,
 }) => {
   const clickHoles = allowedClickSpotlights ?? spotlights;
   const title = lang === "fr" ? step.title_fr : step.title_en;
@@ -671,6 +774,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const [overlayRect, setOverlayRect] = useState<DOMRect | null>(null);
   const [dialogPosition, setDialogPosition] = useState<{ x: number; y: number } | null>(null);
+  const [viewportInsetNudge, setViewportInsetNudge] = useState({ x: 0, y: 0 });
   const dragStartRef = useRef<{
     mouseX: number;
     mouseY: number;
@@ -759,12 +863,104 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     dialogRef.current?.focus();
   }, []);
 
-  // Réappliquer la position configurée quand l’étape change
   useEffect(() => {
     setDialogPosition(null);
-    // step.stage utilisé comme clé pour réexécuter l’effet au changement d’étape
-    void step.stage;
   }, [step.stage]);
+
+  const tutorialLayoutDepsKey = useMemo(() => {
+    const spotlightSig = spotlights
+      .map((s) => {
+        if (s.shape === "circle") {
+          const c = s as TutorialSpotlightCircle;
+          return `circle:${c.x},${c.y},${c.radius}`;
+        }
+        const r = s as TutorialSpotlightRect;
+        return `rect:${r.left},${r.top},${r.width},${r.height}`;
+      })
+      .join("|");
+    const tableSig =
+      tableNameMSpotlightRectsForLayout != null
+        ? tableNameMSpotlightRectsForLayout
+            .map((r) => `${r.left},${r.top},${r.width},${r.height}`)
+            .join(";")
+        : "";
+    const rangedSig =
+      rangedWeaponsSpotlightRectsForLayout != null
+        ? rangedWeaponsSpotlightRectsForLayout
+            .map((r) => `${r.left},${r.top},${r.width},${r.height}`)
+            .join(";")
+        : "";
+    const panelSig =
+      panelLeftSpotlightForLayout != null
+        ? `${panelLeftSpotlightForLayout.left},${panelLeftSpotlightForLayout.top},${panelLeftSpotlightForLayout.width},${panelLeftSpotlightForLayout.height}`
+        : "";
+    const anchorSig =
+      tutorialPopupAnchor != null &&
+      typeof tutorialPopupAnchor.centerX === "number" &&
+      typeof tutorialPopupAnchor.bottomY === "number"
+        ? `${tutorialPopupAnchor.centerX},${tutorialPopupAnchor.bottomY}`
+        : "";
+    const popupPosSig =
+      step.popupPosition && step.popupPosition !== "center" && typeof step.popupPosition === "object"
+        ? JSON.stringify(step.popupPosition)
+        : String(step.popupPosition ?? "");
+    return [
+      step.stage,
+      dialogPosition?.x ?? "x",
+      dialogPosition?.y ?? "y",
+      anchorSig,
+      panelSig,
+      tableSig,
+      rangedSig,
+      spotlightSig,
+      popupPosSig,
+    ].join("::");
+  }, [
+    step.stage,
+    dialogPosition,
+    tutorialPopupAnchor,
+    panelLeftSpotlightForLayout,
+    tableNameMSpotlightRectsForLayout,
+    rangedWeaponsSpotlightRectsForLayout,
+    spotlights,
+    step.popupPosition,
+  ]);
+
+  const clampDialogToViewport = useCallback(() => {
+    const el = dialogRef.current;
+    if (!el) return;
+    const margin = TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let dx = 0;
+    let dy = 0;
+    if (rect.left < margin) dx = margin - rect.left;
+    else if (rect.right > vw - margin) dx = vw - margin - rect.right;
+    if (rect.top < margin) dy = margin - rect.top;
+    else if (rect.bottom > vh - margin) dy = vh - margin - rect.bottom;
+    setViewportInsetNudge((prev) =>
+      prev.x === dx && prev.y === dy ? prev : { x: dx, y: dy }
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    // Pas de flushSync ici : il déclenchait « flushSync was called from inside a lifecycle method »
+    // et pouvait perturber le batching React pendant le rendu parent (TutorialProvider).
+    setViewportInsetNudge({ x: 0, y: 0 });
+    clampDialogToViewport();
+    const el = dialogRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      clampDialogToViewport();
+    });
+    ro.observe(el);
+    window.addEventListener("resize", clampDialogToViewport);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", clampDialogToViewport);
+    };
+  }, [tutorialLayoutDepsKey, clampDialogToViewport]);
 
   const dialogStyle = ((): React.CSSProperties => {
     const base: React.CSSProperties = {
@@ -783,6 +979,118 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         top: dialogPosition.y,
         transform: "none",
       };
+    }
+    if (
+      (step.stage === "1-11" || step.stage === "1-12" || step.stage === "1-13") &&
+      tutorialPopupAnchor != null &&
+      typeof tutorialPopupAnchor.centerX === "number" &&
+      typeof tutorialPopupAnchor.bottomY === "number"
+    ) {
+      return {
+        ...base,
+        left: tutorialPopupAnchor.centerX,
+        top: tutorialPopupAnchor.bottomY + TUTORIAL_POPUP_TRACKER_ANCHOR_GAP_BELOW_PX,
+        transform: "translateX(-100%)",
+      };
+    }
+    if (step.stage === "1-14" || step.stage === "1-21") {
+      const unitCircle = spotlights.find((s): s is TutorialSpotlightCircle => s.shape === "circle");
+      if (unitCircle != null) {
+        const margin = TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX;
+        const vh = typeof window !== "undefined" ? window.innerHeight : 900;
+        const halfEst = TUTORIAL_POPUP_1_14_VERTICAL_CENTER_CLAMP_HALF_EST_PX;
+        const minTop = margin + halfEst;
+        const maxTop = vh - margin - halfEst;
+        const topY =
+          Number.isFinite(minTop) && Number.isFinite(maxTop) && maxTop >= minTop
+            ? Math.max(minTop, Math.min(unitCircle.y, maxTop))
+            : unitCircle.y;
+        return {
+          ...base,
+          position: "fixed",
+          left: unitCircle.x + unitCircle.radius + TUTORIAL_POPUP_1_14_GAP_RIGHT_OF_UNIT_HALO_PX,
+          top: topY,
+          transform: "translateY(-50%)",
+        };
+      }
+    }
+    if (step.stage === "1-15") {
+      const tableRects = tableNameMSpotlightRectsForLayout;
+      if (tableRects != null && tableRects.length > 0) {
+        const union = unionTutorialSpotlightRects(tableRects);
+        if (
+          union != null &&
+          union.width >= 2 &&
+          union.height >= 2 &&
+          Number.isFinite(union.left) &&
+          Number.isFinite(union.top)
+        ) {
+          const leftAnchor = union.left - TUTORIAL_POPUP_1_15_GAP_LEFT_OF_NAME_M_ROW_PX;
+          const topCenter =
+            union.top + union.height / 2 + TUTORIAL_POPUP_1_15_SHIFT_DOWN_PX;
+          return {
+            ...base,
+            position: "fixed",
+            left: leftAnchor,
+            top: topCenter,
+            transform: "translate(-100%, -50%)",
+          };
+        }
+      }
+      if (panelLeftSpotlightForLayout != null) {
+        const r = panelLeftSpotlightForLayout;
+        if (r.width >= 2 && r.height >= 2) {
+          let fullBoardTop =
+            step.fog.leftPanel === true ? r.top - r.height : r.top;
+          if (!Number.isFinite(fullBoardTop) || fullBoardTop < 0) {
+            fullBoardTop = r.top;
+          }
+          const boardCenterX = r.left + r.width / 2;
+          const desiredBottom = fullBoardTop - TUTORIAL_POPUP_1_15_GAP_ABOVE_BOARD_TOP_PX;
+          const topPx = Math.max(
+            12,
+            desiredBottom - TUTORIAL_POPUP_1_15_MAX_HEIGHT_ESTIMATE_PX
+          );
+          if (Number.isFinite(boardCenterX) && Number.isFinite(topPx)) {
+            return {
+              ...base,
+              position: "fixed",
+              left: boardCenterX,
+              top: topPx,
+              transform: "translateX(-50%)",
+            };
+          }
+        }
+      }
+    }
+    if (step.stage === "1-16" && panelLeftSpotlightForLayout != null) {
+      const board = panelLeftSpotlightForLayout;
+      if (board.width >= 2 && board.height >= 2) {
+        const boardRight = board.left + board.width;
+        const leftPx = boardRight + TUTORIAL_POPUP_1_16_GAP_AFTER_BOARD_RIGHT_PX;
+        const rangedRects = rangedWeaponsSpotlightRectsForLayout;
+        let topCenter: number;
+        if (rangedRects != null && rangedRects.length > 0) {
+          const union = unionTutorialSpotlightRects(rangedRects);
+          if (union != null && union.width >= 2 && union.height >= 2) {
+            topCenter =
+              union.top + union.height / 2 + TUTORIAL_POPUP_1_16_SHIFT_DOWN_PX;
+          } else {
+            topCenter = board.top + board.height / 2;
+          }
+        } else {
+          topCenter = board.top + board.height / 2;
+        }
+        if (Number.isFinite(leftPx) && Number.isFinite(topCenter)) {
+          return {
+            ...base,
+            position: "fixed",
+            left: leftPx,
+            top: topCenter,
+            transform: "translateY(-50%)",
+          };
+        }
+      }
     }
     if (
       step.popupPosition &&
@@ -849,7 +1157,11 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   const blockingPathD = useMemo(
     () =>
       overlayRect && overlayRect.width > 0 && overlayRect.height > 0
-        ? buildBlockingPath(overlayRect.width, overlayRect.height, clickHoles)
+        ? buildBlockingPath(
+            overlayRect.width,
+            overlayRect.height,
+            filterCircleHolesContainedInRectHoles(clickHoles)
+          )
         : "",
     [overlayRect, clickHoles]
   );
@@ -900,6 +1212,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
               left: 0,
               right: 0,
               bottom: 0,
+              pointerEvents: "none",
             }}
             aria-hidden
           />
@@ -913,6 +1226,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
             right: 0,
             bottom: 0,
             backgroundColor: `rgba(0, 0, 0, ${backdropOpacity})`,
+            pointerEvents: "none",
           }}
           aria-hidden
         />
@@ -1055,7 +1369,10 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         aria-labelledby="tutorial-title"
         tabIndex={-1}
         className="tutorial-overlay-dialog"
-        style={{ ...dialogStyle, pointerEvents: "auto" }}
+        style={{
+          ...mergeTutorialDialogViewportTransform(dialogStyle, viewportInsetNudge),
+          pointerEvents: "auto",
+        }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >

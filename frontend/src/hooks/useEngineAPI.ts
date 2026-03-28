@@ -3171,6 +3171,29 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         let lastPoolSize = -1;
         let samePoolSizeCount = 0;
         const initialPhase = gameState.phase;
+        if (initialPhase === "fight") {
+          const fs = gameState.fight_subphase;
+          if (fs == null || fs === "") {
+            throw new Error("Missing fight_subphase at executeAITurn start while phase is fight");
+          }
+        }
+        const initialFightSubphase = initialPhase === "fight" ? gameState.fight_subphase : null;
+
+        const shouldStopTutorialBoundary = (gs: APIGameState | undefined): boolean => {
+          if (!stopAfterPhase || !gs) return false;
+          if (gs.phase !== initialPhase) return true;
+          if (initialPhase === "fight" && gs.phase === "fight") {
+            const ns = gs.fight_subphase;
+            if (ns == null || ns === "") {
+              throw new Error("Missing fight_subphase in fight phase during AI turn (tutorial boundary)");
+            }
+            if (initialFightSubphase == null || initialFightSubphase === "") {
+              throw new Error("Missing initial fight_subphase for tutorial boundary");
+            }
+            return ns !== initialFightSubphase;
+          }
+          return false;
+        };
 
         while (iteration < maxIterations) {
           iteration++;
@@ -3319,10 +3342,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Update game state from activation
           if (activationData.game_state) {
             setGameState(activationData.game_state);
-            const newPhase = activationData.game_state.phase;
-            const phaseChanged = newPhase !== initialPhase;
-            // Tutoriel 2-11/2-12/2-13/2-14 : arrêter après chaque phase pour afficher le popup suivant
-            if (stopAfterPhase && phaseChanged) {
+            // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase (2-14 / 2-15)
+            if (stopAfterPhase && shouldStopTutorialBoundary(activationData.game_state)) {
               onStopAfterPhaseChange?.();
               break;
             }
@@ -3606,11 +3627,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               if (decisionData.result?.phase_complete) {
                 break;
               }
-              // Tutoriel 2-11/2-12/2-13/2-14 : arrêter après chaque phase
-              if (
-                stopAfterPhase &&
-                decisionData.game_state?.phase !== initialPhase
-              ) {
+              // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase
+              if (stopAfterPhase && shouldStopTutorialBoundary(decisionData.game_state)) {
                 onStopAfterPhaseChange?.();
                 break;
               }
@@ -3625,15 +3643,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             // Backend uses activation_ended (generic) or activation_complete (movement handler)
             totalUnitsProcessed++;
 
-            const actEndPhase = activationData.game_state?.phase;
-            const actEndPhaseChanged = actEndPhase !== initialPhase;
-
             // Check if phase complete after unit completion
             if (activationData.result?.phase_complete) {
               break;
             }
-            // Tutoriel 2-11/2-12/2-13/2-14 : arrêter après chaque phase
-            if (stopAfterPhase && actEndPhaseChanged) {
+            // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase
+            if (stopAfterPhase && shouldStopTutorialBoundary(activationData.game_state)) {
               onStopAfterPhaseChange?.();
               break;
             }
@@ -3666,11 +3681,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   if (skipData.result?.phase_complete) {
                     break;
                   }
-                  // Tutoriel 2-11/2-12/2-13 : arrêter après chaque phase
-                  if (
-                    stopAfterPhase &&
-                    skipData.game_state?.phase !== initialPhase
-                  ) {
+                  // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase
+                  if (stopAfterPhase && shouldStopTutorialBoundary(skipData.game_state)) {
                     onStopAfterPhaseChange?.();
                     break;
                   }

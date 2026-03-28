@@ -24,6 +24,7 @@ import {
   TUTORIAL_STEP_TITLES_PHASE_MOVE_HALO,
   TutorialProvider,
   type TutorialSpotlightPosition,
+  type TutorialSpotlightRect,
   useTutorial,
 } from "../contexts/TutorialContext";
 import { useEngineAPI } from "../hooks/useEngineAPI";
@@ -326,6 +327,20 @@ function TutorialOverlayGate(): React.ReactNode {
       fogLeftPanelRects={fogLeft}
       fogRightPanelRects={fogRight}
       debugSpotlightLabels={debugSpotlightLabels}
+      tutorialPopupAnchor={tutorial.spotlightTutorialPopupAnchor}
+      panelLeftSpotlightForLayout={
+        tutorial.spotlightLeftPanel?.shape === "rect" ? tutorial.spotlightLeftPanel : null
+      }
+      tableNameMSpotlightRectsForLayout={
+        stage === "1-15" && Array.isArray(tutorial.spotlightTablePositions)
+          ? tutorial.spotlightTablePositions.filter((s): s is TutorialSpotlightRect => s.shape === "rect")
+          : null
+      }
+      rangedWeaponsSpotlightRectsForLayout={
+        stage === "1-16" && Array.isArray(tutorial.spotlightRangedWeaponsPositions)
+          ? tutorial.spotlightRangedWeaponsPositions.filter((s): s is TutorialSpotlightRect => s.shape === "rect")
+          : null
+      }
     />
   );
 }
@@ -341,30 +356,40 @@ function TurnPhaseTrackerWithTutorial(
     tutorial?.currentStep?.spotlightIds?.includes("turnPhase.all") === true;
   const forceLayout2_11 = tutorial?.currentEtape === 2 && tutorial?.gamePhase === "deployment";
   const effectiveTitleForRects = showTurnPhaseRects
-    ? stage === "1-14" || stage === "1-15" || stage === "1-16"
-      ? TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT
-      : forceLayout2_11 || stage === "2-11" || stage === "2-12"
-        ? stage
-        : stage === "1-21" ||
-            stage === "1-22" ||
-            stage === "1-23" ||
-            stage === "1-24" ||
-            matchesTutorialStagePattern(stage, "1-24-*") ||
-            stage === "1-25" ||
-            stage === "3-1"
-          ? TUTORIAL_STEP_TITLE_PHASE_TIR
-          : (title ?? undefined)
+    ? stage === "1-11"
+      ? TUTORIAL_STEP_TITLE_ROUNDS
+      : stage === "1-12"
+        ? TUTORIAL_STEP_TITLE_TURNS
+        : stage === "1-13"
+          ? TUTORIAL_STEP_TITLE_PHASES
+          : stage === "1-14" || stage === "1-15" || stage === "1-16"
+            ? TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT
+            : forceLayout2_11 || stage === "2-11" || stage === "2-12"
+              ? stage
+              : stage === "1-21" ||
+                  stage === "1-22" ||
+                  stage === "1-23" ||
+                  stage === "1-24" ||
+                  matchesTutorialStagePattern(stage, "1-24-*") ||
+                  stage === "1-25" ||
+                  stage === "3-1"
+                ? TUTORIAL_STEP_TITLE_PHASE_TIR
+                : (title ?? undefined)
     : undefined;
   useEffect(() => {
     if (!showTurnPhaseRects && tutorial?.setSpotlightTurnPhasePositions) {
       tutorial.setSpotlightTurnPhasePositions(null);
     }
-  }, [showTurnPhaseRects, tutorial?.setSpotlightTurnPhasePositions]);
+    if (!showTurnPhaseRects && tutorial?.setSpotlightTutorialPopupAnchor) {
+      tutorial.setSpotlightTutorialPopupAnchor(null);
+    }
+  }, [showTurnPhaseRects, tutorial?.setSpotlightTurnPhasePositions, tutorial?.setSpotlightTutorialPopupAnchor]);
   return (
     <TurnPhaseTracker
       {...props}
       tutorialStepTitle={showTurnPhaseRects ? effectiveTitleForRects : undefined}
       onTutorialRects={tutorial?.setSpotlightTurnPhasePositions}
+      onTutorialPopupAnchor={tutorial?.setSpotlightTutorialPopupAnchor}
     />
   );
 }
@@ -497,6 +522,7 @@ function BoardColumnWithTutorial({
     boardRows,
     tutorial?.setSpotlightLeftPanel,
     tutorial?.setLeftPanelFogRects,
+    tutorial?.spotlightLayoutTick,
   ]);
   return (
     <div ref={ref} className="board-column-overlay-anchor">
@@ -663,6 +689,7 @@ function RightColumnTutorialSpotlight({
     shouldShowRightFog,
     tutorial?.setSpotlightRightPanel,
     tutorial?.setRightPanelFogRects,
+    tutorial?.spotlightLayoutTick,
   ]);
   return (
     <div ref={ref} style={{ display: "contents" }}>

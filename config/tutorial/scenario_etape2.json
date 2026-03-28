@@ -1,5 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
+  "tutorial_fight_no_death_unit_ids": ["1"],
   "wall_ref": "tutorial_walls-01.json",
   "deployment_zone": "hammer_tutorial",
   "deployment_type_P1": "fixed",

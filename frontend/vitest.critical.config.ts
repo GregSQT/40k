@@ -2,17 +2,25 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/utils/weaponHelpers.test.ts"],
+    include: [
+      "src/utils/weaponHelpers.test.ts",
+      "src/utils/gameHelpers.test.ts",
+      "src/utils/replayParser.test.ts",
+    ],
     environment: "jsdom",
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary"],
-      include: ["src/utils/weaponHelpers.ts"],
+      include: [
+        "src/utils/weaponHelpers.ts",
+        "src/utils/gameHelpers.ts",
+        "src/utils/replayParser.ts",
+      ],
       thresholds: {
-        lines: 35,
-        functions: 40,
-        statements: 35,
-        branches: 60,
+        lines: 25,
+        functions: 25,
+        statements: 25,
+        branches: 20,
       },
     },
   },

@@ -427,6 +427,35 @@ export default function Board({
     y: number;
   } | null>(null);
 
+  /**
+   * Quand l’unité sous le curseur est retirée du plateau (mort → plus dans units_cache),
+   * Pixi ne garantit pas un pointerout : le tooltip HTML restait affiché.
+   * On aligne sur la même règle que la boucle de rendu (unités vivantes + ghost tir dangereux).
+   */
+  useEffect(() => {
+    setUnitHoverTooltip((prev) => {
+      if (prev == null || !prev.visible) return prev;
+      const m = prev.text.match(/\bID\s+(\d+)/);
+      if (!m) return prev;
+      const idStr = m[1];
+      const unit = units.find((u) => String(u.id) === idStr);
+      if (!unit) return null;
+      const unitsCache = gameState?.units_cache as Record<string, unknown> | undefined;
+      const isPresentInUnitsCache =
+        unitsCache !== undefined ? Object.hasOwn(unitsCache, idStr) : true;
+      const isHazardousDeathGhost =
+        phase === "shoot" &&
+        selectedUnitId !== null &&
+        String(selectedUnitId) === idStr &&
+        unitsCache !== undefined &&
+        !isPresentInUnitsCache;
+      if (!isPresentInUnitsCache && !isHazardousDeathGhost) {
+        return null;
+      }
+      return prev;
+    });
+  }, [units, gameState?.units_cache, phase, selectedUnitId]);
+
   // Listen for weapon selection icon click
   useEffect(() => {
     if (!boardConfig) return; // Wait for board config to load
@@ -521,6 +550,7 @@ export default function Board({
     tutorial?.currentStep?.stepKey,
     tutorial?.currentStep?.stage,
     tutorial?.setSpotlightPosition,
+    tutorial?.spotlightLayoutTick,
     boardConfig,
     units,
   ]);
@@ -567,6 +597,7 @@ export default function Board({
     tutorial?.popupVisible,
     tutorial?.currentStep?.stage,
     tutorial?.setSpotlightBoardUnitPositions,
+    tutorial?.spotlightLayoutTick,
     boardConfig,
     units,
   ]);

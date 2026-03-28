@@ -51,6 +51,10 @@ jobs:
           pytest tests/unit/engine -q --cov=engine --cov-fail-under=70
           pytest tests/unit/shared -q --cov=shared --cov-fail-under=80
 
+      - name: Unit solidity scorecard (binary)
+        run: |
+          python scripts/unit_solidite_scorecard.py --output reports/unit_solidite_scorecard.json
+
   frontend-unit:
     runs-on: ubuntu-latest
     steps:

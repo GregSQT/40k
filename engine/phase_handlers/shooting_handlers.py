@@ -5082,7 +5082,6 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             "wound_success": True,
             "attack_log": (
                 f"Hit:3+:6(HIT) Wound:4+:6(WOUND) Save:4+:1(FAIL) Dmg:{target_hp_before_damage}HP"
-                " [TUTORIAL]"
             ),
             "weapon_name": weapon_name,
             "hazardous_test_required": False,

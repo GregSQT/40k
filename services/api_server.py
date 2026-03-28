@@ -60,7 +60,7 @@ def make_json_serializable(obj):
         return result
     elif isinstance(obj, (list, tuple)):
         return [make_json_serializable(item) for item in obj]
-    elif isinstance(obj, set):
+    elif isinstance(obj, (set, frozenset)):
         return [make_json_serializable(item) for item in obj]
     elif hasattr(obj, '__dict__'):
         # Handle objects with __dict__ (convert to dict)
@@ -631,7 +631,10 @@ def initialize_engine(scenario_file: str = None):
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
-            "deployment_pools": scenario_deployment_pools
+            "deployment_pools": scenario_deployment_pools,
+            "tutorial_fight_no_death_unit_ids": scenario_result.get(
+                "tutorial_fight_no_death_unit_ids"
+            ),
         }
         
         # Determine which agents are in the scenario
@@ -802,7 +805,10 @@ def initialize_test_engine(scenario_file: str = None, forced_agent_key: str = No
             "deployment_type": scenario_deployment_type,
             "deployment_type_by_player": scenario_deployment_type_by_player,
             "deployment_zone": scenario_deployment_zone,
-            "deployment_pools": scenario_deployment_pools
+            "deployment_pools": scenario_deployment_pools,
+            "tutorial_fight_no_death_unit_ids": scenario_result.get(
+                "tutorial_fight_no_death_unit_ids"
+            ),
         }
         
         # Determine which agents are in the scenario

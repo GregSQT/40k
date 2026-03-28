@@ -1,0 +1,30 @@
+{
+  "solidite_unitaire": "OK",
+  "checks": [
+    {
+      "key": "contract_structure",
+      "ok": true,
+      "details": "10 invariants declares"
+    },
+    {
+      "key": "invariant_collection",
+      "ok": true,
+      "details": "10 nodeids collectable"
+    },
+    {
+      "key": "invariants_green",
+      "ok": true,
+      "details": "10 invariant tests passed"
+    },
+    {
+      "key": "determinism_smoke",
+      "ok": true,
+      "details": "invariant suite green on two consecutive runs"
+    },
+    {
+      "key": "anomaly_traceability",
+      "ok": true,
+      "details": "2 anomalies tracked, 0 open, 1 anomaly-marked test files"
+    }
+  ]
+}

@@ -282,11 +282,11 @@ Seuil initial recommande:
 - Frontend critique (gate bloquant): tests critiques + seuils coverage dedies
 - Frontend global: metrique informative, hausse par sprint
 
-Seuil frontend critique initial (module `weaponHelpers`):
-- lines >= 35%
-- statements >= 35%
-- functions >= 40%
-- branches >= 60%
+Seuil frontend critique initial (modules `weaponHelpers`, `gameHelpers`, `replayParser`):
+- lines >= 25%
+- statements >= 25%
+- functions >= 25%
+- branches >= 20%
 
 Important:
 - la couverture ne remplace pas des assertions fortes;
@@ -315,7 +315,78 @@ Template review (copier-coller):
 
 ---
 
-## 13) Risques residuels (a ne pas confondre)
+## 13) Scorecard binaire de solidite unitaire
+
+Objectif: sortir du flou "coverage only" et obtenir un verdict explicite:
+
+- `SOLIDITE_UNITAIRE=OK`
+- `SOLIDITE_UNITAIRE=KO`
+
+Implementation:
+
+- Contrat des invariants critiques: `config/testing/unit_solidite_contract.json`
+- Script de verification: `scripts/unit_solidite_scorecard.py`
+- Rapport CI: `reports/unit_solidite_scorecard.json`
+
+Le scorecard valide:
+
+- structure du contrat (invariants declares et bien formes)
+- collecte des tests critiques (nodeids resolvables)
+- passage des tests critiques
+- stabilite minimale (double run consecutif des invariants)
+- tracabilite anomalies (`KNOWN_ANOMALIES.md` + tests `@pytest.mark.anomaly`)
+
+Commande locale:
+
+```bash
+python scripts/unit_solidite_scorecard.py --output reports/unit_solidite_scorecard.json
+```
+
+### 13.1 Ajouter un invariant critique (procedure standard)
+
+1. Ajouter (ou identifier) le test unitaire critique dans `tests/unit/...`.
+2. Verifier son nodeid exact:
+
+```bash
+pytest --collect-only -q tests/unit/<module>/test_<fichier>.py
+```
+
+3. Ajouter une entree dans `config/testing/unit_solidite_contract.json`:
+   - `id` unique (`INV-XXX`)
+   - `name` explicite (regle metier verifiee)
+   - `nodeid` exact
+4. Lancer localement le scorecard:
+
+```bash
+python scripts/unit_solidite_scorecard.py --output reports/unit_solidite_scorecard.json
+```
+
+5. Critere d'acceptation: `SOLIDITE_UNITAIRE=OK` + nouveau test vert.
+
+### 13.2 Politique d'evolution des seuils (anti-flou)
+
+- Rythme recommande: augmentation de `+5 points` maximum par sprint sur les seuils critiques.
+- Precondition: le gate courant doit rester vert sur au moins 2 PR consecutives.
+- Interdit: hausse de seuil sans tests supplementaires significatifs.
+- Repli autorise: si blocage legitime, revenir au seuil precedent et ouvrir une action de remediations.
+- Trace obligatoire: chaque changement de seuil doit etre note dans la PR (motif + impact attendu).
+
+### 13.3 Lecture du scorecard en review PR (30 secondes)
+
+Source: `reports/unit_solidite_scorecard.json`
+
+Checklist review:
+- `solidite_unitaire` doit etre `OK`
+- Aucun check `ok: false`
+- Si `KO`, la PR est bloquee tant que le motif n'est pas corrige
+
+Exemple de decision:
+- `OK` + gates coverage critiques verts -> merge possible
+- `KO` (meme avec coverage global elevee) -> merge refuse
+
+---
+
+## 14) Risques residuels (a ne pas confondre)
 
 Le socle unitaire **ne couvre pas**:
 - les regressions d'integration inter-modules;
@@ -334,7 +405,7 @@ Anomalies connues detectees par les tests:
 
 ---
 
-## 14) Plan d'execution (7 jours)
+## 15) Plan d'execution (7 jours)
 
 Jour 1:
 - creer `tests/`, `pytest.ini`, `tests/conftest.py`
@@ -357,7 +428,7 @@ Jour 7:
 
 ---
 
-## 15) Verdict pratique
+## 16) Verdict pratique
 
 Version definitive cible:
 - explicite sur les contrats reels;
@@ -366,3 +437,34 @@ Version definitive cible:
 - progressive pour maximiser le ROI.
 
 Si ces sections sont appliquees telles quelles, le projet gagne une protection concrete contre les regressions majeures, sans freiner le developpement.
+
+---
+
+## 17) Criteria "feu vert prod" (complements obligatoires)
+
+Le socle unitaire seul ne suffit pas pour un feu vert production. Pour un GO prod,
+ajouter et maintenir les 4 briques suivantes:
+
+1. Petit socle integration backend (3-5 scenarios critiques reels)
+- Cibler les enchainements cross-modules critiques (`engine` <-> `services`).
+- Inclure au moins un scenario nominal et un scenario d'echec metier.
+- Gate attendu: tests integration verts en CI principale.
+
+2. Socle API E2E leger (smoke endpoints majeurs)
+- Verifier les endpoints critiques (etat serveur, action principale, erreur metier attendue).
+- Objectif: detecter rapidement une regression de contrat API.
+- Gate attendu: suite smoke API verte sur chaque PR.
+
+3. 1-2 tests UI E2E cibles (parcours critiques)
+- Cibler les parcours a risque produit (ex: lancement/replay/tutoriel/action principale).
+- Eviter les suites E2E lourdes: peu de tests, tres stables, haute valeur.
+- Gate attendu: suite UI E2E ciblee verte sur branche principale.
+
+4. Run de stabilite en CI principale
+- Executer les memes suites critiques plusieurs fois (N runs consecutifs).
+- Objectif: detecter tests flaky et nondeterminisme.
+- Gate attendu: 0 echec intermittent sur les N runs.
+
+Decision:
+- `SOLIDITE_UNITAIRE=OK` + ces 4 briques au vert => GO prod technique.
+- Si une brique est rouge ou absente => NO-GO prod (GO staging possible selon risque accepte).

@@ -2810,9 +2810,28 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                     )
         robust_window = 3
         robust_drawdown_penalty = 0.5
+        save_best_robust_seed = False
+        robust_seed_value: Optional[int] = None
         if save_best_robust:
             robust_window = int(_resolve_callback_value("robust_window"))
             robust_drawdown_penalty = float(_resolve_callback_value("robust_drawdown_penalty"))
+            save_best_robust_seed = bool(callback_params.get("save_best_robust_seed", False))
+            if save_best_robust_seed:
+                if "agent_seat_seed" in training_config:
+                    seed_raw = require_key(training_config, "agent_seat_seed")
+                elif "seed" in training_config:
+                    seed_raw = require_key(training_config, "seed")
+                else:
+                    raise KeyError(
+                        "callback_params.save_best_robust_seed=true requires "
+                        "'agent_seat_seed' or 'seed' in training config"
+                    )
+                if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
+                    raise ValueError(
+                        "Seed used for robust filename must be an integer "
+                        f"(got {type(seed_raw).__name__})"
+                    )
+                robust_seed_value = int(seed_raw)
             if robust_window <= 0:
                 raise ValueError(
                     f"callback_params.robust_window must be > 0 (got {robust_window})"
@@ -2851,6 +2870,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             rewards_config_name=rewards_config_name,
             scenario_pool=bot_eval_scenario_pool,
             save_best_robust=save_best_robust,
+            save_best_robust_seed=save_best_robust_seed,
+            robust_seed_value=robust_seed_value,
             robust_window=robust_window,
             robust_drawdown_penalty=robust_drawdown_penalty,
             model_gating_enabled=model_gating_enabled,

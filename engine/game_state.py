@@ -474,6 +474,23 @@ class GameStateManager:
                 else None
             )
 
+            scenario_tutorial_fight_no_death_unit_ids = None
+            if isinstance(scenario_data, dict) and "tutorial_fight_no_death_unit_ids" in scenario_data:
+                raw = require_key(scenario_data, "tutorial_fight_no_death_unit_ids")
+                if not isinstance(raw, (list, tuple)):
+                    raise TypeError(
+                        f"tutorial_fight_no_death_unit_ids must be list or tuple, got {type(raw).__name__}"
+                    )
+                normalized_ids: List[str] = []
+                for entry in raw:
+                    if not isinstance(entry, (int, str)):
+                        raise TypeError(
+                            "tutorial_fight_no_death_unit_ids entries must be int or str, "
+                            f"got {type(entry).__name__}"
+                        )
+                    normalized_ids.append(str(entry).strip())
+                scenario_tutorial_fight_no_death_unit_ids = frozenset(normalized_ids)
+
             deployment_pools_serializable = None
             if deploy_pools:
                 deployment_pools_serializable = {
@@ -493,7 +510,8 @@ class GameStateManager:
                 "deployment_type": deployment_type,
                 "deployment_type_by_player": deployment_type_by_player,
                 "deployment_pools": deployment_pools_serializable,
-                "roster_info": scenario_roster_info
+                "roster_info": scenario_roster_info,
+                "tutorial_fight_no_death_unit_ids": scenario_tutorial_fight_no_death_unit_ids,
             }
 
     def _load_units_from_roster_refs(

@@ -62,7 +62,10 @@ rules:
       phaseDisplayOverride: shoot
   - stagePattern: 2-14
     behavior:
-      phaseDisplayOverride: charge
+      phaseDisplayOverride: fight
+  - stagePattern: 2-15
+    behavior:
+      phaseDisplayOverride: fight
 steps:
   ##########################################################################################################################
   # 1-11 Rounds
@@ -70,7 +73,7 @@ steps:
   - stage: 1-11
     trigger:
       type: on_deploy
-    layout: Halo sur le panneau gauche (section tours). Popup centré.
+    layout: Halo sur les indicateurs de rounds (panneau droit). Popup en haut à gauche des rounds.
     fog:
       global: true
       leftPanel: false
@@ -79,7 +82,7 @@ steps:
     spotlightIds:
       - turnPhase.all
     next_step: Clic sur Suivant
-    title_fr: Rounds
+    title_fr: 1-11Rounds
     title_en: Rounds
     body_fr: |-
       Une partie de Warhammer 40'000 se déroule en 5 rounds
@@ -99,7 +102,7 @@ steps:
   - stage: 1-12
     trigger:
       type: on_deploy
-    layout: Halo sur le turn phase tracker (section tours). Popup centré.
+    layout: Halo P1/P2. Popup sous la bande, bord droit sur le centre du bouton P1.
     fog:
       global: true
       leftPanel: false
@@ -108,7 +111,7 @@ steps:
     spotlightIds:
       - turnPhase.all
     next_step: Clic sur Suivant
-    title_fr: Tours
+    title_fr: 1-12Tours
     title_en: Turns
     body_fr: |-
       Dans un round, chaque joueur joue son tour
@@ -128,7 +131,7 @@ steps:
   - stage: 1-13
     trigger:
       type: on_deploy
-    layout: Halo sur le panneau gauche (section tours). Popup centré.
+    layout: Halo phases (Move, …). Popup sous la bande, bord droit sur le centre du bouton Move.
     fog:
       global: true
       leftPanel: false
@@ -137,7 +140,7 @@ steps:
     spotlightIds:
       - turnPhase.all
     next_step: Clic sur Suivant
-    title_fr: Phases
+    title_fr: 1-13 Phases
     title_en: Phases
     body_fr: |-
       Un tour est divisé en phases qui se déroulent séquentiellement
@@ -162,7 +165,7 @@ steps:
     advance_on_unit_click: true
     popup_image: "@intercessor"
     popup_first_line_with_icon: true
-    layout: Halo sur l'Intercessor (cercle vert) + halo sur le bouton Move du turn phase tracker. Pas de bouton Suivant dans le popup.
+    layout: Halo sur l'Intercessor (cercle vert) + halo Move (turn phase). Popup à droite du halo unité, centré verticalement sur l’unité. Pas de bouton Suivant dans le popup.
     fog:
       global: true
       leftPanel: false
@@ -197,7 +200,7 @@ steps:
     popup_show_move_hex: true
     layout: >-
       Deux fogs (2 bandes) sur la moitié supérieure du panneau gauche. Tableau d'unités (unitStatusTable) déplié pour afficher les stats de
-      l'Intercessor. Halo sur colonnes Name et M.
+      l'Intercessor. Halo sur colonnes Name et M. Popup à gauche de ce halo (ligne Intercessor), centré verticalement sur la ligne.
     fog:
       global: true
       leftPanel: true
@@ -232,7 +235,7 @@ steps:
     advance_on_move_click: true
     layout: >-
       Suppression du fog du panneau gauche. Tableau d'unités (unitStatusTable) déplié pour afficher les stats de l'Intercessor et ses armes
-      à distance. Fog sur panneau droit, halo sur les lignes titres et détails des RANGED WEAPON(S) de l'Intercessor.
+      à distance. Halo RANGED WEAPON(S). Popup : bord gauche au bord droit du plateau, centré verticalement sur le halo armes à distance.
     fog:
       global: true
       leftPanel: false
@@ -281,9 +284,16 @@ steps:
       rightPanel: false
       boardTopBand: false
     spotlightIds:
+      - board.activeUnit
       - table.p1.nameM
       - turnPhase.all
       - panel.left
+      - gamelog.last2Entries
+    # Clics autorisés : plateau + tracker + log (pas la ligne Name/M du tableau : l’objectif est le jeton sur le board).
+    allowedClickSpotlightIds:
+      - board.activeUnit
+      - panel.left
+      - turnPhase.all
       - gamelog.last2Entries
     next_step: Clic sur l'icône de l'Intercessor pour le sélectionner
     advance_on_unit_click: true
@@ -751,7 +761,7 @@ steps:
     body_en: "During the shoot phase, a unit can choose to :\n\t- shoot with a ranged weapon.\n\t- advance (move up to D6 hex).\n If a unit advances, it will not be able to charge during the next charge phase.\n\n--------------------\n<cursor>Click on Next to continue."
 
   ##########################################################################################################################
-  # 2-14 Phase de charge des Hormagaunts
+  # 2-14 Charge (tour) puis combat en sous-phase « charging » (attaques des chargeurs)
   ##########################################################################################################################
   - stage: 2-14
     hide_advance_icon: false
@@ -760,8 +770,8 @@ steps:
       left: 58%
       top: 25%
     trigger:
-      type: phase_enter
-      phase: fight
+      type: fight_subphase_enter
+      fight_subphase: charging
     title_icon: "@action_logo_charge"
     layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de charge.
     fog:
@@ -786,7 +796,10 @@ steps:
       - Si le jet permet d'atteindre la cible, la charge peut et doit être réalisée.
       - Si le jet est un échec, la charge est annulée.
       
-      Les hormagaunts peuvent charger même après avoir avancé grace à leur règle <Bounding Leap> décrite dans le tableau des unités.
+      Les hormagaunts peuvent charger même après avoir avancé grace à leur règle Bounding Leap décrite dans le tableau des unités.
+
+      Pendant la phase de combat, une unité combat si elle est adjacent à une unité ennemie.
+      -> Les unités ayant chargé attaquent en premier.
       
       --------------------
       <cursor>Cliquez sur Suivant pour continuer.
@@ -802,50 +815,17 @@ steps:
       - If the roll is a failure, the charge is cancelled.
       
       Hormagaunts can charge even after advancing thanks to their <Bounding Leap> rule described in the units table.
+
+      During the fight phase, a unit fights if it is adjacent to an enemy unit.
+      -> The units that have charged attack first.
       
       --------------------
       <cursor>Click on Next to continue.
 
-  ##########################################################################################################################
-  # 2-15 Phase de combat des Hormagaunts
+##########################################################################################################################
+  # 2-15 Phase de combat de l'Intercessor (joueur non actif, alternance)
   ##########################################################################################################################
   - stage: 2-15
-    hide_advance_icon: false
-    advance_on_weapon_click: false
-    popup_position:
-      left: 58%
-      top: 25%
-    trigger:
-      type: phase_enter
-      phase: fight
-    title_icon: "@action_logo_fight"
-    layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de charge.
-    fog:
-      global: false
-      leftPanel: false
-      rightPanel: false
-      boardTopBand: false
-    spotlightIds:
-      - turnPhase.all
-      - panel.left
-    next_step: Clic sur Suivant
-    title_fr: 2-15 Phase de combat des Hormagaunts
-    title_en: Fight phase of Hormagaunts
-    body_fr: |-
-      Pendant la phase de combat, une unité combat si elle est adjacent à une unité ennemie.
-      -> Les unités ayant chargé attaquent en premier.
-      --------------------
-      <cursor>Cliquez sur Suivant pour continuer.
-    body_en: |-
-      During the fight phase, a unit fights if it is adjacent to an enemy unit.
-      -> The units that have charged attack first.
-      --------------------
-      <cursor>Click on Next to continue.
-
-##########################################################################################################################
-  # 2-16 Phase de combat de l'Intercessor
-  ##########################################################################################################################
-  - stage: 2-16
     hide_advance_icon: false
     advance_on_unit_click: true
     popup_image: "@intercessor"
@@ -854,8 +834,8 @@ steps:
       left: 58%
       top: 25%
     trigger:
-      type: phase_enter
-      phase: fight
+      type: fight_subphase_enter
+      fight_subphase: alternating_non_active
     title_icon: "@action_logo_fight"
     layout: Plus de fog nulle part. Les Hormagaunts ont exécuté leur phase de combat.
     fog:
@@ -867,17 +847,18 @@ steps:
       - turnPhase.all
       - panel.left
     next_step: Clic sur l'Intercessor
-    title_fr: 2-16 Phase de combat de l'Intercessor
-    title_en: Fight phase of Intercessor
+    title_fr: 2-15 Fin du tutoriel
+    title_en: End of tutorial
     body_fr: |-
-      Les unités 
-      - Les attaques des unités ayant chargé sont terminées, c'est au tour du joueur non actif de faire attaquer une de ses unités.
+      - Les attaques des Hormagaunts ayant chargé sont terminées, c'est au tour du joueur non actif de faire attaquer une de ses unités.
       - Puis, les joueurs alternent les activations de leurs unités jusqu'à ce qu'elles aient toutes attaqué.
+      - A vous de joueur non actif, sortez votre Intercessor de cette situation !
       --------------------
       <cursor>Cliquez sur l'Intercessor pour l'activer.
     body_en: |-
       During the fight phase, a unit fights if it is adjacent to an enemy unit.
-      - The attacks of the units that have charged are finished, it's now the non-active player's turn to attack one of their units.
+      - The attacks of the Hormagaunts that have charged are finished, it's now the non-active player's turn to attack one of their units.
       - Then, the players alternate the activations of their units until all units have attacked.
+      - It's your turn, get your Intercessor out of this situation!
       --------------------
       <cursor> Click on the Intercessor to activate it.

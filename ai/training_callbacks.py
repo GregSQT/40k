@@ -394,37 +394,25 @@ class EpisodeTerminationCallback(BaseCallback):
                     f"max: {self.max_episode_duration_seconds:.2f}"
                 )
                 gate_label = "Gate 🧱"
-                learning_status_circle = "⚪"
-                learning_status_streak = 0
                 robust_status_text = ""
                 if self.gate_display_state is not None:
                     label_value = self.gate_display_state.get("label")
                     if isinstance(label_value, str) and label_value.strip():
                         gate_label = label_value.strip()
-                    circle_value = self.gate_display_state.get("learning_status_circle")
-                    if isinstance(circle_value, str) and circle_value.strip():
-                        learning_status_circle = circle_value.strip()
-                    streak_value = self.gate_display_state.get("learning_status_streak_count")
-                    if isinstance(streak_value, int) and streak_value > 0:
-                        learning_status_streak = streak_value
                     robust_value = self.gate_display_state.get("best_robust_score")
                     robust_trend = self.gate_display_state.get("robust_trend_symbol")
                     if isinstance(robust_value, (float, int)) and robust_value > -float("inf"):
                         robust_status_text = f" | robust={float(robust_value):.4f}"
-                        if isinstance(robust_trend, str) and robust_trend.strip():
-                            robust_status_text += f" {robust_trend.strip()}"
-                status_display = (
-                    f"{learning_status_circle}x{learning_status_streak}"
-                    if learning_status_streak > 0
-                    else learning_status_circle
-                )
-                gate_display = f" | {gate_label} {status_display}"
+                    else:
+                        robust_status_text = " | robust=NA"
+                    if isinstance(robust_trend, str) and robust_trend.strip():
+                        robust_status_text += f" {robust_trend.strip()}"
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
                 progress_line = (
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
-                    f" [{time_info}] [{duration_display}] {gate_label} {status_display}"
+                    f" [{time_info}] [{duration_display}] {gate_label}"
                     f"{robust_status_text}{phase_display}"
                 )
                 # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
@@ -1357,6 +1345,8 @@ class BotEvaluationCallback(BaseCallback):
                  use_episode_freq: bool = False, verbose: int = 1,
                  training_config_name: str = None, rewards_config_name: str = None,
                  save_best_robust: bool = False, robust_window: int = 3,
+                 save_best_robust_seed: bool = False,
+                 robust_seed_value: Optional[int] = None,
                  robust_drawdown_penalty: float = 0.5,
                  model_gating_enabled: bool = False,
                  model_gating_min_combined: Optional[float] = None,
@@ -1439,6 +1429,24 @@ class BotEvaluationCallback(BaseCallback):
         self.eval_count = int(initial_episode_marker // eval_freq) if use_episode_freq and eval_freq > 0 else 0
         self.best_combined_win_rate = 0.0
         self.save_best_robust = save_best_robust
+        if not isinstance(save_best_robust_seed, bool):
+            raise ValueError(
+                f"save_best_robust_seed must be boolean (got {type(save_best_robust_seed).__name__})"
+            )
+        self.save_best_robust_seed = save_best_robust_seed
+        if self.save_best_robust_seed:
+            if robust_seed_value is None:
+                raise ValueError(
+                    "robust_seed_value is required when save_best_robust_seed=true"
+                )
+            if not isinstance(robust_seed_value, int) or isinstance(robust_seed_value, bool):
+                raise ValueError(
+                    "robust_seed_value must be an integer when save_best_robust_seed=true "
+                    f"(got {type(robust_seed_value).__name__})"
+                )
+            self.robust_seed_value = int(robust_seed_value)
+        else:
+            self.robust_seed_value = None
         self.robust_window = robust_window
         self.robust_drawdown_penalty = robust_drawdown_penalty
         if not isinstance(model_gating_enabled, bool):
@@ -1712,9 +1720,17 @@ class BotEvaluationCallback(BaseCallback):
         """Build robust checkpoint path with explicit .zip extension."""
         agent_key = self._infer_agent_key()
         robust_score_str = f"{robust_score:.4f}"
+        if self.save_best_robust_seed:
+            if self.robust_seed_value is None:
+                raise ValueError(
+                    "robust_seed_value must be set when save_best_robust_seed=true"
+                )
+            filename = f"{agent_key}_{self.robust_seed_value}_robust_{robust_score_str}"
+        else:
+            filename = f"{agent_key}_robust_{robust_score_str}"
         model_base_path = os.path.join(
             self.best_model_save_path,
-            f"{agent_key}_robust_{robust_score_str}"
+            filename
         )
         return self._ensure_zip_path(model_base_path)
 
@@ -1936,13 +1952,19 @@ class BotEvaluationCallback(BaseCallback):
                 self._save_model_with_vecnormalize(save_path)
 
         self.combined_history.append(combined_win_rate)
-        if gate_pass and self.save_best_robust and len(self.combined_history) >= self.robust_window:
+        if self.save_best_robust and len(self.combined_history) >= self.robust_window:
             current_peak = max(self.combined_history)
             current_drawdown = current_peak - combined_win_rate
             moving_average = float(np.mean(self.combined_history))
             robust_score = moving_average - (self.robust_drawdown_penalty * current_drawdown)
+            if self.metrics_tracker is not None:
+                self.metrics_tracker.writer.add_scalar(
+                    "0_critical/n_robust_current_score",
+                    robust_score,
+                    int(eval_marker),
+                )
 
-            if robust_score > self.best_robust_score:
+            if gate_pass and robust_score > self.best_robust_score:
                 previous_robust_model_path = self.best_robust_model_path
                 self.best_robust_score = robust_score
                 self.best_robust_combined = combined_win_rate

@@ -13,6 +13,7 @@ import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
 import type { Unit, UnitId } from "../types/game";
 import TooltipWrapper from "./TooltipWrapper";
+import { useTutorial } from "../contexts/TutorialContext";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
   charge_after_advance: "Allows a unit to charge in the same turn it advanced.",
@@ -207,6 +208,8 @@ const UnitRow = memo<UnitRowProps>(
     reportUnitAttributesRect,
     tableHeaderRowRef,
   }) => {
+    const tutorial = useTutorial();
+    const spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
     const nameCellRef = useRef<HTMLTableCellElement>(null);
     const mCellRef = useRef<HTMLTableCellElement>(null);
     const unitRowRef = useRef<HTMLTableRowElement>(null);
@@ -280,7 +283,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportNameMRect(null);
       };
-    }, [reportNameMRect, reportRect]);
+    }, [reportNameMRect, reportRect, spotlightLayoutTick]);
 
     const rangedTableRef = useRef<HTMLTableElement>(null);
     useLayoutEffect(() => {
@@ -321,7 +324,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportRangedWeaponsRect(null);
       };
-    }, [reportRangedWeaponsRect, isUnitExpanded, isRangedExpanded]);
+    }, [reportRangedWeaponsRect, isUnitExpanded, isRangedExpanded, spotlightLayoutTick]);
 
     // Tutoriel 2-2 : rapporter union (ligne titre + ligne attributs) pour halo
     const reportAttributesRect = useCallback(() => {
@@ -361,7 +364,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportUnitAttributesRect(null);
       };
-    }, [reportUnitAttributesRect, reportAttributesRect]);
+    }, [reportUnitAttributesRect, reportAttributesRect, spotlightLayoutTick]);
 
     // Tutoriel 2-11/2-12 : rapporter le rect de la ligne unité pour halo P2
     const reportRowRect = useCallback(() => {
@@ -394,7 +397,7 @@ const UnitRow = memo<UnitRowProps>(
         clearTimeout(t);
         reportUnitRowRect(unit.id, null);
       };
-    }, [reportUnitRowRect, reportRowRect, unit.id]);
+    }, [reportUnitRowRect, reportRowRect, unit.id, spotlightLayoutTick]);
 
     if (!unit.HP_MAX) {
       throw new Error(`Unit ${unit.id} missing required HP_MAX field`);

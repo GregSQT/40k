@@ -212,6 +212,9 @@ class W40KEngine(gym.Env):
             self._scenario_has_random_agent_roster = bool(
                 scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
             )
+            self._tutorial_fight_no_death_unit_ids = scenario_result.get(
+                "tutorial_fight_no_death_unit_ids"
+            )
 
             # Extract scenario name from file path for logging
             scenario_name = scenario_file if scenario_file else "Unknown Scenario"
@@ -298,6 +301,9 @@ class W40KEngine(gym.Env):
             self._scenario_wall_ref = self.config.get("scenario_wall_ref")
             self._scenario_objectives = self.config.get("scenario_objectives")
             self._scenario_primary_objective = self.config.get("primary_objective")
+            self._tutorial_fight_no_death_unit_ids = self.config.get(
+                "tutorial_fight_no_death_unit_ids"
+            )
         
         # Store training system compatibility parameters
         self.quiet = quiet
@@ -426,7 +432,10 @@ class W40KEngine(gym.Env):
             # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": base_wall_hexes,
             # Objectives: grouped structure with id, name, hexes (for objective control calculation)
-            "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else []))
+            "objectives": self._scenario_objectives if self._scenario_objectives is not None else ((self.config["board"]["default"]["objectives"] if "objectives" in self.config["board"]["default"] else []) if "default" in self.config["board"] else (self.config["board"]["objectives"] if "objectives" in self.config["board"] else [])),
+            "tutorial_fight_no_death_unit_ids": getattr(
+                self, "_tutorial_fight_no_death_unit_ids", None
+            ),
         }
 
         # Load precomputed LoS topology if wall_ref available (PERF: ~1000x faster LoS lookups)
@@ -4151,6 +4160,9 @@ class W40KEngine(gym.Env):
             scenario_roster_info and scenario_roster_info.get("agent_ref_randomized")
         )
         self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
+        self._tutorial_fight_no_death_unit_ids = scenario_result.get(
+            "tutorial_fight_no_death_unit_ids"
+        )
 
         # Extract scenario name from file path for logging
         scenario_name = scenario_file
@@ -4178,6 +4190,9 @@ class W40KEngine(gym.Env):
             self.game_state["objectives"] = self._scenario_objectives
         if "primary_objective" in self.game_state:
             self.game_state["primary_objective"] = self._scenario_primary_objective
+        self.game_state["tutorial_fight_no_death_unit_ids"] = (
+            self._tutorial_fight_no_death_unit_ids
+        )
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
             raise ValueError("objectives are required after scenario reload")

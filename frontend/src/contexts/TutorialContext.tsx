@@ -49,6 +49,7 @@ export const TUTORIAL_STEP_TITLE_1_25_MORT_TERMAGANT = "1-25 Mort du termagant";
 export const TUTORIAL_STEP_TITLES_INTERCESSOR_HALO = [
   TUTORIAL_STEP_TITLE_PHASE_MOUVEMENT,
   TUTORIAL_STEP_TITLE_1_14_PHASE_MOUVEMENT,
+  TUTORIAL_STEP_TITLE_1_21_PHASE_TIR,
 ] as const;
 
 /** Étapes qui affichent le halo sur les colonnes Name et M (panneau droit) pour clic sur l’unité (ex. Intercessor). */
@@ -155,6 +156,16 @@ function normalizeStep(raw: Record<string, unknown>): TutorialStepDef {
   if (raw.title_icon != null && (typeof raw.title_icon !== "string" || raw.title_icon.trim() === "")) {
     throw new Error(`Step "${stageId ?? `${etape}-${order}`}" title_icon must be a non-empty string`);
   }
+  if (typeof raw.trigger === "object" && raw.trigger != null) {
+    const t = raw.trigger as Record<string, unknown>;
+    if (t.type === "fight_subphase_enter") {
+      if (typeof t.fight_subphase !== "string" || t.fight_subphase.trim() === "") {
+        throw new Error(
+          `Step "${stageId ?? `${etape}-${order}`}" trigger fight_subphase_enter requires non-empty fight_subphase`
+        );
+      }
+    }
+  }
   const { stage: _s, etape: _e, order: _o, ...rest } = raw;
   return { ...rest, etape, order, stage_id: stageId } as TutorialStepDef;
 }
@@ -163,7 +174,7 @@ export interface TutorialStepDef {
   etape: number;
   order: number;
   stage_id?: string;
-  trigger: { type: string; phase?: string };
+  trigger: { type: string; phase?: string; fight_subphase?: string };
   /** Si true, pas de bouton Suivant ; on avance au clic sur l'unité joueur 1 (ex. Intercessor). */
   advance_on_unit_click?: boolean;
   /** Si true, on avance quand le joueur confirme un déplacement (clic destination puis confirm). */
@@ -282,6 +293,9 @@ interface TutorialContextValue {
   /** Halos viewport (px) : Turn / P1+P2 / phases selon l'étape (Rounds, Tours, Phases). */
   spotlightTurnPhasePositions: TutorialSpotlightPosition[] | null;
   setSpotlightTurnPhasePositions: (pos: TutorialSpotlightPosition[] | null) => void;
+  /** Ancrage popups 1-11 / 1-12 / 1-13 : centre du bouton cible + bas de la bande (viewport px). */
+  spotlightTutorialPopupAnchor: { centerX: number; bottomY: number } | null;
+  setSpotlightTutorialPopupAnchor: (pos: { centerX: number; bottomY: number } | null) => void;
   /** Rect viewport (px) du PANNEAU GAUCHE (board) = halo (zone sans brouillard). */
   spotlightLeftPanel: TutorialSpotlightPosition | null;
   setSpotlightLeftPanel: (pos: TutorialSpotlightPosition | null) => void;
@@ -315,6 +329,11 @@ interface TutorialContextValue {
   /** Cercles viewport (px) des icônes sur le board (étape 2-11/2-12 : Intercessor + Hormagaunts). */
   spotlightBoardUnitPositions: TutorialSpotlightPosition[];
   setSpotlightBoardUnitPositions: (pos: TutorialSpotlightPosition[] | null) => void;
+  /**
+   * Incrémenté après scroll / resize (throttle rAF) quand le popup tutoriel est visible,
+   * pour forcer la remesure des halos (coords viewport) afin qu’ils suivent le contenu défilant.
+   */
+  spotlightLayoutTick: number;
   /** Position (col, row) où l'ennemi est mort (étape 1-25 : afficher icône ghost Termagant sur le board). */
   lastEnemyDeathPosition: { col: number; row: number } | null;
 }
@@ -329,6 +348,7 @@ interface TutorialProviderProps {
   isTutorialMode: boolean;
   gameState: {
     phase?: string;
+    fight_subphase?: string | null;
     units?: Array<{ id: string | number; player: number; col?: number; row?: number }>;
     units_cache?: Record<string, unknown>;
   } | null;
@@ -348,7 +368,7 @@ interface TutorialProviderProps {
   children: React.ReactNode;
 }
 
-const STAGES_AI_PAUSED = ["2-11", "2-12", "2-13"] as const;
+const STAGES_AI_PAUSED = ["2-11", "2-12", "2-13", "2-14"] as const;
 
 export function TutorialProvider({
   isTutorialMode,
@@ -368,6 +388,10 @@ export function TutorialProvider({
   const [spotlightPosition, setSpotlightPosition] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightTablePositions, setSpotlightTablePositions] = useState<TutorialSpotlightPosition[] | null>(null);
   const [spotlightTurnPhasePositions, setSpotlightTurnPhasePositions] = useState<TutorialSpotlightPosition[] | null>(null);
+  const [spotlightTutorialPopupAnchor, setSpotlightTutorialPopupAnchor] = useState<{
+    centerX: number;
+    bottomY: number;
+  } | null>(null);
   const [spotlightLeftPanel, setSpotlightLeftPanel] = useState<TutorialSpotlightPosition | null>(null);
   const [spotlightRightPanel, setSpotlightRightPanel] = useState<TutorialSpotlightPosition | null>(null);
   const [leftPanelFogRects, setLeftPanelFogRectsState] = useState<TutorialSpotlightRect[]>([]);
@@ -410,10 +434,20 @@ export function TutorialProvider({
   const setSpotlightBoardUnitPositions = useCallback((pos: TutorialSpotlightPosition[] | null) => {
     setSpotlightBoardUnitPositionsState(pos ?? []);
   }, []);
+  const [spotlightLayoutTick, setSpotlightLayoutTick] = useState(0);
+  const spotlightLayoutRafRef = useRef<number | null>(null);
+  const scheduleSpotlightLayoutTickBump = useCallback(() => {
+    if (spotlightLayoutRafRef.current != null) return;
+    spotlightLayoutRafRef.current = requestAnimationFrame(() => {
+      spotlightLayoutRafRef.current = null;
+      setSpotlightLayoutTick((n) => n + 1);
+    });
+  }, []);
   const [lastEnemyDeathPosition, setLastEnemyDeathPosition] = useState<{ col: number; row: number } | null>(null);
   const lastKnownEnemyPositionRef = useRef<{ col: number; row: number } | null>(null);
   const [tutorialLang, setTutorialLang] = useState<TutorialLang>("fr");
   const lastPhaseRef = useRef<string | null>(null);
+  const lastFightSubphaseRef = useRef<string | null>(null);
   const onDeployShownForEtapeRef = useRef<Set<number>>(new Set());
   /** Après avancement manuel (onClosePopup → étape suivante), ne pas laisser l’effet phase_enter écraser l’index. */
   const skipNextPhaseTriggerRef = useRef(false);
@@ -422,6 +456,33 @@ export function TutorialProvider({
   /** Étapes 2-11/2-12/2-13 : l'utilisateur a cliqué Suivant → IA libérée pour exécuter la phase. */
   const [releasedSteps, setReleasedSteps] = useState<Set<string>>(() => new Set());
 
+  /** Remesure des halos (coords viewport) au scroll / resize pendant que le tutoriel est ouvert. */
+  useEffect(() => {
+    if (!isTutorialMode || !popupVisible || skipped) return;
+    const schedule = scheduleSpotlightLayoutTickBump;
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, { passive: true });
+    document.addEventListener("scroll", schedule, { passive: true, capture: true });
+    document.addEventListener("wheel", schedule, { passive: true, capture: true });
+    window.addEventListener("touchmove", schedule, { passive: true, capture: true });
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("scroll", schedule);
+      vv.addEventListener("resize", schedule);
+    }
+    schedule();
+    return () => {
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule);
+      document.removeEventListener("scroll", schedule, true);
+      document.removeEventListener("wheel", schedule, true);
+      window.removeEventListener("touchmove", schedule, true);
+      if (vv) {
+        vv.removeEventListener("scroll", schedule);
+        vv.removeEventListener("resize", schedule);
+      }
+    };
+  }, [isTutorialMode, popupVisible, skipped, scheduleSpotlightLayoutTickBump]);
 
   const stepsForEtape = useMemo(
     () =>
@@ -442,7 +503,9 @@ export function TutorialProvider({
     let phase =
       s.trigger?.type === "phase_enter" && typeof s.trigger.phase === "string" && s.trigger.phase.trim() !== ""
         ? s.trigger.phase
-        : undefined;
+        : s.trigger?.type === "fight_subphase_enter"
+          ? "fight"
+          : undefined;
     if (uiBehavior.phaseDisplayOverride != null) {
       phase = uiBehavior.phaseDisplayOverride;
     }
@@ -495,19 +558,23 @@ export function TutorialProvider({
     onStepChange?.(currentStep);
   }, [currentStep, onStepChange]);
 
-  /** Pause IA : transition étape 2, ou phase move/shoot/charge non encore libérée par clic Suivant.
+  /** Pause IA : transition étape 2, ou phase move/shoot/charge/fight (sous-phases) non libérées par Suivant.
    * Basé sur la phase du jeu, pas sur popupVisible (évite que l'IA enchaîne avant affichage du popup). */
   const phase = gameState?.phase ?? null;
+  const fightSubphase = gameState?.fight_subphase ?? null;
   const shouldPauseAI =
     transitioningToEtape2Ref.current ||
     (currentEtape === 2 &&
       phase != null &&
       ((phase === "move" && !releasedSteps.has("2-11")) ||
         (phase === "shoot" && !releasedSteps.has("2-12")) ||
-        (phase === "charge" && !releasedSteps.has("2-13"))));
+        (phase === "charge" && !releasedSteps.has("2-13")) ||
+        (phase === "fight" &&
+          fightSubphase === "charging" &&
+          !releasedSteps.has("2-14"))));
   useLayoutEffect(() => {
     onPauseAIChange?.(shouldPauseAI);
-  }, [shouldPauseAI, onPauseAIChange]);
+  }, [shouldPauseAI, onPauseAIChange, phase, fightSubphase]);
 
   useLayoutEffect(() => {
     if (stopAiAfterPhaseChangeRef) {
@@ -521,6 +588,7 @@ export function TutorialProvider({
       setSpotlightPosition(null);
       setSpotlightTablePositions(null);
       setSpotlightTurnPhasePositions(null);
+      setSpotlightTutorialPopupAnchor(null);
       setSpotlightLeftPanel(null);
       setSpotlightRightPanel(null);
       setLeftPanelFogRects([]);
@@ -557,12 +625,15 @@ export function TutorialProvider({
   }, [isTutorialMode]);
 
   const showStepForTrigger = useCallback(
-    (triggerType: string, phase?: string) => {
+    (triggerType: string, phaseOrSubphase?: string) => {
       const idx = stepsForEtape.findIndex((s, index) => {
         if (index < currentStepIndex) return false;
         if (s.trigger.type !== triggerType) return false;
-        if (triggerType === "phase_enter" && phase != null) {
-          return s.trigger.phase === phase;
+        if (triggerType === "phase_enter" && phaseOrSubphase != null) {
+          return s.trigger.phase === phaseOrSubphase;
+        }
+        if (triggerType === "fight_subphase_enter" && phaseOrSubphase != null) {
+          return s.trigger.fight_subphase === phaseOrSubphase;
         }
         return true;
       });
@@ -647,18 +718,57 @@ export function TutorialProvider({
     showStepForTrigger,
   ]);
 
+  /** Étapes 2-14 / 2-15 : déclenchées par fight_subphase (étape 2 uniquement). */
+  useEffect(() => {
+    if (!isTutorialMode || skipped || !gameState || steps.length === 0) return;
+    if (transitioningToEtape2Ref.current) return;
+    if (currentEtape !== 2) {
+      lastFightSubphaseRef.current = null;
+      return;
+    }
+    const phase = gameState.phase ?? null;
+    if (phase !== "fight") {
+      lastFightSubphaseRef.current = null;
+      return;
+    }
+    const fightSubphase = gameState.fight_subphase;
+    if (fightSubphase == null || fightSubphase === "") {
+      return;
+    }
+    if (fightSubphase === lastFightSubphaseRef.current) return;
+    if (skipNextPhaseTriggerRef.current) {
+      skipNextPhaseTriggerRef.current = false;
+      lastFightSubphaseRef.current = fightSubphase;
+      return;
+    }
+    lastFightSubphaseRef.current = fightSubphase;
+    showStepForTrigger("fight_subphase_enter", fightSubphase);
+  }, [
+    isTutorialMode,
+    skipped,
+    gameState,
+    gameState?.phase,
+    gameState?.fight_subphase,
+    steps.length,
+    currentStepIndex,
+    showStepForTrigger,
+    currentEtape,
+  ]);
+
   const hasLivingEnemyUnits = useMemo(() => {
     if (!gameState?.units) return false;
     const player2Units = gameState.units.filter((u) => Number(u.player) === 2);
+    if (player2Units.length === 0) return false;
     const cache = gameState.units_cache as Record<string, { HP_CUR?: number }> | undefined;
-    if (cache) {
-      return player2Units.some((u) => {
-        const id = String(u.id);
-        const entry = cache[id];
-        return entry != null && (entry.HP_CUR ?? 0) > 0;
-      });
-    }
-    return player2Units.length > 0;
+    return player2Units.some((u) => {
+      const id = String(u.id);
+      const entry = cache?.[id];
+      if (entry != null) {
+        return (entry.HP_CUR ?? 0) > 0;
+      }
+      // Pas d’entrée cache (mort retiré du cache ou désync) : HP_CUR sur l’unité (API le synchronise)
+      return typeof u.HP_CUR === "number" && u.HP_CUR > 0;
+    });
   }, [gameState?.units, gameState?.units_cache]);
 
   useEffect(() => {
@@ -671,6 +781,9 @@ export function TutorialProvider({
   const hadEnemiesLastRef = useRef(true);
   useEffect(() => {
     if (!isTutorialMode || skipped || !startGameWithScenario) return;
+    // Tant que les étapes ne sont pas chargées, ne pas interpréter « plus d’ennemis » :
+    // sinon idx 1-25 introuvable → passage brutal à l’étape 2 sans preserveP1 (Hormagaunts cassés).
+    if (steps.length === 0) return;
     if (gameState?.phase === "deployment") return;
     const justLostLastEnemy = hadEnemiesLastRef.current && !hasLivingEnemyUnits;
     hadEnemiesLastRef.current = hasLivingEnemyUnits;
@@ -738,8 +851,9 @@ export function TutorialProvider({
     hasLivingEnemyUnits,
     gameState?.phase,
     gameState?.units,
-    startGameWithScenario,
+      startGameWithScenario,
     stepsForEtape,
+    steps.length,
   ]);
 
   const prepareSkipNextPhaseTrigger = useCallback(() => {
@@ -834,6 +948,8 @@ export function TutorialProvider({
             setSpotlightTablePositions,
             spotlightTurnPhasePositions,
             setSpotlightTurnPhasePositions,
+            spotlightTutorialPopupAnchor,
+            setSpotlightTutorialPopupAnchor,
             spotlightLeftPanel,
             setSpotlightLeftPanel,
             spotlightRightPanel,
@@ -856,6 +972,7 @@ export function TutorialProvider({
             setSpotlightP2UnitRowPositions,
             spotlightBoardUnitPositions,
             setSpotlightBoardUnitPositions,
+            spotlightLayoutTick,
             lastEnemyDeathPosition,
           }
         : {
@@ -875,6 +992,8 @@ export function TutorialProvider({
             setSpotlightTablePositions: () => {},
             spotlightTurnPhasePositions: null,
             setSpotlightTurnPhasePositions: () => {},
+            spotlightTutorialPopupAnchor: null,
+            setSpotlightTutorialPopupAnchor: () => {},
             spotlightLeftPanel: null,
             setSpotlightLeftPanel: () => {},
             spotlightRightPanel: null,
@@ -897,6 +1016,7 @@ export function TutorialProvider({
             setSpotlightP2UnitRowPositions: () => {},
             spotlightBoardUnitPositions: [],
             setSpotlightBoardUnitPositions: () => {},
+            spotlightLayoutTick: 0,
             lastEnemyDeathPosition: null,
           },
     [
@@ -913,6 +1033,7 @@ export function TutorialProvider({
       spotlightPosition,
       spotlightTablePositions,
       spotlightTurnPhasePositions,
+      spotlightTutorialPopupAnchor,
       spotlightLeftPanel,
       spotlightRightPanel,
       leftPanelFogRects,
@@ -929,6 +1050,7 @@ export function TutorialProvider({
       spotlightBoardUnitPositions,
       setSpotlightBoardUnitPositions,
       setSpotlightGameLogTopEntriesPositions,
+      spotlightLayoutTick,
       lastEnemyDeathPosition,
     ]
   );

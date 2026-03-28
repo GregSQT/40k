@@ -2,6 +2,7 @@
 // frontend/src/components/GameLog.tsx
 import React from "react";
 import { createPortal } from "react-dom";
+import { useTutorial } from "../contexts/TutorialContext";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import weaponRulesConfig from "../../../config/weapon_rules.json";
 import {
@@ -204,6 +205,22 @@ export const GameLog: React.FC<GameLogProps> = ({
   const lastEntryRef = React.useRef<HTMLDivElement>(null);
   const headerRef = React.useRef<HTMLDivElement>(null);
   const topEntryRefs = React.useRef<Array<HTMLDivElement | null>>([]);
+  const tutorial = useTutorial();
+  const spotlightLayoutTick = tutorial?.spotlightLayoutTick ?? 0;
+  const [gameLogScrollTick, setGameLogScrollTick] = React.useState(0);
+
+  React.useLayoutEffect(() => {
+    const el = eventsContainerRef.current;
+    if (!el) return;
+    if (!onLastEntryRect && !onHeaderRect && !onTopTwoEntriesRects) return;
+    const onContainerScroll = () => {
+      setGameLogScrollTick((n) => n + 1);
+    };
+    el.addEventListener("scroll", onContainerScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onContainerScroll);
+    };
+  }, [onLastEntryRect, onHeaderRect, onTopTwoEntriesRects]);
   const ruleDescriptionByLookup = React.useMemo(() => {
     const descriptions = new Map<string, string>();
 
@@ -345,7 +362,7 @@ export const GameLog: React.FC<GameLogProps> = ({
       height: rect.height,
     });
     return () => onLastEntryRect(null);
-  }, [onLastEntryRect]);
+  }, [onLastEntryRect, spotlightLayoutTick, gameLogScrollTick]);
 
   React.useLayoutEffect(() => {
     if (!onHeaderRect) return;
@@ -362,7 +379,7 @@ export const GameLog: React.FC<GameLogProps> = ({
       height: rect.height,
     });
     return () => onHeaderRect(null);
-  }, [onHeaderRect, displayedEvents.length]);
+  }, [onHeaderRect, displayedEvents.length, spotlightLayoutTick, gameLogScrollTick]);
 
   React.useLayoutEffect(() => {
     if (!onTopTwoEntriesRects) return;
@@ -382,7 +399,7 @@ export const GameLog: React.FC<GameLogProps> = ({
       });
     onTopTwoEntriesRects(topTwo);
     return () => onTopTwoEntriesRects([]);
-  }, [onTopTwoEntriesRects, displayedEvents.length]);
+  }, [onTopTwoEntriesRects, displayedEvents.length, spotlightLayoutTick, gameLogScrollTick]);
 
   return (
     <div className="game-log">

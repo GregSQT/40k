@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "description": "Contrat binaire de solidite unitaire (invariants critiques).",
+  "invariants": [
+    {
+      "id": "INV-001",
+      "name": "require_key leve ConfigurationError si cle absente",
+      "nodeid": "tests/unit/shared/test_data_validation.py::test_require_key_raises_configuration_error_when_missing"
+    },
+    {
+      "id": "INV-002",
+      "name": "require_present leve ConfigurationError si valeur None",
+      "nodeid": "tests/unit/shared/test_data_validation.py::test_require_present_raises_configuration_error_when_none"
+    },
+    {
+      "id": "INV-003",
+      "name": "get_unit_coordinates normalise les chaines numeriques",
+      "nodeid": "tests/unit/engine/test_combat_utils.py::test_get_unit_coordinates_normalizes_numeric_strings"
+    },
+    {
+      "id": "INV-004",
+      "name": "get_unit_coordinates echoue si row absent",
+      "nodeid": "tests/unit/engine/test_combat_utils.py::test_get_unit_coordinates_raises_key_error_when_missing_row"
+    },
+    {
+      "id": "INV-005",
+      "name": "end_activation WAIT log correctement la position",
+      "nodeid": "tests/unit/engine/test_generic_handlers.py::test_end_activation_wait_adds_wait_log_with_position"
+    },
+    {
+      "id": "INV-006",
+      "name": "end_activation Arg2 incremente episode_steps",
+      "nodeid": "tests/unit/engine/test_generic_handlers.py::test_end_activation_arg2_increments_episode_steps"
+    },
+    {
+      "id": "INV-007",
+      "name": "end_activation Arg3 FLED met a jour les sets de tracking",
+      "nodeid": "tests/unit/engine/test_generic_handlers.py::test_end_activation_arg3_fled_marks_units_moved_and_units_fled"
+    },
+    {
+      "id": "INV-008",
+      "name": "update_units_cache_hp met a jour HP positif",
+      "nodeid": "tests/unit/engine/test_shared_utils_units_cache.py::test_update_units_cache_hp_updates_entry_when_hp_positive"
+    },
+    {
+      "id": "INV-009",
+      "name": "update_units_cache_hp retire unite si HP <= 0",
+      "nodeid": "tests/unit/engine/test_shared_utils_units_cache.py::test_update_units_cache_hp_removes_unit_when_hp_zero_or_less"
+    },
+    {
+      "id": "INV-010",
+      "name": "get_hp_from_cache retourne None si unite absente",
+      "nodeid": "tests/unit/engine/test_shared_utils_units_cache.py::test_get_hp_from_cache_returns_none_when_unit_absent"
+    }
+  ]
+}
