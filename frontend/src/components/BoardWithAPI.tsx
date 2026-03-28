@@ -63,6 +63,7 @@ const TURN_PHASE_STEP_TITLES = [
   TUTORIAL_STEP_TITLE_TURNS,
   TUTORIAL_STEP_TITLE_PHASES,
 ] as const;
+const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
 
 function TutorialOverlayGate(): React.ReactNode {
   const tutorial = useTutorial();
@@ -1399,6 +1400,7 @@ export const BoardWithAPI: React.FC = () => {
     const showDebugStr = localStorage.getItem("showDebug");
     const showDebugLoSStr = localStorage.getItem("showDebugLoS");
     const autoSelectWeaponStr = localStorage.getItem("autoSelectWeapon");
+    const retreatAlertEnabledStr = localStorage.getItem(RETREAT_ALERT_STORAGE_KEY);
     return {
       showAdvanceWarning:
         canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
@@ -1406,8 +1408,14 @@ export const BoardWithAPI: React.FC = () => {
       showDebugLoS: showDebugLoSStr ? JSON.parse(showDebugLoSStr) : false,
       autoSelectWeapon:
         canUseAutoWeaponSelection && (autoSelectWeaponStr ? JSON.parse(autoSelectWeaponStr) : true),
+      retreatAlertEnabled: retreatAlertEnabledStr ? JSON.parse(retreatAlertEnabledStr) : true,
     };
   });
+
+  const updateRetreatAlertSetting = useCallback((value: boolean) => {
+    localStorage.setItem(RETREAT_ALERT_STORAGE_KEY, JSON.stringify(value));
+    setSettings((prev) => ({ ...prev, retreatAlertEnabled: value }));
+  }, []);
 
   const handleToggleAdvanceWarning = (value: boolean) => {
     if (!canUseAdvanceWarning) {
@@ -1433,6 +1441,10 @@ export const BoardWithAPI: React.FC = () => {
     }
     setSettings((prev) => ({ ...prev, autoSelectWeapon: value }));
     localStorage.setItem("autoSelectWeapon", JSON.stringify(value));
+  };
+
+  const handleToggleRetreatAlert = (value: boolean) => {
+    updateRetreatAlertSetting(value);
   };
 
   // Calculate available height for GameLog dynamically
@@ -2623,6 +2635,103 @@ export const BoardWithAPI: React.FC = () => {
         </BoardColumnWithTutorial>
       </SharedLayout>
       <TutorialOverlayGate />
+      {apiProps.fleeWarningPopup && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 12000,
+          }}
+          onClick={() => {
+            if (apiProps.fleeWarningPopup?.dontRemind) {
+              updateRetreatAlertSetting(false);
+            }
+            void apiProps.onCancelFleeWarning();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="retreat-warning-title"
+            style={{
+              width: "min(640px, calc(100vw - 32px))",
+              backgroundColor: "#06120a",
+              border: "2px solid #22c55e",
+              borderRadius: "10px",
+              boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
+              padding: "22px 24px 18px 24px",
+              color: "#e5fbe9",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="retreat-warning-title" style={{ margin: "0 0 12px 0", color: "#86efac", fontSize: "30px" }}>
+              Retraite !
+            </h2>
+            <p style={{ margin: 0, lineHeight: 1.5, fontSize: "19px" }}>
+              Vous êtes sur le point d'effectuer un mouvement de Retraite. Si vous le validez, cette unité ne
+              pourra ni tirer ni charger jusqu&apos; à la fin de ce tour.
+            </p>
+            <div style={{ marginTop: "20px", display: "flex", justifyContent: "space-between", alignItems: "end" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={apiProps.fleeWarningPopup.dontRemind}
+                  onChange={(event) => apiProps.onToggleFleeWarningDontRemind(event.target.checked)}
+                  style={{ width: "18px", height: "18px", cursor: "pointer" }}
+                />
+                <span style={{ fontSize: "16px", color: "#d1fae5" }}>Ne plus me rappeler</span>
+              </label>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (apiProps.fleeWarningPopup?.dontRemind) {
+                      updateRetreatAlertSetting(false);
+                    }
+                    void apiProps.onCancelFleeWarning();
+                  }}
+                  style={{
+                    padding: "10px 14px",
+                    border: "1px solid #9ca3af",
+                    borderRadius: "6px",
+                    background: "rgba(31, 41, 55, 0.9)",
+                    color: "#f3f4f6",
+                    cursor: "pointer",
+                    fontSize: "16px",
+                  }}
+                >
+                  Annuler la retraite
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (apiProps.fleeWarningPopup?.dontRemind) {
+                      updateRetreatAlertSetting(false);
+                    }
+                    void apiProps.onConfirmFleeWarning();
+                  }}
+                  style={{
+                    padding: "10px 14px",
+                    border: "1px solid #22c55e",
+                    borderRadius: "6px",
+                    background: "#065f46",
+                    color: "#ecfdf5",
+                    cursor: "pointer",
+                    fontSize: "16px",
+                    fontWeight: 600,
+                  }}
+                >
+                  Valider
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <SettingsMenu
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -2640,6 +2749,8 @@ export const BoardWithAPI: React.FC = () => {
         autoSelectWeapon={settings.autoSelectWeapon}
         canToggleAutoSelectWeapon={canUseAutoWeaponSelection}
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
+        retreatAlertEnabled={settings.retreatAlertEnabled}
+        onToggleRetreatAlert={handleToggleRetreatAlert}
       />
     </TutorialProvider>
   );

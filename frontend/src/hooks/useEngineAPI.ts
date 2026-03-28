@@ -26,9 +26,27 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
 };
 
 const API_BASE = "/api";
+const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
 
 // Prevent duplicate AI turn calls
 let aiTurnInProgress = false;
+
+function readRequiredBooleanSetting(key: string, defaultValue: boolean): boolean {
+  const rawValue = localStorage.getItem(key);
+  if (rawValue == null) {
+    return defaultValue;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch (error) {
+    throw new Error(`Invalid JSON value for localStorage key "${key}": ${String(error)}`);
+  }
+  if (typeof parsed !== "boolean") {
+    throw new Error(`localStorage key "${key}" must be a boolean`);
+  }
+  return parsed;
+}
 
 export interface APIGameState {
   units: Array<{
@@ -229,6 +247,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [advanceRoll, setAdvanceRoll] = useState<number | null>(null);
   const [advanceWarningPopup, setAdvanceWarningPopup] = useState<{
     unitId: number;
+    timestamp: number;
+  } | null>(null);
+  const [fleeWarningPopup, setFleeWarningPopup] = useState<{
+    unitId: number;
+    destCol: number;
+    destRow: number;
+    dontRemind: boolean;
     timestamp: number;
   } | null>(null);
   const [postShootMoveDestinations, setPostShootMoveDestinations] = useState<
@@ -1856,6 +1881,38 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  const shouldShowRetreatAlert = useCallback((): boolean => {
+    return readRequiredBooleanSetting(RETREAT_ALERT_STORAGE_KEY, true);
+  }, []);
+
+  const isFleeMovePreview = useCallback(
+    (unitId: number, destCol: number, destRow: number): boolean => {
+      if (!gameState || gameState.phase !== "move") {
+        return false;
+      }
+      const movingUnit = gameState.units.find((unit) => parseInt(String(unit.id), 10) === unitId);
+      if (!movingUnit) {
+        throw new Error(`Cannot evaluate flee preview: unit ${unitId} not found`);
+      }
+      const enemyUnits = gameState.units.filter(
+        (unit) => unit.player !== movingUnit.player && unit.HP_CUR > 0
+      );
+      const wasAdjacentToEnemy = enemyUnits.some(
+        (enemy) =>
+          cubeDistance(offsetToCube(movingUnit.col, movingUnit.row), offsetToCube(enemy.col, enemy.row)) === 1
+      );
+      if (!wasAdjacentToEnemy) {
+        return false;
+      }
+      const willBeAdjacentToEnemy = enemyUnits.some(
+        (enemy) =>
+          cubeDistance(offsetToCube(destCol, destRow), offsetToCube(enemy.col, enemy.row)) === 1
+      );
+      return !willBeAdjacentToEnemy;
+    },
+    [gameState]
+  );
+
   const handleDeployUnit = useCallback(
     async (unitId: number | string, col: number | string, row: number | string) => {
       if (!gameState || gameState.phase !== "deployment") {
@@ -1955,9 +2012,30 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return;
     }
 
+    if (pendingPreviewAction === "move" || pendingPreviewAction == null) {
+      const willFlee = isFleeMovePreview(movePreview.unitId, movePreview.destCol, movePreview.destRow);
+      if (willFlee && shouldShowRetreatAlert()) {
+        setFleeWarningPopup({
+          unitId: movePreview.unitId,
+          destCol: movePreview.destCol,
+          destRow: movePreview.destRow,
+          dontRemind: false,
+          timestamp: Date.now(),
+        });
+        return;
+      }
+    }
+
     await handleDirectMove(movePreview.unitId, movePreview.destCol, movePreview.destRow);
     setPendingPreviewAction(null);
-  }, [movePreview, pendingPreviewAction, executeAction, handleDirectMove]);
+  }, [
+    movePreview,
+    pendingPreviewAction,
+    executeAction,
+    handleDirectMove,
+    isFleeMovePreview,
+    shouldShowRetreatAlert,
+  ]);
 
   const handleCancelMove = useCallback(async () => {
     if (pendingPreviewAction === "move_after_shooting") {
@@ -1999,6 +2077,39 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
     setMode("select");
   }, [pendingPreviewAction, mode, gameState, selectedUnitId, executeAction]);
+
+  const handleToggleFleeWarningDontRemind = useCallback((value: boolean) => {
+    setFleeWarningPopup((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return { ...prev, dontRemind: value };
+    });
+  }, []);
+
+  const applyRetreatAlertPreferenceFromPopup = useCallback((dontRemind: boolean) => {
+    if (!dontRemind) {
+      return;
+    }
+    localStorage.setItem(RETREAT_ALERT_STORAGE_KEY, JSON.stringify(false));
+  }, []);
+
+  const handleConfirmFleeWarning = useCallback(async () => {
+    if (!fleeWarningPopup) return;
+    const { unitId, destCol, destRow, dontRemind } = fleeWarningPopup;
+    setFleeWarningPopup(null);
+    applyRetreatAlertPreferenceFromPopup(dontRemind);
+    await handleDirectMove(unitId, destCol, destRow);
+    setPendingPreviewAction(null);
+  }, [fleeWarningPopup, applyRetreatAlertPreferenceFromPopup, handleDirectMove]);
+
+  const handleCancelFleeWarning = useCallback(async () => {
+    if (!fleeWarningPopup) return;
+    const { dontRemind } = fleeWarningPopup;
+    setFleeWarningPopup(null);
+    applyRetreatAlertPreferenceFromPopup(dontRemind);
+    await handleCancelMove();
+  }, [fleeWarningPopup, applyRetreatAlertPreferenceFromPopup, handleCancelMove]);
 
   // Backend handles all shooting logic - frontend just sends clicks
   const handleShoot = useCallback(
@@ -2815,6 +2926,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onConfirmAdvanceWarning: async () => {},
       onCancelAdvanceWarning: () => {},
       onSkipAdvanceWarning: async () => {},
+      fleeWarningPopup: null,
+      onConfirmFleeWarning: async () => {},
+      onCancelFleeWarning: async () => {},
+      onToggleFleeWarningDontRemind: () => {},
       availableCellsOverride: undefined,
       blinkingUnits: [],
       blinkingAttackerId: null,
@@ -2893,6 +3008,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onConfirmAdvanceWarning: handleConfirmAdvanceWarning,
     onCancelAdvanceWarning: handleCancelAdvanceWarning,
     onSkipAdvanceWarning: handleSkipAdvanceWarning,
+    fleeWarningPopup,
+    onConfirmFleeWarning: handleConfirmFleeWarning,
+    onCancelFleeWarning: handleCancelFleeWarning,
+    onToggleFleeWarningDontRemind: handleToggleFleeWarningDontRemind,
     availableCellsOverride: moveSelectionCellsOverride,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnitsIds,

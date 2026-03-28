@@ -15,6 +15,8 @@ interface SettingsMenuProps {
   autoSelectWeapon: boolean;
   canToggleAutoSelectWeapon: boolean;
   onToggleAutoSelectWeapon: (value: boolean) => void;
+  retreatAlertEnabled?: boolean;
+  onToggleRetreatAlert?: (value: boolean) => void;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
@@ -31,6 +33,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   autoSelectWeapon,
   canToggleAutoSelectWeapon,
   onToggleAutoSelectWeapon,
+  retreatAlertEnabled = true,
+  onToggleRetreatAlert,
 }) => {
   if (!isOpen) return null;
 
@@ -152,6 +156,25 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             </label>
             <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
               Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir.
+            </p>
+          </div>
+        )}
+
+        {onToggleRetreatAlert && (
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", cursor: "pointer", color: "#e5e7eb" }}
+            >
+              <input
+                type="checkbox"
+                checked={retreatAlertEnabled}
+                onChange={(e) => onToggleRetreatAlert(e.target.checked)}
+                style={{ marginRight: "12px", width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Alerte de retraite</span>
+            </label>
+            <p style={{ color: "#9ca3af", fontSize: "14px", marginLeft: "30px", marginTop: "4px" }}>
+              Affiche une confirmation avant de valider un mouvement de Retraite.
             </p>
           </div>
         )}
