@@ -10,6 +10,7 @@ Example:
     --runs-root ./tensorboard_b001 \
     --seeds 32345 42345 52345 62345 72345 \
     --run-pattern "{seed}" \
+    --last-run-only \
     --min-evals 5 \
     --out-prefix ./reports/b001_coreagent
 """
@@ -19,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -55,7 +57,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--runs-root",
-        required=True,
+        default="./tensorboard",
         help="Root directory for one batch (ex: tensorboard_b001).",
     )
     parser.add_argument(
@@ -68,6 +70,14 @@ def parse_args() -> argparse.Namespace:
         "--run-pattern",
         default="{seed}",
         help='Subdirectory pattern under runs-root (default: "{seed}").',
+    )
+    parser.add_argument(
+        "--last-run-only",
+        action="store_true",
+        help=(
+            "V2 fast mode: read only one run directory per seed. "
+            "Requires a clean seed folder with exactly one run_* directory."
+        ),
     )
     parser.add_argument(
         "--tag-robust",
@@ -100,6 +110,25 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Output prefix for JSON/CSV files (without extension).",
     )
+    parser.add_argument(
+        "--archive-runs-root",
+        action="store_true",
+        help=(
+            "After successful analysis, rename runs-root to next batch directory "
+            "(ex: tensorboard -> tensorboard_b001) and recreate runs-root empty."
+        ),
+    )
+    parser.add_argument(
+        "--archive-prefix",
+        default="tensorboard_b",
+        help="Batch directory prefix used with --archive-runs-root (default: tensorboard_b).",
+    )
+    parser.add_argument(
+        "--archive-width",
+        type=int,
+        default=3,
+        help="Zero-padding width for batch index (default: 3 => b001, b002, ...).",
+    )
     return parser.parse_args()
 
 
@@ -107,25 +136,65 @@ def collect_event_files(run_dir: Path) -> List[Path]:
     return sorted(run_dir.rglob("events.out.tfevents.*"))
 
 
-def read_scalar_points(event_files: List[Path], tag: str) -> List[ScalarPoint]:
-    merged: Dict[Tuple[int, float], ScalarPoint] = {}
+def resolve_analysis_dir_for_seed(seed_dir: Path, last_run_only: bool) -> Path:
+    """Return the directory to scan for event files for a seed."""
+    if not last_run_only:
+        return seed_dir
+
+    if not seed_dir.exists():
+        raise FileNotFoundError(f"Seed directory does not exist: {seed_dir}")
+    if not seed_dir.is_dir():
+        raise NotADirectoryError(f"Seed path is not a directory: {seed_dir}")
+
+    run_dirs = sorted(
+        [
+            child
+            for child in seed_dir.iterdir()
+            if child.is_dir() and child.name.startswith("run_")
+        ]
+    )
+    if len(run_dirs) != 1:
+        raise RuntimeError(
+            "Invalid seed folder for --last-run-only: expected exactly one run_* directory "
+            f"in {seed_dir}, found {len(run_dirs)} ({[d.name for d in run_dirs]})"
+        )
+    return run_dirs[0]
+
+
+def read_scalar_points_for_tags(
+    event_files: List[Path], tags: List[str]
+) -> Dict[str, List[ScalarPoint]]:
+    requested_tags = {str(tag) for tag in tags}
+    merged_by_tag: Dict[str, Dict[Tuple[int, float], ScalarPoint]] = {
+        tag: {} for tag in requested_tags
+    }
+
     for event_file in event_files:
         accumulator = EventAccumulator(str(event_file), size_guidance={"scalars": 0})
         try:
             accumulator.Reload()
         except Exception as exc:
             raise RuntimeError(f"Cannot read event file: {event_file} ({exc})") from exc
-        scalar_tags = accumulator.Tags().get("scalars", [])
-        if tag not in scalar_tags:
-            continue
-        for scalar in accumulator.Scalars(tag):
-            step = int(scalar.step)
-            wall_time = float(scalar.wall_time)
-            key = (step, wall_time)
-            merged[key] = ScalarPoint(step=step, wall_time=wall_time, value=float(scalar.value))
-    points = list(merged.values())
-    points.sort(key=lambda p: (p.step, p.wall_time))
-    return points
+        available_scalar_tags = set(accumulator.Tags().get("scalars", []))
+        tags_to_read = requested_tags.intersection(available_scalar_tags)
+        for tag in tags_to_read:
+            per_tag_merged = merged_by_tag[tag]
+            for scalar in accumulator.Scalars(tag):
+                step = int(scalar.step)
+                wall_time = float(scalar.wall_time)
+                key = (step, wall_time)
+                per_tag_merged[key] = ScalarPoint(
+                    step=step,
+                    wall_time=wall_time,
+                    value=float(scalar.value),
+                )
+
+    result: Dict[str, List[ScalarPoint]] = {}
+    for tag in requested_tags:
+        points = list(merged_by_tag[tag].values())
+        points.sort(key=lambda p: (p.step, p.wall_time))
+        result[tag] = points
+    return result
 
 
 def best_value(points: List[ScalarPoint]) -> Optional[float]:
@@ -156,10 +225,14 @@ def summarize_seed(
     tag_holdout_hard: str,
     min_evals: int,
 ) -> SeedSummary:
-    robust_points = read_scalar_points(event_files, tag_robust)
-    combined_points = read_scalar_points(event_files, tag_combined)
-    worst_bot_points = read_scalar_points(event_files, tag_worst_bot)
-    holdout_hard_points = read_scalar_points(event_files, tag_holdout_hard)
+    points_by_tag = read_scalar_points_for_tags(
+        event_files=event_files,
+        tags=[tag_robust, tag_combined, tag_worst_bot, tag_holdout_hard],
+    )
+    robust_points = points_by_tag[tag_robust]
+    combined_points = points_by_tag[tag_combined]
+    worst_bot_points = points_by_tag[tag_worst_bot]
+    holdout_hard_points = points_by_tag[tag_holdout_hard]
 
     valid = len(robust_points) >= min_evals
     reason = "ok" if valid else f"insufficient_robust_points({len(robust_points)}<{min_evals})"
@@ -264,11 +337,15 @@ def write_outputs(
             "runs_root": str(Path(args.runs_root).resolve()),
             "seeds": list(args.seeds),
             "run_pattern": args.run_pattern,
+            "last_run_only": bool(args.last_run_only),
             "tag_robust": args.tag_robust,
             "tag_combined": args.tag_combined,
             "tag_worst_bot": args.tag_worst_bot,
             "tag_holdout_hard": args.tag_holdout_hard,
             "min_evals": args.min_evals,
+            "archive_runs_root": bool(args.archive_runs_root),
+            "archive_prefix": str(args.archive_prefix),
+            "archive_width": int(args.archive_width),
         },
         "aggregate": aggregate,
         "seeds": [asdict(row) for row in seed_rows],
@@ -300,6 +377,46 @@ def write_outputs(
     print(f"Wrote CSV : {csv_path}")
 
 
+def _next_batch_dir(parent_dir: Path, prefix: str, width: int) -> Path:
+    if width <= 0:
+        raise ValueError(f"--archive-width must be > 0 (got {width})")
+    highest_idx = 0
+    for candidate in parent_dir.iterdir():
+        if not candidate.is_dir():
+            continue
+        name = candidate.name
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(prefix):]
+        if suffix.isdigit():
+            highest_idx = max(highest_idx, int(suffix))
+    next_idx = highest_idx + 1
+    return parent_dir / f"{prefix}{next_idx:0{width}d}"
+
+
+def archive_runs_root(runs_root: Path, prefix: str, width: int) -> Path:
+    parent_dir = runs_root.parent
+    dst_dir = _next_batch_dir(parent_dir, prefix, width)
+    return archive_runs_root_to(runs_root, dst_dir)
+
+
+def archive_runs_root_to(runs_root: Path, dst_dir: Path) -> Path:
+    if dst_dir.exists():
+        raise FileExistsError(f"Batch destination already exists: {dst_dir}")
+    runs_root.rename(dst_dir)
+    runs_root.mkdir(parents=True, exist_ok=False)
+    print(f"Archived runs-root: {dst_dir}")
+    print(f"Recreated empty runs-root: {runs_root}")
+    return dst_dir
+
+
+def _extract_batch_token(batch_dir_name: str) -> str:
+    match = re.search(r"(b\d+)$", batch_dir_name)
+    if match:
+        return str(match.group(1))
+    return batch_dir_name
+
+
 def main() -> int:
     args = parse_args()
 
@@ -323,13 +440,17 @@ def main() -> int:
             )
         if not run_dir.is_dir():
             raise NotADirectoryError(f"Run path is not a directory for seed={seed}: {run_dir}")
-        event_files = collect_event_files(run_dir)
+        analysis_dir = resolve_analysis_dir_for_seed(
+            seed_dir=run_dir,
+            last_run_only=bool(args.last_run_only),
+        )
+        event_files = collect_event_files(analysis_dir)
         if not event_files:
-            raise FileNotFoundError(f"No TensorBoard event files found in: {run_dir}")
+            raise FileNotFoundError(f"No TensorBoard event files found in: {analysis_dir}")
 
         summary = summarize_seed(
             seed=str(seed),
-            run_dir=run_dir,
+            run_dir=analysis_dir,
             event_files=event_files,
             tag_robust=args.tag_robust,
             tag_combined=args.tag_combined,
@@ -342,9 +463,29 @@ def main() -> int:
     aggregate = compute_aggregate(seed_rows)
     print_console_report(seed_rows, aggregate)
 
-    default_prefix = runs_root / "seed_aggregate"
-    out_prefix = Path(args.out_prefix).resolve() if args.out_prefix else default_prefix
+    archive_target_dir: Optional[Path] = None
+    if args.archive_runs_root:
+        archive_target_dir = _next_batch_dir(
+            parent_dir=runs_root.parent,
+            prefix=str(args.archive_prefix),
+            width=int(args.archive_width),
+        )
+
+    if args.out_prefix:
+        out_prefix = Path(args.out_prefix).resolve()
+    else:
+        if archive_target_dir is not None:
+            batch_token = _extract_batch_token(archive_target_dir.name)
+            out_prefix = (runs_root.parent / "reports" / f"{batch_token}_coreagent").resolve()
+        else:
+            out_prefix = (runs_root / "seed_aggregate").resolve()
+
     write_outputs(out_prefix, seed_rows, aggregate, args)
+
+    if args.archive_runs_root:
+        if archive_target_dir is None:
+            raise RuntimeError("archive target directory should not be None when archive is enabled")
+        archive_runs_root_to(runs_root=runs_root, dst_dir=archive_target_dir)
 
     return 0
 

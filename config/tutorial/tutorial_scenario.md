@@ -462,7 +462,7 @@ The hit points bar of the Termagant blinks, indicating that the Intercessor has 
 - advance_on_weapon_click: `false`
 - popup_position: `{ left: 58%, top: 25% }`
 - next_step: `Clic sur Suivant`
-- layout: `Fog droite + board haut, unit table P2 expanded, halos turn/P2/move + Hormagaunts.`
+- layout: `Fog droite + board haut, unit table P2 expanded, halos turn/P2/move + deux Hormagaunts (gauche/droite).`
 
 **UI**
 - spotlightIds: `table.p2.unitRows`, `board.unitRows`, `turnPhase.all`, `panel.left`

@@ -52,7 +52,7 @@ interface UnitStatusTableProps {
   tutorialForceTableExpanded?: boolean;
   /** En mode tutoriel : forcer ces unités à avoir la ligne stats dépliée (ex. Intercessor id 1). */
   tutorialForceUnitIdsExpanded?: UnitId[];
-  /** En mode tutoriel (étape 2-11) : forcer ces unités à avoir la ligne stats repliée (ex. premier Hormagaunt id 2). */
+  /** En mode tutoriel (étape 2-11) : forcer ces unités à avoir la ligne stats repliée (ex. Hormagaunts id 2 et 3). */
   tutorialForceUnitIdsCollapsed?: UnitId[];
   /** En mode tutoriel : rapporter les positions viewport [colonne Name, colonne M] pour les halos. */
   onNameMColumnsRect?:

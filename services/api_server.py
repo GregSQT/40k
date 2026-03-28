@@ -1180,14 +1180,10 @@ def start_game():
                 scenario_file = os.path.join("config", "scenario_pvp_test.json")
             if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP Test engine initialization failed"}), 500
-            # PvP test mode must remain human vs human.
-            engine.is_pve_mode = False
         elif requested_mode == "pvp":
             print("DEBUG: Initializing engine for PvP mode")
             if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
-            # PvP must remain human vs human.
-            engine.is_pve_mode = False
         elif requested_mode == "pve":
             print("DEBUG: Initializing engine for PvE mode (copied from Test mode)")
             if not initialize_test_engine(
@@ -1208,8 +1204,17 @@ def start_game():
             print("DEBUG: Initializing engine for PvP mode")
             if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
-            # Ensure PvE mode is explicitly disabled for PvP
+
+        # HTTP session: requested_mode is the source of truth for PvE vs PvP (aligns engine with client).
+        if requested_mode in ("pve", "pve_test"):
+            engine.is_pve_mode = True
+            engine.config["pve_mode"] = True
+        elif requested_mode in ("pvp", "pvp_test"):
             engine.is_pve_mode = False
+            engine.config["pve_mode"] = False
+        else:
+            raise ValueError(f"Unhandled requested_mode: {requested_mode!r}")
+
         engine.current_mode_code = requested_mode
         
         print("DEBUG: About to call engine.reset()")

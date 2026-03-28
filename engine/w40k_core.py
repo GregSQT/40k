@@ -315,14 +315,13 @@ class W40KEngine(gym.Env):
         self.is_training = training_config_name in ["debug", "default", "conservative", "aggressive"]
         
         # PvE mode configuration
-        # AI_TURN.md COMPLIANCE: Direct access with validation
-        if isinstance(config, dict) and "pve_mode" in config:
-            self.is_pve_mode = config["pve_mode"]
-        else:
-            self.is_pve_mode = False
-        
-        # CRITICAL FIX: Update config with actual PvE mode value
-        self.config["pve_mode"] = self.is_pve_mode
+        # AI_TURN.md COMPLIANCE: self.config is normalized above (training + API paths); never read
+        # from the raw `config` parameter here — it can diverge from self.config after copy/fill.
+        if "pve_mode" not in self.config:
+            raise KeyError(
+                "pve_mode must be present in config after engine config build"
+            )
+        self.is_pve_mode = self.config["pve_mode"]
         self._ai_model = None
         if not isinstance(self.is_pve_mode, bool):
             raise TypeError(f"is_pve_mode must be bool, got {type(self.is_pve_mode).__name__}")

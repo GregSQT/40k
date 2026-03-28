@@ -1,6 +1,12 @@
 import { load } from "js-yaml";
 import tutorialScenarioYamlRaw from "../../../config/tutorial/tutorial_scenario.yaml?raw";
 
+/**
+ * Référence au YAML brut pour le HMR Vite : quand le fichier change, les modules qui en dépendent
+ * (ex. TutorialContext) se réévaluent et peuvent recharger les steps sans rechargement complet de la page.
+ */
+export const tutorialScenarioYamlRevision = tutorialScenarioYamlRaw;
+
 interface TutorialScenarioRuntimeData {
   runtime_config: unknown;
   rules: unknown;
@@ -84,9 +90,7 @@ function buildRuntimeData(): TutorialScenarioRuntimeData {
   };
 }
 
-const RUNTIME_DATA = buildRuntimeData();
-
 export function getTutorialScenarioRuntimeData(): TutorialScenarioRuntimeData {
-  return RUNTIME_DATA;
+  return buildRuntimeData();
 }
 

@@ -121,8 +121,10 @@ interface TutorialOverlayProps {
   panelLeftSpotlightForLayout?: TutorialSpotlightRect | null;
   /** 1-15 : rects halo colonnes Name + M (ligne Intercessor) — popup à gauche de ce bloc. */
   tableNameMSpotlightRectsForLayout?: TutorialSpotlightRect[] | null;
-  /** 1-16 : halo section RANGED WEAPON(S) — centrage vertical ; bord gauche du popup au bord droit du plateau. */
-  rangedWeaponsSpotlightRectsForLayout?: TutorialSpotlightRect[] | null;
+  /** Étape 2-16 : passage au mode PvE (init API + navigation). */
+  onGoToPveMode?: () => void | Promise<void>;
+  /** Étape 2-16 : fermer le popup sans quitter le tutoriel. */
+  onDismissPopupOnly?: () => void;
 }
 
 /**
@@ -154,10 +156,35 @@ const TUTORIAL_POPUP_1_15_GAP_LEFT_OF_NAME_M_ROW_PX = 48;
 /** 1-15 : décalage vertical vers le bas par rapport au centre du halo Name/M. */
 const TUTORIAL_POPUP_1_15_SHIFT_DOWN_PX = 100;
 
-/** 1-16 : écart entre le bord gauche du popup et le bord droit du halo plateau (panel.left). */
-const TUTORIAL_POPUP_1_16_GAP_AFTER_BOARD_RIGHT_PX = -100;
-/** 1-16 : décalage vertical (px) sous le centre du halo armes à distance. */
-const TUTORIAL_POPUP_1_16_SHIFT_DOWN_PX = 300;
+/**
+ * 2-13 … 2-15 : ancrage sur le halo plateau (panel.left) — même logique que l’historique 2-13.
+ * Chaque étape a ses propres réglages (px) ; pas de popup_position YAML pour ces étapes.
+ */
+type TutorialPopup2BoardAnchorConfig = {
+  /** Décalage sous le bord supérieur du plateau (px). */
+  offsetTopPx: number;
+  /** Décalage horizontal par rapport au centre du plateau (px ; positif = vers la droite). */
+  centerXShiftPx: number;
+};
+
+const TUTORIAL_POPUP_2_BOARD_ANCHOR_BY_STAGE: Record<
+  "2-13" | "2-14" | "2-15",
+  TutorialPopup2BoardAnchorConfig
+> = {
+  "2-13": { offsetTopPx: 12, centerXShiftPx: 0 },
+  "2-14": { offsetTopPx: 12, centerXShiftPx: 0 },
+  "2-15": { offsetTopPx: 12, centerXShiftPx: 0 },
+};
+
+function isTutorialStage2BoardAnchored(
+  stage: string
+): stage is "2-13" | "2-14" | "2-15" {
+  return stage === "2-13" || stage === "2-14" || stage === "2-15";
+}
+
+/** 2-16 uniquement : position du popup dans le viewport (fin tutoriel). Réglage ici, pas dans le YAML. */
+const TUTORIAL_POPUP_2_16_VIEWPORT_LEFT = "30%";
+const TUTORIAL_POPUP_2_16_VIEWPORT_TOP = "10%";
 
 /** Marge (px) entre le bord du popup tutoriel et les bords du viewport (clamp général). */
 const TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX = 8;
@@ -718,7 +745,8 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   tutorialPopupAnchor = null,
   panelLeftSpotlightForLayout = null,
   tableNameMSpotlightRectsForLayout = null,
-  rangedWeaponsSpotlightRectsForLayout = null,
+  onGoToPveMode,
+  onDismissPopupOnly,
 }) => {
   const clickHoles = allowedClickSpotlights ?? spotlights;
   const title = lang === "fr" ? step.title_fr : step.title_en;
@@ -867,6 +895,13 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     setDialogPosition(null);
   }, [step.stage]);
 
+  useEffect(() => {
+    // Si la position YAML change (HMR), on annule un éventuel drag persistant
+    // pour que les nouveaux réglages left/top reprennent immédiatement la main.
+    setDialogPosition(null);
+    setViewportInsetNudge({ x: 0, y: 0 });
+  }, [step.popupPosition]);
+
   const tutorialLayoutDepsKey = useMemo(() => {
     const spotlightSig = spotlights
       .map((s) => {
@@ -881,12 +916,6 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     const tableSig =
       tableNameMSpotlightRectsForLayout != null
         ? tableNameMSpotlightRectsForLayout
-            .map((r) => `${r.left},${r.top},${r.width},${r.height}`)
-            .join(";")
-        : "";
-    const rangedSig =
-      rangedWeaponsSpotlightRectsForLayout != null
-        ? rangedWeaponsSpotlightRectsForLayout
             .map((r) => `${r.left},${r.top},${r.width},${r.height}`)
             .join(";")
         : "";
@@ -911,7 +940,6 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       anchorSig,
       panelSig,
       tableSig,
-      rangedSig,
       spotlightSig,
       popupPosSig,
     ].join("::");
@@ -921,7 +949,6 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     tutorialPopupAnchor,
     panelLeftSpotlightForLayout,
     tableNameMSpotlightRectsForLayout,
-    rangedWeaponsSpotlightRectsForLayout,
     spotlights,
     step.popupPosition,
   ]);
@@ -930,6 +957,10 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     const el = dialogRef.current;
     if (!el) return;
     const margin = TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX;
+    const hasExplicitPopupPosition =
+      step.popupPosition != null &&
+      step.popupPosition !== "center" &&
+      typeof step.popupPosition === "object";
     const rect = el.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -937,12 +968,16 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     let dy = 0;
     if (rect.left < margin) dx = margin - rect.left;
     else if (rect.right > vw - margin) dx = vw - margin - rect.right;
-    if (rect.top < margin) dy = margin - rect.top;
-    else if (rect.bottom > vh - margin) dy = vh - margin - rect.bottom;
+    // En mode popup_position explicite (YAML), on ne force pas l'axe Y :
+    // l'objectif est de laisser l'utilisateur affiner top librement.
+    if (!hasExplicitPopupPosition) {
+      if (rect.top < margin) dy = margin - rect.top;
+      else if (rect.bottom > vh - margin) dy = vh - margin - rect.bottom;
+    }
     setViewportInsetNudge((prev) =>
       prev.x === dx && prev.y === dy ? prev : { x: dx, y: dy }
     );
-  }, []);
+  }, [step.popupPosition]);
 
   useLayoutEffect(() => {
     // Pas de flushSync ici : il déclenchait « flushSync was called from inside a lifecycle method »
@@ -972,12 +1007,29 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
       maxWidth: "520px",
     };
     const toCss = (v: string | number): string => (typeof v === "number" ? `${v}px` : v);
-    if (dialogPosition !== null) {
+    const hasExplicitPopupPosition =
+      step.popupPosition != null &&
+      step.popupPosition !== "center" &&
+      typeof step.popupPosition === "object";
+    if (dialogPosition !== null && !hasExplicitPopupPosition) {
       return {
         ...base,
+        position: "fixed",
         left: dialogPosition.x,
         top: dialogPosition.y,
         transform: "none",
+      };
+    }
+    if (hasExplicitPopupPosition) {
+      const popupPos = step.popupPosition as { left: string | number; top: string | number };
+      const stageSpecificTransform =
+        step.stage === "1-16" ? "translateY(-50%)" : "none";
+      return {
+        ...base,
+        position: "fixed",
+        left: toCss(popupPos.left),
+        top: toCss(popupPos.top),
+        transform: stageSpecificTransform,
       };
     }
     if (
@@ -1063,49 +1115,39 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
         }
       }
     }
-    if (step.stage === "1-16" && panelLeftSpotlightForLayout != null) {
-      const board = panelLeftSpotlightForLayout;
-      if (board.width >= 2 && board.height >= 2) {
-        const boardRight = board.left + board.width;
-        const leftPx = boardRight + TUTORIAL_POPUP_1_16_GAP_AFTER_BOARD_RIGHT_PX;
-        const rangedRects = rangedWeaponsSpotlightRectsForLayout;
-        let topCenter: number;
-        if (rangedRects != null && rangedRects.length > 0) {
-          const union = unionTutorialSpotlightRects(rangedRects);
-          if (union != null && union.width >= 2 && union.height >= 2) {
-            topCenter =
-              union.top + union.height / 2 + TUTORIAL_POPUP_1_16_SHIFT_DOWN_PX;
-          } else {
-            topCenter = board.top + board.height / 2;
-          }
-        } else {
-          topCenter = board.top + board.height / 2;
-        }
-        if (Number.isFinite(leftPx) && Number.isFinite(topCenter)) {
-          return {
-            ...base,
-            position: "fixed",
-            left: leftPx,
-            top: topCenter,
-            transform: "translateY(-50%)",
-          };
-        }
+    if (
+      isTutorialStage2BoardAnchored(step.stage) &&
+      panelLeftSpotlightForLayout != null
+    ) {
+      const anchor = TUTORIAL_POPUP_2_BOARD_ANCHOR_BY_STAGE[step.stage];
+      const r = panelLeftSpotlightForLayout;
+      if (r.width >= 2 && r.height >= 2) {
+        const boardCenterX = r.left + r.width / 2 + anchor.centerXShiftPx;
+        const topPx = Math.max(
+          TUTORIAL_DIALOG_VIEWPORT_MARGIN_PX,
+          r.top + anchor.offsetTopPx
+        );
+        return {
+          ...base,
+          position: "fixed",
+          left: boardCenterX,
+          top: topPx,
+          transform: "translateX(-50%)",
+        };
       }
     }
-    if (
-      step.popupPosition &&
-      step.popupPosition !== "center" &&
-      typeof step.popupPosition === "object"
-    ) {
+    if (step.stage === "2-16") {
       return {
         ...base,
-        left: toCss(step.popupPosition.left),
-        top: toCss(step.popupPosition.top),
+        position: "fixed",
+        left: TUTORIAL_POPUP_2_16_VIEWPORT_LEFT,
+        top: TUTORIAL_POPUP_2_16_VIEWPORT_TOP,
         transform: "none",
       };
     }
     return {
       ...base,
+      position: "fixed",
       left: "50%",
       top: "50%",
       transform: "translate(-50%, -50%)",
@@ -1115,7 +1157,11 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
-      onClose();
+      if (step.stage === "2-16" && onDismissPopupOnly) {
+        onDismissPopupOnly();
+      } else {
+        onClose();
+      }
     }
   };
 
@@ -1615,15 +1661,36 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           }}
         >
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            {!step.advanceOnUnitClick && !step.advanceOnMoveClick && !step.advanceOnWeaponClick && (
-              <button type="button" onClick={onClose} className="tutorial-btn-primary">
-                Suivant
-              </button>
-            )}
-            {onSkipTutorial && (
-              <button type="button" onClick={onSkipTutorial} className="tutorial-btn-secondary">
-                Passer le tutoriel
-              </button>
+            {step.stage === "2-16" && onGoToPveMode && onDismissPopupOnly ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void onGoToPveMode()}
+                  className="tutorial-btn-primary"
+                >
+                  {lang === "fr" ? "Mode PvE" : "PvE mode"}
+                </button>
+                <button
+                  type="button"
+                  onClick={onDismissPopupOnly}
+                  className="tutorial-btn-secondary"
+                >
+                  {lang === "fr" ? "Fermer" : "Close"}
+                </button>
+              </>
+            ) : (
+              <>
+                {!step.advanceOnUnitClick && !step.advanceOnMoveClick && !step.advanceOnWeaponClick && (
+                  <button type="button" onClick={onClose} className="tutorial-btn-primary">
+                    Suivant
+                  </button>
+                )}
+                {onSkipTutorial && (
+                  <button type="button" onClick={onSkipTutorial} className="tutorial-btn-secondary">
+                    Passer le tutoriel
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

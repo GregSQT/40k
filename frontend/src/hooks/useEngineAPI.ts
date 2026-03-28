@@ -469,6 +469,96 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     []
   );
 
+  /** POST /api/game/start pour le scénario PvE standard (fin tutoriel → mode PvE). */
+  const startPveGame = useCallback(async () => {
+    const authSession = getAuthSession();
+    if (!authSession?.token) {
+      setError("Session utilisateur manquante. Merci de vous reconnecter.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const requestPayload = {
+        pve_mode: true,
+        mode_code: "pve",
+        scenario_file: "config/scenario_pve.json",
+      };
+      const response = await fetch(`${API_BASE}/game/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authSession.token}`,
+        },
+        body: JSON.stringify(requestPayload),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to start game: ${response.status}`);
+      }
+      const data = await response.json();
+      if (!data.success || !data.game_state) {
+        throw new Error(data.error || "Failed to start game");
+      }
+      const expectedPlayer2Type: "human" | "ai" = "ai";
+      const player2Type = data.game_state?.player_types?.["2"];
+      if (player2Type !== expectedPlayer2Type) {
+        throw new Error(
+          `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
+        );
+      }
+      setGameState(data.game_state);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /** POST /api/game/start pour une partie PvP locale (Continuer sans PvE). */
+  const startPvpGame = useCallback(async () => {
+    const authSession = getAuthSession();
+    if (!authSession?.token) {
+      setError("Session utilisateur manquante. Merci de vous reconnecter.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const requestPayload = {
+        pve_mode: false,
+        mode_code: "pvp",
+        scenario_file: "config/scenario_pvp.json",
+      };
+      const response = await fetch(`${API_BASE}/game/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authSession.token}`,
+        },
+        body: JSON.stringify(requestPayload),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to start game: ${response.status}`);
+      }
+      const data = await response.json();
+      if (!data.success || !data.game_state) {
+        throw new Error(data.error || "Failed to start game");
+      }
+      const expectedPlayer2Type: "human" | "ai" = "human";
+      const player2Type = data.game_state?.player_types?.["2"];
+      if (player2Type !== expectedPlayer2Type) {
+        throw new Error(
+          `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
+        );
+      }
+      setGameState(data.game_state);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Listen for weapon selection events to update gameState
   useEffect(() => {
     const weaponSelectedHandler = (e: Event) => {
@@ -2736,6 +2826,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       fightSubPhase: null,
       executeAITurn: async () => {},
       startGameWithScenario: async () => {},
+      startPveGame: async () => {},
+      startPvpGame: async () => {},
     };
   }
 
@@ -3840,6 +3932,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     },
     startGameWithScenario,
+    startPveGame,
+    startPvpGame,
   };
 
   return returnObject;

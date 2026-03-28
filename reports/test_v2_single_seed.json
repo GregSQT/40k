@@ -1,0 +1,44 @@
+{
+  "config": {
+    "runs_root": "/home/greg/40k/tensorboard_b001",
+    "seeds": [
+      "12345"
+    ],
+    "run_pattern": "{seed}",
+    "last_run_only": true,
+    "tag_robust": "0_critical/n_robust_current_score",
+    "tag_combined": "0_critical/a_bot_eval_combined",
+    "tag_worst_bot": "0_critical/b_worst_bot_score",
+    "tag_holdout_hard": "0_critical/c_holdout_hard_mean",
+    "min_evals": 5,
+    "archive_runs_root": false,
+    "archive_prefix": "tensorboard_b",
+    "archive_width": 3
+  },
+  "aggregate": {
+    "seeds_total": 1,
+    "seeds_valid": 1,
+    "valid_rate": 1.0,
+    "median_best_robust": 0.6240000128746033,
+    "q1_best_robust": 0.6240000128746033,
+    "q3_best_robust": 0.6240000128746033,
+    "iqr_best_robust": 0.0,
+    "min_best_robust": 0.6240000128746033,
+    "max_best_robust": 0.6240000128746033
+  },
+  "seeds": [
+    {
+      "seed": "12345",
+      "run_dir": "/home/greg/40k/tensorboard_b001/12345/run_20260328-121542",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6240000128746033,
+      "robust_last": 0.6043199896812439,
+      "combined_best": 0.6484000086784363,
+      "combined_last": 0.616599977016449,
+      "worst_bot_min": 0.328000009059906,
+      "holdout_hard_min": 0.3285714387893677
+    }
+  ]
+}

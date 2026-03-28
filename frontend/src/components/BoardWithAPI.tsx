@@ -322,6 +322,8 @@ function TutorialOverlayGate(): React.ReactNode {
       onLangChange={tutorial.setTutorialLang}
       onClose={tutorial.onClosePopup}
       onSkipTutorial={tutorial.onSkipTutorial}
+      onGoToPveMode={tutorial.onGoToPveMode}
+      onDismissPopupOnly={tutorial.onDismissPopupOnly}
       spotlights={spotlights}
       allowedClickSpotlights={allowedClickSpotlights}
       fogLeftPanelRects={fogLeft}
@@ -334,11 +336,6 @@ function TutorialOverlayGate(): React.ReactNode {
       tableNameMSpotlightRectsForLayout={
         stage === "1-15" && Array.isArray(tutorial.spotlightTablePositions)
           ? tutorial.spotlightTablePositions.filter((s): s is TutorialSpotlightRect => s.shape === "rect")
-          : null
-      }
-      rangedWeaponsSpotlightRectsForLayout={
-        stage === "1-16" && Array.isArray(tutorial.spotlightRangedWeaponsPositions)
-          ? tutorial.spotlightRangedWeaponsPositions.filter((s): s is TutorialSpotlightRect => s.shape === "rect")
           : null
       }
     />
@@ -989,7 +986,7 @@ function UnitStatusTablePlayer2WithTutorial(
       {...props}
       tutorialForceTableExpanded={wantsEnemyAttributesSpotlight || isStage2_11Or12}
       tutorialForceUnitIdsExpanded={wantsEnemyAttributesSpotlight ? [2] : undefined}
-      tutorialForceUnitIdsCollapsed={stage === "2-11" ? [2] : undefined}
+      tutorialForceUnitIdsCollapsed={stage === "2-11" ? [2, 3] : undefined}
       onUnitAttributesSectionRect={
         wantsEnemyAttributesSpotlight ? onUnitAttributesSectionRect : undefined
       }
@@ -1060,6 +1057,8 @@ export const BoardWithAPI: React.FC = () => {
   );
   const stopAiAfterPhaseChangeRef = useRef(false);
   const [pauseAIForTutorial, setPauseAIForTutorial] = useState(false);
+  /** Synchrone avec shouldPauseAI du TutorialProvider (évite course : phase charge avant pause state). */
+  const tutorialPauseAiSyncRef = useRef(false);
   const apiProps = useEngineAPI({
     getTutorialShootOptionsRef,
     stopAiAfterPhaseChangeRef,
@@ -1079,6 +1078,15 @@ export const BoardWithAPI: React.FC = () => {
       console.error("Failed to mark tutorial complete:", err);
     }
   }, [navigate]);
+  const handleGoToPveMode = useCallback(async () => {
+    try {
+      await apiProps.startPveGame();
+      await markTutorialComplete();
+      navigate("/game?mode=pve", { replace: true });
+    } catch (err) {
+      console.error("Failed to go to PvE mode:", err);
+    }
+  }, [apiProps.startPveGame, navigate]);
   const gameMode = location.pathname.includes("/replay")
     ? "training"
     : isTutorialMode
@@ -1576,13 +1584,16 @@ export const BoardWithAPI: React.FC = () => {
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
     // Tutoriel 2-11/2-12/2-13 : pause IA tant que le popup est visible (Hormagaunts immobiles jusqu'au clic Suivant)
+    const tutorialPauseFromSync =
+      isTutorialMode && tutorialPauseAiSyncRef.current;
     const shouldTriggerAI =
       isAiEnabled &&
       isAITurn &&
       !isAIProcessingRef.current &&
       gameNotOver &&
       hasEligibleAIUnits &&
-      !pauseAIForTutorial;
+      !pauseAIForTutorial &&
+      !tutorialPauseFromSync;
 
     // Only log when values actually change (prevents console flooding during animations)
     const currentAICheck = {
@@ -1697,7 +1708,15 @@ export const BoardWithAPI: React.FC = () => {
       //   turnKeyMatches: lastProcessedTurn === turnKey
       // });
     }
-  }, [isAiMode, apiProps, gameMode, lastProcessedTurn, pauseAIForTutorial]);
+  }, [
+    isAiMode,
+    apiProps,
+    gameMode,
+    lastProcessedTurn,
+    pauseAIForTutorial,
+    isTutorialMode,
+    tutorialPauseAiSyncRef,
+  ]);
 
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
@@ -2464,8 +2483,10 @@ export const BoardWithAPI: React.FC = () => {
       gameState={apiProps.gameState ?? null}
       startGameWithScenario={apiProps.startGameWithScenario}
       onPauseAIChange={setPauseAIForTutorial}
+      tutorialPauseAiSyncRef={tutorialPauseAiSyncRef}
       stopAiAfterPhaseChangeRef={stopAiAfterPhaseChangeRef}
       onTutorialComplete={handleTutorialComplete}
+      onGoToPveMode={handleGoToPveMode}
     >
       <TutorialShootOptionsSync getTutorialShootOptionsRef={getTutorialShootOptionsRef} />
       <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>

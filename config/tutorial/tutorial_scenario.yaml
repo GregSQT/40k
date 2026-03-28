@@ -66,6 +66,10 @@ rules:
   - stagePattern: 2-15
     behavior:
       phaseDisplayOverride: fight
+  - stagePattern: 2-16
+    behavior:
+      phaseDisplayOverride: fight
+      hidePopupIllustrationBlock: true
 steps:
   ##########################################################################################################################
   # 1-11 Rounds
@@ -82,7 +86,7 @@ steps:
     spotlightIds:
       - turnPhase.all
     next_step: Clic sur Suivant
-    title_fr: 1-11Rounds
+    title_fr: Rounds
     title_en: Rounds
     body_fr: |-
       Une partie de Warhammer 40'000 se déroule en 5 rounds
@@ -111,7 +115,7 @@ steps:
     spotlightIds:
       - turnPhase.all
     next_step: Clic sur Suivant
-    title_fr: 1-12Tours
+    title_fr: Tours
     title_en: Turns
     body_fr: |-
       Dans un round, chaque joueur joue son tour
@@ -140,7 +144,7 @@ steps:
     spotlightIds:
       - turnPhase.all
     next_step: Clic sur Suivant
-    title_fr: 1-13 Phases
+    title_fr: Phases
     title_en: Phases
     body_fr: |-
       Un tour est divisé en phases qui se déroulent séquentiellement
@@ -233,9 +237,12 @@ steps:
       phase: move
     title_icon: "@action_logo_move"
     advance_on_move_click: true
+    popup_position:
+      left: 30%
+      top: 30%
     layout: >-
       Suppression du fog du panneau gauche. Tableau d'unités (unitStatusTable) déplié pour afficher les stats de l'Intercessor et ses armes
-      à distance. Halo RANGED WEAPON(S). Popup : bord gauche au bord droit du plateau, centré verticalement sur le halo armes à distance.
+      à distance. Halo RANGED WEAPON(S).
     fog:
       global: true
       leftPanel: false
@@ -352,7 +359,7 @@ steps:
       - turnPhase.all
       - panel.left
     next_step: Clic sur l'icone du menu des armes à distance
-    title_fr: 1-22 Menu de Choix des Armes
+    title_fr: Menu de Choix des Armes
     title_en: Weapon choice menu
     body_fr: |-
       La ligne de vue réapparaît (en bleu), et le Termagant est une cible potentielle (sa barre de points de vie clignote).
@@ -403,7 +410,7 @@ steps:
       - panel.left
       - gamelog.last2Entries
     next_step: Clic sur le Bolt Rifle dans le menu des armes à distance
-    title_fr: 1-23 Choix de l'Arme
+    title_fr: Choix de l'Arme
     title_en: Weapon choice
     body_fr: |-
       Le menu affiche les armes à distance dont dispose l'Intercessor. 
@@ -461,7 +468,7 @@ steps:
       - panel.left
       - gamelog.last2Entries
     next_step: Le Termagant est mort.
-    title_fr: 1-24 Choix de la cible
+    title_fr: Choix de la cible
     title_en: Target choice
     body_fr: <cursor>Cliquez sur le termagant pour tirer dessus.
     body_en: <cursor>Click on the Termagant to shoot at it.
@@ -496,7 +503,7 @@ steps:
       - panel.left
       - gamelog.last2Entries
     next_step: Clic sur l'icône du Termagant
-    title_fr: 1-24-1 Tir - Jet de Toucher
+    title_fr: Tir - Jet de Toucher
     title_en: Shoot - Touch roll
     body_fr: "L'Intercessor fait d'abord un jet pour toucher la cible.\n\nLe Bolt Rifle a une caractéristique BS de 3+.\n\nLe joueur doit faire 3 ou plus sur son jet de D6 pour toucher la cible.\n\t- En cas de succès, on passe au jet de blessure.\n\t- En cas d'échec, l'attaque s'achève.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer."
     body_en: "The Intercessor first rolls a dice to hit the target.\n\nThe Bolt Rifle has a BS characteristic of 3+.\n\nThe player must roll 3 or more on its D6 roll to hit the target.\n\t- In case of success, we move to the wound roll.\n\t- In case of failure, the attack ends.\n\n--------------------\n<cursor>Click on Next to continue."
@@ -531,7 +538,7 @@ steps:
       - panel.left
       - gamelog.last2Entries
     next_step: Clic sur l'icône du Termagant
-    title_fr: 1-24-2 Tir - Jet de Blessure
+    title_fr: Tir - Jet de Blessure
     title_en: Shoot - Wound roll
     body_fr: "Ayant touché, l'Intercessor doit essayer de blesser sa cible.\n\nLa résolution des jets de blessure se font selon ce tableau:\nS(Force) de l'attaquant vs T(Endurance) de la cible \tRésultat requis\n\t- La force est le DOUBLE (ou plus)de l’Endurance:\t2+\n\t- La force est SUPÉRIEURE à l’Endurance:\t\t\t3+\n\t- La force est ÉGALE à l’Endurance:\t\t\t\t4+\n\t- La force est INFÉRIEURE à l’Endurance:\t\t\t5+\n\t- La force est la MOITIÉ (ou moins)de l’Endurance:\t6+\n\nLe Bolt Rifle a une caractéristique S (Strength) de 4.\nLe Termagant a une caractéristique T (Toughness) de 3.\n\nLe joueur doit donc faire 3 ou plus pour blesser le Termagant.\n\t- En cas de succès, on passe au jet de sauvegarde.\n\t- En cas d'échec, l'attaque s'achève.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer."
     body_en: "Having hit, the Intercessor must try to wound its target.\n\nThe resolution of the wound rolls is done according to this table:\nS(Strength) of the attacker vs T(Toughness) of the target \tRequired result\n\t- The strength is DOUBLE (or more) of the Toughness\t 2+\t\n\t- The strength is SUPERIOR to the Toughness\t 3+\n\t- The strength is EQUAL to the Toughness\t 4+\n\t- The strength is INFERIOR to the Toughness\t 5+\n\t- The strength is HALF (or less) of the Toughness\t 6+\nThe Bolt Rifle has a S (Strength) characteristic of 4.\nThe Termagant has a T (Toughness) characteristic of 3.\nThe player must therefore roll 3 or more to wound the Termagant.\n\t- In case of success, we move to the save roll.\n\t- In case of failure, the attack ends.\n\n--------------------\n<cursor>Click on Next to continue."
@@ -566,7 +573,7 @@ steps:
       - panel.left
       - gamelog.last2Entries
     next_step: Clic sur l'icône du Termagant
-    title_fr: 1-24-3 Tir - Jet de Sauvegarde
+    title_fr: Tir - Jet de Sauvegarde
     title_en: Shoot - Save roll
     body_fr: "Ayant été blessé, le Termagant doit faire un jet de Sauvegarde (SV) pour éviter de perdre des points de vie.\n\nLa caractéristique SV du termagant est 5+.\n\La caractéristique AP (Pénétration d'Armure) du Bolt Rifle est -1.\n\nPour réussir sa sauvegarde, le Termagant doit donc faire 5 (SV) ou plus sur sont jet, mais il aura -1 (AP) au résultat du dé.\n\nIl devra donc faire 6+ pour réussir son jet d'armure\n\t- En cas de succès, on passe à la perte de points de vie.\n\t- En cas d'échec, l'attaque s'achève.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer."
     body_en: "Having been wounded, the Termagant must roll a Save (SV) roll to avoid losing hit points.\n\tThe Termagant's SV characteristic is 5+.\n\tThe AP (Armor Penetration) characteristic of the Bolt Rifle is -1.\nTo succeed in its save, the Termagant must roll 5 (SV) or more on its roll, but it will have -1 (AP) on the dice result.\nHe will therefore need to roll 6 or more to succeed in his armor roll.\n\t- In case of success, we move to the hit point loss.\n\t- In case of failure, the attack ends.\n\n--------------------\n<cursor>Click on Next to continue."
@@ -601,7 +608,7 @@ steps:
       - panel.left
       - gamelog.last2Entries
     next_step: Clic sur l'icône du Termagant
-    title_fr: 1-24-4 Tir - Perte de Points de Vie
+    title_fr: Tir - Perte de Points de Vie
     title_en: Shoot - Hit point loss
     body_fr: "Ayant raté son jet de Sauvegarde, le Termagant va perdre des Points de vie.\n\nLa caractéristique HP (Points de Vie) du Termagant est 1.\nLa caractéristique DMG (Dégâts) du Bolt Rifle est 1.\n\nLe Termagant va donc perdre 1 HP, ce qui l'amène à zéro : il est mort.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer."
     body_en: "Having failed its save roll, the Termagant will lose hit points.\n\nThe Termagant's HP characteristic is 1.\nThe DMG (Damage) characteristic of the Bolt Rifle is 1.\n\nThe Termagant will therefore lose 1 HP, which brings it to zero : it is dead.\n\n--------------------\n<cursor>Click on Next to continue."
@@ -633,7 +640,7 @@ steps:
       - panel.left
       - gamelog.last2Entries
     next_step: Le termagant est mort.
-    title_fr: 1-25 Mort du termagant
+    title_fr: Mort du termagant
     title_en: Termagant death
     body_fr: |-
       <icone mort> Le Termagant est mort.
@@ -664,8 +671,8 @@ steps:
       phase: move
     title_icon: "@action_logo_move"
     layout: >-
-      Fog sur le panneau de droite et de la ligne 0 à 8 du board. Unitstatustable expanded pour afficher les units de P2. Halo sur le bouton
-      turn 1 et P2 et Move de turnphase tracker et les icones des Termagants de P2.
+      Fog sur le panneau de droite et de la ligne 0 à 8 du board. Unitstatustable expanded pour afficher les unités de P2. Halo sur le bouton
+      turn 1 et P2 et Move de turnphase tracker et les icônes des deux Hormagaunts (gauche et droite) sur le board.
     fog:
       global: true
       leftPanel: false
@@ -677,15 +684,15 @@ steps:
       - turnPhase.all
       - panel.left
     next_step: Clic sur Suivant
-    title_fr: 2-11 Arrivée des Hormagaunts
+    title_fr: Arrivée des Hormagaunts
     title_en: Hormagaunts arrival
     body_fr: |-
-      Au début de son tour, le joueur 2 fait arriver des Hormagaunts sur le plateau.
+      Au début de son tour, le joueur 2 fait arriver deux Hormagaunts sur le plateau (à gauche et à droite).
 
       --------------------
       <cursor>Cliquez sur Suivant pour continuer.
     body_en: |-
-      At the beginning of their turn, Player 2 deploys Hormagaunts on the board.
+      At the beginning of their turn, Player 2 deploys two Hormagaunts on the board (left and right).
 
       --------------------
       <cursor>Click on Next to continue.
@@ -697,8 +704,8 @@ steps:
     hide_advance_icon: false
     advance_on_weapon_click: false
     popup_position:
-      left: 58%
-      top: 25%
+      left: 30%
+      top: 10%
     trigger:
       type: phase_enter
       phase: shoot
@@ -715,7 +722,7 @@ steps:
       - turnPhase.all
       - panel.left
     next_step: Clic sur Suivant
-    title_fr: 2-12 Phase de mouvement des Hormagaunts
+    title_fr: Phase de mouvement des Hormagaunts
     title_en: Movement phase of Hormagaunts
     body_fr: "Les Hormagaunts ont exécuté leur phase de mouvement.\n\n--------------------\n<cursor>Cliquez sur Suivant pour continuer."
     body_en: "The Hormagaunts have executed their movement phase.\n\n--------------------\n<cursor>Click on Next to continue."
@@ -726,9 +733,6 @@ steps:
   - stage: 2-13
     hide_advance_icon: false
     advance_on_weapon_click: false
-    popup_position:
-      left: 58%
-      top: 25%
     trigger:
       type: phase_enter
       phase: charge
@@ -745,7 +749,7 @@ steps:
       - turnPhase.all
       - panel.left
     next_step: Clic sur Suivant
-    title_fr: 2-13 Phase de Tir des Hormagaunts
+    title_fr: Phase de Tir des Hormagaunts
     title_en: Shoot phase of Hormagaunts
     body_fr: |-
       Pendant la phase de tir, une unité peut choisir de:
@@ -766,9 +770,6 @@ steps:
   - stage: 2-14
     hide_advance_icon: false
     advance_on_weapon_click: false
-    popup_position:
-      left: 58%
-      top: 25%
     trigger:
       type: fight_subphase_enter
       fight_subphase: charging
@@ -783,7 +784,7 @@ steps:
       - turnPhase.all
       - panel.left
     next_step: Clic sur Suivant
-    title_fr: 2-14 Phase de charge des Hormagaunts
+    title_fr: Phase de charge des Hormagaunts
     title_en: Charge phase of Hormagaunts
     body_fr: |-
       Pendant la phase de charge, une unité peut choisir de charger une cible ennemie si:
@@ -822,7 +823,7 @@ steps:
       --------------------
       <cursor>Click on Next to continue.
 
-##########################################################################################################################
+  ##########################################################################################################################
   # 2-15 Phase de combat de l'Intercessor (joueur non actif, alternance)
   ##########################################################################################################################
   - stage: 2-15
@@ -830,9 +831,6 @@ steps:
     advance_on_unit_click: true
     popup_image: "@intercessor"
     popup_first_line_with_icon: true
-    popup_position:
-      left: 58%
-      top: 25%
     trigger:
       type: fight_subphase_enter
       fight_subphase: alternating_non_active
@@ -847,8 +845,8 @@ steps:
       - turnPhase.all
       - panel.left
     next_step: Clic sur l'Intercessor
-    title_fr: 2-15 Fin du tutoriel
-    title_en: End of tutorial
+    title_fr: Phase de combat de l'Intercessor
+    title_en: Fight phase of Intercessor
     body_fr: |-
       - Les attaques des Hormagaunts ayant chargé sont terminées, c'est au tour du joueur non actif de faire attaquer une de ses unités.
       - Puis, les joueurs alternent les activations de leurs unités jusqu'à ce qu'elles aient toutes attaqué.
@@ -862,3 +860,36 @@ steps:
       - It's your turn, get your Intercessor out of this situation!
       --------------------
       <cursor> Click on the Intercessor to activate it.
+
+  ##########################################################################################################################
+  # 2-16 Fin du tutoriel — message PvE (après sélection de l'Intercessor)
+  ##########################################################################################################################
+  - stage: 2-16
+    hide_advance_icon: false
+    advance_on_unit_click: false
+    trigger:
+      type: fight_subphase_enter
+      fight_subphase: alternating_non_active
+    title_icon: "@action_logo_move"
+    layout: Fermer (style Passer) + Mode PvE (style Suivant).
+    fog:
+      global: false
+      leftPanel: false
+      rightPanel: false
+      boardTopBand: false
+    spotlightIds:
+      - turnPhase.all
+      - panel.left
+    next_step: Mode PvE ou Fermer
+    title_fr: Fin du tutoriel
+    title_en: End of tutorial
+    body_fr: |-
+      Vous avez terminé le tutoriel !
+
+      --------------------
+      <cursor>Fermer Cliquez sur "Mode PvE" pour lancer une partie contre l’IA.
+    body_en: |-
+      You have completed the tutorial!
+
+      --------------------
+      <cursor>Close dismisses this message. Click on Mode PvE to start a game vs the AI.

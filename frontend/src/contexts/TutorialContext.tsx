@@ -9,7 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { getTutorialScenarioRuntimeData } from "../config/tutorialScenarioRuntime";
+import {
+  getTutorialScenarioRuntimeData,
+  tutorialScenarioYamlRevision,
+} from "../config/tutorialScenarioRuntime";
 import { getTutorialUiBehavior } from "../config/tutorialUiRules";
 import type { APIGameState } from "../hooks/useEngineAPI";
 
@@ -336,6 +339,10 @@ interface TutorialContextValue {
   spotlightLayoutTick: number;
   /** Position (col, row) où l'ennemi est mort (étape 1-25 : afficher icône ghost Termagant sur le board). */
   lastEnemyDeathPosition: { col: number; row: number } | null;
+  /** Étape 2-16 : lance le mode PvE (API + navigation). */
+  onGoToPveMode?: () => void | Promise<void>;
+  /** Étape 2-16 : ferme uniquement le popup sans terminer le tutoriel ni changer de mode. */
+  onDismissPopupOnly: () => void;
 }
 
 const TutorialContext = createContext<TutorialContextValue | null>(null);
@@ -346,6 +353,12 @@ export function useTutorial(): TutorialContextValue | null {
 
 interface TutorialProviderProps {
   isTutorialMode: boolean;
+  /**
+   * Mis à jour à chaque rendu avec shouldPauseAI (même logique que onPauseAIChange).
+   * Permet au parent (BoardWithAPI) de bloquer l’orchestration IA sans décalage d’une frame
+   * (sinon la phase peut passer à charge avant que pauseAIForTutorial soit à jour).
+   */
+  tutorialPauseAiSyncRef?: React.MutableRefObject<boolean>;
   gameState: {
     phase?: string;
     fight_subphase?: string | null;
@@ -365,6 +378,8 @@ interface TutorialProviderProps {
   stopAiAfterPhaseChangeRef?: React.MutableRefObject<boolean>;
   /** Callback appelé quand le tutoriel est terminé (fin complète ou clic "Passer le tutoriel"). */
   onTutorialComplete?: () => void | Promise<void>;
+  /** Étape 2-16 : POST /game/start PvE puis navigation (fourni par BoardWithAPI). */
+  onGoToPveMode?: () => void | Promise<void>;
   children: React.ReactNode;
 }
 
@@ -376,8 +391,10 @@ export function TutorialProvider({
   startGameWithScenario,
   onStepChange,
   onPauseAIChange,
+  tutorialPauseAiSyncRef,
   stopAiAfterPhaseChangeRef,
   onTutorialComplete,
+  onGoToPveMode,
   children,
 }: TutorialProviderProps) {
   const [steps, setSteps] = useState<TutorialStepDef[]>([]);
@@ -572,6 +589,9 @@ export function TutorialProvider({
         (phase === "fight" &&
           fightSubphase === "charging" &&
           !releasedSteps.has("2-14"))));
+  if (tutorialPauseAiSyncRef) {
+    tutorialPauseAiSyncRef.current = shouldPauseAI;
+  }
   useLayoutEffect(() => {
     onPauseAIChange?.(shouldPauseAI);
   }, [shouldPauseAI, onPauseAIChange, phase, fightSubphase]);
@@ -622,7 +642,7 @@ export function TutorialProvider({
     } catch (err) {
       console.error("Tutorial steps load failed from tutorial_scenario.md:", err);
     }
-  }, [isTutorialMode]);
+  }, [isTutorialMode, tutorialScenarioYamlRevision]);
 
   const showStepForTrigger = useCallback(
     (triggerType: string, phaseOrSubphase?: string) => {
@@ -838,10 +858,14 @@ export function TutorialProvider({
       onDeployShownForEtapeRef.current.delete(2);
       startGameWithScenario(TUTORIAL_SCENARIOS[1]);
     } else if (currentEtape === 2) {
-      setCurrentEtape(3);
-      setCurrentStepIndex(0);
-      onDeployShownForEtapeRef.current.delete(3);
-      startGameWithScenario(TUTORIAL_SCENARIOS[2]);
+      // Tous les Hormagaunts morts : même flux que le bouton « Mode PvE » (2-16) — init PvE + navigation.
+      if (onGoToPveMode) {
+        void onGoToPveMode();
+      } else {
+        throw new Error(
+          "TutorialProvider: onGoToPveMode is required when all P2 units are eliminated in etape 2"
+        );
+      }
     }
   }, [
     isTutorialMode,
@@ -851,13 +875,18 @@ export function TutorialProvider({
     hasLivingEnemyUnits,
     gameState?.phase,
     gameState?.units,
-      startGameWithScenario,
+    startGameWithScenario,
+    onGoToPveMode,
     stepsForEtape,
     steps.length,
   ]);
 
   const prepareSkipNextPhaseTrigger = useCallback(() => {
     skipNextPhaseTriggerRef.current = true;
+  }, []);
+
+  const onDismissPopupOnly = useCallback(() => {
+    setPopupVisible(false);
   }, []);
 
   const onClosePopup = useCallback(() => {
@@ -974,6 +1003,8 @@ export function TutorialProvider({
             setSpotlightBoardUnitPositions,
             spotlightLayoutTick,
             lastEnemyDeathPosition,
+            onGoToPveMode,
+            onDismissPopupOnly,
           }
         : {
             isTutorialMode: false,
@@ -1018,6 +1049,8 @@ export function TutorialProvider({
             setSpotlightBoardUnitPositions: () => {},
             spotlightLayoutTick: 0,
             lastEnemyDeathPosition: null,
+            onGoToPveMode: undefined,
+            onDismissPopupOnly: () => {},
           },
     [
       isTutorialMode,
@@ -1027,6 +1060,8 @@ export function TutorialProvider({
       skipped,
       onClosePopup,
       onSkipTutorial,
+      onGoToPveMode,
+      onDismissPopupOnly,
       prepareSkipNextPhaseTrigger,
       currentEtape,
       tutorialLang,

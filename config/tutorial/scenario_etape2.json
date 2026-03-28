@@ -7,9 +7,8 @@
   "deployment_type_P2": "active",
   "units": [
     { "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 19 },
-    { "id": 2, "unit_type": "Hormagaunt", "player": 2, "col": 12, "row": 2 },
-    { "id": 3, "unit_type": "Hormagaunt", "player": 2, "col": 2, "row": 9 },
-    { "id": 4, "unit_type": "Hormagaunt", "player": 2, "col": 22, "row": 9 }
+    { "id": 2, "unit_type": "Hormagaunt", "player": 2, "col": 2, "row": 9 },
+    { "id": 3, "unit_type": "Hormagaunt", "player": 2, "col": 22, "row": 9 }
   ],
     "objectives": [
       {"id": 1, "name": "South", "hexes": [[12, 19], [11, 18], [12, 18], [13, 18], [13, 19], [12, 20], [11, 19]]}

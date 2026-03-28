@@ -26,9 +26,9 @@ Offrir aux nouveaux joueurs un **parcours guidé** : une partie pré-configurée
 
 ### 2.2 Étape 2 — Charge et mêlée
 
-- **Setup** : Après l'étape 1 (Termagant mort), on passe à une scène « Charge + combat ». Trois Hormagaunts apparaissent en **(0, 10), (12, 0), (24, 10)**. Ils chargent le Space Marine.
-- **Narrative** : Le Marine perd 1 PV et tue 1 Hormagaunt. À son tour, il ne fait pas de Fall back et tue les 2 restants.
-- **Implémentation** : Soit scénario préchargé avec 3 Hormagaunts déjà au contact du Marine (positions adjacentes au Marine, ex. Marine (12, 10), Hormagaunts (11,10), (12,9), (13,10)) et popup « Ils viennent de charger » ; soit mode scripté (moteur exécute la charge et les dégâts imposés). Voir § 2.4.
+- **Setup** : Après l'étape 1 (Termagant mort), on passe à une scène « Charge + combat ». Deux Hormagaunts apparaissent **à gauche et à droite** (ex. **(2, 9)** et **(22, 9)** sur le plateau 25×21). Ils chargent le Space Marine.
+- **Narrative** : Le Marine perd 1 PV et tue 1 Hormagaunt. À son tour, il ne fait pas de Fall back et tue l’Hormagaunt restant.
+- **Implémentation** : Soit scénario préchargé avec 2 Hormagaunts déjà au contact du Marine (positions adjacentes, ex. Marine (12, 19), Hormagaunts **(2,9)** et **(22,9)**) et popup « Ils viennent de charger » ; soit mode scripté (moteur exécute la charge et les dégâts imposés). Voir § 2.4.
 
 ### 2.3 Étape 3 — Objectifs (recommandé) ou règles spéciales
 
@@ -40,12 +40,12 @@ Offrir aux nouveaux joueurs un **parcours guidé** : une partie pré-configurée
 
 ### 2.4 Implémentation réaliste : scripté vs simplifié
 
-La narrative ci‑dessus suppose des **résultats déterminés** (Termagant rate ; Marine perd 1 PV, tue 1 puis 2 Hormagaunts). Le moteur actuel est « joueur vs joueur / bot » avec dés ; il n'a pas de mode « scénario scripté » avec actions/dés imposés.
+La narrative ci‑dessus suppose des **résultats déterminés** (Termagant rate ; Marine perd 1 PV, tue un Hormagaunt puis l’autre). Le moteur actuel est « joueur vs joueur / bot » avec dés ; il n'a pas de mode « scénario scripté » avec actions/dés imposés.
 
 - **Option A — Script complet** : Mode tutoriel dans le moteur qui exécute une liste d'actions (ex. « Termagant move + shoot, résultat miss ») et/ou dés forcés. Très lourd à ajouter.
 - **Option B — Simplifié (recommandé pour le MVP)** : Garder la même mise en scène (positions, popups) sans script ennemi.
   - Étape 1 : Popup « Le Termagant a tiré et raté » ; pas de tour adverse (ou skip du tour joueur 2 en mode tutoriel). Le joueur fait mouvement + tir et tue le Termagant.
-  - Étape 2 : Scénario ou transition où le Marine est déjà au contact de 3 Hormagaunts (positions fixes). Popup « Les Hormagaunts viennent de charger. À vous. » Le joueur résout la phase combat (les dés restent aléatoires ; on accepte que le résultat puisse varier).
+  - Étape 2 : Scénario ou transition où le Marine est déjà au contact de 2 Hormagaunts (positions fixes, gauche et droite). Popup « Les Hormagaunts viennent de charger. À vous. » Le joueur résout la phase combat (les dés restent aléatoires ; on accepte que le résultat puisse varier).
   - Étape 3 : Même moteur, objectif « contrôler la zone centrale » ; le joueur déplace son Intercessor sur l'objectif et termine le tour.
 
 Si plus tard on ajoute un vrai mode « script » (actions/dés imposés), on pourra coller à la narrative exacte (1 PV perdu, 1 puis 2 kills).
@@ -53,7 +53,7 @@ Si plus tard on ajoute un vrai mode « script » (actions/dés imposés), on pou
 ### 2.5 Fichiers scénario (tous dans `config/tutorial/`)
 
 - **Étape 1** : `config/tutorial/scenario_etape1.json` — units : Intercessor (12, 20), Termagant (12, 0) ; **murs** : `config/board/25x21/walls/tutorial_walls-01.json` ; `objectives` optionnel.
-- **Étape 2** : `config/tutorial/scenario_etape2.json` — units : Intercessor à la position choisie (ex. 12, 10), 3 Hormagaunts aux positions (0,10), (12,0), (24,10) ou **déjà au contact** (ex. (11,10), (12,9), (13,10)) ; **murs** : même fichier `config/board/25x21/walls/tutorial_walls-01.json`.
+- **Étape 2** : `config/tutorial/scenario_etape2.json` — units : Intercessor (ex. 12, 19), **2 Hormagaunts** côté gauche et droit (ex. **(2, 9)** et **(22, 9)**) ; **murs** : même fichier `config/board/25x21/walls/tutorial_walls-01.json`.
 - **Étape 3** : `config/tutorial/scenario_etape3.json` (ou réutiliser etape1 + objectifs) — objectif Centre comme dans `scenario_pvp_test` ; un Intercessor à déplacer vers la zone ; **murs** : `config/board/25x21/walls/walls-01.json`.
 
 ### 2.6 Extensions possibles (hors MVP)
@@ -91,7 +91,7 @@ Tous les scénarios et le fichier d'étapes du tutoriel sont dans **`config/tuto
 | Fichier | Action |
 |---------|--------|
 | `config/tutorial/scenario_etape1.json` | **Créer** — Intercessor (12,20), Termagant (12,0) ; murs = `config/board/25x21/walls/tutorial_walls-01.json`. |
-| `config/tutorial/scenario_etape2.json` | **Créer** — Intercessor + 3 Hormagaunts (positions au contact ou (0,10),(12,0),(24,10)) ; murs = `config/board/25x21/walls/tutorial_walls-01.json`. |
+| `config/tutorial/scenario_etape2.json` | **Créer** — Intercessor + 2 Hormagaunts (gauche/droite, ex. (2,9) et (22,9)) ; murs = `config/board/25x21/walls/tutorial_walls-01.json`. |
 | `config/tutorial/scenario_etape3.json` (ou réutiliser etape1 + objectifs) | **Créer** — Objectif central, 1 Intercessor ; murs = `config/board/25x21/walls/walls-01.json`. |
 | `config/tutorial/tutorial_scenario.md` | **Créer** — Source unique runtime: bloc `json tutorial-steps` (étapes) + bloc `json tutorial-ui-rules` (UI/fog/halos). |
 
@@ -140,7 +140,7 @@ Réutiliser le format des scénarios existants (voir `config/scenario_pvp.json` 
 
 (Alternative : `wall_hexes` inline, liste plate de `[col, row]` dérivée de `tutorial_walls-01.json`.)
 
-**Étape 2 — Exemple simplifié (Hormagaunts déjà au contact)** : Intercessor (12, 10), 3 Hormagaunts (11,10), (12,9), (13,10). Même source de murs : **`config/board/25x21/walls/tutorial_walls-01.json`**.
+**Étape 2 — Exemple simplifié (Hormagaunts gauche et droite)** : Intercessor (12, 19), 2 Hormagaunts (2,9) et (22,9). Même source de murs : **`config/board/25x21/walls/tutorial_walls-01.json`**.
 
 **Étape 3** : Réutiliser objectif Centre de `scenario_pvp_test` (hex [[12,10],[11,9],[12,9],[13,9],[13,10],[12,11],[11,10]]), 1 Intercessor à placer. **Murs** : `config/board/25x21/walls/walls-01.json`.
 
@@ -216,7 +216,7 @@ Les phases dans `gameState.phase` doivent correspondre à celles du moteur (voir
 1. **Répertoire** : créer `config/tutorial/`.
 2. **Murs** : pour etape1 et etape2, utiliser `config/board/25x21/walls/tutorial_walls-01.json` (murs extérieurs).
 3. **Scénario Étape 1** : créer `config/tutorial/scenario_etape1.json` (Intercessor 12,20 ; Termagant 12,0 ; murs = tutorial_walls-01.json).
-4. **Scénario Étape 2** : créer `config/tutorial/scenario_etape2.json` (Intercessor + 3 Hormagaunts au contact ou (0,10),(12,0),(24,10) ; murs = tutorial_walls-01.json).
+4. **Scénario Étape 2** : créer `config/tutorial/scenario_etape2.json` (Intercessor + 2 Hormagaunts gauche/droite, ex. (2,9) et (22,9) ; murs = tutorial_walls-01.json).
 5. **Scénario Étape 3** : créer `config/tutorial/scenario_etape3.json` (objectif central + 1 Intercessor ; murs = `config/board/25x21/walls/walls-01.json`).
 6. **Étapes/UI** : créer `config/tutorial/tutorial_scenario.md` avec blocs `tutorial-steps` et `tutorial-ui-rules` pour etape 1, 2, 3 (triggers, textes, fog/halos).
 7. **Popup** : implémenter `TutorialOverlay.tsx` (modal titre/corps/Compris/Passer).
@@ -243,7 +243,7 @@ Les phases dans `gameState.phase` doivent correspondre à celles du moteur (voir
 | TutorialContext / useTutorialEngine | Moteur d'étapes : état (étape courante, steps), triggers, transitions etape1→2→3 ; charge `config/tutorial/tutorial_scenario.md` (bloc `tutorial-steps`). |
 | Murs | **Étapes 1 et 2** : `config/board/25x21/walls/tutorial_walls-01.json` (murs extérieurs). **Étape 3** : `config/board/25x21/walls/walls-01.json`. |
 | Étape 1 | Intercessor (12,20), Termagant (12,0). Narrative : Termagant rate, joueur avance et tue. Version simplifiée : skip tour ennemi + popup. |
-| Étape 2 | 3 Hormagaunts (0,10), (12,0), (24,10) ou au contact. Narrative : ils chargent, Marine -1 PV, tue 1 puis 2. Version simplifiée : Hormagaunts déjà au contact, popup « Ils viennent de charger ». |
+| Étape 2 | 2 Hormagaunts (gauche/droite, ex. (2,9) et (22,9)). Narrative : ils chargent, Marine -1 PV, tue un puis l’autre. Version simplifiée : Hormagaunts déjà au contact, popup « Ils viennent de charger ». |
 | Étape 3 | Objectifs (tenir la zone centrale) ; règles spéciales en option (Étape 4 ou fiches). |
 | Implémentation | Option B (simplifié) recommandée pour le MVP ; option A (script complet) si moteur évolue. |
 

@@ -210,31 +210,34 @@ class PvEController:
         else:
             predicted_action = micro_prediction
 
-        # Tutoriel étape 2 : garantir au moins 1 ADVANCE en shoot et 1 CHARGE en charge pour P2.
+        # Tutoriel étape 2 : pour chaque unité P2, même script qu'avant (advance en shoot,
+        # charge en charge, mouvement agressif en move) tant que cette unité n'a pas encore
+        # été comptée dans le tracking. (Anciennement : un seul advance/charge global pour
+        # tout P2 → la 2e Hormagaunt ne recevait plus le forçage.)
         scenario_file = getattr(engine, "_current_scenario_file", "") or ""
         if (
             "tutorial" in scenario_file
             and require_key(game_state, "current_player") == 2
         ):
             current_phase = require_key(game_state, "phase")
-            units = require_key(game_state, "units")
-            if current_phase == "shoot":
+            selected_str = str(selected_unit_id)
+            if current_phase == "move":
+                units_moved = require_key(game_state, "units_moved")
+                if selected_str not in units_moved and len(action_mask) > 0 and bool(
+                    action_mask[0]
+                ):
+                    predicted_action = 0
+            elif current_phase == "shoot":
                 units_advanced = require_key(game_state, "units_advanced")
-                p2_advanced = any(
-                    str(require_key(u, "id")) in units_advanced
-                    for u in units
-                    if int(require_key(u, "player")) == 2
-                )
-                if not p2_advanced and len(action_mask) > 12 and bool(action_mask[12]):
+                if selected_str not in units_advanced and len(action_mask) > 12 and bool(
+                    action_mask[12]
+                ):
                     predicted_action = 12
             elif current_phase == "charge":
                 units_charged = require_key(game_state, "units_charged")
-                p2_charged = any(
-                    str(require_key(u, "id")) in units_charged
-                    for u in units
-                    if int(require_key(u, "player")) == 2
-                )
-                if not p2_charged and len(action_mask) > 9 and bool(action_mask[9]):
+                if selected_str not in units_charged and len(action_mask) > 9 and bool(
+                    action_mask[9]
+                ):
                     predicted_action = 9
 
         # Apply action mask like in training - force valid action if predicted action is invalid
