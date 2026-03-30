@@ -759,6 +759,15 @@ class MetricsCollectionCallback(BaseCallback):
                                 param_count += 1
                         if param_count > 0:
                             model_stats['train/gradient_norm'] = total_norm ** 0.5
+                    # Explicitly expose current entropy coefficient in captured stats.
+                    # This guarantees TensorBoard logging even when SB3 logger keys vary.
+                    if hasattr(_model, "ent_coef"):
+                        ent_coef_value = _model.ent_coef
+                        if isinstance(ent_coef_value, torch.Tensor):
+                            ent_coef_value = float(ent_coef_value.detach().item())
+                        else:
+                            ent_coef_value = float(ent_coef_value)
+                        model_stats['train/ent_coef'] = ent_coef_value
                     _tracker.log_training_metrics(model_stats)
                     _tracker.step_count = _model.num_timesteps
                 return _original_dump(step)
@@ -1348,6 +1357,8 @@ class BotEvaluationCallback(BaseCallback):
                  save_best_robust_seed: bool = False,
                  robust_seed_value: Optional[int] = None,
                  robust_drawdown_penalty: float = 0.5,
+                 robust_penalty_bot: float = 0.0,
+                 robust_penalty_hard: float = 0.0,
                  model_gating_enabled: bool = False,
                  model_gating_min_combined: Optional[float] = None,
                  model_gating_min_worst_bot: Optional[float] = None,
@@ -1449,6 +1460,16 @@ class BotEvaluationCallback(BaseCallback):
             self.robust_seed_value = None
         self.robust_window = robust_window
         self.robust_drawdown_penalty = robust_drawdown_penalty
+        self.robust_penalty_bot = robust_penalty_bot
+        self.robust_penalty_hard = robust_penalty_hard
+        if self.robust_penalty_bot < 0.0:
+            raise ValueError(
+                f"robust_penalty_bot must be >= 0.0 (got {self.robust_penalty_bot})"
+            )
+        if self.robust_penalty_hard < 0.0:
+            raise ValueError(
+                f"robust_penalty_hard must be >= 0.0 (got {self.robust_penalty_hard})"
+            )
         if not isinstance(model_gating_enabled, bool):
             raise ValueError(
                 f"model_gating_enabled must be boolean (got {type(model_gating_enabled).__name__})"
@@ -1956,12 +1977,44 @@ class BotEvaluationCallback(BaseCallback):
             current_peak = max(self.combined_history)
             current_drawdown = current_peak - combined_win_rate
             moving_average = float(np.mean(self.combined_history))
-            robust_score = moving_average - (self.robust_drawdown_penalty * current_drawdown)
+            robust_base = moving_average - (self.robust_drawdown_penalty * current_drawdown)
+
+            if self.model_gating_min_worst_bot is None:
+                raise ValueError(
+                    "robust scoring requires model_gating_min_worst_bot to be set "
+                    "(used as tau_b threshold for penalty_bot)"
+                )
+            if self.model_gating_min_worst_scenario_combined is None:
+                raise ValueError(
+                    "robust scoring requires model_gating_min_worst_scenario_combined to be set "
+                    "(used as tau_h threshold for penalty_hard)"
+                )
+            tau_b = float(self.model_gating_min_worst_bot)
+            tau_h = float(self.model_gating_min_worst_scenario_combined)
+
+            worst_bot_score = min(
+                float(require_key(results, "random")),
+                float(require_key(results, "greedy")),
+                float(require_key(results, "defensive")),
+            )
+            penalty_bot = self.robust_penalty_bot * max(0.0, tau_b - worst_bot_score) ** 2
+
+            penalty_hard = 0.0
+            if "holdout_hard_mean" in results:
+                holdout_hard_mean = float(results["holdout_hard_mean"])
+                penalty_hard = self.robust_penalty_hard * max(0.0, tau_h - holdout_hard_mean) ** 2
+            robust_score = robust_base - penalty_bot - penalty_hard
+
             if self.metrics_tracker is not None:
+                step = int(eval_marker)
                 self.metrics_tracker.writer.add_scalar(
-                    "0_critical/n_robust_current_score",
-                    robust_score,
-                    int(eval_marker),
+                    "0_critical/n_robust_current_score", robust_score, step,
+                )
+                self.metrics_tracker.writer.add_scalar(
+                    "0_critical/n2_robust_penalty_bot", penalty_bot, step,
+                )
+                self.metrics_tracker.writer.add_scalar(
+                    "0_critical/n3_robust_penalty_hard", penalty_hard, step,
                 )
 
             if gate_pass and robust_score > self.best_robust_score:

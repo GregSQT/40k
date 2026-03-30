@@ -1,0 +1,52 @@
+// frontend/src/roster/spaceMarine/units/LieutenantPowerWeaponBolter.ts
+
+import { getWeapons } from "../armory";
+import { LeaderEliteMeleeElite } from "../classes/LeaderEliteMeleeElite";
+
+export class LieutenantPowerWeaponBolter extends LeaderEliteMeleeElite {
+  static NAME = "LieutenantPowerWeaponBolter";
+  static DISPLAY_NAME = "Lieutenant (Master-crafted Power Weapon, Master-crafted Bolter)";
+
+  // BASE
+  static MOVE = 6; // Move distance
+  static T = 4; // Toughness score
+  static ARMOR_SAVE = 3; // Armor save score
+  static INVUL_SAVE = 7; // Armor invulnerable save score
+  static HP_MAX = 4; // Max hit points
+  static LD = 6; // Leadership score
+  static OC = 1; // Operative Control
+  static VALUE = 65; // Unit value (W40K points cost)
+
+  // WEAPONS
+  static RNG_WEAPON_CODES = ["master_crafted_bolter_lieutenant", "heavy_bolt_pistol_lieutenant"];
+  static RNG_WEAPONS = getWeapons(LieutenantPowerWeaponBolter.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["master_crafted_power_weapon_lieutenant"];
+  static CC_WEAPONS = getWeapons(LieutenantPowerWeaponBolter.CC_WEAPON_CODES);
+
+  // UNIT RULES
+  static UNIT_RULES = [
+    {
+      ruleId: "target_priority",
+      displayName: "Target Priority",
+      grants_rule_ids: ["shoot_after_flee", "charge_after_flee"],
+      usage: "and",
+    },
+  ];
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = {
+    target_priority: 2,
+    shoot_after_flee: 2,
+    charge_after_flee: 2,
+  };
+
+  // UNIT KEYWORDS
+  static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "grenade"}, { keywordId: "imperium"}, { keywordId: "tacticus"}, { keywordId: "lieutenant"}];
+
+
+  static ICON = "/icons/LieutenantPowerWeaponBolter.webp"; // Path relative to public folder
+  static ICON_SCALE = 1.9; // Size of the icon
+
+  constructor(name: string, startPos: [number, number]) {
+    super(name, LieutenantPowerWeaponBolter.HP_MAX, startPos);
+  }
+}

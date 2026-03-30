@@ -1,15 +1,15 @@
-// frontend/src/roster/spaceMarine/units/CaptainTerminator.ts
+// frontend/src/roster/spaceMarine/units/CaptainTerminatorRelicWeaponBolter.ts
 
 import { getWeapons } from "../armory";
 import { LeaderEliteMeleeElite } from "../classes/LeaderEliteMeleeElite";
 
-export class CaptainTerminator extends LeaderEliteMeleeElite {
-  static NAME = "CaptainTerminator";
-  static DISPLAY_NAME = "Captain (Terminator)";
+export class CaptainTerminatorRelicWeaponBolter extends LeaderEliteMeleeElite {
+  static NAME = "CaptainTerminatorRelicWeaponBolter";
+  static DISPLAY_NAME = "Captain Terminator (Relic Weapon, Storm Bolter)";
 
   // BASE
   static MOVE = 5; // Move distance
-  static T = 65; // Toughness score
+  static T = 5; // Toughness score
   static ARMOR_SAVE = 2; // Armor save score
   static INVUL_SAVE = 4; // Armor invulnerable save score
   static HP_MAX = 6; // Max hit points
@@ -18,10 +18,10 @@ export class CaptainTerminator extends LeaderEliteMeleeElite {
   static VALUE = 95; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["storm_bolter_wolf_guard"];
-  static RNG_WEAPONS = getWeapons(CaptainTerminator.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["relic_fist"];
-  static CC_WEAPONS = getWeapons(CaptainTerminator.CC_WEAPON_CODES);
+  static RNG_WEAPON_CODES = ["storm_bolter_captain"];
+  static RNG_WEAPONS = getWeapons(CaptainTerminatorRelicWeaponBolter.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["power_fist_captain"];
+  static CC_WEAPONS = getWeapons(CaptainTerminatorRelicWeaponBolter.CC_WEAPON_CODES);
 
   // UNIT RULES
   static UNIT_RULES = [{ ruleId: "reroll_charge", displayName: "Unstoppable Valour" }];
@@ -33,10 +33,10 @@ export class CaptainTerminator extends LeaderEliteMeleeElite {
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "character"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "captain terminator"}];
 
 
-  static ICON = "/icons/CaptainTerminator.webp"; // Path relative to public folder
+  static ICON = "/icons/CaptainTerminatorRelicWeaponBolter.webp"; // Path relative to public folder
   static ICON_SCALE = 1.9; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, CaptainTerminator.HP_MAX, startPos);
+    super(name, CaptainTerminatorRelicWeaponBolter.HP_MAX, startPos);
   }
 }

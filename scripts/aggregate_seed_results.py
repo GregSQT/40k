@@ -23,7 +23,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
@@ -49,6 +49,7 @@ class SeedSummary:
     combined_last: Optional[float]
     worst_bot_min: Optional[float]
     holdout_hard_min: Optional[float]
+    schedule_diagnostics: Dict[str, Any]
 
 
 def parse_args() -> argparse.Namespace:
@@ -98,6 +99,41 @@ def parse_args() -> argparse.Namespace:
         "--tag-holdout-hard",
         default="0_critical/c_holdout_hard_mean",
         help="TensorBoard tag for holdout hard mean.",
+    )
+    parser.add_argument(
+        "--enable-schedule-diagnostics",
+        action="store_true",
+        help="Enable diagnostics for each decreasing schedule parameter.",
+    )
+    parser.add_argument(
+        "--decaying-tags",
+        nargs="+",
+        default=[
+            "training_diagnostic/learning_rate",
+            "training_diagnostic/entropy_coef",
+        ],
+        help=(
+            "TensorBoard scalar tags treated as decreasing schedule parameters "
+            "(default: learning_rate, entropy_coef)."
+        ),
+    )
+    parser.add_argument(
+        "--diag-fast-consumption-at-40",
+        type=float,
+        default=0.65,
+        help=(
+            "If consumed decay fraction at 40%% is >= this threshold, "
+            "schedule pace is classified TOO_FAST."
+        ),
+    )
+    parser.add_argument(
+        "--diag-slow-consumption-at-80",
+        type=float,
+        default=0.70,
+        help=(
+            "If consumed decay fraction at 80%% is <= this threshold, "
+            "schedule pace is classified TOO_SLOW."
+        ),
     )
     parser.add_argument(
         "--min-evals",
@@ -223,11 +259,15 @@ def summarize_seed(
     tag_combined: str,
     tag_worst_bot: str,
     tag_holdout_hard: str,
+    decaying_tags: List[str],
+    enable_schedule_diagnostics: bool,
+    diag_fast_consumption_at_40: float,
+    diag_slow_consumption_at_80: float,
     min_evals: int,
 ) -> SeedSummary:
     points_by_tag = read_scalar_points_for_tags(
         event_files=event_files,
-        tags=[tag_robust, tag_combined, tag_worst_bot, tag_holdout_hard],
+        tags=[tag_robust, tag_combined, tag_worst_bot, tag_holdout_hard] + decaying_tags,
     )
     robust_points = points_by_tag[tag_robust]
     combined_points = points_by_tag[tag_combined]
@@ -236,6 +276,15 @@ def summarize_seed(
 
     valid = len(robust_points) >= min_evals
     reason = "ok" if valid else f"insufficient_robust_points({len(robust_points)}<{min_evals})"
+
+    schedule_diagnostics: Dict[str, Any] = {}
+    if enable_schedule_diagnostics:
+        for decaying_tag in decaying_tags:
+            schedule_diagnostics[decaying_tag] = compute_schedule_diagnostic(
+                points=points_by_tag.get(decaying_tag, []),
+                fast_consumption_at_40=diag_fast_consumption_at_40,
+                slow_consumption_at_80=diag_slow_consumption_at_80,
+            )
 
     return SeedSummary(
         seed=str(seed),
@@ -249,7 +298,73 @@ def summarize_seed(
         combined_last=last_value(combined_points),
         worst_bot_min=min_value(worst_bot_points),
         holdout_hard_min=min_value(holdout_hard_points),
+        schedule_diagnostics=schedule_diagnostics,
     )
+
+
+def _value_at_progress(points: List[ScalarPoint], progress: float) -> Optional[float]:
+    if not points:
+        return None
+    max_step = max(p.step for p in points)
+    target_step = int(round(progress * max_step))
+    for p in points:
+        if p.step >= target_step:
+            return float(p.value)
+    return float(points[-1].value)
+
+
+def compute_schedule_diagnostic(
+    points: List[ScalarPoint],
+    fast_consumption_at_40: float,
+    slow_consumption_at_80: float,
+) -> Dict[str, Any]:
+    if not points:
+        return {"status": "MISSING", "reason": "tag_not_found_or_no_points"}
+    if len(points) < 5:
+        return {"status": "INSUFFICIENT_DATA", "reason": f"points<{5}", "points": len(points)}
+
+    checkpoints = {
+        "p20": _value_at_progress(points, 0.20),
+        "p40": _value_at_progress(points, 0.40),
+        "p60": _value_at_progress(points, 0.60),
+        "p80": _value_at_progress(points, 0.80),
+        "p100": _value_at_progress(points, 1.00),
+    }
+    if any(v is None for v in checkpoints.values()):
+        return {"status": "INSUFFICIENT_DATA", "reason": "checkpoint_resolution_failed"}
+
+    start_value = float(points[0].value)
+    end_value = float(points[-1].value)
+    total_drop = start_value - end_value
+    if total_drop <= 0.0:
+        return {
+            "status": "NOT_DECREASING",
+            "reason": "non_decreasing_parameter",
+            "start_value": start_value,
+            "end_value": end_value,
+            "checkpoints": checkpoints,
+        }
+
+    p40 = float(checkpoints["p40"])
+    p80 = float(checkpoints["p80"])
+    consumed_40 = (start_value - p40) / total_drop
+    consumed_80 = (start_value - p80) / total_drop
+
+    pace_status = "OK"
+    if consumed_40 >= fast_consumption_at_40:
+        pace_status = "TOO_FAST"
+    elif consumed_80 <= slow_consumption_at_80:
+        pace_status = "TOO_SLOW"
+
+    return {
+        "status": pace_status,
+        "start_value": start_value,
+        "end_value": end_value,
+        "consumed_decay_fraction_at_40": float(consumed_40),
+        "consumed_decay_fraction_at_80": float(consumed_80),
+        "checkpoints": checkpoints,
+        "points": len(points),
+    }
 
 
 def compute_aggregate(seed_rows: List[SeedSummary]) -> Dict[str, object]:
@@ -281,7 +396,75 @@ def compute_aggregate(seed_rows: List[SeedSummary]) -> Dict[str, object]:
                 "max_best_robust": float(max(robust_values)),
             }
         )
+
+    schedule_counts: Dict[str, Dict[str, int]] = {}
+    for row in seed_rows:
+        for tag_name, diag in row.schedule_diagnostics.items():
+            if tag_name not in schedule_counts:
+                schedule_counts[tag_name] = {
+                    "OK": 0,
+                    "TOO_FAST": 0,
+                    "TOO_SLOW": 0,
+                    "MISSING": 0,
+                    "INSUFFICIENT_DATA": 0,
+                    "NOT_DECREASING": 0,
+                }
+            status = str(diag.get("status", "MISSING"))
+            if status not in schedule_counts[tag_name]:
+                schedule_counts[tag_name][status] = 0
+            schedule_counts[tag_name][status] += 1
+    aggregate["schedule_diagnostics"] = schedule_counts
+    aggregate["schedule_pacing_verdict"] = compute_schedule_pacing_verdict(schedule_counts)
     return aggregate
+
+
+def _per_tag_pacing_verdict(counts: Dict[str, int]) -> str:
+    missing = int(counts.get("MISSING", 0))
+    insufficient = int(counts.get("INSUFFICIENT_DATA", 0))
+    not_decreasing = int(counts.get("NOT_DECREASING", 0))
+    too_fast = int(counts.get("TOO_FAST", 0))
+    too_slow = int(counts.get("TOO_SLOW", 0))
+
+    if missing > 0 or insufficient > 0:
+        return "INCOMPLETE"
+    if not_decreasing > 0:
+        return "INVALID"
+    if too_fast > 0 and too_slow > 0:
+        return "MIXED"
+    if too_fast > 0:
+        return "TOO_FAST"
+    if too_slow > 0:
+        return "TOO_SLOW"
+    return "OK"
+
+
+def compute_schedule_pacing_verdict(
+    schedule_counts: Dict[str, Dict[str, int]]
+) -> Dict[str, Any]:
+    if not schedule_counts:
+        return {"global": "NOT_EVALUATED", "per_tag": {}}
+
+    per_tag: Dict[str, str] = {}
+    for tag_name, counts in schedule_counts.items():
+        per_tag[tag_name] = _per_tag_pacing_verdict(counts)
+
+    verdicts = set(per_tag.values())
+    if "INVALID" in verdicts:
+        global_verdict = "INVALID"
+    elif "INCOMPLETE" in verdicts:
+        global_verdict = "INCOMPLETE"
+    elif "MIXED" in verdicts:
+        global_verdict = "MIXED"
+    elif "TOO_FAST" in verdicts and "TOO_SLOW" in verdicts:
+        global_verdict = "MIXED"
+    elif "TOO_FAST" in verdicts:
+        global_verdict = "TOO_FAST"
+    elif "TOO_SLOW" in verdicts:
+        global_verdict = "TOO_SLOW"
+    else:
+        global_verdict = "OK"
+
+    return {"global": global_verdict, "per_tag": per_tag}
 
 
 def print_console_report(seed_rows: List[SeedSummary], aggregate: Dict[str, object]) -> None:
@@ -301,6 +484,22 @@ def print_console_report(seed_rows: List[SeedSummary], aggregate: Dict[str, obje
         )
         if not row.valid:
             print(f"  -> reason: {row.reason}")
+        if row.schedule_diagnostics:
+            for tag_name, diag in row.schedule_diagnostics.items():
+                status = str(diag.get("status", "MISSING"))
+                if status in ("TOO_FAST", "TOO_SLOW", "OK"):
+                    c40 = diag.get("consumed_decay_fraction_at_40")
+                    c80 = diag.get("consumed_decay_fraction_at_80")
+                    if isinstance(c40, float) and isinstance(c80, float):
+                        print(
+                            f"  -> schedule {tag_name}: {status} "
+                            f"(consumed@40={c40:.3f}, consumed@80={c80:.3f})"
+                        )
+                    else:
+                        print(f"  -> schedule {tag_name}: {status}")
+                else:
+                    reason = diag.get("reason", "n/a")
+                    print(f"  -> schedule {tag_name}: {status} ({reason})")
 
     print("\n=== Aggregate ===")
     for key in (
@@ -319,6 +518,18 @@ def print_console_report(seed_rows: List[SeedSummary], aggregate: Dict[str, obje
             print(f"{key}: {value:.6f}")
         else:
             print(f"{key}: {value}")
+    schedule_diag = aggregate.get("schedule_diagnostics")
+    if isinstance(schedule_diag, dict) and schedule_diag:
+        print("schedule_diagnostics:")
+        for tag_name, counts in schedule_diag.items():
+            print(f"  - {tag_name}: {counts}")
+    schedule_verdict = aggregate.get("schedule_pacing_verdict")
+    if isinstance(schedule_verdict, dict) and schedule_verdict:
+        print(f"schedule_pacing_verdict.global: {schedule_verdict.get('global')}")
+        per_tag_verdict = schedule_verdict.get("per_tag")
+        if isinstance(per_tag_verdict, dict):
+            for tag_name, verdict in per_tag_verdict.items():
+                print(f"  - {tag_name}: {verdict}")
 
 
 def write_outputs(
@@ -342,6 +553,10 @@ def write_outputs(
             "tag_combined": args.tag_combined,
             "tag_worst_bot": args.tag_worst_bot,
             "tag_holdout_hard": args.tag_holdout_hard,
+            "enable_schedule_diagnostics": bool(args.enable_schedule_diagnostics),
+            "decaying_tags": list(args.decaying_tags),
+            "diag_fast_consumption_at_40": float(args.diag_fast_consumption_at_40),
+            "diag_slow_consumption_at_80": float(args.diag_slow_consumption_at_80),
             "min_evals": args.min_evals,
             "archive_runs_root": bool(args.archive_runs_root),
             "archive_prefix": str(args.archive_prefix),
@@ -367,6 +582,7 @@ def write_outputs(
                 "combined_last",
                 "worst_bot_min",
                 "holdout_hard_min",
+                "schedule_diagnostics",
             ],
         )
         writer.writeheader()
@@ -422,6 +638,16 @@ def main() -> int:
 
     if args.min_evals <= 0:
         raise ValueError(f"--min-evals must be > 0 (got {args.min_evals})")
+    if not (0.0 < float(args.diag_fast_consumption_at_40) <= 1.0):
+        raise ValueError(
+            "--diag-fast-consumption-at-40 must be in (0,1] "
+            f"(got {args.diag_fast_consumption_at_40})"
+        )
+    if not (0.0 <= float(args.diag_slow_consumption_at_80) < 1.0):
+        raise ValueError(
+            "--diag-slow-consumption-at-80 must be in [0,1) "
+            f"(got {args.diag_slow_consumption_at_80})"
+        )
 
     runs_root = Path(args.runs_root).resolve()
     if not runs_root.exists():
@@ -456,6 +682,10 @@ def main() -> int:
             tag_combined=args.tag_combined,
             tag_worst_bot=args.tag_worst_bot,
             tag_holdout_hard=args.tag_holdout_hard,
+            decaying_tags=list(args.decaying_tags),
+            enable_schedule_diagnostics=bool(args.enable_schedule_diagnostics),
+            diag_fast_consumption_at_40=float(args.diag_fast_consumption_at_40),
+            diag_slow_consumption_at_80=float(args.diag_slow_consumption_at_80),
             min_evals=args.min_evals,
         )
         seed_rows.append(summary)

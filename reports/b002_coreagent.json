@@ -1,0 +1,237 @@
+{
+  "config": {
+    "runs_root": "/home/greg/40k/tensorboard",
+    "seeds": [
+      "12345",
+      "22345",
+      "32345",
+      "42345",
+      "52345"
+    ],
+    "run_pattern": "{seed}",
+    "last_run_only": true,
+    "tag_robust": "0_critical/n_robust_current_score",
+    "tag_combined": "0_critical/a_bot_eval_combined",
+    "tag_worst_bot": "0_critical/b_worst_bot_score",
+    "tag_holdout_hard": "0_critical/c_holdout_hard_mean",
+    "enable_schedule_diagnostics": true,
+    "decaying_tags": [
+      "training_diagnostic/learning_rate",
+      "training_diagnostic/entropy_coef"
+    ],
+    "diag_fast_consumption_at_40": 0.65,
+    "diag_slow_consumption_at_80": 0.7,
+    "min_evals": 5,
+    "archive_runs_root": true,
+    "archive_prefix": "tensorboard_b",
+    "archive_width": 3
+  },
+  "aggregate": {
+    "seeds_total": 5,
+    "seeds_valid": 5,
+    "valid_rate": 1.0,
+    "median_best_robust": 0.6581599712371826,
+    "q1_best_robust": 0.6555200219154358,
+    "q3_best_robust": 0.6649600267410278,
+    "iqr_best_robust": 0.009440004825592041,
+    "min_best_robust": 0.6475200057029724,
+    "max_best_robust": 0.6823999881744385,
+    "schedule_diagnostics": {
+      "training_diagnostic/learning_rate": {
+        "OK": 5,
+        "TOO_FAST": 0,
+        "TOO_SLOW": 0,
+        "MISSING": 0,
+        "INSUFFICIENT_DATA": 0,
+        "NOT_DECREASING": 0
+      },
+      "training_diagnostic/entropy_coef": {
+        "OK": 0,
+        "TOO_FAST": 0,
+        "TOO_SLOW": 0,
+        "MISSING": 5,
+        "INSUFFICIENT_DATA": 0,
+        "NOT_DECREASING": 0
+      }
+    },
+    "schedule_pacing_verdict": {
+      "global": "INCOMPLETE",
+      "per_tag": {
+        "training_diagnostic/learning_rate": "OK",
+        "training_diagnostic/entropy_coef": "INCOMPLETE"
+      }
+    }
+  },
+  "seeds": [
+    {
+      "seed": "12345",
+      "run_dir": "/home/greg/40k/tensorboard/12345/run_20260328-201410",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6649600267410278,
+      "robust_last": 0.631600022315979,
+      "combined_best": 0.6827999949455261,
+      "combined_last": 0.6460000276565552,
+      "worst_bot_min": 0.23999999463558197,
+      "holdout_hard_min": 0.3126984238624573,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0002800485817716e-05,
+          "consumed_decay_fraction_at_40": 0.4033161400767322,
+          "consumed_decay_fraction_at_80": 0.7998520114904445,
+          "checkpoints": {
+            "p20": 8.552680083084852e-05,
+            "p40": 7.176899816840887e-05,
+            "p60": 5.7948200264945626e-05,
+            "p80": 4.401259866426699e-05,
+            "p100": 3.0002800485817716e-05
+          },
+          "points": 70467
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "MISSING",
+          "reason": "tag_not_found_or_no_points"
+        }
+      }
+    },
+    {
+      "seed": "22345",
+      "run_dir": "/home/greg/40k/tensorboard/22345/run_20260328-230259",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6555200219154358,
+      "robust_last": 0.6194000244140625,
+      "combined_best": 0.6940000057220459,
+      "combined_last": 0.6322000026702881,
+      "worst_bot_min": 0.3319999873638153,
+      "holdout_hard_min": 0.3333333432674408,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0001399863976985e-05,
+          "consumed_decay_fraction_at_40": 0.4055281130964248,
+          "consumed_decay_fraction_at_80": 0.8009359979394075,
+          "checkpoints": {
+            "p20": 8.548620098736137e-05,
+            "p40": 7.161359826568514e-05,
+            "p60": 5.7860001106746495e-05,
+            "p80": 4.393560084281489e-05,
+            "p100": 3.0001399863976985e-05
+          },
+          "points": 70762
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "MISSING",
+          "reason": "tag_not_found_or_no_points"
+        }
+      }
+    },
+    {
+      "seed": "32345",
+      "run_dir": "/home/greg/40k/tensorboard/32345/run_20260329-015147",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6823999881744385,
+      "robust_last": 0.6283599734306335,
+      "combined_best": 0.734000027179718,
+      "combined_last": 0.63919997215271,
+      "worst_bot_min": 0.42399999499320984,
+      "holdout_hard_min": 0.44999998807907104,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0001399863976985e-05,
+          "consumed_decay_fraction_at_40": 0.40512803135460046,
+          "consumed_decay_fraction_at_80": 0.8005559774540582,
+          "checkpoints": {
+            "p20": 8.555620297556743e-05,
+            "p40": 7.164160342654213e-05,
+            "p60": 5.7858600484905764e-05,
+            "p80": 4.396220174385235e-05,
+            "p100": 3.0001399863976985e-05
+          },
+          "points": 70275
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "MISSING",
+          "reason": "tag_not_found_or_no_points"
+        }
+      }
+    },
+    {
+      "seed": "42345",
+      "run_dir": "/home/greg/40k/tensorboard/42345/run_20260329-053719",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6475200057029724,
+      "robust_last": 0.6335999965667725,
+      "combined_best": 0.6603999733924866,
+      "combined_last": 0.631600022315979,
+      "worst_bot_min": 0.42399999499320984,
+      "holdout_hard_min": 0.4174603223800659,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0004199288669042e-05,
+          "consumed_decay_fraction_at_40": 0.40788442029628597,
+          "consumed_decay_fraction_at_80": 0.8023881230324987,
+          "checkpoints": {
+            "p20": 8.532519859727472e-05,
+            "p40": 7.144980190787464e-05,
+            "p60": 5.7687801017891616e-05,
+            "p80": 4.3836200347868726e-05,
+            "p100": 3.0004199288669042e-05
+          },
+          "points": 70293
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "MISSING",
+          "reason": "tag_not_found_or_no_points"
+        }
+      }
+    },
+    {
+      "seed": "52345",
+      "run_dir": "/home/greg/40k/tensorboard/52345/run_20260329-082159",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6581599712371826,
+      "robust_last": 0.6345599889755249,
+      "combined_best": 0.676800012588501,
+      "combined_last": 0.6725999712944031,
+      "worst_bot_min": 0.41600000858306885,
+      "holdout_hard_min": 0.4714285731315613,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0002800485817716e-05,
+          "consumed_decay_fraction_at_40": 0.4069162201778388,
+          "consumed_decay_fraction_at_80": 0.8012520657400779,
+          "checkpoints": {
+            "p20": 8.529720071237534e-05,
+            "p40": 7.151700265239924e-05,
+            "p60": 5.775639874627814e-05,
+            "p80": 4.391459879116155e-05,
+            "p100": 3.0002800485817716e-05
+          },
+          "points": 70480
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "MISSING",
+          "reason": "tag_not_found_or_no_points"
+        }
+      }
+    }
+  ]
+}

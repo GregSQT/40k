@@ -7,6 +7,7 @@ References: AI_TURN.md Section ⚡ CHARGE PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
+from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
@@ -17,6 +18,7 @@ from engine.combat_utils import (
     get_hex_neighbors,
     expected_dice_value,
     resolve_dice_value,
+    calculate_hex_distance as _calculate_hex_distance,
 )
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
@@ -1135,11 +1137,11 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     # BFS pathfinding to find all reachable hexes within charge_range
     visited = {start_pos: 0}
-    queue = [(start_pos, 0)]
+    queue = deque([(start_pos, 0)])
     valid_destinations = []
 
     while queue:
-        current_pos, current_dist = queue.pop(0)
+        current_pos, current_dist = queue.popleft()
         current_col, current_row = current_pos
 
         # If we've reached max charge range, don't explore further
@@ -1207,22 +1209,6 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     return valid_destinations
 
 
-def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
-    """Calculate proper hex distance using cube coordinates - SYNCHRONIZED WITH FRONTEND"""
-    # CRITICAL FIX: Use EXACT same formula as frontend/src/utils/gameHelpers.ts offsetToCube()
-    # Frontend formula: x = col, z = row - ((col - (col & 1)) >> 1), y = -x - z
-
-    # Convert offset to cube coordinates (FRONTEND-COMPATIBLE)
-    x1 = col1
-    z1 = row1 - ((col1 - (col1 & 1)) >> 1)
-    y1 = -x1 - z1
-
-    x2 = col2
-    z2 = row2 - ((col2 - (col2 & 1)) >> 1)
-    y2 = -x2 - z2
-
-    # Cube distance (max of absolute differences)
-    return max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
 
 
 def _select_strategic_destination(

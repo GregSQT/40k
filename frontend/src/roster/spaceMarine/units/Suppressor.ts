@@ -15,7 +15,7 @@ export class Suppressor extends EliteRangeTroop {
   static HP_MAX = 2; // Max hit points
   static LD = 6; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 15; // Unit value (W40K points cost)
+  static VALUE = 32; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["accelerator_autocannon", "bolt_pistol"];

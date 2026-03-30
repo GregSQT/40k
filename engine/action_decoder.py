@@ -1157,7 +1157,6 @@ class ActionDecoder:
                 -horizontal_cluster_penalty,
             )
 
-        # Neutral tie-break: prefer balanced center placement, no left/right bias.
         best_hex = max(
             valid_hexes,
             key=lambda h: (

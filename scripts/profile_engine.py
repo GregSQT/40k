@@ -5,6 +5,7 @@ import pstats
 import io
 import sys
 import os
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,9 +13,12 @@ from ai.training_utils import setup_imports, get_scenario_list_for_phase
 from ai.unit_registry import UnitRegistry
 from config_loader import get_config_loader
 
+PROFILE_SEED = 42
+N_STEPS = 500
+
 
 def main():
-    agent_key = "Infantry_Swarm_MeleeSwarm"
+    agent_key = "CoreAgent"
     W40KEngine, _ = setup_imports()
     cfg = get_config_loader()
     unit_registry = UnitRegistry()
@@ -34,12 +38,13 @@ def main():
         quiet=True,
         gym_training_mode=True,
     )
-    obs, _ = env.reset()
+    rng = np.random.default_rng(PROFILE_SEED)
+    obs, _ = env.reset(seed=PROFILE_SEED)
 
     profiler = cProfile.Profile()
     profiler.enable()
-    for _ in range(500):  # 500 steps pour des stats plus stables
-        action = env.action_space.sample()
+    for _ in range(N_STEPS):
+        action = int(rng.integers(env.action_space.n))
         obs, reward, term, trunc, info = env.step(action)
         if term or trunc:
             obs, _ = env.reset()

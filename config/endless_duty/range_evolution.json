@@ -1,0 +1,228 @@
+{
+  "version": 1,
+  "currency": "requisition_points",
+  "unlock_wave": 10,
+  "starter_loadout_id": "range_intercessor_starter",
+  "rules": {
+    "package_replaces_all": true,
+    "package_blocks_extras": true
+  },
+  "loadouts": [
+    {
+      "id": "range_intercessor_starter",
+      "profile": "Intercessor",
+      "picks": {
+        "melee": "close_combat_weapon",
+        "ranged": "bolt_rifle",
+        "secondary": "bolt_pistol"
+      }
+    },
+    {
+      "id": "range_infernus_starter",
+      "profile": "Infernus",
+      "picks": {
+        "melee": "close_combat_weapon",
+        "ranged": "pyreblast",
+        "secondary": "bolt_pistol"
+      }
+    },
+    {
+      "id": "range_sternguard_starter",
+      "profile": "Sternguard",
+      "picks": {
+        "melee": "close_combat_weapon",
+        "ranged": "sternguard_bolt_rifle",
+        "secondary": "sternguard_bolt_pistol"
+      }
+    },
+    {
+      "id": "range_suppressor_starter",
+      "profile": "Suppressor",
+      "picks": {
+        "package": "suppressor_autocannon_pistol_jumppack"
+      }
+    },
+    {
+      "id": "range_hellblaster_starter",
+      "profile": "Hellblaster",
+      "picks": {
+        "package": "hellblaster_plasma_incinerator_pistol"
+      }
+    },
+    {
+      "id": "range_intercessor_gravis_starter",
+      "profile": "IntercessorGravis",
+      "picks": {
+        "melee": "close_combat_weapon",
+        "ranged": "heavy_bolt_rifle",
+        "secondary": "bolt_pistol"
+      }
+    },
+    {
+      "id": "range_inceptor_starter",
+      "profile": "Inceptor",
+      "picks": {
+        "package": "inceptor_assault_bolters_jumppack"
+      }
+    },
+    {
+      "id": "range_eradicator_starter",
+      "profile": "Eradicator",
+      "picks": {
+        "melee": "close_combat_weapon",
+        "ranged": "melta_rifle",
+        "secondary": "bolt_pistol"
+      }
+    },
+    {
+      "id": "range_terminator_starter",
+      "profile": "Terminator",
+      "picks": {
+        "melee": "power_fist",
+        "ranged": "storm_bolter"
+      }
+    }
+  ],
+  "catalog": {
+    "Intercessor": {
+      "base": 10,
+      "rows": [
+        { "slot": "melee", "pick": "close_combat_weapon", "cost": 0 },
+        { "slot": "ranged", "pick": "bolt_rifle", "cost": 0 },
+        {
+          "slot": "ranged",
+          "pick": "astartes_grenade_launcher_package",
+          "includes": ["astartes_grenade_launcher_frag", "astartes_grenade_launcher_krak"],
+          "cost": 2
+        },
+        { "slot": "ranged", "pick": "pyreblast", "cost": 1 },
+        { "slot": "secondary", "pick": "bolt_pistol", "cost": 0 }
+      ],
+      "packages": []
+    },
+    "Infernus": {
+      "base": 10,
+      "rows": [
+        { "slot": "melee", "pick": "close_combat_weapon", "cost": 0 },
+        { "slot": "ranged", "pick": "pyreblast", "cost": 1 },
+        { "slot": "secondary", "pick": "bolt_pistol", "cost": 0 }
+      ],
+      "packages": []
+    },
+    "Sternguard": {
+      "base": 10,
+      "rows": [
+        { "slot": "melee", "pick": "close_combat_weapon", "cost": 0 },
+        { "slot": "ranged", "pick": "sternguard_bolt_rifle", "cost": 0 },
+        { "slot": "ranged", "pick": "planned_sternguard_combi_weapon", "cost": 1, "implemented": false },
+        { "slot": "ranged", "pick": "planned_pyrecannon", "cost": 2, "implemented": false },
+        { "slot": "ranged", "pick": "planned_sternguard_heavy_bolter", "cost": 3, "implemented": false },
+        { "slot": "secondary", "pick": "sternguard_bolt_pistol", "cost": 0 }
+      ],
+      "packages": []
+    },
+    "Suppressor": {
+      "base": 10,
+      "rows": [],
+      "packages": [
+        {
+          "id": "suppressor_autocannon_pistol_jumppack",
+          "cost": 5,
+          "locks_all_slots": true,
+          "picks": [
+            { "id": "close_combat_weapon", "kind": "weapon" },
+            { "id": "accelerator_autocannon", "kind": "weapon" },
+            { "id": "bolt_pistol", "kind": "weapon" },
+            { "id": "jump_pack", "kind": "equipment" }
+          ]
+        }
+      ]
+    },
+    "Hellblaster": {
+      "base": 10,
+      "rows": [],
+      "packages": [
+        {
+          "id": "hellblaster_plasma_incinerator_pistol",
+          "cost": 5,
+          "locks_all_slots": true,
+          "picks": [
+            { "id": "close_combat_weapon", "kind": "weapon" },
+            { "id": "plasma_incinerator_standard", "kind": "weapon" },
+            { "id": "plasma_incinerator_supercharge", "kind": "weapon" },
+            { "id": "bolt_pistol", "kind": "weapon" }
+          ]
+        }
+      ]
+    },
+    "IntercessorGravis": {
+      "base": 20,
+      "rows": [
+        { "slot": "melee", "pick": "close_combat_weapon", "cost": 0 },
+        { "slot": "ranged", "pick": "heavy_bolt_rifle", "cost": 0 },
+        { "slot": "ranged", "pick": "heavy_bolter", "cost": 2 },
+        { "slot": "secondary", "pick": "bolt_pistol", "cost": 0 }
+      ],
+      "packages": []
+    },
+    "Inceptor": {
+      "base": 20,
+      "rows": [],
+      "packages": [
+        {
+          "id": "inceptor_assault_bolters_jumppack",
+          "cost": 4,
+          "locks_all_slots": true,
+          "picks": [
+            { "id": "close_combat_weapon", "kind": "weapon" },
+            { "id": "assault_bolters", "kind": "weapon" },
+            { "id": "jump_pack", "kind": "equipment" }
+          ]
+        },
+        {
+          "id": "inceptor_plasma_exterminators_jumppack",
+          "cost": 8,
+          "locks_all_slots": true,
+          "picks": [
+            { "id": "close_combat_weapon", "kind": "weapon" },
+            { "id": "plasma_exterminator_standard", "kind": "weapon" },
+            { "id": "plasma_exterminator_supercharge", "kind": "weapon" },
+            { "id": "jump_pack", "kind": "equipment" }
+          ]
+        }
+      ]
+    },
+    "Eradicator": {
+      "base": 20,
+      "rows": [
+        { "slot": "melee", "pick": "close_combat_weapon", "cost": 0 },
+        { "slot": "ranged", "pick": "melta_rifle", "cost": 6 },
+        { "slot": "ranged", "pick": "multi_melta", "cost": 7 },
+        { "slot": "secondary", "pick": "bolt_pistol", "cost": 0 }
+      ],
+      "packages": []
+    },
+    "Terminator": {
+      "base": 25,
+      "rows": [
+        { "slot": "melee", "pick": "power_fist", "cost": 0 },
+        { "slot": "melee", "pick": "planned_chain_fist", "cost": 0, "implemented": false },
+        { "slot": "ranged", "pick": "storm_bolter", "cost": 0 },
+        { "slot": "ranged", "pick": "heavy_flamer", "cost": 3 },
+        { "slot": "ranged", "pick": "assault_cannon", "cost": 5 }
+      ],
+      "packages": [
+        {
+          "id": "terminator_cyclone_plus_stormbolter",
+          "cost": 10,
+          "locks_all_slots": true,
+          "picks": [
+            { "id": "cyclone_missile_launcher_frag", "kind": "weapon" },
+            { "id": "cyclone_missile_launcher_krak", "kind": "weapon" },
+            { "id": "storm_bolter", "kind": "weapon" }
+          ]
+        }
+      ]
+    }
+  }
+}

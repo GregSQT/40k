@@ -2067,13 +2067,11 @@ class ObservationBuilder:
                         ally.get("CC_WEAPONS") and len(ally["CC_WEAPONS"]) > 0 and  # A des armes melee
                         ally.get("RNG_WEAPONS") and len(ally["RNG_WEAPONS"]) > 0):  # A aussi des armes range
                         
-                        # Vérifier si peut charger (distance)
                         ally_col, ally_row = positions[str(ally["id"])]
                         enemy_col, enemy_row = positions[str(enemy["id"])]
-                        ally_distance = calculate_pathfinding_distance(
+                        ally_distance = calculate_hex_distance(
                             ally_col, ally_row,
                             enemy_col, enemy_row,
-                            game_state
                         )
                         if "MOVE" not in ally:
                             raise KeyError(f"Unit missing required 'MOVE' field: {ally}")

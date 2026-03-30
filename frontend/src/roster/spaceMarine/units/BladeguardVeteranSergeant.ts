@@ -14,7 +14,7 @@ export class BladeguardVeteranSergeant extends TroopMeleeTroop {
   static HP_MAX = 3; // Max hit points
   static LD = 6; // Leadership score
   static OC = 1; // Operative Control
-  static VALUE = 18; // Unit value (W40K points cost)
+  static VALUE = 36; // Unit value (W40K points cost)
 
   // WEAPONS
   static RNG_WEAPON_CODES = ["plasma_pistol_standard", "plasma_pistol_supercharge"];

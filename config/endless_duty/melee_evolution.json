@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "currency": "requisition_points",
+  "unlock_wave": 15,
+  "starter_loadout_id": "melee_intercessor_starter",
+  "rules": {
+    "package_replaces_all": true,
+    "package_blocks_extras": true
+  },
+  "loadouts": [
+    {
+      "id": "melee_intercessor_starter",
+      "profile": "Intercessor",
+      "picks": {
+        "melee": "assault_intercessor_chainsword",
+        "ranged": "heavy_bolt_pistol",
+        "equipment": "none"
+      }
+    },
+    {
+      "id": "melee_bladeguard_starter",
+      "profile": "Bladeguard",
+      "picks": {
+        "package": "bladeguard_pw_shield_hbp"
+      }
+    },
+    {
+      "id": "melee_aggressor_starter",
+      "profile": "Aggressor",
+      "picks": {
+        "melee": "power_fist",
+        "ranged": "flamestorm_gauntlets"
+      }
+    },
+    {
+      "id": "melee_terminator_starter",
+      "profile": "Terminator",
+      "picks": {
+        "package": "terminator_thunderhammer_stormshield"
+      }
+    }
+  ],
+  "catalog": {
+    "Intercessor": {
+      "base": 12,
+      "rows": [
+        { "slot": "melee", "pick": "assault_intercessor_chainsword", "cost": 0 },
+        { "slot": "ranged", "pick": "heavy_bolt_pistol", "cost": 0 },
+        {
+          "slot": "ranged",
+          "pick": "plasma_pistol_package",
+          "includes": ["plasma_pistol_standard", "plasma_pistol_supercharge"],
+          "cost": 3
+        },
+        { "slot": "equipment", "pick": "jump_pack", "cost": 2 }
+      ],
+      "packages": []
+    },
+    "Bladeguard": {
+      "base": 17,
+      "rows": [],
+      "packages": [
+        {
+          "id": "bladeguard_pw_shield_hbp",
+          "cost": 2,
+          "locks_all_slots": true,
+          "picks": [
+            { "id": "master_crafted_power_weapon", "kind": "weapon" },
+            { "id": "storm_shield", "kind": "special" },
+            { "id": "heavy_bolt_pistol", "kind": "weapon" }
+          ]
+        }
+      ]
+    },
+    "Aggressor": {
+      "base": 22,
+      "rows": [
+        { "slot": "melee", "pick": "power_fist", "cost": 0 },
+        { "slot": "ranged", "pick": "flamestorm_gauntlets", "cost": 0 },
+        { "slot": "ranged", "pick": "auto_boltstorm_gauntlets", "cost": 0 },
+        { "slot": "secondary", "pick": "planned_fragstorm_grenade_launcher", "cost": 2, "implemented": false }
+      ],
+      "packages": []
+    },
+    "Terminator": {
+      "base": 27,
+      "rows": [
+        { "slot": "melee", "pick": "thunder_hammer_terminator", "cost": 0 },
+        { "slot": "melee", "pick": "planned_twin_lightning_claws", "cost": 0, "implemented": false }
+      ],
+      "packages": [
+        {
+          "id": "terminator_thunderhammer_stormshield",
+          "cost": 0,
+          "locks_all_slots": true,
+          "picks": [
+            { "id": "thunder_hammer_terminator", "kind": "weapon" },
+            { "id": "storm_shield", "kind": "special" }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,181 @@
+{
+    "version": 1,
+    "currency": "requisition_points",
+    "starter_loadout_id": "sergeant_starter",
+    "rules": {
+      "package_replaces_all": true,
+      "package_blocks_extras": true
+    },
+    "loadouts": [
+      {
+        "id": "sergeant_starter",
+        "profile": "Sergeant",
+        "picks": {
+          "melee": "close_combat_weapon",
+          "ranged": "bolt_rifle",
+          "secondary": "bolt_pistol",
+          "equipment": "none"
+        }
+      },
+      {
+        "id": "lieutenant_starter",
+        "profile": "Lieutenant",
+        "picks": {
+          "melee": "close_combat_weapon_lieutenant",
+          "ranged": "master_crafted_bolter_lieutenant",
+          "secondary": "heavy_bolt_pistol_lieutenant"
+        }
+      },
+      {
+        "id": "captain_starter",
+        "profile": "Captain",
+        "picks": {
+          "melee": "close_combat_weapon_captain",
+          "ranged": "master_crafted_bolter_captain",
+          "secondary": "bolt_pistol_captain"
+        }
+      },
+      {
+        "id": "captain_gravis_starter",
+        "profile": "CaptainGravis",
+        "picks": {
+          "package": "captain_gravis_pw_hbr"
+        }
+      },
+      {
+        "id": "captain_terminator_starter",
+        "profile": "CaptainTerminator",
+        "picks": {
+          "melee": "relic_weapon_captain",
+          "ranged": "storm_bolter_captain"
+        }
+      }
+    ],
+    "catalog": {
+      "Sergeant": {
+        "base": 0,
+        "rows": [
+          { "slot": "melee", "pick": "close_combat_weapon", "cost": 0 },
+          { "slot": "melee", "pick": "intercessor_sergeant_chainsword", "cost": 2 },
+          { "slot": "melee", "pick": "intercessor_sergeant_power_weapon", "cost": 3 },
+          { "slot": "melee", "pick": "intercessor_sergeant_power_fist", "cost": 5 },
+
+          { "slot": "ranged", "pick": "bolt_rifle", "cost": 0 },
+          { "slot": "ranged", "pick": "hand_flamer", "cost": 2 },
+          {
+            "slot": "ranged",
+            "pick": "plasma_pistol_package_sergeant", "includes": ["plasma_pistol_standard", "plasma_pistol_supercharge"], "cost": 4},
+
+          { "slot": "secondary", "pick": "bolt_pistol", "cost": 0 },
+          { "slot": "equipment", "pick": "jump_pack", "cost": 2 }
+        ],
+        "packages": []
+      },
+
+      "Lieutenant": {
+        "base": 15,
+        "rows": [
+          { "slot": "melee", "pick": "close_combat_weapon_lieutenant", "cost": 0 },
+          { "slot": "melee", "pick": "master_crafted_power_weapon_lieutenant", "cost": 3 },
+          { "slot": "melee", "pick": "power_fist_lieutenant", "cost": 5 },
+  
+          { "slot": "ranged", "pick": "master_crafted_bolter_lieutenant", "cost": 2 },
+          { "slot": "ranged", "pick": "neo_volkite_pistol_lieutenant", "cost": 3 },
+          {
+            "slot": "ranged",
+            "pick": "plasma_pistol_package_lieutenant", "includes": ["plasma_pistol_standard_lieutenant", "plasma_pistol_supercharge_lieutenant"], "cost": 4},
+  
+          { "slot": "secondary", "pick": "heavy_bolt_pistol_lieutenant", "cost": 0 }
+        ],
+        "packages": []
+      },
+  
+      "Captain": {
+        "base": 20,
+        "rows": [
+          { "slot": "melee", "pick": "close_combat_weapon_captain", "cost": 0 },
+          { "slot": "melee", "pick": "master_crafted_power_weapon_captain", "cost": 3 },
+          { "slot": "melee", "pick": "power_fist_captain", "cost": 5 },
+  
+          { "slot": "ranged", "pick": "master_crafted_bolter_captain", "cost": 2 },
+          { "slot": "ranged", "pick": "neo_volkite_pistol_captain", "cost": 3 },
+          {
+            "slot": "ranged",
+            "pick": "plasma_pistol_package_captain", "includes": ["plasma_pistol_standard_captain", "plasma_pistol_supercharge_captain"], "cost": 4},
+  
+          { "slot": "secondary", "pick": "bolt_pistol_captain", "cost": 0 },
+          { "slot": "secondary", "pick": "heavy_bolt_pistol_captain", "cost": 1 }
+        ],
+        "packages": [
+          {
+            "id": "captain_pw_shield_hbp",
+            "cost": 5,
+            "locks_all_slots": true,
+            "picks": [
+              { "id": "master_crafted_power_weapon_captain", "kind": "weapon" },
+              { "id": "storm_shield", "kind": "special" },
+              { "id": "heavy_bolt_pistol_captain", "kind": "weapon" }
+            ]
+          }
+        ]
+      },
+  
+      "CaptainGravis": {
+        "base": 30,
+        "rows": [],
+        "packages": [
+          {
+            "id": "captain_gravis_pw_hbr",
+            "cost": 5,
+            "locks_all_slots": true,
+            "picks": [
+              { "id": "master_crafted_power_weapon_captain", "kind": "weapon" },
+              { "id": "master_crafted_heavy_bolt_rifle_captain", "kind": "weapon" }
+            ]
+          },
+          {
+            "id": "captain_gravis_pf_relic_chainsword_boltstorm",
+            "cost": 4,
+            "locks_all_slots": true,
+            "picks": [
+              { "id": "power_fist_captain", "kind": "weapon" },
+              { "id": "relic_chainsword_captain", "kind": "weapon" },
+              { "id": "boltstorm_gauntlet_captain", "kind": "weapon" }
+            ]
+          },
+          {
+            "id": "captain_gravis_pf_relic_blade_boltstorm",
+            "cost": 5,
+            "locks_all_slots": true,
+            "picks": [
+              { "id": "power_fist_captain", "kind": "weapon" },
+              { "id": "relic_blade_captain", "kind": "weapon" },
+              { "id": "boltstorm_gauntlet_captain", "kind": "weapon" }
+            ]
+          },
+          {
+            "id": "captain_gravis_pf_relic_fist_boltstorm",
+            "cost": 6,
+            "locks_all_slots": true,
+            "picks": [
+              { "id": "power_fist_captain", "kind": "weapon" },
+              { "id": "relic_fist_captain", "kind": "weapon" },
+              { "id": "boltstorm_gauntlet_captain", "kind": "weapon" }
+            ]
+          }
+        ]
+      },
+  
+      "CaptainTerminator": {
+        "base": 40,
+        "rows": [
+          { "slot": "melee", "pick": "relic_weapon_captain", "cost": 4 },
+          { "slot": "melee", "pick": "power_fist_captain", "cost": 5 },
+  
+          { "slot": "ranged", "pick": "storm_bolter_captain", "cost": 1 },
+          { "slot": "ranged", "pick": "combi_weapon_captain", "cost": 2 }
+        ],
+        "packages": []
+      }
+    }
+  }

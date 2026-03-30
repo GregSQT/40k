@@ -14,6 +14,7 @@ from engine.combat_utils import (
     resolve_dice_value,
     expected_dice_value,
     set_unit_coordinates,
+    calculate_hex_distance as _calculate_hex_distance,
 )
 from shared.data_validation import require_key
 from .shared_utils import (
@@ -6068,21 +6069,6 @@ def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[s
     unit_by_id = require_key(game_state, "unit_by_id")
     return unit_by_id.get(str(unit_id))
 
-def _calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
-    """Calculate hex distance using consistent cube coordinates."""
-    # Use same calculation across all handlers
-    def offset_to_cube(col: int, row: int) -> Tuple[int, int, int]:
-        x = col
-        z = row - (col - (col & 1)) // 2
-        y = -x - z
-        return (x, y, z)
-    
-    def cube_distance(a: Tuple[int, int, int], b: Tuple[int, int, int]) -> int:
-        return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
-    
-    cube1 = offset_to_cube(col1, row1)
-    cube2 = offset_to_cube(col2, row2)
-    return cube_distance(cube1, cube2)
 
 
 # ============================================================================

@@ -807,11 +807,12 @@ class W40KMetricsTracker:
             entropy_loss = model_stats['train/entropy_loss']
             self.hyperparameter_tracking['entropy_losses'].append(entropy_loss)
             self.writer.add_scalar('training_diagnostic/entropy_loss', entropy_loss, self.step_count)
-            
-            # TRAINING DIAGNOSTIC: Also log current entropy coefficient value if available
-            if 'train/ent_coef' in model_stats:
-                ent_coef = model_stats['train/ent_coef']
-                self.writer.add_scalar('training_diagnostic/entropy_coef', ent_coef, self.step_count)
+
+        # TRAINING DIAGNOSTIC: Log entropy coefficient independently from entropy_loss
+        # so schedule diagnostics remain available even if entropy_loss is missing.
+        if 'train/ent_coef' in model_stats:
+            ent_coef = model_stats['train/ent_coef']
+            self.writer.add_scalar('training_diagnostic/entropy_coef', ent_coef, self.step_count)
         
         # TRAINING CRITICAL: Clip fraction (how often PPO clips policy updates)
         if 'train/clip_fraction' in model_stats:

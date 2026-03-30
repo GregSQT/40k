@@ -10,7 +10,7 @@ import os
 import re
 import json
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 import sys
 from shared.data_validation import require_key, require_present
 
@@ -63,7 +63,7 @@ class UnitRegistry:
                 # Scan TypeScript files in the units subfolder only
                 units_dir = faction_dir / "units"
                 if units_dir.exists():
-                    for ts_file in units_dir.glob("*.ts"):
+                    for ts_file in units_dir.rglob("*.ts"):
                         if ts_file.name.startswith('index'):
                             continue  # Skip index files
                         
@@ -119,7 +119,7 @@ class UnitRegistry:
             }
             
             # Extract static numeric properties and weapons
-            static_props = self._extract_static_properties(content, faction_name)
+            static_props = self._extract_static_properties(content, faction_name, ts_file)
             unit_data.update(static_props)
             
             # Validate essential properties
@@ -177,7 +177,7 @@ class UnitRegistry:
         
         return faction, role
     
-    def _extract_static_properties(self, content: str, faction_name: str) -> Dict:
+    def _extract_static_properties(self, content: str, faction_name: str, ts_file: Path | None = None) -> Dict:
         """Extract all static properties from TypeScript class, including weapons."""
         properties = {}
 
@@ -450,7 +450,8 @@ class UnitRegistry:
         else:
             faction = faction_name
         
-        properties["RNG_WEAPONS"] = get_weapons(faction, codes)
+        rng_codes = list(codes)
+        properties["RNG_WEAPONS"] = get_weapons(faction, rng_codes)
         
         # Pattern 4: CC_WEAPON_CODES (même logique)
         cc_codes_match = re.search(
@@ -474,7 +475,23 @@ class UnitRegistry:
         else:
             faction = faction_name
         
-        properties["CC_WEAPONS"] = get_weapons(faction, codes)
+        cc_codes = list(codes)
+        properties["CC_WEAPONS"] = get_weapons(faction, cc_codes)
+
+        # Endless Duty: override default weapon codes from evolution starter loadout config.
+        if ts_file is not None and "endlessDuty" in str(ts_file):
+            ed_override = self._resolve_endless_duty_starter_loadout(
+                ts_file=ts_file,
+                content=content,
+                faction=faction,
+                get_weapons_fn=get_weapons,
+            )
+            if ed_override is not None:
+                override_rng_codes = require_key(ed_override, "rng_codes")
+                override_cc_codes = require_key(ed_override, "cc_codes")
+                properties["RNG_WEAPONS"] = get_weapons(faction, override_rng_codes)
+                properties["CC_WEAPONS"] = get_weapons(faction, override_cc_codes)
+                properties["VALUE"] = require_key(ed_override, "value")
         
         # Normalize output: both keys must exist (validated above)
         
@@ -487,6 +504,202 @@ class UnitRegistry:
             properties["selectedCcWeaponIndex"] = 0
         
         return properties
+
+    def _resolve_endless_duty_starter_loadout(
+        self,
+        ts_file: Path,
+        content: str,
+        faction: str,
+        get_weapons_fn: Any,
+    ) -> Dict[str, Any] | None:
+        """Resolve ED starter loadout weapon codes from config/endless_duty/*.json."""
+        if faction != "SpaceMarine":
+            return None
+
+        class_match = re.search(r'export class (\w+)', content)
+        if not class_match:
+            raise ValueError(f"Cannot parse class name for ED unit file: {ts_file}")
+        class_name = class_match.group(1)
+
+        starter_match = re.search(
+            r'static\s+STARTER_LOADOUT_ID(?:\s*:\s*[^=]+)?\s*=\s*["\']([^"\']+)["\']\s*;',
+            content,
+        )
+        if not starter_match:
+            raise ValueError(f"ED unit class {class_name} is missing required static STARTER_LOADOUT_ID")
+        starter_loadout_id = starter_match.group(1)
+
+        def _extract_static_string(prop_name: str) -> str | None:
+            match = re.search(
+                rf'static\s+{prop_name}(?:\s*:\s*[^=]+)?\s*=\s*["\']([^"\']+)["\']\s*;',
+                content,
+            )
+            return match.group(1) if match else None
+
+        evolution_filename = _extract_static_string("EVOLUTION_FILE")
+        profile_name = _extract_static_string("PROFILE_NAME")
+
+        if evolution_filename is None:
+            if class_name.startswith("Leader"):
+                evolution_filename = "leader_evolution.json"
+            elif class_name.startswith("Melee"):
+                evolution_filename = "melee_evolution.json"
+            elif class_name.startswith("Range"):
+                evolution_filename = "range_evolution.json"
+            else:
+                raise ValueError(
+                    f"Cannot infer EVOLUTION_FILE for ED class {class_name}. "
+                    "Add static EVOLUTION_FILE."
+                )
+
+        if profile_name is None:
+            for prefix in ("Leader", "Melee", "Range"):
+                if class_name.startswith(prefix):
+                    profile_name = class_name[len(prefix):]
+                    break
+            if profile_name is None:
+                raise ValueError(
+                    f"Cannot infer PROFILE_NAME for ED class {class_name}. "
+                    "Add static PROFILE_NAME."
+                )
+            if profile_name.endswith("Ed"):
+                profile_name = profile_name[:-2]
+            if not profile_name:
+                raise ValueError(f"Cannot derive ED profile name from class {class_name}")
+
+        evolution_path = self.project_root / "config" / "endless_duty" / evolution_filename
+        if not evolution_path.exists():
+            raise FileNotFoundError(f"Missing ED evolution config: {evolution_path}")
+
+        with open(evolution_path, "r", encoding="utf-8-sig") as f:
+            evolution = json.load(f)
+
+        loadouts = require_key(evolution, "loadouts")
+        if not isinstance(loadouts, list):
+            raise ValueError(f"{evolution_filename} field 'loadouts' must be a list")
+
+        selected_loadout = None
+        for loadout in loadouts:
+            if not isinstance(loadout, dict):
+                continue
+            if str(loadout.get("id")) == starter_loadout_id:
+                selected_loadout = loadout
+                break
+        if selected_loadout is None:
+            raise KeyError(
+                f"starter_loadout_id '{starter_loadout_id}' not found in {evolution_path}"
+            )
+
+        loadout_profile = require_key(selected_loadout, "profile")
+        if str(loadout_profile) != profile_name:
+            raise ValueError(
+                f"ED starter profile mismatch for {class_name}: "
+                f"class profile '{profile_name}' != loadout profile '{loadout_profile}'"
+            )
+
+        picks = require_key(selected_loadout, "picks")
+        if not isinstance(picks, dict):
+            raise ValueError(f"Loadout '{starter_loadout_id}' field 'picks' must be an object")
+
+        catalog = require_key(evolution, "catalog")
+        profile_catalog = require_key(catalog, profile_name)
+        base_value = require_key(profile_catalog, "base")
+        if not isinstance(base_value, (int, float)):
+            raise ValueError(
+                f"Catalog profile '{profile_name}' in {evolution_filename} must define numeric field 'base'"
+            )
+        rows = require_key(profile_catalog, "rows")
+        packages = require_key(profile_catalog, "packages")
+        if not isinstance(rows, list) or not isinstance(packages, list):
+            raise ValueError(f"Catalog profile '{profile_name}' must define list fields rows/packages")
+
+        ranged_codes: List[str] = []
+        melee_codes: List[str] = []
+        starter_total_cost = float(base_value)
+
+        def _append_row_pick(slot_name: str, pick_id: str) -> None:
+            nonlocal starter_total_cost
+            row_match = None
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("slot")) == slot_name and str(row.get("pick")) == pick_id:
+                    row_match = row
+                    break
+            if row_match is None:
+                raise KeyError(
+                    f"Loadout '{starter_loadout_id}' references unknown row pick "
+                    f"slot='{slot_name}' pick='{pick_id}' for profile '{profile_name}'"
+                )
+            row_cost = require_key(row_match, "cost")
+            if not isinstance(row_cost, (int, float)):
+                raise ValueError(
+                    f"Loadout row '{pick_id}' in profile '{profile_name}' must define numeric field 'cost'"
+                )
+            starter_total_cost += float(row_cost)
+            includes = row_match.get("includes")
+            target_list = ranged_codes if slot_name in ("ranged", "secondary") else melee_codes
+            if includes is not None:
+                if not isinstance(includes, list):
+                    raise ValueError(
+                        f"Loadout '{starter_loadout_id}' row '{pick_id}' has non-list includes"
+                    )
+                for weapon_code in includes:
+                    target_list.append(str(weapon_code))
+            else:
+                target_list.append(pick_id)
+
+        for slot_key in ("melee", "ranged", "secondary"):
+            pick_val = picks.get(slot_key)
+            if pick_val is None:
+                continue
+            if str(pick_val) == "none":
+                continue
+            _append_row_pick(slot_key, str(pick_val))
+
+        package_id = picks.get("package")
+        if package_id is not None:
+            package_match = None
+            for package in packages:
+                if not isinstance(package, dict):
+                    continue
+                if str(package.get("id")) == str(package_id):
+                    package_match = package
+                    break
+            if package_match is None:
+                raise KeyError(
+                    f"Loadout '{starter_loadout_id}' references unknown package '{package_id}' "
+                    f"for profile '{profile_name}'"
+                )
+            package_cost = require_key(package_match, "cost")
+            if not isinstance(package_cost, (int, float)):
+                raise ValueError(
+                    f"Package '{package_id}' in profile '{profile_name}' must define numeric field 'cost'"
+                )
+            starter_total_cost += float(package_cost)
+            package_picks = require_key(package_match, "picks")
+            if not isinstance(package_picks, list):
+                raise ValueError(
+                    f"Package '{package_id}' in profile '{profile_name}' must have list field 'picks'"
+                )
+            for package_pick in package_picks:
+                if not isinstance(package_pick, dict):
+                    continue
+                pick_id = str(require_key(package_pick, "id"))
+                pick_kind = str(require_key(package_pick, "kind"))
+                if pick_kind != "weapon":
+                    continue
+                weapon_def = get_weapons_fn(faction, [pick_id])[0]
+                if "RNG" in weapon_def:
+                    ranged_codes.append(pick_id)
+                else:
+                    melee_codes.append(pick_id)
+
+        return {
+            "rng_codes": ranged_codes,
+            "cc_codes": melee_codes,
+            "value": int(starter_total_cost),
+        }
     
     def _build_faction_role_matrix(self):
         """Build the faction-role matrix with custom agent mappings."""

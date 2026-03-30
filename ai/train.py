@@ -2810,6 +2810,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                     )
         robust_window = 3
         robust_drawdown_penalty = 0.5
+        robust_penalty_bot = 0.0
+        robust_penalty_hard = 0.0
         save_best_robust_seed = False
         robust_seed_value: Optional[int] = None
         if save_best_robust:
@@ -2832,6 +2834,16 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                         f"(got {type(seed_raw).__name__})"
                     )
                 robust_seed_value = int(seed_raw)
+            robust_penalty_bot = float(require_key(callback_params, "robust_penalty_bot"))
+            robust_penalty_hard = float(require_key(callback_params, "robust_penalty_hard"))
+            if robust_penalty_bot < 0.0:
+                raise ValueError(
+                    f"robust_penalty_bot must be >= 0.0 (got {robust_penalty_bot})"
+                )
+            if robust_penalty_hard < 0.0:
+                raise ValueError(
+                    f"robust_penalty_hard must be >= 0.0 (got {robust_penalty_hard})"
+                )
             if robust_window <= 0:
                 raise ValueError(
                     f"callback_params.robust_window must be > 0 (got {robust_window})"
@@ -2874,6 +2886,8 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             robust_seed_value=robust_seed_value,
             robust_window=robust_window,
             robust_drawdown_penalty=robust_drawdown_penalty,
+            robust_penalty_bot=robust_penalty_bot,
+            robust_penalty_hard=robust_penalty_hard,
             model_gating_enabled=model_gating_enabled,
             model_gating_min_combined=model_gating_min_combined,
             model_gating_min_worst_bot=model_gating_min_worst_bot,

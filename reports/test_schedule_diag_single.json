@@ -1,0 +1,90 @@
+{
+  "config": {
+    "runs_root": "/home/greg/40k/tensorboard_b001",
+    "seeds": [
+      "12345"
+    ],
+    "run_pattern": "{seed}",
+    "last_run_only": true,
+    "tag_robust": "0_critical/n_robust_current_score",
+    "tag_combined": "0_critical/a_bot_eval_combined",
+    "tag_worst_bot": "0_critical/b_worst_bot_score",
+    "tag_holdout_hard": "0_critical/c_holdout_hard_mean",
+    "enable_schedule_diagnostics": true,
+    "decaying_tags": [
+      "training_diagnostic/learning_rate",
+      "training_diagnostic/entropy_coef"
+    ],
+    "diag_fast_consumption_at_40": 0.65,
+    "diag_slow_consumption_at_80": 0.7,
+    "min_evals": 5,
+    "archive_runs_root": false,
+    "archive_prefix": "tensorboard_b",
+    "archive_width": 3
+  },
+  "aggregate": {
+    "seeds_total": 1,
+    "seeds_valid": 1,
+    "valid_rate": 1.0,
+    "median_best_robust": 0.6240000128746033,
+    "q1_best_robust": 0.6240000128746033,
+    "q3_best_robust": 0.6240000128746033,
+    "iqr_best_robust": 0.0,
+    "min_best_robust": 0.6240000128746033,
+    "max_best_robust": 0.6240000128746033,
+    "schedule_diagnostics": {
+      "training_diagnostic/learning_rate": {
+        "OK": 1,
+        "TOO_FAST": 0,
+        "TOO_SLOW": 0,
+        "MISSING": 0,
+        "INSUFFICIENT_DATA": 0,
+        "NOT_DECREASING": 0
+      },
+      "training_diagnostic/entropy_coef": {
+        "OK": 0,
+        "TOO_FAST": 0,
+        "TOO_SLOW": 0,
+        "MISSING": 1,
+        "INSUFFICIENT_DATA": 0,
+        "NOT_DECREASING": 0
+      }
+    }
+  },
+  "seeds": [
+    {
+      "seed": "12345",
+      "run_dir": "/home/greg/40k/tensorboard_b001/12345/run_20260328-121542",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6240000128746033,
+      "robust_last": 0.6043199896812439,
+      "combined_best": 0.6484000086784363,
+      "combined_last": 0.616599977016449,
+      "worst_bot_min": 0.328000009059906,
+      "holdout_hard_min": 0.3285714387893677,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0001399863976985e-05,
+          "consumed_decay_fraction_at_40": 0.40642806314077784,
+          "consumed_decay_fraction_at_80": 0.8007959849214191,
+          "checkpoints": {
+            "p20": 8.536999666830525e-05,
+            "p40": 7.155060302466154e-05,
+            "p60": 5.7808199926512316e-05,
+            "p80": 4.39454015577212e-05,
+            "p100": 3.0001399863976985e-05
+          },
+          "points": 70903
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "MISSING",
+          "reason": "tag_not_found_or_no_points"
+        }
+      }
+    }
+  ]
+}

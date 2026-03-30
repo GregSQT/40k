@@ -1,0 +1,157 @@
+{
+  "mode": "endless_duty",
+  "deployment_zone": "hammer",
+  "deployment_type": "active",
+  "wall_ref": "walls-01.json",
+  "primary_objectives": ["objectives_control"],
+  "units": [
+    {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 10}
+  ],
+  "objectives": [
+    {"id": 5, "name": "Center", "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]}
+  ],
+  "endless_duty": {
+    "budget_mode": "soft_cap",
+    "budget_soft_cap_pct": 0.05,
+    "budget_by_wave": {
+      "1": 18,
+      "2": 24,
+      "3": 30,
+      "4": 36,
+      "5": 44,
+      "6": 52,
+      "7": 60,
+      "8": 70,
+      "9": 80,
+      "10": 92,
+      "11": 102,
+      "12": 112,
+      "13": 122,
+      "14": 132,
+      "15": 142,
+      "16": 152,
+      "17": 162,
+      "18": 172,
+      "19": 182,
+      "20": 192
+    },
+    "budget_growth_after_wave_20": {
+      "enabled": true,
+      "start_wave": 21,
+      "delta_per_wave": 6,
+      "formula": "budget(w) = budget(20) + (w - 20) * 6"
+    },
+    "wave_spike": {
+      "every_n_waves": 5,
+      "budget_multiplier": 1.1
+    },
+    "spawn_unlock_rules": {
+      "waves_1_4_max_enemy_value": 24,
+      "waves_5_9_max_enemy_value": 45,
+      "wave_10_plus_allow_value_gte_90": true
+    },
+    "wave_unlock_rules": {
+      "leader": 1,
+      "range": 10,
+      "melee": 15
+    },
+    "objective_selection": {
+      "mode": "random_from_pool_per_run",
+      "seeded": true
+    },
+    "objective_pool": [
+      {"id": 1, "name": "West", "hexes": [[2, 10], [1, 9], [2, 9], [3, 9], [3, 10], [2, 11], [1, 10]]},
+      {"id": 2, "name": "North", "hexes": [[12, 1], [12, 2], [11, 1], [11, 0], [12, 0], [13, 0], [13, 1]]},
+      {"id": 3, "name": "East", "hexes": [[22, 10], [21, 9], [22, 9], [23, 9], [23, 10], [22, 11], [21, 10]]},
+      {"id": 4, "name": "South", "hexes": [[12, 19], [11, 18], [12, 18], [13, 18], [13, 19], [12, 20], [11, 19]]},
+      {"id": 5, "name": "Center", "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]}
+    ],
+    "enemy_spawn_rules": {
+      "mode": "random_board_edge_hexes",
+      "candidate_edges": ["north", "south", "east", "west"],
+      "exclude_objective_hexes": true,
+      "min_distance_from_objective": 3,
+      "min_distance_between_spawns": 1,
+      "max_retries_per_unit": 50
+    },
+    "economy": {
+      "currency": "requisition_points",
+      "starting_leader_combat_value": 18,
+      "starting_leader_requisition_cost": 0,
+      "credits_formula": "floor(0.20 * enemy_value_killed_wave) + wave_clear_bonus + no_consumable_bonus + objective_hold_bonus",
+      "credits_alpha_on_kill_value": 0.2,
+      "wave_clear_bonus": 2,
+      "no_consumable_bonus": 1,
+      "objective_hold_bonus": 1,
+      "recruit_cost_formula": "VALUE(target_unit)",
+      "upgrade_cost_formula": "VALUE(target_unit) - VALUE(current_unit)",
+      "weapon_variant_cost_formula": "VALUE(target_variant) - VALUE(current_unit)",
+      "capital_model": {
+        "enabled": true,
+        "capital_total_field": "requisition_capital_total",
+        "invested_total_field": "requisition_invested_total",
+        "available_field": "requisition_available",
+        "available_formula": "requisition_capital_total - requisition_invested_total",
+        "allow_refit_between_waves": true,
+        "allow_weapon_refit_between_waves": true,
+        "is_resale": false,
+        "refit_returns_previous_investment": true
+      }
+    },
+    "objective_rules": {
+      "loss_counter_threshold": 2,
+      "loss_counter_increment_when": "TYR_CONTROL",
+      "loss_counter_reset_when": ["SM_CONTROL", "NEUTRAL"]
+    },
+    "consumables": {
+      "stock_cap_per_type": 2,
+      "max_uses_per_wave_global": 3,
+      "max_uses_per_unit_per_round": 1,
+      "cost_scaling_multipliers_per_type": [1.0, 1.5, 2.0],
+      "allow_same_buff_stacking": false,
+      "allow_different_buff_stacking": true,
+      "items": [
+        {
+          "id": "med_stim",
+          "base_cost": 5,
+          "effect": {"type": "instant_heal", "hp_delta": 1}
+        },
+        {
+          "id": "adrenal_stim",
+          "base_cost": 4,
+          "effect": {"type": "temp_move_bonus", "move_delta": 2, "duration": "end_of_current_turn"}
+        },
+        {
+          "id": "targeter_stim",
+          "base_cost": 4,
+          "effect": {"type": "next_shooting_hit_bonus", "to_hit_delta": 1, "duration": "next_shooting_activation"}
+        },
+        {
+          "id": "armor_stim",
+          "base_cost": 5,
+          "effect": {"type": "temp_armor_save_bonus", "armor_save_delta": 1, "armor_save_min": 2, "duration": "end_of_next_enemy_shooting_phase"}
+        }
+      ]
+    },
+    "logging": {
+      "source": "step_stream_only",
+      "optional_fields": [
+        "wave_index",
+        "credits_delta",
+        "credits_balance_before",
+        "credits_balance_after",
+        "credits_reason",
+        "purchase_type",
+        "purchase_item_id",
+        "purchase_item_from",
+        "purchase_item_to",
+        "purchase_cost",
+        "purchase_delta"
+      ]
+    },
+    "bonuses": {
+      "enabled": false,
+      "release_target": "v1.1"
+    }
+  }
+}

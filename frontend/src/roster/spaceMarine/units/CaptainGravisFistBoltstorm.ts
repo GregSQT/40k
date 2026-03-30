@@ -1,11 +1,11 @@
-// frontend/src/roster/spaceMarine/units/CaptainGravis.ts
+// frontend/src/roster/spaceMarine/units/CaptainGravisFistBoltstorm.ts
 
 import { getWeapons } from "../armory";
 import { LeaderEliteMeleeElite } from "../classes/LeaderEliteMeleeElite";
 
-export class CaptainGravis extends LeaderEliteMeleeElite {
-  static NAME = "Captain Gravis";
-  static DISPLAY_NAME = "Captain (Gravis)";
+export class CaptainGravisFistBoltstorm extends LeaderEliteMeleeElite {
+  static NAME = "CaptainGravisFistBoltstorm";
+  static DISPLAY_NAME = "Captain Gravis (Relic Fist, Boltstorm Gauntlet)";
 
   // BASE
   static MOVE = 5; // Move distance
@@ -18,19 +18,19 @@ export class CaptainGravis extends LeaderEliteMeleeElite {
   static VALUE = 80; // Unit value (W40K points cost)
 
   // WEAPONS
-  static RNG_WEAPON_CODES = ["master_crafted_boltgun"];
-  static RNG_WEAPONS = getWeapons(CaptainGravis.RNG_WEAPON_CODES);
-  static CC_WEAPON_CODES = ["power_fist"];
-  static CC_WEAPONS = getWeapons(CaptainGravis.CC_WEAPON_CODES);
+  static RNG_WEAPON_CODES = ["boltstorm_gauntlet_captain"];
+  static RNG_WEAPONS = getWeapons(CaptainGravisFistBoltstorm.RNG_WEAPON_CODES);
+  static CC_WEAPON_CODES = ["power_fist_captain", "relic_fist_captain"];
+  static CC_WEAPONS = getWeapons(CaptainGravisFistBoltstorm.CC_WEAPON_CODES);
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "gravis"}, { keywordId: "captain"}];
 
 
-  static ICON = "/icons/CaptainGravis.webp"; // Path relative to public folder
+  static ICON = "/icons/CaptainGravisFistBoltstorm.webp"; // Path relative to public folder
   static ICON_SCALE = 1.9; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
-    super(name, CaptainGravis.HP_MAX, startPos);
+    super(name, CaptainGravisFistBoltstorm.HP_MAX, startPos);
   }
 }

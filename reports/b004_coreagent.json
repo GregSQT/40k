@@ -1,0 +1,292 @@
+{
+  "config": {
+    "runs_root": "/home/greg/40k/tensorboard",
+    "seeds": [
+      "12345",
+      "22345",
+      "32345",
+      "42345",
+      "52345"
+    ],
+    "run_pattern": "{seed}",
+    "last_run_only": true,
+    "tag_robust": "0_critical/n_robust_current_score",
+    "tag_combined": "0_critical/a_bot_eval_combined",
+    "tag_worst_bot": "0_critical/b_worst_bot_score",
+    "tag_holdout_hard": "0_critical/c_holdout_hard_mean",
+    "enable_schedule_diagnostics": true,
+    "decaying_tags": [
+      "training_diagnostic/learning_rate",
+      "training_diagnostic/entropy_coef"
+    ],
+    "diag_fast_consumption_at_40": 0.65,
+    "diag_slow_consumption_at_80": 0.7,
+    "min_evals": 5,
+    "archive_runs_root": true,
+    "archive_prefix": "tensorboard_b",
+    "archive_width": 3
+  },
+  "aggregate": {
+    "seeds_total": 5,
+    "seeds_valid": 5,
+    "valid_rate": 1.0,
+    "median_best_robust": 0.6656000018119812,
+    "q1_best_robust": 0.6527199745178223,
+    "q3_best_robust": 0.6702399849891663,
+    "iqr_best_robust": 0.017520010471343994,
+    "min_best_robust": 0.6353600025177002,
+    "max_best_robust": 0.6913599967956543,
+    "schedule_diagnostics": {
+      "training_diagnostic/learning_rate": {
+        "OK": 5,
+        "TOO_FAST": 0,
+        "TOO_SLOW": 0,
+        "MISSING": 0,
+        "INSUFFICIENT_DATA": 0,
+        "NOT_DECREASING": 0
+      },
+      "training_diagnostic/entropy_coef": {
+        "OK": 5,
+        "TOO_FAST": 0,
+        "TOO_SLOW": 0,
+        "MISSING": 0,
+        "INSUFFICIENT_DATA": 0,
+        "NOT_DECREASING": 0
+      }
+    },
+    "schedule_pacing_verdict": {
+      "global": "OK",
+      "per_tag": {
+        "training_diagnostic/learning_rate": "OK",
+        "training_diagnostic/entropy_coef": "OK"
+      }
+    }
+  },
+  "seeds": [
+    {
+      "seed": "12345",
+      "run_dir": "/home/greg/40k/tensorboard/12345/run_20260329-234128",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6702399849891663,
+      "robust_last": 0.6136800050735474,
+      "combined_best": 0.692799985408783,
+      "combined_last": 0.6254000067710876,
+      "worst_bot_min": 0.3479999899864197,
+      "holdout_hard_min": 0.36349207162857056,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0002800485817716e-05,
+          "consumed_decay_fraction_at_40": 0.4072362711864231,
+          "consumed_decay_fraction_at_80": 0.8003720034262817,
+          "checkpoints": {
+            "p20": 8.537559915566817e-05,
+            "p40": 7.149459997890517e-05,
+            "p60": 5.771020005340688e-05,
+            "p80": 4.3976200686302036e-05,
+            "p100": 3.0002800485817716e-05
+          },
+          "points": 71299
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "OK",
+          "start_value": 0.019999999552965164,
+          "end_value": 0.010000400245189667,
+          "consumed_decay_fraction_at_40": 0.40723618206521234,
+          "consumed_decay_fraction_at_80": 0.8003720410230504,
+          "checkpoints": {
+            "p20": 0.017910800874233246,
+            "p40": 0.01592780090868473,
+            "p60": 0.013958600349724293,
+            "p80": 0.011996599845588207,
+            "p100": 0.010000400245189667
+          },
+          "points": 100257
+        }
+      }
+    },
+    {
+      "seed": "22345",
+      "run_dir": "/home/greg/40k/tensorboard/22345/run_20260330-023854",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6527199745178223,
+      "robust_last": 0.5720000267028809,
+      "combined_best": 0.6787999868392944,
+      "combined_last": 0.5902000069618225,
+      "worst_bot_min": 0.3880000114440918,
+      "holdout_hard_min": 0.4238095283508301,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0001399863976985e-05,
+          "consumed_decay_fraction_at_40": 0.40522812974830713,
+          "consumed_decay_fraction_at_80": 0.8008360034900349,
+          "checkpoints": {
+            "p20": 8.551000064471737e-05,
+            "p40": 7.163459667935967e-05,
+            "p60": 5.779420098406263e-05,
+            "p80": 4.394260031403974e-05,
+            "p100": 3.0001399863976985e-05
+          },
+          "points": 70915
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "OK",
+          "start_value": 0.019999999552965164,
+          "end_value": 0.010000200010836124,
+          "consumed_decay_fraction_at_40": 0.40522806544683937,
+          "consumed_decay_fraction_at_80": 0.8008360277811643,
+          "checkpoints": {
+            "p20": 0.01792999915778637,
+            "p40": 0.015947800129652023,
+            "p60": 0.013970600441098213,
+            "p80": 0.011991799809038639,
+            "p100": 0.010000200010836124
+          },
+          "points": 100256
+        }
+      }
+    },
+    {
+      "seed": "32345",
+      "run_dir": "/home/greg/40k/tensorboard/32345/run_20260330-053355",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6353600025177002,
+      "robust_last": 0.6148399710655212,
+      "combined_best": 0.6751999855041504,
+      "combined_last": 0.6313999891281128,
+      "worst_bot_min": 0.41999998688697815,
+      "holdout_hard_min": 0.44999998807907104,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0001399863976985e-05,
+          "consumed_decay_fraction_at_40": 0.4052881056290638,
+          "consumed_decay_fraction_at_80": 0.7996160088410893,
+          "checkpoints": {
+            "p20": 8.551419887226075e-05,
+            "p40": 7.163039845181629e-05,
+            "p60": 5.7820798247121274e-05,
+            "p80": 4.402799822855741e-05,
+            "p100": 3.0001399863976985e-05
+          },
+          "points": 71067
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "OK",
+          "start_value": 0.019999999552965164,
+          "end_value": 0.010000200010836124,
+          "consumed_decay_fraction_at_40": 0.40528804382295835,
+          "consumed_decay_fraction_at_80": 0.7996159707514146,
+          "checkpoints": {
+            "p20": 0.01793060079216957,
+            "p40": 0.01594720035791397,
+            "p60": 0.013974400237202644,
+            "p80": 0.012004000134766102,
+            "p100": 0.010000200010836124
+          },
+          "points": 100256
+        }
+      }
+    },
+    {
+      "seed": "42345",
+      "run_dir": "/home/greg/40k/tensorboard/42345/run_20260330-082910",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6913599967956543,
+      "robust_last": 0.6913599967956543,
+      "combined_best": 0.7235999703407288,
+      "combined_last": 0.7009999752044678,
+      "worst_bot_min": 0.3319999873638153,
+      "holdout_hard_min": 0.35555556416511536,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0001399863976985e-05,
+          "consumed_decay_fraction_at_40": 0.40446808877760837,
+          "consumed_decay_fraction_at_80": 0.8006759811877386,
+          "checkpoints": {
+            "p20": 8.541339775547385e-05,
+            "p40": 7.168779848143458e-05,
+            "p60": 5.789920032839291e-05,
+            "p80": 4.395380165078677e-05,
+            "p100": 3.0001399863976985e-05
+          },
+          "points": 70598
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "OK",
+          "start_value": 0.019999999552965164,
+          "end_value": 0.010000200010836124,
+          "consumed_decay_fraction_at_40": 0.40446809099166703,
+          "consumed_decay_fraction_at_80": 0.8006760233554306,
+          "checkpoints": {
+            "p20": 0.017916200682520866,
+            "p40": 0.015955399721860886,
+            "p60": 0.01398560032248497,
+            "p80": 0.011993399821221828,
+            "p100": 0.010000200010836124
+          },
+          "points": 100255
+        }
+      }
+    },
+    {
+      "seed": "52345",
+      "run_dir": "/home/greg/40k/tensorboard/52345/run_20260330-113206",
+      "valid": true,
+      "reason": "ok",
+      "robust_points": 45,
+      "robust_best": 0.6656000018119812,
+      "robust_last": 0.6635599732398987,
+      "combined_best": 0.6972000002861023,
+      "combined_last": 0.6543999910354614,
+      "worst_bot_min": 0.164000004529953,
+      "holdout_hard_min": 0.17698413133621216,
+      "schedule_diagnostics": {
+        "training_diagnostic/learning_rate": {
+          "status": "OK",
+          "start_value": 9.999999747378752e-05,
+          "end_value": 3.0001399863976985e-05,
+          "consumed_decay_fraction_at_40": 0.40488802388723955,
+          "consumed_decay_fraction_at_80": 0.80013599037226,
+          "checkpoints": {
+            "p20": 8.538820111425593e-05,
+            "p40": 7.165840361267328e-05,
+            "p60": 5.791040166513994e-05,
+            "p80": 4.3991600250592455e-05,
+            "p100": 3.0001399863976985e-05
+          },
+          "points": 70825
+        },
+        "training_diagnostic/entropy_coef": {
+          "status": "OK",
+          "start_value": 0.019999999552965164,
+          "end_value": 0.010000200010836124,
+          "consumed_decay_fraction_at_40": 0.4048881258927488,
+          "consumed_decay_fraction_at_80": 0.8001360317021109,
+          "checkpoints": {
+            "p20": 0.017912600189447403,
+            "p40": 0.01595119945704937,
+            "p60": 0.01398720033466816,
+            "p80": 0.011998799629509449,
+            "p100": 0.010000200010836124
+          },
+          "points": 100256
+        }
+      }
+    }
+  ]
+}

@@ -106,6 +106,10 @@
     "alias": "shoot_after_flee",
     "description": "Display rule for Cunning Hunters: allows shooting after fleeing."
   },
+  "target_priority": {
+    "id": "target_priority",
+    "description": "This unit can shoot and charge in a turn in which it fell back."
+  },
   "targeted_intercession": {
     "id": "targeted_intercession",
     "description": "Assault Interecessor : When this unit makes an attack, it can reroll rolls of 1 for the wound rolls. If the target is on an objective, it can reroll the wound rolls."
