@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_regular_roster_troop_62",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 2
+    }
+  ]
+}

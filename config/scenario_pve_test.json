@@ -1,6 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
-  "wall_ref": "walls-01.json",
+  "wall_ref": "walls-11.json",
   "units": [
     {"id": 1, "unit_type": "TyranidWarriorMelee", "player": 1, "col": 4, "row": 12},
     {"id": 2, "unit_type": "Intercessor", "player": 1, "col": 6, "row": 12},

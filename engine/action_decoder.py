@@ -480,7 +480,7 @@ class ActionDecoder:
                 # 0 = aggressive (toward enemies)
                 # 1 = tactical (shooting position)
                 # 2 = defensive (away from enemies)
-                # 3 = random (exploration)
+                # 3 = objective (toward nearest objective)
 
                 # Get unit to activate and build destinations
                 from engine.phase_handlers import movement_handlers

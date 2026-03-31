@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_hard_roster_troop_40",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "Hellblaster",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantPowerFistPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    }
+  ]
+}

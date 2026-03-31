@@ -3,11 +3,11 @@
   "deployment_type": "active",
   "scale": "150pts",
   "agent_roster_seed": null,
-  "agent_roster_ref": "training/agent_training_roster_troop_06.json",
-  "opponent_roster_ref": "training/opponent_training_roster_troop_06.json",
-  "wall_ref": "walls-01.json",
+  "agent_roster_ref": "training_random",
+  "opponent_roster_ref": "training_random",
+  "wall_ref": "random",
   "primary_objectives": [
     "objectives_control"
   ],
-  "objectives_ref": "objectives-01.json"
+  "objectives_ref": "random"
 }

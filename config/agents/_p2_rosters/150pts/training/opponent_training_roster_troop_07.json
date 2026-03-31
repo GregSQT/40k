@@ -2,23 +2,27 @@
   "roster_id": "opponent_training_roster_troop_07",
   "composition": [
     {
-      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardAngelus",
+      "unit_type": "GreyHunterPlasmaGun",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardInferno",
-      "count": 1
+      "unit_type": "Incursor",
+      "count": 2
+    },
+    {
+      "unit_type": "Scout",
+      "count": 2
     },
     {
       "unit_type": "StrikingScorpionExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "Suppressor",
       "count": 1
     }
   ]

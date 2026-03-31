@@ -9,6 +9,8 @@ import sys
 import io
 import argparse
 import tempfile
+import atexit
+import hashlib
 
 # Fix Windows encoding for emoji/Unicode output with line buffering
 if sys.platform == 'win32':
@@ -87,31 +89,51 @@ from stable_baselines3.common.utils import get_schedule_fn  # Convert float hype
 
 
 def _build_training_bots_from_config(training_config):
-    """Build weighted bot list from training_config.bot_training.ratios.
-    
+    """Build weighted bot list from training_config.bot_training.
+
     Config format:
       bot_training:
-        ratios: {random: 0.4, greedy: 0.3, defensive: 0.3}  # must sum to 1
-        greedy_randomness: 0.10
-        defensive_randomness: 0.10
-    
+        ratios: {random: 0.4, greedy: 0.3, defensive: 0.3}
+        randomness: {greedy: 0.10, defensive: 0.10}
+
     Returns list of bot instances for random.choice() selection.
     """
-    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+    from ai.evaluation_bots import (
+        RandomBot, GreedyBot, DefensiveBot, ControlBot,
+        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+    )
     
     cfg = require_key(training_config, "bot_training")
-    ratios = cfg.get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})  # get allowed: ratios optional with defaults
-    greedy_r = float(cfg.get("greedy_randomness", 0.10))
-    defensive_r = float(cfg.get("defensive_randomness", 0.10))
-    
+    ratios = cfg.get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+    randomness_cfg = cfg.get("randomness", {})
+
+    BOT_CLASSES = {
+        "random": RandomBot,
+        "greedy": GreedyBot,
+        "defensive": DefensiveBot,
+        "control": ControlBot,
+        "aggressive_smart": AggressiveSmartBot,
+        "defensive_smart": DefensiveSmartBot,
+        "adaptive": AdaptiveBot,
+    }
+
     total = 10
     bots = []
-    for _ in range(max(1, round(ratios.get("random", 0.2) * total))):
-        bots.append(RandomBot())
-    for _ in range(max(1, round(ratios.get("greedy", 0.4) * total))):
-        bots.append(GreedyBot(randomness=greedy_r))
-    for _ in range(max(1, round(ratios.get("defensive", 0.4) * total))):
-        bots.append(DefensiveBot(randomness=defensive_r))
+    for bot_name, ratio in ratios.items():
+        count = round(ratio * total)
+        if bot_name == "random":
+            count = max(1, count)
+        if count <= 0:
+            continue
+        if bot_name == "random":
+            for _ in range(count):
+                bots.append(RandomBot())
+        elif bot_name in BOT_CLASSES:
+            r_val = float(randomness_cfg.get(bot_name, 0.10))
+            for _ in range(count):
+                bots.append(BOT_CLASSES[bot_name](randomness=r_val))
+        else:
+            raise ValueError(f"Unknown bot name in ratios: {bot_name!r}")
     
     return bots
 
@@ -324,6 +346,10 @@ def _normalize_scenario_name(scenario_path: str) -> str:
     if not scenario_filename.endswith(".json"):
         raise ValueError(f"Scenario path must end with .json: {scenario_path}")
     scenario_name = scenario_filename[:-5]
+    # Temporary ref-mixed scenarios use suffix "__<hash>".
+    # Keep canonical scenario name for config matching (training_hard, etc.).
+    if "__" in scenario_name:
+        scenario_name = scenario_name.split("__", 1)[0]
     if scenario_name.startswith("scenario_"):
         scenario_name = scenario_name[len("scenario_"):]
     if not scenario_name:
@@ -458,6 +484,152 @@ def _load_scenario_wall_ref(scenario_path: str) -> str:
     return wall_ref_raw.strip()
 
 
+def _load_scenario_objectives_ref(scenario_path: str) -> str:
+    """Load required objectives_ref from scenario JSON."""
+    if not isinstance(scenario_path, str) or not scenario_path.strip():
+        raise ValueError(f"Invalid scenario path: {scenario_path!r}")
+    with open(scenario_path, "r", encoding="utf-8-sig") as f:
+        scenario_data = json.load(f)
+    if not isinstance(scenario_data, dict):
+        raise TypeError(
+            f"Scenario JSON must be an object for objectives_ref weighting: {scenario_path}"
+        )
+    objectives_ref_raw = require_key(scenario_data, "objectives_ref")
+    if not isinstance(objectives_ref_raw, str) or not objectives_ref_raw.strip():
+        raise ValueError(
+            f"Scenario objectives_ref must be a non-empty string: {scenario_path}"
+        )
+    return objectives_ref_raw.strip()
+
+
+def _list_available_board_refs(ref_kind: str) -> List[str]:
+    """List available board refs for walls/objectives from current board directory."""
+    if ref_kind not in {"walls", "objectives"}:
+        raise ValueError(f"Unsupported ref_kind: {ref_kind}")
+    config_loader = get_config_loader()
+    board_cols, board_rows = config_loader.get_board_size()
+    board_dir = os.path.join(
+        config_loader.config_dir,
+        "board",
+        f"{board_cols}x{board_rows}",
+        ref_kind,
+    )
+    if not os.path.isdir(board_dir):
+        raise FileNotFoundError(f"Board {ref_kind} directory not found: {board_dir}")
+    pattern = "walls-*.json" if ref_kind == "walls" else "objectives-*.json"
+    refs = [os.path.basename(path) for path in sorted(glob.glob(os.path.join(board_dir, pattern)))]
+    if len(refs) == 0:
+        raise FileNotFoundError(
+            f"No {pattern} files found in board {ref_kind} directory: {board_dir}"
+        )
+    return refs
+
+
+def _expand_random_ref_weights(
+    configured_weights: Dict[str, float],
+    ref_kind: str,
+    config_key_name: str,
+) -> List[Tuple[str, float]]:
+    """
+    Expand configured random-ref weights to concrete refs.
+
+    Rules:
+    - explicit keys (except 'default') target exact refs.
+    - 'default' weight is evenly distributed across remaining available refs.
+    - returned list is normalized to sum exactly 1.0.
+    """
+    explicit_weights = {
+        key: value for key, value in configured_weights.items() if key != "default"
+    }
+    default_weight = float(configured_weights.get("default", 0.0))
+    available_refs = _list_available_board_refs(ref_kind=ref_kind)
+
+    missing_explicit = [
+        ref_name for ref_name in explicit_weights.keys() if ref_name not in available_refs
+    ]
+    if missing_explicit:
+        raise ValueError(
+            f"{config_key_name} contains unknown refs for board {ref_kind}: "
+            f"{sorted(missing_explicit)}"
+        )
+
+    expanded: Dict[str, float] = dict(explicit_weights)
+    remaining_refs = [
+        ref_name for ref_name in available_refs if ref_name not in explicit_weights
+    ]
+    if default_weight > 0.0:
+        if len(remaining_refs) == 0:
+            raise ValueError(
+                f"{config_key_name}.default > 0 but no remaining {ref_kind} refs are available"
+            )
+        per_remaining = default_weight / float(len(remaining_refs))
+        for ref_name in remaining_refs:
+            expanded[ref_name] = per_remaining
+
+    total = sum(expanded.values())
+    if total <= 0.0:
+        raise ValueError(f"{config_key_name} expands to zero total weight")
+    normalized = [(ref_name, weight / total) for ref_name, weight in sorted(expanded.items())]
+    return normalized
+
+
+def _materialize_scenario_with_refs(
+    scenario_path: str,
+    wall_ref: Optional[str] = None,
+    objectives_ref: Optional[str] = None,
+) -> str:
+    """Create a temporary scenario copy with overridden refs and return its path."""
+    if wall_ref is None and objectives_ref is None:
+        return scenario_path
+    if wall_ref is not None and (not isinstance(wall_ref, str) or not wall_ref.strip()):
+        raise ValueError(f"Invalid wall_ref override: {wall_ref!r}")
+    if objectives_ref is not None and (not isinstance(objectives_ref, str) or not objectives_ref.strip()):
+        raise ValueError(f"Invalid objectives_ref override: {objectives_ref!r}")
+    with open(scenario_path, "r", encoding="utf-8-sig") as f:
+        scenario_data = json.load(f)
+    if not isinstance(scenario_data, dict):
+        raise TypeError(
+            f"Scenario JSON must be an object for ref override: {scenario_path}"
+        )
+
+    scenario_copy = deepcopy(scenario_data)
+    if wall_ref is not None:
+        scenario_copy.pop("wall_hexes", None)
+        scenario_copy["wall_ref"] = wall_ref.strip()
+    if objectives_ref is not None:
+        scenario_copy.pop("objectives", None)
+        scenario_copy.pop("objective_hexes", None)
+        scenario_copy["objectives_ref"] = objectives_ref.strip()
+
+    temp_root = _get_wall_override_temp_dir()
+    source_parts = Path(os.path.abspath(scenario_path)).parts
+    if "agents" not in source_parts:
+        raise ValueError(
+            f"Scenario override requires path containing 'agents': {scenario_path}"
+        )
+    agents_idx = source_parts.index("agents")
+    if agents_idx + 1 >= len(source_parts):
+        raise ValueError(f"Cannot resolve agent key from scenario path: {scenario_path}")
+    agent_key = source_parts[agents_idx + 1]
+    try:
+        scenarios_idx = source_parts.index("scenarios", agents_idx + 2)
+        split_dir = source_parts[scenarios_idx + 1]
+    except (ValueError, IndexError):
+        raise ValueError(
+            f"Cannot resolve split directory (training/holdout_*) from scenario path: {scenario_path}"
+        )
+    temp_dir = os.path.join(temp_root, "agents", agent_key, "scenarios", split_dir)
+    os.makedirs(temp_dir, exist_ok=True)
+    hash_payload = f"{os.path.abspath(scenario_path)}|{wall_ref or ''}|{objectives_ref or ''}"
+    path_hash = hashlib.sha1(hash_payload.encode("utf-8")).hexdigest()[:16]
+    file_name = f"{Path(scenario_path).stem}__{path_hash}.json"
+    out_path = os.path.join(temp_dir, file_name)
+    if not os.path.exists(out_path):
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(scenario_copy, f, ensure_ascii=True, indent=2)
+    return out_path
+
+
 def _apply_wall_ref_weighting(
     scenario_list: List[str],
     training_config: Dict[str, Any],
@@ -512,8 +684,12 @@ def _apply_wall_ref_weighting(
                     f"(got {type(weight_raw).__name__})"
                 )
             weight = float(weight_raw)
-            if weight <= 0.0:
-                raise ValueError(f"Weight for wall_ref '{wall_ref}' must be > 0")
+            if wall_ref.strip() == "default":
+                if weight < 0.0:
+                    raise ValueError("Weight for wall_ref 'default' must be >= 0")
+            else:
+                if weight <= 0.0:
+                    raise ValueError(f"Weight for wall_ref '{wall_ref}' must be > 0")
             wall_ref_weights[wall_ref.strip()] = weight
         if "default" not in wall_ref_weights:
             raise KeyError(
@@ -567,75 +743,115 @@ def _apply_wall_ref_weighting(
         for wall_ref, mult in multipliers.items():
             wall_ref_weights[wall_ref] = float(mult) / total_multiplier
 
+    objective_weights_raw = sampling_cfg.get("train_objectives_ref_weights")
+    objective_weights: Dict[str, float] = {"default": 1.0}
+    if objective_weights_raw is not None:
+        if not isinstance(objective_weights_raw, dict):
+            raise TypeError(
+                "scenario_sampling.train_objectives_ref_weights must be an object "
+                f"(got {type(objective_weights_raw).__name__})"
+            )
+        if len(objective_weights_raw) == 0:
+            raise ValueError("scenario_sampling.train_objectives_ref_weights cannot be empty")
+        objective_weights = {}
+        for objectives_ref, weight_raw in objective_weights_raw.items():
+            if not isinstance(objectives_ref, str) or not objectives_ref.strip():
+                raise ValueError(
+                    "scenario_sampling.train_objectives_ref_weights keys must be non-empty strings"
+                )
+            if not isinstance(weight_raw, (int, float)):
+                raise TypeError(
+                    f"Weight for objectives_ref '{objectives_ref}' must be numeric "
+                    f"(got {type(weight_raw).__name__})"
+                )
+            weight = float(weight_raw)
+            if objectives_ref.strip() == "default":
+                if weight < 0.0:
+                    raise ValueError("Weight for objectives_ref 'default' must be >= 0")
+            else:
+                if weight <= 0.0:
+                    raise ValueError(
+                        f"Weight for objectives_ref '{objectives_ref}' must be > 0"
+                    )
+            objective_weights[objectives_ref.strip()] = weight
+        if "default" not in objective_weights:
+            raise KeyError(
+                "scenario_sampling.train_objectives_ref_weights must define a 'default' weight"
+            )
+        objective_sum = sum(objective_weights.values())
+        if abs(objective_sum - 1.0) > 1e-9:
+            raise ValueError(
+                "scenario_sampling.train_objectives_ref_weights must sum to 1.0 "
+                f"(got {objective_sum:.12f})"
+            )
+
     scenario_counts: Dict[str, int] = {}
     for scenario_path in scenario_list:
         if scenario_path not in scenario_counts:
             scenario_counts[scenario_path] = 0
         scenario_counts[scenario_path] += 1
 
-    scenarios_by_group: Dict[str, List[Tuple[str, int]]] = {}
-    for scenario_path, base_count in sorted(scenario_counts.items(), key=lambda item: item[0]):
-        wall_ref = _load_scenario_wall_ref(scenario_path)
-        group_key = wall_ref if wall_ref in wall_ref_weights else "default"
-        if group_key not in scenarios_by_group:
-            scenarios_by_group[group_key] = []
-        scenarios_by_group[group_key].append((scenario_path, base_count))
-
-    configured_groups = [key for key in wall_ref_weights.keys() if key != "default"]
-    missing_groups = [
-        group for group in configured_groups
-        if group not in scenarios_by_group or len(scenarios_by_group[group]) == 0
-    ]
-    if missing_groups:
-        raise ValueError(
-            "scenario_sampling.train_wall_ref_weights defines wall_ref keys not found in scenarios: "
-            f"{sorted(missing_groups)}"
-        )
-
-    total_base = sum(scenario_counts.values())
-    if total_base <= 0:
-        raise ValueError("scenario list is empty for wall_ref weighting")
-
-    weighting_scale = 1000
-    target_group_units: Dict[str, int] = {}
-    group_weight_items = sorted(wall_ref_weights.items(), key=lambda item: item[0])
-    running_assigned = 0
-    for idx, (group_key, group_weight) in enumerate(group_weight_items):
-        if idx == len(group_weight_items) - 1:
-            units = weighting_scale - running_assigned
-        else:
-            units = int(round(group_weight * weighting_scale))
-            units = max(0, units)
-            running_assigned += units
-        target_group_units[group_key] = units
-
+    per_scenario_scale = 10
     weighted_scenario_list: List[str] = []
-    for group_key, scenarios_in_group in sorted(scenarios_by_group.items(), key=lambda item: item[0]):
-        group_units = target_group_units.get(group_key, 0)
-        if group_units <= 0:
+    for scenario_path, base_count in sorted(scenario_counts.items(), key=lambda item: item[0]):
+        original_wall_ref = _load_scenario_wall_ref(scenario_path)
+        original_objectives_ref = _load_scenario_objectives_ref(scenario_path)
+        units_total = base_count * per_scenario_scale
+        if units_total <= 0:
             continue
-        group_base_total = sum(base_count for _, base_count in scenarios_in_group)
-        if group_base_total <= 0:
-            raise ValueError(f"Invalid empty group for wall_ref weighting: {group_key}")
 
-        provisional: List[Tuple[str, int, float]] = []
+        if original_wall_ref == "random":
+            wall_weight_items = _expand_random_ref_weights(
+                configured_weights=wall_ref_weights,
+                ref_kind="walls",
+                config_key_name="scenario_sampling.train_wall_ref_weights",
+            )
+        else:
+            wall_weight_items = sorted(wall_ref_weights.items(), key=lambda item: item[0])
+
+        if original_objectives_ref == "random":
+            objective_weight_items = _expand_random_ref_weights(
+                configured_weights=objective_weights,
+                ref_kind="objectives",
+                config_key_name="scenario_sampling.train_objectives_ref_weights",
+            )
+        else:
+            objective_weight_items = sorted(objective_weights.items(), key=lambda item: item[0])
+
+        provisional: List[Tuple[str, str, int, float]] = []
         assigned = 0
-        for scenario_path, base_count in scenarios_in_group:
-            exact = (float(base_count) / float(group_base_total)) * float(group_units)
-            count = int(exact)
-            assigned += count
-            provisional.append((scenario_path, count, exact - float(count)))
+        for wall_key, wall_weight in wall_weight_items:
+            for obj_key, obj_weight in objective_weight_items:
+                combined = float(wall_weight) * float(obj_weight)
+                exact = combined * float(units_total)
+                count = int(exact)
+                assigned += count
+                provisional.append((wall_key, obj_key, count, exact - float(count)))
 
-        remainder = group_units - assigned
+        remainder = units_total - assigned
         if remainder > 0:
-            provisional.sort(key=lambda item: item[2], reverse=True)
+            provisional.sort(key=lambda item: item[3], reverse=True)
             for i in range(remainder):
-                scenario_path, count, frac = provisional[i % len(provisional)]
-                provisional[i % len(provisional)] = (scenario_path, count + 1, frac)
+                wall_key, obj_key, count, frac = provisional[i % len(provisional)]
+                provisional[i % len(provisional)] = (wall_key, obj_key, count + 1, frac)
 
-        for scenario_path, final_count, _ in provisional:
-            if final_count > 0:
-                weighted_scenario_list.extend([scenario_path] * final_count)
+        for wall_key, obj_key, count, _ in provisional:
+            if count <= 0:
+                continue
+            effective_wall_ref = original_wall_ref if wall_key == "default" else wall_key
+            effective_objectives_ref = (
+                original_objectives_ref if obj_key == "default" else obj_key
+            )
+            weighted_path = _materialize_scenario_with_refs(
+                scenario_path=scenario_path,
+                wall_ref=effective_wall_ref if effective_wall_ref != original_wall_ref else None,
+                objectives_ref=(
+                    effective_objectives_ref
+                    if effective_objectives_ref != original_objectives_ref
+                    else None
+                ),
+            )
+            weighted_scenario_list.extend([weighted_path] * count)
 
     if len(weighted_scenario_list) == 0:
         raise ValueError("Wall-ref weighting produced an empty weighted scenario list")
@@ -754,6 +970,24 @@ from ai.vec_normalize_utils import save_vec_normalize, load_vec_normalize, get_v
 from shared.data_validation import require_key
 
 _progress_bar_width_cache: Optional[Dict[str, int]] = None
+_wall_override_temp_dir: Optional[str] = None
+
+
+def _cleanup_wall_override_temp_dir() -> None:
+    """Remove temporary directory used for wall-ref scenario overrides."""
+    global _wall_override_temp_dir
+    if _wall_override_temp_dir and os.path.isdir(_wall_override_temp_dir):
+        shutil.rmtree(_wall_override_temp_dir, ignore_errors=True)
+    _wall_override_temp_dir = None
+
+
+def _get_wall_override_temp_dir() -> str:
+    """Create (once) and return temporary directory for wall-ref scenario overrides."""
+    global _wall_override_temp_dir
+    if _wall_override_temp_dir is None:
+        _wall_override_temp_dir = tempfile.mkdtemp(prefix="w40k_wallmix_")
+        atexit.register(_cleanup_wall_override_temp_dir)
+    return _wall_override_temp_dir
 
 
 def _get_progress_bar_width(config_key: str) -> int:
@@ -2006,8 +2240,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         f"Scenarios (weighted): {len(scenario_list)} entries, "
         f"{len(unique_scenarios)} unique files"
     )
-    for scenario_name, count in unique_scenarios:
-        chunk_log(f"  - {scenario_name} (weight={count})")
     if len(scenario_list) > 1:
         chunk_log(f"🎲 RANDOM MODE: Each episode randomly selects one of the {len(scenario_list)} scenarios")
     chunk_log(f"{'='*80}\n")
@@ -2133,9 +2365,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                         "(from 'agent_seat_seed' or 'seed')."
                     )
                 agent_seat_seed = int(agent_seat_seed_raw)
-            ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})  # get allowed: ratios optional with defaults
-            r, g, d = ratios.get("random", 0.2) * 100, ratios.get("greedy", 0.4) * 100, ratios.get("defensive", 0.4) * 100
-            chunk_log(f"🤖 Bot training ratios: {r:.0f}% Random, {g:.0f}% Greedy, {d:.0f}% Defensive")
+            ratios = require_key(training_config, "bot_training").get("ratios", {"random": 0.2, "greedy": 0.4, "defensive": 0.4})
+            ratio_parts = [f"{v*100:.0f}% {k.replace('_', ' ').title()}" for k, v in ratios.items() if v > 0]
+            chunk_log(f"🤖 Bot training ratios: {', '.join(ratio_parts)}")
             chunk_log(f"🤖 Agent seat mode: {agent_seat_mode}")
             if "opponent_mix" in training_config:
                 mix_cfg = require_key(training_config, "opponent_mix")
@@ -2756,13 +2988,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 print(f"📊 FINAL BOT EVALUATION RESULTS")
                 print(f"{'='*80}")
                 if bot_results:
-                    for bot_name in ['random', 'greedy', 'defensive']:
-                        if bot_name in bot_results:
+                    for bot_name in sorted(bot_results.keys()):
+                        if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_reliable', 'eval_duration_seconds', 'total_failed_episodes'):
+                            continue
+                        if isinstance(bot_results[bot_name], (int, float)):
                             win_rate = bot_results[bot_name] * 100
-                            wins = require_key(bot_results, f'{bot_name}_wins')
-                            losses = require_key(bot_results, f'{bot_name}_losses')
-                            draws = require_key(bot_results, f'{bot_name}_draws')
-                            print(f"  vs {bot_name.capitalize()}Bot:    {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
+                            wins = bot_results.get(f'{bot_name}_wins', '?')
+                            losses = bot_results.get(f'{bot_name}_losses', '?')
+                            draws = bot_results.get(f'{bot_name}_draws', '?')
+                            print(f"  vs {bot_name:20s}: {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
 
                     combined = require_key(bot_results, 'combined') * 100
                     print(f"  Combined Score: {combined:5.1f}%")
@@ -4230,9 +4464,9 @@ def main():
                     print("\n" + "="*80)
                     print("📊 BOT EVALUATION RESULTS")
                     print("="*80)
-                    print(f"vs RandomBot:     {results['random']:.2f} (W:{results['random_wins']} L:{results['random_losses']} D:{results['random_draws']})")
-                    print(f"vs GreedyBot:     {results['greedy']:.2f} (W:{results['greedy_wins']} L:{results['greedy_losses']} D:{results['greedy_draws']})")
-                    print(f"vs DefensiveBot:  {results['defensive']:.2f} (W:{results['defensive_wins']} L:{results['defensive_losses']} D:{results['defensive_draws']})")
+                    for bot_name in bots:
+                        wr = results[bot_name]
+                        print(f"vs {bot_name:20s}: {wr:.2f} (W:{results[f'{bot_name}_wins']} L:{results[f'{bot_name}_losses']} D:{results[f'{bot_name}_draws']})")
                     print(f"\nCombined Score:   {results['combined']:.2f}")
                     print("="*80 + "\n")
                     return 0
@@ -4419,18 +4653,12 @@ def main():
             print("\n" + "="*80)
             print("📊 FINAL BOT EVALUATION SUMMARY")
             print("="*80)
-            print(
-                f"vs RandomBot:     {results['random']:.2f} "
-                f"(W:{results['random_wins']} L:{results['random_losses']} D:{results['random_draws']})"
-            )
-            print(
-                f"vs GreedyBot:     {results['greedy']:.2f} "
-                f"(W:{results['greedy_wins']} L:{results['greedy_losses']} D:{results['greedy_draws']})"
-            )
-            print(
-                f"vs DefensiveBot:  {results['defensive']:.2f} "
-                f"(W:{results['defensive_wins']} L:{results['defensive_losses']} D:{results['defensive_draws']})"
-            )
+            for bot_name in sorted(results.keys()):
+                if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_reliable', 'eval_duration_seconds', 'total_failed_episodes'):
+                    continue
+                if isinstance(results[bot_name], (int, float)) and f'{bot_name}_wins' in results:
+                    wr = results[bot_name]
+                    print(f"  vs {bot_name:20s}: {wr:.2f} (W:{results[f'{bot_name}_wins']} L:{results[f'{bot_name}_losses']} D:{results[f'{bot_name}_draws']})")
             print(f"Combined Score: {float(require_key(results, 'combined')):.4f}")
             print(f"Worst bot score: {worst_bot_name} = {worst_bot_score:.4f}")
             if worst_scenario_name is not None and worst_scenario_combined is not None:
@@ -4637,9 +4865,7 @@ def main():
                         f"Expected files matching: {args.agent}_scenario_{'self' if scenario_type_name == 'self-play' else 'bot'}*.json"
                     )
 
-                print(f"📋 Found {len(scenario_list)} {scenario_type_name} scenario(s):")
-                for s in scenario_list:
-                    print(f"   - {os.path.basename(s)}")
+                print(f"📋 Found {len(scenario_list)} {scenario_type_name} scenario(s)")
 
                 if len(scenario_list) == 1:
                     # Single scenario - use it directly without rotation

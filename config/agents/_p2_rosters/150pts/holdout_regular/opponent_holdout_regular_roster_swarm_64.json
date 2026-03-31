@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_swarm_64",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 2
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_regular_roster_elite_94",
+  "composition": [
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 1
+    }
+  ]
+}

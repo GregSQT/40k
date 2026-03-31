@@ -132,7 +132,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `--agent <agent_key>` : agent à entraîner (obligatoire pour training ciblé). Détermine le dossier de config et le chemin du modèle.
   - `--training-config <name>` : clé du bloc dans `*_training_config.json` (ex. `default`, `debug`).
   - `--rewards-config <name>` : en pratique le même que `--agent` ou un alias ; utilisé comme `rewards_config_name` et pour charger `*_rewards_config.json`.
-  - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un ou plusieurs bots (RandomBot, GreedyBot, DefensiveBot).
+  - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 7 bots (Tier 1 : Random, Greedy, Defensive, Control ; Tier 2 : AggressiveSmart, DefensiveSmart, Adaptive).
 - **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--new-model` (partir de zéro).
 
 ### Chargement de la config
@@ -178,7 +178,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
 2. **Step logger** (si `--step`) : `StepLogger("step.log", ...)` attaché à `base_env.step_logger` ; désactivé pour les envs vectorisés (SubprocVecEnv).
 3. **ActionMasker** : wrapper SB3 `ActionMasker(base_env, mask_fn)` avec `mask_fn(env) = env.get_action_mask()` pour MaskablePPO.
 4. **Adversaire** :
-   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry, agent_seat_mode=..., global_seed=..., env_rank=...)`. Les bots sont instanciés à partir de `training_config` (ratios, randomness) ou par défaut (RandomBot, GreedyBot, DefensiveBot avec randomness 0.10). Le `agent_seat_mode` détermine quel joueur l'agent contrôle (voir [Seat-Aware Training](#-seat-aware-training-p1--p2--random)).
+   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=unit_registry, agent_seat_mode=..., global_seed=..., env_rank=...)`. Les bots sont instanciés dynamiquement à partir de `training_config` (`bot_training.ratios` + `bot_training.randomness`) — 7 bots disponibles : Tier 1 (Random, Greedy, Defensive, Control) et Tier 2 (AggressiveSmart, DefensiveSmart, Adaptive). Le `agent_seat_mode` détermine quel joueur l'agent contrôle (voir [Seat-Aware Training](#-seat-aware-training-p1--p2--random)).
    - **Self-play** : `SelfPlayWrapper(masked_env, ...)` (autre joueur = copie du modèle, mise à jour périodique).
 5. **Monitor** : `Monitor(wrapped_env)` pour les stats d’épisode (reward, length) utilisées par TensorBoard et les callbacks.
 
@@ -867,7 +867,11 @@ Navigate to the `0_critical/` namespace in TensorBoard - it contains **10 essent
 | `bot_eval/` | `vs_random` | Performance vs RandomBot | Improving |
 | `bot_eval/` | `vs_greedy` | Performance vs GreedyBot | Improving |
 | `bot_eval/` | `vs_defensive` | Performance vs DefensiveBot | Improving |
-| `bot_eval/` | `combined` | Overall bot evaluation | Increasing to 0.70+ |
+| `bot_eval/` | `vs_control` | Performance vs ControlBot | Improving |
+| `bot_eval/` | `vs_aggressive_smart` | Performance vs AggressiveSmartBot | Improving |
+| `bot_eval/` | `vs_defensive_smart` | Performance vs DefensiveSmartBot | Improving |
+| `bot_eval/` | `vs_adaptive` | Performance vs AdaptiveBot | Improving |
+| `bot_eval/` | `combined` | Weighted average across all 7 bots | Increasing to 0.70+ |
 
 ### Success Indicators
 
@@ -917,23 +921,47 @@ Ce document couvre le **monitoring de base** (TensorBoard, 0_critical/, indicate
 
 ### Bot Types
 
-**Random Bot (Easiest)**
+#### Tier 1 — Bots simples (comportement fixe)
+
+**RandomBot (Easiest)**
 - Selects random valid actions
 - No tactical awareness
 - Baseline: Any competent agent should win 90%+
 
-**Greedy Bot (Medium)**
-- Always shoots nearest enemy
-- Moves toward closest target
+**GreedyBot (Medium)**
+- Always shoots nearest enemy, moves aggressively (action 0)
 - Basic threat: Tests if agent learned shooting
-- **Supports randomness parameter** (0.0-0.3) to prevent pattern exploitation
+- **Supports randomness parameter** (0.0-0.3)
 
-**Tactical Bot (Hard)** _(Also called DefensiveBot)_
-- Prioritizes low-HP targets
-- Uses cover when available
-- Avoids being charged
-- Real challenge: Tests full tactical learning
-- **Supports randomness parameter** (0.0-0.3) to prevent pattern exploitation
+**DefensiveBot (Medium-Hard)**
+- Moves defensively (action 2) when threatened, waits otherwise
+- Shoots first available target systematically
+- Tests tactical patience and positioning
+- **Supports randomness parameter** (0.0-0.3)
+
+**ControlBot (Medium)**
+- Moves toward objectives (action 3) when off-objective, holds position once on
+- Objective-focused: Tests if agent can contest/control objectives
+- **Supports randomness parameter** (0.0-0.3)
+
+#### Tier 2 — Bots intelligents (comportement contextuel)
+
+**AggressiveSmartBot (Hard)**
+- Aggressive movement (action 0), always charges (action 9), advances (action 12) if no targets
+- Focus fire: lowest-HP enemy (achever les cibles faibles)
+- Forces l'agent à apprendre advance et charge par exposition
+
+**DefensiveSmartBot (Hard)**
+- Defensive movement (action 2) if threatened, tactical (action 1) otherwise
+- Never charges or advances — purely positional
+- Focus fire: highest-threat enemy (neutraliser les menaces)
+- Tests if agent can beat a cautious, threat-aware opponent
+
+**AdaptiveBot (Hardest)**
+- Adapts strategy based on game state (early/winning/losing postures)
+- Early: objective movement (action 3); Winning: defensive; Losing: aggressive + charge
+- Focus fire: lowest-HP enemy
+- The most challenging bot — tests full adaptive tactical learning
 
 ### Evaluation Commands
 
@@ -990,12 +1018,12 @@ python ai/train.py --agent <agent_key> --scenario bot --eval --test-episodes 20
 
 ### Win Rate Benchmarks
 
-| Training Stage | vs Random | vs Greedy | vs Tactical |
-|----------------|-----------|-----------|-------------|
-| Start          | 30-40%    | 10-20%    | 0-5%        |
-| 1000 episodes  | 60-70%    | 40-50%    | 20-30%      |
-| 3000 episodes  | 80-90%    | 60-70%    | 40-50%      |
-| 5000 episodes  | 90%+      | 75-85%    | 55-65%      |
+| Training Stage | vs Random | vs Greedy | vs Defensive | vs Control | vs Tier 2 (avg) |
+|----------------|-----------|-----------|--------------|------------|-----------------|
+| Start          | 30-40%    | 10-20%   | 5-15%        | 10-20%     | 0-10%           |
+| 1000 episodes  | 60-70%    | 40-50%   | 30-40%       | 35-45%     | 15-25%          |
+| 3000 episodes  | 80-90%    | 60-70%   | 50-60%       | 55-65%     | 35-45%          |
+| 5000 episodes  | 90%+      | 75-85%   | 65-75%       | 65-75%     | 50-60%          |
 
 ---
 
@@ -1003,7 +1031,7 @@ python ai/train.py --agent <agent_key> --scenario bot --eval --test-episodes 20
 
 ### The Problem: Pattern Exploitation vs. Robust Tactics
 
-**Symptom**: Agent performs well against GreedyBot and DefensiveBot but fails against RandomBot
+**Symptom**: Agent performs well against simple bots (Greedy, Defensive) but fails against RandomBot or Tier 2 bots
 
 **Root Cause**: The agent learned to **exploit predictable patterns** instead of developing robust tactical strategies.
 
@@ -1067,56 +1095,71 @@ DefensiveBot(randomness=0.15) # 15% chance of random action
 
 ---
 
-### Solution 3: Increased RandomBot Evaluation Weight
+### Solution 3: Balanced Multi-Bot Evaluation Weights
 
-**Location**: `ai/train.py` (model selection logic)
+**Location**: `config/agents/<agent>/<agent>_training_config.json` → `callback_params.bot_eval_weights`
 
-**Old weights**:
-```python
-combined_score = 0.20 * random + 0.30 * greedy + 0.50 * defensive
-```
-
-**New weights** (Recommended):
-```python
-combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
-```
-
-**Why this helps**:
-- RandomBot performance now impacts overall score significantly
-- Model selection favors agents that handle unpredictability
-- Prevents models that only beat predictable opponents from being saved as "best"
-
-**Recommended weighting**:
-
-```python
-# Balanced weighting (RECOMMENDED)
-combined_score = 0.35 * random + 0.30 * greedy + 0.35 * defensive
-```
-
----
-
-### Solution 4: Weighted Training Bots (Prevent RandomBot Overfitting)
-
-**Symptom**: `b_win_rate_100ep` (training) increases but `a_bot_eval_combined` decreases.
-
-**Root cause**: Agent overfits to RandomBot (easiest opponent) and regresses vs Greedy/Defensive.
-
-**Solution**: Configure bot ratios in `training_config.json` via `bot_training` section.
-
-**Configuration** (in `config/agents/<agent>/<agent>_training_config.json`):
-
+**Configuration actuelle** (7 bots) :
 ```json
-"bot_training": {
-  "ratios": {"random": 0.4, "greedy": 0.3, "defensive": 0.3},
-  "greedy_randomness": 0.10,
-  "defensive_randomness": 0.10
+"bot_eval_weights": {
+  "random": 0.10,
+  "greedy": 0.15,
+  "defensive": 0.15,
+  "control": 0.15,
+  "aggressive_smart": 0.15,
+  "defensive_smart": 0.15,
+  "adaptive": 0.15
 }
 ```
 
-- **ratios**: Must sum to 1.0. Example: 40% Random, 30% Greedy, 30% Defensive (more wins to learn from).
-- **greedy_randomness** / **defensive_randomness**: Lower = stronger bots. Default 0.10 (vs eval's 0.15).
+**Why this helps**:
+- Evaluation couvre 7 profils tactiques distincts (Tier 1 + Tier 2)
+- Poids équilibrés entre bots — aucun bot ne domine le score
+- RandomBot conserve un poids (10%) pour détecter les régressions de base
+- Les bots Tier 2 (advance, charge, focus fire) forcent l'agent à développer des tactiques avancées
 
-**Defaults** when `bot_training` is omitted: 20% Random, 40% Greedy, 40% Defensive.
+**Randomness par bot** (dans `callback_params.bot_eval_randomness`) :
+- Tier 1 : `0.05` (Greedy, Defensive, Control) — peu de bruit, benchmark stable
+- Tier 2 : `0.1` (AggressiveSmart, DefensiveSmart, Adaptive) — léger bruit pour variabilité
+
+---
+
+### Solution 4: Weighted Training Bots (Multi-Tier)
+
+**Symptom**: `b_win_rate_100ep` (training) increases but `a_bot_eval_combined` decreases.
+
+**Root cause**: Agent overfits to simple bots and never apprend advance/charge/focus fire.
+
+**Solution**: Configure bot ratios et randomness dans `training_config.json` via `bot_training`.
+
+**Configuration actuelle** (in `config/agents/<agent>/<agent>_training_config.json`):
+
+```json
+"bot_training": {
+  "ratios": {
+    "random": 0.10,
+    "greedy": 0.15,
+    "defensive": 0.15,
+    "control": 0.15,
+    "aggressive_smart": 0.15,
+    "defensive_smart": 0.15,
+    "adaptive": 0.15
+  },
+  "randomness": {
+    "greedy": 0.05,
+    "defensive": 0.05,
+    "control": 0.05,
+    "aggressive_smart": 0.1,
+    "defensive_smart": 0.1,
+    "adaptive": 0.1
+  }
+}
+```
+
+- **ratios**: Must sum to 1.0. Distribution identique entre eval et training pour cohérence.
+- **randomness**: Format unifié (dict imbriqué). Tier 1 = `0.05`, Tier 2 = `0.1`.
+
+**Defaults** when `bot_training` is omitted: 20% Random, 40% Greedy, 40% Defensive (legacy).
 
 ---
 
@@ -1191,9 +1234,9 @@ every N episodes:
     save current model as "opponent_snapshot"
     train against mix of:
         - 40% current agent
-        - 30% RandomBot
-        - 15% GreedyBot(randomness=0.15)
-        - 15% DefensiveBot(randomness=0.15)
+        - 10% RandomBot
+        - 15% GreedyBot + 15% DefensiveBot + 15% ControlBot
+        - 15% AggressiveSmartBot + 15% DefensiveSmartBot + 15% AdaptiveBot
 ```
 
 This forces continuous adaptation and prevents exploitation strategies.
@@ -1204,21 +1247,22 @@ This forces continuous adaptation and prevents exploitation strategies.
 
 | Setting | Value | Location | Impact |
 |--------|-------|----------|--------|
-| GreedyBot/DefensiveBot (eval) | randomness=0.15 | `ai/bot_evaluation.py` | Standard benchmark |
-| GreedyBot/DefensiveBot (training) | randomness=0.10 | `ai/train.py` | Stronger opponents during training |
-| Training bot ratios | Configurable via `bot_training.ratios` | `training_config.json` | Default 20/40/40; use 40/30/30 for more Random wins |
-| RandomBot eval weight | 35% | `ai/bot_evaluation.py` | Higher importance in combined score |
-| DefensiveBot eval weight | 35% | `ai/bot_evaluation.py` | Balanced with random |
+| Tier 1 bots (eval) | randomness=0.05 | `training_config.json` → `bot_eval_randomness` | Benchmark stable |
+| Tier 2 bots (eval) | randomness=0.10 | `training_config.json` → `bot_eval_randomness` | Variabilité contrôlée |
+| Tier 1 bots (training) | randomness=0.05 | `training_config.json` → `bot_training.randomness` | Adversaires forts |
+| Tier 2 bots (training) | randomness=0.10 | `training_config.json` → `bot_training.randomness` | Adversaires variés |
+| Training/eval bot ratios | 7 bots, ~15% each (random 10%) | `training_config.json` | Distribution équilibrée |
+| Eval weights | 7 bots, ~15% each (random 10%) | `training_config.json` → `bot_eval_weights` | Score combiné multi-profil |
 
 ---
 
 ### Troubleshooting Overfitting
 
 **Agent still struggles vs RandomBot after 1000 episodes**:
-- Increase GreedyBot/DefensiveBot randomness to 0.20-0.25
+- Increase Tier 1 bot randomness to 0.15-0.20
 - Further reduce wait penalty to -0.5
 - Consider starting fresh training
-- Check that combined_score weights favor RandomBot performance
+- Check that `bot_eval_weights` doesn't over-penalize RandomBot performance
 
 **Agent becomes too passive**:
 - Increase wait penalty (make more negative: -0.5 → -1.0)

@@ -6,15 +6,23 @@
       "count": 1
     },
     {
-      "unit_type": "DeathCompanyMarineEviscerator",
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardAngelus",
-      "count": 2
+      "unit_type": "Intercessor",
+      "count": 1
     },
     {
-      "unit_type": "Scout",
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
       "count": 1
     }
   ]

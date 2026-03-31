@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_hard_roster_swarm_78",
+  "composition": [
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 3
+    },
+    {
+      "unit_type": "GuardianDefender",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    }
+  ]
+}

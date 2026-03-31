@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_elite_53",
+  "composition": [
+    {
+      "unit_type": "AggressorBoltStorm",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMultiMelta",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 1
+    }
+  ]
+}

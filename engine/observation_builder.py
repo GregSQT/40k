@@ -29,6 +29,7 @@ from engine.macro_intents import (
     DETAIL_ALLY,
     DETAIL_NONE,
 )
+from engine.weapon_damage_cache import lookup_best_weapon
 
 class ObservationBuilder:
     """Builds observations for the agent."""
@@ -797,74 +798,6 @@ class ObservationBuilder:
                 result[key] = bool(los_cache[target_id])
         return result
 
-    def _calculate_kill_probability(self, shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
-        """
-        Calculate actual probability to kill target this turn considering W40K dice mechanics.
-        MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
-
-        Considers:
-        - Hit probability (weapon.ATK vs d6)
-        - Wound probability (weapon.STR vs target T)
-        - Save failure probability (target saves vs weapon.AP)
-        - Number of attacks (weapon.NB)
-        - Damage per successful wound (weapon.DMG)
-
-        Returns: 0.0-1.0 probability
-        """
-        current_phase = game_state["phase"]
-        
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon or best weapon
-        from engine.ai.weapon_selector import get_best_weapon_for_target
-
-        if current_phase == "shoot":
-            # Get best weapon for this target
-            best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=True)
-            rng_weapons = require_key(shooter, "RNG_WEAPONS")
-            if best_weapon_idx < 0 or best_weapon_idx >= len(rng_weapons):
-                raise ValueError(f"Invalid best ranged weapon index {best_weapon_idx} for shooter_id={shooter.get('id')}")
-            weapon = rng_weapons[best_weapon_idx]
-            
-            hit_target = weapon["ATK"]
-            strength = weapon["STR"]
-            damage = expected_dice_value(require_key(weapon, "DMG"), "kill_prob_rng_dmg")
-            num_attacks = expected_dice_value(require_key(weapon, "NB"), "kill_prob_rng_nb")
-            ap = weapon["AP"]
-        else:
-            # Get best weapon for this target
-            best_weapon_idx, _ = get_best_weapon_for_target(shooter, target, game_state, is_ranged=False)
-            cc_weapons = require_key(shooter, "CC_WEAPONS")
-            if best_weapon_idx < 0 or best_weapon_idx >= len(cc_weapons):
-                raise ValueError(f"Invalid best melee weapon index {best_weapon_idx} for shooter_id={shooter.get('id')}")
-            weapon = cc_weapons[best_weapon_idx]
-            
-            hit_target = weapon["ATK"]
-            strength = weapon["STR"]
-            damage = expected_dice_value(require_key(weapon, "DMG"), "kill_prob_cc_dmg")
-            num_attacks = expected_dice_value(require_key(weapon, "NB"), "kill_prob_cc_nb")
-            ap = weapon["AP"]
-        
-        p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
-        
-        if "T" not in target:
-            raise KeyError(f"Target missing required 'T' field: {target}")
-        wound_target = self._calculate_wound_target(strength, target["T"])
-        p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
-        
-        # Save failure probability (uses imported function from shooting_handlers)
-        save_target = _calculate_save_target(target, ap)
-        p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
-        
-        p_damage_per_attack = p_hit * p_wound * p_fail_save
-        expected_damage = num_attacks * p_damage_per_attack * damage
-        
-        target_hp = get_hp_from_cache(str(target["id"]), game_state)
-        if target_hp is None:
-            target_hp = 0
-        if expected_damage >= target_hp:
-            return 1.0
-        else:
-            return min(1.0, expected_damage / target_hp)
-
     def _use_ranged_scoring_for_phase(self, game_state: Dict[str, Any]) -> bool:
         """
         Resolve phase-aware weapon mode for target scoring features.
@@ -888,16 +821,27 @@ class ObservationBuilder:
         """
         Common scoring service used by enemy and valid-target encoding.
 
+        Uses _best_weapon_cache for O(1) lookup (pre-computed at episode reset).
+
         Returns:
             (best_weapon_index, best_kill_probability, is_ranged_mode)
         """
-        from engine.ai.weapon_selector import get_best_weapon_for_target
-
         is_ranged_mode = self._use_ranged_scoring_for_phase(game_state)
-        best_weapon_idx, best_kill_prob = get_best_weapon_for_target(
-            attacker, target, game_state, is_ranged=is_ranged_mode
+        cache = game_state.get("_best_weapon_cache")
+        if cache is None:
+            return (-1, 0.0, is_ranged_mode)
+
+        hp_cur = get_hp_from_cache(str(target["id"]), game_state)
+        if hp_cur is None or hp_cur <= 0:
+            return (-1, 0.0, is_ranged_mode)
+
+        best_idx, best_dmg = lookup_best_weapon(
+            cache, str(attacker["id"]), str(target["id"]), is_ranged_mode,
         )
-        return best_weapon_idx, best_kill_prob, is_ranged_mode
+        if best_idx < 0 or best_dmg <= 0.0:
+            return (-1, 0.0, is_ranged_mode)
+        kp = min(1.0, best_dmg / float(hp_cur))
+        return best_idx, kp, is_ranged_mode
     
     def _calculate_danger_probability(self, defender: Dict[str, Any], attacker: Dict[str, Any], game_state: Dict[str, Any],
                                      positions: Optional[Dict[str, Tuple[int, int]]] = None) -> float:
@@ -947,64 +891,29 @@ class ObservationBuilder:
             self._danger_probability_cache[cache_key] = 0.0
             return 0.0
 
-        # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use best weapon for this defender
-        from engine.ai.weapon_selector import get_best_weapon_for_target
-        
-        if can_use_ranged and not can_use_melee:
-            # Use best ranged weapon
-            best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=True)
-            rng_weapons = require_key(attacker, "RNG_WEAPONS")
-            if best_weapon_idx < 0 or best_weapon_idx >= len(rng_weapons):
-                raise ValueError(f"Invalid best ranged weapon index {best_weapon_idx} for attacker_id={attacker.get('id')}")
-            weapon = rng_weapons[best_weapon_idx]
-            
-            hit_target = weapon["ATK"]
-            strength = weapon["STR"]
-            damage = expected_dice_value(require_key(weapon, "DMG"), "danger_rng_dmg")
-            num_attacks = expected_dice_value(require_key(weapon, "NB"), "danger_rng_nb")
-            ap = weapon["AP"]
-        else:
-            # Use best melee weapon (or if both available, prefer melee if in range)
-            best_weapon_idx, _ = get_best_weapon_for_target(attacker, defender, game_state, is_ranged=False)
-            cc_weapons = require_key(attacker, "CC_WEAPONS")
-            if best_weapon_idx < 0 or best_weapon_idx >= len(cc_weapons):
-                raise ValueError(f"Invalid best melee weapon index {best_weapon_idx} for attacker_id={attacker.get('id')}")
-            weapon = cc_weapons[best_weapon_idx]
-            
-            hit_target = weapon["ATK"]
-            strength = weapon["STR"]
-            damage = expected_dice_value(require_key(weapon, "DMG"), "danger_cc_dmg")
-            num_attacks = expected_dice_value(require_key(weapon, "NB"), "danger_cc_nb")
-            ap = weapon["AP"]
-        
-        if num_attacks == 0:
-            self._danger_probability_cache[cache_key] = 0.0
-            return 0.0
-        
-        p_hit = max(0.0, min(1.0, (7 - hit_target) / 6.0))
-        
-        if "T" not in defender:
-            self._danger_probability_cache[cache_key] = 0.0
-            return 0.0
-        wound_target = self._calculate_wound_target(strength, defender["T"])
-        p_wound = max(0.0, min(1.0, (7 - wound_target) / 6.0))
-        
-        save_target = _calculate_save_target(defender, ap)
-        p_fail_save = max(0.0, min(1.0, (save_target - 1) / 6.0))
-        
-        p_damage_per_attack = p_hit * p_wound * p_fail_save
-        expected_damage = num_attacks * p_damage_per_attack * damage
-        
+        bwc = game_state.get("_best_weapon_cache")
         defender_hp = get_hp_from_cache(str(defender["id"]), game_state)
-        if defender_hp is None:
-            defender_hp = 0
-        if expected_damage >= defender_hp:
+        if defender_hp is None or defender_hp <= 0:
             self._danger_probability_cache[cache_key] = 1.0
             return 1.0
+
+        if bwc is not None:
+            is_ranged = can_use_ranged and not can_use_melee
+            _, best_exp_dmg = lookup_best_weapon(
+                bwc, str(attacker["id"]), str(defender["id"]), is_ranged,
+            )
         else:
-            result = min(1.0, expected_damage / defender_hp)
-            self._danger_probability_cache[cache_key] = result
-            return result
+            best_exp_dmg = 0.0
+
+        if best_exp_dmg <= 0.0:
+            self._danger_probability_cache[cache_key] = 0.0
+            return 0.0
+        if best_exp_dmg >= defender_hp:
+            self._danger_probability_cache[cache_key] = 1.0
+            return 1.0
+        result = min(1.0, best_exp_dmg / defender_hp)
+        self._danger_probability_cache[cache_key] = result
+        return result
     
     def _calculate_army_weighted_threat(self, target: Dict[str, Any], valid_targets: List[Dict[str, Any]], game_state: Dict[str, Any])  -> float:
         """
@@ -2028,11 +1937,12 @@ class ObservationBuilder:
                 obs[feature_base + 10] = is_valid
                 
                 # Feature 11-12: best_weapon_index + best_kill_probability (phase-aware)
-                best_weapon_idx, best_kill_prob, _ = self._get_phase_aware_best_weapon_features(
+                # Called ONCE and reused for Feature 17 (was called twice before)
+                phase_best_idx, phase_best_kp, phase_is_ranged = self._get_phase_aware_best_weapon_features(
                     active_unit, enemy, game_state
                 )
-                obs[feature_base + 11] = best_weapon_idx / 2.0 if best_weapon_idx >= 0 else 0.0
-                obs[feature_base + 12] = best_kill_prob
+                obs[feature_base + 11] = phase_best_idx / 2.0 if phase_best_idx >= 0 else 0.0
+                obs[feature_base + 12] = phase_best_kp
                 
                 # Feature 13: danger_to_me (était feature 12) - DÉCALÉ
                 obs[feature_base + 13] = self._calculate_danger_probability(active_unit, enemy, game_state, positions)
@@ -2050,92 +1960,56 @@ class ObservationBuilder:
                 obs[feature_base + 14] = min(1.0, visibility / 6.0)  # visibility_to_allies (était feature 13)
                 obs[feature_base + 15] = min(1.0, combined_threat / 5.0)  # combined_friendly_threat (était feature 14)
                 
-                # Feature 16: melee_charge_preference (0.0-1.0) - AMÉLIORÉ POST-ÉTAPE 9
-                # Compare TTK melee vs TTK range pour le meilleur allié melee
-                # 1.0 = melee est beaucoup plus efficace (charge préféré)
-                # 0.0 = range est plus efficace (ne chargerait pas)
-                # 0.5 = équivalent
-                from engine.ai.weapon_selector import get_best_weapon_for_target, calculate_ttk_with_weapon
-                best_melee_ally = None
+                # Feature 16: melee_charge_preference (0.0-1.0)
+                # Uses _best_weapon_cache for O(1) lookups per ally×enemy pair.
+                bwc = game_state.get("_best_weapon_cache")
+                enemy_hp = get_hp_from_cache(str(enemy["id"]), game_state)
+                enemy_hp_f = float(enemy_hp) if enemy_hp and enemy_hp > 0 else 1.0
+
                 best_melee_ttk = float('inf')
                 best_range_ttk = float('inf')
-                
-                current_player = game_state["current_player"]
-                for ally in game_state["units"]:
-                    if (ally["player"] == current_player and 
-                        is_unit_alive(str(ally["id"]), game_state) and
-                        ally.get("CC_WEAPONS") and len(ally["CC_WEAPONS"]) > 0 and  # A des armes melee
-                        ally.get("RNG_WEAPONS") and len(ally["RNG_WEAPONS"]) > 0):  # A aussi des armes range
-                        
-                        ally_col, ally_row = positions[str(ally["id"])]
-                        enemy_col, enemy_row = positions[str(enemy["id"])]
-                        ally_distance = calculate_hex_distance(
-                            ally_col, ally_row,
-                            enemy_col, enemy_row,
-                        )
-                        if "MOVE" not in ally:
-                            raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
-                        max_charge_range = ally["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
-                        
-                        if ally_distance <= max_charge_range:
-                            # TTK avec meilleure arme melee
-                            best_melee_weapon_idx, _ = get_best_weapon_for_target(
-                                ally, enemy, game_state, is_ranged=False
-                            )
-                            melee_ttk = 100.0
-                            if best_melee_weapon_idx >= 0:
-                                melee_weapon = ally["CC_WEAPONS"][best_melee_weapon_idx]
-                                melee_ttk = calculate_ttk_with_weapon(ally, melee_weapon, enemy, game_state)
-                            
-                            # TTK avec meilleure arme range
-                            best_range_weapon_idx, _ = get_best_weapon_for_target(
-                                ally, enemy, game_state, is_ranged=True
-                            )
-                            range_ttk = 100.0
-                            if best_range_weapon_idx >= 0:
-                                range_weapon = ally["RNG_WEAPONS"][best_range_weapon_idx]
-                                range_ttk = calculate_ttk_with_weapon(ally, range_weapon, enemy, game_state)
-                            
-                            if melee_ttk < best_melee_ttk:
-                                best_melee_ally = ally
-                                best_melee_ttk = melee_ttk
-                                best_range_ttk = range_ttk
-                
-                if best_melee_ally and best_range_ttk > 0:
-                    # Normaliser: 1.0 si melee 2x plus rapide, 0.0 si range 2x plus rapide
+                found_melee_ally = False
+
+                enemy_id_str = str(enemy["id"])
+                enemy_col, enemy_row = positions[enemy_id_str]
+                for ally_id, ally in allies_list:
+                    if not ally.get("CC_WEAPONS") or not ally.get("RNG_WEAPONS"):
+                        continue
+
+                    ally_col, ally_row = positions[ally_id]
+                    ally_distance = calculate_hex_distance(ally_col, ally_row, enemy_col, enemy_row)
+                    if "MOVE" not in ally:
+                        raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
+                    if ally_distance > ally["MOVE"] + 12:
+                        continue
+
+                    if bwc is not None:
+                        _, melee_dmg = lookup_best_weapon(bwc, ally_id, enemy_id_str, False)
+                        _, range_dmg = lookup_best_weapon(bwc, ally_id, enemy_id_str, True)
+                    else:
+                        melee_dmg = 0.0
+                        range_dmg = 0.0
+                    melee_ttk = enemy_hp_f / melee_dmg if melee_dmg > 0 else 100.0
+                    range_ttk = enemy_hp_f / range_dmg if range_dmg > 0 else 100.0
+
+                    if melee_ttk < best_melee_ttk:
+                        found_melee_ally = True
+                        best_melee_ttk = melee_ttk
+                        best_range_ttk = range_ttk
+
+                if found_melee_ally and best_range_ttk > 0:
                     ratio = best_range_ttk / best_melee_ttk if best_melee_ttk > 0 else 0.0
-                    # Ratio > 1.0 = melee plus rapide (préféré)
-                    # Ratio < 1.0 = range plus rapide (ne chargerait pas)
-                    # Normaliser: (ratio - 0.5) * 2.0 maps 0.5->0.0, 1.0->1.0, 2.0->3.0 (clamp to 1.0)
                     obs[feature_base + 16] = min(1.0, max(0.0, (ratio - 0.5) * 2.0))
                 else:
-                    obs[feature_base + 16] = 0.0  # Pas d'allié melee ou pas de comparaison possible
-                
-                # Feature 17: target_efficiency (0.0-1.0) - AMÉLIORÉ POST-ÉTAPE 9
-                # TTK avec ma meilleure arme contre cette cible
-                # Normalisé: 1.0 = je peux tuer en 1 tour, 0.0 = je ne peux pas tuer (ou très lent)
-                best_weapon_idx, _, is_ranged_mode = self._get_phase_aware_best_weapon_features(
-                    active_unit, enemy, game_state
-                )
+                    obs[feature_base + 16] = 0.0
 
-                if is_ranged_mode:
-                    weapons = require_key(active_unit, "RNG_WEAPONS")
-                else:
-                    weapons = require_key(active_unit, "CC_WEAPONS")
-
-                if best_weapon_idx >= 0:
-                    if best_weapon_idx >= len(weapons):
-                        raise ValueError(
-                            f"Phase-aware best weapon index out of range: idx={best_weapon_idx}, "
-                            f"weapons_len={len(weapons)}, is_ranged_mode={is_ranged_mode}, "
-                            f"active_unit_id={active_unit.get('id')}, target_id={enemy.get('id')}"
-                        )
-                    weapon = weapons[best_weapon_idx]
-                    ttk = calculate_ttk_with_weapon(active_unit, weapon, enemy, game_state)
-                    # Normaliser: 1.0 = ttk ≤ 1, 0.0 = ttk ≥ 5
+                # Feature 17: target_efficiency — derived from phase_best_kp (Feature 11-12)
+                # kp = min(1, dmg/hp) → TTK = 1/kp when kp < 1, else 1.0
+                if phase_best_idx >= 0 and phase_best_kp > 0.0:
+                    ttk = 1.0 if phase_best_kp >= 1.0 else 1.0 / phase_best_kp
                     obs[feature_base + 17] = max(0.0, min(1.0, 1.0 - (ttk - 1.0) / 4.0))
                 else:
-                    obs[feature_base + 17] = 0.0  # Pas d'armes disponibles dans le mode de phase
+                    obs[feature_base + 17] = 0.0
                 
                 # Feature 18: is_adjacent (était feature 18 originale) - INCHANGÉ
                 obs[feature_base + 18] = 1.0 if distance <= 1 else 0.0

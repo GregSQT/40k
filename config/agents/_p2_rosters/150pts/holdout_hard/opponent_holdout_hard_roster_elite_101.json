@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_elite_101",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardCrushingClaws",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardScytingTalon",
+      "count": 1
+    }
+  ]
+}

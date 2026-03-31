@@ -2,23 +2,27 @@
   "roster_id": "opponent_training_roster_troop_13",
   "composition": [
     {
-      "unit_type": "BladeguardVeteranSergeant",
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyJumpPackEviscerator",
       "count": 1
     },
     {
-      "unit_type": "BloodClawPackLeader",
+      "unit_type": "Incursor",
       "count": 1
     },
     {
-      "unit_type": "RaptorPlasmaGun",
+      "unit_type": "Scout",
+      "count": 3
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardAngelus",
-      "count": 1
-    },
-    {
-      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "unit_type": "WarpSpiderExarchPowerblade",
       "count": 1
     }
   ]

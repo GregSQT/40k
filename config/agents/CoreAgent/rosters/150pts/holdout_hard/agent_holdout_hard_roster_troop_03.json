@@ -6,19 +6,23 @@
       "count": 1
     },
     {
-      "unit_type": "IntercessorSergeant",
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 2
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "RaptorPlasmaGun",
+      "unit_type": "TyranidWarriorMelee",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardInferno",
-      "count": 1
-    },
-    {
-      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "unit_type": "TyranidWarriorRanged",
       "count": 1
     }
   ]

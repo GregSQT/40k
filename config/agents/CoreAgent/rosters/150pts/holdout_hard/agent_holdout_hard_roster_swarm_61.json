@@ -1,0 +1,17 @@
+{
+  "roster_id": "agent_holdout_hard_roster_swarm_61",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 3
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    }
+  ]
+}

@@ -32,10 +32,18 @@ from config_loader import get_config_loader
 
 # Import evaluation bots for testing - flag used by print_final_training_summary
 try:
-    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+    from ai.evaluation_bots import (
+        RandomBot, GreedyBot, DefensiveBot, ControlBot,
+        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+    )
     EVALUATION_BOTS_AVAILABLE = True
 except ImportError:
     EVALUATION_BOTS_AVAILABLE = False
+
+ALL_BOT_NAMES = frozenset([
+    "random", "greedy", "defensive", "control",
+    "aggressive_smart", "defensive_smart", "adaptive",
+])
 
 __all__ = [
     'LearningRateScheduleCallback',
@@ -808,9 +816,10 @@ class MetricsCollectionCallback(BaseCallback):
                     self.metrics_tracker.writer.flush()
                 
                 # Print results
-                print(f"vs RandomBot:     {bot_results['random']:.2f} ({bot_results['random_wins']}/{n_final} wins)")
-                print(f"vs GreedyBot:     {bot_results['greedy']:.2f} ({bot_results['greedy_wins']}/{n_final} wins)")
-                print(f"vs DefensiveBot:  {bot_results['defensive']:.2f} ({bot_results['defensive_wins']}/{n_final} wins)")
+                for bk in ALL_BOT_NAMES:
+                    if bk in bot_results:
+                        label = bk.replace("_", " ").title() + "Bot"
+                        print(f"vs {label+':':<22s}{bot_results[bk]:.2f} ({bot_results.get(f'{bk}_wins', '?')}/{n_final} wins)")
                 print(f"\nCombined Score:   {bot_results['combined']:.2f} {'✅' if bot_results['combined'] >= 0.70 else '⚠️'}")
                 scenario_scores = bot_results.get("scenario_scores")
                 if isinstance(scenario_scores, dict) and scenario_scores:
@@ -1591,10 +1600,10 @@ class BotEvaluationCallback(BaseCallback):
             return True
 
         combined_score = float(require_key(results, "combined"))
-        random_score = float(require_key(results, "random"))
-        greedy_score = float(require_key(results, "greedy"))
-        defensive_score = float(require_key(results, "defensive"))
-        worst_bot_score = min(random_score, greedy_score, defensive_score)
+        bot_score_keys = [k for k in results if k in ALL_BOT_NAMES]
+        if not bot_score_keys:
+            raise ValueError("No bot scores found in results")
+        worst_bot_score = min(float(results[k]) for k in bot_score_keys)
 
         scenario_scores = require_key(results, "scenario_scores")
         if not isinstance(scenario_scores, dict) or not scenario_scores:
@@ -1876,14 +1885,10 @@ class BotEvaluationCallback(BaseCallback):
     @staticmethod
     def _extract_robust_worst_cases(results: Dict[str, Any]) -> Dict[str, Optional[Any]]:
         """Extract worst bot/scenario identifiers and scores from evaluation results."""
-        random_score = float(require_key(results, "random"))
-        greedy_score = float(require_key(results, "greedy"))
-        defensive_score = float(require_key(results, "defensive"))
-        bot_scores = {
-            "random": random_score,
-            "greedy": greedy_score,
-            "defensive": defensive_score,
-        }
+        bot_score_keys = [k for k in results if k in ALL_BOT_NAMES]
+        if not bot_score_keys:
+            raise ValueError("No bot scores found in results")
+        bot_scores = {k: float(results[k]) for k in bot_score_keys}
         worst_bot_name, worst_bot_score = min(bot_scores.items(), key=lambda item: item[1])
 
         scenario_scores = require_key(results, "scenario_scores")
@@ -1953,11 +1958,11 @@ class BotEvaluationCallback(BaseCallback):
 
         if self.metrics_tracker:
             bot_results = {
-                'random': results['random'],
-                'greedy': results['greedy'],
-                'defensive': results['defensive'],
                 'combined': combined_win_rate
             }
+            for bk in ALL_BOT_NAMES:
+                if bk in results:
+                    bot_results[bk] = results[bk]
             if 'holdout_hard_mean' in results:
                 bot_results['holdout_hard_mean'] = float(results['holdout_hard_mean'])
             self.metrics_tracker.log_bot_evaluations(bot_results, step=int(eval_marker))
@@ -1992,11 +1997,8 @@ class BotEvaluationCallback(BaseCallback):
             tau_b = float(self.model_gating_min_worst_bot)
             tau_h = float(self.model_gating_min_worst_scenario_combined)
 
-            worst_bot_score = min(
-                float(require_key(results, "random")),
-                float(require_key(results, "greedy")),
-                float(require_key(results, "defensive")),
-            )
+            robust_bot_keys = [k for k in results if k in ALL_BOT_NAMES]
+            worst_bot_score = min(float(results[k]) for k in robust_bot_keys)
             penalty_bot = self.robust_penalty_bot * max(0.0, tau_b - worst_bot_score) ** 2
 
             penalty_hard = 0.0

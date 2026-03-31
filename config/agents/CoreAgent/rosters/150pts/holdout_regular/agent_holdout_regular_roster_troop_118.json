@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_regular_roster_troop_118",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 2
+    }
+  ]
+}

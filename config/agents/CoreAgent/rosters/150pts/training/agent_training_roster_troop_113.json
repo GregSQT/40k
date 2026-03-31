@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_training_roster_troop_113",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 2
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

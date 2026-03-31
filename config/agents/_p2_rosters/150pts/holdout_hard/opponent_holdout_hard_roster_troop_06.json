@@ -2,23 +2,35 @@
   "roster_id": "opponent_holdout_hard_roster_troop_06",
   "composition": [
     {
-      "unit_type": "SanguinaryGuardAngelus",
+      "unit_type": "AssaultIntercessorJumpPack",
       "count": 1
     },
     {
-      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragonExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
       "count": 1
     },
     {
       "unit_type": "Suppressor",
-      "count": 1
-    },
-    {
-      "unit_type": "TyranidWarriorRanged",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpiderExarchPowerblade",
       "count": 1
     }
   ]

@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_swarm_04",
+  "composition": [
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 3
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 3
+    }
+  ]
+}

@@ -1024,7 +1024,7 @@ def _select_strategic_destination(
     AI_TURN.md COMPLIANCE: Pure stateless function with direct field access.
 
     Args:
-        strategy_id: 0=aggressive, 1=tactical, 2=defensive, 3=random
+        strategy_id: 0=aggressive, 1=tactical, 2=defensive, 3=objective
         valid_destinations: List of valid (col, row) tuples from BFS
         unit: Unit dict with position and stats
         game_state: Full game state for enemy detection
@@ -1120,10 +1120,31 @@ def _select_strategic_destination(
 
         return best_dest
 
-    # STRATEGY 3: RANDOM - Pick random destination for exploration
+    # STRATEGY 3: OBJECTIVE - Move closest to nearest objective hex
     else:
-        import random
-        return random.choice(valid_destinations)
+        objectives = game_state.get("objectives")
+        if objectives:
+            objective_hexes: List[Tuple[int, int]] = []
+            for obj in objectives:
+                hexes = obj.get("hexes", []) if isinstance(obj, dict) else []
+                for h in hexes:
+                    if isinstance(h, dict):
+                        objective_hexes.append((int(h["col"]), int(h["row"])))
+                    elif isinstance(h, (list, tuple)) and len(h) == 2:
+                        objective_hexes.append((int(h[0]), int(h[1])))
+
+            if objective_hexes:
+                best_dest = valid_destinations[0]
+                min_dist = float('inf')
+                for dest in valid_destinations:
+                    for obj_col, obj_row in objective_hexes:
+                        dist = calculate_hex_distance(dest[0], dest[1], obj_col, obj_row)
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_dest = dest
+                return best_dest
+
+        return valid_destinations[0]
 
 
 def movement_preview(valid_destinations: List[Tuple[int, int]]) -> Dict[str, Any]:

@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_regular_roster_troop_86",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 2
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 2
+    }
+  ]
+}

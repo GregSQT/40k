@@ -2,15 +2,19 @@
   "roster_id": "agent_training_roster_troop_11",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPack",
+      "unit_type": "BladeguardVeteranSergeant",
       "count": 1
     },
     {
-      "unit_type": "IntercessorSergeant",
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DarkReaperExarch",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardAngelus",
+      "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
@@ -18,7 +22,7 @@
       "count": 1
     },
     {
-      "unit_type": "Zoanthrope",
+      "unit_type": "WarpSpiderExarchSpinner",
       "count": 1
     }
   ]

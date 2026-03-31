@@ -3,7 +3,6 @@
 pve_controller.py - PvE mode AI opponent
 """
 
-import torch
 import numpy as np
 import os
 from typing import Dict, Any, Tuple, List
@@ -314,6 +313,7 @@ class PvEController:
         unit_observation = engine.build_observation_for_unit(str(unit_id))
         unit_observation = self._normalize_obs_for_inference(unit_observation, micro_model_path)
         obs_tensor, _ = micro_model.policy.obs_to_tensor(unit_observation)
+        import torch
         with torch.no_grad():
             value_tensor = micro_model.policy.predict_values(obs_tensor)
         value_array = value_tensor.detach().cpu().numpy().reshape(-1)

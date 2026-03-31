@@ -1,0 +1,17 @@
+{
+  "roster_id": "agent_training_roster_elite_56",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 3
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    }
+  ]
+}

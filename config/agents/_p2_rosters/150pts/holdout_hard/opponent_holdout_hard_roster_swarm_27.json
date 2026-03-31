@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_swarm_27",
+  "composition": [
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 3
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 2
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

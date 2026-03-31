@@ -9,7 +9,6 @@ import threading
 import time
 import copy
 from pathlib import Path
-import torch
 import json
 import random
 import gymnasium as gym
@@ -19,6 +18,7 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 # Import shared utilities
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
+from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
 
 # Phase handlers (existing - keep these)
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
@@ -44,6 +44,69 @@ from engine.pve_controller import PvEController
 
 # Global flag to ensure debug.log is cleared only once per training session
 _debug_log_cleared = False
+
+# PERF: In-memory cache for topology arrays (keyed by wall_id string).
+# Avoids re-reading .npz from disk every episode during scenario rotation.
+# Each entry: (los_array, pathfinding_array, wall_edge_array).
+_topology_cache: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+
+
+def _load_topology_cached(
+    wall_ref: Optional[str],
+    board_cols: int,
+    board_rows: int,
+    game_state: Dict[str, Any],
+) -> None:
+    """
+    Load precomputed LoS/pathfinding/wall_edge topology into game_state.
+
+    Uses module-level _topology_cache to avoid repeated disk I/O.
+    First call per wall_id reads from disk; subsequent calls copy from memory.
+    """
+    if not wall_ref:
+        for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
+            game_state.pop(key, None)
+        return
+
+    wall_ref_s = str(wall_ref).strip()
+    _stem = wall_ref_s.replace(".json", "").strip()
+    if wall_ref_s.startswith("walls-") and _stem[6:].isdigit():
+        wall_id = _stem[6:]
+    else:
+        wall_id = _stem
+
+    if not wall_id:
+        for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
+            game_state.pop(key, None)
+        return
+
+    cache_key = f"{board_cols}x{board_rows}-{wall_id}"
+
+    if cache_key not in _topology_cache:
+        _root = Path(__file__).resolve().parent.parent
+        _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
+        _topology_path = _board_dir / f"topology_{cache_key}.npz"
+        if not _topology_path.exists():
+            raise FileNotFoundError(
+                f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
+                f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
+            )
+        try:
+            with np.load(str(_topology_path)) as topo:
+                _topology_cache[cache_key] = (
+                    topo["los"].copy(),
+                    topo["pathfinding"].copy(),
+                    topo["wall_edge"].copy(),
+                )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load LoS topology from {_topology_path}: {exc}"
+            ) from exc
+
+    los, pathfinding, wall_edge = _topology_cache[cache_key]
+    game_state["los_topology"] = los
+    game_state["pathfinding_topology"] = pathfinding
+    game_state["wall_edge_topology"] = wall_edge
 
 _engine_id_counter = 0
 _engine_id_lock = threading.Lock()
@@ -438,37 +501,13 @@ class W40KEngine(gym.Env):
         }
 
         # Load precomputed LoS topology if wall_ref available (PERF: ~1000x faster LoS lookups)
-        # CRITICAL: Clear topology when no wall_ref to avoid stale data from previous scenario
-        wall_ref = getattr(self, "_scenario_wall_ref", None)
-        if not wall_ref:
-            for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
-                self.game_state.pop(key, None)
-        else:
-            wall_ref = str(wall_ref).strip()
-            # wall_id: walls-01.json -> 01; tutorial_walls-01.json -> tutorial_walls-01
-            _stem = wall_ref.replace(".json", "").strip()
-            if wall_ref.startswith("walls-") and _stem[6:].isdigit():
-                wall_id = _stem[6:]
-            else:
-                wall_id = _stem
-            if wall_id:
-                _root = Path(__file__).resolve().parent.parent
-                _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
-                _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
-                if not _topology_path.exists():
-                    raise FileNotFoundError(
-                        f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
-                        f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
-                    )
-                try:
-                    with np.load(str(_topology_path)) as topo:
-                        self.game_state["los_topology"] = topo["los"].copy()
-                        self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
-                        self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Failed to load LoS topology from {_topology_path}: {exc}"
-                    ) from exc
+        _load_topology_cached(
+            getattr(self, "_scenario_wall_ref", None),
+            board_cols, board_rows,
+            self.game_state,
+        )
+
+        self.game_state["weapon_damage_table"] = load_weapon_damage_table()
 
         objectives = require_key(self.game_state, "objectives")
         if not objectives:
@@ -488,6 +527,9 @@ class W40KEngine(gym.Env):
         
         # Initialize units from config AFTER game_state exists
         self._initialize_units()
+
+        for unit in self.game_state["units"]:
+            stamp_weapon_keys(unit)
 
         # Build reward configs for all units present in the scenario.
         reward_configs = self._build_reward_configs_for_current_units()
@@ -811,6 +853,12 @@ class W40KEngine(gym.Env):
             uid: {"col": d["col"], "row": d["row"], "HP_CUR": d["HP_CUR"], "player": d["player"]}
             for uid, d in uc.items()
         }
+
+        self.game_state["_best_weapon_cache"] = build_best_weapon_cache(
+            self.game_state["units"],
+            require_key(self.game_state, "weapon_damage_table"),
+            uc,
+        )
 
         # Load AI model for PvE mode after units_cache is built
         if self.is_pve_mode and self.pve_controller.ai_model is None:
@@ -4105,35 +4153,15 @@ class W40KEngine(gym.Env):
 
         board_cols = self.game_state.get("board_cols")
         board_rows = self.game_state.get("board_rows")
-        # CRITICAL: Clear topology when no wall_ref to avoid stale data from previous scenario
-        if not scenario_wall_ref:
+        if isinstance(board_cols, int) and isinstance(board_rows, int):
+            _load_topology_cached(
+                scenario_wall_ref, board_cols, board_rows, self.game_state,
+            )
+        elif not scenario_wall_ref:
             for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
                 self.game_state.pop(key, None)
-        elif isinstance(board_cols, int) and isinstance(board_rows, int):
-            wall_ref = str(scenario_wall_ref).strip()
-            _stem = wall_ref.replace(".json", "").strip()
-            if wall_ref.startswith("walls-") and len(_stem) > 6 and _stem[6:].isdigit():
-                wall_id = _stem[6:]
-            else:
-                wall_id = _stem
-            if wall_id:
-                _root = Path(__file__).resolve().parent.parent
-                _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
-                _topology_path = _board_dir / f"topology_{board_cols}x{board_rows}-{wall_id}.npz"
-                if not _topology_path.exists():
-                    raise FileNotFoundError(
-                        f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
-                        f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
-                    )
-                try:
-                    with np.load(str(_topology_path)) as topo:
-                        self.game_state["los_topology"] = topo["los"].copy()
-                        self.game_state["pathfinding_topology"] = topo["pathfinding"].copy()
-                        self.game_state["wall_edge_topology"] = topo["wall_edge"].copy()
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Failed to load LoS topology from {_topology_path}: {exc}"
-                    ) from exc
+
+        self.game_state["weapon_damage_table"] = load_weapon_damage_table()
 
         # Clear target pool cache on scenario rotation (defense in depth)
         from engine.phase_handlers import shooting_handlers
@@ -4180,6 +4208,8 @@ class W40KEngine(gym.Env):
         # Reinitialize game_state units with a SEPARATE deepcopy
         # This ensures game_state["units"] is independent from config["units"]
         self.game_state["units"] = copy.deepcopy(scenario_units)
+        for unit in self.game_state["units"]:
+            stamp_weapon_keys(unit)
         self._rebuild_unit_by_id()
 
         # Update wall_hexes and objectives in game_state if present

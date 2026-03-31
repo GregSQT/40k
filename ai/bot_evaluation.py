@@ -9,11 +9,15 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
 import hashlib
+import json
 import logging
 import multiprocessing as mp
 import os
 import sys
 import time
+import tempfile
+import shutil
+import atexit
 import numpy as np
 import re
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
@@ -26,6 +30,75 @@ __all__ = ['evaluate_against_bots']
 # Worker globals (scope processus)
 _worker_model = None
 _worker_obs_normalizer = None
+_eval_ref_temp_dir: Optional[str] = None
+
+
+def _cleanup_eval_ref_temp_dir() -> None:
+    """Remove temporary scenario directory used by eval ref overrides."""
+    global _eval_ref_temp_dir
+    if _eval_ref_temp_dir and os.path.isdir(_eval_ref_temp_dir):
+        shutil.rmtree(_eval_ref_temp_dir, ignore_errors=True)
+    _eval_ref_temp_dir = None
+
+
+def _get_eval_ref_temp_dir() -> str:
+    """Create (once) and return temp dir for eval scenario ref overrides."""
+    global _eval_ref_temp_dir
+    if _eval_ref_temp_dir is None:
+        _eval_ref_temp_dir = tempfile.mkdtemp(prefix="w40k_eval_refmix_")
+        atexit.register(_cleanup_eval_ref_temp_dir)
+    return _eval_ref_temp_dir
+
+
+def _materialize_eval_scenario_refs(
+    scenario_path: str,
+    wall_ref: str,
+    objectives_ref: str,
+) -> str:
+    """Create temporary scenario JSON with overridden wall_ref/objectives_ref."""
+    if not isinstance(wall_ref, str) or not wall_ref.strip():
+        raise ValueError(f"Invalid eval wall_ref override: {wall_ref!r}")
+    if not isinstance(objectives_ref, str) or not objectives_ref.strip():
+        raise ValueError(f"Invalid eval objectives_ref override: {objectives_ref!r}")
+    with open(scenario_path, "r", encoding="utf-8-sig") as f:
+        scenario_data = json.load(f)
+    if not isinstance(scenario_data, dict):
+        raise TypeError(f"Scenario JSON must be object: {scenario_path}")
+    scenario_copy = dict(scenario_data)
+    scenario_copy.pop("wall_hexes", None)
+    scenario_copy.pop("objectives", None)
+    scenario_copy.pop("objective_hexes", None)
+    scenario_copy["wall_ref"] = wall_ref.strip()
+    scenario_copy["objectives_ref"] = objectives_ref.strip()
+
+    source_parts = tuple(os.path.abspath(scenario_path).split(os.sep))
+    if "agents" not in source_parts:
+        raise ValueError(
+            f"Eval scenario override requires path containing 'agents': {scenario_path}"
+        )
+    agents_idx = source_parts.index("agents")
+    if agents_idx + 1 >= len(source_parts):
+        raise ValueError(f"Cannot resolve agent key from eval scenario path: {scenario_path}")
+    agent_key = source_parts[agents_idx + 1]
+    try:
+        scenarios_idx = source_parts.index("scenarios", agents_idx + 2)
+        split_dir = source_parts[scenarios_idx + 1]
+    except (ValueError, IndexError):
+        raise ValueError(
+            f"Cannot resolve split directory (training/holdout_*) from eval scenario path: {scenario_path}"
+        )
+
+    temp_root = _get_eval_ref_temp_dir()
+    out_dir = os.path.join(temp_root, "agents", agent_key, "scenarios", split_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    path_hash = hashlib.sha1(
+        f"{os.path.abspath(scenario_path)}|{wall_ref}|{objectives_ref}".encode("utf-8")
+    ).hexdigest()[:16]
+    out_path = os.path.join(out_dir, f"{os.path.basename(scenario_path)[:-5]}__{path_hash}.json")
+    if not os.path.exists(out_path):
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(scenario_copy, f, ensure_ascii=True, indent=2)
+    return out_path
 
 
 def _build_eval_obs_normalizer(
@@ -86,30 +159,25 @@ def _load_bot_eval_params(config_loader, agent_key: str, training_config_name: s
     callback_params = require_key(training_cfg, "callback_params")
 
     bot_eval_weights = require_key(callback_params, "bot_eval_weights")
-    random_weight = float(require_key(bot_eval_weights, "random"))
-    greedy_weight = float(require_key(bot_eval_weights, "greedy"))
-    defensive_weight = float(require_key(bot_eval_weights, "defensive"))
-    total_weight = random_weight + greedy_weight + defensive_weight
+    weights: Dict[str, float] = {
+        name: float(w) for name, w in bot_eval_weights.items()
+    }
+    total_weight = sum(weights.values())
     if abs(total_weight - 1.0) > 1e-9:
+        detail = ", ".join(f"{k}={v}" for k, v in weights.items())
         raise ValueError(
-            "callback_params.bot_eval_weights must sum to 1.0 "
-            f"(got random={random_weight}, greedy={greedy_weight}, defensive={defensive_weight}, total={total_weight})"
+            f"callback_params.bot_eval_weights must sum to 1.0 "
+            f"(got {detail}, total={total_weight})"
         )
 
     bot_eval_randomness = require_key(callback_params, "bot_eval_randomness")
-    greedy_randomness = float(require_key(bot_eval_randomness, "greedy"))
-    defensive_randomness = float(require_key(bot_eval_randomness, "defensive"))
+    randomness: Dict[str, float] = {
+        name: float(r) for name, r in bot_eval_randomness.items()
+    }
 
     return {
-        "weights": {
-            "random": random_weight,
-            "greedy": greedy_weight,
-            "defensive": defensive_weight,
-        },
-        "randomness": {
-            "greedy": greedy_randomness,
-            "defensive": defensive_randomness,
-        },
+        "weights": weights,
+        "randomness": randomness,
     }
 
 
@@ -297,7 +365,10 @@ def _create_eval_env(
 
     Tout ce qui est passé doit être sérialisable (picklable) pour usage en workers.
     """
-    from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+    from ai.evaluation_bots import (
+        RandomBot, GreedyBot, DefensiveBot, ControlBot,
+        AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+    )
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
     from sb3_contrib.common.wrappers import ActionMasker
@@ -306,12 +377,20 @@ def _create_eval_env(
     unit_registry = UnitRegistry()
     W40KEngine, _ = setup_imports()
 
-    # CRITICAL: RandomBot() n'accepte pas randomness ; GreedyBot/DefensiveBot oui
+    BOT_CLASSES = {
+        "greedy": GreedyBot,
+        "defensive": DefensiveBot,
+        "control": ControlBot,
+        "aggressive_smart": AggressiveSmartBot,
+        "defensive_smart": DefensiveSmartBot,
+        "adaptive": AdaptiveBot,
+    }
     if bot_type == "random":
         bot = RandomBot()
+    elif bot_type in BOT_CLASSES:
+        bot = BOT_CLASSES[bot_type](randomness=randomness_config.get(bot_type, 0.15))
     else:
-        bot_class = {"greedy": GreedyBot, "defensive": DefensiveBot}[bot_type]
-        bot = bot_class(randomness=randomness_config.get(bot_type, 0.15))
+        raise ValueError(f"Unknown bot_type: {bot_type!r}. Valid: random, {', '.join(BOT_CLASSES)}")
 
     def mask_fn(env):
         return env.get_action_mask()
@@ -643,7 +722,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     # Import evaluation bots for testing
     eval_wall_start = time.time()
     try:
-        from ai.evaluation_bots import RandomBot, GreedyBot, DefensiveBot
+        from ai.evaluation_bots import (
+            RandomBot, GreedyBot, DefensiveBot, ControlBot,
+            AggressiveSmartBot, DefensiveSmartBot, AdaptiveBot,
+        )
         EVALUATION_BOTS_AVAILABLE = True
     except ImportError:
         EVALUATION_BOTS_AVAILABLE = False
@@ -758,7 +840,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     randomness_config = {
         "greedy": eval_randomness.get("greedy", 0.15),
         "defensive": eval_randomness.get("defensive", 0.15),
+        "control": eval_randomness.get("control", 0.15),
     }
+
+    active_bot_names = tuple(eval_weights.keys())
 
     if scenario_list_override is not None:
         if not isinstance(scenario_list_override, list):
@@ -805,6 +890,43 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     extra_episodes = n_episodes % len(scenario_list)
 
     callback_params = require_key(training_cfg, "callback_params")
+    sampling_cfg = training_cfg.get("scenario_sampling")
+    eval_wall_refs: List[str] = []
+    eval_objectives_refs: List[str] = []
+    eval_ref_strict = False
+    if scenario_pool == "holdout":
+        if not isinstance(sampling_cfg, dict):
+            raise TypeError(
+                "scenario_sampling must be an object in training config for holdout evaluation"
+            )
+        raw_eval_wall_refs = require_key(sampling_cfg, "eval_wall_refs")
+        raw_eval_objectives_refs = require_key(sampling_cfg, "eval_objectives_refs")
+        raw_eval_ref_strict = sampling_cfg.get("eval_ref_strict", True)
+        if not isinstance(raw_eval_ref_strict, bool):
+            raise TypeError(
+                "scenario_sampling.eval_ref_strict must be boolean "
+                f"(got {type(raw_eval_ref_strict).__name__})"
+            )
+        eval_ref_strict = raw_eval_ref_strict
+        if not isinstance(raw_eval_wall_refs, list) or len(raw_eval_wall_refs) == 0:
+            raise ValueError(
+                "scenario_sampling.eval_wall_refs must be a non-empty list for holdout evaluation"
+            )
+        if not isinstance(raw_eval_objectives_refs, list) or len(raw_eval_objectives_refs) == 0:
+            raise ValueError(
+                "scenario_sampling.eval_objectives_refs must be a non-empty list for holdout evaluation"
+            )
+        for raw_ref in raw_eval_wall_refs:
+            if not isinstance(raw_ref, str) or not raw_ref.strip():
+                raise ValueError(f"Invalid wall ref in scenario_sampling.eval_wall_refs: {raw_ref!r}")
+            eval_wall_refs.append(raw_ref.strip())
+        for raw_ref in raw_eval_objectives_refs:
+            if not isinstance(raw_ref, str) or not raw_ref.strip():
+                raise ValueError(
+                    f"Invalid objectives ref in scenario_sampling.eval_objectives_refs: {raw_ref!r}"
+                )
+            eval_objectives_refs.append(raw_ref.strip())
+
     use_subprocess = callback_params.get("bot_eval_use_subprocess", True)
     worker_model_device_raw = require_key(callback_params, "bot_eval_worker_device")
     worker_model_device = str(worker_model_device_raw).strip().lower()
@@ -840,13 +962,24 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     task_timeout_seconds = callback_params.get("bot_eval_task_timeout_seconds", 300)
     n_workers = callback_params.get("bot_eval_n_workers")
     if n_workers is None:
-        n_workers = min(n_envs, len(scenario_list) * 3)
+        n_workers = min(n_envs, len(scenario_list) * len(active_bot_names))
     n_workers = max(1, int(n_workers))
 
     tasks: List[Dict[str, Any]] = []
-    for bot_name in ("random", "greedy", "defensive"):
+    for bot_name in active_bot_names:
         for scenario_index, scenario_file in enumerate(scenario_list):
             scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
+            task_scenario_file = scenario_file
+            if scenario_pool == "holdout" and eval_ref_strict:
+                wall_ref = eval_wall_refs[(scenario_index + len(bot_name)) % len(eval_wall_refs)]
+                objectives_ref = eval_objectives_refs[
+                    (scenario_index * 3 + len(bot_name)) % len(eval_objectives_refs)
+                ]
+                task_scenario_file = _materialize_eval_scenario_refs(
+                    scenario_path=scenario_file,
+                    wall_ref=wall_ref,
+                    objectives_ref=objectives_ref,
+                )
             episodes_for_scenario = episodes_per_scenario + (1 if scenario_index < extra_episodes else 0)
             if episodes_for_scenario <= 0:
                 continue
@@ -854,7 +987,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 "bot_name": bot_name,
                 "bot_type": bot_name,
                 "randomness_config": randomness_config,
-                "scenario_file": scenario_file,
+                "scenario_file": task_scenario_file,
                 "scenario_name": scenario_name,
                 "n_episodes": episodes_for_scenario,
                 "base_seed": base_seed,
@@ -875,7 +1008,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         base_agent_key,
     )
 
-    total_episodes = 3 * n_episodes
+    total_episodes = len(active_bot_names) * n_episodes
     start_time = time.time() if show_progress else None
     last_progress_line_len = 0
 
@@ -953,8 +1086,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
     # Agrégation (section 2.9)
     results: Dict[str, Any] = {}
-    bot_names = ("random", "greedy", "defensive")
-    for bn in bot_names:
+    for bn in active_bot_names:
         bot_results = [r for r in results_list if r.get("bot_name") == bn]
         wins = sum(r["wins"] for r in bot_results)
         losses = sum(r["losses"] for r in bot_results)
@@ -988,30 +1120,22 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     results["eval_reliable"] = total_failed_episodes == 0
     results["eval_duration_seconds"] = float(time.time() - eval_wall_start)
 
-    results["combined"] = (
-        eval_weights["random"] * results["random"] +
-        eval_weights["greedy"] * results["greedy"] +
-        eval_weights["defensive"] * results["defensive"]
+    results["combined"] = sum(
+        eval_weights[bn] * results[bn] for bn in active_bot_names
     )
     results["scenario_bot_stats"] = scenario_bot_stats
 
     scenario_scores: Dict[str, Dict[str, float]] = {}
     for scenario_name, per_bot in scenario_bot_stats.items():
-        random_stats = require_key(per_bot, "random")
-        greedy_stats = require_key(per_bot, "greedy")
-        defensive_stats = require_key(per_bot, "defensive")
+        bot_win_rates: Dict[str, float] = {}
+        for bn in active_bot_names:
+            stats = require_key(per_bot, bn)
+            bot_win_rates[bn] = float(require_key(stats, "win_rate"))
 
-        random_wr = float(require_key(random_stats, "win_rate"))
-        greedy_wr = float(require_key(greedy_stats, "win_rate"))
-        defensive_wr = float(require_key(defensive_stats, "win_rate"))
-
-        combined_score = (
-            eval_weights["random"] * random_wr
-            + eval_weights["greedy"] * greedy_wr
-            + eval_weights["defensive"] * defensive_wr
+        combined_score = sum(
+            eval_weights[bn] * bot_win_rates[bn] for bn in active_bot_names
         )
-
-        worst_bot_score = min(random_wr, greedy_wr, defensive_wr)
+        worst_bot_score = min(bot_win_rates.values())
         scenario_scores[scenario_name] = {
             "combined": combined_score,
             "worst_bot_score": worst_bot_score,

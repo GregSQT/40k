@@ -1,0 +1,17 @@
+{
+  "roster_id": "opponent_training_roster_elite_66",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 3
+    }
+  ]
+}

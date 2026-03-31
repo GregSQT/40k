@@ -865,9 +865,10 @@ class W40KMetricsTracker:
         This dashboard contains ONLY the metrics you need to tune PPO hyperparameters.
         All metrics are smoothed (20-episode rolling average) for clear trends.
 
-        GAME PERFORMANCE (5 metrics):
+        GAME PERFORMANCE (6 metrics):
         - 0_critical/a_bot_eval_combined    - Primary goal [0-1] (sorts first)
-        - 0_critical/b_worst_bot_score      - Min(random, greedy, defensive)
+        - 0_critical/a2_tier2_combined      - Avg(aggressive_smart, defensive_smart, adaptive)
+        - 0_critical/b_worst_bot_score      - Min across all 7 bots
         - 0_critical/c_holdout_hard_mean    - Hard holdout aggregate robustness
         - 0_critical/d_win_rate_100ep       - Training opponent performance
         - 0_critical/e_episode_reward_smooth  - Learning progress
@@ -1014,8 +1015,25 @@ class W40KMetricsTracker:
             self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], x)
         if 'defensive' in bot_results:
             self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], x)
-        if all(k in bot_results for k in ('random', 'greedy', 'defensive')):
-            worst_bot_score = min(bot_results['random'], bot_results['greedy'], bot_results['defensive'])
+        if 'control' in bot_results:
+            self.writer.add_scalar('bot_eval/vs_control', bot_results['control'], x)
+        if 'aggressive_smart' in bot_results:
+            self.writer.add_scalar('bot_eval/vs_aggressive_smart', bot_results['aggressive_smart'], x)
+        if 'defensive_smart' in bot_results:
+            self.writer.add_scalar('bot_eval/vs_defensive_smart', bot_results['defensive_smart'], x)
+        if 'adaptive' in bot_results:
+            self.writer.add_scalar('bot_eval/vs_adaptive', bot_results['adaptive'], x)
+        ALL_BOT_KEYS = ('random', 'greedy', 'defensive', 'control', 'aggressive_smart', 'defensive_smart', 'adaptive')
+        TIER2_BOT_KEYS = ('aggressive_smart', 'defensive_smart', 'adaptive')
+        tier2_scores = [bot_results[k] for k in TIER2_BOT_KEYS if k in bot_results]
+        if tier2_scores:
+            tier2_combined = sum(tier2_scores) / len(tier2_scores)
+            self.writer.add_scalar('bot_eval/tier2_combined', tier2_combined, x)
+            self.writer.add_scalar('0_critical/a2_tier2_combined', tier2_combined, x)
+
+        bot_score_keys = [k for k in ALL_BOT_KEYS if k in bot_results]
+        if len(bot_score_keys) >= 3:
+            worst_bot_score = min(bot_results[k] for k in bot_score_keys)
             self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, x)
             self.writer.add_scalar('0_critical/b_worst_bot_score', worst_bot_score, x)
             if self.forcing_tracking['episodes_total'] > 0:

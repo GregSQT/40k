@@ -1,7 +1,7 @@
 {
   "deployment_zone": "hammer",
   "deployment_type": "active",
-  "wall_ref": "walls-01.json",
+  "wall_ref": "walls-11.json",
   "primary_objectives": ["objectives_control"],
   "units": [
     {"id": 1, "unit_type": "IntercessorSergeant", "player": 1, "col": 12, "row": 2},

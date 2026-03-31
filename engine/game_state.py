@@ -6,10 +6,17 @@ game_state.py - Game state initialization and management
 from typing import Dict, List, Any, Optional, Tuple
 import copy
 import json
+import os
 from pathlib import Path
 from shared.data_validation import require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
+
+# PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
+_scenario_json_cache: Dict[str, Any] = {}
+_walls_json_cache: Dict[str, List[List[int]]] = {}
+_objectives_json_cache: Dict[str, List[Dict[str, Any]]] = {}
+
 
 class GameStateManager:
     """Manages game state."""
@@ -132,18 +139,21 @@ class GameStateManager:
             if not unit_registry:
                 raise ValueError("unit_registry is required - no fallbacks allowed")
             
-            import json
-            import os
             import random
             
             if not os.path.exists(scenario_file):
                 raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
             
-            try:
-                with open(scenario_file, 'r') as f:
-                    scenario_data = json.load(f)
-            except Exception as e:
-                raise ValueError(f"Failed to parse scenario file {scenario_file}: {e}")
+            abs_path = os.path.abspath(scenario_file)
+            if abs_path in _scenario_json_cache:
+                scenario_data = copy.deepcopy(_scenario_json_cache[abs_path])
+            else:
+                try:
+                    with open(scenario_file, 'r') as f:
+                        scenario_data = json.load(f)
+                except Exception as e:
+                    raise ValueError(f"Failed to parse scenario file {scenario_file}: {e}")
+                _scenario_json_cache[abs_path] = copy.deepcopy(scenario_data)
             
             scenario_roster_info: Optional[Dict[str, Any]] = None
             if isinstance(scenario_data, list):
@@ -589,7 +599,7 @@ class GameStateManager:
             expected_split=(split if split == "training" else str(holdout_split_for_p2)),
             scenario_file=scenario_file,
             field_name="opponent_roster_ref",
-            allow_random=(split == "holdout"),
+            allow_random=(split in {"training", "holdout"}),
             scenario_agent_key=scenario_agent_key,
             scale_name=scale_name,
             roster_kind="opponent",
@@ -683,7 +693,7 @@ class GameStateManager:
                         / scale_name
                         / expected_split
                     )
-                    pattern = f"agent_{expected_split}_roster-*.json"
+                    pattern = f"agent_{expected_split}_roster*.json"
                 else:
                     base_dir = (
                         project_root
@@ -693,12 +703,15 @@ class GameStateManager:
                         / scale_name
                         / expected_split
                     )
-                    pattern = f"opponent_{expected_split}_roster-*.json"
+                    pattern = f"opponent_{expected_split}_roster*.json"
                 if not base_dir.exists():
                     raise FileNotFoundError(
                         f"Scenario '{scenario_file}' {field_name}={random_token!r} but directory does not exist: {base_dir}"
                     )
-                candidates = sorted(base_dir.glob(pattern), key=lambda p: p.name)
+                candidates = [
+                    p for p in sorted(base_dir.glob(pattern), key=lambda p: p.name)
+                    if "_kpis" not in p.name and "_matchups" not in p.name
+                ]
                 if not candidates:
                     raise FileNotFoundError(
                         f"Scenario '{scenario_file}' {field_name}={random_token!r} but no files matching "
@@ -857,6 +870,9 @@ class GameStateManager:
     def _load_shared_walls_from_ref(self, wall_ref: Any, scenario_file: str) -> List[List[int]]:
         """Load shared wall_hexes file referenced by scenario wall_ref."""
         wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref")
+        cache_key = str(wall_path)
+        if cache_key in _walls_json_cache:
+            return copy.deepcopy(_walls_json_cache[cache_key])
         if not wall_path.exists():
             raise FileNotFoundError(f"Shared walls file not found for scenario {scenario_file}: {wall_path}")
         try:
@@ -881,10 +897,12 @@ class GameStateManager:
                     if not isinstance(h, (list, tuple)) or len(h) < 2:
                         raise ValueError(f"Shared walls file {wall_path}: invalid wall hex {h}")
                     result.append([int(h[0]), int(h[1])])
+            _walls_json_cache[cache_key] = copy.deepcopy(result)
             return result
         wall_hexes = require_key(wall_data, "wall_hexes")
         if not isinstance(wall_hexes, list):
             raise ValueError(f"Shared walls file {wall_path} field 'wall_hexes' must be list")
+        _walls_json_cache[cache_key] = copy.deepcopy(wall_hexes)
         return wall_hexes
 
     def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
@@ -895,6 +913,9 @@ class GameStateManager:
             scenario_file,
             "objectives_ref"
         )
+        cache_key = str(objectives_path)
+        if cache_key in _objectives_json_cache:
+            return copy.deepcopy(_objectives_json_cache[cache_key])
         if not objectives_path.exists():
             raise FileNotFoundError(
                 f"Shared objectives file not found for scenario {scenario_file}: {objectives_path}"
@@ -909,6 +930,7 @@ class GameStateManager:
         objectives = require_key(objectives_data, "objectives")
         if not isinstance(objectives, list):
             raise ValueError(f"Shared objectives file {objectives_path} field 'objectives' must be list")
+        _objectives_json_cache[cache_key] = copy.deepcopy(objectives)
         return objectives
 
     def _resolve_shared_config_path(

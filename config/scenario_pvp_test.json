@@ -1,6 +1,6 @@
 {
   "primary_objectives": ["objectives_control"],
-  "wall_ref": "walls-01.json",
+  "wall_ref": "walls-11.json",
   "units": [
     {"id": 2, "unit_type": "IntercessorSergeant", "player": 1, "col": 8, "row": 4},
     {"id": 4, "unit_type": "Intercessor", "player": 1, "col": 10, "row": 6},

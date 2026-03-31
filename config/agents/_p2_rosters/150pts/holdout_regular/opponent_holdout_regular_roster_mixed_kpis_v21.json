@@ -1,0 +1,163 @@
+{
+  "roster_value_mean": 150.875,
+  "roster_value_std": 2.9652501299777954,
+  "roster_value_p95": 154.0,
+  "rejection_rate_roster_budget": 0.8850574712643678,
+  "sampling_target_tanking_distribution": {
+    "Elite": 0.2,
+    "Swarm": 0.48,
+    "Troop": 0.32
+  },
+  "sampling_observed_tanking_distribution": {
+    "Elite": 0.125,
+    "Swarm": 0.5583333333333333,
+    "Troop": 0.31666666666666665
+  },
+  "sampling_target_units_per_roster_distribution": {
+    "5": 0.06,
+    "6": 0.12,
+    "7": 0.18,
+    "8": 0.22,
+    "9": 0.2,
+    "10": 0.14,
+    "11": 0.06,
+    "12": 0.02
+  },
+  "sampling_observed_units_per_roster_distribution": {
+    "5": 0.05,
+    "6": 0.16666666666666666,
+    "7": 0.225,
+    "8": 0.16666666666666666,
+    "9": 0.23333333333333334,
+    "10": 0.10833333333333334,
+    "11": 0.041666666666666664,
+    "12": 0.008333333333333333
+  },
+  "unit_pick_frequency": {
+    "spaceMarine::BloodClaw": 65,
+    "chaos::CultistFirebrand": 61,
+    "spaceMarine::Scout": 43,
+    "spaceMarine::HeavyIntercessor": 42,
+    "aeldari::DarkReaper": 35,
+    "adeptusCustodes::Witchseeker": 29,
+    "chaos::ChosenPlasma": 29,
+    "aeldari::FireDragon": 25,
+    "tyranid::RipperSwarm": 25,
+    "tyranid::Genestealer": 24,
+    "spaceMarine::AssaultIntercessorJumpPack": 23,
+    "chaos::RenegadeGuard": 22,
+    "aeldari::SwoopingHawk": 21,
+    "tyranid::Gargoyle": 21,
+    "aeldari::SwoopingHawkExarch": 20,
+    "aeldari::WarpSpider": 20,
+    "spaceMarine::DeathCompanyMarineEviscerator": 20,
+    "aeldari::DireAvenger": 18,
+    "aeldari::HeavyWeaponPlatform": 18,
+    "aeldari::HowlingBansheeExarch": 18,
+    "tyranid::TermagantTuto": 17,
+    "chaos::CultistMob": 16,
+    "aeldari::DireAvengerExarch": 15,
+    "aeldari::SerpentScalePlatform": 15,
+    "aeldari::StrikingScorpion": 15,
+    "tyranid::Termagant": 15,
+    "spaceMarine::FenrisianWolf": 14,
+    "tyranid::Hormagaunt": 14,
+    "aeldari::WarpSpiderExarchSpinner": 13,
+    "spaceMarine::HeavyIntercessorHeavyBolter": 13,
+    "aeldari::StormGuardian": 12,
+    "aeldari::DarkReaperExarch": 11,
+    "spaceMarine::AssaultIntercessor": 11,
+    "aeldari::HowlingBanshee": 10,
+    "spaceMarine::AssaultIntercessorJumpPackPlasmaPistol": 10,
+    "spaceMarine::InceptorBolter": 10,
+    "spaceMarine::Incursor": 10,
+    "tyranid::TyranidWarriorMelee": 10,
+    "spaceMarine::InceptorPlasma": 9,
+    "adeptusCustodes::Prosecutor": 8,
+    "aeldari::GuardianDefender": 8,
+    "spaceMarine::Infernus": 8,
+    "spaceMarine::Intercessor": 7,
+    "chaos::RaptorPlasmaGun": 6,
+    "spaceMarine::BladeguardVeteranSergeant": 6,
+    "spaceMarine::GreyHunter": 6,
+    "spaceMarine::AssaultIntercessorSergeant": 5,
+    "spaceMarine::BloodClawPackLeader": 5,
+    "spaceMarine::DeathCompanyJumpPackEviscerator": 5,
+    "spaceMarine::SternguardVeteranBoltRifle": 5,
+    "spaceMarine::Suppressor": 5,
+    "aeldari::WarpSpiderExarchPowerblade": 4,
+    "spaceMarine::GreyHunterPackLeader": 4,
+    "spaceMarine::IntercessorSergeant": 4,
+    "aeldari::FireDragonExarch": 3,
+    "spaceMarine::EradicatorMeltaRifle": 3,
+    "spaceMarine::WolfGuardTerminator": 3,
+    "chaos::RaptorMeltaGun": 2,
+    "spaceMarine::AssaultIntercessorJumpPackSergeantPowerFistHandFlamer": 2,
+    "spaceMarine::BladeguardVeteran": 2,
+    "spaceMarine::IntercessorGrenadeLauncher": 2,
+    "tyranid::Biovore": 2,
+    "tyranid::HiveGuardShockcannon": 2,
+    "tyranid::Zoanthrope": 2,
+    "aeldari::StrikingScorpionExarch": 1,
+    "aeldari::WraithguardDScythe": 1,
+    "spaceMarine::AggressorBoltStorm": 1,
+    "spaceMarine::CaptainPowerFistPistol": 1,
+    "spaceMarine::EradicatorMultiMelta": 1,
+    "spaceMarine::GreyHunterPlasmaGun": 1,
+    "spaceMarine::Hellblaster": 1,
+    "spaceMarine::HellblasterSergeant": 1,
+    "spaceMarine::LieutenantCloseCombatBolter": 1,
+    "spaceMarine::LieutenantPowerWeaponPlasmaPistol": 1,
+    "spaceMarine::SanguinaryGuardAngelus": 1,
+    "spaceMarine::SanguinaryGuardInferno": 1,
+    "spaceMarine::SternguardVeteranSergeantPowerFist": 1,
+    "spaceMarine::TerminatorAssaultCannon": 1,
+    "spaceMarine::TerminatorCyclone": 1,
+    "spaceMarine::TerminatorHeavyFlamer": 1,
+    "tyranid::HiveGuardImpalerCannon": 1,
+    "tyranid::Pyrovore": 1,
+    "tyranid::TyranidWarriorRanged": 1,
+    "tyranid::TyrantGuardBoneCleaver": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.28494238123719545,
+    "observed": {
+      "Balance": 0.24156118143459915,
+      "Melee": 0.31329113924050633,
+      "Ranged": 0.4451476793248945
+    },
+    "target": {
+      "Balance": 0.38403237205319685,
+      "Melee": 0.30543392653623136,
+      "Ranged": 0.31053370141057174
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 0.6822187456466682,
+    "observed": {
+      "High": 0.1518987341772152,
+      "Low": 0.30168776371308015,
+      "Mid": 0.5464135021097046
+    },
+    "target": {
+      "High": 0.48025367824291987,
+      "Low": 0.31444219247070954,
+      "Mid": 0.20530412928637057
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 0.7811395782117923,
+    "observed": {
+      "AntiElite": 0.18459915611814345,
+      "Burst": 0.06856540084388185,
+      "Generalist": 0.45042194092827004,
+      "Volume": 0.29641350210970463
+    },
+    "target": {
+      "AntiElite": 0.22246046491322202,
+      "Burst": 0.42127388115469944,
+      "Generalist": 0.13684156302923972,
+      "Volume": 0.2194240909028388
+    }
+  }
+}

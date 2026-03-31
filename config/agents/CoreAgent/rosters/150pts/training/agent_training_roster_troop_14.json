@@ -2,23 +2,31 @@
   "roster_id": "agent_training_roster_troop_14",
   "composition": [
     {
-      "unit_type": "HellblasterSergeant",
+      "unit_type": "AssaultIntercessor",
       "count": 1
     },
     {
-      "unit_type": "SternguardVeteranBoltRifle",
+      "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "unit_type": "IntercessorGrenadeLauncher",
       "count": 1
     },
     {
-      "unit_type": "TyranidWarriorMelee",
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
       "count": 1
     },
     {
       "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
       "count": 1
     }
   ]

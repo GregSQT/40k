@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_troop_52",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    }
+  ]
+}

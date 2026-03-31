@@ -1,0 +1,17 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_elite_119",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerFistPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    }
+  ]
+}
