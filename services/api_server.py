@@ -33,6 +33,14 @@ from shared.data_validation import require_key
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
 from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
+from services.endless_duty_runtime import (
+    ED_MODE_CODE,
+    ED_SCENARIO_DEFAULT,
+    commit_inter_wave_requisition,
+    handle_endless_duty_post_action,
+    initialize_endless_duty_state,
+    is_endless_duty_mode,
+)
 
 AUTH_DB_PATH = os.path.join(abs_parent, "config", "users.db")
 PBKDF2_ITERATIONS = 200000
@@ -95,7 +103,7 @@ def _sync_units_hp_from_cache(serializable_state: Dict[str, Any], game_state: Di
         unit["HP_CUR"] = require_key(cache_entry, "HP_CUR")
 
 
-def _build_player_types(is_ai_enabled: bool) -> Dict[str, str]:
+def _build_player_types(is_ai_enabled: bool, mode_code: str) -> Dict[str, str]:
     """
     Build player type mapping for frontend orchestration.
 
@@ -115,11 +123,11 @@ def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: W4
     current_mode_code = getattr(engine_instance, "current_mode_code", None)
     if not isinstance(current_mode_code, str) or not current_mode_code:
         raise ValueError("engine.current_mode_code is required to derive player_types")
-    if current_mode_code not in {"pvp", "pvp_test", "pve", "pve_test"}:
+    if current_mode_code not in {"pvp", "pvp_test", "pve", "pve_test", ED_MODE_CODE}:
         raise ValueError(f"Unsupported current_mode_code for player_types: {current_mode_code}")
     # Strict mode gate: only PvE modes allow AI orchestration for player 2.
-    is_ai_enabled = current_mode_code in {"pve", "pve_test"}
-    player_types = _build_player_types(is_ai_enabled)
+    is_ai_enabled = current_mode_code in {"pve", "pve_test", ED_MODE_CODE}
+    player_types = _build_player_types(is_ai_enabled, current_mode_code)
     engine_instance.game_state["player_types"] = player_types
     engine_instance.game_state["current_mode_code"] = current_mode_code
     serializable_state["player_types"] = player_types
@@ -267,6 +275,10 @@ def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
         return True
     if mode == "pve_test" and "test" in allowed_modes:
         return True
+    # Backward compatibility: if profile has PvE permission but not yet the ED row,
+    # allow Endless Duty in the same capability family.
+    if mode == ED_MODE_CODE and "pve" in allowed_modes:
+        return True
     return False
 
 
@@ -359,6 +371,10 @@ def initialize_auth_db() -> None:
             ("tutorial", "Tutoriel"),
         )
         cursor.execute(
+            "INSERT OR IGNORE INTO game_modes (code, label) VALUES (?, ?)",
+            (ED_MODE_CODE, "Endless Duty"),
+        )
+        cursor.execute(
             "INSERT OR IGNORE INTO options (code, label) VALUES (?, ?)",
             ("show_advance_warning", "Afficher avertissement mode advance"),
         )
@@ -402,12 +418,17 @@ def initialize_auth_db() -> None:
             "SELECT id FROM game_modes WHERE code = ?",
             ("tutorial",),
         ).fetchone()
+        endless_duty_row = cursor.execute(
+            "SELECT id FROM game_modes WHERE code = ?",
+            (ED_MODE_CODE,),
+        ).fetchone()
         if (
             pve_row is None
             or pve_test_row is None
             or pvp_row is None
             or pvp_test_row is None
             or tutorial_row is None
+            or endless_duty_row is None
         ):
             raise RuntimeError("Failed to seed required game modes")
 
@@ -433,6 +454,10 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (profile_id, endless_duty_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (admin_profile_id, pve_row["id"]),
         )
         cursor.execute(
@@ -450,6 +475,10 @@ def initialize_auth_db() -> None:
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (admin_profile_id, tutorial_row["id"]),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
+            (admin_profile_id, endless_duty_row["id"]),
         )
 
         warning_option_row = cursor.execute(
@@ -1149,7 +1178,7 @@ def start_game():
 
         requested_mode = "pvp"
         if mode_code is not None:
-            allowed_mode_codes = {"pvp", "pve", "pvp_test", "pve_test"}
+            allowed_mode_codes = {"pvp", "pve", "pvp_test", "pve_test", ED_MODE_CODE}
             if mode_code not in allowed_mode_codes:
                 raise ValueError(f"Unsupported mode_code '{mode_code}'. Allowed values: {sorted(allowed_mode_codes)}")
             requested_mode = mode_code
@@ -1200,13 +1229,22 @@ def start_game():
                 forced_agent_key="CoreAgent",
             ):
                 return jsonify({"success": False, "error": "PvE Test engine initialization failed"}), 500
+        elif requested_mode == ED_MODE_CODE:
+            print("DEBUG: Initializing engine for Endless Duty mode")
+            if scenario_file is None:
+                scenario_file = ED_SCENARIO_DEFAULT
+            if not initialize_test_engine(
+                scenario_file=scenario_file,
+                forced_agent_key="CoreAgent",
+            ):
+                return jsonify({"success": False, "error": "Endless Duty engine initialization failed"}), 500
         else:
             print("DEBUG: Initializing engine for PvP mode")
             if not initialize_engine(scenario_file=scenario_file):
                 return jsonify({"success": False, "error": "PvP engine initialization failed"}), 500
 
         # HTTP session: requested_mode is the source of truth for PvE vs PvP (aligns engine with client).
-        if requested_mode in ("pve", "pve_test"):
+        if requested_mode in ("pve", "pve_test", ED_MODE_CODE):
             engine.is_pve_mode = True
             engine.config["pve_mode"] = True
         elif requested_mode in ("pvp", "pvp_test"):
@@ -1228,6 +1266,17 @@ def start_game():
             print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
             raise
         print("DEBUG: engine.reset() completed successfully")
+
+        if requested_mode == ED_MODE_CODE:
+            project_root = Path(abs_parent)
+            initialize_endless_duty_state(
+                engine_instance=engine,
+                project_root=project_root,
+                scenario_file=scenario_file,
+            )
+            # Endless Duty spawns tyranids after reset; reload micro models now that player-2 units exist.
+            if bool(getattr(engine, "is_pve_mode", False)):
+                engine.pve_controller.load_ai_model_for_pve(engine.game_state, engine)
 
         # Tutoriel : conserver les positions des unités P1 depuis l’état précédent (ex. Intercessor après 1-25)
         preserve_p1 = data.get("preserve_p1_positions_from")
@@ -1344,6 +1393,7 @@ def start_game():
             "pvp_test": "PvP Test",
             "pve_test": "PvE Test",
             "pve": "PvE",
+            ED_MODE_CODE: "Endless Duty",
         }
         mode_label = mode_labels.get(requested_mode)
         if mode_label is None:
@@ -1393,6 +1443,40 @@ def execute_action():
         if not action:
             return jsonify({"success": False, "error": "No action provided"}), 400
 
+        success = None
+        result = None
+        endless_mode_active = is_endless_duty_mode(engine)
+        if endless_mode_active:
+            ed_state = require_key(engine.game_state, "endless_duty_state")
+            inter_wave_pending = bool(require_key(ed_state, "inter_wave_pending"))
+            action_name = action.get("action")
+            if action_name == "endless_duty_status":
+                serializable_state = make_json_serializable(_game_state_for_json(engine))
+                _sync_units_hp_from_cache(serializable_state, engine.game_state)
+                _attach_player_types(serializable_state, engine)
+                return jsonify(
+                    {
+                        "success": True,
+                        "result": {"action": "endless_duty_status"},
+                        "game_state": serializable_state,
+                        "endless_duty_state": make_json_serializable(require_key(engine.game_state, "endless_duty_state")),
+                    }
+                )
+            if action_name == "endless_duty_commit":
+                success, result = commit_inter_wave_requisition(engine, action)
+            else:
+                if inter_wave_pending:
+                    return jsonify(
+                        {
+                            "success": False,
+                            "error": "inter_wave_pending_commit_required",
+                            "hint": "Use action=endless_duty_commit before continuing combat",
+                        }
+                    ), 400
+                # Read-only preview remains allowed during combat phase.
+                success = None
+                result = None
+
         # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
         if action.get("action") == "preview_shoot_from_position":
             unit_id = action.get("unitId")
@@ -1418,12 +1502,18 @@ def execute_action():
             })
 
         # Route ALL actions through engine consistently
-        if action.get("action") == "end_phase":
-            success, result = _execute_end_phase_action(engine, action)
-        elif action.get("action") == "change_roster":
-            success, result = _execute_change_roster_action(engine, action)
-        else:
-            success, result = engine.execute_semantic_action(action)
+        if success is None:
+            if action.get("action") == "end_phase":
+                success, result = _execute_end_phase_action(engine, action)
+            elif action.get("action") == "change_roster":
+                success, result = _execute_change_roster_action(engine, action)
+            else:
+                success, result = engine.execute_semantic_action(action)
+
+        if success and endless_mode_active and action.get("action") != "endless_duty_status":
+            ed_post = handle_endless_duty_post_action(engine)
+            if isinstance(result, dict):
+                result["endless_duty"] = ed_post
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(_game_state_for_json(engine))
@@ -1451,6 +1541,11 @@ def execute_action():
             "result": result,
             "game_state": serializable_state,
             "action_logs": action_logs,
+            "endless_duty_state": (
+                make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                if endless_mode_active
+                else None
+            ),
             "message": "Action executed successfully" if success else "Action failed"
         })
     
@@ -1934,8 +2029,61 @@ def get_board_config():
         wall_ref = board_spec.get("wall_ref", "walls-01.json")
         objectives_ref = board_spec.get("objectives_ref", "objectives-01.json")
 
+        scenario_file_raw = request.args.get("scenario_file")
+        scenario_data = None
+        if scenario_file_raw is not None and not isinstance(scenario_file_raw, str):
+            raise ValueError("scenario_file query param must be a string when provided")
+        scenario_file = scenario_file_raw.strip() if isinstance(scenario_file_raw, str) else None
+        if scenario_file:
+            if not scenario_file.endswith(".json"):
+                raise ValueError("scenario_file must reference a .json file")
+            normalized = scenario_file.replace("\\", "/").strip()
+            if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
+                raise ValueError(f"Unsafe scenario_file path: {scenario_file}")
+            scenario_path = (project_root / normalized).resolve()
+            config_root = (project_root / "config").resolve()
+            if config_root not in scenario_path.parents:
+                raise ValueError(f"scenario_file must be under config/: {scenario_file}")
+            if not scenario_path.exists():
+                raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
+            with open(scenario_path, "r", encoding="utf-8-sig") as f:
+                scenario_data = json.load(f)
+            if not isinstance(scenario_data, dict):
+                raise ValueError("scenario_file JSON must be an object")
+
+            has_wall_hexes = "wall_hexes" in scenario_data
+            has_wall_ref = "wall_ref" in scenario_data
+            if has_wall_hexes and has_wall_ref:
+                raise ValueError("scenario cannot define both wall_hexes and wall_ref")
+            if has_wall_ref:
+                wall_ref_raw = scenario_data.get("wall_ref")
+                if not isinstance(wall_ref_raw, str) or not wall_ref_raw.strip():
+                    raise ValueError("scenario wall_ref must be a non-empty string")
+                wall_ref_candidate = wall_ref_raw.strip()
+                if "/" in wall_ref_candidate or "\\" in wall_ref_candidate:
+                    raise ValueError("scenario wall_ref must be filename only")
+                wall_ref = wall_ref_candidate
+
+            has_objectives = "objectives" in scenario_data
+            has_objectives_ref = "objectives_ref" in scenario_data
+            if has_objectives and has_objectives_ref:
+                raise ValueError("scenario cannot define both objectives and objectives_ref")
+            if has_objectives_ref:
+                objectives_ref_raw = scenario_data.get("objectives_ref")
+                if not isinstance(objectives_ref_raw, str) or not objectives_ref_raw.strip():
+                    raise ValueError("scenario objectives_ref must be a non-empty string")
+                objectives_ref_candidate = objectives_ref_raw.strip()
+                if "/" in objectives_ref_candidate or "\\" in objectives_ref_candidate:
+                    raise ValueError("scenario objectives_ref must be filename only")
+                objectives_ref = objectives_ref_candidate
+
         wall_hexes = []
-        if wall_ref and wall_ref.endswith(".json"):
+        if scenario_file and isinstance(scenario_data, dict) and "wall_hexes" in scenario_data:
+            scenario_wall_hexes = scenario_data.get("wall_hexes")
+            if not isinstance(scenario_wall_hexes, list):
+                raise ValueError("scenario wall_hexes must be a list")
+            wall_hexes = scenario_wall_hexes
+        elif wall_ref and wall_ref.endswith(".json"):
             wall_path = board_dir / "walls" / wall_ref
             if wall_path.exists():
                 with open(wall_path, "r", encoding="utf-8-sig") as f:
@@ -1948,7 +2096,12 @@ def get_board_config():
                     wall_hexes = wall_data.get("wall_hexes", [])
 
         objectives = []
-        if objectives_ref and objectives_ref.endswith(".json"):
+        if scenario_file and isinstance(scenario_data, dict) and "objectives" in scenario_data:
+            scenario_objectives = scenario_data.get("objectives")
+            if not isinstance(scenario_objectives, list):
+                raise ValueError("scenario objectives must be a list")
+            objectives = scenario_objectives
+        elif objectives_ref and objectives_ref.endswith(".json"):
             obj_path = board_dir / "objectives" / objectives_ref
             if obj_path.exists():
                 with open(obj_path, "r", encoding="utf-8-sig") as f:
@@ -2016,6 +2169,23 @@ def execute_ai_turn():
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
     
     try:
+        endless_mode_active = is_endless_duty_mode(engine)
+        if endless_mode_active:
+            ed_state = require_key(engine.game_state, "endless_duty_state")
+            if bool(require_key(ed_state, "inter_wave_pending")):
+                serializable_state = make_json_serializable(_game_state_for_json(engine))
+                _sync_units_hp_from_cache(serializable_state, engine.game_state)
+                _attach_player_types(serializable_state, engine)
+                return jsonify(
+                    {
+                        "success": True,
+                        "result": {"action": "ai_turn_skipped", "reason": "inter_wave_pending"},
+                        "game_state": serializable_state,
+                        "action_logs": [],
+                        "endless_duty_state": make_json_serializable(ed_state),
+                    }
+                )
+
         # Debug: Check engine state before AI turn (conditional on debug mode)
         debug_mode = os.environ.get('W40K_DEBUG', 'false').lower() == 'true'
         
@@ -2053,10 +2223,43 @@ def execute_ai_turn():
                     },
                     "game_state": serializable_state,
                     "action_logs": action_logs,
+                    "endless_duty_state": (
+                        make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                        if endless_mode_active
+                        else None
+                    ),
+                })
+            if error_type == "game_over":
+                print(f"ℹ️ [API] execute_ai_turn skipped: error_type={error_type}, result={result}")
+                serializable_state = make_json_serializable(_game_state_for_json(engine))
+                _sync_units_hp_from_cache(serializable_state, engine.game_state)
+                _attach_player_types(serializable_state, engine)
+                action_logs = serializable_state.get("action_logs", [])
+                engine.game_state["action_logs"] = []
+                serializable_state["action_logs"] = []
+                return jsonify({
+                    "success": True,
+                    "result": {
+                        "action": "ai_turn_skipped",
+                        "reason": "game_over",
+                        "details": result,
+                    },
+                    "game_state": serializable_state,
+                    "action_logs": action_logs,
+                    "endless_duty_state": (
+                        make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                        if endless_mode_active
+                        else None
+                    ),
                 })
             else:
                 print(f"❌ [API] execute_ai_turn failed: error_type={error_type}, result={result}")
                 return jsonify({"success": False, "error": result}), 500
+
+        if endless_mode_active:
+            ed_post = handle_endless_duty_post_action(engine)
+            if isinstance(result, dict):
+                result["endless_duty"] = ed_post
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(_game_state_for_json(engine))
@@ -2074,7 +2277,12 @@ def execute_ai_turn():
             "success": True,
             "result": result,
             "game_state": serializable_state,
-            "action_logs": action_logs
+            "action_logs": action_logs,
+            "endless_duty_state": (
+                make_json_serializable(require_key(engine.game_state, "endless_duty_state"))
+                if endless_mode_active
+                else None
+            ),
         })
             
     except Exception as e:

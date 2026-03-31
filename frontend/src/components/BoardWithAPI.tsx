@@ -2,6 +2,10 @@
 import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import leaderEvolutionConfig from "../../../config/endless_duty/leader_evolution.json";
+import meleeEvolutionConfig from "../../../config/endless_duty/melee_evolution.json";
+import rangeEvolutionConfig from "../../../config/endless_duty/range_evolution.json";
+import endlessDutyScenarioConfig from "../../../config/scenario_endless_duty.json";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
 import type { MutableRefObject } from "react";
@@ -56,6 +60,150 @@ type RuleChoicePrompt = {
     label: string;
   }>;
 };
+
+type EndlessDutySlotProfiles = {
+  leader: string | null;
+  melee: string | null;
+  range: string | null;
+};
+
+type EndlessDutyPickState = {
+  package: string | null;
+  melee: string | null;
+  ranged: string | null;
+  secondary: string | null;
+  special: string | null;
+};
+
+type EndlessDutySlotPicks = {
+  leader: EndlessDutyPickState | null;
+  melee: EndlessDutyPickState | null;
+  range: EndlessDutyPickState | null;
+};
+
+type EvolutionCatalogConfig = {
+  loadouts?: Array<{
+    id?: string;
+    profile?: string;
+    picks?: Record<string, unknown>;
+  }>;
+  catalog?: Record<
+    string,
+    {
+      base?: number;
+      rows?: Array<{ slot?: string; pick?: string; cost?: number; implemented?: boolean }>;
+      packages?: Array<{ id?: string; cost?: number; implemented?: boolean }>;
+    }
+  >;
+};
+
+function getProfileOptions(config: EvolutionCatalogConfig): string[] {
+  if (!config.catalog || typeof config.catalog !== "object") {
+    return [];
+  }
+  return Object.keys(config.catalog).sort((a, b) => a.localeCompare(b));
+}
+
+type PickOption = {
+  id: string;
+  cost: number;
+  label: string;
+};
+
+type ProfilePickMenuData = {
+  baseCost: number;
+  primaryPackages: PickOption[];
+  primaryMelee: PickOption[];
+  ranged: PickOption[];
+  secondary: PickOption[];
+  special: PickOption[];
+};
+
+function buildPickMenusByProfile(config: EvolutionCatalogConfig): Map<string, ProfilePickMenuData> {
+  const result = new Map<string, ProfilePickMenuData>();
+  const catalog = config.catalog ?? {};
+  for (const [profile, profileCatalog] of Object.entries(catalog)) {
+    if (!profileCatalog) {
+      continue;
+    }
+    const baseCost = Number(profileCatalog.base ?? 0);
+    const rows = profileCatalog.rows ?? [];
+    const packages = profileCatalog.packages ?? [];
+    const data: ProfilePickMenuData = {
+      baseCost,
+      primaryPackages: [],
+      primaryMelee: [],
+      ranged: [],
+      secondary: [],
+      special: [],
+    };
+    for (const pkg of packages) {
+      if (pkg.implemented === false) {
+        continue;
+      }
+      if (typeof pkg.id !== "string") {
+        continue;
+      }
+      const cost = Number(pkg.cost ?? 0);
+      data.primaryPackages.push({
+        id: pkg.id,
+        cost,
+        label: `${pkg.id} (+${cost})`,
+      });
+    }
+    for (const row of rows) {
+      if (row.implemented === false) {
+        continue;
+      }
+      if (typeof row.slot !== "string" || typeof row.pick !== "string") {
+        continue;
+      }
+      const cost = Number(row.cost ?? 0);
+      const option: PickOption = {
+        id: row.pick,
+        cost,
+        label: `${row.pick} (+${cost})`,
+      };
+      if (row.slot === "melee") {
+        data.primaryMelee.push(option);
+      } else if (row.slot === "ranged") {
+        data.ranged.push(option);
+      } else if (row.slot === "secondary") {
+        data.secondary.push(option);
+      } else if (row.slot === "equipment" || row.slot === "special") {
+        data.special.push(option);
+      }
+    }
+    result.set(profile, data);
+  }
+  return result;
+}
+
+function buildDefaultPicksByProfile(config: EvolutionCatalogConfig): Map<string, EndlessDutyPickState> {
+  const defaults = new Map<string, EndlessDutyPickState>();
+  const loadouts = config.loadouts ?? [];
+  for (const loadout of loadouts) {
+    const profile = typeof loadout.profile === "string" ? loadout.profile : null;
+    if (!profile || defaults.has(profile)) {
+      continue;
+    }
+    const picks = loadout.picks ?? {};
+    defaults.set(profile, {
+      package: typeof picks.package === "string" && picks.package !== "none" ? picks.package : null,
+      melee: typeof picks.melee === "string" && picks.melee !== "none" ? picks.melee : null,
+      ranged: typeof picks.ranged === "string" && picks.ranged !== "none" ? picks.ranged : null,
+      secondary:
+        typeof picks.secondary === "string" && picks.secondary !== "none" ? picks.secondary : null,
+      special:
+        (typeof picks.special === "string" && picks.special !== "none"
+          ? picks.special
+          : typeof picks.equipment === "string" && picks.equipment !== "none"
+            ? picks.equipment
+            : null),
+    });
+  }
+  return defaults;
+}
 
 /** Étapes avec halo sur le turn phase tracker : Rounds=tour, Tours=P1/P2, Phases=phases. */
 const TURN_PHASE_STEP_TITLES = [
@@ -1128,6 +1276,8 @@ export const BoardWithAPI: React.FC = () => {
     ? "training"
     : isTutorialMode
       ? "tutorial"
+      : location.pathname === "/game" && location.search.includes("mode=endless_duty")
+        ? "endless_duty"
       : location.pathname === "/game" && location.search.includes("mode=pvp_test")
         ? "pvp_test"
         : location.pathname === "/game" && location.search.includes("mode=pve_test")
@@ -1148,7 +1298,7 @@ export const BoardWithAPI: React.FC = () => {
       return false;
     }
     // AI orchestration: PvE et tutoriel (P2 contrôlé par IA).
-    if (gameMode !== "pve" && gameMode !== "tutorial") {
+    if (gameMode !== "pve" && gameMode !== "tutorial" && gameMode !== "endless_duty") {
       return false;
     }
     return Object.values(playerTypes).some((playerType) => playerType === "ai");
@@ -1233,8 +1383,165 @@ export const BoardWithAPI: React.FC = () => {
   const [isDraggingRuleChoicePopup, setIsDraggingRuleChoicePopup] = useState(false);
   const ruleChoiceDragOffsetRef = useRef({ x: 0, y: 0 });
   const [showGameOverPopup, setShowGameOverPopup] = useState(false);
+  const [isEndlessDutyModalOpen, setIsEndlessDutyModalOpen] = useState(false);
+  const [endlessDutyFormError, setEndlessDutyFormError] = useState<string | null>(null);
+  const [isSubmittingEndlessDuty, setIsSubmittingEndlessDuty] = useState(false);
+  const [endlessDutyDraft, setEndlessDutyDraft] = useState<EndlessDutySlotProfiles>({
+    leader: null,
+    melee: null,
+    range: null,
+  });
+  const [endlessDutyDraftPicks, setEndlessDutyDraftPicks] = useState<EndlessDutySlotPicks>({
+    leader: null,
+    melee: null,
+    range: null,
+  });
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
+
+  const endlessDutyProfileOptions = useMemo(
+    () => ({
+      leader: getProfileOptions(leaderEvolutionConfig as EvolutionCatalogConfig),
+      melee: getProfileOptions(meleeEvolutionConfig as EvolutionCatalogConfig),
+      range: getProfileOptions(rangeEvolutionConfig as EvolutionCatalogConfig),
+    }),
+    []
+  );
+
+  const endlessDutyUnlockRules = useMemo(() => {
+    const endlessCfg = (endlessDutyScenarioConfig as { endless_duty?: { wave_unlock_rules?: Record<string, number> } })
+      .endless_duty;
+    const waveUnlockRules = endlessCfg?.wave_unlock_rules ?? {};
+    return {
+      leader: Number(waveUnlockRules.leader ?? 1),
+      melee: Number(waveUnlockRules.melee ?? 15),
+      range: Number(waveUnlockRules.range ?? 10),
+    };
+  }, []);
+  const endlessDutyPickMenus = useMemo(
+    () => ({
+      leader: buildPickMenusByProfile(leaderEvolutionConfig as EvolutionCatalogConfig),
+      melee: buildPickMenusByProfile(meleeEvolutionConfig as EvolutionCatalogConfig),
+      range: buildPickMenusByProfile(rangeEvolutionConfig as EvolutionCatalogConfig),
+    }),
+    []
+  );
+  const endlessDutyDefaultPicks = useMemo(
+    () => ({
+      leader: buildDefaultPicksByProfile(leaderEvolutionConfig as EvolutionCatalogConfig),
+      melee: buildDefaultPicksByProfile(meleeEvolutionConfig as EvolutionCatalogConfig),
+      range: buildDefaultPicksByProfile(rangeEvolutionConfig as EvolutionCatalogConfig),
+    }),
+    []
+  );
+  const getDefaultPicksForProfile = useCallback(
+    (slot: keyof EndlessDutySlotProfiles, profile: string | null): EndlessDutyPickState | null => {
+      if (!profile) {
+        return null;
+      }
+      const defaults = endlessDutyDefaultPicks[slot].get(profile);
+      return defaults ? { ...defaults } : null;
+    },
+    [endlessDutyDefaultPicks]
+  );
+
+  useEffect(() => {
+    if (gameMode !== "endless_duty") {
+      setIsEndlessDutyModalOpen(false);
+      setEndlessDutyFormError(null);
+      return;
+    }
+    if (!apiProps.endlessDutyState?.inter_wave_pending) {
+      setIsEndlessDutyModalOpen(false);
+      setEndlessDutyFormError(null);
+      return;
+    }
+    const slotProfiles = apiProps.endlessDutyState.slot_profiles;
+    const slotPicks = apiProps.endlessDutyState.slot_picks;
+    const resolvedPicks: EndlessDutySlotPicks = {
+      leader:
+        slotProfiles.leader == null
+          ? null
+          : ((slotPicks?.leader as EndlessDutyPickState | null) ??
+            getDefaultPicksForProfile("leader", slotProfiles.leader)),
+      melee:
+        slotProfiles.melee == null
+          ? null
+          : ((slotPicks?.melee as EndlessDutyPickState | null) ??
+            getDefaultPicksForProfile("melee", slotProfiles.melee)),
+      range:
+        slotProfiles.range == null
+          ? null
+          : ((slotPicks?.range as EndlessDutyPickState | null) ??
+            getDefaultPicksForProfile("range", slotProfiles.range)),
+    };
+    setEndlessDutyDraft({
+      leader: slotProfiles.leader ?? null,
+      melee: slotProfiles.melee ?? null,
+      range: slotProfiles.range ?? null,
+    });
+    setEndlessDutyDraftPicks(resolvedPicks);
+    setIsEndlessDutyModalOpen(true);
+    setEndlessDutyFormError(null);
+  }, [gameMode, apiProps.endlessDutyState, getDefaultPicksForProfile]);
+
+  useEffect(() => {
+    if (gameMode !== "endless_duty") {
+      return;
+    }
+    if (!apiProps.fetchEndlessDutyStatus) {
+      return;
+    }
+    void apiProps.fetchEndlessDutyStatus().catch(() => {
+      // The regular game loop will refresh state on next action.
+    });
+  }, [gameMode, apiProps.fetchEndlessDutyStatus]);
+
+  const handleEndlessDutyDraftChange = useCallback(
+    (slot: keyof EndlessDutySlotProfiles, profile: string | null) => {
+      setEndlessDutyDraft((prev) => ({ ...prev, [slot]: profile }));
+      setEndlessDutyDraftPicks((prev) => {
+        if (profile == null) {
+          return { ...prev, [slot]: null };
+        }
+        return { ...prev, [slot]: getDefaultPicksForProfile(slot, profile) };
+      });
+      setEndlessDutyFormError(null);
+    },
+    [getDefaultPicksForProfile]
+  );
+  const handleEndlessDutyPickChange = useCallback(
+    (slot: keyof EndlessDutySlotProfiles, pickKey: keyof EndlessDutyPickState, pickValue: string | null) => {
+      setEndlessDutyDraftPicks((prev) => {
+        const current = prev[slot];
+        if (!current) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [slot]: { ...current, [pickKey]: pickValue },
+        };
+      });
+      setEndlessDutyFormError(null);
+    },
+    []
+  );
+
+  const handleEndlessDutyCommit = useCallback(async () => {
+    if (gameMode !== "endless_duty") {
+      return;
+    }
+    setIsSubmittingEndlessDuty(true);
+    setEndlessDutyFormError(null);
+    try {
+      await apiProps.commitEndlessDuty(endlessDutyDraft, endlessDutyDraftPicks);
+      setIsEndlessDutyModalOpen(false);
+    } catch (error) {
+      setEndlessDutyFormError(error instanceof Error ? error.message : "Commit requisition impossible");
+    } finally {
+      setIsSubmittingEndlessDuty(false);
+    }
+  }, [gameMode, apiProps.commitEndlessDuty, endlessDutyDraft, endlessDutyDraftPicks]);
 
   const closeRosterPicker = () => {
     setRosterPickerPlayer(null);
@@ -2591,6 +2898,109 @@ export const BoardWithAPI: React.FC = () => {
     </RightColumnTutorialSpotlight>
   );
 
+  const endlessDutyState = apiProps.endlessDutyState;
+  const isEndlessDutyInterWave =
+    gameMode === "endless_duty" && endlessDutyState?.inter_wave_pending === true;
+  const currentWave = endlessDutyState?.wave_index ?? 1;
+  const slotUnlockStatus = {
+    leader: currentWave >= endlessDutyUnlockRules.leader,
+    melee: currentWave >= endlessDutyUnlockRules.melee,
+    range: currentWave >= endlessDutyUnlockRules.range,
+  };
+  const requisitionCapitalTotal = endlessDutyState?.requisition_capital_total ?? 0;
+  const resolveSlotCost = (
+    slot: keyof EndlessDutySlotProfiles,
+    profile: string,
+    picks: EndlessDutyPickState | null
+  ): number | null => {
+    if (!picks) {
+      return null;
+    }
+    const menu = endlessDutyPickMenus[slot].get(profile);
+    if (!menu) {
+      return null;
+    }
+    let total = menu.baseCost;
+    const findCost = (options: PickOption[], id: string | null): number | null => {
+      if (!id) {
+        return 0;
+      }
+      const option = options.find((opt) => opt.id === id);
+      return option ? option.cost : null;
+    };
+    const packageCost = findCost(menu.primaryPackages, picks.package);
+    const meleeCost = findCost(menu.primaryMelee, picks.melee);
+    const rangedCost = findCost(menu.ranged, picks.ranged);
+    const secondaryCost = findCost(menu.secondary, picks.secondary);
+    const specialCost = findCost(menu.special, picks.special);
+    if (
+      packageCost == null ||
+      meleeCost == null ||
+      rangedCost == null ||
+      secondaryCost == null ||
+      specialCost == null
+    ) {
+      return null;
+    }
+    total += packageCost + meleeCost + rangedCost + secondaryCost + specialCost;
+    return total;
+  };
+  const resolveDraftInvestedTotal = (
+    draftProfiles: EndlessDutySlotProfiles,
+    draftPicks: EndlessDutySlotPicks
+  ): number | null => {
+    const slotEntries: Array<keyof EndlessDutySlotProfiles> = ["leader", "melee", "range"];
+    let total = 0;
+    for (const slot of slotEntries) {
+      const profile = draftProfiles[slot];
+      if (profile == null) {
+        continue;
+      }
+      const slotCost = resolveSlotCost(slot, profile, draftPicks[slot]);
+      if (slotCost == null) {
+        return null;
+      }
+      total += slotCost;
+    }
+    return total;
+  };
+  const projectedInvestedTotal = resolveDraftInvestedTotal(endlessDutyDraft, endlessDutyDraftPicks);
+  const projectedAvailable =
+    projectedInvestedTotal == null ? null : requisitionCapitalTotal - projectedInvestedTotal;
+  const isProjectedDraftAffordable = projectedAvailable != null && projectedAvailable >= 0;
+  const isOptionDraftAffordable = (
+    slot: keyof EndlessDutySlotProfiles,
+    profile: string | null,
+    picks: EndlessDutyPickState | null
+  ): boolean => {
+    const candidateProfiles: EndlessDutySlotProfiles = {
+      ...endlessDutyDraft,
+      [slot]: profile,
+    };
+    const candidatePicks: EndlessDutySlotPicks = {
+      ...endlessDutyDraftPicks,
+      [slot]: picks,
+    };
+    const candidateInvested = resolveDraftInvestedTotal(candidateProfiles, candidatePicks);
+    const candidateAvailable = candidateInvested == null ? null : requisitionCapitalTotal - candidateInvested;
+    return candidateAvailable != null && candidateAvailable >= 0;
+  };
+  const getProfileLabel = (slot: keyof EndlessDutySlotProfiles, profile: string): string => {
+    const defaultPicks = getDefaultPicksForProfile(slot, profile);
+    const cost = resolveSlotCost(slot, profile, defaultPicks);
+    if (typeof cost !== "number" || Number.isNaN(cost)) {
+      return `${profile} (cout inconnu)`;
+    }
+    return `${profile} (a partir de ${cost})`;
+  };
+  const getPickMenuForSlot = (slot: keyof EndlessDutySlotProfiles): ProfilePickMenuData | null => {
+    const profile = endlessDutyDraft[slot];
+    if (!profile) {
+      return null;
+    }
+    return endlessDutyPickMenus[slot].get(profile) ?? null;
+  };
+
   return (
     <TutorialProvider
       isTutorialMode={activeTutorialMode}
@@ -2740,6 +3150,565 @@ export const BoardWithAPI: React.FC = () => {
         </BoardColumnWithTutorial>
       </SharedLayout>
       <TutorialOverlayGate />
+      {isEndlessDutyInterWave && isEndlessDutyModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 12000,
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="endless-duty-title"
+            style={{
+              width: "min(720px, calc(100vw - 32px))",
+              backgroundColor: "#0b1322",
+              border: "2px solid #60a5fa",
+              borderRadius: "10px",
+              boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
+              padding: "22px 24px 18px 24px",
+              color: "#dbeafe",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="endless-duty-title" style={{ margin: "0 0 8px 0", color: "#bfdbfe", fontSize: "28px" }}>
+              Endless Duty - Requisition
+            </h2>
+            <p style={{ margin: "0 0 12px 0", lineHeight: 1.5, fontSize: "16px" }}>
+              Wave {currentWave} cleared. Configurez votre escouade avant la prochaine vague.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "14px" }}>
+              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>Capital total</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>{endlessDutyState?.requisition_capital_total ?? 0}</div>
+              </div>
+              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>Investi</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>{endlessDutyState?.requisition_invested_total ?? 0}</div>
+              </div>
+              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>Disponible</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>{endlessDutyState?.requisition_available ?? 0}</div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
+              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>Investi projete</div>
+                <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                  {projectedInvestedTotal == null ? "-" : projectedInvestedTotal}
+                </div>
+              </div>
+              <div style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid #334155", borderRadius: "6px", padding: "8px 10px" }}>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>Disponible projete</div>
+                <div style={{ fontSize: "18px", fontWeight: 700, color: isProjectedDraftAffordable ? "#86efac" : "#fca5a5" }}>
+                  {projectedAvailable == null ? "-" : projectedAvailable}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "10px" }}>
+              <label style={{ display: "grid", gap: "6px" }}>
+                <span style={{ fontWeight: 600 }}>
+                  Leader (deverrouille wave {endlessDutyUnlockRules.leader})
+                </span>
+                <select
+                  value={endlessDutyDraft.leader ?? ""}
+                  disabled={!slotUnlockStatus.leader || isSubmittingEndlessDuty}
+                  onChange={(event) =>
+                    handleEndlessDutyDraftChange("leader", event.target.value === "" ? null : event.target.value)
+                  }
+                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                >
+                  <option value="" disabled>
+                    Choisir un leader (obligatoire)
+                  </option>
+                  {endlessDutyProfileOptions.leader.map((profile) => (
+                    <option
+                      key={`ed-leader-${profile}`}
+                      value={profile}
+                      disabled={
+                        !isOptionDraftAffordable(
+                          "leader",
+                          profile,
+                          getDefaultPicksForProfile("leader", profile)
+                        )
+                      }
+                    >
+                      {getProfileLabel("leader", profile)}
+                    </option>
+                  ))}
+                </select>
+                {(() => {
+                  const menu = getPickMenuForSlot("leader");
+                  const picks = endlessDutyDraftPicks.leader;
+                  const hasPackage = picks?.package != null;
+                  if (!menu || !picks) {
+                    return null;
+                  }
+                  return (
+                    <>
+                      <select
+                        value={picks.package ?? picks.melee ?? ""}
+                        disabled={!slotUnlockStatus.leader || isSubmittingEndlessDuty || !endlessDutyDraft.leader}
+                        onChange={(event) => {
+                          const value = event.target.value === "" ? null : event.target.value;
+                          if (value && menu.primaryPackages.some((opt) => opt.id === value)) {
+                            handleEndlessDutyPickChange("leader", "package", value);
+                            handleEndlessDutyPickChange("leader", "melee", null);
+                          } else {
+                            handleEndlessDutyPickChange("leader", "package", null);
+                            handleEndlessDutyPickChange("leader", "melee", value);
+                          }
+                        }}
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Arme principale (melee ou pack)</option>
+                        {menu.primaryPackages.map((option) => (
+                          <option key={`ed-leader-package-${option.id}`} value={option.id}>
+                            [PACK] {option.label}
+                          </option>
+                        ))}
+                        {menu.primaryMelee.map((option) => (
+                          <option key={`ed-leader-melee-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.ranged ?? ""}
+                        disabled={
+                          !slotUnlockStatus.leader ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.leader ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "leader",
+                            "ranged",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Arme a distance</option>
+                        {menu.ranged.map((option) => (
+                          <option key={`ed-leader-ranged-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.secondary ?? ""}
+                        disabled={
+                          !slotUnlockStatus.leader ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.leader ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "leader",
+                            "secondary",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Secondaire</option>
+                        {menu.secondary.map((option) => (
+                          <option key={`ed-leader-secondary-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.special ?? ""}
+                        disabled={
+                          !slotUnlockStatus.leader ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.leader ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "leader",
+                            "special",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Special (equipement/special)</option>
+                        {menu.special.map((option) => (
+                          <option key={`ed-leader-special-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  );
+                })()}
+              </label>
+              <label style={{ display: "grid", gap: "6px" }}>
+                <span style={{ fontWeight: 600 }}>
+                  Melee (deverrouille wave {endlessDutyUnlockRules.melee})
+                </span>
+                <select
+                  value={endlessDutyDraft.melee ?? ""}
+                  disabled={!slotUnlockStatus.melee || isSubmittingEndlessDuty}
+                  onChange={(event) =>
+                    handleEndlessDutyDraftChange("melee", event.target.value === "" ? null : event.target.value)
+                  }
+                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                >
+                  <option value="">Aucun</option>
+                  {endlessDutyProfileOptions.melee.map((profile) => (
+                    <option
+                      key={`ed-melee-${profile}`}
+                      value={profile}
+                      disabled={
+                        !isOptionDraftAffordable(
+                          "melee",
+                          profile,
+                          getDefaultPicksForProfile("melee", profile)
+                        )
+                      }
+                    >
+                      {getProfileLabel("melee", profile)}
+                    </option>
+                  ))}
+                </select>
+                {(() => {
+                  const menu = getPickMenuForSlot("melee");
+                  const picks = endlessDutyDraftPicks.melee;
+                  const hasPackage = picks?.package != null;
+                  if (!menu || !picks) {
+                    return null;
+                  }
+                  return (
+                    <>
+                      <select
+                        value={picks.package ?? picks.melee ?? ""}
+                        disabled={!slotUnlockStatus.melee || isSubmittingEndlessDuty || !endlessDutyDraft.melee}
+                        onChange={(event) => {
+                          const value = event.target.value === "" ? null : event.target.value;
+                          if (value && menu.primaryPackages.some((opt) => opt.id === value)) {
+                            handleEndlessDutyPickChange("melee", "package", value);
+                            handleEndlessDutyPickChange("melee", "melee", null);
+                          } else {
+                            handleEndlessDutyPickChange("melee", "package", null);
+                            handleEndlessDutyPickChange("melee", "melee", value);
+                          }
+                        }}
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Arme principale (melee ou pack)</option>
+                        {menu.primaryPackages.map((option) => (
+                          <option key={`ed-melee-package-${option.id}`} value={option.id}>
+                            [PACK] {option.label}
+                          </option>
+                        ))}
+                        {menu.primaryMelee.map((option) => (
+                          <option key={`ed-melee-melee-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.ranged ?? ""}
+                        disabled={
+                          !slotUnlockStatus.melee ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.melee ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "melee",
+                            "ranged",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Arme a distance</option>
+                        {menu.ranged.map((option) => (
+                          <option key={`ed-melee-ranged-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.secondary ?? ""}
+                        disabled={
+                          !slotUnlockStatus.melee ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.melee ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "melee",
+                            "secondary",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Secondaire</option>
+                        {menu.secondary.map((option) => (
+                          <option key={`ed-melee-secondary-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.special ?? ""}
+                        disabled={
+                          !slotUnlockStatus.melee ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.melee ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "melee",
+                            "special",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Special (equipement/special)</option>
+                        {menu.special.map((option) => (
+                          <option key={`ed-melee-special-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  );
+                })()}
+              </label>
+              <label style={{ display: "grid", gap: "6px" }}>
+                <span style={{ fontWeight: 600 }}>
+                  Range (deverrouille wave {endlessDutyUnlockRules.range})
+                </span>
+                <select
+                  value={endlessDutyDraft.range ?? ""}
+                  disabled={!slotUnlockStatus.range || isSubmittingEndlessDuty}
+                  onChange={(event) =>
+                    handleEndlessDutyDraftChange("range", event.target.value === "" ? null : event.target.value)
+                  }
+                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                >
+                  <option value="">Aucun</option>
+                  {endlessDutyProfileOptions.range.map((profile) => (
+                    <option
+                      key={`ed-range-${profile}`}
+                      value={profile}
+                      disabled={
+                        !isOptionDraftAffordable(
+                          "range",
+                          profile,
+                          getDefaultPicksForProfile("range", profile)
+                        )
+                      }
+                    >
+                      {getProfileLabel("range", profile)}
+                    </option>
+                  ))}
+                </select>
+                {(() => {
+                  const menu = getPickMenuForSlot("range");
+                  const picks = endlessDutyDraftPicks.range;
+                  const hasPackage = picks?.package != null;
+                  if (!menu || !picks) {
+                    return null;
+                  }
+                  return (
+                    <>
+                      <select
+                        value={picks.package ?? picks.melee ?? ""}
+                        disabled={!slotUnlockStatus.range || isSubmittingEndlessDuty || !endlessDutyDraft.range}
+                        onChange={(event) => {
+                          const value = event.target.value === "" ? null : event.target.value;
+                          if (value && menu.primaryPackages.some((opt) => opt.id === value)) {
+                            handleEndlessDutyPickChange("range", "package", value);
+                            handleEndlessDutyPickChange("range", "melee", null);
+                          } else {
+                            handleEndlessDutyPickChange("range", "package", null);
+                            handleEndlessDutyPickChange("range", "melee", value);
+                          }
+                        }}
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Arme principale (melee ou pack)</option>
+                        {menu.primaryPackages.map((option) => (
+                          <option key={`ed-range-package-${option.id}`} value={option.id}>
+                            [PACK] {option.label}
+                          </option>
+                        ))}
+                        {menu.primaryMelee.map((option) => (
+                          <option key={`ed-range-melee-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.ranged ?? ""}
+                        disabled={
+                          !slotUnlockStatus.range ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.range ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "range",
+                            "ranged",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Arme a distance</option>
+                        {menu.ranged.map((option) => (
+                          <option key={`ed-range-ranged-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.secondary ?? ""}
+                        disabled={
+                          !slotUnlockStatus.range ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.range ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "range",
+                            "secondary",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Secondaire</option>
+                        {menu.secondary.map((option) => (
+                          <option key={`ed-range-secondary-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={picks.special ?? ""}
+                        disabled={
+                          !slotUnlockStatus.range ||
+                          isSubmittingEndlessDuty ||
+                          !endlessDutyDraft.range ||
+                          hasPackage
+                        }
+                        onChange={(event) =>
+                          handleEndlessDutyPickChange(
+                            "range",
+                            "special",
+                            event.target.value === "" ? null : event.target.value
+                          )
+                        }
+                        style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #475569", background: "#0f172a", color: "#e2e8f0" }}
+                      >
+                        <option value="">Special (equipement/special)</option>
+                        {menu.special.map((option) => (
+                          <option key={`ed-range-special-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  );
+                })()}
+              </label>
+            </div>
+            {!isProjectedDraftAffordable && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "8px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #f59e0b",
+                  color: "#fde68a",
+                  background: "rgba(120, 53, 15, 0.35)",
+                  fontSize: "14px",
+                }}
+              >
+                Selection invalide: requisition insuffisante pour ce draft.
+              </div>
+            )}
+            {endlessDutyFormError && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "8px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #f87171",
+                  color: "#fecaca",
+                  background: "rgba(127, 29, 29, 0.35)",
+                  fontSize: "14px",
+                }}
+              >
+                {endlessDutyFormError}
+              </div>
+            )}
+            <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  void apiProps.fetchEndlessDutyStatus().catch(() => {});
+                }}
+                disabled={isSubmittingEndlessDuty}
+                style={{
+                  padding: "10px 14px",
+                  border: "1px solid #64748b",
+                  borderRadius: "6px",
+                  background: "rgba(30, 41, 59, 0.9)",
+                  color: "#e2e8f0",
+                  cursor: isSubmittingEndlessDuty ? "not-allowed" : "pointer",
+                }}
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleEndlessDutyCommit();
+                }}
+                disabled={isSubmittingEndlessDuty || !isProjectedDraftAffordable}
+                style={{
+                  padding: "10px 14px",
+                  border: "1px solid #60a5fa",
+                  borderRadius: "6px",
+                  background: isSubmittingEndlessDuty || !isProjectedDraftAffordable ? "#334155" : "#1d4ed8",
+                  color: "#eff6ff",
+                  cursor: isSubmittingEndlessDuty || !isProjectedDraftAffordable ? "not-allowed" : "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {isSubmittingEndlessDuty ? "Validation..." : "Valider et lancer vague suivante"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {apiProps.advanceWarningPopup && settings.showAdvanceWarning && (
         <div
           style={{

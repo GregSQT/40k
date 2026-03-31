@@ -296,20 +296,24 @@ export const GameLog: React.FC<GameLogProps> = ({
   }, []);
 
   const renderMessageWithRuleDescriptions = React.useCallback(
-    (message: string, ruleHintByLabel?: Record<string, string>): React.ReactNode => {
+    (message: string | undefined, ruleHintByLabel?: Record<string, string>): React.ReactNode => {
+      const safeMessage = typeof message === "string" ? message : "";
+      if (safeMessage.length === 0) {
+        return "";
+      }
       const nodes: React.ReactNode[] = [];
       let lastIndex = 0;
       let match: RegExpExecArray | null;
       RULE_TOKEN_REGEX.lastIndex = 0;
 
       for (;;) {
-        match = RULE_TOKEN_REGEX.exec(message);
+        match = RULE_TOKEN_REGEX.exec(safeMessage);
         if (match === null) {
           break;
         }
         const [fullToken, tokenLabel] = match;
         if (match.index > lastIndex) {
-          nodes.push(message.slice(lastIndex, match.index));
+          nodes.push(safeMessage.slice(lastIndex, match.index));
         }
         const description = resolveRuleDescription(tokenLabel, ruleDescriptionByLookup, ruleHintByLabel);
         if (description) {
@@ -326,8 +330,8 @@ export const GameLog: React.FC<GameLogProps> = ({
         lastIndex = RULE_TOKEN_REGEX.lastIndex;
       }
 
-      if (lastIndex < message.length) {
-        nodes.push(message.slice(lastIndex));
+      if (lastIndex < safeMessage.length) {
+        nodes.push(safeMessage.slice(lastIndex));
       }
       return nodes;
     },

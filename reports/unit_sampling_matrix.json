@@ -4,27 +4,27 @@
       "counts": {
         "mobility": {
           "High": 2,
-          "Low": 14,
-          "Mid": 19
+          "Low": 21,
+          "Mid": 29
         },
         "weapon_profile": {
-          "AntiElite": 17,
+          "AntiElite": 26,
           "Burst": 4,
-          "Generalist": 10,
-          "Volume": 4
+          "Generalist": 17,
+          "Volume": 5
         }
       },
       "weights": {
         "mobility_weights": {
-          "High": 0.5874034909447973,
-          "Low": 0.2220176508987307,
-          "Mid": 0.19057885815647205
+          "High": 0.6364482863286923,
+          "Low": 0.1964122053162998,
+          "Mid": 0.16713950835500785
         },
         "weapon_profile_weights": {
-          "AntiElite": 0.1555948942786403,
-          "Burst": 0.32076709195882347,
-          "Generalist": 0.20287092180371274,
-          "Volume": 0.32076709195882347
+          "AntiElite": 0.14151168029071481,
+          "Burst": 0.3607854096018291,
+          "Generalist": 0.17500662964353805,
+          "Volume": 0.3226962804639181
         }
       }
     },
@@ -60,27 +60,27 @@
       "counts": {
         "mobility": {
           "High": 4,
-          "Low": 7,
-          "Mid": 27
+          "Low": 8,
+          "Mid": 33
         },
         "weapon_profile": {
-          "AntiElite": 18,
+          "AntiElite": 22,
           "Burst": 1,
-          "Generalist": 13,
-          "Volume": 6
+          "Generalist": 15,
+          "Volume": 7
         }
       },
       "weights": {
         "mobility_weights": {
-          "High": 0.46710874216858683,
-          "Low": 0.35310101914350583,
-          "Mid": 0.17979023868790742
+          "High": 0.4865559498996439,
+          "Low": 0.3440470116007002,
+          "Mid": 0.16939703849965593
         },
         "weapon_profile_weights": {
-          "AntiElite": 0.12267848892968945,
-          "Burst": 0.5204807485674132,
-          "Generalist": 0.14435538668089914,
-          "Volume": 0.2124853758219982
+          "AntiElite": 0.1152832580472646,
+          "Burst": 0.5407264103886812,
+          "Generalist": 0.13961495881932526,
+          "Volume": 0.20437537274472897
         }
       }
     }
@@ -100,6 +100,16 @@
       "weapon_profile": "AntiElite"
     },
     {
+      "blend_group": "Balance",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Elite",
+      "units": [
+        "spaceMarine::CaptainCloseCombatBolter"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
       "blend_group": "Melee",
       "count": 1,
       "mobility_bucket": "High",
@@ -111,14 +121,19 @@
     },
     {
       "blend_group": "Melee",
-      "count": 6,
+      "count": 11,
       "mobility_bucket": "Low",
       "tanking": "Elite",
       "units": [
         "spaceMarine::AggressorBoltStorm",
         "spaceMarine::AggressorFlamestorm",
         "spaceMarine::AssaultTerminator",
-        "spaceMarine::Captain Gravis",
+        "spaceMarine::CaptainGravisBladeBoltstorm",
+        "spaceMarine::CaptainGravisChainSwordBoltstorm",
+        "spaceMarine::CaptainGravisFistBoltstorm",
+        "spaceMarine::CaptainPowerFistNeoVolkite",
+        "spaceMarine::CaptainPowerFistPlasmaPistol",
+        "spaceMarine::CaptainPowerWeaponPlasmaPistol",
         "spaceMarine::TerminatorHeavyFlamer",
         "tyranid::TyrantGuardCrushingClaws"
       ],
@@ -126,10 +141,12 @@
     },
     {
       "blend_group": "Melee",
-      "count": 2,
+      "count": 4,
       "mobility_bucket": "Low",
       "tanking": "Elite",
       "units": [
+        "spaceMarine::CaptainPowerWeaponNeoVolkite",
+        "spaceMarine::CaptainStormShield",
         "tyranid::GenestealerPrime",
         "tyranid::TyrantGuardBoneCleaver"
       ],
@@ -148,11 +165,15 @@
     },
     {
       "blend_group": "Melee",
-      "count": 2,
+      "count": 6,
       "mobility_bucket": "Mid",
       "tanking": "Elite",
       "units": [
-        "spaceMarine::CaptainTerminator",
+        "spaceMarine::CaptainPowerFistBolter",
+        "spaceMarine::CaptainPowerFistPistol",
+        "spaceMarine::CaptainTerminatorRelicFistBolter",
+        "spaceMarine::CaptainTerminatorRelicFistCombi",
+        "spaceMarine::CaptainTerminatorRelicWeaponBolter",
         "spaceMarine::Terminator"
       ],
       "weapon_profile": "AntiElite"
@@ -170,13 +191,18 @@
     },
     {
       "blend_group": "Melee",
-      "count": 4,
+      "count": 9,
       "mobility_bucket": "Mid",
       "tanking": "Elite",
       "units": [
         "adeptusCustodes::CustodianGuardSpear",
         "adeptusCustodes::CustodianWardenAxe",
         "adeptusCustodes::CustodianWardenSpear",
+        "spaceMarine::CaptainGravisPowerWeaponBoltRifle",
+        "spaceMarine::CaptainPowerWeaponBolter",
+        "spaceMarine::CaptainPowerWeaponPistol",
+        "spaceMarine::CaptainTerminatorRelicWeaponBolter",
+        "spaceMarine::CaptainTerminatorRelicWeaponCombi",
         "spaceMarine::WolfGuardTerminator"
       ],
       "weapon_profile": "Generalist"
@@ -481,6 +507,16 @@
       "weapon_profile": "Generalist"
     },
     {
+      "blend_group": "Balance",
+      "count": 1,
+      "mobility_bucket": "Mid",
+      "tanking": "Troop",
+      "units": [
+        "spaceMarine::LieutenantCloseCombatBolter"
+      ],
+      "weapon_profile": "Volume"
+    },
+    {
       "blend_group": "Melee",
       "count": 1,
       "mobility_bucket": "High",
@@ -503,12 +539,13 @@
     },
     {
       "blend_group": "Melee",
-      "count": 2,
+      "count": 3,
       "mobility_bucket": "Low",
       "tanking": "Troop",
       "units": [
         "spaceMarine::DeathCompanyMarineEviscerator",
-        "spaceMarine::DeathCompanyMarineEviscerator"
+        "spaceMarine::DeathCompanyMarineEviscerator",
+        "spaceMarine::LieutenantStormShield"
       ],
       "weapon_profile": "Generalist"
     },
@@ -525,25 +562,29 @@
     },
     {
       "blend_group": "Melee",
-      "count": 3,
+      "count": 6,
       "mobility_bucket": "Mid",
       "tanking": "Troop",
       "units": [
         "aeldari::StrikingScorpionExarch",
         "spaceMarine::AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
-        "spaceMarine::GreyHunterPackLeader"
+        "spaceMarine::GreyHunterPackLeader",
+        "spaceMarine::LieutenantPowerFistBolter",
+        "spaceMarine::LieutenantPowerFistPlasmaPistol",
+        "spaceMarine::LieutenantPowerWeaponPlasmaPistol"
       ],
       "weapon_profile": "AntiElite"
     },
     {
       "blend_group": "Melee",
-      "count": 4,
+      "count": 5,
       "mobility_bucket": "Mid",
       "tanking": "Troop",
       "units": [
         "spaceMarine::BladeguardVeteran",
         "spaceMarine::DeathCompanyJumpPackEviscerator",
         "spaceMarine::GreyHunter",
+        "spaceMarine::LieutenantPowerWeaponBolter",
         "spaceMarine::SanguinaryGuardAngelus"
       ],
       "weapon_profile": "Generalist"
@@ -583,7 +624,7 @@
     },
     {
       "blend_group": "Ranged",
-      "count": 7,
+      "count": 8,
       "mobility_bucket": "Mid",
       "tanking": "Troop",
       "units": [
@@ -593,6 +634,7 @@
         "spaceMarine::Hellblaster",
         "spaceMarine::HellblasterSergeant",
         "spaceMarine::IntercessorGrenadeLauncher",
+        "spaceMarine::LieutenantCloseCombatPlasmaPistol",
         "tyranid::Zoanthrope"
       ],
       "weapon_profile": "AntiElite"
@@ -681,12 +723,28 @@
     "spaceMarine::AssaultIntercessorJumpPackSergeantPowerFistHandFlamer": 20,
     "spaceMarine::AssaultIntercessorSergeant": 22,
     "spaceMarine::AssaultTerminator": 36,
-    "spaceMarine::BladeguardVeteran": 15,
-    "spaceMarine::BladeguardVeteranSergeant": 18,
+    "spaceMarine::BladeguardVeteran": 32,
+    "spaceMarine::BladeguardVeteranSergeant": 36,
     "spaceMarine::BloodClaw": 13,
     "spaceMarine::BloodClawPackLeader": 18,
-    "spaceMarine::Captain Gravis": 80,
-    "spaceMarine::CaptainTerminator": 95,
+    "spaceMarine::CaptainCloseCombatBolter": 70,
+    "spaceMarine::CaptainGravisBladeBoltstorm": 80,
+    "spaceMarine::CaptainGravisChainSwordBoltstorm": 80,
+    "spaceMarine::CaptainGravisFistBoltstorm": 80,
+    "spaceMarine::CaptainGravisPowerWeaponBoltRifle": 80,
+    "spaceMarine::CaptainPowerFistBolter": 70,
+    "spaceMarine::CaptainPowerFistNeoVolkite": 70,
+    "spaceMarine::CaptainPowerFistPistol": 70,
+    "spaceMarine::CaptainPowerFistPlasmaPistol": 70,
+    "spaceMarine::CaptainPowerWeaponBolter": 70,
+    "spaceMarine::CaptainPowerWeaponNeoVolkite": 70,
+    "spaceMarine::CaptainPowerWeaponPistol": 70,
+    "spaceMarine::CaptainPowerWeaponPlasmaPistol": 70,
+    "spaceMarine::CaptainStormShield": 70,
+    "spaceMarine::CaptainTerminatorRelicFistBolter": 95,
+    "spaceMarine::CaptainTerminatorRelicFistCombi": 95,
+    "spaceMarine::CaptainTerminatorRelicWeaponBolter": 95,
+    "spaceMarine::CaptainTerminatorRelicWeaponCombi": 95,
     "spaceMarine::DeathCompanyJumpPackEviscerator": 17,
     "spaceMarine::DeathCompanyMarineEviscerator": 17,
     "spaceMarine::DeathwingTerminatorPlasmaCannon": 38,
@@ -707,12 +765,19 @@
     "spaceMarine::Intercessor": 18,
     "spaceMarine::IntercessorGrenadeLauncher": 20,
     "spaceMarine::IntercessorSergeant": 21,
+    "spaceMarine::LieutenantCloseCombatBolter": 65,
+    "spaceMarine::LieutenantCloseCombatPlasmaPistol": 65,
+    "spaceMarine::LieutenantPowerFistBolter": 65,
+    "spaceMarine::LieutenantPowerFistPlasmaPistol": 65,
+    "spaceMarine::LieutenantPowerWeaponBolter": 65,
+    "spaceMarine::LieutenantPowerWeaponPlasmaPistol": 65,
+    "spaceMarine::LieutenantStormShield": 65,
     "spaceMarine::SanguinaryGuardAngelus": 50,
     "spaceMarine::SanguinaryGuardInferno": 50,
     "spaceMarine::Scout": 14,
     "spaceMarine::SternguardVeteranBoltRifle": 31,
     "spaceMarine::SternguardVeteranSergeantPowerFist": 38,
-    "spaceMarine::Suppressor": 15,
+    "spaceMarine::Suppressor": 32,
     "spaceMarine::Terminator": 33,
     "spaceMarine::TerminatorAssaultCannon": 38,
     "spaceMarine::TerminatorCyclone": 38,

@@ -169,6 +169,26 @@ export interface APIGameState {
   active_rule_choice_prompt?: RuleChoicePrompt | null;
 }
 
+export interface EndlessDutyState {
+  enabled: boolean;
+  wave_index: number;
+  inter_wave_pending: boolean;
+  objective_lost_counter: number;
+  requisition_capital_total: number;
+  requisition_invested_total: number;
+  requisition_available: number;
+  slot_profiles: {
+    leader: string | null;
+    melee: string | null;
+    range: string | null;
+  };
+  slot_picks: {
+    leader: Record<string, string | null> | null;
+    melee: Record<string, string | null> | null;
+    range: Record<string, string | null> | null;
+  };
+}
+
 interface ArmyListItem {
   file: string;
   name: string;
@@ -209,6 +229,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const stopAiAfterPhaseChangeRef = options?.stopAiAfterPhaseChangeRef;
   const onStopAfterPhaseChange = options?.onStopAfterPhaseChange;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
+  const [endlessDutyState, setEndlessDutyState] = useState<EndlessDutyState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [maxTurnsFromConfig, setMaxTurnsFromConfig] = useState<number>(8);
@@ -349,11 +370,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get("mode");
         const isPvEMode = mode === "pve";
+        const isEndlessDutyMode = mode === "endless_duty";
         const isPvETestMode = mode === "pve_test";
         const isPvPTestMode = mode === "pvp_test";
         const isTutorialMode = mode === "tutorial";
         const requestedModeCode = isTutorialMode
           ? "pve"
+          : isEndlessDutyMode
+            ? "endless_duty"
           : isPvETestMode
             ? "pve_test"
             : isPvEMode
@@ -370,6 +394,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 ? "PvP Test"
                 : isPvETestMode
                   ? "PvE Test"
+                : isEndlessDutyMode
+                  ? "Endless Duty"
                   : isPvEMode
                     ? "PvE"
                     : "PvP"
@@ -377,11 +403,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
 
         const requestPayload: Record<string, unknown> = {
-          pve_mode: isPvEMode || isPvETestMode || isTutorialMode,
+          pve_mode: isPvEMode || isPvETestMode || isTutorialMode || isEndlessDutyMode,
           mode_code: requestedModeCode,
         };
         if (isTutorialMode) {
           requestPayload.scenario_file = "config/tutorial/scenario_etape1.json";
+        } else if (isEndlessDutyMode) {
+          requestPayload.scenario_file = "config/scenario_endless_duty.json";
         } else if (isPvPTestMode) {
           requestPayload.scenario_file = "config/scenario_pvp_test.json";
         } else if (isPvETestMode) {
@@ -411,7 +439,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const data = await response.json();
         if (data.success) {
           const expectedPlayer2Type: "human" | "ai" =
-            requestedModeCode === "pve" || requestedModeCode === "pve_test" ? "ai" : "human";
+            requestedModeCode === "pve" ||
+            requestedModeCode === "pve_test" ||
+            requestedModeCode === "endless_duty"
+              ? "ai"
+              : "human";
           const player2Type = data.game_state?.player_types?.["2"];
           if (player2Type !== expectedPlayer2Type) {
             throw new Error(
@@ -419,9 +451,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             );
           }
           setGameState(data.game_state);
+          setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
           const startedMode =
             requestedModeCode === "pve"
               ? "PvE"
+              : requestedModeCode === "endless_duty"
+                ? "Endless Duty"
               : requestedModeCode === "pve_test"
                   ? "PvE Test"
                 : requestedModeCode === "pvp_test"
@@ -480,6 +515,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const data = await response.json();
         if (data.success && data.game_state) {
           setGameState(data.game_state);
+          setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
         } else {
           throw new Error(data.error || "Failed to start game");
         }
@@ -531,6 +567,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
       }
       setGameState(data.game_state);
+      setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       throw err;
@@ -576,6 +613,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
       }
       setGameState(data.game_state);
+      setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       throw err;
@@ -772,6 +810,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
 
         const data = await response.json();
+        setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
 
         // Process detailed backend action logs FIRST
         if (data.action_logs && data.action_logs.length > 0) {
@@ -1659,6 +1698,60 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return "enemy";
     }
   }, []);
+
+  const fetchEndlessDutyStatus = useCallback(async (): Promise<EndlessDutyState | null> => {
+    const response = await fetch(`${API_BASE}/game/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "endless_duty_status" }),
+    });
+    if (!response.ok) {
+      throw new Error(`Endless Duty status failed: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(String(data.error || "Failed to fetch Endless Duty status"));
+    }
+    if (data.game_state) {
+      setGameState(data.game_state);
+    }
+    const nextState = (data.endless_duty_state as EndlessDutyState | undefined) ?? null;
+    setEndlessDutyState(nextState);
+    return nextState;
+  }, []);
+
+  const commitEndlessDuty = useCallback(
+    async (
+      slotProfiles: { leader: string | null; melee: string | null; range: string | null },
+      slotPicks: {
+        leader: Record<string, string | null> | null;
+        melee: Record<string, string | null> | null;
+        range: Record<string, string | null> | null;
+      }
+    ) => {
+      const response = await fetch(`${API_BASE}/game/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "endless_duty_commit",
+          slot_profiles: slotProfiles,
+          slot_picks: slotPicks,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Endless Duty commit failed: ${response.status}`);
+      }
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(String(data.error || "Failed to commit Endless Duty requisition"));
+      }
+      if (data.game_state) {
+        setGameState(data.game_state);
+      }
+      setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
+    },
+    []
+  );
 
   // Backend-driven shooting phase management
   const handleShootingPhaseClick = useCallback(
@@ -2943,6 +3036,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       startGameWithScenario: async () => {},
       startPveGame: async () => {},
       startPvpGame: async () => {},
+      endlessDutyState: null,
+      fetchEndlessDutyStatus: async () => null,
+      commitEndlessDuty: async () => {},
     };
   }
 
@@ -3469,6 +3565,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   const stateData = await stateResponse.json();
                   if (stateData.game_state) {
                     setGameState(stateData.game_state);
+                    setEndlessDutyState(
+                      (stateData.endless_duty_state as EndlessDutyState | undefined) ?? null
+                    );
                   }
                 }
               } catch (stateErr) {
@@ -3477,7 +3576,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               // Exit loop - no more AI units eligible
               break;
             }
-
             // For other errors, log and throw
             throw new Error(
               `AI activation failed: ${aiResponse.status} - ${JSON.stringify(errorData)}`
@@ -3489,6 +3587,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           if (activationData.result?.action === "ai_turn_skipped") {
             if (activationData.game_state) {
               setGameState(activationData.game_state);
+              setEndlessDutyState(
+                (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
+              );
             }
             break;
           }
@@ -3553,6 +3654,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Update game state from activation
           if (activationData.game_state) {
             setGameState(activationData.game_state);
+            setEndlessDutyState(
+              (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
+            );
             // Tutoriel étape 2 : arrêter après chaque phase ou changement de fight_subphase (2-14 / 2-15)
             if (stopAfterPhase && shouldStopTutorialBoundary(activationData.game_state)) {
               onStopAfterPhaseChange?.();
@@ -3832,6 +3936,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
               // Update game state from decision
               setGameState(decisionData.game_state);
+              setEndlessDutyState(
+                (decisionData.endless_duty_state as EndlessDutyState | undefined) ?? null
+              );
               totalUnitsProcessed++;
 
               // Check if phase complete
@@ -3887,6 +3994,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 if (skipResponse.ok) {
                   const skipData = await skipResponse.json();
                   setGameState(skipData.game_state);
+                  setEndlessDutyState(
+                    (skipData.endless_duty_state as EndlessDutyState | undefined) ?? null
+                  );
                   totalUnitsProcessed++;
 
                   if (skipData.result?.phase_complete) {
@@ -4053,6 +4163,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     startGameWithScenario,
     startPveGame,
     startPvpGame,
+    endlessDutyState,
+    fetchEndlessDutyStatus,
+    commitEndlessDuty,
   };
 
   return returnObject;

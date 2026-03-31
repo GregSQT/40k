@@ -76,7 +76,7 @@ def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:
         )
     if mode_code in {"pvp", "pvp_test"}:
         return False
-    if mode_code in {"pve", "pve_test"}:
+    if mode_code in {"pve", "pve_test", "endless_duty"}:
         return True
     raise ValueError(f"Unsupported current_mode_code for fight auto execution: {mode_code}")
 

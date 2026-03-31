@@ -1,0 +1,6 @@
+{
+  "objectives_id": "objectives-11",
+  "objectives": [
+    {"id": 1, "name": "West", "hexes": [[2, 10], [1, 9], [2, 9], [3, 9], [3, 10], [2, 11], [1, 10]]}
+  ]
+}

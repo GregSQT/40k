@@ -36,6 +36,7 @@ const ProtectedGameRoute = () => {
   const allowedModes = authSession.permissions.game_modes;
   const isRequestedModeAllowed =
     allowedModes.includes(requestedMode) ||
+    (requestedMode === "endless_duty" && allowedModes.includes("pve")) ||
     ((requestedMode === "pvp_test" || requestedMode === "pve_test" || requestedMode === "tutorial") &&
       allowedModes.includes("test"));
   if (!isRequestedModeAllowed) {

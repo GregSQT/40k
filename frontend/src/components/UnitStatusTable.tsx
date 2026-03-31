@@ -44,7 +44,7 @@ interface UnitStatusTableProps {
   guidedFocusUnitId?: UnitId | null;
   clickedUnitId?: UnitId | null;
   onSelectUnit: (unitId: UnitId) => void;
-  gameMode?: "pvp" | "pvp_test" | "pve" | "training" | "tutorial";
+  gameMode?: "pvp" | "pvp_test" | "pve" | "training" | "tutorial" | "endless_duty";
   isReplay?: boolean;
   victoryPoints?: number;
   onCollapseChange?: (collapsed: boolean) => void;

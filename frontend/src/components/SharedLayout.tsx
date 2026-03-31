@@ -24,6 +24,8 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
   const getButtonClass = (path: string) => {
     const isPvPTestMode = location.pathname === "/game" && location.search.includes("mode=pvp_test");
     const isPvEMode = location.pathname === "/game" && location.search.includes("mode=pve");
+    const isEndlessDutyMode =
+      location.pathname === "/game" && location.search.includes("mode=endless_duty");
     const isPvETestMode = location.pathname === "/game" && location.search.includes("mode=pve_test");
     const isTutorialMode = location.pathname === "/game" && location.search.includes("mode=tutorial");
 
@@ -35,6 +37,11 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
     // Handle PvE mode detection via query parameter
     if (path === "/game?mode=pve") {
       return `nav-button ${isPvEMode ? "nav-button--active" : "nav-button--inactive"}`;
+    }
+
+    // Handle Endless Duty mode detection via query parameter
+    if (path === "/game?mode=endless_duty") {
+      return `nav-button ${isEndlessDutyMode ? "nav-button--active" : "nav-button--inactive"}`;
     }
 
     // Handle PvE test mode detection via query parameter
@@ -53,6 +60,7 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
         location.pathname === "/game" &&
         !isPvPTestMode &&
         !isPvEMode &&
+        !isEndlessDutyMode &&
         !isPvETestMode &&
         !isTutorialMode;
       return `nav-button ${isPvPMode ? "nav-button--active" : "nav-button--inactive"}`;
@@ -96,6 +104,13 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
               className={getButtonClass("/game?mode=pve")}
             >
               PvE
+            </button>
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/game?mode=endless_duty")}
+              className={getButtonClass("/game?mode=endless_duty")}
+            >
+              Endless Duty
             </button>
             <button
               type="button"

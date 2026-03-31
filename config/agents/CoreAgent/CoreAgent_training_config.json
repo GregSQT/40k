@@ -35,7 +35,7 @@
     "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05", "holdout_regular_bot-06"],
     "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05", "holdout_hard_bot-06"],
     "bot_eval_weights": {"random": 0.1, "greedy": 0.40, "defensive": 0.50},
-    "bot_eval_randomness": {"greedy": 0.1, "defensive": 0.1}
+    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05}
   },
     "observation_params": {
       "obs_size": 355,
@@ -58,7 +58,7 @@
     "normalize_advantage": true,
     "ent_coef": { "start": 0.02, "end": 0.01 },
     "vf_coef": 1.0,
-    "max_grad_norm": 0.5,
+    "max_grad_norm": 0.3,
     "target_kl": 0.008,
     "tensorboard_log": "./tensorboard/",
     "policy_kwargs": {
@@ -81,8 +81,8 @@
   },
   "bot_training": {
     "ratios": {"random": 0.1, "greedy": 0.40, "defensive": 0.50},
-    "greedy_randomness": 0.1,
-    "defensive_randomness": 0.1
+    "greedy_randomness": 0.05,
+    "defensive_randomness": 0.05
   },
   "opponent_mix": {
     "enabled": false,
@@ -94,9 +94,16 @@
     "self_play_snapshot_device": "cpu",
     "self_play_deterministic": false
   },
+  "scenario_sampling": {
+    "train_objective_count_weights": {"1": 0.025, "2": 0.025, "3": 0.025, "4": 0.025, "5": 0.90},
+    "train_wall_ref_weights": {"walls-11.json": 0.3, "walls-21.json": 0.3, "walls-31.json": 0.3, "default": 0.1},
+    "train_selection_mode": "uniform_within_count",
+    "eval_objective_count_weights": {"5": 1.0},
+    "eval_selection_mode": "uniform_within_count"
+  },
   "training_hard": {
     "enabled": true,
-    "target_episode_ratio": 0.25,
+    "target_episode_ratio": 0.3,
     "max_scenario_weight": 4,
     "scenario_names": [
       "training_bot-21",
@@ -208,6 +215,13 @@
     "snapshot_update_freq_episodes": 1000,
     "self_play_snapshot_device": "cpu",
     "self_play_deterministic": false
+  },
+  "scenario_sampling": {
+    "train_objective_count_weights": {"1": 0.025, "2": 0.025, "3": 0.025, "4": 0.025, "5": 0.90},
+    "train_wall_ref_weights": {"walls-11.json": 0.3, "walls-21.json": 0.3, "walls-31.json": 0.3, "default": 0.1},
+    "train_selection_mode": "uniform_within_count",
+    "eval_objective_count_weights": {"5": 1.0},
+    "eval_selection_mode": "uniform_within_count"
   },
   "training_hard": {
     "enabled": true,

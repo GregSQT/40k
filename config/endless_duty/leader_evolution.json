@@ -62,9 +62,7 @@
 
           { "slot": "ranged", "pick": "bolt_rifle", "cost": 0 },
           { "slot": "ranged", "pick": "hand_flamer", "cost": 2 },
-          {
-            "slot": "ranged",
-            "pick": "plasma_pistol_package_sergeant", "includes": ["plasma_pistol_standard", "plasma_pistol_supercharge"], "cost": 4},
+          { "slot": "ranged", "pick": "plasma_pistol_package_sergeant", "includes": ["plasma_pistol_standard", "plasma_pistol_supercharge"], "cost": 4},
 
           { "slot": "secondary", "pick": "bolt_pistol", "cost": 0 },
           { "slot": "equipment", "pick": "jump_pack", "cost": 2 }
@@ -81,9 +79,7 @@
   
           { "slot": "ranged", "pick": "master_crafted_bolter_lieutenant", "cost": 2 },
           { "slot": "ranged", "pick": "neo_volkite_pistol_lieutenant", "cost": 3 },
-          {
-            "slot": "ranged",
-            "pick": "plasma_pistol_package_lieutenant", "includes": ["plasma_pistol_standard_lieutenant", "plasma_pistol_supercharge_lieutenant"], "cost": 4},
+          { "slot": "ranged", "pick": "plasma_pistol_package_lieutenant", "includes": ["plasma_pistol_standard_lieutenant", "plasma_pistol_supercharge_lieutenant"], "cost": 4},
   
           { "slot": "secondary", "pick": "heavy_bolt_pistol_lieutenant", "cost": 0 }
         ],
@@ -99,9 +95,7 @@
   
           { "slot": "ranged", "pick": "master_crafted_bolter_captain", "cost": 2 },
           { "slot": "ranged", "pick": "neo_volkite_pistol_captain", "cost": 3 },
-          {
-            "slot": "ranged",
-            "pick": "plasma_pistol_package_captain", "includes": ["plasma_pistol_standard_captain", "plasma_pistol_supercharge_captain"], "cost": 4},
+          { "slot": "ranged", "pick": "plasma_pistol_package_captain", "includes": ["plasma_pistol_standard_captain", "plasma_pistol_supercharge_captain"], "cost": 4},
   
           { "slot": "secondary", "pick": "bolt_pistol_captain", "cost": 0 },
           { "slot": "secondary", "pick": "heavy_bolt_pistol_captain", "cost": 1 }

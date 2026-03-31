@@ -1,0 +1,7 @@
+{
+  "description": "Spawns forcés par vague (priorité + budget restant pour le tirage aléatoire). Chaque entrée: unit_type + quantity, ou one_of + quantity.",
+  "waves": {
+    "1": [{ "unit_type": "Hormagaunt", "quantity": 1 }, { "unit_type": "Termagant", "quantity": 1 }],
+    "5": [{ "one_of": ["TyranidWarriorMelee", "TyranidWarriorRanged"], "quantity": 1 }]
+  }
+}

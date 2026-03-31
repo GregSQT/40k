@@ -442,6 +442,206 @@ def _apply_training_hard_weights(
     return weighted_scenario_list
 
 
+def _load_scenario_wall_ref(scenario_path: str) -> str:
+    """Load required wall_ref from scenario JSON."""
+    if not isinstance(scenario_path, str) or not scenario_path.strip():
+        raise ValueError(f"Invalid scenario path: {scenario_path!r}")
+    with open(scenario_path, "r", encoding="utf-8-sig") as f:
+        scenario_data = json.load(f)
+    if not isinstance(scenario_data, dict):
+        raise TypeError(
+            f"Scenario JSON must be an object for wall_ref weighting: {scenario_path}"
+        )
+    wall_ref_raw = require_key(scenario_data, "wall_ref")
+    if not isinstance(wall_ref_raw, str) or not wall_ref_raw.strip():
+        raise ValueError(f"Scenario wall_ref must be a non-empty string: {scenario_path}")
+    return wall_ref_raw.strip()
+
+
+def _apply_wall_ref_weighting(
+    scenario_list: List[str],
+    training_config: Dict[str, Any],
+) -> List[str]:
+    """
+    Apply optional per-wall_ref weighting from training config.
+
+    Config format:
+      scenario_sampling:
+        train_wall_ref_weights:
+          "walls-11.json": 0.3
+          "walls-21.json": 0.3
+          "walls-31.json": 0.3
+          "default": 0.1
+    """
+    sampling_cfg = training_config.get("scenario_sampling")
+    if sampling_cfg is None:
+        return scenario_list
+    if not isinstance(sampling_cfg, dict):
+        raise TypeError(
+            f"scenario_sampling must be an object in training config "
+            f"(got {type(sampling_cfg).__name__})"
+        )
+
+    raw_weights = sampling_cfg.get("train_wall_ref_weights")
+    raw_multipliers = sampling_cfg.get("train_wall_ref_multipliers")
+    if raw_weights is None and raw_multipliers is None:
+        return scenario_list
+    if raw_weights is not None and raw_multipliers is not None:
+        raise ValueError(
+            "Use only one of scenario_sampling.train_wall_ref_weights or "
+            "scenario_sampling.train_wall_ref_multipliers"
+        )
+
+    wall_ref_weights: Dict[str, float] = {}
+    if raw_weights is not None:
+        if not isinstance(raw_weights, dict):
+            raise TypeError(
+                "scenario_sampling.train_wall_ref_weights must be an object "
+                f"(got {type(raw_weights).__name__})"
+            )
+        if len(raw_weights) == 0:
+            raise ValueError("scenario_sampling.train_wall_ref_weights cannot be empty")
+        for wall_ref, weight_raw in raw_weights.items():
+            if not isinstance(wall_ref, str) or not wall_ref.strip():
+                raise ValueError(
+                    "scenario_sampling.train_wall_ref_weights keys must be non-empty strings"
+                )
+            if not isinstance(weight_raw, (int, float)):
+                raise TypeError(
+                    f"Weight for wall_ref '{wall_ref}' must be numeric "
+                    f"(got {type(weight_raw).__name__})"
+                )
+            weight = float(weight_raw)
+            if weight <= 0.0:
+                raise ValueError(f"Weight for wall_ref '{wall_ref}' must be > 0")
+            wall_ref_weights[wall_ref.strip()] = weight
+        if "default" not in wall_ref_weights:
+            raise KeyError(
+                "scenario_sampling.train_wall_ref_weights must define a 'default' weight"
+            )
+        weight_sum = sum(wall_ref_weights.values())
+        if abs(weight_sum - 1.0) > 1e-9:
+            raise ValueError(
+                "scenario_sampling.train_wall_ref_weights must sum to 1.0 "
+                f"(got {weight_sum:.12f})"
+            )
+    else:
+        if not isinstance(raw_multipliers, dict):
+            raise TypeError(
+                "scenario_sampling.train_wall_ref_multipliers must be an object "
+                f"(got {type(raw_multipliers).__name__})"
+            )
+        if len(raw_multipliers) == 0:
+            raise ValueError("scenario_sampling.train_wall_ref_multipliers cannot be empty")
+
+        default_multiplier = raw_multipliers.get("default", 1)
+        if not isinstance(default_multiplier, int):
+            raise TypeError(
+                "scenario_sampling.train_wall_ref_multipliers['default'] must be integer "
+                f"(got {type(default_multiplier).__name__})"
+            )
+        if default_multiplier < 1:
+            raise ValueError(
+                "scenario_sampling.train_wall_ref_multipliers['default'] must be >= 1"
+            )
+
+        multipliers: Dict[str, int] = {}
+        for wall_ref, multiplier_raw in raw_multipliers.items():
+            if wall_ref == "default":
+                continue
+            if not isinstance(wall_ref, str) or not wall_ref.strip():
+                raise ValueError(
+                    "scenario_sampling.train_wall_ref_multipliers keys must be non-empty strings"
+                )
+            if not isinstance(multiplier_raw, int):
+                raise TypeError(
+                    f"Multiplier for wall_ref '{wall_ref}' must be integer "
+                    f"(got {type(multiplier_raw).__name__})"
+                )
+            if multiplier_raw < 1:
+                raise ValueError(f"Multiplier for wall_ref '{wall_ref}' must be >= 1")
+            multipliers[wall_ref.strip()] = int(multiplier_raw)
+
+        total_multiplier = float(default_multiplier + sum(multipliers.values()))
+        wall_ref_weights["default"] = float(default_multiplier) / total_multiplier
+        for wall_ref, mult in multipliers.items():
+            wall_ref_weights[wall_ref] = float(mult) / total_multiplier
+
+    scenario_counts: Dict[str, int] = {}
+    for scenario_path in scenario_list:
+        if scenario_path not in scenario_counts:
+            scenario_counts[scenario_path] = 0
+        scenario_counts[scenario_path] += 1
+
+    scenarios_by_group: Dict[str, List[Tuple[str, int]]] = {}
+    for scenario_path, base_count in sorted(scenario_counts.items(), key=lambda item: item[0]):
+        wall_ref = _load_scenario_wall_ref(scenario_path)
+        group_key = wall_ref if wall_ref in wall_ref_weights else "default"
+        if group_key not in scenarios_by_group:
+            scenarios_by_group[group_key] = []
+        scenarios_by_group[group_key].append((scenario_path, base_count))
+
+    configured_groups = [key for key in wall_ref_weights.keys() if key != "default"]
+    missing_groups = [
+        group for group in configured_groups
+        if group not in scenarios_by_group or len(scenarios_by_group[group]) == 0
+    ]
+    if missing_groups:
+        raise ValueError(
+            "scenario_sampling.train_wall_ref_weights defines wall_ref keys not found in scenarios: "
+            f"{sorted(missing_groups)}"
+        )
+
+    total_base = sum(scenario_counts.values())
+    if total_base <= 0:
+        raise ValueError("scenario list is empty for wall_ref weighting")
+
+    weighting_scale = 1000
+    target_group_units: Dict[str, int] = {}
+    group_weight_items = sorted(wall_ref_weights.items(), key=lambda item: item[0])
+    running_assigned = 0
+    for idx, (group_key, group_weight) in enumerate(group_weight_items):
+        if idx == len(group_weight_items) - 1:
+            units = weighting_scale - running_assigned
+        else:
+            units = int(round(group_weight * weighting_scale))
+            units = max(0, units)
+            running_assigned += units
+        target_group_units[group_key] = units
+
+    weighted_scenario_list: List[str] = []
+    for group_key, scenarios_in_group in sorted(scenarios_by_group.items(), key=lambda item: item[0]):
+        group_units = target_group_units.get(group_key, 0)
+        if group_units <= 0:
+            continue
+        group_base_total = sum(base_count for _, base_count in scenarios_in_group)
+        if group_base_total <= 0:
+            raise ValueError(f"Invalid empty group for wall_ref weighting: {group_key}")
+
+        provisional: List[Tuple[str, int, float]] = []
+        assigned = 0
+        for scenario_path, base_count in scenarios_in_group:
+            exact = (float(base_count) / float(group_base_total)) * float(group_units)
+            count = int(exact)
+            assigned += count
+            provisional.append((scenario_path, count, exact - float(count)))
+
+        remainder = group_units - assigned
+        if remainder > 0:
+            provisional.sort(key=lambda item: item[2], reverse=True)
+            for i in range(remainder):
+                scenario_path, count, frac = provisional[i % len(provisional)]
+                provisional[i % len(provisional)] = (scenario_path, count + 1, frac)
+
+        for scenario_path, final_count, _ in provisional:
+            if final_count > 0:
+                weighted_scenario_list.extend([scenario_path] * final_count)
+
+    if len(weighted_scenario_list) == 0:
+        raise ValueError("Wall-ref weighting produced an empty weighted scenario list")
+    return weighted_scenario_list
+
+
 def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
     """
     Load rule-checker scenario paths from config/rule_checker/manifest.json.
@@ -1731,6 +1931,27 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     from ai.unit_registry import UnitRegistry
     unit_registry = UnitRegistry()
+    initial_weighted_entries = len(scenario_list)
+    scenario_list = _apply_wall_ref_weighting(
+        scenario_list=scenario_list,
+        training_config=training_config,
+    )
+    if len(scenario_list) > initial_weighted_entries:
+        sampling_cfg = training_config.get("scenario_sampling")
+        if isinstance(sampling_cfg, dict):
+            wall_weights_cfg = sampling_cfg.get("train_wall_ref_weights")
+            multipliers_cfg = sampling_cfg.get("train_wall_ref_multipliers")
+            if isinstance(wall_weights_cfg, dict):
+                chunk_log(
+                    "🎯 Wall-ref weighting enabled (weights): "
+                    f"{wall_weights_cfg}"
+                )
+            elif isinstance(multipliers_cfg, dict):
+                chunk_log(
+                    "🎯 Wall-ref weighting enabled (multipliers - legacy): "
+                    f"{multipliers_cfg}"
+                )
+
     initial_weighted_entries = len(scenario_list)
     scenario_list = _apply_training_hard_weights(
         scenario_list=scenario_list,
