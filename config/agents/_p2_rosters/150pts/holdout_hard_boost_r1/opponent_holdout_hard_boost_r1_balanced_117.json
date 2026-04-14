@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_117",
+  "composition": [
+    {
+      "unit_type": "AggressorFlamestorm",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 2
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantCloseCombatPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "WolfGuardTerminator",
+      "count": 1
+    }
+  ]
+}

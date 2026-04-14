@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_swarm_100",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    }
+  ]
+}

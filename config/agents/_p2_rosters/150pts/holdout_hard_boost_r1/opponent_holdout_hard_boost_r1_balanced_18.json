@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_18",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainGravisChainSwordBoltstorm",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardImpalerCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    }
+  ]
+}

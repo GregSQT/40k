@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_17",
+  "composition": [
+    {
+      "unit_type": "CaptainStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

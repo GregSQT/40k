@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_43",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianAllarusAxe",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    }
+  ]
+}

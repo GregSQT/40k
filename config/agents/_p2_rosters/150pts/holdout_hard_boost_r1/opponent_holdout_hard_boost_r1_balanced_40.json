@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_40",
+  "composition": [
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardImpalerCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantPowerFistBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

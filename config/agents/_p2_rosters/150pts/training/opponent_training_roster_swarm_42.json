@@ -6,11 +6,11 @@
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
-      "count": 3
+      "unit_type": "CultistFirebrand",
+      "count": 1
     },
     {
-      "unit_type": "DireAvenger",
+      "unit_type": "Gargoyle",
       "count": 1
     },
     {
@@ -18,16 +18,12 @@
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "Prosecutor",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "SwoopingHawkExarch",
       "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawk",
-      "count": 2
     },
     {
       "unit_type": "Termagant",
@@ -35,6 +31,10 @@
     },
     {
       "unit_type": "TermagantTuto",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

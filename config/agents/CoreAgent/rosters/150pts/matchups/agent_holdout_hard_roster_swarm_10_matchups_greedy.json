@@ -1,0 +1,1114 @@
+{
+  "agent_key": "CoreAgent",
+  "scale": "150pts",
+  "split": "holdout_hard",
+  "model_path": "/home/greg/40k/ai/models/CoreAgent/model_CoreAgent.zip",
+  "generated_at": "2026-04-08T09:44:32Z",
+  "episodes_per_matchup": 30,
+  "p1_benchmark": "agent_holdout_hard_roster_swarm_10",
+  "p1_benchmark_split": null,
+  "p2_benchmark": null,
+  "p2_benchmark_split": null,
+  "opponent_mode": "bot",
+  "agent_seat_mode": "p1",
+  "agent_seat_bidirectional": false,
+  "eval_bot": "greedy",
+  "eval_bot_randomness": 0.15,
+  "overall_win_rate": 0.2133,
+  "matchups": {
+    "agent_holdout_hard_roster_swarm_10": {
+      "opponent_holdout_hard_roster_balanced_01": {
+        "wins": 10,
+        "losses": 20,
+        "draws": 0,
+        "win_rate": 0.3333
+      },
+      "opponent_holdout_hard_roster_balanced_02": {
+        "wins": 4,
+        "losses": 26,
+        "draws": 0,
+        "win_rate": 0.1333
+      },
+      "opponent_holdout_hard_roster_balanced_03": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_balanced_04": {
+        "wins": 8,
+        "losses": 22,
+        "draws": 0,
+        "win_rate": 0.2667
+      },
+      "opponent_holdout_hard_roster_balanced_05": {
+        "wins": 12,
+        "losses": 18,
+        "draws": 0,
+        "win_rate": 0.4
+      },
+      "opponent_holdout_hard_roster_balanced_06": {
+        "wins": 11,
+        "losses": 19,
+        "draws": 0,
+        "win_rate": 0.3667
+      },
+      "opponent_holdout_hard_roster_balanced_07": {
+        "wins": 13,
+        "losses": 17,
+        "draws": 0,
+        "win_rate": 0.4333
+      },
+      "opponent_holdout_hard_roster_balanced_08": {
+        "wins": 4,
+        "losses": 26,
+        "draws": 0,
+        "win_rate": 0.1333
+      },
+      "opponent_holdout_hard_roster_balanced_09": {
+        "wins": 9,
+        "losses": 21,
+        "draws": 0,
+        "win_rate": 0.3
+      },
+      "opponent_holdout_hard_roster_balanced_10": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_balanced_11": {
+        "wins": 8,
+        "losses": 22,
+        "draws": 0,
+        "win_rate": 0.2667
+      },
+      "opponent_holdout_hard_roster_balanced_12": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_balanced_13": {
+        "wins": 0,
+        "losses": 30,
+        "draws": 0,
+        "win_rate": 0.0
+      },
+      "opponent_holdout_hard_roster_balanced_14": {
+        "wins": 9,
+        "losses": 21,
+        "draws": 0,
+        "win_rate": 0.3
+      },
+      "opponent_holdout_hard_roster_balanced_15": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_balanced_16": {
+        "wins": 5,
+        "losses": 25,
+        "draws": 0,
+        "win_rate": 0.1667
+      },
+      "opponent_holdout_hard_roster_balanced_17": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_balanced_18": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_balanced_19": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_balanced_20": {
+        "wins": 8,
+        "losses": 22,
+        "draws": 0,
+        "win_rate": 0.2667
+      },
+      "opponent_holdout_hard_roster_balanced_21": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_balanced_22": {
+        "wins": 1,
+        "losses": 29,
+        "draws": 0,
+        "win_rate": 0.0333
+      },
+      "opponent_holdout_hard_roster_balanced_23": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_balanced_24": {
+        "wins": 5,
+        "losses": 25,
+        "draws": 0,
+        "win_rate": 0.1667
+      },
+      "opponent_holdout_hard_roster_balanced_25": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_balanced_26": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_balanced_27": {
+        "wins": 9,
+        "losses": 21,
+        "draws": 0,
+        "win_rate": 0.3
+      },
+      "opponent_holdout_hard_roster_balanced_28": {
+        "wins": 5,
+        "losses": 25,
+        "draws": 0,
+        "win_rate": 0.1667
+      },
+      "opponent_holdout_hard_roster_balanced_29": {
+        "wins": 5,
+        "losses": 25,
+        "draws": 0,
+        "win_rate": 0.1667
+      },
+      "opponent_holdout_hard_roster_balanced_30": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_balanced_31": {
+        "wins": 4,
+        "losses": 26,
+        "draws": 0,
+        "win_rate": 0.1333
+      },
+      "opponent_holdout_hard_roster_balanced_32": {
+        "wins": 4,
+        "losses": 26,
+        "draws": 0,
+        "win_rate": 0.1333
+      },
+      "opponent_holdout_hard_roster_balanced_33": {
+        "wins": 5,
+        "losses": 25,
+        "draws": 0,
+        "win_rate": 0.1667
+      },
+      "opponent_holdout_hard_roster_balanced_34": {
+        "wins": 12,
+        "losses": 18,
+        "draws": 0,
+        "win_rate": 0.4
+      },
+      "opponent_holdout_hard_roster_balanced_35": {
+        "wins": 5,
+        "losses": 25,
+        "draws": 0,
+        "win_rate": 0.1667
+      },
+      "opponent_holdout_hard_roster_balanced_36": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_balanced_37": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_balanced_38": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_balanced_39": {
+        "wins": 4,
+        "losses": 26,
+        "draws": 0,
+        "win_rate": 0.1333
+      },
+      "opponent_holdout_hard_roster_balanced_40": {
+        "wins": 11,
+        "losses": 19,
+        "draws": 0,
+        "win_rate": 0.3667
+      },
+      "opponent_holdout_hard_roster_balanced_41": {
+        "wins": 1,
+        "losses": 29,
+        "draws": 0,
+        "win_rate": 0.0333
+      },
+      "opponent_holdout_hard_roster_balanced_42": {
+        "wins": 15,
+        "losses": 15,
+        "draws": 0,
+        "win_rate": 0.5
+      },
+      "opponent_holdout_hard_roster_balanced_43": {
+        "wins": 8,
+        "losses": 22,
+        "draws": 0,
+        "win_rate": 0.2667
+      },
+      "opponent_holdout_hard_roster_balanced_44": {
+        "wins": 13,
+        "losses": 17,
+        "draws": 0,
+        "win_rate": 0.4333
+      },
+      "opponent_holdout_hard_roster_balanced_45": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_balanced_46": {
+        "wins": 14,
+        "losses": 16,
+        "draws": 0,
+        "win_rate": 0.4667
+      },
+      "opponent_holdout_hard_roster_balanced_47": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_balanced_48": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_balanced_49": {
+        "wins": 14,
+        "losses": 16,
+        "draws": 0,
+        "win_rate": 0.4667
+      },
+      "opponent_holdout_hard_roster_balanced_50": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_elite_11": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_elite_14": {
+        "wins": 4,
+        "losses": 26,
+        "draws": 0,
+        "win_rate": 0.1333
+      },
+      "opponent_holdout_hard_roster_elite_19": {
+        "wins": 10,
+        "losses": 20,
+        "draws": 0,
+        "win_rate": 0.3333
+      },
+      "opponent_holdout_hard_roster_swarm_02": {
+        "wins": 8,
+        "losses": 22,
+        "draws": 0,
+        "win_rate": 0.2667
+      },
+      "opponent_holdout_hard_roster_swarm_04": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_swarm_06": {
+        "wins": 21,
+        "losses": 9,
+        "draws": 0,
+        "win_rate": 0.7
+      },
+      "opponent_holdout_hard_roster_swarm_07": {
+        "wins": 9,
+        "losses": 21,
+        "draws": 0,
+        "win_rate": 0.3
+      },
+      "opponent_holdout_hard_roster_swarm_08": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_swarm_09": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_swarm_10": {
+        "wins": 9,
+        "losses": 21,
+        "draws": 0,
+        "win_rate": 0.3
+      },
+      "opponent_holdout_hard_roster_swarm_12": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_swarm_13": {
+        "wins": 13,
+        "losses": 17,
+        "draws": 0,
+        "win_rate": 0.4333
+      },
+      "opponent_holdout_hard_roster_swarm_16": {
+        "wins": 8,
+        "losses": 22,
+        "draws": 0,
+        "win_rate": 0.2667
+      },
+      "opponent_holdout_hard_roster_swarm_17": {
+        "wins": 10,
+        "losses": 20,
+        "draws": 0,
+        "win_rate": 0.3333
+      },
+      "opponent_holdout_hard_roster_swarm_18": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_swarm_20": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_swarm_21": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_swarm_22": {
+        "wins": 14,
+        "losses": 16,
+        "draws": 0,
+        "win_rate": 0.4667
+      },
+      "opponent_holdout_hard_roster_swarm_26": {
+        "wins": 4,
+        "losses": 26,
+        "draws": 0,
+        "win_rate": 0.1333
+      },
+      "opponent_holdout_hard_roster_swarm_27": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_swarm_28": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_swarm_30": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_swarm_31": {
+        "wins": 6,
+        "losses": 24,
+        "draws": 0,
+        "win_rate": 0.2
+      },
+      "opponent_holdout_hard_roster_swarm_32": {
+        "wins": 14,
+        "losses": 16,
+        "draws": 0,
+        "win_rate": 0.4667
+      },
+      "opponent_holdout_hard_roster_swarm_34": {
+        "wins": 15,
+        "losses": 15,
+        "draws": 0,
+        "win_rate": 0.5
+      },
+      "opponent_holdout_hard_roster_swarm_35": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_swarm_36": {
+        "wins": 7,
+        "losses": 23,
+        "draws": 0,
+        "win_rate": 0.2333
+      },
+      "opponent_holdout_hard_roster_swarm_39": {
+        "wins": 9,
+        "losses": 21,
+        "draws": 0,
+        "win_rate": 0.3
+      },
+      "opponent_holdout_hard_roster_troop_01": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_troop_03": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_troop_05": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_troop_15": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_troop_23": {
+        "wins": 1,
+        "losses": 29,
+        "draws": 0,
+        "win_rate": 0.0333
+      },
+      "opponent_holdout_hard_roster_troop_24": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_troop_25": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_troop_29": {
+        "wins": 0,
+        "losses": 30,
+        "draws": 0,
+        "win_rate": 0.0
+      },
+      "opponent_holdout_hard_roster_troop_33": {
+        "wins": 9,
+        "losses": 21,
+        "draws": 0,
+        "win_rate": 0.3
+      },
+      "opponent_holdout_hard_roster_troop_37": {
+        "wins": 3,
+        "losses": 27,
+        "draws": 0,
+        "win_rate": 0.1
+      },
+      "opponent_holdout_hard_roster_troop_38": {
+        "wins": 2,
+        "losses": 28,
+        "draws": 0,
+        "win_rate": 0.0667
+      },
+      "opponent_holdout_hard_roster_troop_40": {
+        "wins": 5,
+        "losses": 25,
+        "draws": 0,
+        "win_rate": 0.1667
+      }
+    }
+  },
+  "p1_summaries": [
+    {
+      "p1_roster_id": "agent_holdout_hard_roster_swarm_10",
+      "overall_win_rate": 0.2133,
+      "vs_best": "opponent_holdout_hard_roster_swarm_06",
+      "vs_worst": "opponent_holdout_hard_roster_balanced_13",
+      "sur_performant": false,
+      "sous_performant": false
+    }
+  ],
+  "p2_summaries": [
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_13",
+      "p1_win_rate_vs_this_p2": 0.0,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_29",
+      "p1_win_rate_vs_this_p2": 0.0,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_22",
+      "p1_win_rate_vs_this_p2": 0.0333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_41",
+      "p1_win_rate_vs_this_p2": 0.0333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_23",
+      "p1_win_rate_vs_this_p2": 0.0333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_21",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_25",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_37",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_09",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_18",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_20",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_30",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_35",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_05",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_38",
+      "p1_win_rate_vs_this_p2": 0.0667,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_19",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_26",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_48",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_50",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_elite_11",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_21",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_28",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_01",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_03",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_15",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_24",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_25",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_37",
+      "p1_win_rate_vs_this_p2": 0.1,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_02",
+      "p1_win_rate_vs_this_p2": 0.1333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_08",
+      "p1_win_rate_vs_this_p2": 0.1333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_31",
+      "p1_win_rate_vs_this_p2": 0.1333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_32",
+      "p1_win_rate_vs_this_p2": 0.1333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_39",
+      "p1_win_rate_vs_this_p2": 0.1333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_elite_14",
+      "p1_win_rate_vs_this_p2": 0.1333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_26",
+      "p1_win_rate_vs_this_p2": 0.1333,
+      "sur_performant_p2": true,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_16",
+      "p1_win_rate_vs_this_p2": 0.1667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_24",
+      "p1_win_rate_vs_this_p2": 0.1667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_28",
+      "p1_win_rate_vs_this_p2": 0.1667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_29",
+      "p1_win_rate_vs_this_p2": 0.1667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_33",
+      "p1_win_rate_vs_this_p2": 0.1667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_35",
+      "p1_win_rate_vs_this_p2": 0.1667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_40",
+      "p1_win_rate_vs_this_p2": 0.1667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_03",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_10",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_15",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_17",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_23",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_45",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_27",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_31",
+      "p1_win_rate_vs_this_p2": 0.2,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_12",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_18",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_30",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_36",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_38",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_47",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_04",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_08",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_12",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_36",
+      "p1_win_rate_vs_this_p2": 0.2333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": false
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_04",
+      "p1_win_rate_vs_this_p2": 0.2667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_11",
+      "p1_win_rate_vs_this_p2": 0.2667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_20",
+      "p1_win_rate_vs_this_p2": 0.2667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_43",
+      "p1_win_rate_vs_this_p2": 0.2667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_02",
+      "p1_win_rate_vs_this_p2": 0.2667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_16",
+      "p1_win_rate_vs_this_p2": 0.2667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_09",
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_14",
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_27",
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_07",
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_10",
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_39",
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_troop_33",
+      "p1_win_rate_vs_this_p2": 0.3,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_01",
+      "p1_win_rate_vs_this_p2": 0.3333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_elite_19",
+      "p1_win_rate_vs_this_p2": 0.3333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_17",
+      "p1_win_rate_vs_this_p2": 0.3333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_06",
+      "p1_win_rate_vs_this_p2": 0.3667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_40",
+      "p1_win_rate_vs_this_p2": 0.3667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_05",
+      "p1_win_rate_vs_this_p2": 0.4,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_34",
+      "p1_win_rate_vs_this_p2": 0.4,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_07",
+      "p1_win_rate_vs_this_p2": 0.4333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_44",
+      "p1_win_rate_vs_this_p2": 0.4333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_13",
+      "p1_win_rate_vs_this_p2": 0.4333,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_46",
+      "p1_win_rate_vs_this_p2": 0.4667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_49",
+      "p1_win_rate_vs_this_p2": 0.4667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_22",
+      "p1_win_rate_vs_this_p2": 0.4667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_32",
+      "p1_win_rate_vs_this_p2": 0.4667,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_balanced_42",
+      "p1_win_rate_vs_this_p2": 0.5,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_34",
+      "p1_win_rate_vs_this_p2": 0.5,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    },
+    {
+      "p2_roster_id": "opponent_holdout_hard_roster_swarm_06",
+      "p1_win_rate_vs_this_p2": 0.7,
+      "sur_performant_p2": false,
+      "sous_performant_p2": true
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "roster_value_mean": 169.71666666666667,
+  "roster_value_std": 3.357040694156421,
+  "roster_value_p95": 175.0,
+  "rejection_rate_roster_budget": 0.6214511041009464,
+  "sampling_target_tanking_distribution": {
+    "Swarm": 1.0
+  },
+  "sampling_observed_tanking_distribution": {
+    "Swarm": 1.0
+  },
+  "sampling_target_units_per_roster_distribution": {
+    "5": 0.06,
+    "6": 0.12,
+    "7": 0.18,
+    "8": 0.22,
+    "9": 0.2,
+    "10": 0.14,
+    "11": 0.06,
+    "12": 0.02
+  },
+  "sampling_observed_units_per_roster_distribution": {
+    "5": 0.041666666666666664,
+    "6": 0.1,
+    "7": 0.18333333333333332,
+    "8": 0.20833333333333334,
+    "9": 0.16666666666666666,
+    "10": 0.225,
+    "11": 0.058333333333333334,
+    "12": 0.016666666666666666
+  },
+  "unit_pick_frequency": {
+    "chaos::CultistFirebrand": 153,
+    "aeldari::DarkReaper": 56,
+    "adeptusCustodes::Witchseeker": 49,
+    "chaos::ChosenPlasma": 46,
+    "tyranid::RipperSwarm": 43,
+    "aeldari::FireDragon": 42,
+    "aeldari::HowlingBansheeExarch": 42,
+    "aeldari::WarpSpider": 42,
+    "aeldari::SwoopingHawk": 40,
+    "tyranid::Genestealer": 37,
+    "aeldari::DireAvenger": 35,
+    "tyranid::Gargoyle": 34,
+    "aeldari::StrikingScorpion": 32,
+    "aeldari::SwoopingHawkExarch": 31,
+    "chaos::CultistMob": 30,
+    "chaos::RenegadeGuard": 30,
+    "tyranid::TermagantTuto": 28,
+    "tyranid::Termagant": 27,
+    "aeldari::SerpentScalePlatform": 26,
+    "aeldari::DireAvengerExarch": 25,
+    "aeldari::StormGuardian": 25,
+    "tyranid::Hormagaunt": 25,
+    "adeptusCustodes::Prosecutor": 24,
+    "aeldari::GuardianDefender": 22,
+    "aeldari::HeavyWeaponPlatform": 22,
+    "spaceMarine::FenrisianWolf": 19,
+    "aeldari::HowlingBanshee": 17
+  },
+  "distribution_drift_blend": {
+    "l1": 0.47598212655953054,
+    "observed": {
+      "Balance": 0.2405189620758483,
+      "Melee": 0.22255489021956087,
+      "Ranged": 0.5369261477045908
+    },
+    "target": {
+      "Balance": 0.35053245778758724,
+      "Melee": 0.35053245778758724,
+      "Ranged": 0.2989350844248255
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 0.5781236670126966,
+    "observed": {
+      "High": 0.16067864271457086,
+      "Low": 0.41317365269461076,
+      "Mid": 0.42614770459081835
+    },
+    "target": {
+      "High": 0.44974047622091917,
+      "Low": 0.31801454050987915,
+      "Mid": 0.2322449832692017
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 0.853276641461791,
+    "observed": {
+      "AntiElite": 0.1437125748502994,
+      "Burst": 0.09081836327345309,
+      "Generalist": 0.42614770459081835,
+      "Volume": 0.3393213572854291
+    },
+    "target": {
+      "AntiElite": 0.2971888000987203,
+      "Burst": 0.36398045875592777,
+      "Generalist": 0.12868652530285352,
+      "Volume": 0.21014421584249843
+    }
+  }
+}

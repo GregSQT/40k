@@ -6,23 +6,23 @@
       "count": 1
     },
     {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
       "unit_type": "FireDragon",
       "count": 1
     },
     {
-      "unit_type": "GuardianDefender",
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
-      "count": 1
-    },
-    {
-      "unit_type": "SerpentScalePlatform",
-      "count": 1
-    },
-    {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "SwoopingHawk",
       "count": 1
     },
     {

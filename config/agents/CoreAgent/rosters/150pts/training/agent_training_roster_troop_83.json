@@ -2,31 +2,27 @@
   "roster_id": "agent_training_roster_troop_83",
   "composition": [
     {
-      "unit_type": "BloodClaw",
-      "count": 2
-    },
-    {
-      "unit_type": "HellblasterSergeant",
+      "unit_type": "AssaultIntercessor",
       "count": 1
     },
     {
-      "unit_type": "Incursor",
+      "unit_type": "DeathCompanyJumpPackEviscerator",
       "count": 1
     },
     {
-      "unit_type": "IntercessorGrenadeLauncher",
+      "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "IntercessorSergeant",
+      "unit_type": "RaptorPlasmaGun",
       "count": 1
     },
     {
-      "unit_type": "TyranidWarriorRanged",
+      "unit_type": "SanguinaryGuardAngelus",
       "count": 1
     },
     {
-      "unit_type": "WarpSpiderExarchSpinner",
+      "unit_type": "WarpSpiderExarchPowerblade",
       "count": 1
     }
   ]

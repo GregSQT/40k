@@ -2,24 +2,36 @@
   "roster_id": "agent_holdout_hard_roster_swarm_06",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "HowlingBansheeExarch",
+      "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
-      "unit_type": "Witchseeker",
-      "count": 2
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
     }
   ]
 }

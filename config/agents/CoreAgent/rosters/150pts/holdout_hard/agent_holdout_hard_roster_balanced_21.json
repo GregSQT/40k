@@ -1,0 +1,33 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_21",
+  "composition": [
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardScytingTalon",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

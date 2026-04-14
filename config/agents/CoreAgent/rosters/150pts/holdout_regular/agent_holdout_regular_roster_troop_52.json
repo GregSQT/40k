@@ -2,15 +2,7 @@
   "roster_id": "agent_holdout_regular_roster_troop_52",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPack",
-      "count": 1
-    },
-    {
-      "unit_type": "BloodClaw",
-      "count": 1
-    },
-    {
-      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "unit_type": "DarkReaperExarch",
       "count": 1
     },
     {
@@ -18,20 +10,16 @@
       "count": 1
     },
     {
-      "unit_type": "Infernus",
+      "unit_type": "Scout",
       "count": 1
     },
     {
-      "unit_type": "RaptorMeltaGun",
+      "unit_type": "Suppressor",
       "count": 1
     },
     {
-      "unit_type": "StrikingScorpionExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpiderExarchSpinner",
-      "count": 1
+      "unit_type": "TyranidWarriorMelee",
+      "count": 2
     }
   ]
 }

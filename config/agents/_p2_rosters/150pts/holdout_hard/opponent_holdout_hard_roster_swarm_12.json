@@ -6,16 +6,24 @@
       "count": 2
     },
     {
-      "unit_type": "DarkReaper",
-      "count": 1
+      "unit_type": "FireDragon",
+      "count": 3
     },
     {
-      "unit_type": "StormGuardian",
-      "count": 1
+      "unit_type": "HowlingBanshee",
+      "count": 3
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 3
     },
     {
       "unit_type": "SwoopingHawkExarch",
-      "count": 1
+      "count": 2
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 3
     }
   ]
 }

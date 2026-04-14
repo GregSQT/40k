@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_96",
+  "composition": [
+    {
+      "unit_type": "AssaultTerminator",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantCloseCombatPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    }
+  ]
+}

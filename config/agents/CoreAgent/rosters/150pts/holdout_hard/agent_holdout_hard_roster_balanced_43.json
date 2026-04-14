@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_43",
+  "composition": [
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 1
+    },
+    {
+      "unit_type": "Terminator",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_training_roster_balanced_38",
+  "composition": [
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardDScythe",
+      "count": 1
+    }
+  ]
+}

@@ -2,11 +2,11 @@
   "roster_id": "agent_training_roster_swarm_21",
   "composition": [
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "ChosenPlasma",
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
@@ -18,20 +18,28 @@
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
       "count": 1
     },
     {
       "unit_type": "TermagantTuto",
-      "count": 1
+      "count": 2
     },
     {
       "unit_type": "WarpSpider",

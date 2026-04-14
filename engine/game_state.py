@@ -6,9 +6,11 @@ game_state.py - Game state initialization and management
 from typing import Dict, List, Any, Optional, Tuple
 import copy
 import json
+import math
 import os
 from pathlib import Path
-from shared.data_validation import require_key
+import re
+from shared.data_validation import ConfigurationError, require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
 
@@ -712,6 +714,8 @@ class GameStateManager:
                     p for p in sorted(base_dir.glob(pattern), key=lambda p: p.name)
                     if "_kpis" not in p.name and "_matchups" not in p.name
                 ]
+                if expected_split == "training":
+                    candidates = self._filter_training_roster_candidates(candidates)
                 if not candidates:
                     raise FileNotFoundError(
                         f"Scenario '{scenario_file}' {field_name}={random_token!r} but no files matching "
@@ -791,7 +795,7 @@ class GameStateManager:
                             data = json.load(f)
                         if require_key(data, "roster_id") == requested_id:
                             return f"{ref_split}/{candidate_path.name}", was_randomized
-                    except (json.JSONDecodeError, KeyError):
+                    except (json.JSONDecodeError, KeyError, ConfigurationError):
                         continue
 
         # Strict split validation: ref must match expected_split (scenario path context)
@@ -866,6 +870,112 @@ class GameStateManager:
             f"Scenario '{scenario_file}' references missing roster file '{normalized}' "
             f"and no roster with roster_id '{requested_roster_id}' exists in {base_dir}"
         )
+
+    def _filter_training_roster_candidates(self, candidates: List[Path]) -> List[Path]:
+        """Apply optional progressive roster schedule for training random roster selection."""
+        if len(candidates) == 0:
+            return candidates
+
+        training_cfg_raw = self.config.get("training_config")
+        if training_cfg_raw is None:
+            return candidates
+        if not isinstance(training_cfg_raw, dict):
+            raise TypeError(
+                f"config['training_config'] must be dict when present (got {type(training_cfg_raw).__name__})"
+            )
+
+        schedule_raw = training_cfg_raw.get("roster_pool_schedule")
+        if schedule_raw is None:
+            return candidates
+        if not isinstance(schedule_raw, dict):
+            raise TypeError(
+                f"training_config.roster_pool_schedule must be dict (got {type(schedule_raw).__name__})"
+            )
+
+        enabled = schedule_raw.get("enabled")
+        if not isinstance(enabled, bool):
+            raise TypeError("training_config.roster_pool_schedule.enabled must be bool")
+        if not enabled:
+            return candidates
+
+        training_schedule = schedule_raw.get("training")
+        if not isinstance(training_schedule, dict):
+            raise TypeError(
+                "training_config.roster_pool_schedule.training must be dict when schedule is enabled"
+            )
+        start_counts_raw = training_schedule.get("start_counts")
+        end_counts_raw = training_schedule.get("end_counts")
+        if not isinstance(start_counts_raw, dict) or not isinstance(end_counts_raw, dict):
+            raise TypeError(
+                "training_config.roster_pool_schedule.training.start_counts and end_counts must be dict"
+            )
+
+        classes = ("swarm", "troop", "elite")
+        start_counts: Dict[str, int] = {}
+        end_counts: Dict[str, int] = {}
+        for cls in classes:
+            start_value = start_counts_raw.get(cls)
+            end_value = end_counts_raw.get(cls)
+            if not isinstance(start_value, int) or isinstance(start_value, bool):
+                raise TypeError(f"start_counts.{cls} must be integer")
+            if not isinstance(end_value, int) or isinstance(end_value, bool):
+                raise TypeError(f"end_counts.{cls} must be integer")
+            if start_value <= 0 or end_value <= 0:
+                raise ValueError(f"start_counts/end_counts.{cls} must be > 0")
+            if end_value < start_value:
+                raise ValueError(
+                    f"end_counts.{cls} must be >= start_counts.{cls} ({end_value} < {start_value})"
+                )
+            start_counts[cls] = int(start_value)
+            end_counts[cls] = int(end_value)
+
+        total_episodes = training_cfg_raw.get("total_episodes")
+        n_envs = training_cfg_raw.get("n_envs")
+        if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
+            raise TypeError(
+                "training_config.total_episodes must be integer when roster_pool_schedule is enabled"
+            )
+        if not isinstance(n_envs, int) or isinstance(n_envs, bool):
+            raise TypeError(
+                "training_config.n_envs must be integer when roster_pool_schedule is enabled"
+            )
+        if total_episodes <= 0 or n_envs <= 0:
+            raise ValueError(
+                "training_config.total_episodes and n_envs must be > 0 when roster_pool_schedule is enabled"
+            )
+
+        episode_number = self.config.get("_training_episode_index", 0)
+        if not isinstance(episode_number, int) or isinstance(episode_number, bool):
+            raise TypeError("config._training_episode_index must be integer when roster_pool_schedule is enabled")
+        episode_number = max(0, int(episode_number))
+
+        episodes_per_env = int(math.ceil(float(total_episodes) / float(n_envs)))
+        denominator = max(1, episodes_per_env - 1)
+        progress = min(1.0, max(0.0, float(episode_number) / float(denominator)))
+
+        active_limits: Dict[str, int] = {}
+        for cls in classes:
+            start_value = start_counts[cls]
+            end_value = end_counts[cls]
+            interpolated = start_value + int(math.floor((end_value - start_value) * progress))
+            active_limits[cls] = max(start_value, min(end_value, interpolated))
+
+        filtered: List[Path] = []
+        for candidate in candidates:
+            match = re.search(r"(elite|swarm|troop)_(\d+)$", candidate.stem.lower())
+            if match is None:
+                continue
+            roster_class = str(match.group(1))
+            roster_idx = int(match.group(2))
+            if roster_idx <= active_limits[roster_class]:
+                filtered.append(candidate)
+
+        if len(filtered) == 0:
+            raise ValueError(
+                "roster_pool_schedule produced zero eligible training rosters "
+                f"(active_limits={active_limits}, candidates={len(candidates)})"
+            )
+        return filtered
 
     def _load_shared_walls_from_ref(self, wall_ref: Any, scenario_file: str) -> List[List[int]]:
         """Load shared wall_hexes file referenced by scenario wall_ref."""

@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_72",
+  "composition": [
+    {
+      "unit_type": "AssaultTerminator",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "Terminator",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_40",
+  "composition": [
+    {
+      "unit_type": "CaptainCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "Terminator",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

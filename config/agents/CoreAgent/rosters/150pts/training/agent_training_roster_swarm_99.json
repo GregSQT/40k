@@ -2,23 +2,27 @@
   "roster_id": "agent_training_roster_swarm_99",
   "composition": [
     {
-      "unit_type": "DarkReaper",
-      "count": 3
-    },
-    {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
-      "count": 2
-    },
-    {
-      "unit_type": "Genestealer",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "RipperSwarm",
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyWeaponPlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
       "count": 1
     },
     {

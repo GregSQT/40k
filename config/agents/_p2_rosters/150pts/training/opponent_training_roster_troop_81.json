@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_81",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantCloseCombatPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    }
+  ]
+}

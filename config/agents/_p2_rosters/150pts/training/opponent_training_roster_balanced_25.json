@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_25",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerWeaponNeoVolkite",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardCrushingClaws",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

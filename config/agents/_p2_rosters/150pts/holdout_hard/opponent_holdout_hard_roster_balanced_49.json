@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_49",
+  "composition": [
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardImpalerCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "WolfGuardTerminator",
+      "count": 1
+    }
+  ]
+}

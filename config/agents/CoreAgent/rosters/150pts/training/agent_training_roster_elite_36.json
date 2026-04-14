@@ -2,24 +2,16 @@
   "roster_id": "agent_training_roster_elite_36",
   "composition": [
     {
-      "unit_type": "AggressorFlamestorm",
-      "count": 1
-    },
-    {
       "unit_type": "HeavyIntercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "InceptorBolter",
       "count": 1
     },
     {
-      "unit_type": "Pyrovore",
-      "count": 1
-    },
-    {
-      "unit_type": "Terminator",
-      "count": 1
-    },
-    {
-      "unit_type": "TerminatorHeavyFlamer",
-      "count": 1
+      "unit_type": "InceptorPlasma",
+      "count": 3
     }
   ]
 }

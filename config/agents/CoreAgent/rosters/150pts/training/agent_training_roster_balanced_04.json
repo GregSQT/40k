@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_balanced_04",
+  "composition": [
+    {
+      "unit_type": "AssaultTerminator",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerWeaponPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

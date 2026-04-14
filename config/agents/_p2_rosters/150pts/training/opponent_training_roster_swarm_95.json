@@ -2,23 +2,15 @@
   "roster_id": "opponent_training_roster_swarm_95",
   "composition": [
     {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
-      "count": 1
-    },
-    {
-      "unit_type": "GuardianDefender",
-      "count": 1
-    },
-    {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
@@ -26,8 +18,16 @@
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
-      "count": 2
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
     },
     {
       "unit_type": "Witchseeker",

@@ -1,0 +1,33 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_06",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 2
+    },
+    {
+      "unit_type": "GuardianDefender",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardWraithcannon",
+      "count": 1
+    }
+  ]
+}

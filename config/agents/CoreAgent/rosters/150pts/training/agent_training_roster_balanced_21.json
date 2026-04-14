@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_balanced_21",
+  "composition": [
+    {
+      "unit_type": "GreyHunterPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBanshee",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardScytingTalon",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

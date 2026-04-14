@@ -3,39 +3,19 @@
   "composition": [
     {
       "unit_type": "CultistFirebrand",
-      "count": 1
+      "count": 2
     },
     {
-      "unit_type": "CultistMob",
-      "count": 1
+      "unit_type": "Hormagaunt",
+      "count": 5
     },
     {
-      "unit_type": "DireAvengerExarch",
-      "count": 1
+      "unit_type": "SerpentScalePlatform",
+      "count": 2
     },
     {
-      "unit_type": "Genestealer",
-      "count": 1
-    },
-    {
-      "unit_type": "Prosecutor",
-      "count": 1
-    },
-    {
-      "unit_type": "RenegadeGuard",
-      "count": 1
-    },
-    {
-      "unit_type": "StormGuardian",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
-      "count": 1
+      "unit_type": "Termagant",
+      "count": 5
     }
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_33",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "Pyrovore",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

@@ -2,20 +2,20 @@
   "roster_id": "agent_training_roster_swarm_38",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 1
-    },
-    {
       "unit_type": "CultistFirebrand",
       "count": 2
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "HowlingBanshee",
+      "unit_type": "RenegadeGuard",
       "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 2
     }
   ]
 }

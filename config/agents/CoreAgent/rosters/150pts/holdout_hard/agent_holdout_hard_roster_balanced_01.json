@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_01",
+  "composition": [
+    {
+      "unit_type": "CustodianAllarusSpear",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

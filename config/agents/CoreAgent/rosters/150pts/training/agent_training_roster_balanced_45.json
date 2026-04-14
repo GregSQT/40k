@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_balanced_45",
+  "composition": [
+    {
+      "unit_type": "CustodianWardenSpear",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

@@ -2,36 +2,24 @@
   "roster_id": "opponent_holdout_hard_roster_troop_33",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "unit_type": "IntercessorSergeant",
       "count": 1
     },
     {
-      "unit_type": "DarkReaperExarch",
+      "unit_type": "LieutenantPowerWeaponPlasmaPistol",
       "count": 1
     },
     {
-      "unit_type": "Hellblaster",
+      "unit_type": "StrikingScorpionExarch",
       "count": 1
     },
     {
-      "unit_type": "Incursor",
+      "unit_type": "Suppressor",
       "count": 1
     },
     {
-      "unit_type": "Intercessor",
+      "unit_type": "TyranidWarriorRanged",
       "count": 1
-    },
-    {
-      "unit_type": "IntercessorGrenadeLauncher",
-      "count": 1
-    },
-    {
-      "unit_type": "RaptorPlasmaGun",
-      "count": 1
-    },
-    {
-      "unit_type": "Scout",
-      "count": 2
     }
   ]
 }

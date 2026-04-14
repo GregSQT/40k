@@ -2,35 +2,31 @@
   "roster_id": "opponent_training_roster_swarm_59",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
+      "unit_type": "DarkReaper",
+      "count": 2
+    },
+    {
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
-      "count": 1
+      "unit_type": "HowlingBansheeExarch",
+      "count": 2
     },
     {
       "unit_type": "StrikingScorpion",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
+      "unit_type": "Termagant",
       "count": 1
     }
   ]

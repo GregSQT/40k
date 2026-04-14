@@ -2,32 +2,24 @@
   "roster_id": "opponent_training_roster_swarm_44",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 1
-    },
-    {
       "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "RenegadeGuard",
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "Termagant",
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
-      "count": 1
-    },
-    {
-      "unit_type": "Hormagaunt",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
+      "unit_type": "TermagantTuto",
       "count": 1
     },
     {
       "unit_type": "Witchseeker",
-      "count": 2
+      "count": 1
     }
   ]
 }

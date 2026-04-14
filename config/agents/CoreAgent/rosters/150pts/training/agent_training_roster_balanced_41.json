@@ -1,0 +1,37 @@
+{
+  "roster_id": "agent_training_roster_balanced_41",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragonExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
+      "count": 1
+    }
+  ]
+}

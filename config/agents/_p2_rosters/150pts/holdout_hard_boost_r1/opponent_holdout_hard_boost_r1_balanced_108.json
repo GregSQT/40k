@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_108",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardDScythe",
+      "count": 1
+    }
+  ]
+}

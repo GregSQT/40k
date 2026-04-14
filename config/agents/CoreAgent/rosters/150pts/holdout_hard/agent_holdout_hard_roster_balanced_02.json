@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_02",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragonExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 1
+    }
+  ]
+}

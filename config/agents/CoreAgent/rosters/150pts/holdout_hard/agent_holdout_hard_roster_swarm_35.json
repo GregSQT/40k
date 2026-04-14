@@ -6,15 +6,19 @@
       "count": 1
     },
     {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "Hormagaunt",
+      "count": 2
+    },
+    {
+      "unit_type": "RipperSwarm",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
+      "unit_type": "StrikingScorpion",
       "count": 1
     },
     {
@@ -22,7 +26,7 @@
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

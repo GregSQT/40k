@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_regular_roster_troop_37",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 2
+    },
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "Hellblaster",
+      "count": 2
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

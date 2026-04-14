@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_09",
+  "composition": [
+    {
+      "unit_type": "DeathwingTerminatorPlasmaCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "GenestealerPrime",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    }
+  ]
+}

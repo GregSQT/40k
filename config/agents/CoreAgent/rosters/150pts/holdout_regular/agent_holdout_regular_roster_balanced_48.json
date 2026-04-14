@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_48",
+  "composition": [
+    {
+      "unit_type": "CaptainCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    }
+  ]
+}

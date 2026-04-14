@@ -1,0 +1,37 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_balanced_08",
+  "composition": [
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardImpalerCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardDScythe",
+      "count": 1
+    }
+  ]
+}

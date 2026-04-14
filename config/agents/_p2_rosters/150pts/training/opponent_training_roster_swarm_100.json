@@ -10,11 +10,19 @@
       "count": 1
     },
     {
-      "unit_type": "FenrisianWolf",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
@@ -22,15 +30,7 @@
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
+      "unit_type": "RenegadeGuard",
       "count": 1
     }
   ]

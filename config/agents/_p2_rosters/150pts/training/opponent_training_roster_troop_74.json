@@ -2,23 +2,23 @@
   "roster_id": "opponent_training_roster_troop_74",
   "composition": [
     {
-      "unit_type": "DeathCompanyMarineEviscerator",
+      "unit_type": "BladeguardVeteranSergeant",
       "count": 1
     },
     {
-      "unit_type": "Incursor",
+      "unit_type": "BloodClaw",
       "count": 1
     },
     {
-      "unit_type": "LieutenantPowerFistPlasmaPistol",
+      "unit_type": "DarkReaperExarch",
       "count": 1
     },
     {
-      "unit_type": "RaptorPlasmaGun",
+      "unit_type": "GreyHunterPlasmaGun",
       "count": 1
     },
     {
-      "unit_type": "Suppressor",
+      "unit_type": "LieutenantPowerFistBolter",
       "count": 1
     }
   ]

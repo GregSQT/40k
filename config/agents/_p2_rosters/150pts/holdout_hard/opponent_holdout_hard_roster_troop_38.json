@@ -1,0 +1,37 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_troop_38",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    }
+  ]
+}

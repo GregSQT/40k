@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_training_roster_balanced_42",
+  "composition": [
+    {
+      "unit_type": "Gargoyle",
+      "count": 2
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "Obliterator",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    }
+  ]
+}

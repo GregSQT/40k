@@ -6,23 +6,19 @@
       "count": 1
     },
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "HeavyWeaponPlatform",
       "count": 1
     },
     {
-      "unit_type": "FenrisianWolf",
-      "count": 2
-    },
-    {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
-      "unit_type": "RipperSwarm",
+      "unit_type": "Prosecutor",
       "count": 1
     },
     {
@@ -30,7 +26,15 @@
       "count": 1
     },
     {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 2
+    },
+    {
       "unit_type": "WarpSpider",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

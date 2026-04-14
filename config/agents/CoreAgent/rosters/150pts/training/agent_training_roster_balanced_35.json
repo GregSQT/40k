@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_training_roster_balanced_35",
+  "composition": [
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyWeaponPlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

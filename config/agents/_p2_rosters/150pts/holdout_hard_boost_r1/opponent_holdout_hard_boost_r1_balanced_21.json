@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_21",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerFistPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_06",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantCloseCombatPlasmaPistol",
+      "count": 1
+    }
+  ]
+}

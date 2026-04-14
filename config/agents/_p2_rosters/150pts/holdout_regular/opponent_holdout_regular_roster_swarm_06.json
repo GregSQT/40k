@@ -2,6 +2,10 @@
   "roster_id": "opponent_holdout_regular_roster_swarm_06",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
@@ -10,27 +14,23 @@
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
-      "count": 1
-    },
-    {
-      "unit_type": "HowlingBanshee",
-      "count": 1
-    },
-    {
-      "unit_type": "RenegadeGuard",
-      "count": 1
-    },
-    {
-      "unit_type": "RipperSwarm",
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
       "unit_type": "StormGuardian",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

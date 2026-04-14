@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_71",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainGravisPowerWeaponBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "Pyrovore",
+      "count": 1
+    },
+    {
+      "unit_type": "StormGuardian",
+      "count": 2
+    }
+  ]
+}

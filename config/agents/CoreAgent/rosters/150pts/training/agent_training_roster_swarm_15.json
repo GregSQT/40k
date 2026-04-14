@@ -10,11 +10,11 @@
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
@@ -22,11 +22,7 @@
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
+      "unit_type": "SwoopingHawk",
       "count": 1
     }
   ]

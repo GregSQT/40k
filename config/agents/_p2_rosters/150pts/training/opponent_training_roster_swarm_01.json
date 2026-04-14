@@ -2,28 +2,28 @@
   "roster_id": "opponent_training_roster_swarm_01",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
-      "count": 2
-    },
-    {
-      "unit_type": "HowlingBanshee",
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "SerpentScalePlatform",
       "count": 1
     },
     {
-      "unit_type": "Termagant",
-      "count": 2
+      "unit_type": "SwoopingHawk",
+      "count": 1
     },
     {
       "unit_type": "WarpSpider",

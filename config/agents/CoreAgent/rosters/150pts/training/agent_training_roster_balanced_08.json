@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_training_roster_balanced_08",
+  "composition": [
+    {
+      "unit_type": "HowlingBanshee",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardScytingTalon",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

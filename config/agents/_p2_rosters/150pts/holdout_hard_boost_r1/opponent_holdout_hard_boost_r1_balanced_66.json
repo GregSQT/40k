@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_66",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardDScythe",
+      "count": 1
+    }
+  ]
+}

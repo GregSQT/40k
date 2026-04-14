@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_training_roster_swarm_27",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 2
+    },
+    {
+      "unit_type": "HowlingBanshee",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    }
+  ]
+}

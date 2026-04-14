@@ -3,34 +3,18 @@
   "composition": [
     {
       "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "FenrisianWolf",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "GuardianDefender",
-      "count": 1
-    },
-    {
-      "unit_type": "Hormagaunt",
-      "count": 1
-    },
-    {
-      "unit_type": "HowlingBansheeExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
+      "unit_type": "StormGuardian",
       "count": 1
     }
   ]

@@ -1,0 +1,53 @@
+{
+  "default": {
+    "cols": 250,
+    "rows": 210,
+    "hex_radius": 25,
+    "margin": 4,
+    "chunk_size": 64,
+    "hex_orientations": 6,
+    "pathfinding": {
+      "max_open_nodes": 2000,
+      "time_budget_us": 5000
+    },
+    "colors": {
+      "background": "0x002200",
+      "cell_even": "0x002200",
+      "cell_odd": "0x001a00",
+      "cell_border": "0x00ff00",
+      "player_1": "0x1D4ED8",
+      "player_2": "0x882222",
+      "hp_full": "0x36e36b",
+      "hp_damaged": "0x444444",
+      "highlight": "0x90d090",
+      "current_unit": "0xffd700",
+      "eligible": "0x00ff00",
+      "attack": "0xe08080",
+      "charge": "0xff9900",
+      "objective_zone": "0xff9933",
+      "wall": "0x808080",
+      "objective": "0xff9900",
+      "objective_p1": "0x4488cc",
+      "objective_p2": "0xcc4444"
+    },
+    "display": {
+      "resolution": "auto",
+      "autoDensity": true,
+      "antialias": true,
+      "forceCanvas": true,
+      "icon_scale": 1.2,
+      "eligible_outline_width": 3,
+      "eligible_outline_alpha": 0.8,
+      "hp_bar_width_ratio": 1.4,
+      "hp_bar_height": 7,
+      "hp_bar_y_offset_ratio": 0.85,
+      "unit_circle_radius_ratio": 0.6,
+      "unit_text_size": 10,
+      "selected_border_width": 4,
+      "charge_target_border_width": 3,
+      "default_border_width": 2,
+      "canvas_border": "1px solid #333",
+      "right_column_bottom_offset": 650
+    }
+  }
+}

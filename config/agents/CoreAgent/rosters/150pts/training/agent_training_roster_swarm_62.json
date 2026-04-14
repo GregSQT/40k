@@ -2,31 +2,19 @@
   "roster_id": "agent_training_roster_swarm_62",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "Gargoyle",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
-      "count": 1
-    },
-    {
-      "unit_type": "RenegadeGuard",
-      "count": 1
-    },
-    {
-      "unit_type": "RipperSwarm",
-      "count": 1
-    },
-    {
-      "unit_type": "StrikingScorpion",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
+      "unit_type": "SwoopingHawk",
       "count": 1
     }
   ]

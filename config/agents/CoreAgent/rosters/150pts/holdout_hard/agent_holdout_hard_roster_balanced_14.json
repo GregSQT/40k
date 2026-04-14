@@ -1,0 +1,17 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_14",
+  "composition": [
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathwingTerminatorPlasmaCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunter",
+      "count": 1
+    }
+  ]
+}

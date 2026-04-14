@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_swarm_76",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "StormGuardian",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    }
+  ]
+}

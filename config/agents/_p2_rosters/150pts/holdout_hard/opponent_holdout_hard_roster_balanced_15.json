@@ -1,0 +1,37 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_15",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyWeaponPlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardImpalerCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    }
+  ]
+}

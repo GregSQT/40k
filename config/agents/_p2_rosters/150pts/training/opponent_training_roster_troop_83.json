@@ -6,23 +6,23 @@
       "count": 1
     },
     {
-      "unit_type": "BloodClaw",
-      "count": 3
-    },
-    {
-      "unit_type": "DarkReaperExarch",
-      "count": 1
-    },
-    {
       "unit_type": "DeathCompanyJumpPackEviscerator",
       "count": 1
     },
     {
-      "unit_type": "Scout",
-      "count": 2
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
     },
     {
-      "unit_type": "TyranidWarriorMelee",
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
       "count": 1
     }
   ]

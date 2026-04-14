@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_86",
+  "composition": [
+    {
+      "unit_type": "CaptainCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianAllarusAxe",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    }
+  ]
+}

@@ -3,7 +3,7 @@
   "composition": [
     {
       "unit_type": "ChosenPlasma",
-      "count": 1
+      "count": 2
     },
     {
       "unit_type": "CultistFirebrand",
@@ -14,27 +14,15 @@
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "HowlingBansheeExarch",
-      "count": 1
+      "unit_type": "RipperSwarm",
+      "count": 2
     },
     {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "Termagant",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
+      "unit_type": "SwoopingHawkExarch",
       "count": 1
     }
   ]

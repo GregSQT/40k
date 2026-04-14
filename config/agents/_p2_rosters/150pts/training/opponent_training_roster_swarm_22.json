@@ -10,11 +10,11 @@
       "count": 1
     },
     {
-      "unit_type": "DireAvengerExarch",
-      "count": 1
+      "unit_type": "FenrisianWolf",
+      "count": 2
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
@@ -22,15 +22,7 @@
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
-      "count": 1
-    },
-    {
-      "unit_type": "RenegadeGuard",
-      "count": 1
-    },
-    {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "RipperSwarm",
       "count": 1
     }
   ]

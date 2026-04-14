@@ -2,35 +2,27 @@
   "roster_id": "agent_holdout_regular_roster_swarm_19",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 2
-    },
-    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
+      "unit_type": "HeavyWeaponPlatform",
       "count": 1
     },
     {
-      "unit_type": "Prosecutor",
-      "count": 2
-    },
-    {
-      "unit_type": "SwoopingHawk",
+      "unit_type": "SerpentScalePlatform",
       "count": 1
     },
     {
-      "unit_type": "TermagantTuto",
+      "unit_type": "StrikingScorpion",
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

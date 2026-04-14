@@ -6,31 +6,27 @@
       "count": 1
     },
     {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
       "unit_type": "DarkReaper",
       "count": 2
     },
     {
-      "unit_type": "FenrisianWolf",
+      "unit_type": "HeavyWeaponPlatform",
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "Hormagaunt",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "RipperSwarm",
       "count": 1
     },
     {
       "unit_type": "StormGuardian",
-      "count": 1
-    },
-    {
-      "unit_type": "StrikingScorpion",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

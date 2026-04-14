@@ -6,15 +6,27 @@
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
-      "count": 3
+      "unit_type": "Gargoyle",
+      "count": 1
     },
     {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "HeavyWeaponPlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

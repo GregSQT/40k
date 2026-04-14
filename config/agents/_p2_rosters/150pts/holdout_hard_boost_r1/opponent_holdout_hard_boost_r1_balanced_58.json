@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_58",
+  "composition": [
+    {
+      "unit_type": "LieutenantPowerFistPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardScytingTalon",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardWraithcannon",
+      "count": 1
+    }
+  ]
+}

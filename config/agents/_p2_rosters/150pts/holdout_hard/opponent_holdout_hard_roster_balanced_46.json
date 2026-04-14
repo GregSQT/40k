@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_46",
+  "composition": [
+    {
+      "unit_type": "CaptainTerminatorRelicFistBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

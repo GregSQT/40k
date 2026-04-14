@@ -2,36 +2,24 @@
   "roster_id": "agent_holdout_regular_roster_swarm_33",
   "composition": [
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "ChosenPlasma",
       "count": 1
+    },
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
     },
     {
       "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
-      "count": 1
-    },
-    {
-      "unit_type": "GuardianDefender",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
       "unit_type": "Hormagaunt",
       "count": 1
-    },
-    {
-      "unit_type": "Prosecutor",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
-      "count": 2
     }
   ]
 }

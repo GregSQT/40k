@@ -6,27 +6,23 @@
       "count": 1
     },
     {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 2
+    },
+    {
       "unit_type": "BladeguardVeteranSergeant",
       "count": 1
     },
     {
-      "unit_type": "DarkReaperExarch",
+      "unit_type": "GreyHunterPackLeader",
       "count": 1
     },
     {
-      "unit_type": "DeathCompanyMarineEviscerator",
+      "unit_type": "StrikingScorpionExarch",
       "count": 1
     },
     {
-      "unit_type": "GreyHunter",
-      "count": 1
-    },
-    {
-      "unit_type": "GreyHunterPlasmaGun",
-      "count": 1
-    },
-    {
-      "unit_type": "RaptorMeltaGun",
+      "unit_type": "TyranidWarriorMelee",
       "count": 1
     }
   ]

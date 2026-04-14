@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_balanced_36",
+  "composition": [
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantCloseCombatPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "Pyrovore",
+      "count": 2
+    }
+  ]
+}

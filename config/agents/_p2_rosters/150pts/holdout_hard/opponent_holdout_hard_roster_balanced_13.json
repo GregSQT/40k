@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_13",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardShockcannon",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 2
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    }
+  ]
+}

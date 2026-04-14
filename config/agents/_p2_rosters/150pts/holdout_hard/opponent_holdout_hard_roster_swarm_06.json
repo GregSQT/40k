@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_swarm_06",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "GuardianDefender",
+      "count": 3
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 3
+    },
+    {
+      "unit_type": "HowlingBanshee",
+      "count": 3
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 2
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 3
+    }
+  ]
+}

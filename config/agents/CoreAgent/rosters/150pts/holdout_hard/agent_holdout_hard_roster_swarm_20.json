@@ -2,11 +2,15 @@
   "roster_id": "agent_holdout_hard_roster_swarm_20",
   "composition": [
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "DireAvengerExarch",
+      "count": 2
+    },
+    {
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
@@ -14,15 +18,23 @@
       "count": 1
     },
     {
-      "unit_type": "HowlingBansheeExarch",
-      "count": 1
-    },
-    {
       "unit_type": "RipperSwarm",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
+      "unit_type": "StormGuardian",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

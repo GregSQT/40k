@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_47",
+  "composition": [
+    {
+      "unit_type": "Incursor",
+      "count": 2
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 1
+    },
+    {
+      "unit_type": "Pyrovore",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardScytingTalon",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 2
+    }
+  ]
+}

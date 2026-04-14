@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_regular_roster_swarm_34",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 2
+    }
+  ]
+}

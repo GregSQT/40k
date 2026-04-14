@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_balanced_05",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerFistBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    }
+  ]
+}

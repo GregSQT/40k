@@ -2,7 +2,15 @@
   "roster_id": "opponent_training_roster_swarm_40",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
@@ -10,7 +18,7 @@
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
@@ -18,11 +26,11 @@
       "count": 1
     },
     {
-      "unit_type": "RipperSwarm",
+      "unit_type": "Prosecutor",
       "count": 1
     },
     {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

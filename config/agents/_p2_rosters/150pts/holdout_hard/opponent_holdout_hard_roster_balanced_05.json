@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_05",
+  "composition": [
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerWeaponNeoVolkite",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBanshee",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    }
+  ]
+}

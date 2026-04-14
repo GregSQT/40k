@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_21",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantPowerWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    }
+  ]
+}

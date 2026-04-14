@@ -10,27 +10,19 @@
       "count": 1
     },
     {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "Hormagaunt",
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
-      "count": 1
-    },
-    {
-      "unit_type": "Gargoyle",
+      "unit_type": "HowlingBansheeExarch",
       "count": 2
-    },
-    {
-      "unit_type": "GuardianDefender",
-      "count": 1
     },
     {
       "unit_type": "Prosecutor",
       "count": 1
     },
     {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "SerpentScalePlatform",
       "count": 1
     }
   ]

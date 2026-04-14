@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_113",
+  "composition": [
+    {
+      "unit_type": "CaptainCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    }
+  ]
+}

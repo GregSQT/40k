@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_11",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainGravisChainSwordBoltstorm",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardDScythe",
+      "count": 1
+    }
+  ]
+}

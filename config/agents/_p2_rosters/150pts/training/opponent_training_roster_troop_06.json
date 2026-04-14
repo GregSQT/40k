@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_06",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 2
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

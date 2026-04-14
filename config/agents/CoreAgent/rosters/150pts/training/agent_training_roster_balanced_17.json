@@ -1,0 +1,37 @@
+{
+  "roster_id": "agent_training_roster_balanced_17",
+  "composition": [
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunter",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardBoneCleaver",
+      "count": 1
+    }
+  ]
+}

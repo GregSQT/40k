@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_roster_balanced_30",
+  "composition": [
+    {
+      "unit_type": "BladeguardVeteranSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardImpalerCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "StormGuardian",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorHeavyFlamer",
+      "count": 1
+    }
+  ]
+}

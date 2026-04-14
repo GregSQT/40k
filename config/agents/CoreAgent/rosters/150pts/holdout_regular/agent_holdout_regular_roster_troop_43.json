@@ -3,22 +3,22 @@
   "composition": [
     {
       "unit_type": "AssaultIntercessorJumpPack",
+      "count": 2
+    },
+    {
+      "unit_type": "BladeguardVeteranSergeant",
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "unit_type": "IntercessorSergeant",
       "count": 1
     },
     {
-      "unit_type": "DarkReaperExarch",
+      "unit_type": "SanguinaryGuardAngelus",
       "count": 1
     },
     {
-      "unit_type": "LieutenantCloseCombatBolter",
-      "count": 1
-    },
-    {
-      "unit_type": "RaptorMeltaGun",
+      "unit_type": "Scout",
       "count": 1
     }
   ]

@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_balanced_50",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainTerminatorRelicWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    }
+  ]
+}

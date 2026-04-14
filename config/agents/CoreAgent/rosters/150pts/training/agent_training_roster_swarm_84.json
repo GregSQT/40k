@@ -6,15 +6,15 @@
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "Prosecutor",
+      "unit_type": "DireAvengerExarch",
       "count": 1
     },
     {
@@ -22,11 +22,11 @@
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
+      "unit_type": "StrikingScorpion",
       "count": 1
     },
     {
-      "unit_type": "Witchseeker",
+      "unit_type": "SwoopingHawk",
       "count": 1
     }
   ]

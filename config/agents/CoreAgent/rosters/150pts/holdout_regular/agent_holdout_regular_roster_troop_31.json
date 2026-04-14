@@ -2,12 +2,12 @@
   "roster_id": "agent_holdout_regular_roster_troop_31",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPack",
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
       "count": 1
     },
     {
-      "unit_type": "BloodClaw",
-      "count": 1
+      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "count": 2
     },
     {
       "unit_type": "DeathCompanyMarineEviscerator",
@@ -18,19 +18,15 @@
       "count": 1
     },
     {
-      "unit_type": "Incursor",
+      "unit_type": "IntercessorSergeant",
       "count": 1
     },
     {
-      "unit_type": "RaptorMeltaGun",
+      "unit_type": "Scout",
       "count": 1
     },
     {
-      "unit_type": "SternguardVeteranBoltRifle",
-      "count": 1
-    },
-    {
-      "unit_type": "StrikingScorpionExarch",
+      "unit_type": "TyranidWarriorMelee",
       "count": 1
     }
   ]

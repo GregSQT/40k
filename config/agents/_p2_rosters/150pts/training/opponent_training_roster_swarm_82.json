@@ -10,24 +10,28 @@
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
+      "unit_type": "RenegadeGuard",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "WarpSpider",
       "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 2
     }
   ]
 }

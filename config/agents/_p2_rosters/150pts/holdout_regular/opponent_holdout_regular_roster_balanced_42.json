@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_balanced_42",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    }
+  ]
+}

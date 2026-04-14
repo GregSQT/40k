@@ -6,19 +6,11 @@
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
-      "count": 1
-    },
-    {
-      "unit_type": "Gargoyle",
-      "count": 1
-    },
-    {
-      "unit_type": "RipperSwarm",
+      "unit_type": "HeavyWeaponPlatform",
       "count": 1
     },
     {
@@ -26,11 +18,11 @@
       "count": 1
     },
     {
-      "unit_type": "StormGuardian",
+      "unit_type": "StrikingScorpion",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

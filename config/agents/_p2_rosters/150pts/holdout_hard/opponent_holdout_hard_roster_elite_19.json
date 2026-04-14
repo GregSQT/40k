@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_elite_19",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerWeaponPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "HiveGuardShockcannon",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 1
+    }
+  ]
+}

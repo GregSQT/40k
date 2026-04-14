@@ -1,0 +1,33 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_22",
+  "composition": [
+    {
+      "unit_type": "AssaultTerminator",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathwingTerminatorPlasmaCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "GuardianDefender",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    }
+  ]
+}

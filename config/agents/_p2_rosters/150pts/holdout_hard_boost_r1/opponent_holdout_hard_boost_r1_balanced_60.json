@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_60",
+  "composition": [
+    {
+      "unit_type": "CaptainTerminatorRelicFistCombi",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMultiMelta",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
+      "count": 1
+    }
+  ]
+}

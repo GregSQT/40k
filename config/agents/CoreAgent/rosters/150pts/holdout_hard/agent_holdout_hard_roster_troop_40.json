@@ -2,28 +2,28 @@
   "roster_id": "agent_holdout_hard_roster_troop_40",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorSergeant",
+      "unit_type": "AssaultIntercessorJumpPack",
       "count": 1
     },
     {
-      "unit_type": "BloodClaw",
+      "unit_type": "BladeguardVeteranSergeant",
       "count": 1
     },
     {
-      "unit_type": "Hellblaster",
+      "unit_type": "DeathCompanyJumpPackEviscerator",
       "count": 1
     },
     {
-      "unit_type": "Infernus",
+      "unit_type": "GreyHunter",
       "count": 1
     },
     {
-      "unit_type": "LieutenantPowerFistPlasmaPistol",
+      "unit_type": "WarpSpiderExarchPowerblade",
       "count": 1
     },
     {
-      "unit_type": "Scout",
-      "count": 1
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 2
     }
   ]
 }

@@ -2,28 +2,36 @@
   "roster_id": "opponent_holdout_hard_roster_swarm_22",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 1
-    },
-    {
       "unit_type": "CultistFirebrand",
       "count": 2
     },
     {
+      "unit_type": "DarkReaper",
+      "count": 2
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 3
+    },
+    {
       "unit_type": "Gargoyle",
+      "count": 3
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
-      "count": 1
-    },
-    {
-      "unit_type": "Hormagaunt",
-      "count": 1
+      "unit_type": "HowlingBanshee",
+      "count": 3
     },
     {
       "unit_type": "RenegadeGuard",
-      "count": 1
+      "count": 3
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 3
     }
   ]
 }

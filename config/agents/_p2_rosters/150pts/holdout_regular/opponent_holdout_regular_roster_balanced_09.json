@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_balanced_09",
+  "composition": [
+    {
+      "unit_type": "CaptainGravisFistBoltstorm",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    }
+  ]
+}

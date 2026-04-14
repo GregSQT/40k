@@ -6,23 +6,27 @@
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "DireAvengerExarch",
       "count": 1
     },
     {
-      "unit_type": "HowlingBanshee",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
+      "unit_type": "Hormagaunt",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
       "count": 1
     }
   ]

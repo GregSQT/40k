@@ -2,14 +2,6 @@
   "roster_id": "opponent_holdout_regular_roster_troop_55",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
-      "count": 1
-    },
-    {
-      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
-      "count": 1
-    },
-    {
       "unit_type": "BloodClaw",
       "count": 2
     },
@@ -18,12 +10,16 @@
       "count": 1
     },
     {
-      "unit_type": "Intercessor",
+      "unit_type": "IntercessorSergeant",
+      "count": 2
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardAngelus",
-      "count": 1
+      "unit_type": "Scout",
+      "count": 3
     }
   ]
 }

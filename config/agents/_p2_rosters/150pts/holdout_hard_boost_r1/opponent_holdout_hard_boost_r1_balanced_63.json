@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_63",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianAllarusAxe",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardShockcannon",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    }
+  ]
+}

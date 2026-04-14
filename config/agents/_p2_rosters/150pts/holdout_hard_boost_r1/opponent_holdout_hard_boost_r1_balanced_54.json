@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_54",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainTerminatorRelicWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_12",
+  "composition": [
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 2
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "WraithguardWraithcannon",
+      "count": 1
+    }
+  ]
+}

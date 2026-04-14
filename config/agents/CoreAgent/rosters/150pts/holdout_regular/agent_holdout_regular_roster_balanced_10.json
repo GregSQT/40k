@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_10",
+  "composition": [
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorHeavyFlamer",
+      "count": 1
+    }
+  ]
+}

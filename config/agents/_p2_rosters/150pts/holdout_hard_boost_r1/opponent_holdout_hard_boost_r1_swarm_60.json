@@ -1,0 +1,41 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_swarm_60",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
+      "count": 2
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "GuardianDefender",
+      "count": 1
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

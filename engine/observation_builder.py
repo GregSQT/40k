@@ -81,6 +81,10 @@ class ObservationBuilder:
         "RAPID_FIRE",
         "SUSTAINED_HITS",
     })
+    _WEAPON_RULE_OBS_ALIAS = {
+        # Keep observation size/model compatibility: ANTI_INFANTRY shares the ANTI_VEHICLE channel.
+        "ANTI_INFANTRY": "ANTI_VEHICLE",
+    }
     _WEAPON_RULE_PARAMETER_NORMALIZATION = 6.0
     
     def __init__(self, config: Dict[str, Any]):
@@ -1388,10 +1392,11 @@ class ObservationBuilder:
             if not isinstance(weapon_rules, list):
                 raise TypeError(f"WEAPON_RULES must be list for weapon {weapon.get('display_name')}")
             for raw_rule in weapon_rules:
-                rule_name, parameter = self._parse_weapon_rule_entry(raw_rule)
+                raw_rule_name, parameter = self._parse_weapon_rule_entry(raw_rule)
+                rule_name = self._WEAPON_RULE_OBS_ALIAS.get(raw_rule_name, raw_rule_name)
                 if rule_name not in known_rule_ids:
                     raise KeyError(
-                        f"Weapon rule '{rule_name}' not mapped in observation features "
+                        f"Weapon rule '{raw_rule_name}' (canonical='{rule_name}') not mapped in observation features "
                         f"(unit={unit.get('id')}, weapon={weapon.get('display_name')})"
                     )
                 if rule_name in self._WEAPON_RULES_WITH_PARAMETER:

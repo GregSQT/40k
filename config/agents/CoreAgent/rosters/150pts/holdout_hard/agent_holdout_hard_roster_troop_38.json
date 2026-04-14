@@ -2,27 +2,31 @@
   "roster_id": "agent_holdout_hard_roster_troop_38",
   "composition": [
     {
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "AssaultIntercessorJumpPack",
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "unit_type": "DarkReaperExarch",
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "unit_type": "GreyHunterPackLeader",
       "count": 1
     },
     {
-      "unit_type": "SanguinaryGuardInferno",
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 2
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
       "count": 1
     },
     {
       "unit_type": "Scout",
-      "count": 1
-    },
-    {
-      "unit_type": "TyranidWarriorMelee",
       "count": 1
     }
   ]

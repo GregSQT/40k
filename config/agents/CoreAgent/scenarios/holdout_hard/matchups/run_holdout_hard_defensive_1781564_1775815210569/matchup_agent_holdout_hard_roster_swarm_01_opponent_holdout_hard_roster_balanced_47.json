@@ -1,0 +1,13 @@
+{
+  "deployment_zone": "hammer",
+  "deployment_type": "active",
+  "scale": "150pts",
+  "p1_roster_seed": 42,
+  "wall_ref": "walls-11.json",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "objectives_ref": "objectives-51.json",
+  "agent_roster_ref": "holdout_hard/agent_holdout_hard_roster_swarm_01.json",
+  "opponent_roster_ref": "holdout_hard/opponent_holdout_hard_roster_balanced_47.json"
+}

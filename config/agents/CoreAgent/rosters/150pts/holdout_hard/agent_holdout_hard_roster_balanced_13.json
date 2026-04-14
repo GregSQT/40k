@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_13",
+  "composition": [
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantPowerFistBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    }
+  ]
+}

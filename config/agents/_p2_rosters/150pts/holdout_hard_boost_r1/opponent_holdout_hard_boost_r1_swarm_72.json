@@ -1,0 +1,41 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_swarm_72",
+  "composition": [
+    {
+      "unit_type": "DarkReaper",
+      "count": 2
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 2
+    },
+    {
+      "unit_type": "FireDragon",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 2
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

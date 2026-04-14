@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_15",
+  "composition": [
+    {
+      "unit_type": "AggressorBoltStorm",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianWardenSpear",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

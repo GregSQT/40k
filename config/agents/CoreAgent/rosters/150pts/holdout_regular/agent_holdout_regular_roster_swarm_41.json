@@ -2,11 +2,11 @@
   "roster_id": "agent_holdout_regular_roster_swarm_41",
   "composition": [
     {
-      "unit_type": "CultistFirebrand",
-      "count": 2
+      "unit_type": "DarkReaper",
+      "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
@@ -14,11 +14,27 @@
       "count": 1
     },
     {
-      "unit_type": "TermagantTuto",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
+      "unit_type": "RipperSwarm",
+      "count": 2
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
       "count": 1
     }
   ]

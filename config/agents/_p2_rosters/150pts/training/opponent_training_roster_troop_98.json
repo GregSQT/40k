@@ -6,23 +6,27 @@
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorSergeant",
-      "count": 2
-    },
-    {
-      "unit_type": "BloodClaw",
-      "count": 3
-    },
-    {
       "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "Incursor",
+      "unit_type": "GreyHunter",
       "count": 1
     },
     {
-      "unit_type": "WarpSpiderExarchPowerblade",
+      "unit_type": "Incursor",
+      "count": 2
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
       "count": 1
     }
   ]

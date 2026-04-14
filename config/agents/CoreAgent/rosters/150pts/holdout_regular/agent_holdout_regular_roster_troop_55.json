@@ -2,28 +2,24 @@
   "roster_id": "agent_holdout_regular_roster_troop_55",
   "composition": [
     {
-      "unit_type": "AssaultIntercessor",
-      "count": 1
-    },
-    {
       "unit_type": "BloodClaw",
-      "count": 3
+      "count": 2
     },
     {
-      "unit_type": "GreyHunterPackLeader",
+      "unit_type": "DarkReaperExarch",
       "count": 1
     },
     {
       "unit_type": "IntercessorSergeant",
+      "count": 2
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
       "count": 1
     },
     {
       "unit_type": "Scout",
-      "count": 2
-    },
-    {
-      "unit_type": "Suppressor",
-      "count": 1
+      "count": 3
     }
   ]
 }

@@ -7,10 +7,10 @@
     },
     {
       "unit_type": "BloodClaw",
-      "count": 1
+      "count": 3
     },
     {
-      "unit_type": "DarkReaperExarch",
+      "unit_type": "GreyHunterPackLeader",
       "count": 1
     },
     {
@@ -18,12 +18,8 @@
       "count": 1
     },
     {
-      "unit_type": "SternguardVeteranBoltRifle",
-      "count": 1
-    },
-    {
-      "unit_type": "TyranidWarriorMelee",
-      "count": 1
+      "unit_type": "Scout",
+      "count": 3
     },
     {
       "unit_type": "WarpSpiderExarchSpinner",

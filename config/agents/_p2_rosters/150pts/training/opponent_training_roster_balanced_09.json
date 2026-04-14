@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_09",
+  "composition": [
+    {
+      "unit_type": "CustodianGuardSpear",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "Hellblaster",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    }
+  ]
+}

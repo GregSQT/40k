@@ -2,28 +2,36 @@
   "roster_id": "opponent_training_roster_swarm_61",
   "composition": [
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "HeavyWeaponPlatform",
       "count": 1
     },
     {
-      "unit_type": "DireAvenger",
+      "unit_type": "HowlingBanshee",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
       "count": 2
     },
     {
-      "unit_type": "DireAvengerExarch",
-      "count": 1
+      "unit_type": "WarpSpider",
+      "count": 2
     },
     {
-      "unit_type": "GuardianDefender",
-      "count": 1
-    },
-    {
-      "unit_type": "RipperSwarm",
-      "count": 1
+      "unit_type": "Witchseeker",
+      "count": 2
     }
   ]
 }

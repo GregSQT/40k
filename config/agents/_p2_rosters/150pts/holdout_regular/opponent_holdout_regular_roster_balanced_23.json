@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_balanced_23",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "Terminator",
+      "count": 1
+    }
+  ]
+}

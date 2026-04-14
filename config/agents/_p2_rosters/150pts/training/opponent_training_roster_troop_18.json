@@ -2,28 +2,24 @@
   "roster_id": "opponent_training_roster_troop_18",
   "composition": [
     {
-      "unit_type": "AssaultIntercessor",
-      "count": 1
-    },
-    {
-      "unit_type": "AssaultIntercessorJumpPack",
-      "count": 1
-    },
-    {
-      "unit_type": "BloodClaw",
-      "count": 1
-    },
-    {
       "unit_type": "BloodClawPackLeader",
       "count": 1
     },
     {
-      "unit_type": "LieutenantStormShield",
+      "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "TyranidWarriorRanged",
+      "unit_type": "GreyHunterPackLeader",
       "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranSergeantPowerFist",
+      "count": 2
     }
   ]
 }

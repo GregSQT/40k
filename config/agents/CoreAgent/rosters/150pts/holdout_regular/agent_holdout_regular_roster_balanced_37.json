@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_37",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerFistPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardImpalerCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "HowlingBanshee",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
+      "count": 1
+    }
+  ]
+}

@@ -2,23 +2,31 @@
   "roster_id": "agent_holdout_regular_roster_troop_39",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPack",
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
       "count": 1
     },
     {
-      "unit_type": "Intercessor",
+      "unit_type": "Hellblaster",
       "count": 1
     },
     {
-      "unit_type": "LieutenantPowerFistBolter",
+      "unit_type": "Scout",
       "count": 1
     },
     {
       "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
       "count": 1
     }
   ]

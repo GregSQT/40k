@@ -6,10 +6,6 @@
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
-      "count": 1
-    },
-    {
       "unit_type": "FenrisianWolf",
       "count": 1
     },
@@ -18,16 +14,12 @@
       "count": 1
     },
     {
-      "unit_type": "GuardianDefender",
-      "count": 1
-    },
-    {
       "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
-      "count": 1
+      "unit_type": "HowlingBansheeExarch",
+      "count": 2
     }
   ]
 }

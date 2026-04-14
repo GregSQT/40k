@@ -3,11 +3,7 @@
   "composition": [
     {
       "unit_type": "AssaultIntercessor",
-      "count": 1
-    },
-    {
-      "unit_type": "AssaultIntercessorJumpPack",
-      "count": 1
+      "count": 2
     },
     {
       "unit_type": "BloodClaw",
@@ -18,11 +14,11 @@
       "count": 2
     },
     {
-      "unit_type": "Infernus",
+      "unit_type": "GreyHunter",
       "count": 1
     },
     {
-      "unit_type": "Scout",
+      "unit_type": "Incursor",
       "count": 2
     }
   ]

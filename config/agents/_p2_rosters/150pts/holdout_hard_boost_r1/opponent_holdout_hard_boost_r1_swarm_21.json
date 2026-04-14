@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_swarm_21",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    }
+  ]
+}

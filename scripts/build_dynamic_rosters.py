@@ -36,6 +36,7 @@ class UnitMeta:
 @dataclass(frozen=True)
 class UnitPick:
     unit_key: str
+    tanking: str
     blend_group: str
     mobility_bucket: str
     weapon_profile: str
@@ -54,6 +55,90 @@ class RosterBuildResult:
     roster_value: int
     rejected_attempts: int
     total_attempts: int
+
+
+def _validate_balanced_bounds(min_share: float, max_share: float) -> None:
+    if min_share < 0.0 or min_share > 1.0:
+        raise ValueError(f"--balanced-min-share must be in [0,1] (got {min_share})")
+    if max_share < 0.0 or max_share > 1.0:
+        raise ValueError(f"--balanced-max-share must be in [0,1] (got {max_share})")
+    if min_share > max_share:
+        raise ValueError(
+            f"--balanced-min-share must be <= --balanced-max-share (got {min_share} > {max_share})"
+        )
+
+
+def _is_balanced_roster(
+    unit_picks: List[UnitPick],
+    expected_tankings: List[str],
+    min_share: float,
+    max_share: float,
+) -> bool:
+    if not unit_picks:
+        return False
+    if not expected_tankings:
+        raise ValueError("expected_tankings must be non-empty")
+    total = len(unit_picks)
+    tanking_counter = Counter(p.tanking for p in unit_picks)
+    for tanking in expected_tankings:
+        share = float(tanking_counter.get(tanking, 0)) / float(total)
+        if share < min_share or share > max_share:
+            return False
+    return True
+
+
+def _build_balanced_weighted_choices(
+    target_by_tanking: Dict[str, Tuple[List[WeightedUnitChoice], Dict[str, float], Dict[str, float], Dict[str, float]]],
+    tanking_distribution: Dict[str, float],
+) -> List[WeightedUnitChoice]:
+    if not target_by_tanking:
+        raise ValueError("target_by_tanking is empty")
+    if not tanking_distribution:
+        raise ValueError("tanking_distribution is empty")
+    combined: List[WeightedUnitChoice] = []
+    for tanking_name, sampling_weight in sorted(tanking_distribution.items(), key=lambda item: item[0]):
+        if sampling_weight <= 0.0:
+            continue
+        if tanking_name not in target_by_tanking:
+            raise KeyError(f"Tanking '{tanking_name}' missing from target_by_tanking")
+        weighted_choices = target_by_tanking[tanking_name][0]
+        for choice in weighted_choices:
+            adjusted_weight = float(choice.base_weight) * float(sampling_weight)
+            if adjusted_weight <= 0.0:
+                continue
+            combined.append(
+                WeightedUnitChoice(
+                    unit_pick=choice.unit_pick,
+                    base_weight=adjusted_weight,
+                )
+            )
+    if not combined:
+        raise ValueError("No weighted choices available for balanced mode")
+    return combined
+
+
+def _is_balanced_count_feasible(units_per_roster: int, class_count: int, min_share: float, max_share: float) -> bool:
+    if units_per_roster <= 0:
+        return False
+    min_count = int(math.ceil(min_share * units_per_roster))
+    max_count = int(math.floor(max_share * units_per_roster))
+    if min_count > max_count:
+        return False
+    return (min_count * class_count) <= units_per_roster <= (max_count * class_count)
+
+
+def _build_roster_id(roster_prefix: str, tanking_label: str, index: int) -> str:
+    normalized_prefix = roster_prefix.strip("_")
+    normalized_tanking = tanking_label.strip("_").lower()
+    if not normalized_prefix:
+        raise ValueError("roster_prefix must not be empty")
+    if not normalized_tanking:
+        raise ValueError("tanking_label must not be empty")
+
+    # Avoid duplicated suffixes like "..._balanced_balanced_01".
+    if normalized_prefix.lower().endswith(f"_{normalized_tanking}") or normalized_prefix.lower() == normalized_tanking:
+        return f"{normalized_prefix}_{index:02d}"
+    return f"{normalized_prefix}_{normalized_tanking}_{index:02d}"
 
 
 def _require_key(mapping: Dict[str, Any], key: str) -> Any:
@@ -376,6 +461,7 @@ def _build_feasible_weighted_unit_choices(
                 WeightedUnitChoice(
                     unit_pick=UnitPick(
                         unit_key=unit_key,
+                        tanking=target_tanking,
                         blend_group=blend,
                         mobility_bucket=mobility,
                         weapon_profile=weapon,
@@ -747,6 +833,12 @@ def main() -> None:
     parser.add_argument("--roster-prefix", default="p2_dynamic")
     parser.add_argument("--max-build-attempts", type=int, default=200)
     parser.add_argument("--max-roster-resample-attempts", type=int, default=40)
+    parser.add_argument("--balanced-mode", action="store_true",
+                        help="Build each roster with mixed tanking composition constraints")
+    parser.add_argument("--balanced-min-share", type=float, default=0.20,
+                        help="Per-roster minimum share per tanking in balanced mode")
+    parser.add_argument("--balanced-max-share", type=float, default=0.40,
+                        help="Per-roster maximum share per tanking in balanced mode")
     parser.add_argument("--opponent-roster-dir", default=None)
     parser.add_argument("--num-matchups", type=int, default=None)
     parser.add_argument("--matchup-tol-strict", type=int, default=3)
@@ -777,6 +869,7 @@ def main() -> None:
         raise ValueError(
             f"--max-roster-resample-attempts must be > 0 (got {args.max_roster_resample_attempts})"
         )
+    _validate_balanced_bounds(args.balanced_min_share, args.balanced_max_share)
     if args.max_matchup_build_attempts <= 0:
         raise ValueError(f"--max-matchup-build-attempts must be > 0 (got {args.max_matchup_build_attempts})")
 
@@ -840,6 +933,33 @@ def main() -> None:
         tanking_distribution = {str(args.target_tanking): 1.0}
         units_distribution = {int(args.units_per_roster): 1.0}
 
+    if args.balanced_mode:
+        if not mixed_mode_requested:
+            raise ValueError("--balanced-mode requires mixed mode arguments")
+        expected_tankings = sorted(tanking_distribution.keys())
+        if expected_tankings != ["Elite", "Swarm", "Troop"]:
+            raise ValueError(
+                "--balanced-mode requires all three tankings exactly once in --target-tanking-values: "
+                "Swarm,Troop,Elite"
+            )
+        infeasible_units = [
+            units_value
+            for units_value in sorted(units_distribution.keys())
+            if not _is_balanced_count_feasible(
+                units_per_roster=int(units_value),
+                class_count=len(expected_tankings),
+                min_share=args.balanced_min_share,
+                max_share=args.balanced_max_share,
+            )
+        ]
+        if infeasible_units:
+            raise ValueError(
+                "Balanced mode has infeasible --units-per-roster-values for current min/max share constraints. "
+                f"Infeasible values: {infeasible_units}"
+            )
+    else:
+        expected_tankings = sorted(tanking_distribution.keys())
+
     # Naming policy: dedicated roster prefix for training_hard split by default.
     if args.split == "training_hard" and args.roster_prefix == "p2_dynamic":
         args.roster_prefix = "p2_training_hard_roster"
@@ -857,6 +977,11 @@ def main() -> None:
             matrix=matrix,
             units_meta=units_meta,
         )
+    balanced_weighted_choices = (
+        _build_balanced_weighted_choices(target_by_tanking, tanking_distribution)
+        if args.balanced_mode
+        else []
+    )
 
     if args.output_dir is None:
         output_dir = Path(f"config/agents/_p2_rosters/{args.points_scale}pts/{args.split}")
@@ -874,6 +999,7 @@ def main() -> None:
     selected_unit_count_by_tanking: Counter[str] = Counter()
     total_rejected_attempts = 0
     total_attempts = 0
+    balanced_rejected_resamples = 0
     generated_roster_values: List[Tuple[str, int]] = []
 
     tanking_keys = sorted(tanking_distribution.keys())
@@ -888,9 +1014,13 @@ def main() -> None:
         last_resample_error: Optional[RuntimeError] = None
 
         for _ in range(args.max_roster_resample_attempts):
-            sampled_tanking = str(_weighted_pick(tanking_keys, tanking_weights_for_sampling, rng))
             sampled_units_per_roster = int(_weighted_pick(units_keys, units_weights_for_sampling, rng))
-            weighted_choices, _blend_target, _mobility_target, _weapon_target = target_by_tanking[sampled_tanking]
+            if args.balanced_mode:
+                sampled_tanking = "balanced"
+                weighted_choices = balanced_weighted_choices
+            else:
+                sampled_tanking = str(_weighted_pick(tanking_keys, tanking_weights_for_sampling, rng))
+                weighted_choices, _blend_target, _mobility_target, _weapon_target = target_by_tanking[sampled_tanking]
             try:
                 sampled_result = _build_one_roster(
                     weighted_choices=weighted_choices,
@@ -908,6 +1038,14 @@ def main() -> None:
             except RuntimeError as exc:
                 last_resample_error = exc
                 continue
+            if args.balanced_mode and not _is_balanced_roster(
+                unit_picks=sampled_result.unit_picks,
+                expected_tankings=expected_tankings,
+                min_share=args.balanced_min_share,
+                max_share=args.balanced_max_share,
+            ):
+                balanced_rejected_resamples += 1
+                continue
             selected_tanking = sampled_tanking
             selected_units_per_roster = sampled_units_per_roster
             build_result = sampled_result
@@ -923,13 +1061,13 @@ def main() -> None:
         selected_tanking_counter[selected_tanking] += 1
         selected_units_per_roster_counter[int(selected_units_per_roster)] += 1
 
-        roster_id = f"{args.roster_prefix}_{selected_tanking.lower()}_{idx:02d}"
+        roster_id = _build_roster_id(args.roster_prefix, selected_tanking, idx)
         written_paths.append(_write_roster_file(output_dir, roster_id, build_result.composition))
         roster_values.append(build_result.roster_value)
         total_rejected_attempts += build_result.rejected_attempts
         total_attempts += build_result.total_attempts
         all_unit_picks.extend(build_result.unit_picks)
-        selected_unit_count_by_tanking[selected_tanking] += len(build_result.unit_picks)
+        selected_unit_count_by_tanking.update(p.tanking for p in build_result.unit_picks)
         generated_roster_values.append((roster_id, build_result.roster_value))
 
     if not all_unit_picks:
@@ -962,10 +1100,16 @@ def main() -> None:
         label="weapon_target",
     )
 
-    observed_tanking_distribution = {
-        key: float(selected_tanking_counter[key]) / float(args.num_rosters)
-        for key in sorted(selected_tanking_counter.keys())
-    }
+    if args.balanced_mode:
+        observed_tanking_distribution = {
+            key: float(selected_unit_count_by_tanking.get(key, 0)) / float(len(all_unit_picks))
+            for key in sorted(expected_tankings)
+        }
+    else:
+        observed_tanking_distribution = {
+            key: float(selected_tanking_counter[key]) / float(args.num_rosters)
+            for key in sorted(selected_tanking_counter.keys())
+        }
     observed_units_distribution = {
         str(key): float(selected_units_per_roster_counter[key]) / float(args.num_rosters)
         for key in sorted(selected_units_per_roster_counter.keys())
@@ -989,6 +1133,15 @@ def main() -> None:
         "distribution_drift_mobility": _distribution_drift(picked_mobility_counter, mobility_target),
         "distribution_drift_weapon_profile": _distribution_drift(picked_weapon_counter, weapon_target),
     }
+    if args.balanced_mode:
+        kpis["balanced_mode"] = {
+            "enabled": True,
+            "min_share": float(args.balanced_min_share),
+            "max_share": float(args.balanced_max_share),
+            "expected_tankings": expected_tankings,
+            "observed_unit_share_by_tanking": observed_tanking_distribution,
+            "rejected_resamples_balance_constraint": int(balanced_rejected_resamples),
+        }
 
     matchup_path: Optional[Path] = None
     if args.opponent_roster_dir is not None:
@@ -1023,18 +1176,18 @@ def main() -> None:
             "matchups": matchups,
         }
         matchup_tanking_label = (
-            str(args.target_tanking).lower()
-            if args.target_tanking is not None
-            else "mixed"
+            "balanced"
+            if args.balanced_mode
+            else (str(args.target_tanking).lower() if args.target_tanking is not None else "mixed")
         )
         matchup_path = output_dir / f"{args.roster_prefix}_{matchup_tanking_label}_matchups.json"
         matchup_path.write_text(json.dumps(matchup_payload, indent=2), encoding="utf-8")
         kpis.update(matchup_kpis)
 
     kpi_tanking_label = (
-        str(args.target_tanking).lower()
-        if args.target_tanking is not None
-        else "mixed"
+        "balanced"
+        if args.balanced_mode
+        else (str(args.target_tanking).lower() if args.target_tanking is not None else "mixed")
     )
     kpi_path = output_dir / f"{args.roster_prefix}_{kpi_tanking_label}_kpis_v21.json"
     kpi_path.write_text(json.dumps(kpis, indent=2), encoding="utf-8")
@@ -1045,6 +1198,12 @@ def main() -> None:
         f"{dict(sorted(tanking_distribution.items(), key=lambda item: item[0]))}"
     )
     print(f"Observed tanking distribution: {observed_tanking_distribution}")
+    if args.balanced_mode:
+        print(
+            "Balanced constraints: "
+            f"{args.balanced_min_share:.2f} <= share(tanking) <= {args.balanced_max_share:.2f} "
+            "for each generated roster"
+        )
     print(f"Points budget: {args.points_scale} +/- {args.points_tolerance}")
     print(
         "Target units-per-roster distribution: "

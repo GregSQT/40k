@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_balanced_20",
+  "composition": [
+    {
+      "unit_type": "CaptainTerminatorRelicWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
+    }
+  ]
+}

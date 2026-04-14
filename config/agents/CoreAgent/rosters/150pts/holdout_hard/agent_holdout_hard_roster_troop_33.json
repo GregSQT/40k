@@ -2,28 +2,28 @@
   "roster_id": "agent_holdout_hard_roster_troop_33",
   "composition": [
     {
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
       "count": 1
     },
     {
       "unit_type": "BloodClaw",
-      "count": 3
-    },
-    {
-      "unit_type": "GreyHunterPlasmaGun",
-      "count": 1
-    },
-    {
-      "unit_type": "Hellblaster",
       "count": 2
     },
     {
-      "unit_type": "RaptorPlasmaGun",
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
       "count": 1
     },
     {
       "unit_type": "Scout",
-      "count": 1
+      "count": 2
     }
   ]
 }

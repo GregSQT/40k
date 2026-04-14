@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_swarm_55",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 2
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    }
+  ]
+}

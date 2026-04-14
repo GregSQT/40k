@@ -2,11 +2,15 @@
   "roster_id": "agent_holdout_hard_roster_swarm_19",
   "composition": [
     {
-      "unit_type": "DarkReaper",
-      "count": 2
+      "unit_type": "CultistFirebrand",
+      "count": 1
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
@@ -14,27 +18,15 @@
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
-      "count": 1
-    },
-    {
-      "unit_type": "StrikingScorpion",
-      "count": 2
-    },
-    {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
+      "unit_type": "SwoopingHawk",
       "count": 1
     }
   ]

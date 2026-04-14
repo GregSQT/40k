@@ -17,7 +17,7 @@
     "checkpoint_name_prefix": "ppo_checkpoint",
     "eval_deterministic": true,
     "eval_render": false,
-    "bot_eval_freq": 1000,
+    "bot_eval_freq": 2500,
     "bot_eval_use_episodes": true,
     "bot_eval_intermediate": 150,
     "bot_eval_final": 300,
@@ -32,11 +32,27 @@
     "model_gating_min_combined": 0.45,
     "model_gating_min_worst_bot": 0.25,
     "model_gating_min_worst_scenario_combined": 0.35,
-    "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05", "holdout_regular_bot-06"],
-    "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05", "holdout_hard_bot-06"],
+    "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05", "holdout_regular_bot-06", "holdout_regular_bot-07", "holdout_regular_bot-08", "holdout_regular_bot-09", "holdout_regular_bot-10"],
+    "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05", "holdout_hard_bot-06", "holdout_hard_bot-07", "holdout_hard_bot-08", "holdout_hard_bot-09", "holdout_hard_bot-10"],
     "holdout_hard_opponent_budget_modifier": 1.10,
-    "bot_eval_weights": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.10, "defensive_smart": 0.10, "adaptive": 0.10},
-    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "defensive_smart": 0.05, "adaptive": 0.05}
+    "bot_eval_weights": {"greedy": 0.23, "defensive": 0.23, "control": 0.23, "aggressive_smart": 0.15, "adaptive": 0.16},
+    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "roster_pool_schedule": {
+    "enabled": true,
+    "training": {
+      "start_counts": { "swarm": 10, "troop": 6, "elite": 4 },
+      "end_counts":   { "swarm": 48, "troop": 32, "elite": 20 }
+    }
+  },
+  "deployment_random_mix": {
+    "enabled": false,
+    "training_only": true,
+    "force_random_ratio_start": 0.10,
+    "force_random_ratio_end": 0.20,
+    "schedule": "linear",
+    "freeze_after_progress": 0.80,
+    "apply_to": "agent_only"
   },
     "observation_params": {
       "obs_size": 355,
@@ -81,8 +97,8 @@
     "norm_reward": false
   },
   "bot_training": {
-    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.10, "defensive_smart": 0.10, "adaptive": 0.10},
-    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "defensive_smart": 0.05, "adaptive": 0.05}
+    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.15, "adaptive": 0.15},
+    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
   },
   "opponent_mix": {
     "enabled": false,
@@ -106,20 +122,13 @@
     "eval_selection_mode": "uniform_within_count"
   },
   "training_hard": {
-    "enabled": true,
+    "enabled": false,
     "target_episode_ratio": 0.3,
     "max_scenario_weight": 4,
-    "scenario_names": [
-      "training_bot-21",
-      "training_bot-22",
-      "training_bot-23",
-      "training_bot-24",
-      "training_bot-29",
-      "training_bot-30"
-    ]
+    "scenario_names": []
   },
   "unit_rule_forcing": {
-    "enabled": true,
+    "enabled": false,
     "target_controlled_episode_ratio": 0.20,
     "max_scenario_weight": 6
   }
@@ -157,11 +166,20 @@
     "model_gating_min_combined": 0.45,
     "model_gating_min_worst_bot": 0.25,
     "model_gating_min_worst_scenario_combined": 0.35,
-    "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05", "holdout_regular_bot-06"],
-    "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05", "holdout_hard_bot-06"],
+    "holdout_regular_scenarios": ["holdout_regular_bot-01", "holdout_regular_bot-02", "holdout_regular_bot-03", "holdout_regular_bot-04", "holdout_regular_bot-05", "holdout_regular_bot-06", "holdout_regular_bot-07", "holdout_regular_bot-08", "holdout_regular_bot-09", "holdout_regular_bot-10"],
+    "holdout_hard_scenarios": ["holdout_hard_bot-01", "holdout_hard_bot-02", "holdout_hard_bot-03", "holdout_hard_bot-04", "holdout_hard_bot-05", "holdout_hard_bot-06", "holdout_hard_bot-07", "holdout_hard_bot-08", "holdout_hard_bot-09", "holdout_hard_bot-10"],
     "holdout_hard_opponent_budget_modifier": 1.10,
-    "bot_eval_weights": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.10, "defensive_smart": 0.10, "adaptive": 0.10},
-    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "defensive_smart": 0.05, "adaptive": 0.05}
+    "bot_eval_weights": {"greedy": 0.23, "defensive": 0.23, "control": 0.23, "aggressive_smart": 0.15, "adaptive": 0.16},
+    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
+  },
+  "deployment_random_mix": {
+    "enabled": false,
+    "training_only": true,
+    "force_random_ratio_start": 0.10,
+    "force_random_ratio_end": 0.20,
+    "schedule": "linear",
+    "freeze_after_progress": 0.80,
+    "apply_to": "agent_only"
   },
     "observation_params": {
       "obs_size": 355,
@@ -206,8 +224,8 @@
     "norm_reward": false
   },
   "bot_training": {
-    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.10, "defensive_smart": 0.10, "adaptive": 0.10},
-    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "defensive_smart": 0.05, "adaptive": 0.05}
+    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.15, "adaptive": 0.15},
+    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
   },
   "opponent_mix": {
     "enabled": true,
@@ -231,17 +249,10 @@
     "eval_selection_mode": "uniform_within_count"
   },
   "training_hard": {
-    "enabled": true,
+    "enabled": false,
     "target_episode_ratio": 0.20,
     "max_scenario_weight": 4,
-    "scenario_names": [
-      "training_bot-21",
-      "training_bot-22",
-      "training_bot-23",
-      "training_bot-24",
-      "training_bot-29",
-      "training_bot-30"
-    ]
+    "scenario_names": []
   },
   "unit_rule_forcing": {
     "enabled": true,
@@ -267,8 +278,8 @@
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 10,
       "bot_eval_final": 0,
-      "bot_eval_weights": {"random": 0.10, "greedy": 0.15, "defensive": 0.15, "control": 0.15, "aggressive_smart": 0.15, "defensive_smart": 0.15, "adaptive": 0.15},
-      "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "defensive_smart": 0.05, "adaptive": 0.05}
+      "bot_eval_weights": {"greedy": 0.23, "defensive": 0.23, "control": 0.23, "aggressive_smart": 0.15, "adaptive": 0.16},
+    "bot_eval_randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
     },
     "observation_params": {
       "obs_size": 355,
@@ -318,21 +329,14 @@
       "norm_reward": false
     },
     "bot_training": {
-      "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.10, "defensive_smart": 0.10, "adaptive": 0.10},
-      "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.1, "defensive_smart": 0.1, "adaptive": 0.1}
+    "ratios": {"random": 0.10, "greedy": 0.20, "defensive": 0.20, "control": 0.20, "aggressive_smart": 0.15, "adaptive": 0.15},
+    "randomness": {"greedy": 0.05, "defensive": 0.05, "control": 0.05, "aggressive_smart": 0.05, "adaptive": 0.05}
     },
     "training_hard": {
       "enabled": false,
       "target_episode_ratio": 0.20,
       "max_scenario_weight": 4,
-      "scenario_names": [
-        "training_bot-21",
-        "training_bot-22",
-        "training_bot-23",
-        "training_bot-24",
-        "training_bot-29",
-        "training_bot-30"
-      ]
+      "scenario_names": []
     },
     "unit_rule_forcing": {
       "enabled": true,

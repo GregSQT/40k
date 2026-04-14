@@ -1,0 +1,17 @@
+{
+  "roster_id": "agent_holdout_hard_roster_elite_11",
+  "composition": [
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 2
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 2
+    }
+  ]
+}

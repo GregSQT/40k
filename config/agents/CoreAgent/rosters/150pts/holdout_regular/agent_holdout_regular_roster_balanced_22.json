@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_regular_roster_balanced_22",
+  "composition": [
+    {
+      "unit_type": "AggressorFlamestorm",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerFistBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    }
+  ]
+}

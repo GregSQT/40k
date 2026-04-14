@@ -1,0 +1,33 @@
+{
+  "roster_id": "agent_holdout_regular_roster_troop_03",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorGrenadeLauncher",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_01",
+  "composition": [
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    }
+  ]
+}

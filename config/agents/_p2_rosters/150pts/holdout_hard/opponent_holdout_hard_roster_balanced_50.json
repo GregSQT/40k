@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_50",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainGravisChainSwordBoltstorm",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMultiMelta",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 1
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
+      "count": 1
+    }
+  ]
+}

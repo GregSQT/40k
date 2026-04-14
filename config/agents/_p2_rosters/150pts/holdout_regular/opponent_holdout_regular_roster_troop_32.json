@@ -2,6 +2,10 @@
   "roster_id": "opponent_holdout_regular_roster_troop_32",
   "composition": [
     {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 2
+    },
+    {
       "unit_type": "BladeguardVeteranSergeant",
       "count": 1
     },
@@ -10,19 +14,15 @@
       "count": 1
     },
     {
-      "unit_type": "FireDragonExarch",
+      "unit_type": "Hellblaster",
       "count": 1
     },
     {
-      "unit_type": "IntercessorSergeant",
+      "unit_type": "Incursor",
       "count": 1
     },
     {
-      "unit_type": "SternguardVeteranBoltRifle",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpiderExarchSpinner",
+      "unit_type": "TyranidWarriorRanged",
       "count": 1
     }
   ]

@@ -2,19 +2,27 @@
   "roster_id": "agent_training_roster_swarm_67",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
       "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {

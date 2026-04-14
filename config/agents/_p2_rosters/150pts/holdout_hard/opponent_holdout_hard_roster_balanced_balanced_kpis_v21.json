@@ -1,0 +1,182 @@
+{
+  "roster_value_mean": 166.48,
+  "roster_value_std": 3.1574673394985417,
+  "roster_value_p95": 170.0,
+  "rejection_rate_roster_budget": 0.038461538461538464,
+  "sampling_target_tanking_distribution": {
+    "Elite": 0.3334,
+    "Swarm": 0.3333,
+    "Troop": 0.3333
+  },
+  "sampling_observed_tanking_distribution": {
+    "Elite": 0.3365695792880259,
+    "Swarm": 0.34951456310679613,
+    "Troop": 0.313915857605178
+  },
+  "sampling_target_units_per_roster_distribution": {
+    "5": 0.08,
+    "6": 0.15,
+    "8": 0.25,
+    "9": 0.24,
+    "10": 0.18,
+    "11": 0.07,
+    "12": 0.03
+  },
+  "sampling_observed_units_per_roster_distribution": {
+    "5": 0.56,
+    "6": 0.1,
+    "8": 0.28,
+    "9": 0.06
+  },
+  "unit_pick_frequency": {
+    "chaos::ChosenPlasma": 10,
+    "adeptusCustodes::Witchseeker": 9,
+    "tyranid::Pyrovore": 9,
+    "tyranid::Biovore": 8,
+    "tyranid::Gargoyle": 8,
+    "tyranid::TermagantTuto": 8,
+    "aeldari::SwoopingHawk": 7,
+    "aeldari::WraithguardDScythe": 7,
+    "chaos::RaptorPlasmaGun": 7,
+    "spaceMarine::HeavyIntercessorHeavyBolter": 7,
+    "adeptusCustodes::Prosecutor": 6,
+    "aeldari::WarpSpider": 6,
+    "chaos::RenegadeGuard": 6,
+    "tyranid::Genestealer": 6,
+    "tyranid::HiveGuardImpalerCannon": 6,
+    "tyranid::Termagant": 6,
+    "aeldari::StrikingScorpion": 5,
+    "aeldari::WarpSpiderExarchSpinner": 5,
+    "chaos::CultistMob": 5,
+    "spaceMarine::AssaultIntercessorJumpPack": 5,
+    "spaceMarine::AssaultIntercessorSergeant": 5,
+    "spaceMarine::BladeguardVeteranSergeant": 5,
+    "spaceMarine::DeathwingTerminatorPlasmaCannon": 5,
+    "spaceMarine::Incursor": 5,
+    "tyranid::Hormagaunt": 5,
+    "tyranid::TyranidWarriorMelee": 5,
+    "tyranid::TyrantGuardScytingTalon": 5,
+    "aeldari::StrikingScorpionExarch": 4,
+    "aeldari::WraithguardWraithcannon": 4,
+    "spaceMarine::AssaultIntercessor": 4,
+    "spaceMarine::BloodClawPackLeader": 4,
+    "spaceMarine::CaptainGravisPowerWeaponBoltRifle": 4,
+    "spaceMarine::IntercessorSergeant": 4,
+    "spaceMarine::Scout": 4,
+    "spaceMarine::TerminatorCyclone": 4,
+    "tyranid::HiveGuardShockcannon": 4,
+    "tyranid::TyranidWarriorRanged": 4,
+    "aeldari::DarkReaperExarch": 3,
+    "aeldari::DireAvenger": 3,
+    "aeldari::FireDragon": 3,
+    "aeldari::SerpentScalePlatform": 3,
+    "aeldari::SwoopingHawkExarch": 3,
+    "aeldari::WarpSpiderExarchPowerblade": 3,
+    "spaceMarine::CaptainPowerWeaponNeoVolkite": 3,
+    "spaceMarine::CaptainTerminatorRelicWeaponCombi": 3,
+    "spaceMarine::DeathCompanyMarineEviscerator": 3,
+    "spaceMarine::EradicatorMeltaRifle": 3,
+    "spaceMarine::EradicatorMultiMelta": 3,
+    "spaceMarine::HellblasterSergeant": 3,
+    "spaceMarine::LieutenantStormShield": 3,
+    "adeptusCustodes::CustodianAllarusAxe": 2,
+    "aeldari::DarkReaper": 2,
+    "aeldari::HeavyWeaponPlatform": 2,
+    "chaos::Obliterator": 2,
+    "spaceMarine::AssaultIntercessorJumpPackPlasmaPistol": 2,
+    "spaceMarine::CaptainGravisBladeBoltstorm": 2,
+    "spaceMarine::CaptainGravisChainSwordBoltstorm": 2,
+    "spaceMarine::CaptainGravisFistBoltstorm": 2,
+    "spaceMarine::CaptainPowerWeaponBolter": 2,
+    "spaceMarine::FenrisianWolf": 2,
+    "spaceMarine::GreyHunterPlasmaGun": 2,
+    "spaceMarine::HeavyIntercessor": 2,
+    "spaceMarine::InceptorBolter": 2,
+    "spaceMarine::Intercessor": 2,
+    "spaceMarine::IntercessorGrenadeLauncher": 2,
+    "spaceMarine::SanguinaryGuardAngelus": 2,
+    "spaceMarine::Suppressor": 2,
+    "adeptusCustodes::CustodianAllarusSpear": 1,
+    "adeptusCustodes::CustodianGuardBlade": 1,
+    "adeptusCustodes::CustodianGuardSpear": 1,
+    "aeldari::DireAvengerExarch": 1,
+    "aeldari::GuardianDefender": 1,
+    "aeldari::HowlingBanshee": 1,
+    "spaceMarine::AssaultTerminator": 1,
+    "spaceMarine::BloodClaw": 1,
+    "spaceMarine::CaptainPowerFistBolter": 1,
+    "spaceMarine::CaptainStormShield": 1,
+    "spaceMarine::CaptainTerminatorRelicFistBolter": 1,
+    "spaceMarine::CaptainTerminatorRelicFistCombi": 1,
+    "spaceMarine::DeathCompanyJumpPackEviscerator": 1,
+    "spaceMarine::GreyHunter": 1,
+    "spaceMarine::GreyHunterPackLeader": 1,
+    "spaceMarine::Hellblaster": 1,
+    "spaceMarine::Infernus": 1,
+    "spaceMarine::LieutenantCloseCombatBolter": 1,
+    "spaceMarine::SternguardVeteranSergeantPowerFist": 1,
+    "spaceMarine::TerminatorAssaultCannon": 1,
+    "spaceMarine::WolfGuardTerminator": 1,
+    "tyranid::GenestealerPrime": 1,
+    "tyranid::TyrantGuardBoneCleaver": 1,
+    "tyranid::TyrantGuardCrushingClaws": 1,
+    "tyranid::Zoanthrope": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.34942463295158177,
+    "observed": {
+      "Balance": 0.24271844660194175,
+      "Melee": 0.343042071197411,
+      "Ranged": 0.41423948220064727
+    },
+    "target": {
+      "Balance": 0.41743076307773264,
+      "Melee": 0.26762506290920063,
+      "Ranged": 0.31494417401306674
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 0.7570130767010274,
+    "observed": {
+      "High": 0.14563106796116504,
+      "Low": 0.3559870550161812,
+      "Mid": 0.49838187702265374
+    },
+    "target": {
+      "High": 0.5241376063116787,
+      "Low": 0.28525889920139175,
+      "Mid": 0.1906034944869295
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 0.6625400232194727,
+    "observed": {
+      "AntiElite": 0.2977346278317152,
+      "Burst": 0.12297734627831715,
+      "Generalist": 0.36893203883495146,
+      "Volume": 0.21035598705501618
+    },
+    "target": {
+      "AntiElite": 0.1876895831439508,
+      "Burst": 0.4183884593913673,
+      "Generalist": 0.14770707191297955,
+      "Volume": 0.24621488555170234
+    }
+  },
+  "balanced_mode": {
+    "enabled": true,
+    "min_share": 0.2,
+    "max_share": 0.4,
+    "expected_tankings": [
+      "Elite",
+      "Swarm",
+      "Troop"
+    ],
+    "observed_unit_share_by_tanking": {
+      "Elite": 0.3365695792880259,
+      "Swarm": 0.34951456310679613,
+      "Troop": 0.313915857605178
+    },
+    "rejected_resamples_balance_constraint": 529
+  }
+}

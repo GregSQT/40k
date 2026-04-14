@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_training_roster_balanced_47",
+  "composition": [
+    {
+      "unit_type": "CaptainGravisChainSwordBoltstorm",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "HellblasterSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

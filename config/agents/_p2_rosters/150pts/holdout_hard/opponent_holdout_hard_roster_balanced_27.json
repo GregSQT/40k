@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_27",
+  "composition": [
+    {
+      "unit_type": "CaptainGravisPowerWeaponBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianGuardSpear",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 2
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
+      "count": 1
+    }
+  ]
+}

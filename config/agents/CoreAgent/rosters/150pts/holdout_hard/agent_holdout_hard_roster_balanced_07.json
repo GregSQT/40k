@@ -1,0 +1,13 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_07",
+  "composition": [
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 1
+    }
+  ]
+}

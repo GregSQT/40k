@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_swarm_32",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 3
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 3
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 3
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 3
+    },
+    {
+      "unit_type": "StormGuardian",
+      "count": 3
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 3
+    }
+  ]
+}

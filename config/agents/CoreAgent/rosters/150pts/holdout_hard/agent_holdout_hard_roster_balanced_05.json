@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_05",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathwingTerminatorPlasmaCannon",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
+      "count": 1
+    }
+  ]
+}

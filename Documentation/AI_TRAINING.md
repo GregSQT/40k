@@ -76,6 +76,14 @@
   - [Common Errors](#common-errors)
   - [Performance Issues](#performance-issues)
 - [Évolutions prévues : League / curriculum training](#évolutions-prévues--league--curriculum-training)
+- [Pipeline opérationnel holdout hard (CoreAgent 150pts)](#-pipeline-opérationnel-holdout-hard-coreagent-150pts)
+  - [Objectif](#objectif)
+  - [Étape 0 — Préparation rosters et scénarios](#étape-0--préparation-rosters-et-scénarios)
+  - [Étape 1 — Matrices BOT rapides (e12)](#étape-1--matrices-bot-rapides-e12)
+  - [Étape 2 — Rebalancing BOT](#étape-2--rebalancing-bot)
+  - [Étape 3 — Revalidation robuste (e30)](#étape-3--revalidation-robuste-e30)
+  - [Étape 4 — Validation finale ciblée (e50)](#étape-4--validation-finale-ciblée-e50)
+  - [Étape 5 — Boost des rosters faibles](#étape-5--boost-des-rosters-faibles)
 - [Advanced Topics (External References)](#-advanced-topics-external-references)
 - [Quick Reference Cheat Sheet](#-quick-reference-cheat-sheet)
 - [Summary](#-summary)
@@ -1695,6 +1703,123 @@ Le changement est considéré positif si:
 Approche recommandée: **implémenter une v1 simple sans Elo/PFSP**, puis ajouter un rating seulement si nécessaire.
 
 Ce plan donne un gain robuste à coût d'implémentation maîtrisé, compatible avec l'architecture actuelle.
+
+---
+
+## 🔁 PIPELINE OPÉRATIONNEL HOLDOUT HARD (COREAGENT 150PTS)
+
+### Objectif
+
+Construire un benchmark `holdout_hard`:
+- stable (scénarios fixes),
+- équitable en `holdout_regular` (pool commun agent/opponent),
+- exigeant en `holdout_hard` (opponent +10% budget),
+- calibré de façon data-driven via matrices multi-bots + rebalancing.
+
+Ce pipeline est la séquence recommandée pour `CoreAgent` en `150pts`.
+
+### Étape 0 — Préparation rosters et scénarios
+
+1. **Nettoyer les pools rosters** (`training`, `holdout_regular`, `holdout_hard`) côté agent et `_p2_rosters`.
+2. **Générer rosters agent**:
+   - `training`: specific + balanced,
+   - `holdout_regular`: specific + balanced.
+3. **Rendre `training` identique côté opponent** (copie + rename + `roster_id`).
+4. **Rendre `holdout_regular` identique côté opponent** (copie + rename + `roster_id`).
+5. **Générer `holdout_hard` séparé**:
+   - agent: `150pts`,
+   - opponent: `165pts` (+10%).
+6. **Générer les scénarios holdout fixes** (`holdout_regular` et `holdout_hard`) avec `wall_ref` et `objectives_ref` explicites.
+7. **Vérifier les comptes** (volumétrie rosters + scénarios).
+
+Notes:
+- Les fichiers `*_kpis_v21.json` ne sont pas des rosters.
+- Les scénarios doivent être présents (`10/10`) avant toute phase matchup.
+
+### Étape 1 — Matrices BOT rapides (e12)
+
+But: obtenir une première estimation rapide de difficulté.
+
+1. Nettoyer sorties matchup précédentes (`scenarios/.../matchups/*.json`, `rosters/.../matchups/*.json`).
+2. Lancer 3 jobs en parallèle (un par bot):
+   - `greedy`,
+   - `defensive_smart`,
+   - `adaptive`.
+3. Utiliser `--episodes 12` (ou 10/12) pour réduire le temps.
+
+Important:
+- Avec `90x90` rosters hard, la matrice complète = `8100` matchups **par bot**.
+- Le temps mur est dominé par un bot (même en parallèle inter-bots).
+
+### Étape 2 — Rebalancing BOT
+
+1. **Dry-run** (`rebalance_holdout_hard_scenarios.py` sans `--apply`) pour proposer des affectations.
+2. Vérifier:
+   - cible (`target-win-rate`, ex `0.40`),
+   - bande (`min/max`, ex `0.25-0.50`),
+   - plancher (`floor-win-rate`, ex `0.20`),
+   - filtre opponent (`min/max p1 win rate vs p2`, ex `0.20-0.60`),
+   - diversité (`max-repeat-per-opponent`, ex `2`).
+3. **Apply** (`--apply`) pour écrire les nouveaux `opponent_roster_ref` dans les scénarios hard.
+
+### Étape 3 — Revalidation robuste (e30)
+
+But: confirmer la qualité après `apply` avec moins de bruit statistique.
+
+1. Nettoyer sorties matchup.
+2. Lancer à nouveau 3 bots en parallèle avec `--episodes 30`.
+3. Analyser:
+   - `wr_mean` par scénario,
+   - dispersion inter-bots,
+   - respect de la bande cible.
+
+Critère pratique GO:
+- au moins `8/10` scénarios dans `[0.25, 0.50]`,
+- pas de scénario sous `0.20`,
+- dispersion inter-bots raisonnable.
+
+### Étape 4 — Validation finale ciblée (e50)
+
+But: verrouiller la fiabilité finale sans coût d’un full-matrix e50.
+
+1. Extraire les cas borderline depuis e30:
+   - proches de `0.25±0.05`,
+   - proches de `0.50±0.05`,
+   - forte dispersion inter-bots.
+2. Lancer des évaluations ciblées en `--episodes 50` (P1 benchmark par roster/scénario concerné).
+3. Snapshotter chaque résultat e50 ciblé dans `reports/e50_candidates/raw_matchups/`.
+4. Consolider le résumé e50 **depuis ces snapshots ciblés** (et non depuis les fichiers matchups globaux, potentiellement écrasés au fil des runs).
+
+Notes opérationnelles:
+- Exécuter les blocs shell critiques en mode fail-fast (ex: subshell `(`...`)` + `set -euo pipefail`).
+- Ne pas exécuter deux fois le script généré `run_e50_commands.sh`.
+
+### Décision GO / NO-GO (fin branche calibration)
+
+Le GO global doit être pris sur la vue complète e30 (10 scénarios), pas sur le sous-ensemble e50 ciblé:
+- `IN_BAND_25_50 >= 8/10`,
+- aucun scénario `< 0.20`,
+- dispersion inter-bots acceptable (majorité des `wr_spread <= 0.20`).
+
+Le e50 ciblé sert à confirmer/affiner les cas limites, pas à remplacer la décision globale.
+
+### Étape 5 — Boost des rosters faibles
+
+But: réintégrer progressivement les rosters exclus (souvent swarm faibles) au lieu de les ignorer.
+
+Process recommandé:
+1. Extraire les IDs faibles depuis le dry-run.
+2. Si la liste est vide: skip propre des étapes de boost (`dry-run` et `apply`).
+3. Générer des candidats boostés par type (palier `+5` points).
+4. Appliquer le remplacement des rosters faibles validés.
+5. **Recalculer les 3 matrices BOT (`e30`) immédiatement après remplacement**.
+6. Recalibrer les scénarios hard (dry-run puis apply) avec les matrices fraîchement régénérées.
+7. Revalider (`e30`) puis contrôle structurel avec l’agent.
+8. Cible de performance: `0.40-0.50`, stabilité sur 2 passes.
+9. Archiver les anciens (`*_deprecated`) et tagger les boosts élevés (`+30`, `+40`) pour audit humain.
+
+Outil d’automatisation:
+- `scripts/auto_boost_weak_rosters.py` (plan + apply + rapport CSV).
 
 ---
 

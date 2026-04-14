@@ -6,28 +6,32 @@
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "DireAvengerExarch",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "FenrisianWolf",
       "count": 1
     },
     {
-      "unit_type": "RipperSwarm",
+      "unit_type": "Hormagaunt",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
-      "unit_type": "Termagant",
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
       "count": 1
     },
     {
       "unit_type": "Witchseeker",
-      "count": 2
+      "count": 1
     }
   ]
 }

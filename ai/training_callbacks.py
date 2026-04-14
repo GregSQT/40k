@@ -17,6 +17,7 @@ import json
 import os
 import time
 import re
+import math
 import shutil
 import tempfile
 from collections import deque
@@ -179,7 +180,8 @@ class EpisodeTerminationCallback(BaseCallback):
                  disable_early_stopping: bool = False, global_start_time: float = None,
                  phase_label: Optional[str] = None,
                  phase_episode_offset: int = 0,
-                 gate_display_state: Optional[Dict[str, Any]] = None):
+                 gate_display_state: Optional[Dict[str, Any]] = None,
+                 training_config: Optional[Dict[str, Any]] = None):
         super().__init__(verbose)
         if max_episodes <= 0:
             raise ValueError("max_episodes must be positive - no defaults allowed")
@@ -223,6 +225,7 @@ class EpisodeTerminationCallback(BaseCallback):
         self.gate_display_state = gate_display_state
         self.total_eval_time_at_last_display = 0.0
         self.training_progress_bar_length = _require_progress_bar_width("training_width")
+        self.training_config = training_config
 
     def _on_training_start(self) -> None:
         """Initialize timing on training start."""
@@ -230,6 +233,80 @@ class EpisodeTerminationCallback(BaseCallback):
         # Only set start_time if not already set (preserves global start time in rotation mode)
         if self.start_time is None:
             self.start_time = time.time()
+
+    def _compute_training_roster_count(self, display_episode_count: int) -> Optional[int]:
+        """Compute active training roster count (per side) for progress display."""
+        if self.training_config is None:
+            return None
+        if not isinstance(self.training_config, dict):
+            raise TypeError(
+                f"EpisodeTerminationCallback.training_config must be dict (got {type(self.training_config).__name__})"
+            )
+        schedule_raw = self.training_config.get("roster_pool_schedule")
+        if schedule_raw is None:
+            return None
+        if not isinstance(schedule_raw, dict):
+            raise TypeError(
+                f"training_config.roster_pool_schedule must be dict (got {type(schedule_raw).__name__})"
+            )
+        enabled = schedule_raw.get("enabled")
+        if not isinstance(enabled, bool):
+            raise TypeError("training_config.roster_pool_schedule.enabled must be bool")
+        if not enabled:
+            return None
+
+        training_schedule = schedule_raw.get("training")
+        if not isinstance(training_schedule, dict):
+            raise TypeError("training_config.roster_pool_schedule.training must be dict")
+        start_counts_raw = training_schedule.get("start_counts")
+        end_counts_raw = training_schedule.get("end_counts")
+        if not isinstance(start_counts_raw, dict) or not isinstance(end_counts_raw, dict):
+            raise TypeError(
+                "training_config.roster_pool_schedule.training.start_counts and end_counts must be dict"
+            )
+
+        classes = ("swarm", "troop", "elite")
+        start_counts: Dict[str, int] = {}
+        end_counts: Dict[str, int] = {}
+        for cls in classes:
+            start_value = start_counts_raw.get(cls)
+            end_value = end_counts_raw.get(cls)
+            if not isinstance(start_value, int) or isinstance(start_value, bool):
+                raise TypeError(f"start_counts.{cls} must be integer")
+            if not isinstance(end_value, int) or isinstance(end_value, bool):
+                raise TypeError(f"end_counts.{cls} must be integer")
+            if start_value <= 0 or end_value <= 0:
+                raise ValueError(f"start_counts/end_counts.{cls} must be > 0")
+            if end_value < start_value:
+                raise ValueError(
+                    f"end_counts.{cls} must be >= start_counts.{cls} ({end_value} < {start_value})"
+                )
+            start_counts[cls] = int(start_value)
+            end_counts[cls] = int(end_value)
+
+        total_episodes = self.training_config.get("total_episodes")
+        n_envs = self.training_config.get("n_envs")
+        if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
+            raise TypeError("training_config.total_episodes must be integer when roster schedule is enabled")
+        if not isinstance(n_envs, int) or isinstance(n_envs, bool):
+            raise TypeError("training_config.n_envs must be integer when roster schedule is enabled")
+        if total_episodes <= 0 or n_envs <= 0:
+            raise ValueError("training_config.total_episodes and n_envs must be > 0 when roster schedule is enabled")
+
+        # Schedule runs per environment episode index, aligned with engine/game_state.py.
+        per_env_episode_index = max(0, int(math.ceil(float(display_episode_count) / float(n_envs))) - 1)
+        episodes_per_env = int(math.ceil(float(total_episodes) / float(n_envs)))
+        denominator = max(1, episodes_per_env - 1)
+        progress = min(1.0, max(0.0, float(per_env_episode_index) / float(denominator)))
+
+        total_active = 0
+        for cls in classes:
+            start_value = start_counts[cls]
+            end_value = end_counts[cls]
+            interpolated = start_value + int(math.floor((end_value - start_value) * progress))
+            active_count = max(start_value, min(end_value, interpolated))
+            total_active += int(active_count)
+        return total_active
 
     def _on_step(self) -> bool:
         """Track episodes and display progress."""
@@ -418,10 +495,14 @@ class EpisodeTerminationCallback(BaseCallback):
 
                 # Use \r for overwriting progress, but add spaces to clear previous longer lines
                 phase_display = f" | {self.phase_label}" if self.phase_label else ""
+                roster_display = ""
+                roster_count = self._compute_training_roster_count(display_episode_count)
+                if roster_count is not None:
+                    roster_display = f" | Rosters: {roster_count}"
                 progress_line = (
                     f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
                     f" [{time_info}] [{duration_display}] {gate_label}"
-                    f"{robust_status_text}{phase_display}"
+                    f"{robust_status_text}{roster_display}{phase_display}"
                 )
                 # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
                 prev_len = self._last_progress_line_len

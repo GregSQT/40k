@@ -10,31 +10,27 @@
       "count": 1
     },
     {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "FenrisianWolf",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "RenegadeGuard",
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
-      "unit_type": "HowlingBanshee",
+      "unit_type": "StrikingScorpion",
       "count": 1
     },
     {
-      "unit_type": "HowlingBansheeExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "Termagant",
+      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

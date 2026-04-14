@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_45",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "InceptorPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    }
+  ]
+}

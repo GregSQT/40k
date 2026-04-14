@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_39",
+  "composition": [
+    {
+      "unit_type": "CaptainCloseCombatBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "TyrantGuardCrushingClaws",
+      "count": 1
+    }
+  ]
+}

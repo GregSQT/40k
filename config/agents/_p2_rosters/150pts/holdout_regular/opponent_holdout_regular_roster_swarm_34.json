@@ -3,39 +3,19 @@
   "composition": [
     {
       "unit_type": "CultistFirebrand",
+      "count": 2
+    },
+    {
+      "unit_type": "Gargoyle",
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "Prosecutor",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
-      "count": 1
-    },
-    {
-      "unit_type": "GuardianDefender",
-      "count": 1
-    },
-    {
-      "unit_type": "Hormagaunt",
-      "count": 1
-    },
-    {
-      "unit_type": "RipperSwarm",
-      "count": 1
-    },
-    {
-      "unit_type": "Termagant",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
-      "count": 1
+      "unit_type": "RenegadeGuard",
+      "count": 2
     }
   ]
 }

@@ -6,28 +6,32 @@
       "count": 1
     },
     {
-      "unit_type": "CultistFirebrand",
-      "count": 1
-    },
-    {
       "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "DireAvenger",
+      "unit_type": "DarkReaper",
+      "count": 2
+    },
+    {
+      "unit_type": "FireDragon",
+      "count": 2
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 2
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
+      "unit_type": "RenegadeGuard",
       "count": 1
     },
     {
       "unit_type": "RipperSwarm",
       "count": 2
-    },
-    {
-      "unit_type": "SwoopingHawk",
-      "count": 1
     }
   ]
 }

@@ -1,0 +1,29 @@
+{
+  "roster_id": "opponent_training_roster_balanced_28",
+  "composition": [
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMultiMelta",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 2
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    }
+  ]
+}

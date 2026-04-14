@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_116",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerFistPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
+      "count": 1
+    }
+  ]
+}

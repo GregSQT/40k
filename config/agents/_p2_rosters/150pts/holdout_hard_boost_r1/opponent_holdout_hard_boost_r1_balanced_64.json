@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_64",
+  "composition": [
+    {
+      "unit_type": "CaptainTerminatorRelicWeaponCombi",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 2
+    }
+  ]
+}

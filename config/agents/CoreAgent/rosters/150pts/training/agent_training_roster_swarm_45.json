@@ -2,7 +2,15 @@
   "roster_id": "agent_training_roster_swarm_45",
   "composition": [
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
@@ -14,27 +22,11 @@
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "RipperSwarm",
       "count": 1
     },
     {
-      "unit_type": "StormGuardian",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
+      "unit_type": "StrikingScorpion",
       "count": 1
     }
   ]

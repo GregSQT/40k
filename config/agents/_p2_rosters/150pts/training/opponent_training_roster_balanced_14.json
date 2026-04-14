@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_14",
+  "composition": [
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 1
+    },
+    {
+      "unit_type": "Pyrovore",
+      "count": 1
+    },
+    {
+      "unit_type": "SanguinaryGuardInferno",
+      "count": 1
+    },
+    {
+      "unit_type": "WolfGuardTerminator",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_balanced_46",
+  "composition": [
+    {
+      "unit_type": "AggressorBoltStorm",
+      "count": 1
+    },
+    {
+      "unit_type": "CaptainPowerFistNeoVolkite",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyJumpPackEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    }
+  ]
+}

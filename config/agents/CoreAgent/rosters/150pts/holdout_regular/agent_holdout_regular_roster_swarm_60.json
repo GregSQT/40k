@@ -10,23 +10,27 @@
       "count": 1
     },
     {
-      "unit_type": "FenrisianWolf",
-      "count": 2
-    },
-    {
-      "unit_type": "FireDragon",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "StormGuardian",
+      "unit_type": "Gargoyle",
       "count": 1
     },
     {
-      "unit_type": "StrikingScorpion",
-      "count": 2
+      "unit_type": "Genestealer",
+      "count": 1
     },
     {
-      "unit_type": "WarpSpider",
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

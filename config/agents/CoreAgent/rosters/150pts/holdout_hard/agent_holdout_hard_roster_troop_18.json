@@ -1,0 +1,25 @@
+{
+  "roster_id": "agent_holdout_hard_roster_troop_18",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SternguardVeteranBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_35",
+  "composition": [
+    {
+      "unit_type": "CaptainGravisBladeBoltstorm",
+      "count": 1
+    },
+    {
+      "unit_type": "EradicatorMeltaRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
+      "count": 1
+    }
+  ]
+}

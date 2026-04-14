@@ -2,7 +2,15 @@
   "roster_id": "opponent_holdout_hard_roster_swarm_36",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
@@ -10,15 +18,11 @@
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
-      "count": 1
+      "unit_type": "Gargoyle",
+      "count": 2
     },
     {
-      "unit_type": "HowlingBanshee",
-      "count": 1
-    },
-    {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
@@ -26,11 +30,7 @@
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
+      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

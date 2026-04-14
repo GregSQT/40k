@@ -2,23 +2,27 @@
   "roster_id": "opponent_training_roster_troop_49",
   "composition": [
     {
-      "unit_type": "BloodClaw",
+      "unit_type": "AssaultIntercessorJumpPack",
       "count": 2
     },
     {
-      "unit_type": "BloodClawPackLeader",
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
       "count": 1
     },
     {
-      "unit_type": "DarkReaperExarch",
+      "unit_type": "BladeguardVeteran",
       "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
     },
     {
       "unit_type": "FireDragonExarch",
       "count": 1
     },
     {
-      "unit_type": "LieutenantStormShield",
+      "unit_type": "Intercessor",
       "count": 1
     }
   ]

@@ -2,28 +2,28 @@
   "roster_id": "opponent_holdout_hard_roster_swarm_07",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 1
-    },
-    {
       "unit_type": "CultistFirebrand",
-      "count": 2
-    },
-    {
-      "unit_type": "Gargoyle",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "DarkReaper",
       "count": 2
     },
     {
-      "unit_type": "StormGuardian",
+      "unit_type": "FireDragon",
+      "count": 2
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 3
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
       "count": 1
     },
     {
       "unit_type": "Witchseeker",
-      "count": 1
+      "count": 3
     }
   ]
 }

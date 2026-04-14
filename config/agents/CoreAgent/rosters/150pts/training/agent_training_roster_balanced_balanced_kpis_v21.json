@@ -1,0 +1,186 @@
+{
+  "roster_value_mean": 150.82,
+  "roster_value_std": 3.362677504608493,
+  "roster_value_p95": 155.0,
+  "rejection_rate_roster_budget": 0.0,
+  "sampling_target_tanking_distribution": {
+    "Elite": 0.3334,
+    "Swarm": 0.3333,
+    "Troop": 0.3333
+  },
+  "sampling_observed_tanking_distribution": {
+    "Elite": 0.32432432432432434,
+    "Swarm": 0.34797297297297297,
+    "Troop": 0.3277027027027027
+  },
+  "sampling_target_units_per_roster_distribution": {
+    "5": 0.08,
+    "6": 0.15,
+    "8": 0.25,
+    "9": 0.24,
+    "10": 0.18,
+    "11": 0.07,
+    "12": 0.03
+  },
+  "sampling_observed_units_per_roster_distribution": {
+    "5": 0.56,
+    "6": 0.2,
+    "8": 0.24
+  },
+  "unit_pick_frequency": {
+    "tyranid::Biovore": 13,
+    "spaceMarine::HeavyIntercessor": 8,
+    "tyranid::Gargoyle": 8,
+    "aeldari::DarkReaper": 7,
+    "aeldari::WarpSpiderExarchSpinner": 7,
+    "chaos::ChosenPlasma": 7,
+    "chaos::CultistMob": 7,
+    "chaos::RaptorPlasmaGun": 7,
+    "spaceMarine::AssaultIntercessorJumpPack": 7,
+    "tyranid::RipperSwarm": 7,
+    "adeptusCustodes::Witchseeker": 6,
+    "tyranid::Termagant": 6,
+    "aeldari::HowlingBanshee": 5,
+    "aeldari::StormGuardian": 5,
+    "aeldari::StrikingScorpion": 5,
+    "aeldari::WarpSpider": 5,
+    "spaceMarine::DeathCompanyMarineEviscerator": 5,
+    "spaceMarine::FenrisianWolf": 5,
+    "spaceMarine::HeavyIntercessorHeavyBolter": 5,
+    "spaceMarine::Scout": 5,
+    "adeptusCustodes::CustodianGuardBlade": 4,
+    "spaceMarine::BloodClaw": 4,
+    "spaceMarine::CaptainTerminatorRelicWeaponBolter": 4,
+    "spaceMarine::Hellblaster": 4,
+    "spaceMarine::InceptorPlasma": 4,
+    "spaceMarine::IntercessorSergeant": 4,
+    "spaceMarine::TerminatorAssaultCannon": 4,
+    "tyranid::Genestealer": 4,
+    "tyranid::Hormagaunt": 4,
+    "tyranid::Pyrovore": 4,
+    "aeldari::DarkReaperExarch": 3,
+    "aeldari::DireAvengerExarch": 3,
+    "aeldari::SwoopingHawk": 3,
+    "aeldari::WraithguardWraithcannon": 3,
+    "chaos::RenegadeGuard": 3,
+    "spaceMarine::AssaultIntercessor": 3,
+    "spaceMarine::AssaultIntercessorJumpPackSergeantPowerFistHandFlamer": 3,
+    "spaceMarine::BladeguardVeteranSergeant": 3,
+    "spaceMarine::BloodClawPackLeader": 3,
+    "spaceMarine::CaptainCloseCombatBolter": 3,
+    "spaceMarine::DeathwingTerminatorPlasmaCannon": 3,
+    "spaceMarine::GreyHunterPackLeader": 3,
+    "spaceMarine::GreyHunterPlasmaGun": 3,
+    "spaceMarine::Infernus": 3,
+    "spaceMarine::LieutenantStormShield": 3,
+    "spaceMarine::TerminatorCyclone": 3,
+    "spaceMarine::WolfGuardTerminator": 3,
+    "tyranid::TermagantTuto": 3,
+    "tyranid::TyranidWarriorMelee": 3,
+    "tyranid::TyrantGuardBoneCleaver": 3,
+    "tyranid::TyrantGuardCrushingClaws": 3,
+    "tyranid::TyrantGuardScytingTalon": 3,
+    "adeptusCustodes::CustodianAllarusSpear": 2,
+    "adeptusCustodes::CustodianWardenSpear": 2,
+    "aeldari::FireDragon": 2,
+    "aeldari::FireDragonExarch": 2,
+    "aeldari::HeavyWeaponPlatform": 2,
+    "aeldari::StrikingScorpionExarch": 2,
+    "aeldari::SwoopingHawkExarch": 2,
+    "aeldari::WraithguardDScythe": 2,
+    "spaceMarine::AssaultIntercessorJumpPackPlasmaPistol": 2,
+    "spaceMarine::BladeguardVeteran": 2,
+    "spaceMarine::CaptainPowerWeaponNeoVolkite": 2,
+    "spaceMarine::EradicatorMeltaRifle": 2,
+    "spaceMarine::IntercessorGrenadeLauncher": 2,
+    "spaceMarine::Suppressor": 2,
+    "tyranid::HiveGuardImpalerCannon": 2,
+    "adeptusCustodes::CustodianGuardSpear": 1,
+    "adeptusCustodes::CustodianWardenAxe": 1,
+    "aeldari::DireAvenger": 1,
+    "aeldari::GuardianDefender": 1,
+    "aeldari::HowlingBansheeExarch": 1,
+    "aeldari::SerpentScalePlatform": 1,
+    "aeldari::WarpSpiderExarchPowerblade": 1,
+    "chaos::Obliterator": 1,
+    "chaos::RaptorMeltaGun": 1,
+    "spaceMarine::AggressorFlamestorm": 1,
+    "spaceMarine::AssaultTerminator": 1,
+    "spaceMarine::CaptainGravisChainSwordBoltstorm": 1,
+    "spaceMarine::CaptainPowerWeaponBolter": 1,
+    "spaceMarine::CaptainPowerWeaponPlasmaPistol": 1,
+    "spaceMarine::CaptainStormShield": 1,
+    "spaceMarine::DeathCompanyJumpPackEviscerator": 1,
+    "spaceMarine::EradicatorMultiMelta": 1,
+    "spaceMarine::GreyHunter": 1,
+    "spaceMarine::HellblasterSergeant": 1,
+    "spaceMarine::InceptorBolter": 1,
+    "spaceMarine::Incursor": 1,
+    "spaceMarine::Intercessor": 1,
+    "spaceMarine::LieutenantCloseCombatBolter": 1,
+    "spaceMarine::LieutenantPowerWeaponBolter": 1,
+    "spaceMarine::SanguinaryGuardInferno": 1,
+    "spaceMarine::Terminator": 1,
+    "spaceMarine::TerminatorHeavyFlamer": 1,
+    "tyranid::HiveGuardShockcannon": 1,
+    "tyranid::TyranidWarriorRanged": 1,
+    "tyranid::Zoanthrope": 1
+  },
+  "distribution_drift_blend": {
+    "l1": 0.3397285326214951,
+    "observed": {
+      "Balance": 0.24662162162162163,
+      "Melee": 0.36486486486486486,
+      "Ranged": 0.3885135135135135
+    },
+    "target": {
+      "Balance": 0.41648588793236924,
+      "Melee": 0.2684093040386501,
+      "Ranged": 0.3151048080289807
+    }
+  },
+  "distribution_drift_mobility": {
+    "l1": 0.6933664302606392,
+    "observed": {
+      "High": 0.17567567567567569,
+      "Low": 0.2905405405405405,
+      "Mid": 0.5337837837837838
+    },
+    "target": {
+      "High": 0.5223588908059953,
+      "Low": 0.28710685644645356,
+      "Mid": 0.1905342527475512
+    }
+  },
+  "distribution_drift_weapon_profile": {
+    "l1": 0.7163780857695298,
+    "observed": {
+      "AntiElite": 0.3108108108108108,
+      "Burst": 0.11824324324324324,
+      "Generalist": 0.38175675675675674,
+      "Volume": 0.1891891891891892
+    },
+    "target": {
+      "AntiElite": 0.18708798563736986,
+      "Burst": 0.4208643526396562,
+      "Generalist": 0.14729053904543282,
+      "Volume": 0.24475712267754116
+    }
+  },
+  "balanced_mode": {
+    "enabled": true,
+    "min_share": 0.2,
+    "max_share": 0.4,
+    "expected_tankings": [
+      "Elite",
+      "Swarm",
+      "Troop"
+    ],
+    "observed_unit_share_by_tanking": {
+      "Elite": 0.32432432432432434,
+      "Swarm": 0.34797297297297297,
+      "Troop": 0.3277027027027027
+    },
+    "rejected_resamples_balance_constraint": 679
+  }
+}

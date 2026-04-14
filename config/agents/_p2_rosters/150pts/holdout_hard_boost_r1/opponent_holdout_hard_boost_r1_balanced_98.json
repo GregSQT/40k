@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_balanced_98",
+  "composition": [
+    {
+      "unit_type": "AggressorFlamestorm",
+      "count": 1
+    },
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 2
+    },
+    {
+      "unit_type": "Hellblaster",
+      "count": 1
+    },
+    {
+      "unit_type": "Pyrovore",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    }
+  ]
+}

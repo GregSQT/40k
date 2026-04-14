@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_06",
+  "composition": [
+    {
+      "unit_type": "CaptainTerminatorRelicWeaponBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "Hellblaster",
+      "count": 1
+    },
+    {
+      "unit_type": "Hormagaunt",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

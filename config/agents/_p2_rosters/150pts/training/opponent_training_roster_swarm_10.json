@@ -6,20 +6,8 @@
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
-      "count": 1
-    },
-    {
-      "unit_type": "DireAvengerExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "Genestealer",
-      "count": 1
-    },
-    {
-      "unit_type": "StormGuardian",
-      "count": 1
+      "unit_type": "RipperSwarm",
+      "count": 2
     },
     {
       "unit_type": "SwoopingHawk",
@@ -27,6 +15,14 @@
     },
     {
       "unit_type": "SwoopingHawkExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

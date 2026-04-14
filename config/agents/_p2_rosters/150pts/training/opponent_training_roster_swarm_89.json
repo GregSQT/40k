@@ -6,19 +6,19 @@
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
-      "count": 2
-    },
-    {
-      "unit_type": "FireDragon",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "HowlingBanshee",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "Prosecutor",
+      "count": 1
+    },
+    {
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
@@ -26,8 +26,8 @@
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
-      "count": 1
+      "unit_type": "WarpSpider",
+      "count": 2
     }
   ]
 }

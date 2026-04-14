@@ -6,27 +6,27 @@
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "unit_type": "BladeguardVeteran",
       "count": 1
     },
     {
-      "unit_type": "BladeguardVeteranSergeant",
+      "unit_type": "BloodClawPackLeader",
       "count": 1
     },
     {
-      "unit_type": "DeathCompanyMarineEviscerator",
-      "count": 1
-    },
-    {
-      "unit_type": "Hellblaster",
-      "count": 1
-    },
-    {
-      "unit_type": "Intercessor",
+      "unit_type": "Scout",
       "count": 1
     },
     {
       "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
       "count": 1
     }
   ]

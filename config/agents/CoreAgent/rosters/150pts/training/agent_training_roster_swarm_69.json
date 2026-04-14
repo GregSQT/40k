@@ -2,19 +2,27 @@
   "roster_id": "agent_training_roster_swarm_69",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 1
-    },
-    {
       "unit_type": "CultistFirebrand",
-      "count": 2
+      "count": 1
     },
     {
       "unit_type": "FireDragon",
+      "count": 2
+    },
+    {
+      "unit_type": "RipperSwarm",
       "count": 1
     },
     {
-      "unit_type": "TermagantTuto",
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

@@ -1,0 +1,29 @@
+{
+  "roster_id": "agent_training_roster_balanced_44",
+  "composition": [
+    {
+      "unit_type": "AggressorFlamestorm",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "Biovore",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
+    }
+  ]
+}

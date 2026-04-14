@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_troop_39",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 2
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 3
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 2
+    },
+    {
+      "unit_type": "GreyHunter",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 2
+    }
+  ]
+}

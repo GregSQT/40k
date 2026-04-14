@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_troop_05",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessorJumpPack",
+      "count": 1
+    },
+    {
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "count": 1
+    },
+    {
+      "unit_type": "BloodClaw",
+      "count": 2
+    },
+    {
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 2
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorMeltaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    }
+  ]
+}

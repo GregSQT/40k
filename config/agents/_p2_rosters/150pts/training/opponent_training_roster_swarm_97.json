@@ -2,27 +2,23 @@
   "roster_id": "opponent_training_roster_swarm_97",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
-      "count": 1
-    },
-    {
-      "unit_type": "FireDragon",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
       "unit_type": "Gargoyle",
-      "count": 2
-    },
-    {
-      "unit_type": "Prosecutor",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
+      "unit_type": "Hormagaunt",
       "count": 1
     },
     {
@@ -30,7 +26,19 @@
       "count": 1
     },
     {
-      "unit_type": "StormGuardian",
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "SwoopingHawk",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

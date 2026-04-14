@@ -6,28 +6,28 @@
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorJumpPack",
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
       "count": 1
     },
     {
-      "unit_type": "BloodClaw",
-      "count": 3
+      "unit_type": "AssaultIntercessorJumpPackSergeantPowerFistHandFlamer",
+      "count": 1
     },
     {
       "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "GreyHunter",
+      "unit_type": "Intercessor",
       "count": 1
     },
     {
-      "unit_type": "IntercessorGrenadeLauncher",
+      "unit_type": "TyranidWarriorRanged",
       "count": 1
     },
     {
-      "unit_type": "Scout",
-      "count": 2
+      "unit_type": "WarpSpiderExarchSpinner",
+      "count": 1
     }
   ]
 }

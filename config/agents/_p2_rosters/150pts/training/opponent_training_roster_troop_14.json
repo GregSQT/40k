@@ -2,19 +2,15 @@
   "roster_id": "opponent_training_roster_troop_14",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPack",
+      "unit_type": "AssaultIntercessorSergeant",
       "count": 1
     },
     {
       "unit_type": "BloodClaw",
-      "count": 2
-    },
-    {
-      "unit_type": "BloodClawPackLeader",
       "count": 1
     },
     {
-      "unit_type": "GreyHunter",
+      "unit_type": "BloodClawPackLeader",
       "count": 1
     },
     {
@@ -22,7 +18,11 @@
       "count": 2
     },
     {
-      "unit_type": "TyranidWarriorRanged",
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
       "count": 2
     }
   ]

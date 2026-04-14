@@ -2,39 +2,39 @@
   "roster_id": "opponent_holdout_regular_roster_swarm_48",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
       "unit_type": "Gargoyle",
-      "count": 1
-    },
-    {
-      "unit_type": "HowlingBansheeExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "Prosecutor",
-      "count": 1
+      "count": 2
     },
     {
       "unit_type": "RenegadeGuard",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "SwoopingHawk",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
+      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

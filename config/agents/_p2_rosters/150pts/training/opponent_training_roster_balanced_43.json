@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_43",
+  "composition": [
+    {
+      "unit_type": "CustodianAllarusSpear",
+      "count": 1
+    },
+    {
+      "unit_type": "Hellblaster",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "Termagant",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorCyclone",
+      "count": 1
+    }
+  ]
+}

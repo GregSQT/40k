@@ -1,0 +1,17 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_12",
+  "composition": [
+    {
+      "unit_type": "CaptainStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "Infernus",
+      "count": 1
+    },
+    {
+      "unit_type": "TerminatorAssaultCannon",
+      "count": 1
+    }
+  ]
+}

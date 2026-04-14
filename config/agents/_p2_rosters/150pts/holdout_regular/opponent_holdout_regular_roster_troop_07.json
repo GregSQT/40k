@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_holdout_regular_roster_troop_07",
+  "composition": [
+    {
+      "unit_type": "AssaultIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "LieutenantPowerFistBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 2
+    }
+  ]
+}

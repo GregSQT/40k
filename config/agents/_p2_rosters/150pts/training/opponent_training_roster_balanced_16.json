@@ -1,0 +1,21 @@
+{
+  "roster_id": "opponent_training_roster_balanced_16",
+  "composition": [
+    {
+      "unit_type": "Biovore",
+      "count": 2
+    },
+    {
+      "unit_type": "BladeguardVeteran",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "RaptorPlasmaGun",
+      "count": 1
+    }
+  ]
+}

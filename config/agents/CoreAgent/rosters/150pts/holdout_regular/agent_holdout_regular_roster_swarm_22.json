@@ -6,24 +6,20 @@
       "count": 1
     },
     {
-      "unit_type": "HowlingBansheeExarch",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "RipperSwarm",
+      "unit_type": "GuardianDefender",
       "count": 1
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 2
     },
     {
       "unit_type": "StormGuardian",
       "count": 2
-    },
-    {
-      "unit_type": "StrikingScorpion",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
-      "count": 1
     }
   ]
 }

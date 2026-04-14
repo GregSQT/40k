@@ -2,11 +2,7 @@
   "roster_id": "agent_training_roster_swarm_88",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 1
-    },
-    {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
@@ -14,11 +10,7 @@
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
-      "count": 1
-    },
-    {
-      "unit_type": "Genestealer",
+      "unit_type": "DireAvengerExarch",
       "count": 1
     },
     {
@@ -26,12 +18,24 @@
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    },
+    {
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
       "unit_type": "SwoopingHawkExarch",
       "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 2
     }
   ]
 }

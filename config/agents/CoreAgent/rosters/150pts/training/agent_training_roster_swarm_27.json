@@ -6,23 +6,27 @@
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
-      "unit_type": "Prosecutor",
+      "unit_type": "DireAvengerExarch",
+      "count": 2
+    },
+    {
+      "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "RenegadeGuard",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
+      "unit_type": "RipperSwarm",
       "count": 1
     }
   ]

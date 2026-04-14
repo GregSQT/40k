@@ -6,28 +6,28 @@
       "count": 1
     },
     {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "DarkReaper",
+      "count": 3
+    },
+    {
+      "unit_type": "FireDragonExarch",
       "count": 1
     },
     {
       "unit_type": "Genestealer",
-      "count": 1
+      "count": 3
     },
     {
-      "unit_type": "HowlingBansheeExarch",
-      "count": 1
+      "unit_type": "HowlingBanshee",
+      "count": 3
     },
     {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
+      "unit_type": "SerpentScalePlatform",
       "count": 1
     },
     {
       "unit_type": "Witchseeker",
-      "count": 1
+      "count": 3
     }
   ]
 }

@@ -2,7 +2,7 @@
   "roster_id": "agent_training_roster_troop_11",
   "composition": [
     {
-      "unit_type": "BladeguardVeteranSergeant",
+      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
       "count": 1
     },
     {
@@ -10,19 +10,23 @@
       "count": 2
     },
     {
-      "unit_type": "DarkReaperExarch",
-      "count": 1
-    },
-    {
       "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "TyranidWarriorMelee",
+      "unit_type": "FireDragonExarch",
       "count": 1
     },
     {
-      "unit_type": "WarpSpiderExarchSpinner",
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "Incursor",
+      "count": 2
+    },
+    {
+      "unit_type": "StrikingScorpionExarch",
       "count": 1
     }
   ]

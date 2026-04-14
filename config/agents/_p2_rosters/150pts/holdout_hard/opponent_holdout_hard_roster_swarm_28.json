@@ -2,28 +2,40 @@
   "roster_id": "opponent_holdout_hard_roster_swarm_28",
   "composition": [
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "ChosenPlasma",
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
-      "count": 2
+      "unit_type": "DireAvengerExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragon",
+      "count": 1
+    },
+    {
+      "unit_type": "Gargoyle",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
     },
     {
       "unit_type": "SerpentScalePlatform",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
-      "count": 1
+      "unit_type": "StrikingScorpion",
+      "count": 2
     },
     {
-      "unit_type": "TermagantTuto",
-      "count": 1
+      "unit_type": "SwoopingHawk",
+      "count": 3
     },
     {
       "unit_type": "Witchseeker",
-      "count": 2
+      "count": 1
     }
   ]
 }

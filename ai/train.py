@@ -963,6 +963,7 @@ from ai.training_utils import (
     make_macro_training_env,
     get_agent_scenario_file,
     get_scenario_list_for_phase,
+    describe_expected_bot_self_scenario_files,
     ensure_scenario
 )
 from ai.vec_normalize_utils import save_vec_normalize, load_vec_normalize, get_vec_normalize_path
@@ -2956,12 +2957,26 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
                 # Log final results to metrics tracker
                 if metrics_tracker and bot_results:
+                    known_bot_keys = (
+                        "random",
+                        "greedy",
+                        "defensive",
+                        "control",
+                        "aggressive_smart",
+                        "defensive_smart",
+                        "adaptive",
+                    )
+                    available_bot_keys = [key for key in known_bot_keys if key in bot_results]
+                    if len(available_bot_keys) == 0:
+                        raise ValueError(
+                            "Final bot evaluation did not return any known bot score keys. "
+                            f"Expected at least one of: {known_bot_keys}"
+                        )
                     final_bot_results = {
-                        'random': require_key(bot_results, 'random'),
-                        'greedy': require_key(bot_results, 'greedy'),
-                        'defensive': require_key(bot_results, 'defensive'),
-                        'combined': require_key(bot_results, 'combined')
+                        key: float(require_key(bot_results, key))
+                        for key in available_bot_keys
                     }
+                    final_bot_results["combined"] = float(require_key(bot_results, "combined"))
                     metrics_tracker.log_bot_evaluations(final_bot_results)
                     holdout_split_metrics = {
                         key: float(require_key(bot_results, key))
@@ -3070,6 +3085,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             phase_label=phase_label,
             phase_episode_offset=phase_episode_offset,
             gate_display_state=gate_display_state,
+            training_config=training_config,
         )
         episode_callback.global_episode_offset = global_episode_offset
         callbacks.append(episode_callback)
@@ -4861,48 +4877,45 @@ def main():
                 # NO FALLBACKS - if no scenarios found, ERROR
                 if len(scenario_list) == 0:
                     raise FileNotFoundError(
-                        f"No {scenario_type_name} scenarios found. "
-                        f"Expected files matching: {args.agent}_scenario_{'self' if scenario_type_name == 'self-play' else 'bot'}*.json"
+                        f"No {scenario_type_name} scenarios found under "
+                        f"config/agents/{args.agent}/scenarios/. "
+                        f"{describe_expected_bot_self_scenario_files(scenario_type_name == 'self-play')}"
                     )
 
                 print(f"📋 Found {len(scenario_list)} {scenario_type_name} scenario(s)")
 
-                if len(scenario_list) == 1:
-                    # Single scenario - use it directly without rotation
-                    # Extract scenario name from path for override
-                    scenario_name = os.path.basename(scenario_list[0]).replace(f"{args.agent}_scenario_", "").replace(".json", "")
-                    args.scenario = scenario_name  # Set specific scenario to use
+                # Load agent-specific training config to get total episodes
+                training_config = config.load_agent_training_config(args.agent, args.training_config)
+                if "total_episodes" not in training_config:
+                    raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
+                # CLI argument takes priority over config
+                if args.total_episodes is not None:
+                    total_episodes = args.total_episodes
+                    print(f"📊 Using total_episodes from CLI: {total_episodes}")
                 else:
-                    # Load agent-specific training config to get total episodes
-                    training_config = config.load_agent_training_config(args.agent, args.training_config)
-                    if "total_episodes" not in training_config:
-                        raise KeyError(f"total_episodes missing from {args.agent} training config phase {args.training_config}")
-                    # CLI argument takes priority over config
-                    if args.total_episodes is not None:
-                        total_episodes = args.total_episodes
-                        print(f"📊 Using total_episodes from CLI: {total_episodes}")
-                    else:
-                        total_episodes = training_config["total_episodes"]
-                    
-                    # Use multi-scenario training with random selection per episode
-                    success, model, env = train_with_scenario_rotation(
-                        config=config,
-                        agent_key=args.agent,
-                        training_config_name=args.training_config,
-                        rewards_config_name=args.rewards_config,
-                        scenario_list=scenario_list,
-                        total_episodes=total_episodes,
-                        new_model=args.new,
-                        append_training=args.append,
-                        debug_mode=args.debug,
-                        use_bots=(args.scenario == "bot"),
-                        device_mode=args.mode
-                    )
-                    
-                    if success and args.test_episodes > 0:
-                        test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
-                    
-                    return 0 if success else 1
+                    total_episodes = training_config["total_episodes"]
+
+                # Always use scenario rotation path for self/bot/all modes,
+                # even when a single scenario is available.
+                # This keeps random wall/objective ref materialization consistent.
+                success, model, env = train_with_scenario_rotation(
+                    config=config,
+                    agent_key=args.agent,
+                    training_config_name=args.training_config,
+                    rewards_config_name=args.rewards_config,
+                    scenario_list=scenario_list,
+                    total_episodes=total_episodes,
+                    new_model=args.new,
+                    append_training=args.append,
+                    debug_mode=args.debug,
+                    use_bots=(args.scenario == "bot"),
+                    device_mode=args.mode
+                )
+
+                if success and args.test_episodes > 0:
+                    test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
+
+                return 0 if success else 1
             
             # Standard single-scenario training (no rotation)
             model, env, training_config, model_path = create_multi_agent_model(

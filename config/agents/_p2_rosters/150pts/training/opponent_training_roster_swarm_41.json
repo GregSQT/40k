@@ -6,23 +6,31 @@
       "count": 1
     },
     {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvenger",
+      "count": 1
+    },
+    {
       "unit_type": "FireDragon",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "RenegadeGuard",
       "count": 2
     },
     {
-      "unit_type": "Termagant",
+      "unit_type": "RipperSwarm",
       "count": 1
     },
     {
-      "unit_type": "Witchseeker",
+      "unit_type": "SwoopingHawk",
       "count": 1
     }
   ]

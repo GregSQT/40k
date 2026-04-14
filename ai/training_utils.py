@@ -33,6 +33,7 @@ __all__ = [
     'make_macro_training_env',
     'get_agent_scenario_file',
     'get_scenario_list_for_phase',
+    'describe_expected_bot_self_scenario_files',
     'ensure_scenario'
 ]
 
@@ -311,6 +312,52 @@ def make_macro_training_env(
     return _init
 
 
+def describe_expected_bot_self_scenario_files(is_self_play: bool) -> str:
+    """
+    Texte d'aide pour erreurs CLI : motifs et dossiers alignés sur get_scenario_list_for_phase
+    lorsque scenario_type vaut 'bot' ou 'self'.
+    """
+    kind = "self" if is_self_play else "bot"
+    return (
+        f"patterns: scenario_{kind}*.json, scenario_*_{kind}*.json, *_scenario_{kind}*.json; "
+        "search: scenarios/training/, holdout_regular/, holdout_hard/ (chaque dossier présent), "
+        "sinon la racine scenarios/"
+    )
+
+
+def _gather_scenario_files_in_dir(
+    search_dir: str,
+    scenario_type: Optional[str],
+    training_config_name: str,
+) -> List[str]:
+    """Collecte les chemins JSON pour un dossier de scénarios (logique unique pour glob)."""
+    search_dir_name = os.path.basename(search_dir)
+    if scenario_type in ("bot", "self"):
+        patterns = [
+            f"scenario_{scenario_type}*.json",
+            f"scenario_*_{scenario_type}*.json",
+            f"*_scenario_{scenario_type}*.json",
+        ]
+    else:
+        patterns = [
+            f"scenario_{training_config_name}.json",
+            f"scenario_{training_config_name}-*.json",
+            f"{training_config_name}_scenario_*.json",
+        ]
+        if search_dir_name in {"training", "holdout_regular", "holdout_hard"}:
+            patterns.append(f"{search_dir_name}_scenario_*.json")
+
+    matches: List[str] = []
+    for pattern in patterns:
+        matches.extend(glob.glob(os.path.join(search_dir, pattern)))
+
+    if not matches:
+        matches = glob.glob(os.path.join(search_dir, "scenario_*.json"))
+        matches.extend(glob.glob(os.path.join(search_dir, "*_scenario_*.json")))
+
+    return matches
+
+
 def get_scenario_list_for_phase(config, agent_key, training_config_name, scenario_type=None):
     """
     Get all available scenarios for a training phase.
@@ -323,6 +370,11 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
 
     Returns:
         List of scenario file paths
+
+    Bot / self (entraînement contre bots ou self-play) :
+        Cherche dans scenarios/training/, puis holdout_regular/, puis holdout_hard/
+        (tous les dossiers existants), afin que des scénarios présents uniquement en holdout
+        soient trouvés même si training/ existe mais est vide.
     """
     scenarios: List[str] = []
     if not agent_key:
@@ -347,6 +399,16 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
             search_dirs.append(holdout_hard_dir)
     elif scenario_type == "training":
         search_dirs = [training_dir] if has_training_dir else []
+    elif scenario_type in ("bot", "self"):
+        search_dirs = []
+        if has_training_dir:
+            search_dirs.append(training_dir)
+        if has_holdout_regular_dir:
+            search_dirs.append(holdout_regular_dir)
+        if has_holdout_hard_dir:
+            search_dirs.append(holdout_hard_dir)
+        if not search_dirs:
+            search_dirs = [scenarios_root]
     else:
         # Default training behavior:
         # - if training/ exists, use it exclusively
@@ -354,32 +416,9 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
         search_dirs = [training_dir] if has_training_dir else [scenarios_root]
 
     for search_dir in search_dirs:
-        search_dir_name = os.path.basename(search_dir)
-        if scenario_type in ("bot", "self"):
-            patterns = [
-                f"scenario_{scenario_type}*.json",
-                f"scenario_*_{scenario_type}*.json",
-                f"*_scenario_{scenario_type}*.json",
-            ]
-        else:
-            patterns = [
-                f"scenario_{training_config_name}.json",
-                f"scenario_{training_config_name}-*.json",
-                f"{training_config_name}_scenario_*.json",
-            ]
-            if search_dir_name in {"training", "holdout_regular", "holdout_hard"}:
-                patterns.append(f"{search_dir_name}_scenario_*.json")
-
-        matches: List[str] = []
-        for pattern in patterns:
-            matches.extend(glob.glob(os.path.join(search_dir, pattern)))
-
-        # If no phase-specific match exists in this directory, accept all portable scenario files.
-        if not matches:
-            matches = glob.glob(os.path.join(search_dir, "scenario_*.json"))
-            matches.extend(glob.glob(os.path.join(search_dir, "*_scenario_*.json")))
-
-        scenarios.extend(matches)
+        scenarios.extend(
+            _gather_scenario_files_in_dir(search_dir, scenario_type, training_config_name)
+        )
 
     # Filter by explicit subtype marker (e.g. "1", "2", "bot-1"), if provided.
     if scenario_type and scenario_type not in ("bot", "self", "training", "holdout"):
@@ -415,8 +454,10 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
     # Search order for training: prefer training/ when it exists.
     search_dirs = [training_dir, scenarios_root] if has_training_dir else [scenarios_root]
 
-    # If specific scenario requested, try to find it (portable naming only).
+    # If specific scenario requested, accept explicit file path first.
     if scenario_override and scenario_override != "all":
+        if isinstance(scenario_override, str) and os.path.isfile(scenario_override):
+            return scenario_override
         for search_dir in search_dirs:
             explicit_candidates = [
                 os.path.join(search_dir, f"scenario_{scenario_override}.json"),

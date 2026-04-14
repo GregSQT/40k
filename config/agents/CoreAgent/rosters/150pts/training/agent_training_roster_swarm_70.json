@@ -6,32 +6,20 @@
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "FenrisianWolf",
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "Gargoyle",
+      "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
       "unit_type": "HowlingBansheeExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "Prosecutor",
-      "count": 1
-    },
-    {
-      "unit_type": "SerpentScalePlatform",
-      "count": 1
-    },
-    {
-      "unit_type": "Termagant",
-      "count": 1
+      "count": 2
     }
   ]
 }

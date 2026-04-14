@@ -6,27 +6,31 @@
       "count": 1
     },
     {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
       "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "GuardianDefender",
+      "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "RenegadeGuard",
       "count": 1
     },
     {
       "unit_type": "TermagantTuto",
-      "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
       "count": 1
     }
   ]

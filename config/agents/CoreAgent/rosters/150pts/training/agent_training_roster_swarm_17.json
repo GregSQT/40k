@@ -6,36 +6,28 @@
       "count": 1
     },
     {
-      "unit_type": "DarkReaper",
+      "unit_type": "CultistMob",
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
-      "unit_type": "HowlingBanshee",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "StormGuardian",
+      "unit_type": "HowlingBansheeExarch",
       "count": 1
     },
     {
-      "unit_type": "StrikingScorpion",
+      "unit_type": "SwoopingHawkExarch",
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "Termagant",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
-      "count": 1
+      "unit_type": "Witchseeker",
+      "count": 2
     }
   ]
 }

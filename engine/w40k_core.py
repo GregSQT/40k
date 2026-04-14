@@ -579,6 +579,9 @@ class W40KEngine(gym.Env):
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
         self.episode_number = 0  # Track episode number for debug logging
+        self._deployment_random_mix_episode_enabled = False
+        self._deployment_random_mix_ratio = 0.0
+        self._deployment_random_mix_apply_to = "agent_only"
         
         # Clear debug.log ONCE at the start of training, only when --debug (avoid I/O when not debugging)
         global _debug_log_cleared
@@ -620,6 +623,167 @@ class W40KEngine(gym.Env):
                 base_agent_key = agent_key[:-len(phase_suffix)]
                 break
         return base_agent_key
+
+    def _is_training_scenario_context(self) -> bool:
+        """Return True when current scenario belongs to training split."""
+        current_path = getattr(self, "_current_scenario_file", None)
+        if not isinstance(current_path, str) or not current_path.strip():
+            return False
+        normalized = current_path.replace("\\", "/")
+        return "/scenarios/training/" in normalized
+
+    def _configure_deployment_random_mix_for_episode(self) -> None:
+        """
+        Configure per-episode deployment randomization for training only.
+
+        Config contract (training_config):
+          deployment_random_mix:
+            enabled: bool
+            training_only: bool
+            force_random_ratio_start: float in [0,1]
+            force_random_ratio_end: float in [0,1]
+            schedule: "linear"
+            freeze_after_progress: float in [0,1]
+            apply_to: "agent_only" | "both"
+        """
+        self._deployment_random_mix_episode_enabled = False
+        self._deployment_random_mix_ratio = 0.0
+        self._deployment_random_mix_apply_to = "agent_only"
+
+        if not isinstance(getattr(self, "training_config", None), dict):
+            return
+        mix_cfg = self.training_config.get("deployment_random_mix")
+        if mix_cfg is None:
+            return
+        if not isinstance(mix_cfg, dict):
+            raise TypeError(
+                "training_config.deployment_random_mix must be an object "
+                f"(got {type(mix_cfg).__name__})"
+            )
+
+        enabled = require_key(mix_cfg, "enabled")
+        if not isinstance(enabled, bool):
+            raise TypeError(
+                "training_config.deployment_random_mix.enabled must be bool "
+                f"(got {type(enabled).__name__})"
+            )
+        if not enabled:
+            return
+
+        training_only = require_key(mix_cfg, "training_only")
+        if not isinstance(training_only, bool):
+            raise TypeError(
+                "training_config.deployment_random_mix.training_only must be bool "
+                f"(got {type(training_only).__name__})"
+            )
+        if training_only and not self._is_training_scenario_context():
+            return
+
+        ratio_start = require_key(mix_cfg, "force_random_ratio_start")
+        ratio_end = require_key(mix_cfg, "force_random_ratio_end")
+        if not isinstance(ratio_start, (int, float)):
+            raise TypeError(
+                "training_config.deployment_random_mix.force_random_ratio_start "
+                f"must be number (got {type(ratio_start).__name__})"
+            )
+        if not isinstance(ratio_end, (int, float)):
+            raise TypeError(
+                "training_config.deployment_random_mix.force_random_ratio_end "
+                f"must be number (got {type(ratio_end).__name__})"
+            )
+        ratio_start = float(ratio_start)
+        ratio_end = float(ratio_end)
+        if ratio_start < 0.0 or ratio_start > 1.0:
+            raise ValueError(
+                "training_config.deployment_random_mix.force_random_ratio_start "
+                f"must be in [0,1] (got {ratio_start})"
+            )
+        if ratio_end < 0.0 or ratio_end > 1.0:
+            raise ValueError(
+                "training_config.deployment_random_mix.force_random_ratio_end "
+                f"must be in [0,1] (got {ratio_end})"
+            )
+
+        schedule = require_key(mix_cfg, "schedule")
+        if schedule != "linear":
+            raise ValueError(
+                "training_config.deployment_random_mix.schedule must be 'linear' "
+                f"(got {schedule!r})"
+            )
+        freeze_after_progress = require_key(mix_cfg, "freeze_after_progress")
+        if not isinstance(freeze_after_progress, (int, float)):
+            raise TypeError(
+                "training_config.deployment_random_mix.freeze_after_progress must be number "
+                f"(got {type(freeze_after_progress).__name__})"
+            )
+        freeze_after_progress = float(freeze_after_progress)
+        if freeze_after_progress < 0.0 or freeze_after_progress > 1.0:
+            raise ValueError(
+                "training_config.deployment_random_mix.freeze_after_progress must be in [0,1] "
+                f"(got {freeze_after_progress})"
+            )
+
+        apply_to = require_key(mix_cfg, "apply_to")
+        if not isinstance(apply_to, str):
+            raise TypeError(
+                "training_config.deployment_random_mix.apply_to must be string "
+                f"(got {type(apply_to).__name__})"
+            )
+        apply_to = apply_to.strip()
+        if apply_to not in {"agent_only", "both"}:
+            raise ValueError(
+                "training_config.deployment_random_mix.apply_to must be one of "
+                "{'agent_only','both'} "
+                f"(got {apply_to!r})"
+            )
+
+        total_episodes = require_key(self.training_config, "total_episodes")
+        if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
+            raise TypeError(
+                "training_config.total_episodes must be integer "
+                f"(got {type(total_episodes).__name__})"
+            )
+        if total_episodes <= 0:
+            raise ValueError(
+                f"training_config.total_episodes must be > 0 (got {total_episodes})"
+            )
+
+        episode_number = require_key(self.game_state, "episode_number")
+        if not isinstance(episode_number, int) or isinstance(episode_number, bool):
+            raise TypeError(
+                "game_state.episode_number must be integer "
+                f"(got {type(episode_number).__name__})"
+            )
+        episode_index = max(0, int(episode_number) - 1)
+        denominator = max(1, total_episodes - 1)
+        progress = min(1.0, max(0.0, float(episode_index) / float(denominator)))
+        capped_progress = min(progress, freeze_after_progress)
+        mix_ratio = ratio_start + ((ratio_end - ratio_start) * capped_progress)
+        mix_ratio = min(1.0, max(0.0, mix_ratio))
+
+        self._deployment_random_mix_ratio = mix_ratio
+        self._deployment_random_mix_apply_to = apply_to
+        self._deployment_random_mix_episode_enabled = bool(random.random() < mix_ratio)
+        self.game_state["deployment_random_mix_ratio"] = mix_ratio
+        self.game_state["deployment_random_mix_episode_enabled"] = self._deployment_random_mix_episode_enabled
+
+    def _should_force_random_deployment_action(self, action_mask: np.ndarray) -> bool:
+        """Return True when current deployment step must use random valid action."""
+        if self.game_state.get("phase") != "deployment":
+            return False
+        if not getattr(self, "_deployment_random_mix_episode_enabled", False):
+            return False
+        if not isinstance(action_mask, np.ndarray):
+            raise TypeError(f"action_mask must be np.ndarray (got {type(action_mask).__name__})")
+        if action_mask.size <= 0:
+            return False
+
+        apply_to = getattr(self, "_deployment_random_mix_apply_to", "agent_only")
+        current_player = int(require_key(self.game_state, "current_player"))
+        controlled_player = int(require_key(self.config, "controlled_player"))
+        if apply_to == "agent_only" and current_player != controlled_player:
+            return False
+        return True
 
     def _build_reward_configs_for_current_units(self) -> Dict[str, Dict[str, Any]]:
         """Build reward config mapping for all units in current game state."""
@@ -713,6 +877,9 @@ class W40KEngine(gym.Env):
             "game_over": False,
             "turn_limit_reached": False,
             "winner": None,
+            "deployment_random_mix_ratio": 0.0,
+            "deployment_random_mix_episode_enabled": False,
+            "_deployment_random_mix_forced_steps": 0,
             "victory_points": {1: 0, 2: 0},
             "primary_objective": self._scenario_primary_objective,
             "primary_objective_scored_turns": set(),
@@ -748,6 +915,7 @@ class W40KEngine(gym.Env):
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
             "objective_controllers": {}  # RESET: Clear objective control for new episode
         })
+        self._configure_deployment_random_mix_for_episode()
         self.game_state["deployment_type"] = self.config.get("deployment_type")
         self.game_state["deployment_type_by_player"] = self.config.get("deployment_type_by_player")
         self.game_state["deployment_zone"] = self.config.get("deployment_zone")
@@ -1124,6 +1292,19 @@ class W40KEngine(gym.Env):
                     self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
             return observation, 0.0, terminated, False, info
+
+        if self._should_force_random_deployment_action(action_mask):
+            valid_action_indices = [int(i) for i, value in enumerate(action_mask) if bool(value)]
+            if len(valid_action_indices) == 0:
+                raise RuntimeError("deployment_random_mix enabled but no valid action available")
+            action = int(random.choice(valid_action_indices))
+            forced_steps = self.game_state.get("_deployment_random_mix_forced_steps", 0)
+            if not isinstance(forced_steps, int) or isinstance(forced_steps, bool):
+                raise TypeError(
+                    "_deployment_random_mix_forced_steps must be integer "
+                    f"(got {type(forced_steps).__name__})"
+                )
+            self.game_state["_deployment_random_mix_forced_steps"] = forced_steps + 1
         
         # Normalize raw action once and keep it in game_state for deterministic
         # policy-driven rule-choice resolution in gym training mode.
@@ -4081,8 +4262,15 @@ class W40KEngine(gym.Env):
         bootstrap_controlled_player = 1
         if hasattr(self, "config") and isinstance(self.config, dict) and "controlled_player" in self.config:
             bootstrap_controlled_player = int(require_key(self.config, "controlled_player"))
+        bootstrap_config = {"board": {}, "controlled_player": bootstrap_controlled_player}
+        if hasattr(self, "training_config") and isinstance(self.training_config, dict):
+            bootstrap_config["training_config"] = self.training_config
+        if hasattr(self, "game_state") and isinstance(self.game_state, dict):
+            episode_number = self.game_state.get("episode_number")
+            if isinstance(episode_number, int) and not isinstance(episode_number, bool):
+                bootstrap_config["_training_episode_index"] = max(0, int(episode_number) - 1)
         temp_manager = GameStateManager(
-            {"board": {}, "controlled_player": bootstrap_controlled_player},
+            bootstrap_config,
             unit_registry
         )
         return temp_manager.load_units_from_scenario(scenario_file, unit_registry)

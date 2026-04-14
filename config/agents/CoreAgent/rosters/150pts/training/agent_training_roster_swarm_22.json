@@ -2,35 +2,27 @@
   "roster_id": "agent_training_roster_swarm_22",
   "composition": [
     {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "FenrisianWolf",
+      "count": 2
+    },
+    {
       "unit_type": "FireDragon",
       "count": 1
     },
     {
-      "unit_type": "HowlingBanshee",
-      "count": 1
-    },
-    {
-      "unit_type": "HowlingBansheeExarch",
+      "unit_type": "HeavyWeaponPlatform",
       "count": 1
     },
     {
       "unit_type": "RipperSwarm",
-      "count": 2
-    },
-    {
-      "unit_type": "StormGuardian",
-      "count": 2
-    },
-    {
-      "unit_type": "StrikingScorpion",
-      "count": 1
-    },
-    {
-      "unit_type": "SwoopingHawk",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

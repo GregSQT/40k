@@ -2,35 +2,39 @@
   "roster_id": "agent_training_roster_swarm_87",
   "composition": [
     {
-      "unit_type": "CultistFirebrand",
+      "unit_type": "ChosenPlasma",
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "DarkReaper",
+      "count": 2
+    },
+    {
+      "unit_type": "Gargoyle",
       "count": 1
     },
     {
-      "unit_type": "DireAvengerExarch",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "FenrisianWolf",
+      "unit_type": "GuardianDefender",
       "count": 1
     },
     {
-      "unit_type": "HowlingBanshee",
+      "unit_type": "RipperSwarm",
       "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 2
     },
     {
       "unit_type": "SwoopingHawk",
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
-      "count": 1
-    },
-    {
-      "unit_type": "Witchseeker",
+      "unit_type": "Termagant",
       "count": 1
     }
   ]

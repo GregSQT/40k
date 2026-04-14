@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_training_roster_balanced_02",
+  "composition": [
+    {
+      "unit_type": "CaptainStormShield",
+      "count": 1
+    },
+    {
+      "unit_type": "FireDragonExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "GreyHunterPlasmaGun",
+      "count": 1
+    },
+    {
+      "unit_type": "HeavyIntercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "RipperSwarm",
+      "count": 1
+    }
+  ]
+}

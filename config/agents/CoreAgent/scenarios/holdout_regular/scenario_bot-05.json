@@ -3,11 +3,11 @@
   "deployment_type": "active",
   "scale": "150pts",
   "agent_roster_seed": null,
-  "agent_roster_ref": "holdout_regular_random",
-  "opponent_roster_ref": "holdout_regular_random",
-  "wall_ref": "random",
+  "agent_roster_ref": "holdout_regular/agent_holdout_regular_roster_balanced_05.json",
+  "opponent_roster_ref": "holdout_regular/opponent_holdout_regular_roster_balanced_05.json",
+  "wall_ref": "walls-11.json",
   "primary_objectives": [
     "objectives_control"
   ],
-  "objectives_ref": "random"
+  "objectives_ref": "objectives-51.json"
 }

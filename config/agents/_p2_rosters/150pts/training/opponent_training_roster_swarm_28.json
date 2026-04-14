@@ -6,7 +6,7 @@
       "count": 1
     },
     {
-      "unit_type": "CultistMob",
+      "unit_type": "DarkReaper",
       "count": 1
     },
     {
@@ -18,7 +18,7 @@
       "count": 1
     },
     {
-      "unit_type": "RipperSwarm",
+      "unit_type": "Hormagaunt",
       "count": 1
     },
     {
@@ -26,11 +26,7 @@
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 1
-    },
-    {
-      "unit_type": "TermagantTuto",
+      "unit_type": "StrikingScorpion",
       "count": 1
     }
   ]

@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_25",
+  "composition": [
+    {
+      "unit_type": "CaptainPowerFistBolter",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

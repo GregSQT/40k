@@ -2,24 +2,20 @@
   "roster_id": "agent_holdout_regular_roster_troop_14",
   "composition": [
     {
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "BladeguardVeteranSergeant",
       "count": 1
     },
     {
-      "unit_type": "BloodClaw",
-      "count": 3
-    },
-    {
-      "unit_type": "GreyHunter",
+      "unit_type": "DeathCompanyMarineEviscerator",
       "count": 1
     },
     {
-      "unit_type": "Infernus",
+      "unit_type": "HellblasterSergeant",
       "count": 1
     },
     {
-      "unit_type": "Scout",
-      "count": 3
+      "unit_type": "SanguinaryGuardAngelus",
+      "count": 1
     },
     {
       "unit_type": "WarpSpiderExarchPowerblade",

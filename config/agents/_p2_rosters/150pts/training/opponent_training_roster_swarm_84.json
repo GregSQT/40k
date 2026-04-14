@@ -6,7 +6,19 @@
       "count": 1
     },
     {
-      "unit_type": "HowlingBansheeExarch",
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaper",
+      "count": 1
+    },
+    {
+      "unit_type": "DireAvengerExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
       "count": 1
     },
     {
@@ -14,12 +26,8 @@
       "count": 1
     },
     {
-      "unit_type": "SwoopingHawkExarch",
+      "unit_type": "SwoopingHawk",
       "count": 1
-    },
-    {
-      "unit_type": "WarpSpider",
-      "count": 2
     }
   ]
 }

@@ -10,19 +10,27 @@
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
+      "unit_type": "FenrisianWolf",
       "count": 1
     },
     {
-      "unit_type": "HowlingBansheeExarch",
+      "unit_type": "Hormagaunt",
       "count": 1
     },
     {
-      "unit_type": "RipperSwarm",
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
       "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

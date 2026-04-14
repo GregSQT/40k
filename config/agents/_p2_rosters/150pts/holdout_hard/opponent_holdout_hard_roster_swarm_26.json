@@ -2,23 +2,27 @@
   "roster_id": "opponent_holdout_hard_roster_swarm_26",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
-      "count": 2
+      "count": 1
     },
     {
       "unit_type": "DarkReaper",
       "count": 1
     },
     {
-      "unit_type": "GuardianDefender",
+      "unit_type": "Genestealer",
       "count": 1
     },
     {
-      "unit_type": "RenegadeGuard",
-      "count": 1
+      "unit_type": "HowlingBansheeExarch",
+      "count": 2
     },
     {
-      "unit_type": "StormGuardian",
+      "unit_type": "SwoopingHawkExarch",
       "count": 1
     }
   ]

@@ -2,32 +2,28 @@
   "roster_id": "agent_training_roster_troop_14",
   "composition": [
     {
-      "unit_type": "AssaultIntercessor",
+      "unit_type": "AssaultIntercessorSergeant",
       "count": 1
     },
     {
-      "unit_type": "DeathCompanyMarineEviscerator",
+      "unit_type": "BloodClaw",
       "count": 1
     },
     {
-      "unit_type": "IntercessorGrenadeLauncher",
+      "unit_type": "BloodClawPackLeader",
       "count": 1
     },
     {
-      "unit_type": "RaptorPlasmaGun",
-      "count": 1
+      "unit_type": "Scout",
+      "count": 2
     },
     {
       "unit_type": "Suppressor",
       "count": 1
     },
     {
-      "unit_type": "WarpSpiderExarchPowerblade",
-      "count": 1
-    },
-    {
       "unit_type": "WarpSpiderExarchSpinner",
-      "count": 1
+      "count": 2
     }
   ]
 }

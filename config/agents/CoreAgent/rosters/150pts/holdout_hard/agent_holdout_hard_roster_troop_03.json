@@ -6,23 +6,23 @@
       "count": 1
     },
     {
-      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
-      "count": 2
-    },
-    {
-      "unit_type": "BloodClaw",
-      "count": 2
-    },
-    {
-      "unit_type": "DeathCompanyMarineEviscerator",
+      "unit_type": "DarkReaperExarch",
       "count": 1
     },
     {
-      "unit_type": "TyranidWarriorMelee",
+      "unit_type": "GreyHunter",
       "count": 1
     },
     {
-      "unit_type": "TyranidWarriorRanged",
+      "unit_type": "Intercessor",
+      "count": 3
+    },
+    {
+      "unit_type": "WarpSpiderExarchPowerblade",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpiderExarchSpinner",
       "count": 1
     }
   ]

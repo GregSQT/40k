@@ -1,0 +1,21 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_20",
+  "composition": [
+    {
+      "unit_type": "Biovore",
+      "count": 2
+    },
+    {
+      "unit_type": "HowlingBansheeExarch",
+      "count": 1
+    },
+    {
+      "unit_type": "Scout",
+      "count": 1
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    }
+  ]
+}

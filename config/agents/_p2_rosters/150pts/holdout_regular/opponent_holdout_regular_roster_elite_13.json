@@ -6,15 +6,15 @@
       "count": 3
     },
     {
+      "unit_type": "HeavyIntercessorHeavyBolter",
+      "count": 1
+    },
+    {
       "unit_type": "InceptorBolter",
-      "count": 1
+      "count": 2
     },
     {
-      "unit_type": "TerminatorCyclone",
-      "count": 1
-    },
-    {
-      "unit_type": "WolfGuardTerminator",
+      "unit_type": "InceptorPlasma",
       "count": 1
     }
   ]

@@ -1,0 +1,25 @@
+{
+  "roster_id": "opponent_holdout_hard_roster_balanced_10",
+  "composition": [
+    {
+      "unit_type": "CaptainGravisPowerWeaponBoltRifle",
+      "count": 1
+    },
+    {
+      "unit_type": "DarkReaperExarch",
+      "count": 2
+    },
+    {
+      "unit_type": "GuardianDefender",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardShockcannon",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    }
+  ]
+}

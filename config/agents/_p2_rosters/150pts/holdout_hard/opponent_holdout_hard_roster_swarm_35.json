@@ -2,10 +2,6 @@
   "roster_id": "opponent_holdout_hard_roster_swarm_35",
   "composition": [
     {
-      "unit_type": "ChosenPlasma",
-      "count": 1
-    },
-    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
@@ -14,11 +10,11 @@
       "count": 2
     },
     {
-      "unit_type": "FenrisianWolf",
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "HowlingBanshee",
       "count": 1
     },
     {
@@ -26,8 +22,16 @@
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
-      "count": 2
+      "unit_type": "StrikingScorpion",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    },
+    {
+      "unit_type": "Witchseeker",
+      "count": 1
     }
   ]
 }

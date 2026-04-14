@@ -1,0 +1,33 @@
+{
+  "roster_id": "opponent_holdout_hard_boost_r1_swarm_29",
+  "composition": [
+    {
+      "unit_type": "CultistFirebrand",
+      "count": 1
+    },
+    {
+      "unit_type": "CultistMob",
+      "count": 1
+    },
+    {
+      "unit_type": "Genestealer",
+      "count": 2
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 2
+    },
+    {
+      "unit_type": "SerpentScalePlatform",
+      "count": 1
+    },
+    {
+      "unit_type": "TermagantTuto",
+      "count": 1
+    },
+    {
+      "unit_type": "WarpSpider",
+      "count": 1
+    }
+  ]
+}

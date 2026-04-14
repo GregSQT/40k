@@ -2,24 +2,32 @@
   "roster_id": "opponent_holdout_hard_roster_troop_40",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPackPlasmaPistol",
+      "unit_type": "AssaultIntercessorJumpPack",
       "count": 1
     },
     {
-      "unit_type": "BloodClaw",
-      "count": 3
-    },
-    {
-      "unit_type": "DeathCompanyMarineEviscerator",
+      "unit_type": "DarkReaperExarch",
       "count": 1
     },
     {
-      "unit_type": "LieutenantPowerWeaponPlasmaPistol",
+      "unit_type": "DeathCompanyJumpPackEviscerator",
       "count": 1
     },
     {
-      "unit_type": "Scout",
-      "count": 2
+      "unit_type": "Incursor",
+      "count": 1
+    },
+    {
+      "unit_type": "Suppressor",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorMelee",
+      "count": 1
+    },
+    {
+      "unit_type": "Zoanthrope",
+      "count": 1
     }
   ]
 }

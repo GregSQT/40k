@@ -1,0 +1,58 @@
+Opponent pool filter enabled: mean p1 win rate vs p2 in [0.200,0.600] -> kept 48 / 90
+Dropped opponent rosters by mean p1 win rate:
+  - opponent_holdout_hard_roster_balanced_45: mean_p1_wr=0.606
+  - opponent_holdout_hard_roster_swarm_20: mean_p1_wr=0.608
+  - opponent_holdout_hard_roster_balanced_38: mean_p1_wr=0.615
+  - opponent_holdout_hard_roster_balanced_16: mean_p1_wr=0.616
+  - opponent_holdout_hard_roster_balanced_11: mean_p1_wr=0.619
+  - opponent_holdout_hard_roster_balanced_29: mean_p1_wr=0.627
+  - opponent_holdout_hard_roster_balanced_20: mean_p1_wr=0.630
+  - opponent_holdout_hard_roster_balanced_30: mean_p1_wr=0.630
+  - opponent_holdout_hard_roster_swarm_28: mean_p1_wr=0.634
+  - opponent_holdout_hard_roster_balanced_12: mean_p1_wr=0.635
+  - opponent_holdout_hard_roster_balanced_33: mean_p1_wr=0.642
+  - opponent_holdout_hard_roster_balanced_44: mean_p1_wr=0.644
+  - opponent_holdout_hard_roster_balanced_41: mean_p1_wr=0.644
+  - opponent_holdout_hard_roster_balanced_05: mean_p1_wr=0.645
+  - opponent_holdout_hard_roster_balanced_46: mean_p1_wr=0.660
+  - opponent_holdout_hard_roster_swarm_21: mean_p1_wr=0.662
+  - opponent_holdout_hard_roster_balanced_17: mean_p1_wr=0.666
+  - opponent_holdout_hard_roster_swarm_02: mean_p1_wr=0.679
+  - opponent_holdout_hard_roster_swarm_26: mean_p1_wr=0.679
+  - opponent_holdout_hard_roster_balanced_14: mean_p1_wr=0.685
+  - opponent_holdout_hard_roster_swarm_08: mean_p1_wr=0.685
+  - opponent_holdout_hard_roster_balanced_40: mean_p1_wr=0.690
+  - opponent_holdout_hard_roster_swarm_31: mean_p1_wr=0.703
+  - opponent_holdout_hard_roster_swarm_09: mean_p1_wr=0.706
+  - opponent_holdout_hard_roster_swarm_30: mean_p1_wr=0.708
+  - opponent_holdout_hard_roster_balanced_42: mean_p1_wr=0.713
+  - opponent_holdout_hard_roster_swarm_35: mean_p1_wr=0.722
+  - opponent_holdout_hard_roster_swarm_17: mean_p1_wr=0.724
+  - opponent_holdout_hard_roster_swarm_04: mean_p1_wr=0.731
+  - opponent_holdout_hard_roster_swarm_36: mean_p1_wr=0.746
+  - opponent_holdout_hard_roster_swarm_16: mean_p1_wr=0.755
+  - opponent_holdout_hard_roster_swarm_18: mean_p1_wr=0.772
+  - opponent_holdout_hard_roster_swarm_10: mean_p1_wr=0.773
+  - opponent_holdout_hard_roster_swarm_07: mean_p1_wr=0.784
+  - opponent_holdout_hard_roster_swarm_39: mean_p1_wr=0.792
+  - opponent_holdout_hard_roster_swarm_13: mean_p1_wr=0.800
+  - opponent_holdout_hard_roster_swarm_12: mean_p1_wr=0.838
+  - opponent_holdout_hard_roster_swarm_22: mean_p1_wr=0.839
+  - opponent_holdout_hard_roster_swarm_27: mean_p1_wr=0.847
+  - opponent_holdout_hard_roster_swarm_06: mean_p1_wr=0.865
+  - opponent_holdout_hard_roster_swarm_34: mean_p1_wr=0.883
+  - opponent_holdout_hard_roster_swarm_32: mean_p1_wr=0.899
+Proposed holdout_hard opponent assignments (target=0.400, band=[0.250,0.500], floor=0.200):
+Matrix source: mode=bot weighted=[holdout_hard_matchups_greedy.json@0.330, holdout_hard_matchups_defensive_smart.json@0.330, holdout_hard_matchups_adaptive.json@0.340]
+  scenario_bot-01.json: agent_holdout_hard_roster_balanced_01 | opponent_holdout_hard_roster_elite_14 == opponent_holdout_hard_roster_elite_14 | pred_wr=0.453
+  scenario_bot-02.json: agent_holdout_hard_roster_balanced_02 | opponent_holdout_hard_roster_troop_03 == opponent_holdout_hard_roster_troop_03 | pred_wr=0.396
+  scenario_bot-03.json: agent_holdout_hard_roster_balanced_03 | opponent_holdout_hard_roster_balanced_09 == opponent_holdout_hard_roster_balanced_09 | pred_wr=0.397
+  scenario_bot-04.json: agent_holdout_hard_roster_balanced_04 | opponent_holdout_hard_roster_balanced_35 == opponent_holdout_hard_roster_balanced_35 | pred_wr=0.463
+  scenario_bot-05.json: agent_holdout_hard_roster_balanced_05 | opponent_holdout_hard_roster_elite_14 == opponent_holdout_hard_roster_elite_14 | pred_wr=0.452
+  scenario_bot-06.json: agent_holdout_hard_roster_balanced_06 | opponent_holdout_hard_roster_elite_11 == opponent_holdout_hard_roster_elite_11 | pred_wr=0.452
+  scenario_bot-07.json: agent_holdout_hard_roster_balanced_07 | opponent_holdout_hard_roster_troop_38 == opponent_holdout_hard_roster_troop_38 | pred_wr=0.475
+  scenario_bot-08.json: agent_holdout_hard_roster_balanced_08 | opponent_holdout_hard_roster_balanced_18 == opponent_holdout_hard_roster_balanced_18 | pred_wr=0.408
+  scenario_bot-09.json: agent_holdout_hard_roster_balanced_09 | opponent_holdout_hard_roster_elite_19 == opponent_holdout_hard_roster_elite_19 | pred_wr=0.419
+  scenario_bot-10.json: agent_holdout_hard_roster_balanced_10 | opponent_holdout_hard_roster_balanced_15 == opponent_holdout_hard_roster_balanced_15 | pred_wr=0.396
+
+Dry run only. Re-run with --apply to write scenario files.

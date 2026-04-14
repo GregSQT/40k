@@ -3,7 +3,7 @@
 
 > **📍 File Location**: Save as `Documentation/AI_OBSERVATION.md`
 > **Status**: ✅ CANONICAL REFERENCE (March 2026)
-> **Version**: 2.5 - Weapon Damage Table + Rule-Aware Observation System
+> **Version**: 2.6 - Strategic pool scalars (spec) + Rule-Aware Observation System
 
 ---
 
@@ -19,6 +19,7 @@
 - `AI_TRAINING.md` is the canonical reference (CLI, callbacks, bot evaluation runtime, robust gates).
 
 **Version History:**
+- **v2.6 (April 2026)**: **Spec** — append **2 floats** `[355:357]` for macro-designated pool summaries (aligned with `Documentation/TODO/Macro_agent.md` §2.5.2). **Implémentation** : `engine/observation_builder.py` + `obs_size` / `observation_params` dans la config agent — jusqu’à merge, la taille canonique reste **355** côté code si non branché.
 - **v2.5 (March 2026)**: Weapon Damage Table pre-computation + observation optimizations ⭐
 - v2.4 (March 2026): 355-float rule-aware observation (CoreAgent current)
 - v2.3 (February 2026): 323-float asymmetric observation (legacy compatible)
@@ -29,6 +30,7 @@
 - `AI_TURN.md` → Game state management (authoritative)
 - `AI_IMPLEMENTATION.md` → Handler architecture (authoritative)
 - `AI_TRAINING.md` → Training pipeline details & bot behaviors
+- `Documentation/TODO/Macro_agent.md` → Masse VALUE×HP, rewards agrégés, gate \(r_C\), **§2.5.2** (aligné avec obs v2.6 `[355:357]`)
 
 ### Refactor Plan Integration Status
 
@@ -71,17 +73,17 @@ The **Rule-Aware Asymmetric Observation System** provides agents with rich tacti
 
 ### Key Metrics
 
-| Metric | v2.4 (355-float) | v2.3 (323-float) |
-|--------|------------------|------------------|
-| **Observation Size** | 355 floats | 323 floats |
-| **Allied Features** | 12 per unit | N/A (mixed) |
-| **Enemy Features** | 22 per unit | N/A (mixed) |
-| **Valid Target Features** | 8 per slot | 9 per slot |
-| **Rules Block** | 32 floats | N/A |
-| **Perception Radius** | R=25 hexes | R=25 hexes |
-| **Training Speed** | ~311 it/s (CPU) | 311 it/s (CPU) |
-| **Network Architecture** | 320×320 MlpPolicy | 256×256 MlpPolicy |
-| **Expected Win Rate** | 85-90% (2000 ep) | 80-85% (2000 ep) |
+| Metric | v2.6 (spec, 357-float) | v2.4 (355-float) | v2.3 (323-float) |
+|--------|-------------------------|------------------|------------------|
+| **Observation Size** | **357** (+2 scalaires strategiques) | 355 floats | 323 floats |
+| **Allied Features** | 12 per unit | 12 per unit | N/A (mixed) |
+| **Enemy Features** | 22 per unit | 22 per unit | N/A (mixed) |
+| **Valid Target Features** | 8 per slot | 8 per slot | 9 per slot |
+| **Rules Block** | 32 floats | 32 floats | N/A |
+| **Perception Radius** | R=25 hexes | R=25 hexes | R=25 hexes |
+| **Training Speed** | ~311 it/s (CPU) | ~311 it/s (CPU) | ~311 it/s (CPU) |
+| **Network Architecture** | 320×320 MlpPolicy | 320×320 MlpPolicy | 256×256 MlpPolicy |
+| **Expected Win Rate** | 85-90% (2000 ep) | 85-90% (2000 ep) | 80-85% (2000 ep) |
 
 ### Design Philosophy v2.4
 
@@ -96,9 +98,18 @@ The **Rule-Aware Asymmetric Observation System** provides agents with rich tacti
 
 ---
 
-## 📊 OBSERVATION ARCHITECTURE v2.4
+## 📊 OBSERVATION ARCHITECTURE v2.4 / v2.6 (extension)
 
 ### Structure Overview (Legacy + Rule-Aware)
+
+**v2.6 (spec)** : prolonger le vecteur **rule-aware** ainsi (apres one-hot macro `[350:355]`) :
+
+```
+│  [355:356]  strategic_pool_mass_norm     (1 float)   🆕 spec v2.6
+│  [356:357]  strategic_pool_weighted_norm (1 float)   🆕 spec v2.6
+```
+
+Definition fonctionnelle : voir **`Documentation/TODO/Macro_agent.md`** §**2.5.2**. Ces scalaires sont **redondants** avec les briques existantes (VALUE, HP, `best_kill_probability` par cible) mais **accélérent** l’apprentissage et **alignent** policy et reward sur une **même** définition de masse.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -115,7 +126,8 @@ The **Rule-Aware Asymmetric Observation System** provides agents with rich tacti
 └──────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────┐
-│  OBSERVATION VECTOR RULE-AWARE (355 floats)              │
+│  OBSERVATION VECTOR RULE-AWARE (355 floats) — v2.4        │
+│  (357 floats avec extension v2.6 — voir ci-dessous)        │
 ├──────────────────────────────────────────────────────────┤
 │  [0:15]    Global context         (15 floats)            │
 │  [15:37]   Active unit            (22 floats)            │
@@ -126,6 +138,8 @@ The **Rule-Aware Asymmetric Observation System** provides agents with rich tacti
 │  [314:346] Rules block            (32 floats)   NEW 🆕   │
 │  [346:350] Macro intent target    (4 floats)             │
 │  [350:355] Macro intent one-hot   (5 floats)             │
+│  [355:356] strategic_pool_mass_norm     (1)   v2.6 spec  │
+│  [356:357] strategic_pool_weighted_norm (1)   v2.6 spec  │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -248,6 +262,18 @@ obs[37] = ARMOR_SAVE / 6.0           # Armor save
 - Action 7 → obs[297:305] (target slot 3)
 - Action 8 → obs[305:313] (target slot 4)
 
+**Features per target (8 floats):**
+```python
+[target_base + 0] = is_valid                        # 1.0 = target exists
+[target_base + 1] = best_weapon_index               # 0-2 normalized / 2.0
+[target_base + 2] = best_kill_probability           # W40K dice calculation
+[target_base + 3] = danger_to_me                    # Threat assessment
+[target_base + 4] = enemy_index / 5.0               # Reference to obs[141:273]
+[target_base + 5] = distance_normalized             # Distance / 25
+[target_base + 6] = is_priority_target              # Approaching + dangerous
+[target_base + 7] = coordination_bonus             # Can melee charge after
+```
+
 #### 7. Rules Block [314:346] - 32 floats 🆕 NEW (v2.4)
 
 32 explicit rule features:
@@ -271,17 +297,18 @@ Parameterized weapon rules are encoded as normalized scalar intensity (max acros
 - screen
 - attrition
 
-**Features per target (8 floats):**
-```python
-[target_base + 0] = is_valid                        # 1.0 = target exists
-[target_base + 1] = best_weapon_index               # 0-2 normalized / 2.0
-[target_base + 2] = best_kill_probability           # W40K dice calculation
-[target_base + 3] = danger_to_me                    # Threat assessment
-[target_base + 4] = enemy_index / 5.0               # Reference to obs[141:273]
-[target_base + 5] = distance_normalized             # Distance / 25
-[target_base + 6] = is_priority_target              # Approaching + dangerous
-[target_base + 7] = coordination_bonus             # Can melee charge after
-```
+#### 10. Strategic designated pool (v2.6 — **spec**, à implémenter) [355:357] - 2 floats
+
+**Objectif** : exposer une **synthèse explicite** de la « masse » associée aux **cibles désignées** par l’ordre macro (même définition que les rewards agrégés dans `Macro_agent.md` §2.5.2), pour éviter au réseau de **recomposer** seul une fonction non linéaire à partir des slots cibles.
+
+| Index | Nom | Définition (spec) | Normalisation |
+|-------|-----|-------------------|---------------|
+| `355` | `strategic_pool_mass_norm` | Soit \(U\) l’ensemble des unités concernées par l’ordre (IDs figés **début de tour** pour attrition / liste macro pour focus). \(M = \sum_{i\in U} \mathrm{VALUE}_i \cdot \mathrm{HP\_CUR}_i\). Valeur encodée : \(M\) divisée par un **plafond** nommé en config (ex. somme des VALUE×HP_MAX sur \(U\) au début de tour), clampée dans \([0,1]\). | Borne sup **nommée** — pas de magic number dans le builder. |
+| `356` | `strategic_pool_weighted_norm` | Même \(U\), masse pondérée \(M^W = \sum_{i\in U} W_i \cdot \mathrm{HP\_CUR}_i\) avec \(W_i = \mathrm{VALUE}_i \cdot (1 + \eta \psi_i)\), \(\psi_i\) dérivé de `best_kill_probability` (voir `Macro_agent.md`). Normaliser comme la ligne ci-dessus avec un plafond **nommé** cohérent. | Même principe. |
+
+**Redondance** : oui, par rapport à VALUE + HP + cibles ; **intérêt** : accélération d’apprentissage, stabilité, **alignement** reward ↔ obs. **Maintenance** : une seule implémentation partagée (helper) entre reward shaping et `ObservationBuilder`.
+
+**Implémentation** : à brancher dans `engine/observation_builder.py` quand `macro_intent_id` / cibles sont disponibles ; mettre à jour `observation_params.obs_size` et les configs d’agent.
 
 **Removed from v2.0:** hp_ratio, is_lowest_hp, army_weighted_threat, target_type_match (now in enemy section)
 

@@ -2,19 +2,31 @@
   "roster_id": "opponent_holdout_regular_roster_troop_05",
   "composition": [
     {
-      "unit_type": "AssaultIntercessorJumpPack",
-      "count": 2
+      "unit_type": "AssaultIntercessorSergeant",
+      "count": 1
     },
     {
       "unit_type": "BloodClaw",
-      "count": 3
+      "count": 1
     },
     {
-      "unit_type": "Scout",
-      "count": 2
+      "unit_type": "BloodClawPackLeader",
+      "count": 1
     },
     {
-      "unit_type": "TyranidWarriorMelee",
+      "unit_type": "DeathCompanyMarineEviscerator",
+      "count": 1
+    },
+    {
+      "unit_type": "Intercessor",
+      "count": 1
+    },
+    {
+      "unit_type": "IntercessorSergeant",
+      "count": 1
+    },
+    {
+      "unit_type": "TyranidWarriorRanged",
       "count": 1
     },
     {

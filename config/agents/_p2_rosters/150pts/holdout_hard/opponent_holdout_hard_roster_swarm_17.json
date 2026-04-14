@@ -7,10 +7,10 @@
     },
     {
       "unit_type": "DarkReaper",
-      "count": 1
+      "count": 2
     },
     {
-      "unit_type": "Genestealer",
+      "unit_type": "DireAvenger",
       "count": 1
     },
     {
@@ -19,11 +19,11 @@
     },
     {
       "unit_type": "SwoopingHawk",
-      "count": 1
+      "count": 2
     },
     {
-      "unit_type": "SwoopingHawkExarch",
-      "count": 2
+      "unit_type": "Witchseeker",
+      "count": 1
     }
   ]
 }

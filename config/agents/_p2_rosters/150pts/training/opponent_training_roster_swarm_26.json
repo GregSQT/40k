@@ -2,6 +2,10 @@
   "roster_id": "opponent_training_roster_swarm_26",
   "composition": [
     {
+      "unit_type": "ChosenPlasma",
+      "count": 1
+    },
+    {
       "unit_type": "CultistFirebrand",
       "count": 1
     },
@@ -10,11 +14,7 @@
       "count": 1
     },
     {
-      "unit_type": "DireAvenger",
-      "count": 1
-    },
-    {
-      "unit_type": "FenrisianWolf",
+      "unit_type": "FireDragon",
       "count": 1
     },
     {
@@ -22,15 +22,15 @@
       "count": 1
     },
     {
-      "unit_type": "HeavyWeaponPlatform",
+      "unit_type": "SerpentScalePlatform",
       "count": 1
     },
     {
-      "unit_type": "Termagant",
+      "unit_type": "StormGuardian",
       "count": 1
     },
     {
-      "unit_type": "WarpSpider",
+      "unit_type": "Witchseeker",
       "count": 1
     }
   ]

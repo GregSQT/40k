@@ -2,24 +2,28 @@
   "roster_id": "opponent_training_roster_swarm_30",
   "composition": [
     {
-      "unit_type": "DireAvenger",
+      "unit_type": "ChosenPlasma",
       "count": 2
     },
     {
-      "unit_type": "FireDragon",
+      "unit_type": "CultistFirebrand",
       "count": 1
     },
     {
-      "unit_type": "Genestealer",
+      "unit_type": "SwoopingHawk",
+      "count": 2
+    },
+    {
+      "unit_type": "SwoopingHawkExarch",
       "count": 1
     },
     {
-      "unit_type": "Hormagaunt",
+      "unit_type": "TermagantTuto",
       "count": 1
     },
     {
-      "unit_type": "SerpentScalePlatform",
-      "count": 3
+      "unit_type": "WarpSpider",
+      "count": 1
     },
     {
       "unit_type": "Witchseeker",

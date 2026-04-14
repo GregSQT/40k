@@ -1,0 +1,17 @@
+{
+  "roster_id": "agent_holdout_hard_roster_balanced_33",
+  "composition": [
+    {
+      "unit_type": "CustodianGuardBlade",
+      "count": 1
+    },
+    {
+      "unit_type": "HiveGuardShockcannon",
+      "count": 1
+    },
+    {
+      "unit_type": "Prosecutor",
+      "count": 1
+    }
+  ]
+}
