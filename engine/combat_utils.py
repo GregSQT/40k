@@ -317,7 +317,7 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
     if col1 == col2 and row1 == row2:
         return 0
 
-    # Precomputed topology lookup (O(1), ~1000x faster than BFS)
+    # Precomputed topology lookup (O(1) — legacy boards with .npz)
     pathfinding_topology = game_state.get("pathfinding_topology")
     board_cols = game_state.get("board_cols")
     board_rows = game_state.get("board_rows")
@@ -334,74 +334,41 @@ def calculate_pathfinding_distance(col1: int, row1: int, col2: int, row2: int,
         to_idx = row2 * board_cols + col2
         return int(pathfinding_topology[from_idx, to_idx])
 
+    # On-demand BFS (Board ×10 or missing topology)
+    if not isinstance(board_cols, int) or not isinstance(board_rows, int):
+        return max_search_distance + 1
+
     # Check cache first
     cache_key = ((col1, row1), (col2, row2))
     if "pathfinding_distance_cache" in game_state:
         if cache_key in game_state["pathfinding_distance_cache"]:
             return game_state["pathfinding_distance_cache"][cache_key]
 
-    # Get wall set for O(1) lookup
-    wall_set = set()
-    if "wall_hexes" in game_state:
-        wall_set = {tuple(w) if isinstance(w, list) else w for w in game_state["wall_hexes"]}
+    from engine.hex_utils import pathfinding_distance as _hex_pathfinding, build_wall_set
+    wall_set = game_state.get("_wall_set_cache")
+    if wall_set is None:
+        wall_set = build_wall_set(game_state)
+        game_state["_wall_set_cache"] = wall_set
 
-    # BFS to find shortest path
-    start_pos = (col1, row1)
-    end_pos = (col2, row2)
+    config = game_state.get("config") or {}
+    game_rules = config.get("game_rules") or {}
+    board_cfg = config.get("board_config", {}).get("default", {})
+    pf_cfg = board_cfg.get("pathfinding", {})
+    max_open = pf_cfg.get("max_open_nodes", 2000)
 
-    visited = {start_pos: 0}
-    queue = [(start_pos, 0)]
+    result = _hex_pathfinding(
+        col1, row1, col2, row2,
+        board_cols, board_rows,
+        wall_set,
+        max_search_distance=max_search_distance,
+        max_open_nodes=max_open,
+    )
 
-    while queue:
-        current_pos, current_dist = queue.pop(0)
-
-        # Found target
-        if current_pos == end_pos:
-            # Cache result
-            if "pathfinding_distance_cache" not in game_state:
-                game_state["pathfinding_distance_cache"] = {}
-            game_state["pathfinding_distance_cache"][cache_key] = current_dist
-            return current_dist
-
-        # Stop searching if we've gone too far
-        if current_dist >= max_search_distance:
-            continue
-
-        # Explore neighbors
-        neighbors = get_hex_neighbors(current_pos[0], current_pos[1])
-
-        for neighbor_col, neighbor_row in neighbors:
-            neighbor_pos = (neighbor_col, neighbor_row)
-
-            # Skip if already visited
-            if neighbor_pos in visited:
-                continue
-
-            # Skip walls
-            if neighbor_pos in wall_set:
-                continue
-
-            # Skip out of bounds (basic check)
-            if neighbor_col < 0 or neighbor_row < 0:
-                continue
-            if "board_cols" in game_state and neighbor_col >= game_state["board_cols"]:
-                continue
-            if "board_rows" in game_state and neighbor_row >= game_state["board_rows"]:
-                continue
-
-            neighbor_dist = current_dist + 1
-            visited[neighbor_pos] = neighbor_dist
-            queue.append((neighbor_pos, neighbor_dist))
-
-    # Target not reachable within max_search_distance
-    unreachable_dist = max_search_distance + 1
-
-    # Cache the unreachable result too
     if "pathfinding_distance_cache" not in game_state:
         game_state["pathfinding_distance_cache"] = {}
-    game_state["pathfinding_distance_cache"][cache_key] = unreachable_dist
+    game_state["pathfinding_distance_cache"][cache_key] = result
 
-    return unreachable_dist
+    return result
 
 
 def get_hex_line(start_col: int, start_row: int, end_col: int, end_row: int) -> List[Tuple[int, int]]:

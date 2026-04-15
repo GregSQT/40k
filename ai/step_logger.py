@@ -229,9 +229,12 @@ class StepLogger:
                     display_suffix = f" [{display_name}]" if isinstance(display_name, str) and display_name.strip() else ""
                     player_name = f"P{unit['player']}"
                     hp_max = require_key(unit, "HP_MAX")
+                    base_shape = unit.get("BASE_SHAPE", "round")
+                    base_size = unit.get("BASE_SIZE", 1)
+                    base_info = f" base={base_shape}/{base_size}" if base_size != 1 else ""
                     f.write(
                         f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: "
-                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}\n"
+                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}{base_info}\n"
                     )
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")

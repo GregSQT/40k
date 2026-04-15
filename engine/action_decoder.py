@@ -1201,7 +1201,9 @@ class ActionDecoder:
                     distance = calculate_hex_distance(*get_unit_coordinates(unit), *get_unit_coordinates(target))
                     if "MOVE" not in unit:
                         raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                    max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
+                    from shared.data_validation import require_key as _rk
+                    _gr = _rk(_rk(game_state, "config"), "game_rules")
+                    max_charge_range = unit["MOVE"] + _rk(_gr, "charge_max_distance")
                     
                     if distance <= max_charge_range:
                         return True

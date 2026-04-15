@@ -40,6 +40,8 @@ export class LeaderLieutenant extends LeaderEliteMeleeElite {
   static UNIT_KEYWORDS = [...LieutenantPowerFistPlasmaPistol.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
 
   static ICON = "/icons/LieutenantPowerFistPlasmaPistol.webp";
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = LieutenantPowerFistPlasmaPistol.BASE_SIZE; // Size of the base
   static ICON_SCALE = LieutenantPowerFistPlasmaPistol.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

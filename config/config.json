@@ -5,7 +5,7 @@
     "description": "Warhammer 40k tactical game with AI opponents"
   },
   "paths": {
-    "board": "board/25x21",
+    "board": "board/360x312",
     "ai_models": "ai/",
     "models_root": "ai/models",
     "model_file": "ai/models/{agent_key}/model_{agent_key}.zip",

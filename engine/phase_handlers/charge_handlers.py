@@ -28,6 +28,7 @@ from .shared_utils import (
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
+    build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
 )
 
 CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
@@ -129,11 +130,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     units_cache = require_key(game_state, "units_cache")
-    # PERFORMANCE: Build full occupied positions once for all eligibility checks
-    full_occupied_positions = set()
-    for u_id, u_entry in units_cache.items():
-        col_int, row_int = u_entry["col"], u_entry["row"]
-        full_occupied_positions.add((col_int, row_int))
+    full_occupied_positions = build_occupied_positions_set(game_state)
 
     for unit_id, cache_entry in units_cache.items():
         unit = get_unit_by_id(game_state, unit_id)
@@ -145,18 +142,19 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if cache_entry["player"] != current_player:
             continue  # Wrong player
 
-        # "NOT adjacent to enemy?"
-        # CRITICAL FIX: Use direct hex distance calculation for reliable adjacency detection
-        # Normalize coordinates to int to ensure consistent calculation
+        # "NOT adjacent to enemy?" — footprint distance <= engagement_zone
+        from engine.hex_utils import min_distance_between_sets
+        from .shared_utils import get_engagement_zone
+        engagement_zone = get_engagement_zone(game_state)
         unit_col_int, unit_row_int = require_unit_position(unit_id, game_state)
+        unit_fp = cache_entry.get("occupied_hexes", {(unit_col_int, unit_row_int)})
         adjacent_found = False
         for enemy_id, enemy_entry in units_cache.items():
             if enemy_entry["player"] != cache_entry["player"]:
-                enemy_col_int, enemy_row_int = enemy_entry["col"], enemy_entry["row"]
-                hex_dist = _calculate_hex_distance(unit_col_int, unit_row_int, enemy_col_int, enemy_row_int)
-                if hex_dist <= 1:  # Distance 1 = adjacent (melee range is always 1)
+                enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
+                if min_distance_between_sets(unit_fp, enemy_fp) <= engagement_zone:
                     adjacent_found = True
-                    break  # Stop checking other enemies - this unit is adjacent
+                    break
         
         if adjacent_found:
             continue  # Already in melee, cannot charge
@@ -549,7 +547,8 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
     if not unit:
         return []
     
-    CHARGE_MAX_DISTANCE = 12
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
     valid_targets = []
     
     # Build all hexes reachable via BFS within max charge distance
@@ -569,47 +568,35 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
                if int(cache_entry["player"]) != unit_player]
     
     from engine.utils.weapon_helpers import get_melee_range
-    melee_range = get_melee_range()  # Always 1
-    
-    # For each enemy, check if:
-    # 1. Unit is NOT already adjacent to this enemy (CRITICAL: cannot charge from adjacent hex)
-    # 2. Enemy is within charge_max_distance (via BFS - at least one reachable hex is adjacent to enemy)
-    # 3. Enemy has at least one non-occupied adjacent hex that is reachable
+    from engine.hex_utils import min_distance_between_sets
+    from .shared_utils import get_engagement_zone, compute_candidate_footprint, build_occupied_positions_set
+    melee_range = get_melee_range(game_state)
+    engagement_zone = get_engagement_zone(game_state)
+
     unit_col_int, unit_row_int = require_unit_position(unit, game_state)
-    
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col_int, unit_row_int)}) if unit_entry else {(unit_col_int, unit_row_int)}
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+
     for enemy_id in enemies:
         enemy_entry = units_cache.get(str(enemy_id))
         if enemy_entry is None:
             raise KeyError(f"Enemy {enemy_id} not in units_cache (dead or absent)")
-        enemy_col_int, enemy_row_int = enemy_entry["col"], enemy_entry["row"]
-        
-        # CRITICAL: Check if unit is already adjacent to this enemy
-        # RULE: Cannot charge from adjacent hex (must be at distance > melee_range)
-        distance_from_unit_to_enemy = _calculate_hex_distance(unit_col_int, unit_row_int, enemy_col_int, enemy_row_int)
-        if distance_from_unit_to_enemy <= melee_range:
-            # Unit is already adjacent to this enemy - cannot charge
+        enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
+
+        if min_distance_between_sets(unit_fp, enemy_fp) <= engagement_zone:
             continue
-        
-        # Check if any reachable hex is adjacent to this enemy
+
         has_adjacent_reachable_hex = False
         non_occupied_adjacent_hexes = []
-        
+
         for dest_col, dest_row in reachable_hexes:
-            distance_to_enemy = _calculate_hex_distance(dest_col, dest_row, enemy_col_int, enemy_row_int)
-            if 0 < distance_to_enemy <= melee_range:
-                # This reachable hex is adjacent to enemy
+            candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
+            dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp)
+            if 0 < dist_to_enemy <= engagement_zone:
                 has_adjacent_reachable_hex = True
-                
-                # Check if this hex is not occupied
-                is_occupied = False
-                for check_id, check_entry in units_cache.items():
-                    if check_id != str(unit["id"]):
-                        check_col, check_row = check_entry["col"], check_entry["row"]
-                        if check_col == dest_col and check_row == dest_row:
-                            is_occupied = True
-                            break
-                
-                if not is_occupied:
+                if not candidate_fp & occupied_positions:
                     non_occupied_adjacent_hexes.append((dest_col, dest_row))
         
         # Target is valid if it has at least one non-occupied adjacent hex reachable
@@ -734,26 +721,19 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     # CRITICAL: Normalize destination coordinates to int for consistent comparison
     dest_col_int, dest_row_int = normalize_coordinates(dest_col, dest_row)
     
-    # Check all units for occupation - CRITICAL: Normalize all coordinates for comparison
-    units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
-    for check_id, check_entry in units_cache.items():
-        check_col, check_row = check_entry["col"], check_entry["row"]
-        # CRITICAL: Compare as normalized integers to avoid type mismatch
-        if (check_id != unit_id_str and
-            check_col == dest_col_int and
-            check_row == dest_row_int):
-            # Another unit already occupies this destination - prevent collision
-            if "console_logs" not in game_state:
-                game_state["console_logs"] = []
-            log_msg = f"[CHARGE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot charge to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_id}"
-            add_console_log(game_state, log_msg)
-            safe_print(game_state, log_msg)
-            return False, {
-                "error": "charge_destination_occupied",
-                "occupant_id": check_id,
-                "destination": (dest_col_int, dest_row_int)
-            }
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, unit, game_state)
+    if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+        if "console_logs" not in game_state:
+            game_state["console_logs"] = []
+        log_msg = f"[CHARGE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot charge to ({dest_col_int},{dest_row_int}) - footprint blocked"
+        add_console_log(game_state, log_msg)
+        safe_print(game_state, log_msg)
+        return False, {
+            "error": "charge_destination_occupied",
+            "destination": (dest_col_int, dest_row_int)
+        }
 
     # Execute charge - position assignment happens immediately after occupation check
     # CRITICAL: Log ALL position changes to detect unauthorized modifications
@@ -844,14 +824,11 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
     if (col_int, row_int) in game_state["wall_hexes"]:
         return False
 
-    # Unit occupation check (defensive - pool already filters occupied hexes)
-    units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit["id"])
-    for other_id, other_entry in units_cache.items():
-        if other_id != unit_id_str:
-            other_col, other_row = other_entry["col"], other_entry["row"]
-            if other_col == col_int and other_row == row_int:
-                return False
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    candidate_fp = compute_candidate_footprint(col_int, row_int, unit, game_state)
+    if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+        return False
 
     # CRITICAL: Verify destination is in the valid pool
     # The pool guarantees: adjacent to enemy, not occupied, reachable with charge_roll
@@ -882,13 +859,11 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     Args:
         full_occupied_positions: Optional pre-computed set of all unit positions (from get_eligible_units).
     """
-    # Maximum possible charge distance is 12 hexes (2d6 max roll)
-    # But target can be at distance 13 because charge ends adjacent to target
-    CHARGE_MAX_DISTANCE = 12
-    TARGET_MAX_DISTANCE = 13  # Target can be 1 hex further (charge ends adjacent)
-
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
     from engine.utils.weapon_helpers import get_melee_range
+    cc_range = get_melee_range(game_state)
+    TARGET_MAX_DISTANCE = CHARGE_MAX_DISTANCE + cc_range
     
     try:
         # Build all hexes reachable via BFS within max charge distance
@@ -902,65 +877,45 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
         return False
 
-    # Check if any enemy is within melee range of any reachable hex
-    cc_range = get_melee_range()  # Always 1
+    from engine.hex_utils import min_distance_between_sets
+    from .shared_utils import get_engagement_zone, compute_candidate_footprint
+    engagement_zone = get_engagement_zone(game_state)
 
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
-    unit_col, unit_row = require_unit_position(unit, game_state)
     for enemy_id, enemy_entry in units_cache.items():
         if int(enemy_entry["player"]) != unit_player:
-            # Check if enemy is within CC_RNG of any reachable hex (use enemy_entry for position)
-            enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
+            enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
             for dest_col, dest_row in reachable_hexes:
-                distance_to_enemy = _calculate_hex_distance(dest_col, dest_row, enemy_col, enemy_row)
-                if 0 < distance_to_enemy <= cc_range:
-                    # Found a reachable hex adjacent to this enemy
+                candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
+                dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp)
+                if 0 < dist_to_enemy <= engagement_zone:
                     return True
-            
-            # NEW: Also check if enemy is at distance 13 (charge of 12 can reach adjacent to target at 13)
-            # Calculate distance from unit to enemy
-            distance_to_enemy = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
-            if distance_to_enemy == TARGET_MAX_DISTANCE:
-                # Check if there's a path of 12 hexes that can reach adjacent to this enemy
-                # This means we need to check if any hex adjacent to enemy is reachable in 12 moves
-                enemy_neighbors = get_hex_neighbors(enemy_col, enemy_row)
-                for neighbor_col, neighbor_row in enemy_neighbors:
-                    # Check if this neighbor is reachable in 12 moves from unit
-                    neighbor_distance = _calculate_hex_distance(unit_col, unit_row, neighbor_col, neighbor_row)
-                    if neighbor_distance <= CHARGE_MAX_DISTANCE:
-                        # Check if this neighbor is in reachable hexes (pathfinding check)
-                        if (neighbor_col, neighbor_row) in reachable_hexes:
-                            return True
 
     return False
 
 
 def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md adjacency check logic.
+    Check if unit is within engagement zone of any enemy (footprint distance).
 
-    Check if unit is adjacent to enemy (used for charge eligibility).
-
-    CRITICAL: Use proper hexagonal adjacency check for consistency.
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
+    Used for charge eligibility — unit must NOT be already engaged.
     """
     from engine.utils.weapon_helpers import get_melee_range
-    cc_range = get_melee_range()  # Always 1
-    # CRITICAL: Normalize coordinates BEFORE any calculations to ensure proper tuple comparison
+    from engine.hex_utils import min_distance_between_sets
+    cc_range = get_melee_range(game_state)
     unit_col, unit_row = require_unit_position(unit, game_state)
 
-    # CRITICAL FIX: Use hex distance calculation directly
-    # This is more reliable than get_hex_neighbors() which may have bugs
-    # Distance <= cc_range = adjacent (cc_range is always 1 for melee)
     units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     for enemy_id, enemy_entry in units_cache.items():
         if int(enemy_entry["player"]) != unit_player:
-            # CRITICAL: Normalize enemy coordinates (use enemy_entry for position)
-            enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
-            hex_dist = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
-            if hex_dist <= cc_range:
+            enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
+            if min_distance_between_sets(unit_fp, enemy_fp) <= cc_range:
                 return True
     return False
 
@@ -1030,41 +985,6 @@ def _find_adjacent_enemy_at_destination(game_state: Dict[str, Any], col: int, ro
         return None
 
 
-def _is_traversable_hex(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any],
-                        occupied_positions: set) -> bool:
-    """
-    Check if a hex can be traversed (moved through) during pathfinding.
-
-    A hex is traversable if it's:
-    - Within board bounds
-    - NOT a wall
-    - NOT occupied by another unit
-
-    Note: We check enemy adjacency separately in _is_valid_destination
-
-    PERFORMANCE: Uses pre-computed occupied_positions set for O(1) lookup.
-    occupied_positions must be provided (use pre-computed set from BFS).
-    """
-    # Board bounds check
-    if (col < 0 or row < 0 or
-        col >= game_state["board_cols"] or
-        row >= game_state["board_rows"]):
-        return False
-
-    # Wall check - CRITICAL: Can't move through walls
-    if (col, row) in game_state["wall_hexes"]:
-        return False
-
-    # Unit occupation check - CRITICAL: Use pre-computed set for O(1) lookup
-    # CRITICAL: Convert coordinates to int for consistent tuple comparison
-    # Use int(float(...)) to match the conversion used in occupied_positions construction
-    col_int, row_int = int(float(col)), int(float(row))
-    if (col_int, row_int) in occupied_positions:
-        return False
-
-    return True
-
-
 def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int,
                                         target_id: Optional[str] = None,
                                         full_occupied_positions: Optional[Set[Tuple[int, int]]] = None) -> List[Tuple[int, int]]:
@@ -1107,17 +1027,15 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         if not enemies:
             return []  # No enemies to charge
 
-    # PERFORMANCE: Use pre-computed occupied positions if provided, else build from scratch
+    unit_id_str = str(unit["id"])
     if full_occupied_positions is not None:
-        occupied_positions = full_occupied_positions - {start_pos}
+        # Remove moving unit's footprint from the pre-computed set
+        units_cache_ref = require_key(game_state, "units_cache")
+        own_entry = units_cache_ref.get(unit_id_str)
+        own_hexes = own_entry.get("occupied_hexes", {start_pos}) if own_entry else {start_pos}
+        occupied_positions = full_occupied_positions - own_hexes
     else:
-        occupied_positions = set()
-        units_cache = require_key(game_state, "units_cache")
-        unit_id_str = str(unit["id"])
-        for u_id, u_entry in units_cache.items():
-            if u_id != unit_id_str:
-                col_int, row_int = u_entry["col"], u_entry["row"]
-                occupied_positions.add((col_int, row_int))
+        occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     
     # CRITICAL: Log occupied positions and all units for debugging position bugs
     if "episode_number" in game_state and "turn" in game_state and "phase" in game_state:
@@ -1140,68 +1058,56 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     queue = deque([(start_pos, 0)])
     valid_destinations = []
 
+    from engine.utils.weapon_helpers import get_melee_range
+    from engine.hex_utils import min_distance_between_sets
+    from .shared_utils import get_engagement_zone
+    melee_range = get_melee_range(game_state)
+    engagement_zone = get_engagement_zone(game_state)
+
     while queue:
         current_pos, current_dist = queue.popleft()
         current_col, current_row = current_pos
 
-        # If we've reached max charge range, don't explore further
         if current_dist >= charge_range:
             continue
 
-        # Explore all 6 hex neighbors
         neighbors = get_hex_neighbors(current_col, current_row)
 
         for neighbor_col, neighbor_row in neighbors:
-            # CRITICAL: Convert coordinates to int IMMEDIATELY to ensure all tuples are (int, int)
-            # This prevents type mismatch bugs in visited dict, valid_destinations list, and queue
             neighbor_col_int, neighbor_row_int = int(neighbor_col), int(neighbor_row)
             neighbor_pos = (neighbor_col_int, neighbor_row_int)
             neighbor_dist = current_dist + 1
 
-            # Skip if already visited
             if neighbor_pos in visited:
                 continue
 
-            # Check if traversable (not wall, not occupied)
-            if not _is_traversable_hex(game_state, neighbor_col_int, neighbor_row_int, unit, occupied_positions):
+            candidate_fp = compute_candidate_footprint(neighbor_col_int, neighbor_row_int, unit, game_state)
+
+            if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
                 continue
 
-            # Mark as visited
             visited[neighbor_pos] = neighbor_dist
 
-            # Check if this hex is adjacent to target enemy (or any enemy if no target specified)
-            # CRITICAL: If target_id provided, only check adjacency to that specific target
             is_adjacent_to_enemy = False
-            hex_is_occupied_by_enemy = False
-            from engine.utils.weapon_helpers import get_melee_range
-            melee_range = get_melee_range()  # Always 1
+            hex_overlaps_enemy = False
             for enemy_ref in enemies:
                 enemy_id = enemy_ref["id"] if isinstance(enemy_ref, dict) else enemy_ref
                 enemy_entry = units_cache.get(str(enemy_id))
                 if enemy_entry is None:
                     raise KeyError(f"Enemy {enemy_id} not in units_cache (dead or absent)")
-                enemy_col_int, enemy_row_int = enemy_entry["col"], enemy_entry["row"]
-                distance_to_enemy = _calculate_hex_distance(neighbor_col_int, neighbor_row_int, enemy_col_int, enemy_row_int)
-                if distance_to_enemy == 0:
-                    # Enemy is ON this hex - mark as occupied and skip
-                    hex_is_occupied_by_enemy = True
+                enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
+                if candidate_fp & enemy_fp:
+                    hex_overlaps_enemy = True
                     break
-                elif 0 < distance_to_enemy <= melee_range:
+                dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp)
+                if dist_to_enemy <= engagement_zone:
                     is_adjacent_to_enemy = True
-                    # If target_id specified, we only need to check this one target
                     if target_id:
                         break
-                    # Otherwise continue checking other enemies to ensure no enemy is ON the hex
 
-            # CRITICAL: Only add as destination if adjacent to an enemy AND NOT OCCUPIED
-            # Use pre-computed occupied_positions set for O(1) lookup (no redundant loop)
-            if is_adjacent_to_enemy and not hex_is_occupied_by_enemy and neighbor_pos != start_pos:
-                # CRITICAL: Use pre-computed occupied_positions set for O(1) lookup
-                # This is consistent with movement_handlers.py and avoids redundant loops
-                if neighbor_pos not in occupied_positions:
-                    valid_destinations.append(neighbor_pos)
+            if is_adjacent_to_enemy and not hex_overlaps_enemy and neighbor_pos != start_pos:
+                valid_destinations.append(neighbor_pos)
 
-            # Continue exploring (charges can move through enemy-adjacent hexes)
             queue.append((neighbor_pos, neighbor_dist))
 
     game_state["valid_charge_destinations_pool"] = valid_destinations
@@ -1857,20 +1763,22 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
 def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    Simplified flee detection (distance <= 1, no CC_RNG)
-
-    CRITICAL: Uses proper hex distance, not Chebyshev distance.
-    Hexagonal grids require hex distance calculation for accurate adjacency.
+    Flee detection: unit within engagement zone of any enemy (footprint distance).
     """
+    from engine.utils.weapon_helpers import get_melee_range
+    from engine.hex_utils import min_distance_between_sets
+    cc_range = get_melee_range(game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     unit_col, unit_row = require_unit_position(unit, game_state)
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     for enemy_id, enemy_entry in units_cache.items():
         if int(enemy_entry["player"]) != unit_player:
-            # AI_TURN.md COMPLIANCE: Use proper hex distance calculation (enemy_entry for position)
-            enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
-            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
-            if distance <= 1:
+            enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
+            if min_distance_between_sets(unit_fp, enemy_fp) <= cc_range:
                 return True
     return False
 

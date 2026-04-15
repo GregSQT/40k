@@ -41,6 +41,8 @@ export class MeleeIntercessor extends TroopMeleeSwarm {
   };
   static UNIT_KEYWORDS = [...AssaultIntercessor.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = AssaultIntercessor.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = AssaultIntercessor.BASE_SIZE; // Size of the base
   static ICON_SCALE = AssaultIntercessor.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

@@ -13,10 +13,12 @@ import re
 from shared.data_validation import ConfigurationError, require_key
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
+from engine.hex_utils import expand_objectives_to_hex_list, expand_wall_group_to_hex_list
 
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
 _scenario_json_cache: Dict[str, Any] = {}
 _walls_json_cache: Dict[str, List[List[int]]] = {}
+_walls_json_mtime_ns: Dict[str, int] = {}
 _objectives_json_cache: Dict[str, List[Dict[str, Any]]] = {}
 
 
@@ -43,6 +45,16 @@ class GameStateManager:
             self.validate_uppercase_fields(unit)
             game_state["units"].append(unit)
     
+    def _get_inches_to_subhex(self) -> int:
+        """Get the board scale factor (inches to sub-hex conversion).
+
+        Returns 1 for legacy boards (1 hex = 1 inch),
+        or the configured value (e.g. 10) for ×10 micro-grids.
+        """
+        board = self.config.get("board", {})
+        default = board.get("default", board)
+        return int(default.get("inches_to_subhex", 1))
+
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Create unit with AI_TURN.md compliant fields."""
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Validate at least one weapon type exists
@@ -75,6 +87,15 @@ class GameStateManager:
         
         unit_rules = copy.deepcopy(config["UNIT_RULES"]) if "UNIT_RULES" in config else []
         unit_keywords = copy.deepcopy(require_key(config, "UNIT_KEYWORDS"))
+
+        scale = self._get_inches_to_subhex()
+        if scale != 1:
+            for w in rng_weapons:
+                w["RNG"] = int(require_key(w, "RNG")) * scale
+            for w in cc_weapons:
+                if "RNG" in w:
+                    w["RNG"] = int(w["RNG"]) * scale
+
         return {
             # Identity
             "id": config["id"],
@@ -89,7 +110,7 @@ class GameStateManager:
             # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
             "HP_CUR": config["HP_CUR"],
             "HP_MAX": config["HP_MAX"],
-            "MOVE": config["MOVE"],
+            "MOVE": config["MOVE"] * scale,
             "T": config["T"],
             "ARMOR_SAVE": config["ARMOR_SAVE"],
             "INVUL_SAVE": config["INVUL_SAVE"],
@@ -106,6 +127,8 @@ class GameStateManager:
             "VALUE": config["VALUE"],
             "ICON": config["ICON"],
             "ICON_SCALE": config["ICON_SCALE"],
+            "BASE_SHAPE": config.get("BASE_SHAPE", "round"),
+            "BASE_SIZE": config.get("BASE_SIZE", 1),
             "UNIT_RULES": unit_rules,
             "UNIT_KEYWORDS": unit_keywords,
             
@@ -213,7 +236,14 @@ class GameStateManager:
                         scenario_file
                     )
                 elif has_objectives_inline:
-                    resolved_scenario_objectives = require_key(scenario_data, "objectives")
+                    from config_loader import get_config_loader
+                    cols, rows = get_config_loader().get_board_size()
+                    resolved_scenario_objectives = expand_objectives_to_hex_list(
+                        require_key(scenario_data, "objectives"),
+                        cols=cols,
+                        rows=rows,
+                        path_hint=f"Scenario file {scenario_file} objectives",
+                    )
                 elif has_objective_hexes_legacy:
                     resolved_scenario_objectives = require_key(scenario_data, "objective_hexes")
 
@@ -285,8 +315,9 @@ class GameStateManager:
                         f"Unsupported deployment_zone '{deployment_zone}' in {scenario_file}"
                     )
                 project_root = os.path.dirname(os.path.dirname(__file__))
+                board_size_dir = f"{board_cols}x{board_rows}"
                 deployment_path = os.path.join(
-                    project_root, "config", "deployment", f"{deployment_zone}.json"
+                    project_root, "config", "deployment", board_size_dir, f"{deployment_zone}.json"
                 )
                 if not os.path.exists(deployment_path):
                     raise FileNotFoundError(f"Deployment file not found: {deployment_path}")
@@ -332,7 +363,30 @@ class GameStateManager:
                         2: deploy_pools[2] - wall_hex_set,
                     }
             used_hexes = set()
-            
+            is_micro_board = int(board_spec.get("inches_to_subhex", 1)) > 1
+
+            def _compute_deploy_footprint(
+                col: int, row: int, base_shape: str, base_size, orientation: int = 0
+            ) -> set:
+                if not is_micro_board or base_size == 1:
+                    return {(col, row)}
+                from engine.hex_utils import compute_occupied_hexes
+                return compute_occupied_hexes(col, row, base_shape, base_size, orientation)
+
+            def _is_footprint_deployable(
+                footprint: set, pool_set: set, wall_set: set, used: set
+            ) -> bool:
+                for c, r in footprint:
+                    if not _is_valid_deploy_hex(c, r):
+                        return False
+                    if pool_set and (c, r) not in pool_set:
+                        return False
+                    if (c, r) in wall_set:
+                        return False
+                    if (c, r) in used:
+                        return False
+                return True
+
             enhanced_units = []
             for unit_data in basic_units:
                 if "unit_type" not in unit_data:
@@ -342,18 +396,37 @@ class GameStateManager:
                 unit_player = require_key(unit_data, "player")
                 if int(unit_player) not in deployment_type_by_player:
                     raise ValueError(f"Invalid unit player for deployment: {unit_player}")
+
+                try:
+                    full_unit_data = unit_registry.get_unit_data(unit_type)
+                except Exception as e:
+                    raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
+
+                base_shape = full_unit_data.get("BASE_SHAPE", "round")
+                base_size = full_unit_data.get("BASE_SIZE", 1)
                 player_deployment_type = deployment_type_by_player[int(unit_player)]
+                pool_set = set()
+                if deployment_zone and int(unit_player) in deploy_pools:
+                    pool_set = deploy_pools[int(unit_player)]
+
                 if player_deployment_type == "random":
-                    if unit_player not in deploy_pools:
-                        raise ValueError(f"Invalid unit player for deployment: {unit_player}")
-                    available_hexes = list(deploy_pools[unit_player] - used_hexes)
-                    if not available_hexes:
+                    if not pool_set:
+                        raise ValueError(f"No deployment pool for player {unit_player}")
+                    candidates = [
+                        (c, r) for c, r in pool_set
+                        if _is_footprint_deployable(
+                            _compute_deploy_footprint(c, r, base_shape, base_size),
+                            pool_set, wall_hex_set, used_hexes,
+                        )
+                    ]
+                    if not candidates:
                         raise ValueError(
                             f"No available deployment hexes for player {unit_player} "
-                            f"(units={len([u for u in basic_units if require_key(u, 'player') == unit_player])})"
+                            f"(unit {unit_data.get('id')} base_size={base_size})"
                         )
-                    chosen_col, chosen_row = random.choice(available_hexes)
-                    used_hexes.add((chosen_col, chosen_row))
+                    chosen_col, chosen_row = random.choice(candidates)
+                    fp = _compute_deploy_footprint(chosen_col, chosen_row, base_shape, base_size)
+                    used_hexes.update(fp)
                 elif player_deployment_type == "active":
                     chosen_col, chosen_row = -1, -1
                 else:
@@ -362,33 +435,29 @@ class GameStateManager:
                         if field not in unit_data:
                             raise KeyError(f"Unit missing required field '{field}': {unit_data}")
                     chosen_col, chosen_row = normalize_coordinates(unit_data["col"], unit_data["row"])
-                    if deployment_zone:
-                        if unit_player not in deploy_pools:
-                            raise ValueError(f"Invalid unit player for deployment: {unit_player}")
-                        if (chosen_col, chosen_row) not in deploy_pools[unit_player]:
+                    fp = _compute_deploy_footprint(chosen_col, chosen_row, base_shape, base_size)
+                    if pool_set:
+                        for c, r in fp:
+                            if (c, r) not in pool_set:
+                                raise ValueError(
+                                    f"Unit {unit_data.get('id')} footprint cell ({c},{r}) outside "
+                                    f"deployment zone '{deployment_zone}' for player {unit_player}"
+                                )
+                    for c, r in fp:
+                        if not _is_valid_deploy_hex(c, r):
                             raise ValueError(
-                                f"Unit {unit_data.get('id')} outside deployment zone '{deployment_zone}' "
-                                f"for player {unit_player}: ({chosen_col},{chosen_row})"
+                                f"Unit {unit_data.get('id')} footprint cell ({c},{r}) on invalid hex"
                             )
-                    if deployment_zone and not _is_valid_deploy_hex(chosen_col, chosen_row):
-                        raise ValueError(
-                            f"Unit {unit_data.get('id')} on invalid deploy hex: ({chosen_col},{chosen_row})"
-                        )
-                    if wall_hex_set and (chosen_col, chosen_row) in wall_hex_set:
-                        raise ValueError(
-                            f"Unit {unit_data.get('id')} placed on wall hex: ({chosen_col},{chosen_row})"
-                        )
-                    if (chosen_col, chosen_row) in used_hexes:
-                        raise ValueError(
-                            f"Duplicate unit position: ({chosen_col},{chosen_row})"
-                        )
-                    used_hexes.add((chosen_col, chosen_row))
-                
-                try:
-                    full_unit_data = unit_registry.get_unit_data(unit_type)
-                except Exception as e:
-                    raise ValueError(f"Failed to get unit data for '{unit_type}': {e}")
-                
+                        if wall_hex_set and (c, r) in wall_hex_set:
+                            raise ValueError(
+                                f"Unit {unit_data.get('id')} footprint cell ({c},{r}) on wall hex"
+                            )
+                        if (c, r) in used_hexes:
+                            raise ValueError(
+                                f"Unit {unit_data.get('id')} footprint overlap at ({c},{r})"
+                            )
+                    used_hexes.update(fp)
+
                 required_fields = ["id", "player"]
                 for field in required_fields:
                     if field not in unit_data:
@@ -452,6 +521,8 @@ class GameStateManager:
                     "VALUE": full_unit_data["VALUE"],
                     "ICON": full_unit_data["ICON"],
                     "ICON_SCALE": full_unit_data["ICON_SCALE"],
+                    "BASE_SHAPE": full_unit_data.get("BASE_SHAPE", "round"),
+                    "BASE_SIZE": full_unit_data.get("BASE_SIZE", 1),
                     "UNIT_RULES": copy.deepcopy(require_key(full_unit_data, "UNIT_RULES")),
                     "UNIT_KEYWORDS": copy.deepcopy(require_key(full_unit_data, "UNIT_KEYWORDS")),
                     "SHOOT_LEFT": shoot_left,
@@ -981,8 +1052,14 @@ class GameStateManager:
         """Load shared wall_hexes file referenced by scenario wall_ref."""
         wall_path = self._resolve_shared_config_path("_walls", wall_ref, scenario_file, "wall_ref")
         cache_key = str(wall_path)
-        if cache_key in _walls_json_cache:
-            return copy.deepcopy(_walls_json_cache[cache_key])
+        if cache_key in _walls_json_cache and cache_key in _walls_json_mtime_ns:
+            if wall_path.exists():
+                try:
+                    cur_mtime = wall_path.stat().st_mtime_ns
+                except OSError:
+                    cur_mtime = None
+                if cur_mtime is not None and _walls_json_mtime_ns[cache_key] == cur_mtime:
+                    return copy.deepcopy(_walls_json_cache[cache_key])
         if not wall_path.exists():
             raise FileNotFoundError(f"Shared walls file not found for scenario {scenario_file}: {wall_path}")
         try:
@@ -997,22 +1074,20 @@ class GameStateManager:
             if not isinstance(walls, list):
                 raise ValueError(f"Shared walls file {wall_path} field 'walls' must be list")
             result: List[List[int]] = []
-            for g in walls:
+            for gi, g in enumerate(walls):
                 if not isinstance(g, dict):
                     raise ValueError(f"Shared walls file {wall_path}: wall group must be dict")
-                hexes = require_key(g, "hexes")
-                if not isinstance(hexes, list):
-                    raise ValueError(f"Shared walls file {wall_path}: wall group 'hexes' must be list")
-                for h in hexes:
-                    if not isinstance(h, (list, tuple)) or len(h) < 2:
-                        raise ValueError(f"Shared walls file {wall_path}: invalid wall hex {h}")
-                    result.append([int(h[0]), int(h[1])])
+                hint = f"Shared walls file {wall_path} group[{gi}]"
+                expanded = expand_wall_group_to_hex_list(g, path_hint=hint)
+                result.extend(expanded)
             _walls_json_cache[cache_key] = copy.deepcopy(result)
+            _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
             return result
         wall_hexes = require_key(wall_data, "wall_hexes")
         if not isinstance(wall_hexes, list):
             raise ValueError(f"Shared walls file {wall_path} field 'wall_hexes' must be list")
         _walls_json_cache[cache_key] = copy.deepcopy(wall_hexes)
+        _walls_json_mtime_ns[cache_key] = wall_path.stat().st_mtime_ns
         return wall_hexes
 
     def _load_shared_objectives_from_ref(self, objectives_ref: Any, scenario_file: str) -> List[Dict[str, Any]]:
@@ -1038,10 +1113,16 @@ class GameStateManager:
         if not isinstance(objectives_data, dict):
             raise ValueError(f"Shared objectives file {objectives_path} must be JSON object")
         objectives = require_key(objectives_data, "objectives")
-        if not isinstance(objectives, list):
-            raise ValueError(f"Shared objectives file {objectives_path} field 'objectives' must be list")
-        _objectives_json_cache[cache_key] = copy.deepcopy(objectives)
-        return objectives
+        from config_loader import get_config_loader
+        cols, rows = get_config_loader().get_board_size()
+        expanded_objectives = expand_objectives_to_hex_list(
+            objectives,
+            cols=cols,
+            rows=rows,
+            path_hint=f"Shared objectives file {objectives_path}",
+        )
+        _objectives_json_cache[cache_key] = copy.deepcopy(expanded_objectives)
+        return expanded_objectives
 
     def _resolve_shared_config_path(
         self,

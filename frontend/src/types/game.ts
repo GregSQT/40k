@@ -141,6 +141,8 @@ export interface Unit {
   // Display properties
   ICON: string;
   ICON_SCALE?: number;
+  BASE_SIZE?: number | [number, number];
+  BASE_SHAPE?: "round" | "oval" | "square";
 
   // Game state tracking
   SHOOT_LEFT?: number;
@@ -278,6 +280,7 @@ export interface GameState {
   deployment_type?: "random" | "fixed" | "active";
   deployment_state?: DeploymentState;
   active_movement_unit?: string; // Active unit ID in movement phase
+  move_preview_border?: Array<[number, number]>;
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
   active_charge_unit?: string; // Active unit ID in charge phase

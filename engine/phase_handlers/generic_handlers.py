@@ -408,41 +408,27 @@ def _rebuild_alternating_pools_for_fight(game_state: Dict[str, Any]) -> None:
 
 def _is_adjacent_to_enemy_for_fight(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    Check if unit is adjacent to at least one enemy within CC_RNG.
+    Check if unit is within engagement zone of at least one enemy.
 
-    Used for fight phase eligibility - unit must be within melee range of an enemy.
+    Uses min distance between footprints (§3.3, §9.8) for multi-hex units.
     """
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of CC_RNG
     from engine.utils.weapon_helpers import get_melee_range
-    cc_range = get_melee_range()  # Always 1
+    from engine.hex_utils import min_distance_between_sets
+    cc_range = get_melee_range(game_state)
     unit_col, unit_row = require_unit_position(unit, game_state)
 
     units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     for enemy_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) != unit_player:
-            enemy_col, enemy_row = require_unit_position(enemy_id, game_state)
-            distance = _calculate_hex_distance_for_fight(unit_col, unit_row, enemy_col, enemy_row)
+            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            distance = min_distance_between_sets(unit_fp, enemy_fp)
             if distance <= cc_range:
                 return True
 
     return False
 
-
-def _calculate_hex_distance_for_fight(col1: int, row1: int, col2: int, row2: int) -> int:
-    """
-    Calculate hex distance using offset coordinates.
-    Converts to cube coordinates for accurate distance calculation.
-    """
-    # Convert offset to cube coordinates (odd-q layout)
-    def offset_to_cube(col: int, row: int) -> tuple:
-        x = col
-        z = row - (col - (col & 1)) // 2
-        y = -x - z
-        return (x, y, z)
-
-    cube1 = offset_to_cube(col1, row1)
-    cube2 = offset_to_cube(col2, row2)
-
-    # Cube distance
-    return max(abs(cube1[0] - cube2[0]), abs(cube1[1] - cube2[1]), abs(cube1[2] - cube2[2]))

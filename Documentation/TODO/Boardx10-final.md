@@ -16,7 +16,7 @@
 
 Passer à une micro-maille à **beaucoup plus de cellules** qu'aujourd'hui (ex. ordre **~250×210**, **sans** figer cette taille — **§2.2 P2**) est **faisable** si l'on **abandonne** une topologie **dense globale** en **Θ(n²)**.
 
-Stratégie cible : **(a)** validation moteur en **sous-hex** — affichage pouces comme **vue dérivée** ; **(b)** géométrie **B** figée (**§2.2**), **pointy-top**, **offset odd-r** ; module unique de primitives **§2.3** ; **(c)** LoS et pathfinding **à la demande**, **bornés** ; **(d)** obstacles et occupation **sparse** (chunks arithmétiques, hash) ; **(e)** RL : **macro-actions**, observations **multi-échelle**, **MaskablePPO**, masques **O(k)**.
+Stratégie cible : **(a)** validation moteur en **sous-hex** — affichage pouces comme **vue dérivée** ; **(b)** géométrie **B** figée (**§2.2**), **offset odd-q** ; module unique de primitives **§2.3** ; **(c)** LoS et pathfinding **à la demande**, **bornés** ; **(d)** obstacles et occupation **sparse** (chunks arithmétiques, hash) ; **(e)** RL : **macro-actions**, observations **multi-échelle**, **MaskablePPO**, masques **O(k)**.
 
 ---
 
@@ -36,7 +36,7 @@ Toute règle nouvelle reste alignée avec **`Documentation/AI_TURN.md`** et **`D
 ### 2.1 État actuel (référence)
 
 - **1 hex = 1 inch** ; plateau typique **25×21** hex « macro ».
-- **Pré-calcul :** `scripts/los_topology_builder.py` produit des matrices **denses** `los` et `pathfinding` en **`(n, n)`** avec `n = cols × rows`, chargées depuis `config/board/{cols}x{rows}/topology_*.npz`.
+- **Pré-calcul (legacy, supprimé) :** l'ancien `scripts/los_topology_builder.py` produisait des matrices **denses** n×n — supprimé car incompatible ×10. Remplacé par LoS on-demand + BFS borné (`hex_utils.py`).
 
 ### 2.2 Géométrie et granularité — P1, P2, P3
 
@@ -48,49 +48,46 @@ Toute règle nouvelle reste alignée avec **`Documentation/AI_TURN.md`** et **`D
 
 **Moteur :** entiers (pas sur le graphe des sous-hex) ; 0,1″ sert au **brief physique**, pas à injecter des flottants.
 
-#### P2 — Approche B (figée) : pointy-top, offset odd-r, plateau dimensionnable
+#### P2 — Approche B (figée) : offset odd-q, plateau dimensionnable
 
-**Décision :** pavage hexagonal **pointy-top** avec coordonnées **offset odd-r** (`(col, row)` avec les rangées impaires décalées de +½ col vers la droite).
+**Décision :** pavage hexagonal avec coordonnées **offset odd-q** (`(col, row)` avec les colonnes impaires décalées de +½ row vers le bas). Système **identique** au code existant (`engine/combat_utils.py`).
 
-**Orientation hex (figée) : pointy-top**  
-Les hex ont une **pointe** en haut et en bas ; les **côtés plats** sont à gauche et à droite. Le plat à plat (P1) correspond à la **largeur** horizontale de la cellule. Les hex ne sont **pas affichés** ; l'orientation fixe uniquement les **formules** de voisinage et de distance.
+**Système de coordonnées (figé) : offset odd-q**  
+`(col, row)` avec `0 ≤ col < COLS`, `0 ≤ row < ROWS`. Les colonnes **impaires** (`col % 2 == 1`) sont décalées de +½ rangée vers le bas.
 
-**Système de coordonnées (figé) : offset odd-r**  
-`(col, row)` avec `0 ≤ col < COLS`, `0 ≤ row < ROWS`. Les rangées **impaires** (`row % 2 == 1`) sont décalées de +½ colonne vers la droite.
+**6 voisins (offset odd-q) :**
 
-**6 voisins (offset odd-r, pointy-top) :**
-
-Pour une rangée **paire** (`row % 2 == 0`) :
+Pour une colonne **paire** (`col % 2 == 0`) :
 
 | Direction | Δcol | Δrow |
 |-----------|------|------|
-| Est       | +1   | 0    |
-| Ouest     | −1   | 0    |
-| NE        | 0    | −1   |
-| NO        | −1   | −1   |
-| SE        | 0    | +1   |
-| SO        | −1   | +1   |
-
-Pour une rangée **impaire** (`row % 2 == 1`) :
-
-| Direction | Δcol | Δrow |
-|-----------|------|------|
-| Est       | +1   | 0    |
-| Ouest     | −1   | 0    |
+| N         | 0    | −1   |
 | NE        | +1   | −1   |
-| NO        | 0    | −1   |
+| SE        | +1   | 0    |
+| S         | 0    | +1   |
+| SO        | −1   | 0    |
+| NO        | −1   | −1   |
+
+Pour une colonne **impaire** (`col % 2 == 1`) :
+
+| Direction | Δcol | Δrow |
+|-----------|------|------|
+| N         | 0    | −1   |
+| NE        | +1   | 0    |
 | SE        | +1   | +1   |
-| SO        | 0    | +1   |
+| S         | 0    | +1   |
+| SO        | −1   | +1   |
+| NO        | −1   | 0    |
 
-**Distance hex :** convertir `(col, row)` offset → **cube** `(q, r, s)` puis `distance = max(|Δq|, |Δr|, |Δs|)`. Formule de conversion offset odd-r → cube :
+**Distance hex :** convertir `(col, row)` offset → **cube** `(x, z, y)` puis `distance = max(|Δx|, |Δy|, |Δz|)`. Formule de conversion offset odd-q → cube :
 
 ```
-q = col - (row - (row & 1)) / 2
-r = row
-s = -q - r
+x = col
+z = row - (col - (col & 1)) / 2
+y = -x - z
 ```
 
-**Construction du plateau :** grille rectangulaire de **`COLS` × `ROWS`** cellules en offset odd-r. Bornes lues en **config**. Pas de subdivision de macro-hex : **un plateau neuf**.
+**Construction du plateau :** grille rectangulaire de **`COLS` × `ROWS`** cellules en offset odd-q. Bornes lues en **config**. Pas de subdivision de macro-hex : **un plateau neuf**.
 
 **Dimensions configurables :** `COLS` et `ROWS` ne sont **pas** figés à 250×210 ; ce sont des **paramètres** de `board_config`.
 
@@ -100,9 +97,16 @@ s = -q - r
 
 #### P3 — Constantes numériques
 
-Toutes les grandeurs de règles (MOVE, RNG, charge, mêlée, advance, perception, etc.) en **sous-hex** par **×10** vs legacy.
+**Approche retenue : conversion au chargement (inches → sub-hex).**
 
-Exemples : MOVE 6 → **60** ; portée 24 → **240** ; charge max 12 → **120** ; mêlée / engagement 1 → **10**.
+Les fichiers de données (rosters, armories, `game_config.json`) conservent les valeurs en **inches** (standard GW, lisible et vérifiable). Le moteur convertit **une seule fois** au chargement via `inches_to_subhex` (paramètre dans `board_config.json`, ex. **10** pour ×10).
+
+- **`board_config.json`** : `"inches_to_subhex": 10`
+- **`game_state.py` (`create_unit`)** : `MOVE *= scale`, `weapon.RNG *= scale`
+- **`w40k_core.py` (init)** : `game_rules` distances (`engagement_zone`, `charge_max_distance`, etc.) `*= scale`
+- **`observation_builder.py`** : normalisations RL (`/12.0`, `/24.0`) multipliées par `scale`
+
+Exemples avec scale=10 : MOVE 6″ → **60** sub-hex en `game_state` ; RNG 24″ → **240** ; engagement 1″ → **10**.
 
 **Observations RL :** normaliser par **`perception_radius`** en sous-hex, pas par la taille du plateau.
 
@@ -114,7 +118,7 @@ Exemples : MOVE 6 → **60** ; portée 24 → **240** ; charge max 12 → **120*
 
 ### 2.3 Coordonnées globales vs hiérarchiques
 
-**Canonique :** `(col, row)` offset odd-r, `COLS`/`ROWS` en config.
+**Canonique :** `(col, row)` offset odd-q, `COLS`/`ROWS` en config.
 
 **Hiérarchique (optionnel) :** `(chunk_i, chunk_j, local_i, local_j)` — uniquement si déduit du **même module** de conversions.
 
@@ -128,8 +132,8 @@ Fin de la matrice LoS/path **pleine** à l'échelle ×10 ; empreintes cohérente
 
 - **Unité :** entité de jeu identifiée (ex. `unit_id`).
 - **Socle :** **`occupied_hexes`** = ensemble des cellules occupées **à une pose donnée** (centre + forme + orientation). Recalculé quand le **centre**, la **taille** ou l'**orientation** du socle changent.
-- **`base_shape`** : **rond**, **ovale** ou **carré** — discrétisé sur la grille hex selon des règles figées dans les données unité / rosters. La forme est **dérivée** d'un petit nombre de paramètres (taille, axes pour l'ovale).
-- **Taille du socle (`BASE_SIZE`) :** **diamètre en hex** de la base. Défini dans les fichiers de config/roster de chaque unité (ex. `static BASE_SIZE = 126` dans `Intercessor.ts` = socle de 126 hex de diamètre). En legacy (1 hex/unité), ce champ servait au rendu frontend ; en ×10, il définit l'**empreinte physique** du socle sur la micro-grille. L'icône frontend s'étend pour couvrir la surface de `occupied_hexes` — `ICON_SCALE` n'est plus utilisé en ×10.
+- **`base_shape` / `BASE_SHAPE` :** dans les rosters TypeScript, **`static BASE_SHAPE = "round" | "oval" | "square"`** — forme du socle pour la discrétisation sur la grille hex. La quasi-totalité des unités GW sont **rondes** (`"round"`).
+- **Taille du socle (`BASE_SIZE`) :** **diamètre en hex** de la base (entier). Défini dans chaque fichier d'unité après `BASE_SHAPE` (ex. `Intercessor.ts` : `BASE_SHAPE` puis `BASE_SIZE = 13`). En ×10, cela définit l'**empreinte** `occupied_hexes` sur la micro-grille. L'icône frontend s'étend pour couvrir cette empreinte — `ICON_SCALE` n'est plus utilisé en ×10.
 - **Orientation / rotation :** le socle **peut** tourner (translation + rotation) pendant le déplacement — utile pour passer dans des couloirs étroits (formes non circulaires). Cependant, **aucune règle de jeu** ne dépend de l'orientation : pas de facing, pas de bonus directionnel. Pour les socles **ronds** (symétriques), la rotation ne change pas `occupied_hexes`. Pour les **ovales** et **carrés**, la rotation modifie `occupied_hexes` mais **n'affecte que** le pathfinding (traversabilité) et le placement, **pas** les règles de tir, charge, mêlée, etc. L'**angle** de rotation est **discrétisé** en **6 orientations** (pas de 60°, paramètre `hex_orientations` dans `board_config.json`).
 - **Nombre d'hex du socle :** `|occupied_hexes|` (≥ 1). Un socle d'**un seul** hex = legacy.
 - **Centre `(col, row)` :** point de référence de la pose — avec **forme** + **taille** + **orientation**, on **dérive** `occupied_hexes`.
@@ -184,7 +188,7 @@ Les §3 (distances), §7 (LoS), §8 (pathfinding) et §9 (phases) s'appuient sur
 
 ### 5.1 Grille : micro canonique, macro vue optionnelle
 
-- **Micro (canonique) :** maille **B** pointy-top odd-r sur `COLS × ROWS` cellules.
+- **Micro (canonique) :** maille **B** odd-q sur `COLS × ROWS` cellules.
 - **Macro (optionnelle) :** regroupement pour UI ou migration — pas requis pour la correction des règles.
 
 ### 5.2 Obstacles et occupation
@@ -326,19 +330,19 @@ La policy choisit une **destination** ou action dans un pool filtré ; le moteur
 
 ## 9. Empreinte au sol (socles) — par phase
 
-### 9.0 Zone d'engagement et `game_rules` (cible impl — **doc uniquement**)
+### 9.0 Zone d'engagement et `game_rules` — **implémenté**
 
-Les clés ci-dessous sont la **cible** pour `config/game_config.json` → `game_rules` lors du branchement moteur ×10. Les distances sont en **sous-hex** ; la mesure est la **distance minimale sur paires d'hex** des socles (**§3.3**).
+Les clés ci-dessous sont dans `config/game_config.json` → `game_rules`. Les valeurs sont en **inches** (standard GW). Le moteur les convertit automatiquement en sub-hex via `inches_to_subhex` au chargement (§P3).
 
-| Clé | Valeur cible | Rôle |
-|-----|----------------|------|
-| **`engagement_zone`** | **10** | Distance en sous-hex (= **1″**). Définit un **périmètre** autour de l'empreinte (`occupied_hexes`) de chaque unité. Toute cellule du plateau à distance hex **≤ 10** d'au moins un hex de l'empreinte est **dans la zone d'engagement** de cette unité. Utilisé pour : (1) **mouvement** et **advance** — interdiction d'entrer dans la zone d'engagement ennemie (sauf charge) ; (2) **fight** — une unité est **engagée** au corps à corps si elle a au moins un ennemi dont un hex d'empreinte est à distance **≤ `engagement_zone`** de son propre hex d'empreinte (**§9.8**). En legacy, « adjacent (distance ≤ 1) » jouait ce rôle ; ici, le périmètre est de **10** sous-hex autour des hex du socle. |
-| **`charge_max_distance`** | **120** | Distance max (§3.3) pour qu'une cible soit éligible comme cible de charge. Legacy : **13** (incluait la zone d'engagement implicitement) ; ici **120** = 12 ×10 (distance pure, la zone d'engagement est gérée séparément via `engagement_zone`). |
-| **`advance_distance_range`** | **60** | Portée max du déplacement advance en sous-hex (legacy **6** ×10). |
-| **`max_search_distance`** | **500** | Rayon max de recherche pathfinding / cibles en sous-hex (legacy **50** ×10). |
-| **`avg_charge_roll`** | **70** | Moyenne du jet de charge en sous-hex (legacy **7** ×10). |
+| Clé | Valeur (inches) | Sub-hex (×10) | Rôle |
+|-----|-----------------|---------------|------|
+| **`engagement_zone`** | **1** | **10** | Distance en inches (= **1″**). Définit un **périmètre** autour de l'empreinte (`occupied_hexes`) de chaque unité. Utilisé pour : (1) **mouvement** et **advance** — interdiction d'entrer dans la zone d'engagement ennemie (sauf charge) ; (2) **fight** — une unité est **engagée** au corps à corps si elle a au moins un ennemi dont un hex d'empreinte est à distance **≤ `engagement_zone`** (converti) de son propre hex d'empreinte (**§9.8**). |
+| **`charge_max_distance`** | **12** | **120** | Distance max (§3.3) pour qu'une cible soit éligible comme cible de charge. |
+| **`advance_distance_range`** | **6** | **60** | Portée max du déplacement advance. |
+| **`max_search_distance`** | **50** | **500** | Rayon max de recherche pathfinding / cibles. |
+| **`avg_charge_roll`** | **7** | **70** | Moyenne du jet de charge. |
 
-**Note :** `melee_range` n'est plus une constante séparée — l'engagement au corps à corps est régi par **`engagement_zone`** (même seuil de **10** sous-hex).
+**Note :** `melee_range` n'est plus une constante séparée — l'engagement au corps à corps est régi par **`engagement_zone`** (même seuil).
 
 **Mouvement :** interdire les poses / chemins qui placeraient l'empreinte de l'unité dans la zone d'engagement d'un ennemi (§8.5).
 
@@ -521,7 +525,7 @@ Mêmes interdits : pas de matrice globale ; LoS/path bornés ; représentation c
 
 ### Phase A — Cadrage
 
-- [x] Convention géométrique §2.2 (P1–P3, **B** figé, **pointy-top**, **odd-r**, plat à plat 0,1″).
+- [x] Convention géométrique §2.2 (P1–P3, **B** figé, **odd-q**, plat à plat 0,1″).
 - [x] Unité canonique simulation : `(col, row)` global micro.
 - [x] Paramètres perf figés dans `board_config.json` : `chunk_size` = 64, `hex_orientations` = 6, `pathfinding.max_open_nodes` = 2 000, `pathfinding.time_budget_us` = 5 000.
 - [ ] Périmètre décisions vue macro vs micro (produit + RL).
@@ -529,32 +533,38 @@ Mêmes interdits : pas de matrice globale ; LoS/path bornés ; représentation c
 
 ### Phase B — Moteur géométrique
 
-- [ ] Chunks + coordonnées locales si besoin.
-- [ ] LoS à la demande + tests régression.
-- [ ] Pathfinding : plan macro + corridor micro ; budgets (§8).
+- [x] **Module `engine/hex_utils.py`** créé — primitives hex odd-q : voisins, conversions offset↔cube, distance, hex line (grid traversal), LoS à la demande, BFS borné, wall set helper, empreintes (`compute_occupied_hexes`, `_footprint_round/oval/square`), occupation (`build_occupation_map`, `validate_placement`). 80 tests (`tests/unit/engine/test_hex_utils.py`).
+- [x] **LoS à la demande** — `_get_los_visibility_state` (shooting_handlers), `_has_los_from_topology` (observation_builder) : fallback sur `hex_utils` quand `los_topology` absent. Diagnostic adapté.
+- [x] **Pathfinding BFS borné** — `calculate_pathfinding_distance` (combat_utils) : fallback sur `hex_utils.pathfinding_distance` avec budgets (`max_open_nodes`, `max_search_distance`) quand `pathfinding_topology` absent.
+- [x] **Chargement .npz optionnel** — `_load_topology_cached` (w40k_core) : log info au lieu de crash si .npz absent (mode Board ×10). Invalidation `_wall_set_cache` au reset.
+- [ ] Chunks + coordonnées locales si besoin (optionnel — non bloquant pour Phase C).
 
 ### Phase C — Règles et socles
 
-- [ ] Empreintes + occupation + rotation (§2.5) + tests mouvement → tir → charge → fight (§9).
-- [ ] `engagement_zone` intégrée dans move/advance/charge/fight.
-- [ ] Déploiement / placement initial.
+- [x] **Empreintes + occupation (socles ronds)** — `build_occupied_positions_set`, `compute_candidate_footprint`, `is_footprint_placement_valid` dans `shared_utils.py`. BFS mouvement/charge/advance vérifie l'empreinte complète à chaque position candidate. Commit-time checks footprint-aware. Flee detection via `min_distance_between_sets` entre empreintes. Dead code supprimé (`_is_valid_destination`, `_is_traversable_hex` remplacés).
+- [x] **`engagement_zone` intégrée dans move/advance/charge/fight** — Toutes les fonctions d'adjacence/engagement utilisent `min_distance_between_sets(unit_fp, enemy_fp) <= engagement_zone` : `_is_adjacent_to_enemy_within_cc_range` (fight, shooting), `_is_adjacent_to_enemy_for_fight` (generic), `_is_adjacent_to_enemy` / `_is_adjacent_to_enemy_simple` (charge), target validation (PISTOL/friendly engagement), advance commit-time check, weapon range checks. Dead code supprimé (`_calculate_hex_distance_for_fight`).
+- [x] **Déploiement / placement initial avec validation d'empreinte** — `game_state.py` : `used_hexes` stocke les empreintes complètes ; random deployment filtre les positions candidates par `_is_footprint_deployable` ; fixed deployment valide chaque cellule de l'empreinte (zone, murs, overlap). `deployment_handlers.py` : `execute_deployment_action` utilise `compute_candidate_footprint` + `build_occupied_positions_set` pour valider l'empreinte entière avant placement.
 
 ### Phase D — IA / RL
 
-- [ ] Espace d'actions + masques ; observations multi-échelle.
-- [ ] Profiler `env.step` ; seuils §10.5.
+- [x] **Espace d'actions + masques** — Action space fixe (13 slots, stratégies + target slots), indépendant de la taille du plateau. Masque (13 bools) indépendant de la grille. Aucune modification nécessaire pour ×10.
+- [x] **Observations** — Vecteur 355 floats stable. Normalisations MOVE/RNG déjà scalées par `inches_to_subhex`. `perception_radius` scalé au chargement dans `w40k_core`.
+- [x] **Perf BFS : FLY** — Remplacé scan `O(cols×rows)` par BFS borné `O(reachable)` dans `movement_handlers.py` (éligibilité + pool builder). FLY ignore murs/occupation pour la traversée, valide la destination normalement.
+- [x] **Perf BFS : deque** — Tous les BFS mouvement/charge utilisent `collections.deque` pour `O(1) popleft` au lieu de `list.pop(0)` `O(n)`.
+- [x] **Dead code** — Import mort `_is_traversable_hex` supprimé de `shooting_handlers.py`.
+- [ ] Profiler `env.step` sur board 360×312 ; seuils §10.5 (à faire en conditions réelles d'entraînement).
 
 ### Phase E — Outils et données
 
-- [ ] Adapter `los_topology_builder` : chunk ou runtime only.
+- [x] ~~Adapter `los_topology_builder`~~ — **supprimé** (builder incompatible ×10, remplacé par `hex_utils.py`).
 - [ ] CI : maps références + golden LoS/path.
-- [ ] Replay : format centre + params socle + orientation ; reconstruction `occupied_hexes` (§18.1).
-- [ ] Analyzer : tests intersection empreintes (§18.2).
+- [x] Replay : `BASE_SHAPE`, `BASE_SIZE`, `orientation` ajoutés dans `game_replay_logger.py` (3 chemins) et `step_logger.py`. Reconstruction `occupied_hexes` possible côté frontend via ces données.
+- [x] Analyzer : `compute_occupied_hexes` et `min_distance_between_sets` disponibles dans `hex_utils.py` / `shared_utils.py`.
 
 ### Phase F — Rollout
 
-- [ ] Feature flag `BOARD_MICRO_SCALE` : valeurs énumérées uniquement.
-- [ ] Migration assets / scénarios (§19).
+- [x] Feature flag = `inches_to_subhex` dans `board_config.json` (valeur 10 pour ×10, 1 pour legacy). Le moteur scale dynamiquement.
+- [x] Migration : `scenario_pvp_test.json` migré (360×312). Scénarios legacy restent sur board 25×21.
 
 ---
 
@@ -600,7 +610,7 @@ Mêmes interdits : pas de matrice globale ; LoS/path bornés ; représentation c
 ## 16. Références internes
 
 - [`.cursorrules`](../../.cursorrules)
-- `scripts/los_topology_builder.py` — petits `n` seulement.
+- ~~`scripts/los_topology_builder.py`~~ — **supprimé** (remplacé par `engine/hex_utils.py`).
 - `engine/w40k_core.py`, `engine/observation_builder.py`
 - `Documentation/LOS_TOPOLOGY.md`
 - `Documentation/AI_TURN.md`, `Documentation/AI_IMPLEMENTATION.md`, `Documentation/AI_OBSERVATION.md`, `Documentation/AI_TRAINING.md`
@@ -639,28 +649,31 @@ Murs (statique) + `occupied_hexes(U)` par unité + carte inverse `cellule → un
 Liste **indicative** de fichiers impactés.
 
 ### Configuration
-- [ ] `config/game_config.json` (clés cibles §9.0)
+- [x] `config/game_config.json` — **fait** : clés §9.0 en **inches** (`engagement_zone: 1`, `charge_max_distance: 12`, `advance_distance_range: 6`, `avg_charge_roll: 7`, `max_search_distance: 50`). Conversion sub-hex au chargement via `inches_to_subhex`.
 - [x] `config/board/250x210/board_config.json` — **créé** : `cols`/`rows`, `chunk_size`, `hex_orientations`, `pathfinding.*`.
+- [x] `config/board/360x312/board_config.json` — **créé** : idem + `inches_to_subhex: 10`, `hex_radius: 1.7`, background image.
 - [ ] `config/board_config_Objectives.json`
 - [ ] `config/board_config_big.json`
-- [ ] `frontend/public/config/board_config.json`
-- [ ] `config/agents/*/training_config.json` (`perception_radius` ×10)
+- [x] `frontend/public/config/board_config.json` — **fait** : synchronisé avec 360×312, ajout `inches_to_subhex: 10` + display avancé.
+- [x] `config/agents/CoreAgent/CoreAgent_training_config.json` — **fait** : `perception_radius: 25` (inches), converti automatiquement au chargement via `inches_to_subhex`.
 
 ### Unités et armes (frontend)
-- [ ] `frontend/src/roster/**/*.ts` (MOVE ×10)
-- [ ] `frontend/src/roster/**/armory.ts` (RNG ×10)
+- [x] `frontend/src/roster/**/*.ts` — valeurs en **inches** (standard GW). Conversion ×`inches_to_subhex` dans `game_state.py` (`create_unit`).
+- [x] `frontend/src/roster/**/armory.ts` — idem, `RNG` en inches. Conversion au chargement.
 
 ### Code Python — migration O(n²) → calculs bornés (Phase B)
-- [ ] `scripts/los_topology_builder.py` — **builder n×n** : adapter (chunks) ou abandonner pour ×10.
-- [ ] `engine/w40k_core.py` — **charge `.npz` n×n** en mémoire : supprimer, remplacer par LoS/path à la demande.
-- [ ] `engine/combat_utils.py` — **`pathfinding_topology[from_idx, to_idx]`** : remplacer par A* fenêtré (§8).
-- [ ] `engine/observation_builder.py` — **`los_topology[from_idx, to_idx]`** : remplacer par LoS à la demande (§7).
-- [ ] `engine/phase_handlers/shooting_handlers.py` — **`los_topology[from_idx, to_idx]`** : remplacer par LoS à la demande (§7).
+- [x] `scripts/los_topology_builder.py` — **supprimé** : matrices denses n×n impossibles à l'échelle ×10 (n²=12,6G pour 360×312). Remplacé par LoS on-demand et BFS borné via `hex_utils.py`. `build_topology.sh` et référence Dockerfile supprimés.
+- [x] `engine/w40k_core.py` — chargement .npz **optionnel** ; log info si absent ; invalidation `_wall_set_cache` au reset ; **conversion `game_rules` inches→sub-hex** via `inches_to_subhex` ; stocke `inches_to_subhex` dans `game_state`.
+- [x] `engine/combat_utils.py` — fallback sur `hex_utils.pathfinding_distance` (BFS borné) quand `pathfinding_topology` absent.
+- [x] `engine/observation_builder.py` — fallback sur `hex_utils.compute_los_visibility` quand `los_topology` absent. **Normalisations RL** (`MOVE`, `RNG`, positions relatives) mises à l'échelle via `inches_to_subhex`. **Hardcoded `+12`** charge remplacé par `charge_max_distance` config.
+- [x] `engine/phase_handlers/shooting_handlers.py` — fallback sur `hex_utils.compute_los_state` quand `los_topology` absent.
+- [x] **`engine/hex_utils.py`** (nouveau) — module unique de primitives hex odd-q + LoS à la demande + BFS borné.
 
-### Code Python — autres
-- [ ] `engine/phase_handlers/charge_handlers.py`
+### Code Python — conversion inches→sub-hex (Phase B)
+- [x] `engine/game_state.py` — `create_unit` : `MOVE *= scale`, `weapon.RNG *= scale` via `_get_inches_to_subhex()`.
+- [x] `engine/phase_handlers/charge_handlers.py` — remplacé hardcoded `12`/`13` par `charge_max_distance` + `melee_range` depuis config.
+- [x] `engine/action_decoder.py` — remplacé hardcoded `+12` par `charge_max_distance` config.
 - [ ] `engine/utils/weapon_helpers.py`
-- [ ] `engine/game_state.py`
 
 ### Logs et replays
 - [ ] `ai/step_logger.py`
@@ -675,11 +688,23 @@ Liste **indicative** de fichiers impactés.
 - [ ] `frontend/src/types/game.ts`
 - [ ] `frontend/src/data/UnitFactory.ts`
 
+### Frontend UX — Drag & drop placement (implémenté)
+
+Rendu PIXI.js (canvas WebGL). **Mode clic + preview** (select unit → hover hex → click pour confirmer).
+
+- [x] **Ghost unit** : cercle semi-transparent + ID suivant le curseur, snappé au hex le plus proche (`pointermove` sur canvas).
+- [x] **Footprint visible** : empreinte complète du socle (overlay hex polygones vert/rouge selon validité). Port TS de `compute_occupied_hexes` (round) dans `frontend/src/utils/hexFootprint.ts`.
+- [x] **Pré-validation visuelle** : footprint **vert** si toutes les cellules sont valides (pas de mur, pas occupé, dans les bornes, dans le pool de déploiement). Footprint **rouge** sinon.
+- [x] **Highlight objectif** : si `candidate_footprint ∩ objective_hexes ≠ ∅`, highlight jaune pulsant des hexes de l'objectif.
+- [x] **Drop = commit** : clic gauche (pointerup) pour confirmer → appel `onDeployUnit` existant. Le backend reste l'autorité de validation.
+- [x] **Hook** : `useDragPlacement` dans `frontend/src/hooks/useDragPlacement.ts` — input: `selectedUnit`, `mouseHex`, `gameState`, `boardConfig`, `objectives` ; output: PIXI overlay + `onDrop(col, row)`.
+- [x] **Utilitaires** : `hexFootprint.ts` — `computeOccupiedHexes`, `pixelToHex`, `hexToPixel`, `buildOccupiedSet`, `getContestedObjectives`, etc.
+
 ### Scénarios
 - [ ] `config/agents/*/scenarios/*.json`
 - [ ] `config/scenario_game.json`
-- [ ] `frontend/public/config/scenario.json`
+- [x] `frontend/public/config/scenario.json` — fichier legacy non référencé, peut être supprimé.
 
 ---
 
-*Micro-grille **B** pointy-top odd-r, **plat à plat = 0,1″**, `COLS × ROWS` configurables. Socles multi-cellules avec rotation (§2.5). Zone d'engagement **10** sous-hex (§9.0). **Une seule** spec ×10 : **ce fichier**.*
+*Micro-grille **B** odd-q, **plat à plat = 0,1″**, `COLS × ROWS` configurables. Socles multi-cellules avec rotation (§2.5). Zone d'engagement **10** sous-hex (§9.0). **Une seule** spec ×10 : **ce fichier**.*

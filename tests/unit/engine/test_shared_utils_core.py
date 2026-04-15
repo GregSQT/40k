@@ -24,12 +24,15 @@ def test_build_units_cache_normalizes_coordinates_hp_and_player() -> None:
 
     build_units_cache(game_state)
 
-    assert game_state["units_cache"]["1"] == {
-        "col": 3,
-        "row": 4,
-        "HP_CUR": 2,
-        "player": 1,
-    }
+    entry = game_state["units_cache"]["1"]
+    assert entry["col"] == 3
+    assert entry["row"] == 4
+    assert entry["HP_CUR"] == 2
+    assert entry["player"] == 1
+    assert entry["BASE_SHAPE"] == "round"
+    assert entry["BASE_SIZE"] == 1
+    assert entry["occupied_hexes"] == {(3, 4)}
+    assert game_state["occupation_map"][(3, 4)] == "1"
 
 
 def test_build_units_cache_raises_value_error_on_invalid_player() -> None:
@@ -98,12 +101,14 @@ def test_update_units_cache_unit_inserts_entry_when_hp_positive() -> None:
 
     update_units_cache_unit(game_state, "u9", "2", "3.0", 4, 2)
 
-    assert game_state["units_cache"]["u9"] == {
-        "col": 2,
-        "row": 3,
-        "HP_CUR": 4,
-        "player": 2,
-    }
+    entry = game_state["units_cache"]["u9"]
+    assert entry["col"] == 2
+    assert entry["row"] == 3
+    assert entry["HP_CUR"] == 4
+    assert entry["player"] == 2
+    assert entry["BASE_SHAPE"] == "round"
+    assert entry["BASE_SIZE"] == 1
+    assert entry["occupied_hexes"] == {(2, 3)}
 
 
 def test_update_units_cache_unit_raises_when_cache_missing() -> None:

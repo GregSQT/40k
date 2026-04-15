@@ -25,6 +25,8 @@ export class RangeInfernus extends TroopRangeSwarm {
 
   static UNIT_KEYWORDS = [...Infernus.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = Infernus.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = Infernus.BASE_SIZE; // Size of the base
   static ICON_SCALE = Infernus.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

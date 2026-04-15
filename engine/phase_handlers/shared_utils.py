@@ -168,13 +168,123 @@ def rebuild_choice_timing_index(game_state: Dict[str, Any]) -> None:
 # UNITS_CACHE - Single source of truth for position, HP, player of living units
 # =============================================================================
 
+def _compute_unit_occupied_hexes(
+    col: int, row: int, unit: Dict[str, Any],
+    game_state: Optional[Dict[str, Any]] = None,
+) -> Set[Tuple[int, int]]:
+    """Compute occupied_hexes for a unit based on its BASE_SHAPE and BASE_SIZE.
+
+    Multi-hex footprints are only computed on Board ×10 (engagement_zone > 1).
+    On legacy boards (engagement_zone=1), all units occupy a single cell.
+    """
+    ez = get_engagement_zone(game_state) if game_state is not None else 1
+    if ez <= 1:
+        return {(col, row)}
+    base_shape = unit.get("BASE_SHAPE", "round")
+    base_size = unit.get("BASE_SIZE", 1)
+    orientation = unit.get("orientation", 0)
+    if base_size == 1:
+        return {(col, row)}
+    from engine.hex_utils import compute_occupied_hexes
+    return compute_occupied_hexes(col, row, base_shape, base_size, orientation)
+
+
+def build_occupied_positions_set(
+    game_state: Dict[str, Any],
+    exclude_unit_id: Optional[str] = None,
+) -> Set[Tuple[int, int]]:
+    """Build set of all cells occupied by living units (full footprints).
+
+    Uses occupied_hexes from units_cache for multi-hex units.
+    For single-hex units, equivalent to {(col, row)} per unit.
+
+    Args:
+        game_state: Game state with units_cache
+        exclude_unit_id: Optional unit to exclude (e.g. the moving unit)
+
+    Returns:
+        Set of (col, row) cells occupied by other units
+    """
+    units_cache = require_key(game_state, "units_cache")
+    occupied: Set[Tuple[int, int]] = set()
+    for uid, entry in units_cache.items():
+        if uid == exclude_unit_id:
+            continue
+        occ = entry.get("occupied_hexes")
+        if occ:
+            occupied.update(occ)
+        else:
+            occupied.add((require_key(entry, "col"), require_key(entry, "row")))
+    return occupied
+
+
+def compute_candidate_footprint(
+    center_col: int, center_row: int,
+    unit_or_stub: Dict[str, Any],
+    game_state: Dict[str, Any],
+) -> Set[Tuple[int, int]]:
+    """Compute occupied_hexes for a unit placed at a candidate center position.
+
+    For single-hex units or legacy boards (engagement_zone <= 1), returns {(center_col, center_row)}.
+    For multi-hex units on x10 boards, computes the full round/oval/square footprint.
+
+    Args:
+        center_col, center_row: Candidate center position
+        unit_or_stub: Dict with BASE_SHAPE and BASE_SIZE keys
+        game_state: Game state (used to detect x10 mode via engagement_zone)
+
+    Returns:
+        Set of (col, row) cells forming the footprint
+    """
+    return _compute_unit_occupied_hexes(center_col, center_row, unit_or_stub, game_state)
+
+
+def is_footprint_placement_valid(
+    candidate_hexes: Set[Tuple[int, int]],
+    game_state: Dict[str, Any],
+    occupied_positions: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+) -> bool:
+    """Check if all cells of a candidate footprint are valid for placement.
+
+    Validates: within board bounds, not a wall, not occupied by another unit.
+    Optionally checks that no cell falls within the enemy engagement zone.
+
+    Args:
+        candidate_hexes: Set of (col, row) for the candidate footprint
+        game_state: With board_cols, board_rows, wall_hexes
+        occupied_positions: Pre-computed set of occupied cells
+        enemy_adjacent_hexes: If provided, also blocks cells in enemy engagement zone
+
+    Returns:
+        True if ALL cells pass every check
+    """
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+    for c, r in candidate_hexes:
+        if c < 0 or r < 0 or c >= board_cols or r >= board_rows:
+            return False
+        if (c, r) in wall_hexes:
+            return False
+        if (c, r) in occupied_positions:
+            return False
+        if enemy_adjacent_hexes is not None and (c, r) in enemy_adjacent_hexes:
+            return False
+    return True
+
+
 def build_units_cache(game_state: Dict[str, Any]) -> None:
     """
     Build units_cache from game_state["units"].
     
     Creates game_state["units_cache"]: Dict[str, Dict] mapping unit_id (str) to
-    {"col": int, "row": int, "HP_CUR": int, "player": int} for all units in game_state["units"].
+    {"col": int, "row": int, "HP_CUR": int, "player": int, "BASE_SHAPE": str,
+     "BASE_SIZE": int|list, "occupied_hexes": Set[(col,row)]}
+    for all units in game_state["units"].
     During gameplay, dead units are removed from cache (update_units_cache_hp calls remove_from_units_cache when HP <= 0).
+    
+    Also builds game_state["occupation_map"]: Dict[(col,row), unit_id] for cell→unit lookup.
     
     Called ONCE at reset() after units are initialized. Not called at phase start.
     
@@ -182,12 +292,13 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         game_state: Game state with "units" list
         
     Returns:
-        None (updates game_state["units_cache"])
+        None (updates game_state["units_cache"] and game_state["occupation_map"])
     """
     if "units" not in game_state:
         raise KeyError("game_state must have 'units' field to build units_cache")
     
     units_cache: Dict[str, Dict[str, Any]] = {}
+    occupation_map: Dict[Tuple[int, int], str] = {}
     
     for unit in game_state["units"]:
         hp_cur_raw = require_key(unit, "HP_CUR")
@@ -204,20 +315,53 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         except (ValueError, TypeError):
             raise ValueError(f"Unit {unit_id} has invalid player: {player_raw!r}") from None
         
+        base_shape = unit.get("BASE_SHAPE", "round")
+        base_size = unit.get("BASE_SIZE", 1)
+        occupied = _compute_unit_occupied_hexes(col, row, unit, game_state)
+        
         units_cache[unit_id] = {
             "col": col,
             "row": row,
             "HP_CUR": hp_cur,
-            "player": player
+            "player": player,
+            "BASE_SHAPE": base_shape,
+            "BASE_SIZE": base_size,
+            "occupied_hexes": occupied,
         }
+        
+        for cell in occupied:
+            occupation_map[cell] = unit_id
     
     game_state["units_cache"] = units_cache
+    game_state["occupation_map"] = occupation_map
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     phase = game_state.get("phase", "?")
-    add_debug_file_log(game_state, f"[UNITS_CACHE BUILD] E{episode} T{turn} {phase} units_cache={units_cache}")
+    add_debug_file_log(game_state, f"[UNITS_CACHE BUILD] E{episode} T{turn} {phase} units_cache built with {len(units_cache)} units, occupation_map={len(occupation_map)} cells")
+
+
+def _update_occupation_map(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    old_entry: Optional[Dict[str, Any]],
+    new_occupied: Optional[Set[Tuple[int, int]]],
+) -> None:
+    """Incrementally update game_state["occupation_map"] when a unit moves or dies.
+
+    Removes old cells, adds new cells. Skips if occupation_map not yet built.
+    """
+    occ_map = game_state.get("occupation_map")
+    if occ_map is None:
+        return
+    if old_entry is not None:
+        for cell in old_entry.get("occupied_hexes", set()):
+            if occ_map.get(cell) == unit_id:
+                del occ_map[cell]
+    if new_occupied is not None:
+        for cell in new_occupied:
+            occ_map[cell] = unit_id
 
 
 def update_units_cache_unit(
@@ -256,11 +400,23 @@ def update_units_cache_unit(
     if effective_hp <= 0:
         remove_from_units_cache(game_state, unit_id)
         return
+    
+    old_entry = game_state["units_cache"].get(unit_id)
+    base_shape = old_entry.get("BASE_SHAPE", "round") if old_entry else "round"
+    base_size = old_entry.get("BASE_SIZE", 1) if old_entry else 1
+    unit_stub = {"BASE_SHAPE": base_shape, "BASE_SIZE": base_size}
+    new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)
+    
+    _update_occupation_map(game_state, unit_id, old_entry, new_occupied)
+    
     game_state["units_cache"][unit_id] = {
         "col": norm_col,
         "row": norm_row,
         "HP_CUR": effective_hp,
-        "player": player
+        "player": player,
+        "BASE_SHAPE": base_shape,
+        "BASE_SIZE": base_size,
+        "occupied_hexes": new_occupied,
     }
 
 
@@ -306,6 +462,8 @@ def remove_from_units_cache(game_state: Dict[str, Any], unit_id: str) -> None:
         removed_player = require_key(entry, "player")
         removed_col_int, removed_row_int = normalize_coordinates(removed_col, removed_row)
         removed_player_int = int(removed_player)
+
+        _update_occupation_map(game_state, unit_id, entry, None)
 
         update_enemy_adjacent_caches_after_unit_removed(
             game_state,
@@ -445,17 +603,20 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
     
     entry = game_state["units_cache"].get(unit_id)
     if entry is None:
-        # Unit not in cache - no-op
         return
     
     old_col = entry.get("col")
     old_row = entry.get("row")
 
-    # Normalize coordinates
     norm_col, norm_row = normalize_coordinates(col, row)
+    
+    unit_stub = {"BASE_SHAPE": entry.get("BASE_SHAPE", "round"), "BASE_SIZE": entry.get("BASE_SIZE", 1)}
+    new_occupied = _compute_unit_occupied_hexes(norm_col, norm_row, unit_stub, game_state)
+    _update_occupation_map(game_state, unit_id, entry, new_occupied)
     
     entry["col"] = norm_col
     entry["row"] = norm_row
+    entry["occupied_hexes"] = new_occupied
 
     if game_state.get("debug_mode", False):
         episode = game_state.get("episode_number", "?")
@@ -698,30 +859,39 @@ def enrich_unit_for_reward_mapper(unit: Dict[str, Any], game_state: Dict[str, An
     return enriched
 
 
-def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
-    """
-    Pre-compute all hexes adjacent to enemy units.
+def get_engagement_zone(game_state: Dict[str, Any]) -> int:
+    """Read engagement_zone from game_rules config.
 
-    Returns a set of (col, row) tuples that are adjacent to at least one enemy.
-    This allows O(1) adjacency checks instead of O(n) iteration per hex.
+    Returns 1 for legacy boards (adjacency), 10 for Board ×10 (§9.0).
+    """
+    config = game_state.get("config") or {}
+    game_rules = config.get("game_rules") or {}
+    return int(game_rules.get("engagement_zone", 1))
+
+
+def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
+    """Pre-compute all hexes within engagement_zone of enemy units.
+
+    Returns a set of (col, row) that are in the engagement zone of at least one enemy.
+    For legacy boards (engagement_zone=1): equivalent to adjacent hexes.
+    For Board ×10 (engagement_zone=10): dilated multi-hex zone (§9.0).
 
     Calculates once per phase and stores in game_state cache.
     Call this function at phase start, then use game_state[f"enemy_adjacent_hexes_player_{player}"] directly.
 
-    Uses units_cache as source of truth for living enemy positions.
+    Uses units_cache as source of truth for living enemy positions and occupied_hexes.
 
     Args:
         game_state: Game state with units_cache
         player: The player checking adjacency (enemies are units with different player)
 
     Returns:
-        Set of hex coordinates adjacent to any living enemy unit
+        Set of hex coordinates in the engagement zone of any living enemy unit
     """
     enemy_adjacent_counts, enemy_adjacent_hexes = _compute_enemy_adjacent_cache_for_player_from_units_cache(
         game_state, int(player)
     )
 
-    # Store result in game_state cache for reuse during phase
     cache_key = f"enemy_adjacent_hexes_player_{player}"
     counts_key = f"enemy_adjacent_counts_player_{player}"
     game_state[cache_key] = enemy_adjacent_hexes
@@ -733,16 +903,20 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
 def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     game_state: Dict[str, Any], player: int
 ) -> Tuple[Dict[Tuple[int, int], int], Set[Tuple[int, int]]]:
-    """
-    Compute per-player enemy-adjacent counters and set from current units_cache.
+    """Compute per-player engagement-zone counters and set from current units_cache.
+
+    Uses engagement_zone from game_rules (1 for legacy, 10 for ×10).
+    For each enemy unit, dilates its occupied_hexes by engagement_zone distance.
     """
     units_cache = require_key(game_state, "units_cache")
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
+    engagement_zone = get_engagement_zone(game_state)
     player_int = int(player)
 
-    counts: Dict[Tuple[int, int], int] = {}
-    hexes: Set[Tuple[int, int]] = set()
+    all_enemy_occupied: Set[Tuple[int, int]] = set()
+    per_unit_occupied: list = []
+
     for entry in units_cache.values():
         hp_cur = require_key(entry, "HP_CUR")
         if hp_cur <= 0:
@@ -755,60 +929,37 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
         if entry_player == player_int:
             continue
 
-        enemy_col = require_key(entry, "col")
-        enemy_row = require_key(entry, "row")
-        for neighbor_col, neighbor_row in get_hex_neighbors(enemy_col, enemy_row):
-            if (
-                neighbor_col < 0
-                or neighbor_row < 0
-                or neighbor_col >= board_cols
-                or neighbor_row >= board_rows
-            ):
-                continue
-            neighbor = (neighbor_col, neighbor_row)
-            if neighbor in counts:
-                counts[neighbor] = counts[neighbor] + 1
-            else:
-                counts[neighbor] = 1
-            hexes.add(neighbor)
-    return counts, hexes
+        occ = entry.get("occupied_hexes")
+        if occ:
+            all_enemy_occupied.update(occ)
+            per_unit_occupied.append(occ)
+        else:
+            enemy_col = require_key(entry, "col")
+            enemy_row = require_key(entry, "row")
+            cell = (enemy_col, enemy_row)
+            all_enemy_occupied.add(cell)
+            per_unit_occupied.append({cell})
+
+    from engine.hex_utils import dilate_hex_set
+    zone_hexes = dilate_hex_set(all_enemy_occupied, engagement_zone, board_cols, board_rows)
+
+    counts: Dict[Tuple[int, int], int] = {}
+    for unit_occ in per_unit_occupied:
+        unit_zone = dilate_hex_set(unit_occ, engagement_zone, board_cols, board_rows)
+        for h in unit_zone:
+            counts[h] = counts.get(h, 0) + 1
+
+    return counts, zone_hexes
 
 
 def _compute_enemy_adjacent_hexes_from_units_cache(
     game_state: Dict[str, Any], player: int
 ) -> Set[Tuple[int, int]]:
-    """
-    Compute enemy-adjacent hexes directly from current units_cache snapshot.
-    """
-    units_cache = require_key(game_state, "units_cache")
-    board_cols = require_key(game_state, "board_cols")
-    board_rows = require_key(game_state, "board_rows")
-
-    enemy_adjacent_hexes: Set[Tuple[int, int]] = set()
-    player_int = int(player)
-    for entry in units_cache.values():
-        hp_cur = require_key(entry, "HP_CUR")
-        if hp_cur <= 0:
-            continue
-        entry_player_raw = require_key(entry, "player")
-        try:
-            entry_player = int(entry_player_raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid player value in units_cache entry: {entry_player_raw!r}") from exc
-        if entry_player == player_int:
-            continue
-
-        enemy_col = require_key(entry, "col")
-        enemy_row = require_key(entry, "row")
-        for neighbor_col, neighbor_row in get_hex_neighbors(enemy_col, enemy_row):
-            if (
-                neighbor_col >= 0
-                and neighbor_row >= 0
-                and neighbor_col < board_cols
-                and neighbor_row < board_rows
-            ):
-                enemy_adjacent_hexes.add((neighbor_col, neighbor_row))
-    return enemy_adjacent_hexes
+    """Compute engagement-zone hexes directly from current units_cache snapshot."""
+    _, zone_hexes = _compute_enemy_adjacent_cache_for_player_from_units_cache(
+        game_state, player
+    )
+    return zone_hexes
 
 
 def _get_players_present_from_units_cache(game_state: Dict[str, Any]) -> Set[int]:

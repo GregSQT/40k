@@ -28,6 +28,8 @@ export class TermagantTuto extends SwarmRangeSwarm {
 
 
   static ICON = "/icons/Termagant.webp"; // Path relative to public folder
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = 11; // Size of the base
   static ICON_SCALE = 1.2; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

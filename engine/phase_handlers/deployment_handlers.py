@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
 deployment_handlers.py - Deployment Phase Implementation (Test mode)
+
+Footprint-aware: validates entire unit footprint (multi-hex bases) during deployment.
 """
 
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple, List, Optional, Set
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
-from engine.phase_handlers.shared_utils import update_units_cache_position, rebuild_choice_timing_index
+from engine.phase_handlers.shared_utils import (
+    update_units_cache_position, rebuild_choice_timing_index,
+    compute_candidate_footprint, build_occupied_positions_set,
+)
 
 
 def deployment_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -39,11 +44,14 @@ def _get_deployable_remaining(deployment_state: Dict[str, Any], player: int) -> 
     raise KeyError(f"deployable_units missing player {player}")
 
 
-def _is_hex_occupied(game_state: Dict[str, Any], dest_col: int, dest_row: int) -> bool:
-    for unit in require_key(game_state, "units"):
-        if int(unit["col"]) == int(dest_col) and int(unit["row"]) == int(dest_row):
-            return True
-    return False
+def _is_footprint_overlapping(
+    game_state: Dict[str, Any],
+    candidate_fp: Set[Tuple[int, int]],
+    exclude_unit_id: Optional[str] = None,
+) -> bool:
+    """Check if candidate footprint overlaps any deployed unit's footprint."""
+    occupied = build_occupied_positions_set(game_state, exclude_unit_id=exclude_unit_id)
+    return bool(candidate_fp & occupied)
 
 
 def _mark_deployed(deployment_state: Dict[str, Any], unit_id: str, current_deployer: int) -> None:
@@ -92,7 +100,10 @@ def _resolve_next_deployer_after_success(
 
 def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    Execute deployment action.
+    Execute deployment action with footprint-aware validation.
+
+    Validates that the entire unit footprint (multi-hex base) fits within the
+    deployment pool, does not overlap walls, and does not overlap other units.
     """
     current_phase = require_key(game_state, "phase")
     if current_phase != "deployment":
@@ -125,11 +136,23 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     deployment_pools = require_key(deployment_state, "deployment_pools")
     pool = _get_deployment_pool(deployment_pools, int(current_deployer))
     pool_set = {(int(col), int(row)) for col, row in pool}
-    if (int(dest_col), int(dest_row)) not in pool_set:
-        return False, {"error": "invalid_deploy_hex", "unitId": unit_id, "destCol": dest_col, "destRow": dest_row}
 
-    if _is_hex_occupied(game_state, dest_col, dest_row):
-        return False, {"error": "deploy_hex_occupied", "unitId": unit_id, "destCol": dest_col, "destRow": dest_row}
+    candidate_fp = compute_candidate_footprint(int(dest_col), int(dest_row), unit, game_state)
+
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    wall_hexes = game_state.get("wall_hexes", set())
+
+    for c, r in candidate_fp:
+        if c < 0 or c >= board_cols or r < 0 or r >= board_rows:
+            return False, {"error": "deploy_footprint_out_of_bounds", "cell": (c, r)}
+        if (c, r) not in pool_set:
+            return False, {"error": "deploy_footprint_outside_zone", "cell": (c, r)}
+        if (c, r) in wall_hexes:
+            return False, {"error": "deploy_footprint_on_wall", "cell": (c, r)}
+
+    if _is_footprint_overlapping(game_state, candidate_fp, exclude_unit_id=unit_id):
+        return False, {"error": "deploy_footprint_occupied", "unitId": unit_id}
 
     set_unit_coordinates(unit, dest_col, dest_row)
     update_units_cache_position(game_state, unit_id, dest_col, dest_row)

@@ -35,8 +35,16 @@ def get_selected_melee_weapon(unit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return cc_weapons[idx]
 
 
-def get_melee_range() -> int:
-    """Melee range is always 1."""
+def get_melee_range(game_state: Optional[Dict[str, Any]] = None) -> int:
+    """Melee engagement range.
+
+    Returns engagement_zone from game_rules (1 for legacy, 10 for ×10).
+    If game_state is not provided, returns 1 (legacy default).
+    """
+    if game_state is not None:
+        config = game_state.get("config") or {}
+        game_rules = config.get("game_rules") or {}
+        return int(game_rules.get("engagement_zone", 1))
     return 1
 
 

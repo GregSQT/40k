@@ -32,6 +32,8 @@ export class AssaultIntercessorJumpPackSergeantPowerFistHandFlamer extends Troop
 
 
   static ICON = "/icons/AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.webp"; // Path relative to public folder
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = 13; // Size of the base
   static ICON_SCALE = 1.7; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

@@ -27,6 +27,8 @@ export class LeaderCaptainGravis extends LeaderEliteMeleeElite {
   static UNIT_KEYWORDS = [...CaptainGravisPowerWeaponBoltRifle.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
 
   static ICON = "/icons/CaptainGravisPowerWeaponBoltRifle.webp";
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = CaptainGravisPowerWeaponBoltRifle.BASE_SIZE; // Size of the base
   static ICON_SCALE = CaptainGravisPowerWeaponBoltRifle.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

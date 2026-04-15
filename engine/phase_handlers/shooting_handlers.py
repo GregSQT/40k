@@ -28,6 +28,7 @@ from .shared_utils import (
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
+    build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
 )
 
 # ============================================================================
@@ -526,19 +527,21 @@ def weapon_availability_check(
                 # Check if at least ONE enemy unit meets ALL conditions
                 weapon_has_valid_target = False
                 
+                from engine.hex_utils import min_distance_between_sets as _mds_wpn
                 units_cache = require_key(game_state, "units_cache")
                 unit_player = int(unit["player"]) if unit["player"] is not None else None
                 unit_col, unit_row = require_unit_position(unit, game_state)
+                _uid_str = str(unit["id"])
+                _ue = units_cache.get(_uid_str)
+                _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)}) if _ue else {(unit_col, unit_row)}
                 for enemy_id, cache_entry in units_cache.items():
-                    # CRITICAL: Normalize player values to int for consistent comparison
                     enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
                     if enemy_player != unit_player:
                         enemy = get_unit_by_id(game_state, enemy_id)
                         if enemy is None:
                             raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                        # Check range (use cache_entry for enemy position)
-                        enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-                        distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+                        _e_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+                        distance = _mds_wpn(_u_fp, _e_fp)
                         if distance > weapon_range:
                             continue
                         
@@ -675,20 +678,21 @@ def _get_available_weapons_for_selection(
             })
             continue
         
+        from engine.hex_utils import min_distance_between_sets as _mds_wpn2
         units_cache = require_key(game_state, "units_cache")
         unit_player = int(unit["player"]) if unit["player"] is not None else None
         unit_col, unit_row = require_unit_position(unit, game_state)
+        _uid2 = str(unit["id"])
+        _ue2 = units_cache.get(_uid2)
+        _u_fp2 = _ue2.get("occupied_hexes", {(unit_col, unit_row)}) if _ue2 else {(unit_col, unit_row)}
         for enemy_id, cache_entry in units_cache.items():
-            # CRITICAL: Normalize player values to int for consistent comparison
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if enemy_player != unit_player:
                 enemy = get_unit_by_id(game_state, enemy_id)
                 if enemy is None:
                     raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                
-                # Check range (use cache_entry for enemy position)
-                enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-                distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+                _e_fp2 = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+                distance = _mds_wpn2(_u_fp2, _e_fp2)
                 if distance > weapon_range:
                     continue
                 
@@ -1018,51 +1022,72 @@ def preview_shoot_valid_targets_from_position(
     advance_position: bool = False,
 ) -> List[str]:
     """
-    Build valid_target_pool for a unit at a hypothetical position (read-only, no mutation).
-    Used by move phase preview and advance phase preview: same logic as shoot phase, source of truth.
+    Return IDs of enemies targetable from a hypothetical position (read-only, no mutation).
+
+    Lightweight alternative to deepcopy: directly checks LoS and range from
+    (dest_col, dest_row) to each alive enemy, without mutating game_state.
 
     Args:
-        advance_position: If True, simulate unit having advanced (ASSAULT weapons only, or shoot_after_advance).
+        advance_position: If True, only ASSAULT weapons count for range check.
     """
     unit = _get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
-    if "units_cache" not in game_state:
+    units_cache = game_state.get("units_cache")
+    if not units_cache:
         return []
-    state_copy = copy.deepcopy(game_state)
-    unit_id_str = str(unit_id)
-    unit_copy = _get_unit_by_id(state_copy, unit_id)
-    if not unit_copy:
+
+    from engine.utils.weapon_helpers import get_max_ranged_range
+    from engine.hex_utils import hex_distance, compute_los_state, build_wall_set
+
+    rng_weapons = unit.get("RNG_WEAPONS", [])
+    if not rng_weapons:
         return []
-    set_unit_coordinates(unit_copy, dest_col, dest_row)
-    update_units_cache_position(state_copy, unit_id_str, dest_col, dest_row)
+
     if advance_position:
-        if "units_advanced" not in state_copy:
-            state_copy["units_advanced"] = set()
-        state_copy["units_advanced"].add(unit_id_str)
-    if "weapon_rule" not in state_copy:
-        state_copy["weapon_rule"] = 1
-    # Initialize weapon.shot = 0 (required by weapon_availability_check; move phase has no shooting init)
-    current_player = int(require_key(unit_copy, "player"))
-    units = require_key(state_copy, "units")
-    if not isinstance(units, list):
-        raise TypeError(f"state_copy['units'] must be list (got {type(units).__name__})")
-    for u in units:
-        if int(require_key(u, "player")) != current_player:
-            continue
-        rng_weapons = require_key(u, "RNG_WEAPONS")
-        if not isinstance(rng_weapons, list):
-            raise TypeError(
-                f"Unit {require_key(u, 'id')} RNG_WEAPONS must be list "
-                f"(got {type(rng_weapons).__name__})"
+        assault_weapons = [w for w in rng_weapons if w.get("type") == "Assault"]
+        if not assault_weapons:
+            has_shoot_after_advance = any(
+                r.get("rule") == "shoot_after_advance"
+                for r in unit.get("RULES", [])
             )
-        for weapon in rng_weapons:
-            if "shot" not in weapon:
-                weapon["shot"] = 0
-    if "los_cache" in unit_copy:
-        del unit_copy["los_cache"]
-    build_unit_los_cache(state_copy, unit_id_str)
-    return shooting_build_valid_target_pool(state_copy, unit_id_str)
+            if not has_shoot_after_advance:
+                return []
+            max_range = max(w.get("RNG", 0) for w in rng_weapons)
+        else:
+            max_range = max(w.get("RNG", 0) for w in assault_weapons)
+    else:
+        max_range = get_max_ranged_range(unit)
+
+    if max_range <= 0:
+        return []
+
+    unit_player = int(unit["player"])
+    config = game_state.get("config", {})
+    game_rules = config.get("game_rules", {})
+    los_min = float(game_rules.get("los_visibility_min_ratio", 0.5))
+    cover_ratio = float(game_rules.get("cover_ratio", 0.75))
+    wall_set = build_wall_set(game_state)
+
+    valid_targets: List[str] = []
+    for target_id, target_data in units_cache.items():
+        if int(target_data.get("player", -1)) == unit_player:
+            continue
+        if not is_unit_alive(str(target_id), game_state):
+            continue
+        t_col = int(target_data["col"])
+        t_row = int(target_data["row"])
+        dist = hex_distance(dest_col, dest_row, t_col, t_row)
+        if dist > max_range or dist <= 0:
+            continue
+        _ratio, can_see, _in_cover = compute_los_state(
+            dest_col, dest_row, t_col, t_row,
+            wall_set, los_min, cover_ratio,
+        )
+        if can_see:
+            valid_targets.append(str(target_id))
+
+    return valid_targets
 
 
 def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_id: str) -> None:
@@ -1469,32 +1494,35 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     EXACT COPY from w40k_engine_save.py working validation with proper LoS
     PERFORMANCE: Uses LoS cache for instant lookups (0.001ms vs 5-10ms)
     """
-    # Range check using proper hex distance
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from all ranged weapons
+    # Range check using min footprint distance (§3.3)
+    from engine.hex_utils import min_distance_between_sets
+    from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range, get_selected_ranged_weapon
+
     shooter_col, shooter_row = require_unit_position(shooter, game_state)
     target_col, target_row = require_unit_position(target, game_state)
-    distance = _calculate_hex_distance(shooter_col, shooter_row, target_col, target_row)
-    from engine.utils.weapon_helpers import get_max_ranged_range
+
+    units_cache = require_key(game_state, "units_cache")
+    shooter_id_str = str(shooter["id"])
+    target_id_str = str(target["id"])
+    shooter_entry = units_cache.get(shooter_id_str)
+    target_entry = units_cache.get(target_id_str)
+    shooter_fp = shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)}) if shooter_entry else {(shooter_col, shooter_row)}
+    target_fp = target_entry.get("occupied_hexes", {(target_col, target_row)}) if target_entry else {(target_col, target_row)}
+    distance = min_distance_between_sets(shooter_fp, target_fp)
+
     max_range = get_max_ranged_range(shooter)
     if distance > max_range:
         return False
-        
-    # Dead target check (units_cache is source of truth)
-    if not is_unit_alive(str(target["id"]), game_state):
+
+    if not is_unit_alive(target_id_str, game_state):
         return False
-        
-    # Friendly fire check
-    # CRITICAL: Normalize player values to int for consistent comparison
+
     target_player = int(target["player"]) if target["player"] is not None else None
     shooter_player = int(shooter["player"]) if shooter["player"] is not None else None
     if target_player == shooter_player:
         return False
-    
-    # CRITICAL: If shooter is engaged (adjacent to at least one enemy),
-    # it can only shoot with a PISTOL weapon and only at adjacent targets.
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
-    from engine.utils.weapon_helpers import get_melee_range, get_selected_ranged_weapon
-    melee_range = get_melee_range()
+
+    melee_range = get_melee_range(game_state)
     enemy_adjacent_to_shooter = (distance <= melee_range)
     selected_weapon = get_selected_ranged_weapon(shooter)
     weapon_is_pistol = bool(selected_weapon and _weapon_has_pistol_rule(selected_weapon))
@@ -1503,30 +1531,19 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     if shooter_is_engaged:
         if not weapon_is_pistol:
             return False
-        # Engaged shooter with PISTOL can only target adjacent enemies.
         if not enemy_adjacent_to_shooter:
             return False
     elif enemy_adjacent_to_shooter and not weapon_is_pistol:
-        # Non-engaged shooter cannot use non-PISTOL against adjacent targets.
         return False
-    
-    # W40K RULE: Cannot shoot at enemy engaged in melee with friendly units
-    # CRITICAL: This rule applies ONLY when enemy is NOT adjacent to shooter
-    # If enemy is adjacent to shooter AND we have PISTOL weapon, we can shoot regardless of engagement
-    # If enemy is NOT adjacent to shooter, normal rules apply: cannot shoot if enemy is engaged with friendly units
+
     if not enemy_adjacent_to_shooter:
-        # Enemy is NOT adjacent to shooter - apply normal engaged enemy rule
-        units_cache = require_key(game_state, "units_cache")
         shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
-        shooter_id_str = str(shooter["id"])
-        target_col, target_row = require_unit_position(target, game_state)
         for friendly_id, cache_entry in units_cache.items():
-            # CRITICAL: Normalize player values to int for consistent comparison
             friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
-                friendly_col, friendly_row = cache_entry["col"], cache_entry["row"]
-                friendly_distance = _calculate_hex_distance(target_col, target_row, friendly_col, friendly_row)
-                
+                friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+                friendly_distance = min_distance_between_sets(target_fp, friendly_fp)
+
                 if friendly_distance <= melee_range:
                     # Enemy is engaged with friendly unit - cannot shoot
                     if game_state.get("debug_mode", False):
@@ -1933,18 +1950,18 @@ def valid_target_pool_build(
                 add_console_log(game_state, log_msg)
             continue
         
-        # CRITICAL: If shooter is engaged (adjacent to at least one enemy),
-        # only adjacent targets are valid (and only with PISTOL weapons).
-        # This check must be done BEFORE checking if enemy is engaged with other friendly units.
         from engine.utils.weapon_helpers import get_melee_range
-        melee_range = get_melee_range()
+        from engine.hex_utils import min_distance_between_sets
+        melee_range = get_melee_range(game_state)
         enemy_entry = units_cache.get(target_id_str)
         if enemy_entry is None:
             raise KeyError(f"Enemy {target_id_str} not in units_cache (dead or absent)")
-        enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
-        distance_to_enemy = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
-        
-        # Check if enemy is adjacent to shooter
+
+        unit_entry = units_cache.get(unit_id_normalized)
+        shooter_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+        enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
+        distance_to_enemy = min_distance_between_sets(shooter_fp, enemy_fp)
+
         enemy_adjacent_to_shooter = (distance_to_enemy <= melee_range)
         shooter_is_engaged = adjacent_status == 1
         has_pistol_weapon = False
@@ -1985,24 +2002,15 @@ def valid_target_pool_build(
         # If enemy is adjacent to shooter AND we have PISTOL weapon, we can shoot regardless of engagement
         # If enemy is NOT adjacent to shooter, normal rules apply: cannot shoot if enemy is engaged with friendly units
         if not enemy_adjacent_to_shooter:
-            # Enemy is NOT adjacent to shooter - apply normal engaged enemy rule
             enemy_adjacent_to_friendly = False
             engaged_friendly_id = None
             engaged_friendly_distance = None
-            units_cache = require_key(game_state, "units_cache")
-            enemy_entry = units_cache.get(enemy_id_normalized)
-            if enemy_entry is None:
-                raise KeyError(f"Enemy {enemy_id_normalized} not in units_cache (dead or absent)")
-            enemy_col, enemy_row = enemy_entry["col"], enemy_entry["row"]
             for friendly_id, cache_entry in units_cache.items():
-                # CRITICAL: Convert to int for consistent comparison (player can be int or string)
                 friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
                 if (friendly_player == current_player_int and 
                     friendly_id != unit_id_normalized):
-                    friendly_col, friendly_row = cache_entry["col"], cache_entry["row"]
-                    friendly_distance = _calculate_hex_distance(
-                        enemy_col, enemy_row, friendly_col, friendly_row
-                    )
+                    friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+                    friendly_distance = min_distance_between_sets(enemy_fp, friendly_fp)
                     if friendly_distance <= melee_range:
                         enemy_adjacent_to_friendly = True
                         engaged_friendly_id = friendly_id
@@ -2627,7 +2635,7 @@ def _dump_los_contradiction_diagnostic(
     if cache_key_inv in hlc:
         lines.append(f"hex_los_cache[inverse_key] = {hlc[cache_key_inv]}")
 
-    # topology
+    # topology (legacy) or on-demand (×10)
     lt = game_state.get("los_topology")
     bc, br = game_state.get("board_cols"), game_state.get("board_rows")
     if lt is not None and bc is not None and br is not None:
@@ -2641,6 +2649,12 @@ def _dump_los_contradiction_diagnostic(
             lines.append(f"los_topology[target_idx, attacker_idx] = {val_inv:.6f} (idx {ti}->{fi})")
         else:
             lines.append(f"Topology indices out of bounds: fi={fi} ti={ti} n={n}")
+    elif lt is None:
+        from engine.hex_utils import compute_los_visibility
+        wall_set = _get_wall_set(game_state)
+        v_fwd = compute_los_visibility(ac_norm, ar_norm, tc_norm, tr_norm, wall_set)
+        v_inv = compute_los_visibility(tc_norm, tr_norm, ac_norm, ar_norm, wall_set)
+        lines.append(f"on-demand LoS (no topology): fwd={v_fwd:.6f} inv={v_inv:.6f}")
     else:
         lines.append(f"los_topology present: {lt is not None}, board_cols={bc}, board_rows={br}")
 
@@ -2660,13 +2674,11 @@ def _get_los_visibility_state(
     end_col: int,
     end_row: int,
 ) -> Tuple[float, bool, bool]:
-    """Return (visibility_ratio, can_see, in_cover) using los_topology (required).
-    Topology is the single source of truth for LoS; no implicit recovery."""
-    los_topology = game_state.get("los_topology")
-    if los_topology is None:
-        raise KeyError(
-            "los_topology is required. Load topology at reset via topology_{cols}x{rows}-{wall_id}.npz"
-        )
+    """Return (visibility_ratio, can_see, in_cover).
+
+    Uses precomputed los_topology when available (legacy boards with .npz).
+    Falls back to on-demand hex line trace (Board ×10) via hex_utils.
+    """
     config = require_key(game_state, "config")
     game_rules = require_key(config, "game_rules")
     los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
@@ -2682,14 +2694,35 @@ def _get_los_visibility_state(
         and 0 <= end_col < board_cols
         and 0 <= end_row < board_rows
     ):
-        # Invalid coords (e.g. undeployed unit at -1,-1): no LoS
         return 0.0, False, False
-    from_idx = start_row * board_cols + start_col
-    to_idx = end_row * board_cols + end_col
-    visibility_ratio = float(los_topology[from_idx, to_idx])
+
+    los_topology = game_state.get("los_topology")
+    if los_topology is not None:
+        from_idx = start_row * board_cols + start_col
+        to_idx = end_row * board_cols + end_col
+        visibility_ratio = float(los_topology[from_idx, to_idx])
+    else:
+        from engine.hex_utils import compute_los_state, build_wall_set
+        wall_set = _get_wall_set(game_state)
+        return compute_los_state(
+            start_col, start_row, end_col, end_row,
+            wall_set, los_visibility_min_ratio, cover_ratio,
+        )
+
     can_see = visibility_ratio >= los_visibility_min_ratio
     in_cover = can_see and visibility_ratio < cover_ratio
     return visibility_ratio, can_see, in_cover
+
+
+def _get_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
+    """Return cached wall_set from game_state, building it on first call."""
+    cached = game_state.get("_wall_set_cache")
+    if cached is not None:
+        return cached
+    from engine.hex_utils import build_wall_set
+    ws = build_wall_set(game_state)
+    game_state["_wall_set_cache"] = ws
+    return ws
 
 
 def _update_unit_los_preview_data(
@@ -6012,53 +6045,55 @@ def _unit_has_shot_with_any_weapon(unit: Dict[str, Any]) -> bool:
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    Check if unit is adjacent to enemy within melee range.
-    
-    PERFORMANCE: Uses cached enemy_adjacent_hexes if available (O(1) lookup),
-    otherwise falls back to iterating enemies (O(n)).
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (melee range is always 1)
+    Check if unit is engaged (within engagement zone of any enemy).
+
+    Uses min distance between footprints (§3.3, §9.8) for multi-hex units.
+    Always uses fresh positions from units_cache.
     """
     from engine.utils.weapon_helpers import get_melee_range
-    cc_range = get_melee_range()  # Always 1
-    
-    # CRITICAL FIX: Check adjacency using current positions from units_cache
-    # The cache built at phase start may be stale if unit positions changed after movement.
-    # Always use current positions for accurate adjacency checks.
+    from engine.hex_utils import min_distance_between_sets
+    cc_range = get_melee_range(game_state)
+
     unit_col, unit_row = require_unit_position(unit, game_state)
     unit_player = int(unit["player"]) if unit["player"] is not None else None
-    
-    # Check if unit is adjacent to any enemy using current positions
+
     units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     for enemy_id, cache_entry in units_cache.items():
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
-            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            distance = min_distance_between_sets(unit_fp, enemy_fp)
             if distance <= cc_range:
                 return True
     return False
 
 
 def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Cube coordinate range check"""
-    # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from all ranged weapons
+    """Check if any enemy is within weapon range using footprint distance (§3.3)."""
     from engine.utils.weapon_helpers import get_max_ranged_range
+    from engine.hex_utils import min_distance_between_sets
     max_range = get_max_ranged_range(unit)
     if max_range <= 0:
         return False
 
-    # CRITICAL: Normalize player value to int for consistent comparison
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     units_cache = require_key(game_state, "units_cache")
     unit_col, unit_row = require_unit_position(unit, game_state)
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     for enemy_id, cache_entry in units_cache.items():
-        # CRITICAL: Normalize player value to int for consistent comparison
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
-            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-            distance = _calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            distance = min_distance_between_sets(unit_fp, enemy_fp)
             if distance <= max_range:
-                return True  # Simplified - assume clear LoS for now
+                return True
 
     return False
 
@@ -6087,7 +6122,6 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
     from engine.combat_utils import get_hex_neighbors, is_hex_adjacent_to_enemy
     from engine.phase_handlers.movement_handlers import (
         movement_build_valid_destinations_pool,
-        _is_traversable_hex
     )
     from .shared_utils import build_enemy_adjacent_hexes
     
@@ -6239,16 +6273,18 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         if (dest_col, dest_row) not in valid_destinations:
             return False, {"error": "invalid_advance_destination", "destination": (dest_col, dest_row)}
         
-        # Re-validate destination against current enemy positions at commit time.
-        # This protects against stale pools when board state changed during activation.
+        from engine.hex_utils import min_distance_between_sets
+        from .shared_utils import get_engagement_zone, compute_candidate_footprint
+        engagement_zone = get_engagement_zone(game_state)
         unit_player_int = int(require_key(unit, "player"))
         units_cache = require_key(game_state, "units_cache")
+        candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
         for enemy_id, cache_entry in units_cache.items():
             enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if enemy_player == unit_player_int:
                 continue
-            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-            if _calculate_hex_distance(dest_col, dest_row, enemy_col, enemy_row) <= 1:
+            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            if min_distance_between_sets(candidate_fp, enemy_fp) <= engagement_zone:
                 return False, {
                     "error": "advance_destination_adjacent_to_enemy",
                     "enemy_id": enemy_id,
@@ -6267,31 +6303,21 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         from engine.game_utils import conditional_debug_print
         conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} checking advance destination ({dest_col_int},{dest_row_int})")
         
-        # Check all units for occupation - CRITICAL: Use explicit int conversion for all comparisons
-        units_cache = require_key(game_state, "units_cache")
         unit_id_str = str(unit["id"])
-        for check_id, check_entry in units_cache.items():
-            check_col, check_row = check_entry["col"], check_entry["row"]
-            check_hp = get_hp_from_cache(str(check_id), game_state)
-            conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Checking Unit {check_id} at ({check_col},{check_row}) - HP={check_hp}")
-            
-            # CRITICAL: Compare as integers to avoid type mismatch
-            if (check_id != unit_id_str and
-                check_col == dest_col_int and
-                check_row == dest_row_int):
-                # Another unit already occupies this destination - prevent collision
-                if "console_logs" not in game_state:
-                    game_state["console_logs"] = []
-                log_msg = f"[ADVANCE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot advance to ({dest_col_int},{dest_row_int}) - occupied by Unit {check_id}"
-                from engine.game_utils import add_console_log, add_debug_log
-                from engine.game_utils import safe_print
-                add_console_log(game_state, log_msg)
-                safe_print(game_state, log_msg)
-                return False, {
-                    "error": "advance_destination_occupied",
-                    "occupant_id": check_id,
-                    "destination": (dest_col, dest_row)
-                }
+        occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+        candidate_fp = compute_candidate_footprint(dest_col_int, dest_row_int, unit, game_state)
+        if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+            if "console_logs" not in game_state:
+                game_state["console_logs"] = []
+            log_msg = f"[ADVANCE COLLISION PREVENTED] E{episode} T{turn} {phase}: Unit {unit['id']} cannot advance to ({dest_col_int},{dest_row_int}) - footprint blocked"
+            from engine.game_utils import add_console_log, add_debug_log
+            from engine.game_utils import safe_print
+            add_console_log(game_state, log_msg)
+            safe_print(game_state, log_msg)
+            return False, {
+                "error": "advance_destination_occupied",
+                "destination": (dest_col, dest_row)
+            }
         
         conditional_debug_print(game_state, f"[OCCUPATION CHECK] E{episode} T{turn} {phase}: Unit {unit['id']} advance destination ({dest_col_int},{dest_row_int}) is FREE - proceeding with advance")
         

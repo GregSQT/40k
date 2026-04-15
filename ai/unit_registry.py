@@ -414,7 +414,12 @@ class UnitRegistry:
                 prop_value = prop_value.split('#')[0].strip()
             
             # Try to convert to appropriate type
-            if prop_value.isdigit() or (prop_value.startswith('-') and prop_value[1:].isdigit()):
+            if prop_value.startswith('[') and prop_value.endswith(']'):
+                try:
+                    properties[prop_name] = json.loads(prop_value)
+                except json.JSONDecodeError:
+                    properties[prop_name] = prop_value
+            elif prop_value.isdigit() or (prop_value.startswith('-') and prop_value[1:].isdigit()):
                 properties[prop_name] = int(prop_value)
             elif prop_value.replace('.', '').isdigit():
                 properties[prop_name] = float(prop_value)

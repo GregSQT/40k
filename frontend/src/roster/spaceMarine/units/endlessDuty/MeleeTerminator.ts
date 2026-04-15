@@ -25,6 +25,8 @@ export class MeleeTerminator extends EliteMeleeElite {
 
   static UNIT_KEYWORDS = [...AssaultTerminator.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = AssaultTerminator.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = AssaultTerminator.BASE_SIZE; // Size of the base
   static ICON_SCALE = AssaultTerminator.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

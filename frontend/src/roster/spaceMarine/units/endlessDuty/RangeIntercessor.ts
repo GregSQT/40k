@@ -25,6 +25,8 @@ export class RangeIntercessor extends TroopRangeSwarm {
 
   static UNIT_KEYWORDS = [...Intercessor.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = Intercessor.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = Intercessor.BASE_SIZE; // Size of the base
   static ICON_SCALE = Intercessor.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

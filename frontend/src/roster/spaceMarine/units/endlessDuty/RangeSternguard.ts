@@ -25,6 +25,8 @@ export class RangeSternguard extends TroopRangeSwarm {
 
   static UNIT_KEYWORDS = [...SternguardVeteranBoltRifle.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = SternguardVeteranBoltRifle.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = SternguardVeteranBoltRifle.BASE_SIZE; // Size of the base
   static ICON_SCALE = SternguardVeteranBoltRifle.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

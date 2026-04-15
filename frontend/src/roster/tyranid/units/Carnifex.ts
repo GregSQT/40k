@@ -27,6 +27,8 @@ export class Carnifex extends EliteMeleeElite {
   
 
   static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
+  static BASE_SHAPE = "oval"; // Shape of the base
+  static BASE_SIZE = [105, 70]; // Size of the base
   static ICON_SCALE = 2.6; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

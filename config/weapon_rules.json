@@ -1,4 +1,9 @@
 {
+  "ANTI_FLY": {
+    "name": "Anti-Fly",
+    "description": "An unmodified Wound roll of X+ against a target with the fly keyword scores a Critical Wound.",
+    "has_parameter": true
+  },
   "ANTI_INFANTRY": {
     "name": "Anti-Infantry",
     "description": "An unmodified Wound roll of X+ against Infantry scores a Critical Wound.",
@@ -6,7 +11,7 @@
   },
   "ANTI_VEHICLE": {
     "name": "Anti-Vehicle",
-    "description": "An unmodified Wound roll of X+ against a target with the matching keyword scores a Critical Wound.",
+    "description": "An unmodified Wound roll of X+ against a target with the vehicle keyword scores a Critical Wound.",
     "has_parameter": true
   },
   "ASSAULT": {

@@ -1044,7 +1044,7 @@ class RewardCalculator:
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
         from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
         max_ranged_range = get_max_ranged_range(attacker)
-        melee_range = get_melee_range()  # Always 1
+        melee_range = get_melee_range(game_state)
         
         can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
         can_use_melee = distance <= melee_range

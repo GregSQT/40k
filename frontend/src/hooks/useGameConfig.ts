@@ -19,6 +19,16 @@ interface DisplayConfig {
   default_border_width?: number;
   canvas_border?: string;
   right_column_bottom_offset?: number;
+  background_image?: string;
+  background_image_alpha?: number;
+  background_overlay_alpha?: number;
+  wall_texture?: string;
+  wall_texture_alpha?: number;
+  objective_texture?: string;
+  objective_texture_alpha?: number;
+  objective_smooth_contour?: boolean;
+  objective_smooth_radius_ratio?: number;
+  objective_smooth_alpha?: number;
 }
 
 interface ObjectiveZone {
@@ -27,7 +37,7 @@ interface ObjectiveZone {
 }
 
 interface Wall {
-  id: string;
+  id?: string;
   start: { col: number; row: number };
   end: { col: number; row: number };
   thickness?: number;
@@ -162,8 +172,22 @@ export const useGameConfig = (_boardConfigName: string = "default"): ExtendedGam
         setLoading(true);
         setError(null);
 
+        const urlParams = new URLSearchParams(window.location.search);
+        const mode = urlParams.get("mode");
+        const scenarioMap: Record<string, string> = {
+          tutorial: "config/tutorial/scenario_etape1.json",
+          endless_duty: "config/scenario_endless_duty.json",
+          pvp_test: "config/scenario_pvp_test.json",
+          pve_test: "config/scenario_pve_test.json",
+          pve: "config/scenario_pve.json",
+        };
+        const scenarioFile = (mode && scenarioMap[mode]) || "config/scenario_pvp.json";
+        const boardUrl =
+          "/api/config/board?scenario_file=" +
+          encodeURIComponent(scenarioFile) +
+          "&_t=" + Date.now();
         const [boardResponse, gameResponse] = await Promise.all([
-          fetch("/api/config/board"),
+          fetch(boardUrl),
           fetch("/config/game_config.json"),
         ]);
 

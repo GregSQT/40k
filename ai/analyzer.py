@@ -504,7 +504,7 @@ def _get_los_thresholds() -> Tuple[float, float]:
 def _get_los_wall_hexes(wall_hexes: Set[Tuple[int, int]]) -> Set[Tuple[int, int]]:
     """
     Augment wall_hexes with board boundary hexes (bottom_row for odd cols).
-    Matches engine/w40k_core.py and los_topology_builder for LoS consistency.
+    Matches engine/w40k_core.py for LoS consistency.
     """
     from config_loader import get_config_loader
     cols, rows = get_config_loader().get_board_size()

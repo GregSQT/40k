@@ -25,6 +25,8 @@ export class RangeTerminator extends EliteRangeTroop {
 
   static UNIT_KEYWORDS = [...Terminator.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = Terminator.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = Terminator.BASE_SIZE; // Size of the base
   static ICON_SCALE = Terminator.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

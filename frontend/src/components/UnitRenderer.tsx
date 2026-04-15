@@ -128,14 +128,17 @@ interface UnitRendererProps {
   // Debug mode
   debugMode?: boolean;
   onUnitTooltip?: (tooltip: { visible: boolean; text: string; x: number; y: number }) => void;
+  renderTarget?: PIXI.Container;
 }
 
 export class UnitRenderer {
   private props: UnitRendererProps;
   private lastBlinkVersion: number | null = null;
+  private target: PIXI.Container;
 
   constructor(props: UnitRendererProps) {
     this.props = props;
+    this.target = props.renderTarget ?? props.app.stage;
   }
 
   private getCSSColor(variableName: string): number {
@@ -313,12 +316,16 @@ export class UnitRenderer {
       }
     }
 
-    const unitIconScale = unit.ICON_SCALE || this.props.ICON_SCALE;
+    const HEX_HORIZ_SPACING = 1.5 * this.props.HEX_RADIUS;
+    const baseSize = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+    const unitIconScale = baseSize
+      ? (baseSize * HEX_HORIZ_SPACING) / this.props.HEX_RADIUS
+      : (unit.ICON_SCALE || this.props.ICON_SCALE);
 
     // ===== Z-INDEX CALCULATIONS =====
     const unitZIndexRange = 149;
     const minIconScale = 0.5;
-    const maxIconScale = 2.5;
+    const maxIconScale = baseSize ? Math.max(2.5, unitIconScale + 1) : 2.5;
     const minZIndex = 100;
     const scaleRange = maxIconScale - minIconScale;
     const iconZIndex =
@@ -335,7 +342,7 @@ export class UnitRenderer {
     this.renderShootingCounter(unitIconScale);
     this.renderAdvanceButton(unitIconScale, iconZIndex);
     this.renderWeaponSelectionIcon(unitIconScale, iconZIndex);
-    this.renderTargetIndicator(iconZIndex); // Shows 🎯 for all targets (shoot, charge, fight)
+    this.renderTargetIndicator(iconZIndex);
     this.renderShootingIndicator(iconZIndex);
     this.renderMovementIndicator(iconZIndex);
     this.renderChargeIndicator(iconZIndex);
@@ -401,7 +408,6 @@ export class UnitRenderer {
       unit,
       centerX,
       centerY,
-      app,
       isPreview,
       selectedUnitId,
       ruleChoiceHighlightedUnitId,
@@ -452,16 +458,20 @@ export class UnitRenderer {
 
       if (!isShootable && !unitWithFlags.isGhost) {
         const grey = 0x888888;
+        const baseSizeGrey = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+        const greyRadius = baseSizeGrey
+          ? (baseSizeGrey / 2) * 1.5 * HEX_RADIUS
+          : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
         const g = new PIXI.Graphics();
         g.beginFill(grey);
         g.lineStyle(DEFAULT_BORDER_WIDTH, grey);
-        g.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
+        g.drawCircle(centerX, centerY, greyRadius);
         g.endFill();
         g.zIndex = iconZIndex;
         g.eventMode = "static";
         g.cursor = "default";
         this.attachTooltipHandlers(g);
-        app.stage.addChild(g);
+        this.target.addChild(g);
         return;
       }
     }
@@ -519,9 +529,14 @@ export class UnitRenderer {
       circleAlpha = 0.5;
     }
 
+    const baseSizeVal = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+    const circleRadius = baseSizeVal
+      ? (baseSizeVal / 2) * 1.5 * HEX_RADIUS
+      : HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO;
+
     unitCircle.beginFill(finalUnitColor);
     unitCircle.lineStyle(borderWidth, finalBorderColor);
-    unitCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO);
+    unitCircle.drawCircle(centerX, centerY, circleRadius);
     unitCircle.endFill();
     unitCircle.alpha = circleAlpha;
     unitCircle.zIndex = iconZIndex;
@@ -680,7 +695,7 @@ export class UnitRenderer {
       }
     }
 
-    app.stage.addChild(unitCircle);
+    this.target.addChild(unitCircle);
 
     const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
     const isRuleChoiceHighlighted =
@@ -691,10 +706,10 @@ export class UnitRenderer {
     if (isRuleChoiceHighlighted) {
       const markerCircle = new PIXI.Graphics();
       markerCircle.lineStyle(borderWidth + 2, 0xffd700, 0.95);
-      markerCircle.drawCircle(centerX, centerY, HEX_RADIUS * UNIT_CIRCLE_RADIUS_RATIO + 5);
+      markerCircle.drawCircle(centerX, centerY, circleRadius + 5);
       markerCircle.zIndex = iconZIndex + 1;
       markerCircle.eventMode = "none";
-      app.stage.addChild(markerCircle);
+      this.target.addChild(markerCircle);
     }
   }
 
@@ -703,7 +718,6 @@ export class UnitRenderer {
       unit,
       centerX,
       centerY,
-      app,
       isPreview,
       previewType,
       HEX_RADIUS,
@@ -728,11 +742,16 @@ export class UnitRenderer {
           isPreview ? { resourceOptions: { crossorigin: "anonymous" } } : undefined
         );
 
+        const baseSizeIcon = typeof unit.BASE_SIZE === "number" ? unit.BASE_SIZE : undefined;
+        const iconDiameter = baseSizeIcon
+          ? baseSizeIcon * 1.5 * HEX_RADIUS
+          : HEX_RADIUS * unitIconScale;
+
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);
         sprite.position.set(centerX, centerY);
-        sprite.width = HEX_RADIUS * unitIconScale;
-        sprite.height = HEX_RADIUS * unitIconScale;
+        sprite.width = iconDiameter;
+        sprite.height = iconDiameter;
         sprite.zIndex = iconZIndex;
         sprite.alpha = 1.0; // Always fully opaque
 
@@ -788,7 +807,7 @@ export class UnitRenderer {
           }
         }
 
-        app.stage.addChild(sprite);
+        this.target.addChild(sprite);
       } catch {
         this.renderTextFallback(iconZIndex);
       }
@@ -798,7 +817,7 @@ export class UnitRenderer {
   }
 
   private renderTextFallback(iconZIndex: number): void {
-    const { unit, centerX, centerY, app } = this.props;
+    const { unit, centerX, centerY } = this.props;
 
     interface UnitWithFlags extends Unit {
       isJustKilled?: boolean;
@@ -830,7 +849,7 @@ export class UnitRenderer {
     unitText.position.set(centerX, centerY);
     unitText.alpha = textAlpha;
     unitText.zIndex = iconZIndex;
-    app.stage.addChild(unitText);
+    this.target.addChild(unitText);
   }
 
   private renderGreenActivationCircle(isEligible: boolean, unitIconScale: number): void {
@@ -839,7 +858,6 @@ export class UnitRenderer {
     const {
       centerX,
       centerY,
-      app,
       HEX_RADIUS,
       ELIGIBLE_OUTLINE_WIDTH,
       ELIGIBLE_COLOR,
@@ -862,7 +880,7 @@ export class UnitRenderer {
     const greenCircleZIndex = iconZIndex + 50; // Always above the unit icon
 
     eligibleOutline.zIndex = greenCircleZIndex;
-    app.stage.addChild(eligibleOutline);
+    this.target.addChild(eligibleOutline);
 
     // NEW: Add red circle around green circle for charged units in fight phase
     const { unit, phase, fightSubPhase } = this.props;
@@ -877,7 +895,7 @@ export class UnitRenderer {
       chargedOutline.lineStyle(ELIGIBLE_OUTLINE_WIDTH, 0xff0000, ELIGIBLE_OUTLINE_ALPHA); // Red color
       chargedOutline.drawCircle(centerX, centerY, outerCircleRadius);
       chargedOutline.zIndex = 251; // Above green circle
-      app.stage.addChild(chargedOutline);
+      this.target.addChild(chargedOutline);
     }
   }
 
@@ -980,7 +998,7 @@ export class UnitRenderer {
     positionX: number,
     positionY: number
   ): void {
-    const { app, HEX_RADIUS } = this.props;
+    const { HEX_RADIUS } = this.props;
 
     // Get values from CSS variables
     const bgColor = this.getCSSColor(bgColorVar);
@@ -1006,8 +1024,8 @@ export class UnitRenderer {
       borderRadius
     );
     squareBg.endFill();
-    squareBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
-    app.stage.addChild(squareBg);
+    squareBg.zIndex = iconZIndex + 1000;
+    this.target.addChild(squareBg);
 
     // Load and create icon sprite
     const texture = PIXI.Texture.from(iconPath);
@@ -1017,8 +1035,8 @@ export class UnitRenderer {
     const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
     iconSprite.width = iconDisplaySize;
     iconSprite.height = iconDisplaySize;
-    iconSprite.zIndex = iconZIndex + 1001; // Very high z-index to be on top of everything
-    app.stage.addChild(iconSprite);
+    iconSprite.zIndex = iconZIndex + 1001;
+    this.target.addChild(iconSprite);
   }
 
   private renderActionIconInCircle(
@@ -1030,7 +1048,7 @@ export class UnitRenderer {
     positionX: number,
     positionY: number
   ): void {
-    const { app, HEX_RADIUS } = this.props;
+    const { HEX_RADIUS } = this.props;
 
     // Get values from CSS variables
     const bgColor = this.getCSSColor(bgColorVar);
@@ -1049,8 +1067,8 @@ export class UnitRenderer {
     circleBg.lineStyle(borderWidth, whiteBorderColor, borderAlpha); // White border
     circleBg.drawCircle(positionX, positionY, circleRadius);
     circleBg.endFill();
-    circleBg.zIndex = iconZIndex + 1000; // Very high z-index to be on top of everything
-    app.stage.addChild(circleBg);
+    circleBg.zIndex = iconZIndex + 1000;
+    this.target.addChild(circleBg);
 
     // Load and create icon sprite
     const texture = PIXI.Texture.from(iconPath);
@@ -1060,8 +1078,8 @@ export class UnitRenderer {
     const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
     iconSprite.width = iconDisplaySize;
     iconSprite.height = iconDisplaySize;
-    iconSprite.zIndex = iconZIndex + 1001; // Very high z-index to be on top of everything
-    app.stage.addChild(iconSprite);
+    iconSprite.zIndex = iconZIndex + 1001;
+    this.target.addChild(iconSprite);
   }
 
   private renderShootingIndicator(iconZIndex: number): void {
@@ -1166,7 +1184,6 @@ export class UnitRenderer {
       unit,
       centerX,
       centerY,
-      app,
       targetPreview,
       units,
       boardConfig,
@@ -1348,7 +1365,7 @@ export class UnitRenderer {
       barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
       barBg.endFill();
       barBg.zIndex = 350;
-      app.stage.addChild(barBg);
+      this.target.addChild(barBg);
 
       for (let i = 0; i < unit.HP_MAX; i++) {
         const slice = new PIXI.Graphics();
@@ -1377,7 +1394,7 @@ export class UnitRenderer {
         );
         slice.endFill();
         slice.zIndex = 350;
-        app.stage.addChild(slice);
+        this.target.addChild(slice);
       }
     }
   }
@@ -1387,7 +1404,6 @@ export class UnitRenderer {
       unit,
       centerX,
       centerY,
-      app,
       phase,
       current_player,
       HEX_RADIUS,
@@ -1449,7 +1465,7 @@ export class UnitRenderer {
     shootText.position.set(centerX + scaledOffset, centerY - scaledOffset * 1.1);
     // Ensure shooting counter is always on top of other elements
     shootText.zIndex = 10000;
-    app.stage.addChild(shootText);
+    this.target.addChild(shootText);
   }
 
   private renderAdvanceButton(unitIconScale: number, iconZIndex: number): void {
@@ -1457,7 +1473,6 @@ export class UnitRenderer {
       unit,
       phase,
       current_player,
-      app,
       centerX,
       centerY,
       HEX_RADIUS,
@@ -1512,11 +1527,11 @@ export class UnitRenderer {
       }
     });
 
-    app.stage.addChild(iconSprite);
+    this.target.addChild(iconSprite);
   }
 
   private renderWeaponSelectionIcon(unitIconScale: number, iconZIndex: number): void {
-    const { unit, phase, current_player, app, centerX, centerY, HEX_RADIUS, gameState } =
+    const { unit, phase, current_player, centerX, centerY, HEX_RADIUS, gameState } =
       this.props;
 
     if (this.props.useOverlayIcons) {
@@ -1605,7 +1620,7 @@ export class UnitRenderer {
       }
     });
 
-    app.stage.addChild(iconSprite);
+    this.target.addChild(iconSprite);
   }
 
   private renderAttackCounter(unitIconScale: number): void {
@@ -1613,7 +1628,6 @@ export class UnitRenderer {
       unit,
       centerX,
       centerY,
-      app,
       phase,
       current_player,
       HEX_RADIUS,
@@ -1711,7 +1725,7 @@ export class UnitRenderer {
     attackText.position.set(centerX + scaledOffset, centerY - scaledOffset * 1.1);
     // Ensure attack counter is always on top of other elements
     attackText.zIndex = 10000;
-    app.stage.addChild(attackText);
+    this.target.addChild(attackText);
   }
 
   private renderChargeRollBadge(unitIconScale: number): void {
@@ -1797,7 +1811,7 @@ export class UnitRenderer {
   }
 
   private renderUnitIdDebug(iconZIndex: number): void {
-    const { unit, centerX, centerY, app, HEX_RADIUS, debugMode } = this.props;
+    const { unit, centerX, centerY, HEX_RADIUS, debugMode } = this.props;
 
     if (!debugMode) {
       return;
@@ -1816,8 +1830,8 @@ export class UnitRenderer {
       6
     );
     squareBg.endFill();
-    squareBg.zIndex = iconZIndex + 2000; // Very high z-index to be on top of everything
-    app.stage.addChild(squareBg);
+    squareBg.zIndex = iconZIndex + 2000;
+    this.target.addChild(squareBg);
 
     // Create text with unit ID
     const unitIdText = new PIXI.Text(String(unit.id), {
@@ -1828,8 +1842,8 @@ export class UnitRenderer {
     });
     unitIdText.anchor.set(0.5);
     unitIdText.position.set(centerX, centerY);
-    unitIdText.zIndex = iconZIndex + 2001; // Very high z-index to be on top of everything
-    app.stage.addChild(unitIdText);
+    unitIdText.zIndex = iconZIndex + 2001;
+    this.target.addChild(unitIdText);
   }
 
   private renderAdvanceRollBadge(unitIconScale: number): void {

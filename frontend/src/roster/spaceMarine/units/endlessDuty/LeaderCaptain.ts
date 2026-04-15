@@ -27,6 +27,8 @@ export class LeaderCaptain extends LeaderEliteMeleeElite {
   static UNIT_KEYWORDS = [...CaptainPowerFistPlasmaPistol.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
 
   static ICON = "/icons/CaptainPowerFistPlasmaPistol.webp";
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = CaptainPowerFistPlasmaPistol.BASE_SIZE; // Size of the base
   static ICON_SCALE = CaptainPowerFistPlasmaPistol.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

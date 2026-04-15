@@ -370,6 +370,8 @@ class ConfigLoader:
     def load_primary_objective_config(self, objective_id: str) -> Dict[str, Any]:
         """Load primary objective configuration by ID.
 
+        Searches in config/primary_objective/{cols}x{rows}/ based on current board size.
+
         Args:
             objective_id: Primary objective identifier (e.g., "objectives_control")
 
@@ -383,11 +385,13 @@ class ConfigLoader:
         """
         if not objective_id:
             raise ValueError("objective_id is required to load primary objective config")
-        cache_key = f"primary_objective:{objective_id}"
+        cols, rows = self.get_board_size()
+        board_size_dir = f"{cols}x{rows}"
+        cache_key = f"primary_objective:{board_size_dir}:{objective_id}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        primary_objective_dir = self.config_dir / "primary_objective"
+        primary_objective_dir = self.config_dir / "primary_objective" / board_size_dir
         if not primary_objective_dir.exists():
             raise FileNotFoundError(
                 f"Primary objective config directory not found: {primary_objective_dir}"

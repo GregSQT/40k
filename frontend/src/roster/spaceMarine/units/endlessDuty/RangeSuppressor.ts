@@ -25,6 +25,8 @@ export class RangeSuppressor extends EliteRangeTroop {
 
   static UNIT_KEYWORDS = [...Suppressor.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = Suppressor.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = Suppressor.BASE_SIZE; // Size of the base
   static ICON_SCALE = Suppressor.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

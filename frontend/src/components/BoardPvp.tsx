@@ -1,7 +1,7 @@
 // frontend/src/components/BoardPvp.tsx
 
 import * as PIXI from "pixi.js-legacy";
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   TUTORIAL_STEP_TITLES_INTERCESSOR_HALO,
   useTutorial,
@@ -31,6 +31,18 @@ import {
 import { getMaxRangedRange, getMeleeRange } from "../utils/weaponHelpers";
 import { drawBoard } from "./BoardDisplay";
 import { renderUnit } from "./UnitRenderer";
+import {
+  computeOccupiedHexes,
+  pixelToHex,
+  hexToPixel,
+  isFootprintInBounds,
+  isFootprintOnWall,
+  isFootprintOverlapping,
+  isFootprintInDeployPool,
+  getContestedObjectives,
+  buildOccupiedSet,
+  type HexCoord,
+} from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
@@ -217,6 +229,7 @@ type BoardProps = {
   gameState: GameState; // Add gameState prop
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
+  moveDestPoolRef?: React.RefObject<Set<string>>;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callback
   onAdvance?: (unitId: number) => void;
   onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
@@ -296,6 +309,7 @@ export default function Board({
   gameState,
   chargeRollPopup,
   getChargeDestinations,
+  moveDestPoolRef,
   onAdvance,
   onAdvanceMove,
   onCancelAdvance,
@@ -330,6 +344,13 @@ export default function Board({
 
   // Persistent container for UI elements (target logos, charge badges) that should never be cleaned up
   const uiElementsContainerRef = useRef<PIXI.Container | null>(null);
+
+  // Persistent PIXI containers for static layers (survive re-renders)
+  const staticBoardRef = useRef<PIXI.Container | null>(null);
+  const staticWallsRef = useRef<PIXI.Container | null>(null);
+  const staticBoardConfigKeyRef = useRef<string>("");
+  const unitsLayerRef = useRef<PIXI.Container | null>(null);
+  const unitsFingerprintRef = useRef<string>("");
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, gameConfig, loading, error } = useGameConfig();
@@ -420,12 +441,63 @@ export default function Board({
     unitId: number;
     position: { x: number; y: number };
   } | null>(null);
+  const [hexCoordTooltip, setHexCoordTooltip] = useState<{
+    visible: boolean; x: number; y: number; col: number; row: number;
+  } | null>(null);
+
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!boardConfig || !showHexCoordinates) { setHexCoordTooltip(null); return; }
+    const canvas = e.currentTarget.querySelector("canvas");
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const HR = boardConfig.hex_radius;
+    const M = boardConfig.margin;
+    const HW = 1.5 * HR;
+    const HH = Math.sqrt(3) * HR;
+    const ux = px - M;
+    const uy = py - M;
+    const cols = boardConfig.cols;
+    const rows = boardConfig.rows;
+    const colApprox = (ux - HW / 2) / HW;
+    const c0 = Math.max(0, Math.floor(colApprox) - 2);
+    const c1 = Math.min(cols - 1, Math.ceil(colApprox) + 2);
+    let bestCol = 0;
+    let bestRow = 0;
+    let bestD = Number.POSITIVE_INFINITY;
+    for (let c = c0; c <= c1; c++) {
+      const stagger = ((c % 2) * HH) / 2;
+      const rowApprox = (uy - HH / 2 - stagger) / HH;
+      const r0 = Math.max(0, Math.floor(rowApprox) - 2);
+      const r1 = Math.min(rows - 1, Math.ceil(rowApprox) + 2);
+      for (let r = r0; r <= r1; r++) {
+        const cx = c * HW + HW / 2;
+        const cy = r * HH + stagger + HH / 2;
+        const d = (ux - cx) ** 2 + (uy - cy) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          bestCol = c;
+          bestRow = r;
+        }
+      }
+    }
+    if (bestCol >= 0 && bestCol < cols && bestRow >= 0 && bestRow < rows) {
+      setHexCoordTooltip({ visible: true, x: e.clientX, y: e.clientY, col: bestCol, row: bestRow });
+    } else {
+      setHexCoordTooltip(null);
+    }
+  }, [boardConfig, showHexCoordinates]);
+
   const [unitHoverTooltip, setUnitHoverTooltip] = useState<{
     visible: boolean;
     text: string;
     x: number;
     y: number;
   } | null>(null);
+
+  // Persistent container for drag placement overlay (deployment phase)
+  const dragOverlayRef = useRef<PIXI.Container | null>(null);
 
   /**
    * Quand l’unité sous le curseur est retirée du plateau (mort → plus dans units_cache),
@@ -649,20 +721,13 @@ export default function Board({
       canvasContainerRef.current.innerHTML = "";
     }
 
-    // ✅ AGGRESSIVE TEXTURE CACHE CLEARING for movePreview units
-    if (mode === "movePreview" && movePreview) {
-      const previewUnit = units.find((u) => u.id === movePreview.unitId);
-      if (previewUnit?.ICON) {
-        PIXI.Texture.removeFromCache(previewUnit.ICON);
-        // Clear all cached textures to force fresh loading
-        PIXI.utils.clearTextureCache();
+    // PIXI textures are managed by the internal cache — no manual clearing needed.
+
+    if (phase !== "move" || selectedUnitId === null) {
+      if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
+        moveDestPoolRef.current.clear();
       }
     }
-
-    // ✅ CLEAR COMMON TEXTURE CACHE
-    //PIXI.Texture.removeFromCache('/icons/AssaultIntercessor.webp');
-    //PIXI.Texture.removeFromCache('/icons/AssaultIntercessor_red.webp');
-    //PIXI.Texture.removeFromCache('/icons/Intercessor.webp');
 
     // Extract board configuration values - USE CONFIG VALUES
     const BOARD_COLS = boardConfig.cols;
@@ -1020,12 +1085,14 @@ export default function Board({
           cubeDistance(c1, offsetToCube(u.col, u.row)) <= fightRange
       );
 
-      // Fight preview requirement: show adjacent hexes around active unit in red.
-      for (let col = 0; col < BOARD_COLS; col++) {
-        for (let row = 0; row < BOARD_ROWS; row++) {
-          if (cubeDistance(c1, offsetToCube(col, row)) === 1) {
-            fightPreviewCells.push({ col, row });
-          }
+      // Fight preview: show adjacent hexes around active unit in red.
+      // Use direct neighbor computation instead of O(cols×rows) scan.
+      const cubeNeighborDirs = [[1,-1,0],[1,0,-1],[0,1,-1],[-1,1,0],[-1,0,1],[0,-1,1]];
+      for (const [dx, , dz] of cubeNeighborDirs) {
+        const nc = c1.x + dx;
+        const nr = (c1.z + dz) + ((nc - (nc & 1)) >> 1);
+        if (nc >= 0 && nc < BOARD_COLS && nr >= 0 && nr < BOARD_ROWS) {
+          fightPreviewCells.push({ col: nc, row: nr });
         }
       }
     }
@@ -1088,7 +1155,9 @@ export default function Board({
       }
     }
 
-    // ✅ CALCULATE MOVEMENT PREVIEW BEFORE MAIN DRAWBOARD CALL
+    // ✅ MOVEMENT PREVIEW: Use backend-computed destinations (valid_move_destinations_pool)
+    // instead of recalculating client-side. The backend BFS handles walls, footprints,
+    // engagement zones, and pathfinding correctly on the ×10 board.
     if (
       selectedUnit &&
       mode === "select" &&
@@ -1100,166 +1169,17 @@ export default function Board({
       )
     ) {
       if (phase === "move") {
-        // For Movement Phase, show available move destinations
-        if (selectedUnit.MOVE === undefined || selectedUnit.MOVE === null) {
-          throw new Error(
-            `Unit ${selectedUnit.id} (${selectedUnit.type || "unknown"}) is missing required MOVE property for movement preview`
-          );
-        }
-        if (!gameState) {
-          throw new Error("Missing gameState during movement preview calculation");
-        }
-        if (!gameState.units_cache) {
-          throw new Error("Missing units_cache in gameState during movement preview calculation");
-        }
-
-        const aliveUnitIds = new Set(Object.keys(gameState.units_cache).map((id) => id.toString()));
-        const aliveUnits = units.filter((u) => aliveUnitIds.has(u.id.toString()));
-
-        const centerCol = selectedUnit.col;
-        const centerRow = selectedUnit.row;
-        const selectedUnitKeywords = selectedUnit.UNIT_KEYWORDS;
-        const hasFlyKeyword =
-          Array.isArray(selectedUnitKeywords) &&
-          selectedUnitKeywords.some((entry) => entry.keywordId === "fly");
-
-        // Use cube coordinate system for proper hex neighbors
-        const cubeDirections = [
-          [1, -1, 0],
-          [1, 0, -1],
-          [0, 1, -1],
-          [-1, 1, 0],
-          [-1, 0, 1],
-          [0, -1, 1],
-        ];
-
-        // Collect all forbidden hexes (adjacent to any enemy + wall hexes) using cube coordinates
-        const forbiddenSet = new Set<string>();
-
-        // Add all wall hexes as forbidden
-        const wallHexSet = new Set<string>(
-          effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`)
-        );
-        wallHexSet.forEach((wallHex) => {
-          forbiddenSet.add(wallHex);
-        });
-
-        for (const enemy of aliveUnits) {
-          if (enemy.player === selectedUnit.player) continue;
-
-          // Add enemy position itself
-          forbiddenSet.add(`${enemy.col},${enemy.row}`);
-
-          // Use cube coordinates for proper hex adjacency
-          const enemyCube = offsetToCube(enemy.col, enemy.row);
-          for (const [dx, dy, dz] of cubeDirections) {
-            const adjCube = {
-              x: enemyCube.x + dx,
-              y: enemyCube.y + dy,
-              z: enemyCube.z + dz,
-            };
-
-            // Convert back to offset coordinates
-            const adjCol = adjCube.x;
-            const adjRow = adjCube.z + ((adjCube.x - (adjCube.x & 1)) >> 1);
-
-            if (adjCol >= 0 && adjCol < BOARD_COLS && adjRow >= 0 && adjRow < BOARD_ROWS) {
-              forbiddenSet.add(`${adjCol},${adjRow}`);
-            }
-          }
-        }
-
-        if (hasFlyKeyword) {
-          // FLY: ignore walls/occupancy/enemy-adjacency during traversal.
-          // Only destination legality applies (same restriction as engine-side destination checks).
-          for (let col = 0; col < BOARD_COLS; col++) {
-            for (let row = 0; row < BOARD_ROWS; row++) {
-              const key = `${col},${row}`;
-              if (col === centerCol && row === centerRow) {
-                continue;
-              }
-              if (cubeDistance(offsetToCube(centerCol, centerRow), offsetToCube(col, row)) > selectedUnit.MOVE) {
-                continue;
-              }
-              const blocked = aliveUnits.some(
-                (u) => u.col === col && u.row === row && u.id !== selectedUnit.id
-              );
-              if (!blocked && !forbiddenSet.has(key)) {
-                availableCells.push({ col, row });
-              }
-            }
-          }
-        } else {
-          const visited = new Map<string, number>();
-          const queue: [number, number, number][] = [[centerCol, centerRow, 0]];
-
-          while (queue.length > 0) {
-            const next = queue.shift();
-            if (!next) continue;
-            const [col, row, steps] = next;
-            const key = `${col},${row}`;
-
-            if (visited.has(key) && steps >= visited.get(key)!) {
-              continue;
-            }
-
-            visited.set(key, steps);
-
-            // ⛔ Skip forbidden positions completely - don't expand from them
-            if (forbiddenSet.has(key) && steps > 0) {
-              continue;
-            }
-
-            const blocked = aliveUnits.some(
-              (u) => u.col === col && u.row === row && u.id !== selectedUnit.id
-            );
-
-            if (steps > 0 && steps <= selectedUnit.MOVE && !blocked && !forbiddenSet.has(key)) {
-              availableCells.push({ col, row });
-            }
-
-            if (steps >= selectedUnit.MOVE) {
-              continue;
-            }
-
-            // Use cube coordinates for proper hex neighbors
-            const currentCube = offsetToCube(col, row);
-            for (const [dx, dy, dz] of cubeDirections) {
-              const neighborCube = {
-                x: currentCube.x + dx,
-                y: currentCube.y + dy,
-                z: currentCube.z + dz,
-              };
-
-              // Convert back to offset coordinates
-              const ncol = neighborCube.x;
-              const nrow = neighborCube.z + ((neighborCube.x - (neighborCube.x & 1)) >> 1);
-
-              const nkey = `${ncol},${nrow}`;
-              const nextSteps = steps + 1;
-
-              if (
-                ncol >= 0 &&
-                ncol < BOARD_COLS &&
-                nrow >= 0 &&
-                nrow < BOARD_ROWS &&
-                nextSteps <= selectedUnit.MOVE &&
-                !forbiddenSet.has(nkey)
-              ) {
-                const nblocked = aliveUnits.some(
-                  (u) => u.col === ncol && u.row === nrow && u.id !== selectedUnit.id
-                );
-
-                if (!nblocked && (!visited.has(nkey) || visited.get(nkey)! > nextSteps)) {
-                  queue.push([ncol, nrow, nextSteps]);
-                }
-              }
+        const border = gameState?.move_preview_border;
+        if (border && Array.isArray(border) && border.length > 0) {
+          for (const dest of border) {
+            if (Array.isArray(dest) && dest.length === 2) {
+              availableCells.push({ col: Number(dest[0]), row: Number(dest[1]) });
+            } else if (dest && typeof dest === "object" && "col" in dest && "row" in dest) {
+              availableCells.push({ col: Number(dest.col), row: Number(dest.row) });
             }
           }
         }
       } else if (phase !== "charge") {
-        // For other phases (except charge), just show green circle on unit's hex
-        // Charge phase uses chargeCells (orange) for destinations instead
         availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
       }
     }
@@ -1342,37 +1262,8 @@ export default function Board({
       }
 
       const attackCellSet = new Set<string>();
-      const backendRatioByHex = source.unit.los_preview_ratio_by_hex;
-      const backendAttackCells = source.unit.los_preview_attack_cells;
-      const backendCoverCells = source.unit.los_preview_cover_cells;
-      const useBackendLosPreview = false;
-
-      if (useBackendLosPreview) {
-        for (const [hexKey, ratio] of Object.entries(backendRatioByHex)) {
-          if (typeof ratio !== "number" || Number.isNaN(ratio)) {
-            throw new Error(`Invalid los_preview_ratio_by_hex value for key '${hexKey}'`);
-          }
-          losVisibilityRatioByHex.set(hexKey, ratio);
-        }
-        for (const cell of backendAttackCells) {
-          const key = `${cell.col},${cell.row}`;
-          if (!attackCellSet.has(key)) {
-            attackCellSet.add(key);
-            attackCells.push({ col: cell.col, row: cell.row });
-          }
-        }
-        for (const cell of backendCoverCells) {
-          coverCells.push({ col: cell.col, row: cell.row });
-        }
-        return;
-      }
 
       const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
-      const centerCube = offsetToCube(source.fromCol, source.fromRow);
-      const range = getMaxRangedRange(source.unit);
-      if (range <= 0) {
-        return;
-      }
 
       const enemyById = new Map<string, Unit>();
       for (const enemy of units) {
@@ -1412,36 +1303,8 @@ export default function Board({
         }
       }
 
-      // Show all hexes that are geometrically visible from current shooter preview position.
-      for (let col = 0; col < BOARD_COLS; col++) {
-        for (let row = 0; row < BOARD_ROWS; row++) {
-          const targetCube = offsetToCube(col, row);
-          const dist = cubeDistance(centerCube, targetCube);
-          if (dist <= 0 || dist > range) {
-            continue;
-          }
-          const lineOfSight = hasLineOfSight(
-            { col: source.fromCol, row: source.fromRow },
-            { col, row },
-            effectiveWallHexes,
-            coverRatio,
-            losVisibilityMinRatio
-          );
-          const hexKey = `${col},${row}`;
-          losVisibilityRatioByHex.set(hexKey, lineOfSight.visibilityRatio);
-          if (!lineOfSight.canSee) {
-            continue;
-          }
-          if (lineOfSight.inCover) {
-            coverCells.push({ col, row });
-            continue;
-          }
-          if (!attackCellSet.has(hexKey)) {
-            attackCellSet.add(hexKey);
-            attackCells.push({ col, row });
-          }
-        }
-      }
+      // Debug LoS overlay: full hex-level visibility computed via WASM (Phase 3)
+      // In normal mode, only enemy targets + ray paths are shown above.
     };
 
     const shootingPreviewSource = resolveShootingPreviewSource();
@@ -1530,6 +1393,7 @@ export default function Board({
         resolution: number | "auto";
       };
       objective_hexes: [number, number][];
+      objective_zones?: Array<{ id: string; hexes: [number, number][] }>;
       wall_hexes: [number, number][];
       walls?: Array<{
         start: { col: number; row: number };
@@ -1723,27 +1587,84 @@ export default function Board({
 
     // Map unsupported phases for drawBoard/UnitRenderer to closest supported behavior.
     const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;
+    // Compute units fingerprint to determine if unit re-rendering is needed
+    const unitsFingerprint = (() => {
+      const parts: string[] = [];
+      for (const u of units) {
+        parts.push(`${u.id},${u.col},${u.row},${u.HP_CUR}`);
+      }
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}`;
+    })();
+    const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
     if (app.stage) {
+      // Detach persistent containers before removeChildren so they survive.
+      const savedStatic = staticBoardRef.current;
+      const savedWalls = staticWallsRef.current;
+      const savedUi = uiElementsContainerRef.current;
+      const savedDragOverlay = dragOverlayRef.current;
+      const savedUnitsLayer = unitsLayerRef.current;
+      const savedBlinks: PIXI.DisplayObject[] = [];
+      if (savedStatic?.parent) app.stage.removeChild(savedStatic);
+      if (savedWalls?.parent) app.stage.removeChild(savedWalls);
+      if (savedUi?.parent) app.stage.removeChild(savedUi);
+      if (savedDragOverlay?.parent) app.stage.removeChild(savedDragOverlay);
+      if (savedUnitsLayer?.parent) app.stage.removeChild(savedUnitsLayer);
+      for (const child of [...app.stage.children]) {
+        if (child.name === "hp-blink-container") {
+          app.stage.removeChild(child);
+          savedBlinks.push(child);
+        }
+      }
+
+      // Destroy all remaining children (old highlights, old units, etc.)
+      const toDestroy = [...app.stage.children];
       app.stage.removeChildren();
-      if (uiElementsContainerRef.current) {
-        app.stage.addChild(uiElementsContainerRef.current);
-        // Replay/PvP: clear stale transient UI markers before rendering current frame.
-        // This removes markers for units no longer present (e.g. dead targets).
-        const staleTargetMarkers = uiElementsContainerRef.current.children.filter(
+      for (const child of toDestroy) {
+        if (child.destroy) {
+          child.destroy({ children: true, texture: false, baseTexture: false });
+        }
+      }
+
+      // If units changed, clear the units layer so it gets rebuilt
+      if (unitsChanged && savedUnitsLayer) {
+        const unitChildren = [...savedUnitsLayer.children];
+        savedUnitsLayer.removeChildren();
+        for (const child of unitChildren) {
+          if (child.destroy) {
+            child.destroy({ children: true, texture: false, baseTexture: false });
+          }
+        }
+      }
+
+      // Re-attach persistent containers in correct z-order
+      if (savedStatic) app.stage.addChild(savedStatic);
+      if (savedWalls) app.stage.addChild(savedWalls);
+      if (savedUi) app.stage.addChild(savedUi);
+      for (const blink of savedBlinks) app.stage.addChild(blink);
+      if (savedUnitsLayer) app.stage.addChild(savedUnitsLayer);
+      if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
+
+      // Clean stale transient UI markers
+      if (savedUi) {
+        const staleTargetMarkers = savedUi.children.filter(
           (child: PIXI.DisplayObject) =>
             typeof child.name === "string" &&
             (child.name.startsWith("target-indicator-") || child.name.startsWith("charge-badge-"))
         );
         staleTargetMarkers.forEach((child: PIXI.DisplayObject) => {
-          uiElementsContainerRef.current?.removeChild(child);
+          savedUi.removeChild(child);
           if ("destroy" in child && typeof child.destroy === "function") {
             child.destroy();
           }
         });
       }
     }
-    drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
+    // Reuse cached static board layers when the board config hasn't changed.
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}`;
+    const canReuseStatic = staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
+
+    const drawResult = drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
       availableCells: effectiveAvailableCells,
       attackCells,
       coverCells,
@@ -1754,7 +1675,7 @@ export default function Board({
         getAdvanceDestinations &&
         !availableCellsOverride
           ? getAdvanceDestinations(selectedUnitId)
-          : [], // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Populated when in advancePreview mode, but skip if availableCellsOverride is provided
+          : [],
       blockedTargets,
       coverTargets,
       phase: effectivePhase,
@@ -1763,16 +1684,38 @@ export default function Board({
       mode,
       showHexCoordinates,
       objectiveControl,
+      moveDestPoolRef,
+      cachedStaticBoard: canReuseStatic ? staticBoardRef.current : null,
+      cachedWalls: canReuseStatic ? staticWallsRef.current : null,
       losDebugShowRatio: showLosDebugOverlay && phase === "shoot" && shootingPreviewSource !== null,
       losDebugRatioByHex: Object.fromEntries(losVisibilityRatioByHex),
       losDebugCoverRatio: coverRatio,
       losDebugVisibilityMinRatio: losVisibilityMinRatio,
     });
 
+    if (!canReuseStatic && drawResult) {
+      staticBoardRef.current = drawResult.baseHexContainer;
+      staticWallsRef.current = drawResult.wallsContainer;
+      staticBoardConfigKeyRef.current = bcKey;
+    }
+
     // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
     // setupBoardInteractions is now a stub - no longer needed
 
-    // ✅ UNIFIED UNIT RENDERING USING COMPONENT
+    // ✅ Create or reuse persistent units layer
+    if (!unitsLayerRef.current) {
+      unitsLayerRef.current = new PIXI.Container();
+      unitsLayerRef.current.name = "units-layer";
+      unitsLayerRef.current.sortableChildren = true;
+    }
+    if (!unitsLayerRef.current.parent) {
+      app.stage.addChild(unitsLayerRef.current);
+    }
+    const unitsLayer = unitsLayerRef.current;
+
+    // ✅ UNIFIED UNIT RENDERING USING COMPONENT — skip if fingerprint unchanged
+    if (unitsChanged) {
+    unitsFingerprintRef.current = unitsFingerprint;
     for (const unit of units) {
       const unitsCache = gameState?.units_cache;
       const unitIdStr = String(unit.id);
@@ -1909,7 +1852,8 @@ export default function Board({
         centerX,
         centerY,
         app,
-        uiElementsContainer: uiElementsContainerRef.current!, // Pass persistent UI container
+        renderTarget: unitsLayer,
+        uiElementsContainer: uiElementsContainerRef.current!,
         useOverlayIcons: true,
         isPreview: false,
         isEligible: isMoveOriginGhost ? false : (isEligibleForRendering || false),
@@ -2021,10 +1965,11 @@ export default function Board({
           centerX,
           centerY,
           app,
+          renderTarget: unitsLayer,
           useOverlayIcons: true,
           isPreview: true,
           previewType: "move",
-          isEligible: false, // Preview units are not eligible
+          isEligible: false,
           boardConfig: boardConfigForRender,
           HEX_RADIUS,
           ICON_SCALE,
@@ -2077,10 +2022,11 @@ export default function Board({
           centerX,
           centerY,
           app,
+          renderTarget: unitsLayer,
           useOverlayIcons: true,
           isPreview: true,
           previewType: "move",
-          isEligible: false, // Preview units are not eligible
+          isEligible: false,
           boardConfig: boardConfigForRender,
           HEX_RADIUS,
           ICON_SCALE,
@@ -2136,6 +2082,7 @@ export default function Board({
           centerX,
           centerY,
           app,
+          renderTarget: unitsLayer,
           useOverlayIcons: true,
           isPreview: true,
           previewType: "attack",
@@ -2174,6 +2121,13 @@ export default function Board({
           debugMode: showHexCoordinates,
         });
       }
+    }
+    } // end if (unitsChanged)
+
+    if ((window as any).__perfMovePreviewStart && mode === "movePreview") {
+      const elapsed = performance.now() - (window as any).__perfMovePreviewStart;
+      console.log(`[PERF-MOVE] click destination → preview rendered: ${elapsed.toFixed(1)}ms`);
+      delete (window as any).__perfMovePreviewStart;
     }
 
     // ✅ TUTORIAL 1-24-* / 1-25 : ghost Termagant à l'emplacement de mort sur le board
@@ -2398,6 +2352,250 @@ export default function Board({
       }
     }
 
+
+    // --- Drag placement overlay (deployment phase ghost + footprint) ---
+    let dragPointerMove: ((e: PointerEvent) => void) | null = null;
+    let dragPointerUp: ((e: PointerEvent) => void) | null = null;
+    let dragPointerLeave: (() => void) | null = null;
+
+    if (phase === "deployment" && selectedUnitId !== null) {
+      const canvas = app.view as HTMLCanvasElement;
+
+      if (!dragOverlayRef.current) {
+        dragOverlayRef.current = new PIXI.Container();
+        dragOverlayRef.current.name = "drag-placement-overlay";
+        dragOverlayRef.current.zIndex = 9000;
+      }
+      const dragContainer = dragOverlayRef.current;
+      dragContainer.removeChildren();
+      if (!dragContainer.parent) {
+        app.stage.addChild(dragContainer);
+      }
+
+      const selectedUnit = units.find((u) => u.id === selectedUnitId);
+      const wallSet = new Set((boardConfig.wall_hexes ?? []).map(([c, r]) => `${c},${r}`));
+      const occupiedSet = buildOccupiedSet(
+        units.map((u) => ({
+          id: u.id,
+          col: u.col,
+          row: u.row,
+          BASE_SHAPE: u.BASE_SHAPE,
+          BASE_SIZE: typeof u.BASE_SIZE === "number" ? u.BASE_SIZE : 1,
+          alive: u.HP_CUR > 0,
+        })),
+        selectedUnitId ?? undefined,
+      );
+      const ds = gameState.deployment_state;
+      let deployPool: Set<string> | null = null;
+      if (ds) {
+        const poolRaw = ds.deployment_pools?.[String(ds.current_deployer)];
+        if (poolRaw && Array.isArray(poolRaw)) {
+          deployPool = new Set<string>();
+          for (const entry of poolRaw) {
+            if (Array.isArray(entry)) {
+              deployPool.add(`${entry[0]},${entry[1]}`);
+            } else if (entry && typeof entry === "object" && "col" in entry && "row" in entry) {
+              deployPool.add(`${(entry as { col: number; row: number }).col},${(entry as { col: number; row: number }).row}`);
+            }
+          }
+        }
+      }
+      const objsForIntersection: Array<{ id: number; hexes: HexCoord[] }> = (
+        objectivesOverride ?? []
+      ).map((obj, idx) => ({
+        id: idx + 1,
+        hexes: obj.hexes.map((h) => [h.col, h.row] as HexCoord),
+      }));
+
+      let lastHexKey = "";
+
+      const drawDragOverlay = (
+        hex: { col: number; row: number } | null,
+        footprint: HexCoord[],
+        valid: boolean,
+        contestedIds: number[],
+      ) => {
+        dragContainer.removeChildren();
+        if (!hex || footprint.length === 0) return;
+
+        const fillColor = valid ? 0x00ff00 : 0xff0000;
+
+        // Batch all footprint circles into one Graphics
+        const fpBatch = new PIXI.Graphics();
+        fpBatch.beginFill(fillColor, 0.3);
+        fpBatch.lineStyle(1, fillColor, 0.6);
+        for (const [c, r] of footprint) {
+          const pos = hexToPixel(c, r, HEX_RADIUS, MARGIN);
+          fpBatch.drawCircle(pos.x, pos.y, HEX_RADIUS);
+        }
+        fpBatch.endFill();
+        dragContainer.addChild(fpBatch);
+
+        if (contestedIds.length > 0) {
+          const objBatch = new PIXI.Graphics();
+          objBatch.beginFill(0xffcc00, 0.5);
+          objBatch.lineStyle(2, 0xffcc00, 0.8);
+          for (const objId of contestedIds) {
+            const obj = objsForIntersection.find((o) => o.id === objId);
+            if (!obj) continue;
+            for (const [c, r] of obj.hexes) {
+              const pos = hexToPixel(c, r, HEX_RADIUS, MARGIN);
+              objBatch.drawCircle(pos.x, pos.y, HEX_RADIUS);
+            }
+          }
+          objBatch.endFill();
+          dragContainer.addChild(objBatch);
+        }
+
+        if (selectedUnit) {
+          const ghostPos = hexToPixel(hex.col, hex.row, HEX_RADIUS, MARGIN);
+          const circleR = HEX_RADIUS * (selectedUnit.ICON_SCALE ?? 0.6);
+          const ghost = new PIXI.Graphics();
+          ghost.beginFill(0xcccccc, 0.45);
+          ghost.drawCircle(ghostPos.x, ghostPos.y, circleR);
+          ghost.endFill();
+          const idText = new PIXI.Text(String(selectedUnit.id), {
+            fontSize: Math.max(6, HEX_RADIUS * 0.8),
+            fill: valid ? 0x00ff00 : 0xff4444,
+            fontWeight: "bold",
+          });
+          idText.anchor.set(0.5);
+          idText.position.set(ghostPos.x, ghostPos.y);
+          idText.alpha = 0.7;
+          dragContainer.addChild(ghost);
+          dragContainer.addChild(idText);
+        }
+      };
+
+      dragPointerMove = (e: PointerEvent) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const px = (e.clientX - rect.left) * scaleX;
+        const py = (e.clientY - rect.top) * scaleY;
+        const hex = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
+
+        if (hex.col < 0 || hex.col >= BOARD_COLS || hex.row < 0 || hex.row >= BOARD_ROWS) {
+          lastHexKey = "";
+          drawDragOverlay(null, [], false, []);
+          return;
+        }
+        const key = `${hex.col},${hex.row}`;
+        if (key === lastHexKey) return;
+        lastHexKey = key;
+
+        if (!selectedUnit) return;
+        const shape = selectedUnit.BASE_SHAPE ?? "round";
+        const size = typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : 1;
+        const fp = computeOccupiedHexes(hex.col, hex.row, shape, size);
+        const inBounds = isFootprintInBounds(fp, BOARD_COLS, BOARD_ROWS);
+        const onWall = isFootprintOnWall(fp, wallSet);
+        const overlapping = isFootprintOverlapping(fp, occupiedSet);
+        const inPool = deployPool ? isFootprintInDeployPool(fp, deployPool) : true;
+        const valid = inBounds && !onWall && !overlapping && inPool;
+        const contestedIds = getContestedObjectives(fp, objsForIntersection);
+        drawDragOverlay(hex, fp, valid, contestedIds);
+      };
+
+      dragPointerUp = (e: PointerEvent) => {
+        if (e.button !== 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const px = (e.clientX - rect.left) * scaleX;
+        const py = (e.clientY - rect.top) * scaleY;
+        const hex = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
+
+        if (hex.col < 0 || hex.col >= BOARD_COLS || hex.row < 0 || hex.row >= BOARD_ROWS) return;
+        if (!selectedUnit) return;
+        const shape = selectedUnit.BASE_SHAPE ?? "round";
+        const size = typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : 1;
+        const fp = computeOccupiedHexes(hex.col, hex.row, shape, size);
+        const inBounds = isFootprintInBounds(fp, BOARD_COLS, BOARD_ROWS);
+        const onWall = isFootprintOnWall(fp, wallSet);
+        const overlapping = isFootprintOverlapping(fp, occupiedSet);
+        const inPool = deployPool ? isFootprintInDeployPool(fp, deployPool) : true;
+        const valid = inBounds && !onWall && !overlapping && inPool;
+        if (!valid) return;
+        stableCallbacks.current.onDeployUnit?.(selectedUnitId, hex.col, hex.row);
+      };
+
+      dragPointerLeave = () => {
+        lastHexKey = "";
+        drawDragOverlay(null, [], false, []);
+      };
+
+      canvas.addEventListener("pointermove", dragPointerMove);
+      canvas.addEventListener("pointerup", dragPointerUp);
+      canvas.addEventListener("pointerleave", dragPointerLeave);
+    }
+
+    // --- Movement drag-and-drop overlay ---
+    if (phase === "move" && mode === "select" && selectedUnitId !== null) {
+      const canvas = app.view as HTMLCanvasElement;
+      const selectedUnit = units.find((u) => u.id === selectedUnitId);
+      if (selectedUnit) {
+        if (!dragOverlayRef.current) {
+          dragOverlayRef.current = new PIXI.Container();
+          dragOverlayRef.current.name = "drag-placement-overlay";
+          dragOverlayRef.current.zIndex = 9000;
+        }
+        const dragContainer = dragOverlayRef.current;
+        dragContainer.removeChildren();
+        if (!dragContainer.parent) {
+          app.stage.addChild(dragContainer);
+        }
+
+        let lastMoveHexKey = "";
+        const poolRef = moveDestPoolRef?.current;
+
+        dragPointerMove = (e: PointerEvent) => {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const px = (e.clientX - rect.left) * scaleX;
+          const py = (e.clientY - rect.top) * scaleY;
+          const hex = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
+
+          if (hex.col < 0 || hex.col >= BOARD_COLS || hex.row < 0 || hex.row >= BOARD_ROWS) {
+            lastMoveHexKey = "";
+            dragContainer.removeChildren();
+            return;
+          }
+          const key = `${hex.col},${hex.row}`;
+          if (key === lastMoveHexKey) return;
+          lastMoveHexKey = key;
+
+          dragContainer.removeChildren();
+          const valid = poolRef ? poolRef.has(key) : false;
+          const ghostPos = hexToPixel(hex.col, hex.row, HEX_RADIUS, MARGIN);
+          const circleR = HEX_RADIUS * (selectedUnit.ICON_SCALE ?? 0.6);
+          const ghost = new PIXI.Graphics();
+          ghost.beginFill(valid ? 0x00ff00 : 0xff0000, 0.35);
+          ghost.drawCircle(ghostPos.x, ghostPos.y, circleR);
+          ghost.endFill();
+          const idText = new PIXI.Text(String(selectedUnit.id), {
+            fontSize: Math.max(6, HEX_RADIUS * 0.8),
+            fill: valid ? 0x00ff00 : 0xff4444,
+            fontWeight: "bold",
+          });
+          idText.anchor.set(0.5);
+          idText.position.set(ghostPos.x, ghostPos.y);
+          idText.alpha = 0.7;
+          dragContainer.addChild(ghost);
+          dragContainer.addChild(idText);
+        };
+
+        dragPointerLeave = () => {
+          lastMoveHexKey = "";
+          dragContainer.removeChildren();
+        };
+
+        canvas.addEventListener("pointermove", dragPointerMove);
+        canvas.addEventListener("pointerleave", dragPointerLeave);
+      }
+    }
+
     // Cleanup function
     return () => {
       // Cleanup board interactions
@@ -2406,6 +2604,14 @@ export default function Board({
       if (app.view?.removeEventListener) {
         app.view.removeEventListener("contextmenu", contextMenuHandler);
       }
+      window.removeEventListener("boardAdvanceClick", advanceClickHandler);
+
+      // Cleanup drag placement handlers
+      const canvas = app.view as HTMLCanvasElement;
+      if (dragPointerMove) canvas.removeEventListener("pointermove", dragPointerMove);
+      if (dragPointerUp) canvas.removeEventListener("pointerup", dragPointerUp);
+      if (dragPointerLeave) canvas.removeEventListener("pointerleave", dragPointerLeave);
+      if (dragOverlayRef.current) dragOverlayRef.current.removeChildren();
     };
   }, [
     // Essential dependencies - all values used in the effect
@@ -2573,7 +2779,7 @@ export default function Board({
           overflow: "visible",
         }}
       >
-        <div ref={canvasContainerRef} />
+        <div ref={canvasContainerRef} onMouseMove={handleCanvasMouseMove} onMouseLeave={() => setHexCoordTooltip(null)} />
         <div
           ref={overlayRef}
           style={{
@@ -2602,6 +2808,28 @@ export default function Board({
             }}
           >
             {unitHoverTooltip.text}
+          </div>
+        )}
+        {hexCoordTooltip?.visible && (
+          <div
+            style={{
+              position: "fixed",
+              left: `${hexCoordTooltip.x + 14}px`,
+              top: `${hexCoordTooltip.y - 28}px`,
+              background: "rgba(0,0,0,0.85)",
+              color: "#0f0",
+              fontSize: "12px",
+              fontFamily: "monospace",
+              lineHeight: 1.35,
+              padding: "2px 3px",
+              borderRadius: "4px",
+              pointerEvents: "none",
+              zIndex: 1400,
+              whiteSpace: "nowrap",
+              boxSizing: "border-box",
+            }}
+          >
+            {hexCoordTooltip.col},{hexCoordTooltip.row}
           </div>
         )}
       </div>

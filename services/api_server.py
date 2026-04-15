@@ -33,6 +33,7 @@ from shared.data_validation import require_key
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
 from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
+from engine.hex_utils import expand_wall_group_to_hex_list
 from services.endless_duty_runtime import (
     ED_MODE_CODE,
     ED_SCENARIO_DEFAULT,
@@ -77,11 +78,46 @@ def make_json_serializable(obj):
         return obj
 
 
+_GAME_STATE_EXCLUDE_KEYS = frozenset({
+    "los_topology", "pathfinding_topology", "wall_edge_topology",
+    "wall_hexes",
+    "enemy_adjacent_hexes",
+    "occupied_positions",
+    "los_cache",
+    "valid_advance_destinations_pool",
+    "valid_charge_destinations_pool",
+    "units_already_adjacent_to_enemy",
+    "reward_state",
+    "move_preview_candidates",
+    "shoot_preview_candidates",
+    "engagement_zone_cache",
+    "occupation_map",
+    "_cache_instance_id",
+})
+
+
+_UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "HP_CUR", "player")
+
+
 def _game_state_for_json(engine_instance) -> Dict[str, Any]:
-    """Return game_state dict with numpy topology arrays excluded (not JSON-serializable, frontend doesn't need them)."""
-    gs = dict(engine_instance.game_state)
-    for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
-        gs.pop(key, None)
+    """Return game_state dict with internal/heavy fields excluded.
+
+    Strips topology arrays, large sets (wall_hexes, occupied_positions,
+    enemy_adjacent_hexes, los_cache), destination pools already sent via
+    move_preview_border, and other engine-internal fields the frontend
+    never reads.  Also trims units_cache to only the fields the frontend
+    consumes (col, row, HP_CUR, player), dropping occupied_hexes etc.
+    """
+    gs = {
+        k: v for k, v in engine_instance.game_state.items()
+        if k not in _GAME_STATE_EXCLUDE_KEYS
+    }
+    raw_cache = engine_instance.game_state.get("units_cache")
+    if raw_cache is not None:
+        gs["units_cache"] = {
+            uid: {fk: entry[fk] for fk in _UNITS_CACHE_FRONTEND_KEYS if fk in entry}
+            for uid, entry in raw_cache.items()
+        }
     return gs
 
 
@@ -1479,6 +1515,8 @@ def execute_action():
 
         # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
         if action.get("action") == "preview_shoot_from_position":
+            import time as _ptime
+            _pt0 = _ptime.perf_counter()
             unit_id = action.get("unitId")
             dest_col = action.get("destCol")
             dest_row = action.get("destRow")
@@ -1493,6 +1531,8 @@ def execute_action():
                 engine.game_state, str(unit_id), int(dest_col), int(dest_row),
                 advance_position=advance_position,
             )
+            _pt1 = _ptime.perf_counter()
+            print(f"[PERF-API] preview_shoot_from_position: unit={unit_id} dest=({dest_col},{dest_row}) targets={len(valid_targets)} time={(_pt1-_pt0)*1000:.0f}ms")
             return jsonify({
                 "success": True,
                 "result": {
@@ -1501,6 +1541,9 @@ def execute_action():
                 },
             })
 
+        import time as _time
+        _api_t0 = _time.perf_counter()
+        print(f"[PERF-API-DEBUG] action={action.get('action')} unitId={action.get('unitId')} success_before_engine={success}")
         # Route ALL actions through engine consistently
         if success is None:
             if action.get("action") == "end_phase":
@@ -1510,6 +1553,8 @@ def execute_action():
             else:
                 success, result = engine.execute_semantic_action(action)
 
+        _api_t1 = _time.perf_counter()
+        print(f"[PERF-API-DEBUG] after engine: success={success} result_keys={list(result.keys()) if isinstance(result, dict) else type(result)} engine_ms={(_api_t1-_api_t0)*1000:.0f}")
         if success and endless_mode_active and action.get("action") != "endless_duty_status":
             ed_post = handle_endless_duty_post_action(engine)
             if isinstance(result, dict):
@@ -1517,6 +1562,7 @@ def execute_action():
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(_game_state_for_json(engine))
+        _api_t2 = _time.perf_counter()
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
@@ -1536,7 +1582,8 @@ def execute_action():
         engine.game_state["action_logs"] = []
         serializable_state["action_logs"] = []
         
-        return jsonify({
+        _api_t3 = _time.perf_counter()
+        resp = jsonify({
             "success": success,
             "result": result,
             "game_state": serializable_state,
@@ -1548,6 +1595,9 @@ def execute_action():
             ),
             "message": "Action executed successfully" if success else "Action failed"
         })
+        _api_t4 = _time.perf_counter()
+        print(f"[PERF-API] {action.get('action')}: engine={(_api_t1-_api_t0)*1000:.0f}ms serialize={(_api_t2-_api_t1)*1000:.0f}ms post={(_api_t3-_api_t2)*1000:.0f}ms jsonify={(_api_t4-_api_t3)*1000:.0f}ms TOTAL={(_api_t4-_api_t0)*1000:.0f}ms")
+        return resp
     
     except Exception as e:
         import traceback
@@ -2019,6 +2069,7 @@ def get_board_config():
         config_loader = get_config_loader()
         board_data = config_loader.get_board_config()
         board_spec = board_data["default"]
+        print(f"[DEBUG board_config] cols={board_spec.get('cols')} rows={board_spec.get('rows')} hex_radius={board_spec.get('hex_radius')}")
         config_json = config_loader.load_config("config", force_reload=False)
         board_subdir = config_json.get("paths", {}).get("board")
         if not board_subdir:
@@ -2077,7 +2128,8 @@ def get_board_config():
                     raise ValueError("scenario objectives_ref must be filename only")
                 objectives_ref = objectives_ref_candidate
 
-        wall_hexes = []
+        wall_hexes: list = []
+        wall_segments_raw: list[dict] = []
         if scenario_file and isinstance(scenario_data, dict) and "wall_hexes" in scenario_data:
             scenario_wall_hexes = scenario_data.get("wall_hexes")
             if not isinstance(scenario_wall_hexes, list):
@@ -2090,8 +2142,23 @@ def get_board_config():
                     wall_data = json.load(f)
                 if "walls" in wall_data:
                     wall_hexes = []
-                    for g in wall_data.get("walls", []):
-                        wall_hexes.extend(g.get("hexes", []))
+                    for gi, g in enumerate(wall_data.get("walls", [])):
+                        if not isinstance(g, dict):
+                            raise ValueError(f"wall group {gi} must be an object")
+                        hint = f"{wall_path} walls[{gi}]"
+                        has_segments = bool(g.get("segments"))
+                        if has_segments:
+                            for seg in g["segments"]:
+                                if isinstance(seg, list) and len(seg) == 2:
+                                    a, b = seg[0], seg[1]
+                                    wall_segments_raw.append({
+                                        "start": {"col": int(a[0]), "row": int(a[1])},
+                                        "end": {"col": int(b[0]), "row": int(b[1])},
+                                    })
+                        if g.get("hexes"):
+                            from engine.hex_utils import expand_wall_group_to_hex_list as _expand
+                            hexes_only_group = {"hexes": g["hexes"]}
+                            wall_hexes.extend(_expand(hexes_only_group, path_hint=hint))
                 else:
                     wall_hexes = wall_data.get("wall_hexes", [])
 
@@ -2107,9 +2174,20 @@ def get_board_config():
                 with open(obj_path, "r", encoding="utf-8-sig") as f:
                     obj_data = json.load(f)
                 objectives = obj_data.get("objectives", [])
+        from engine.hex_utils import expand_objectives_to_hex_list as _expand_objectives
+        board_cols = int(require_key(board_spec, "cols"))
+        board_rows = int(require_key(board_spec, "rows"))
+        objectives = _expand_objectives(
+            objectives,
+            cols=board_cols,
+            rows=board_rows,
+            path_hint=f"board objectives ({board_subdir})",
+        )
 
         merged = dict(board_spec)
         merged["wall_hexes"] = wall_hexes
+        if wall_segments_raw:
+            merged["walls"] = wall_segments_raw
         merged["objective_zones"] = [
             {"id": str(o["id"]), "hexes": o["hexes"]} for o in objectives
         ]

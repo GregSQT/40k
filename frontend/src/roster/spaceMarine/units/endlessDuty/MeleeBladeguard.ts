@@ -25,6 +25,8 @@ export class MeleeBladeguard extends TroopMeleeTroop {
 
   static UNIT_KEYWORDS = [...BladeguardVeteran.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = BladeguardVeteran.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = BladeguardVeteran.BASE_SIZE; // Size of the base
   static ICON_SCALE = BladeguardVeteran.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

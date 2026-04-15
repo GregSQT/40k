@@ -1,9 +1,17 @@
-﻿{
+{
   "default": {
-    "cols": 25,
-    "rows": 21,
-    "hex_radius": 25,
-    "margin": 4,
+    "cols": 360,
+    "rows": 312,
+    "inches_to_subhex": 10,
+    "hex_radius": 1.7,
+    "margin": 1,
+    "chunk_size": 64,
+    "hex_orientations": 6,
+    "pathfinding": {
+      "max_open_nodes": 2000,
+      "time_budget_us": 5000
+    },
+    "wall_ref": "walls-11.json",
     "colors": {
       "background": "0x002200",
       "cell_even": "0x002200",
@@ -25,21 +33,29 @@
       "objective_p2": "0xcc4444"
     },
     "display": {
+      "background_image": "/backgrounds/terrain1.webp",
+      "background_image_alpha": 0.85,
+      "background_overlay_alpha": 0.18,
+      "wall_texture": "/textures/wall3.webp",
+      "wall_texture_alpha": 1.0,
+      "objective_smooth_contour": true,
+      "objective_smooth_radius_ratio": 1.15,
+      "objective_smooth_alpha": 0.22,
       "resolution": "auto",
       "autoDensity": true,
       "antialias": true,
       "forceCanvas": true,
       "icon_scale": 1.2,
-      "eligible_outline_width": 3,
+      "eligible_outline_width": 1,
       "eligible_outline_alpha": 0.8,
       "hp_bar_width_ratio": 1.4,
-      "hp_bar_height": 7,
+      "hp_bar_height": 1,
       "hp_bar_y_offset_ratio": 0.85,
       "unit_circle_radius_ratio": 0.6,
-      "unit_text_size": 10,
-      "selected_border_width": 4,
-      "charge_target_border_width": 3,
-      "default_border_width": 2,
+      "unit_text_size": 2,
+      "selected_border_width": 1,
+      "charge_target_border_width": 1,
+      "default_border_width": 0.3,
       "canvas_border": "1px solid #333",
       "right_column_bottom_offset": 650
     }

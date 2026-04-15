@@ -97,6 +97,8 @@ export interface APIGameState {
     VALUE: number;
     ICON: string;
     ICON_SCALE?: number;
+    BASE_SIZE?: number | [number, number];
+    BASE_SHAPE?: "round" | "oval" | "square";
     unitType: string;
     SHOOT_LEFT?: number;
     ATTACK_LEFT?: number;
@@ -144,6 +146,8 @@ export interface APIGameState {
   fight_subphase: string | null;
   units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number }>;
   active_movement_unit?: string;
+  valid_move_destinations_pool?: Array<[number, number]>;
+  move_preview_border?: Array<[number, number]>;
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
@@ -266,6 +270,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   >([]);
   const [advancingUnitId, setAdvancingUnitId] = useState<number | null>(null);
   const [advanceRoll, setAdvanceRoll] = useState<number | null>(null);
+  const moveDestPoolRef = useRef<Set<string>>(new Set());
   const [advanceWarningPopup, setAdvanceWarningPopup] = useState<{
     unitId: number;
     timestamp: number;
@@ -799,6 +804,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       try {
         const requestId = Date.now();
         const requestBody = JSON.stringify({ ...action, requestId });
+        const _apiT0 = performance.now();
         const response = await fetch(`${API_BASE}/game/action`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -810,6 +816,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
 
         const data = await response.json();
+        console.log(`[PERF-API] ${action.action} took ${(performance.now() - _apiT0).toFixed(0)}ms`);
         setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
 
         // Process detailed backend action logs FIRST
@@ -1259,8 +1266,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state?.phase === "move"
           ) {
             setSelectedUnitId(parseInt(data.result.unitId, 10));
-            // Note: valid_destinations are stored in game_state.valid_move_destinations_pool
-            // BoardPvp will read them from gameState to display green hexes
+            // Store the full destination pool in a ref for click validation
+            // (not in memoizedGameState to avoid triggering a heavy PIXI rebuild)
+            const pool = data.game_state.valid_move_destinations_pool;
+            const poolSet = new Set<string>();
+            if (Array.isArray(pool)) {
+              for (const d of pool) {
+                if (Array.isArray(d) && d.length === 2) {
+                  poolSet.add(`${d[0]},${d[1]}`);
+                }
+              }
+            }
+            moveDestPoolRef.current = poolSet;
           }
           // Handle charge activation response - can have blinking_units without valid_destinations yet
           // After handleActivateCharge, backend returns blinking_units (targets) but not destinations yet
@@ -1651,6 +1668,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         manualWeaponSelected: unit.manualWeaponSelected,
         ICON: unit.ICON,
         ICON_SCALE: unit.ICON_SCALE,
+        BASE_SIZE: unit.BASE_SIZE,
+        BASE_SHAPE: unit.BASE_SHAPE,
         SHOOT_LEFT: unit.SHOOT_LEFT,
         ATTACK_LEFT: unit.ATTACK_LEFT,
         valid_target_pool: unit.valid_target_pool,
@@ -1929,6 +1948,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handleStartMovePreview = useCallback(
     (unitId: number | string, col: number | string, row: number | string) => {
+      (window as any).__perfMovePreviewStart = performance.now();
+      console.log(`[PERF-MOVE] handleStartMovePreview START t=${(window as any).__perfMovePreviewStart.toFixed(1)}ms`);
       if (gameState?.phase === "shoot") {
         if (pendingPreviewAction !== "move_after_shooting") {
           return;
@@ -1948,12 +1969,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       });
       setPendingPreviewAction("move");
       setMode("movePreview");
+      console.log(`[PERF-MOVE] handleStartMovePreview END (setState queued) t=${performance.now().toFixed(1)}ms`);
     },
     [gameState?.phase, pendingPreviewAction]
   );
 
   const handleDirectMove = useCallback(
     async (unitId: number | string, col: number | string, row: number | string) => {
+      const _t0 = performance.now();
+      console.log(`[PERF-MOVE] handleDirectMove START t=${_t0.toFixed(1)}ms`);
       const action = {
         action: "move",
         unitId: typeof unitId === "string" ? unitId : unitId.toString(),
@@ -1963,9 +1987,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
       try {
         await executeAction(action);
+        const _t1 = performance.now();
+        console.log(`[PERF-MOVE] handleDirectMove executeAction done in ${(_t1 - _t0).toFixed(1)}ms`);
         setMovePreview(null);
         setPendingPreviewAction(null);
         setMode("select");
+        console.log(`[PERF-MOVE] handleDirectMove END total=${(performance.now() - _t0).toFixed(1)}ms`);
       } catch (error) {
         console.error("❌ DIRECT MOVE FAILED:", error);
         console.error("Move failed:", error);
@@ -2075,6 +2102,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   );
 
   const handleConfirmMove = useCallback(async () => {
+    const _t0 = performance.now();
+    console.log(`[PERF-MOVE] handleConfirmMove START t=${_t0.toFixed(1)}ms`);
     if (!movePreview) {
       return;
     }
@@ -2121,6 +2150,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
     await handleDirectMove(movePreview.unitId, movePreview.destCol, movePreview.destRow);
     setPendingPreviewAction(null);
+    console.log(`[PERF-MOVE] handleConfirmMove END total=${(performance.now() - _t0).toFixed(1)}ms`);
   }, [
     movePreview,
     pendingPreviewAction,
@@ -2940,6 +2970,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       active_alternating_activation_pool: gameState.active_alternating_activation_pool,
       non_active_alternating_activation_pool: gameState.non_active_alternating_activation_pool,
       active_movement_unit: gameState.active_movement_unit,
+      move_preview_border: gameState.move_preview_border,
       active_shooting_unit: gameState.active_shooting_unit,
       active_fight_unit: gameState.active_fight_unit,
       units_cache: gameState.units_cache,
@@ -2950,7 +2981,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       winner: gameState.winner,
       pending_rule_choice_queue: gameState.pending_rule_choice_queue,
       active_rule_choice_prompt: gameState.active_rule_choice_prompt,
-      wall_hexes: gameState.wall_hexes,
     };
   }, [
     gameState,
@@ -3011,6 +3041,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onValidateCharge: () => {},
       onLogChargeRoll: () => {},
       getChargeDestinations: () => [],
+      moveDestPoolRef,
       onAdvance: async () => {},
       getAdvanceDestinations: () => [],
       advancingUnitId: null,
@@ -3094,6 +3125,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onValidateCharge: emptyCallback,
     onLogChargeRoll: emptyCallback,
     getChargeDestinations,
+    moveDestPoolRef,
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler
     getAdvanceDestinations: getAdvanceDestinationsMemo,
     advancingUnitId,

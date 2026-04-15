@@ -29,6 +29,8 @@ export class LeaderCaptainTerminator extends LeaderEliteMeleeElite {
   static UNIT_KEYWORDS = [...CaptainTerminatorRelicFistCombi.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
 
   static ICON = "/icons/CaptainTerminatorRelicFistCombi.webp";
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = CaptainTerminatorRelicFistCombi.BASE_SIZE; // Size of the base
   static ICON_SCALE = CaptainTerminatorRelicFistCombi.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

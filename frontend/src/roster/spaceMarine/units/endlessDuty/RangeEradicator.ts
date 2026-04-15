@@ -25,6 +25,8 @@ export class RangeEradicator extends EliteRangeTroop {
 
   static UNIT_KEYWORDS = [...EradicatorMeltaRifle.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = EradicatorMeltaRifle.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = EradicatorMeltaRifle.BASE_SIZE; // Size of the base
   static ICON_SCALE = EradicatorMeltaRifle.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

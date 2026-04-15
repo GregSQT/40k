@@ -28,6 +28,8 @@ export class TerminatorHeavyFlamer extends EliteRangeTroop {
  
 
   static ICON = "/icons/TerminatorHeavyFlamer.webp"; // Path relative to public folder
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.0; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

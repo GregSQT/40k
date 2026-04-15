@@ -150,6 +150,8 @@ export function createUnit(params: {
     HP_MAX: UnitClass.HP_MAX,
     ICON: UnitClass.ICON,
     ICON_SCALE: UnitClass.ICON_SCALE,
+    BASE_SIZE: (UnitClass as Record<string, unknown>).BASE_SIZE as number | [number, number] | undefined,
+    BASE_SHAPE: (UnitClass as Record<string, unknown>).BASE_SHAPE as "round" | "oval" | "square" | undefined,
     HP_CUR: UnitClass.HP_MAX, // Start at full health
     T: UnitClass.T,
     ARMOR_SAVE: UnitClass.ARMOR_SAVE,

@@ -26,6 +26,8 @@ export class RangeHellblaster extends TroopRangeElite {
   static UNIT_RULES: [] = [];
   static UNIT_KEYWORDS = [...Hellblaster.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = Hellblaster.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = Hellblaster.BASE_SIZE; // Size of the base
   static ICON_SCALE = Hellblaster.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

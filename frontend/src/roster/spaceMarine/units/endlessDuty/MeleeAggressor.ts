@@ -27,6 +27,8 @@ export class MeleeAggressor extends EliteMeleeElite {
   static RULES_STATUS = { closest_target_penetration: 2 };
   static UNIT_KEYWORDS = [...AggressorFlamestorm.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = AggressorFlamestorm.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = AggressorFlamestorm.BASE_SIZE; // Size of the base
   static ICON_SCALE = AggressorFlamestorm.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

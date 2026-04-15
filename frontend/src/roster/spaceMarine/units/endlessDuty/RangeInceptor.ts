@@ -25,6 +25,8 @@ export class RangeInceptor extends EliteRangeTroop {
 
   static UNIT_KEYWORDS = [...InceptorBolter.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = InceptorBolter.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = InceptorBolter.BASE_SIZE; // Size of the base
   static ICON_SCALE = InceptorBolter.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

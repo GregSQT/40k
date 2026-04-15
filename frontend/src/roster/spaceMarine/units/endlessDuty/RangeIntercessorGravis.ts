@@ -25,6 +25,8 @@ export class RangeIntercessorGravis extends EliteRangeTroop {
 
   static UNIT_KEYWORDS = [...HeavyIntercessor.UNIT_KEYWORDS, { keywordId: "endless_duty" }];
   static ICON = HeavyIntercessor.ICON;
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = HeavyIntercessor.BASE_SIZE; // Size of the base
   static ICON_SCALE = HeavyIntercessor.ICON_SCALE;
 
   constructor(name: string, startPos: [number, number]) {

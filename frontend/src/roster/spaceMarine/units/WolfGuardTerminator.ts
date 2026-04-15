@@ -28,6 +28,8 @@ export class WolfGuardTerminator extends EliteMeleeElite {
   static UNIT_KEYWORDS = [{ keywordId: "infantry"}, { keywordId: "imperium"}, { keywordId: "terminator"}, { keywordId: "wolf guard terminator squad"}];
   
   static ICON = "/icons/WolfGuardTerminator.webp"; // Path relative to public folder
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = 16; // Size of the base
   static ICON_SCALE = 2.0; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

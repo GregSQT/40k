@@ -3030,17 +3030,7 @@ export const BoardWithAPI: React.FC = () => {
             mode={apiProps.mode}
             movePreview={apiProps.movePreview}
             attackPreview={apiProps.attackPreview || null}
-            wallHexesOverride={
-              apiProps.gameState?.wall_hexes != null && Array.isArray(apiProps.gameState.wall_hexes)
-                ? (
-                    apiProps.gameState.wall_hexes as Array<
-                      [number, number] | { col: number; row: number }
-                    >
-                  ).map((h) =>
-                    Array.isArray(h) ? { col: h[0], row: h[1] } : { col: h.col, row: h.row }
-                  )
-                : undefined
-            }
+            wallHexesOverride={undefined}
             targetPreview={
               apiProps.targetPreview
                 ? {
@@ -3111,6 +3101,7 @@ export const BoardWithAPI: React.FC = () => {
             onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
             gameState={apiProps.gameState as GameState}
             getChargeDestinations={apiProps.getChargeDestinations}
+            moveDestPoolRef={apiProps.moveDestPoolRef}
             onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
             onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
             onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}

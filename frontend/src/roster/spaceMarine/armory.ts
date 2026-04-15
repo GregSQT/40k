@@ -29,6 +29,9 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   astartes_grenade_launcher_frag: {display_name: "Astartes Grenade Launcher (Frag)", COMBI_WEAPON: "astartes_grenade_launcher", RNG: 24, NB: D3, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: [],},
   astartes_grenade_launcher_krak: {display_name: "Astartes Grenade Launcher (Krak)", COMBI_WEAPON: "astartes_grenade_launcher", RNG: 24, NB: 1, ATK: 3, STR: 9, AP: -2, DMG: D3, WEAPON_RULES: [],},  
   auto_boltstorm_gauntlets: {display_name: "Auto Boltstorm Gauntlets", RNG: 18, NB: 3, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["TWIN_LINKED"],},
+  ballistus_lascannon: {display_name: "Ballistus Lascannon", RNG: 48, NB: 2, ATK: 3, STR: 12 , AP: -3, DMG: D6_PLUS_1, WEAPON_RULES: [],},
+  ballistus_missile_launcher_frag: {display_name: "Ballistus Missile Launcher (Frag)", RNG: 48, NB: TWO_D6, ATK: 3, STR: 5, AP: 0, DMG: 1, WEAPON_RULES: ["BLAST"],},
+  ballistus_missile_launcher_krak: {display_name: "Ballistus Missile Launcher (Krak)", RNG: 48, NB: 2, ATK: 3, STR: 10, AP: -2, DMG: D6, WEAPON_RULES: [],},
   boltgun: {display_name: "Boltgun", RNG: 24, NB: 2, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: [],},
   bolt_rifle: {display_name: "Bolt Rifle", RNG: 24, NB: 3, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT", "HEAVY"],},
   bolt_pistol: {display_name: "Bolt Pistol", RNG: 12, NB: 1, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["PISTOL"],},
@@ -47,7 +50,9 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   heavy_bolt_rifle: {display_name: "Heavy Bolt Rifle", RNG: 30, NB: 2, ATK: 3, STR: 5, AP: -1, DMG: 2, WEAPON_RULES: ["ASSAULT", "HEAVY"],},
   heavy_bolter: {display_name: "Heavy Bolter", RNG: 36, NB: 3, ATK: 3, STR: 5, AP: -1, DMG: 2, WEAPON_RULES: ["ASSAULT", "HEAVY", "SUSTAINED_HITS:1"],},
   heavy_flamer: {display_name: "Heavy Flamer", RNG: 12, NB: D6, ATK: 7, STR: 5, AP: -1, DMG: 1, WEAPON_RULES: ["ASSAULT", "HEAVY", "SUSTAINED_HITS:1"],},
+  heavy_onslaught_gatling_cannon: {display_name: "Heavy Onslaught Gatling Cannon", RNG: 24, NB: 12, ATK: 3, STR: 6, AP: 0, DMG: 1, WEAPON_RULES: ["DEVASTATING_WOUNDS"],},
   inferno_pistol: {display_name: "Inferno Pistol", RNG: 6, NB: 1, ATK: 3, STR: 8, AP: -4, DMG: 3, WEAPON_RULES: ["MELTA:2", "PISTOL"],},
+  icarus_rocket_pod: {display_name: "Icarus Rocket Pod", RNG: 24, NB: D3, ATK: 3, STR: 8, AP: -1, DMG: 2, WEAPON_RULES: ["ANTI_FLY:2"],},
   master_crafted_bolter_captain: {display_name: "Master-crafted Bolter", RNG: 24, NB: 2, ATK: 2, STR: 4, AP: -1, DMG: 2, WEAPON_RULES: [],},
   master_crafted_bolter_lieutenant: {display_name: "Master-crafted Bolter", RNG: 24, NB: 2, ATK: 2, STR: 4, AP: -1, DMG: 2, WEAPON_RULES: [],},
   master_crafted_boltgun: {display_name: "Master-crafted Boltgun", RNG: 12, NB: 3, ATK: 2, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: [],},
@@ -58,6 +63,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   neo_volkite_pistol_captain: {display_name: "Neo-Volkite Pistol", RNG: 12, NB: 1, ATK: 2, STR: 5, AP: 0, DMG: 2, WEAPON_RULES: ["DEVASTATING_WOUNDS","PISTOL"],},
   neo_volkite_pistol_lieutenant: {display_name: "Neo-Volkite Pistol", RNG: 12, NB: 1, ATK: 2, STR: 5, AP: 0, DMG: 2, WEAPON_RULES: ["DEVASTATING_WOUNDS","PISTOL"],},
   occulus_bolt_carabine: {display_name: "Oculus Bolt Carabine", RNG: 24, NB: 2, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["ASSAULT", "IGNORES_COVER"],},
+  onslaught_gatling_cannon: {display_name: "Onslaught Gatling Cannon", RNG: 24, NB: 8, ATK: 3, STR: 5, AP: 0, DMG: 1, WEAPON_RULES: ["DEVASTATING_WOUNDS"],},
   plasma_cannon_standard: {display_name: "Plasma Cannon (Standard)", COMBI_WEAPON: "plasma_cannon", RNG: 36, NB: D3, ATK: 3, STR: 7, AP: -2, DMG: 1, WEAPON_RULES: ["BLAST"],},
   plasma_cannon_supercharge: {display_name: "Plasma Cannon (Supercharge)", COMBI_WEAPON: "plasma_cannon", RNG: 36, NB: D3, ATK: 3, STR: 8, AP: -3, DMG: 2, WEAPON_RULES: ["BLAST", "HAZARDOUS"],},
   plasma_exterminator_standard: {display_name: "Plasma Exterminator (Standard)", COMBI_WEAPON: "plasma_exterminator", RNG: 18, NB: 2, ATK: 3, STR: 7, AP: -2, DMG: 2, WEAPON_RULES: ["ASSAULT", "PISTOL", "TWIN_LINKED"],},
@@ -79,10 +85,13 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   storm_bolter: {display_name: "Storm Bolter", RNG: 24, NB: 2, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:2"],},
   storm_bolter_captain: {display_name: "Storm Bolter", RNG: 24, NB: 2, ATK: 2, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:2"],},
   storm_bolter_wolf_guard: {display_name: "Storm Bolter", RNG: 24, NB: 2, ATK: 2, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:2"],},
+  twin_storm_bolter: {display_name: "Twin Storm Bolter", RNG: 24, NB: 2, ATK: 3, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: ["RAPID_FIRE:2", "TWIN_LINKED"],},
+
 
   // #########################################################################################
   // #################################### Melee Weapons ######################################
   // #########################################################################################
+  armoured_feet: {display_name: "Armoured Feet", NB: 5, ATK: 3, STR: 7, AP: 0, DMG: 1, WEAPON_RULES: [],},
   assault_intercessor_chainsword: {display_name: "Astartes Chainsword", NB: 4, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: [],},
   astartes_chainsword: {display_name: "Astartes Chainsword", NB: 3, ATK: 3, STR: 4, AP: -1, DMG: 1, WEAPON_RULES: [],},
   close_combat_weapon_captain: {display_name: "Close Combat Weapon", NB: 6, ATK: 2, STR: 4, AP: 0, DMG: 1, WEAPON_RULES: [],},
@@ -104,6 +113,7 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
   power_fist_pack_leader: {display_name: "Power Fist", NB: 2, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: [],},
   power_fist: {display_name: "Power Fist", NB: 3, ATK: 3, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: [],},
   power_weapon_pack_leader: {display_name: "Power Weapon", NB: 4, ATK: 3, STR: 5, AP: -2, DMG: 1, WEAPON_RULES: [],},
+  redemptor_fist: {display_name: "Redemptor Fist", NB: 5, ATK: 3, STR: 12, AP: -2, DMG: 3, WEAPON_RULES: [],},
   relic_blade_captain: {display_name: "Relic Blade", NB: 2, ATK: 2, STR: 5, AP: -2, DMG: 2, WEAPON_RULES: ["EXTRA_ATTACKS"],},
   relic_chainsword_captain: {display_name: "Relic Chainsword", NB: 3, ATK: 2, STR: 4, AP: -1, DMG: 2, WEAPON_RULES: ["EXTRA_ATTACKS"],},
   relic_fist: {display_name: "Relic Fist", NB: 5, ATK: 2, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: [],},

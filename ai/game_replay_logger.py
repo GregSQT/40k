@@ -414,7 +414,7 @@ class GameReplayLogger:
                         if field not in unit:
                             raise ValueError(f"Unit missing required field '{field}': {unit}")
                     
-                    formatted_units.append({
+                    entry = {
                         "id": unit["id"],
                         "unit_type": unit["unit_type"],
                         "player": unit["player"],
@@ -426,8 +426,12 @@ class GameReplayLogger:
                         "RNG_RNG": unit["RNG_RNG"],
                         "RNG_DMG": unit["RNG_DMG"],
                         "CC_DMG": unit["CC_DMG"],
-                        "CC_RNG": unit["CC_RNG"]
-                    })
+                        "CC_RNG": unit["CC_RNG"],
+                        "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
+                        "BASE_SIZE": unit.get("BASE_SIZE", 1),
+                        "orientation": unit.get("orientation", 0),
+                    }
+                    formatted_units.append(entry)
                 
                 # Store TRUE initial state from scenario config
                 self.initial_game_state = {"units": formatted_units}
@@ -484,7 +488,10 @@ class GameReplayLogger:
                     "RNG_RNG": unit["RNG_RNG"],
                     "RNG_DMG": unit["RNG_DMG"],
                     "CC_DMG": unit["CC_DMG"],
-                    "CC_RNG": unit["CC_RNG"]
+                    "CC_RNG": unit["CC_RNG"],
+                    "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
+                    "BASE_SIZE": unit.get("BASE_SIZE", 1),
+                    "orientation": unit.get("orientation", 0),
                 })
         # THIRD: Try to get from controller if available
         elif hasattr(self.env, 'controller'):
@@ -512,8 +519,10 @@ class GameReplayLogger:
                         "RNG_RNG": unit["RNG_RNG"],
                         "RNG_DMG": unit["RNG_DMG"],
                         "CC_DMG": unit["CC_DMG"],
-                        "RNG_RNG": unit["RNG_RNG"],
-                        "CC_RNG": unit["CC_RNG"]
+                        "CC_RNG": unit["CC_RNG"],
+                        "BASE_SHAPE": unit.get("BASE_SHAPE", "round"),
+                        "BASE_SIZE": unit.get("BASE_SIZE", 1),
+                        "orientation": unit.get("orientation", 0),
                     })
         # THIRD: Try direct environment units
         elif hasattr(self.env, 'units') and self.env.units:

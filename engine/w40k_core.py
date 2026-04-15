@@ -87,10 +87,14 @@ def _load_topology_cached(
         _board_dir = _root / "config" / "board" / f"{board_cols}x{board_rows}"
         _topology_path = _board_dir / f"topology_{cache_key}.npz"
         if not _topology_path.exists():
-            raise FileNotFoundError(
-                f"LoS topology file required for wall_ref={wall_ref} but not found: {_topology_path}\n"
-                f"Run: python scripts/los_topology_builder.py {board_cols}x{board_rows}"
+            import logging
+            logging.getLogger(__name__).info(
+                "No topology .npz for %s — using on-demand LoS/pathfinding (Board ×10 mode).",
+                cache_key,
             )
+            for key in ("los_topology", "pathfinding_topology", "wall_edge_topology"):
+                game_state.pop(key, None)
+            return
         try:
             with np.load(str(_topology_path)) as topo:
                 _topology_cache[cache_key] = (
@@ -368,6 +372,30 @@ class W40KEngine(gym.Env):
                 "tutorial_fight_no_death_unit_ids"
             )
         
+        # Scale game_rules distance values from inches to sub-hex grid units.
+        # Data files keep values in inches (GW standard); the engine works in grid steps.
+        _board_cfg = self.config.get("board", {})
+        _board_default = _board_cfg.get("default", _board_cfg)
+        _scale = int(_board_default.get("inches_to_subhex", 1))
+        if _scale != 1:
+            gr = self.config.get("game_rules")
+            if gr:
+                for _key in (
+                    "engagement_zone",
+                    "charge_max_distance",
+                    "advance_distance_range",
+                    "avg_charge_roll",
+                    "max_search_distance",
+                ):
+                    if _key in gr:
+                        gr[_key] = int(gr[_key]) * _scale
+            op = self.config.get("observation_params")
+            if op and "perception_radius" in op:
+                op["perception_radius"] = int(op["perception_radius"]) * _scale
+            self.config["inches_to_subhex"] = _scale
+        else:
+            self.config["inches_to_subhex"] = 1
+
         # Store training system compatibility parameters
         self.quiet = quiet
         self.unit_registry = unit_registry
@@ -490,6 +518,7 @@ class W40KEngine(gym.Env):
             # Board state - handle both config formats
             "board_cols": board_cols,
             "board_rows": board_rows,
+            "inches_to_subhex": self.config.get("inches_to_subhex", 1),
             "max_range": max_range,
             # Use scenario terrain if loaded, otherwise use board config
             "wall_hexes": base_wall_hexes,
@@ -501,11 +530,13 @@ class W40KEngine(gym.Env):
         }
 
         # Load precomputed LoS topology if wall_ref available (PERF: ~1000x faster LoS lookups)
+        # If .npz missing (Board ×10), LoS/pathfinding use on-demand calculation via hex_utils.
         _load_topology_cached(
             getattr(self, "_scenario_wall_ref", None),
             board_cols, board_rows,
             self.game_state,
         )
+        self.game_state.pop("_wall_set_cache", None)
 
         self.game_state["weapon_damage_table"] = load_weapon_damage_table()
 

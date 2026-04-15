@@ -339,30 +339,35 @@ def _remove_dead_unit_from_fight_pools(game_state: Dict[str, Any], unit_id: str)
 
 def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    Check if unit is adjacent to at least one enemy within melee range.
+    Check if unit is adjacent to at least one enemy within engagement zone.
 
-    Used for fight phase eligibility - unit must be within melee range of an enemy.
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
+    Uses min distance between footprints (§3.3, §9.8) for multi-hex units.
+    For legacy boards (engagement_zone=1, single-hex), equivalent to hex distance <= 1.
     """
     from engine.utils.weapon_helpers import get_melee_range
-    cc_range = get_melee_range()  # Always 1
+    from engine.hex_utils import min_distance_between_sets
+    cc_range = get_melee_range(game_state)
     unit_col, unit_row = require_unit_position(unit, game_state)
 
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
 
     units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     for enemy_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) != unit_player:
-            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-            distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
-            add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} @ ({unit_col},{unit_row}) melee_range={cc_range} | Enemy {enemy_id} @ ({enemy_col},{enemy_row}) distance={distance}")
+            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            distance = min_distance_between_sets(unit_fp, enemy_fp)
+            add_console_log(game_state, f"FIGHT CHECK: Unit {unit['id']} engagement_zone={cc_range} | Enemy {enemy_id} footprint_dist={distance}")
             if distance <= cc_range:
-                add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy_id} (dist {distance} <= melee_range {cc_range})")
+                add_console_log(game_state, f"FIGHT ELIGIBLE: Unit {unit['id']} can fight enemy {enemy_id} (dist {distance} <= engagement_zone {cc_range})")
                 return True
 
-    add_console_log(game_state, f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within melee_range {cc_range}")
+    add_console_log(game_state, f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within engagement_zone {cc_range}")
     return False
 
 
@@ -1242,27 +1247,29 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
     Valid targets:
     - Enemy units
     - Alive (in units_cache)
-    - Adjacent to attacker (within melee range distance)
+    - Within engagement zone (min footprint distance, §3.3/§9.8)
 
     NO LINE OF SIGHT CHECK (fight doesn't need LoS)
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1
     """
     from engine.utils.weapon_helpers import get_melee_range
-    cc_range = get_melee_range()  # Always 1
+    from engine.hex_utils import min_distance_between_sets
+    cc_range = get_melee_range(game_state)
     unit_col, unit_row = require_unit_position(unit, game_state)
     unit_player = int(unit["player"]) if unit["player"] is not None else None
 
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     valid_targets = []
 
-    units_cache = require_key(game_state, "units_cache")
     for target_id, cache_entry in units_cache.items():
-        # Enemy check
         if int(cache_entry["player"]) == unit_player:
             continue
 
-        # Adjacent check (within melee range) - use cache_entry for target position
-        target_col, target_row = cache_entry["col"], cache_entry["row"]
-        distance = calculate_hex_distance(unit_col, unit_row, target_col, target_row)
+        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        distance = min_distance_between_sets(unit_fp, enemy_fp)
         if distance > cc_range:
             continue
 
@@ -2288,22 +2295,28 @@ def _calculate_wound_target(strength: int, toughness: int) -> int:
 
 
 def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """Cube coordinate range check
-    MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers instead of RNG_RNG
+    """Check if any enemy is within weapon range using footprint distance (§3.3).
+
+    Simplified LoS: assumes clear LoS if distance is within range.
     """
     from engine.utils.weapon_helpers import get_max_ranged_range
+    from engine.hex_utils import min_distance_between_sets
     rng_rng = get_max_ranged_range(unit)
     if rng_rng <= 0:
         return False
-    
+
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
     unit_col, unit_row = require_unit_position(unit, game_state)
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+
     for enemy_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) != unit_player:
-            enemy_col, enemy_row = cache_entry["col"], cache_entry["row"]
-            distance = calculate_hex_distance(unit_col, unit_row, enemy_col, enemy_row)
+            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            distance = min_distance_between_sets(unit_fp, enemy_fp)
             if distance <= rng_rng:
-                return True  # Simplified - assume clear LoS for now
-    
+                return True
+
     return False

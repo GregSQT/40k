@@ -15,12 +15,14 @@ import type { DiceValue, Weapon } from "../../types/game";
 const D3: DiceValue = "D3";
 //const D6: DiceValue = "D6";
 const D6_PLUS_1: DiceValue = "D6+1";
+const D6_PLUS_3: DiceValue = "D6+3";
 // ============================================================================
 // TYRANID WEAPONS
 // ============================================================================
 
 export const TYRANID_ARMORY: Record<string, Weapon> = {
   // Ranged Weapons
+  bio_plasmic_screamer: {display_name: "Bio-Plasmic Screamer", RNG: 18, NB: D6_PLUS_3, ATK: 4, STR: 8, AP: -2, DMG: 1, WEAPON_RULES: ["ASSAULT", "BLAST"],},
   deathspitter: {display_name: "Deathspitter", RNG: 24, NB: 3, ATK: 4, STR: 5, AP: -1, DMG: 1, WEAPON_RULES: [],},
   flamespurt: {display_name: "Flamespurt", RNG: 12, NB: D6_PLUS_1, ATK: 7, STR: 6, AP: -1, DMG: 1, WEAPON_RULES: ["IGNORES_COVER", "TORRENT", "TWIN_LINKED"],},
   fleshborer: {display_name: "Fleshborer", RNG: 18, NB: 1, ATK: 4, STR: 5, AP: 0, DMG: 1, WEAPON_RULES: ["ASSAULT"],},
@@ -49,6 +51,7 @@ export const TYRANID_ARMORY: Record<string, Weapon> = {
   rending_claws: {display_name: "Rending Claws", NB: 4, ATK: 2, STR: 4, AP: -2, DMG: 1, WEAPON_RULES: [],},
   rending_claws_prime: {display_name: "Rending Claws", NB: 5, ATK: 2, STR: 6, AP: -2, DMG: 2, WEAPON_RULES: ["DEVASTATING_WOUNDS", "TWIN_LINKED"],},
   bio_weapons: {display_name: "Bio-Weapons", NB: 5, ATK: 3, STR: 5, AP: -1, DMG: 1, WEAPON_RULES: [],},
+  screamer_killer_talons: {display_name: "Screamer-Killer Talons", NB: 10, ATK: 3, STR: 10, AP: -2, DMG: 3, WEAPON_RULES: [],},
   scything_talons: {display_name: "Scything Talons", NB: 3, ATK: 4, STR: 3, AP: -1, DMG: 1, WEAPON_RULES: [],},
   scything_talons_tyrant_guard: {display_name: "Scything Talons", NB: 5, ATK: 3, STR: 5, AP: -1, DMG: 1, WEAPON_RULES: [],},
 };

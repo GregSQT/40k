@@ -742,16 +742,12 @@ class ObservationBuilder:
         to_row: int,
         game_state: Dict[str, Any],
     ) -> bool:
-        """
-        Check LoS using los_topology (O(1), no cache needed).
-        Single source of truth for observation visibility features.
+        """Check LoS for observation visibility features.
+
+        Uses precomputed los_topology when available (legacy boards).
+        Falls back to on-demand hex line trace (Board ×10) via hex_utils.
         Returns False for out-of-bounds coordinates.
         """
-        los_topology = game_state.get("los_topology")
-        if los_topology is None:
-            raise KeyError(
-                "los_topology is required. Load topology at reset via topology_{cols}x{rows}-{wall_id}.npz"
-            )
         board_cols = game_state.get("board_cols")
         board_rows = game_state.get("board_rows")
         if not (
@@ -766,9 +762,21 @@ class ObservationBuilder:
         config = require_key(game_state, "config")
         game_rules = require_key(config, "game_rules")
         los_visibility_min_ratio = float(require_key(game_rules, "los_visibility_min_ratio"))
-        from_idx = from_row * board_cols + from_col
-        to_idx = to_row * board_cols + to_col
-        visibility_ratio = float(los_topology[from_idx, to_idx])
+
+        los_topology = game_state.get("los_topology")
+        if los_topology is not None:
+            from_idx = from_row * board_cols + from_col
+            to_idx = to_row * board_cols + to_col
+            visibility_ratio = float(los_topology[from_idx, to_idx])
+        else:
+            from engine.hex_utils import compute_los_visibility, build_wall_set
+            wall_set = game_state.get("_wall_set_cache")
+            if wall_set is None:
+                wall_set = build_wall_set(game_state)
+                game_state["_wall_set_cache"] = wall_set
+            visibility_ratio = compute_los_visibility(
+                from_col, from_row, to_col, to_row, wall_set,
+            )
         return visibility_ratio >= los_visibility_min_ratio
 
     def _build_los_cache_for_observation(
@@ -886,7 +894,7 @@ class ObservationBuilder:
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use max range from weapons
         from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
         max_ranged_range = get_max_ranged_range(attacker)
-        melee_range = get_melee_range()  # Always 1
+        melee_range = get_melee_range(game_state)
 
         can_use_ranged = max_ranged_range > 0 and distance <= max_ranged_range
         can_use_melee = distance <= melee_range
@@ -1050,7 +1058,8 @@ class ObservationBuilder:
                 )
                 if "MOVE" not in unit:
                     raise KeyError(f"Unit missing required 'MOVE' field: {unit}")
-                max_charge_range = unit["MOVE"] + 12  # Assume average 2d6 = 7, but use 12 for safety
+                _gr = require_key(require_key(game_state, "config"), "game_rules")
+                max_charge_range = unit["MOVE"] + require_key(_gr, "charge_max_distance")
 
                 if distance <= max_charge_range:
                     return True
@@ -1144,12 +1153,15 @@ class ObservationBuilder:
         # -1.0 = enemy controls, 0.0 = contested/empty, 1.0 = we control
         self._encode_objective_control(obs, active_unit, game_state, base_idx=11, positions=positions)
         # === SECTION 2: Active Unit Capabilities (22 floats) - MULTIPLE_WEAPONS_IMPLEMENTATION.md ===
-        obs[16] = require_key(active_unit, "MOVE") / 12.0
+        _scale = game_state.get("inches_to_subhex", 1)
+        _move_norm = 12.0 * _scale
+        _rng_norm = 24.0 * _scale
+        obs[16] = require_key(active_unit, "MOVE") / _move_norm
 
         # RNG_WEAPONS[0] (3 floats: RNG, DMG, NB)
         rng_weapons = require_key(active_unit, "RNG_WEAPONS")
         if len(rng_weapons) > 0:
-            obs[17] = require_key(rng_weapons[0], "RNG") / 24.0
+            obs[17] = require_key(rng_weapons[0], "RNG") / _rng_norm
             obs[18] = expected_dice_value(require_key(rng_weapons[0], "DMG"), "obs_rng0_dmg") / 5.0
             obs[19] = expected_dice_value(require_key(rng_weapons[0], "NB"), "obs_rng0_nb") / 10.0
         else:
@@ -1157,7 +1169,7 @@ class ObservationBuilder:
 
         # RNG_WEAPONS[1] (3 floats)
         if len(rng_weapons) > 1:
-            obs[20] = require_key(rng_weapons[1], "RNG") / 24.0
+            obs[20] = require_key(rng_weapons[1], "RNG") / _rng_norm
             obs[21] = expected_dice_value(require_key(rng_weapons[1], "DMG"), "obs_rng1_dmg") / 5.0
             obs[22] = expected_dice_value(require_key(rng_weapons[1], "NB"), "obs_rng1_nb") / 10.0
         else:
@@ -1165,7 +1177,7 @@ class ObservationBuilder:
 
         # RNG_WEAPONS[2] (3 floats)
         if len(rng_weapons) > 2:
-            obs[23] = require_key(rng_weapons[2], "RNG") / 24.0
+            obs[23] = require_key(rng_weapons[2], "RNG") / _rng_norm
             obs[24] = expected_dice_value(require_key(rng_weapons[2], "DMG"), "obs_rng2_dmg") / 5.0
             obs[25] = expected_dice_value(require_key(rng_weapons[2], "NB"), "obs_rng2_nb") / 10.0
         else:
@@ -1764,8 +1776,9 @@ class ObservationBuilder:
                 # Feature 0-1: Relative position (egocentric)
                 ally_col, ally_row = positions[str(ally["id"])]
                 active_col, active_row = positions[str(active_unit["id"])]
-                rel_col = (ally_col - active_col) / 24.0
-                rel_row = (ally_row - active_row) / 24.0
+                _pos_norm = 24.0 * game_state.get("inches_to_subhex", 1)
+                rel_col = (ally_col - active_col) / _pos_norm
+                rel_row = (ally_row - active_row) / _pos_norm
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
                 obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
                 
@@ -1874,7 +1887,7 @@ class ObservationBuilder:
                 max_range = get_max_ranged_range(unit)
                 if max_range > 0 and distance <= max_range:
                     can_attack = 1.0
-                elif distance <= get_melee_range():
+                elif distance <= get_melee_range(game_state):
                     can_attack = 1.0
                 return (
                     1000,
@@ -1908,8 +1921,9 @@ class ObservationBuilder:
                 # Feature 0-2: Position and distance
                 enemy_col, enemy_row = positions[str(enemy["id"])]
                 active_col, active_row = positions[str(active_unit["id"])]
-                rel_col = (enemy_col - active_col) / 24.0
-                rel_row = (enemy_row - active_row) / 24.0
+                _epos_norm = 24.0 * game_state.get("inches_to_subhex", 1)
+                rel_col = (enemy_col - active_col) / _epos_norm
+                rel_row = (enemy_row - active_row) / _epos_norm
                 obs[feature_base + 0] = np.clip(rel_col, -1.0, 1.0)
                 obs[feature_base + 1] = np.clip(rel_row, -1.0, 1.0)
                 obs[feature_base + 2] = distance / perception_radius
@@ -1937,7 +1951,7 @@ class ObservationBuilder:
                     max_range = get_max_ranged_range(active_unit)
                     is_valid = 1.0 if distance <= max_range else 0.0
                 elif current_phase == "fight":
-                    melee_range = get_melee_range()  # Always 1
+                    melee_range = get_melee_range(game_state)
                     is_valid = 1.0 if distance <= melee_range else 0.0
                 obs[feature_base + 10] = is_valid
                 
@@ -1985,7 +1999,8 @@ class ObservationBuilder:
                     ally_distance = calculate_hex_distance(ally_col, ally_row, enemy_col, enemy_row)
                     if "MOVE" not in ally:
                         raise KeyError(f"Unit missing required 'MOVE' field: {ally}")
-                    if ally_distance > ally["MOVE"] + 12:
+                    _charge_max = require_key(require_key(require_key(game_state, "config"), "game_rules"), "charge_max_distance")
+                    if ally_distance > ally["MOVE"] + _charge_max:
                         continue
 
                     if bwc is not None:
@@ -2076,8 +2091,9 @@ class ObservationBuilder:
                 # Relative position (egocentric)
                 unit_col, unit_row = positions[str(unit["id"])]
                 active_col, active_row = positions[str(active_unit["id"])]
-                rel_col = (unit_col - active_col) / 24.0
-                rel_row = (unit_row - active_row) / 24.0
+                _upos_norm = 24.0 * game_state.get("inches_to_subhex", 1)
+                rel_col = (unit_col - active_col) / _upos_norm
+                rel_row = (unit_row - active_row) / _upos_norm
                 dist_norm = distance / perception_radius
                 hp_ratio = require_hp_from_cache(str(unit["id"]), game_state) / max(1, unit["HP_MAX"])
                 is_enemy = 1.0 if unit["player"] != active_unit["player"] else 0.0
@@ -2108,7 +2124,7 @@ class ObservationBuilder:
                 # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers
                 from engine.utils.weapon_helpers import get_max_ranged_range, get_melee_range
                 max_rng_range = get_max_ranged_range(unit)
-                melee_range = get_melee_range()  # Always 1
+                melee_range = get_melee_range(game_state)
                 
                 offensive_type = 1.0 if max_rng_range > melee_range else 0.0
                 
@@ -2182,11 +2198,12 @@ class ObservationBuilder:
                 distance = calculate_pathfinding_distance(
                     active_col, active_row, enemy_col, enemy_row, game_state
                 )
-                if distance <= active_unit["MOVE"] + 12:
+                _charge_max_d = require_key(require_key(require_key(game_state, "config"), "game_rules"), "charge_max_distance")
+                if distance <= active_unit["MOVE"] + _charge_max_d:
                     valid_targets.append(enemy)
         elif current_phase == "fight":
             from engine.utils.weapon_helpers import get_melee_range
-            melee_range = get_melee_range()
+            melee_range = get_melee_range(game_state)
             units_cache = require_key(game_state, "units_cache")
             active_entry = require_key(units_cache, str(active_unit["id"]))
             active_player = require_key(active_entry, "player")

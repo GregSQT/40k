@@ -1,0 +1,15 @@
+{
+  "name": "hammer",
+  "p1": {
+    "col_min": 0,
+    "col_max": 249,
+    "row_min": 170,
+    "row_max": 209
+  },
+  "p2": {
+    "col_min": 0,
+    "col_max": 249,
+    "row_min": 0,
+    "row_max": 29
+  }
+}

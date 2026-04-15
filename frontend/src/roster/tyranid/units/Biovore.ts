@@ -28,6 +28,8 @@ export class Biovore extends EliteRangeTroop {
 
 
   static ICON = "/icons/Biovore.webp"; // Path relative to public folder
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = 32; // Size of the base
   static ICON_SCALE = 2.2; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {

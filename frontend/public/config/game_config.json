@@ -1,17 +1,19 @@
 {
   "game_rules": {
+    "engagement_zone": 1,
     "max_turns": 5,
     "max_steps_per_turn": 500,
     "max_steps_per_turn_detail": "nb units (50) * nb actions per turn (7) = 350 + marge",
     "turn_limit_penalty": -1,
-    "los_visibility_min_ratio": 0.12,
-    "cover_ratio": 0.75,
+    "los_visibility_min_ratio": 0.05,
+    "cover_ratio": 0.95,
     "cover_ratio_rule": "A unit is considered in cover when visibility_ratio is below cover_ratio and can_see is true.",
     "los_debug_show_ratio": false,
     "los_debug_show_ratio_rule": "When true, shooting preview overlays visibility ratio percentages on evaluated hexes.",
-    "charge_max_distance": 13,
+    "charge_max_distance": 12,
     "advance_distance_range": 6,
     "avg_charge_roll": 7,
+    "max_search_distance": 50,
     "macro_max_unit_value": 200,
     "macro_target_weights": {
       "swarm": 1.0,

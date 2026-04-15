@@ -53,6 +53,8 @@ export class TyranidWarriorMelee extends TroopMeleeTroop {
 
   // ICON
   static ICON = "/icons/TyranidWarriorMelee.webp"; // Path relative to public folder
+  static BASE_SHAPE = "round"; // Shape of the base
+  static BASE_SIZE = 20; // Size of the base
   static ICON_SCALE = 2.2; // Size of the icon
 
   constructor(name: string, startPos: [number, number]) {
