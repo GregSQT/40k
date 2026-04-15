@@ -17,6 +17,10 @@ Thumbs.db
 $RECYCLE.BIN/
 Desktop.ini
 
+# Rust (toolchain / registry home — ne jamais versionner, cf. ~/.rustup ~/.cargo)
+/.rustup/
+/.cargo/
+
 # Environnements virtuels Python
 .venv/
 .venv310/
