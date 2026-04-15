@@ -202,8 +202,6 @@ export function setupBoardClickHandler(callbacks: {
         selectedUnitId: number | null;
       }>
     ).detail;
-    console.log(`[PERF-MOVE] hexClickHandler ENTRY col=${col} row=${row} phase=${phase} mode=${mode} selectedUnitId=${selectedUnitId}`);
-
     if (mode === "chargePreview" && selectedUnitId !== null) {
       if (callbacks.onMoveCharger) {
         callbacks.onMoveCharger(selectedUnitId, col, row);
@@ -216,7 +214,6 @@ export function setupBoardClickHandler(callbacks: {
       if (!callbacks.onStartMovePreview) {
         throw new Error("onStartMovePreview callback is required during move phase");
       }
-      console.log(`[PERF-MOVE] boardClickHandler → onStartMovePreview col=${col} row=${row} t=${performance.now().toFixed(1)}ms`);
       callbacks.onStartMovePreview(selectedUnitId, col, row);
     } else if (mode === "select" && selectedUnitId !== null && phase === "shoot") {
       if (!callbacks.onStartMovePreview) {

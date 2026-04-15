@@ -1543,7 +1543,6 @@ def execute_action():
 
         import time as _time
         _api_t0 = _time.perf_counter()
-        print(f"[PERF-API-DEBUG] action={action.get('action')} unitId={action.get('unitId')} success_before_engine={success}")
         # Route ALL actions through engine consistently
         if success is None:
             if action.get("action") == "end_phase":
@@ -1554,7 +1553,6 @@ def execute_action():
                 success, result = engine.execute_semantic_action(action)
 
         _api_t1 = _time.perf_counter()
-        print(f"[PERF-API-DEBUG] after engine: success={success} result_keys={list(result.keys()) if isinstance(result, dict) else type(result)} engine_ms={(_api_t1-_api_t0)*1000:.0f}")
         if success and endless_mode_active and action.get("action") != "endless_duty_status":
             ed_post = handle_endless_duty_post_action(engine)
             if isinstance(result, dict):
@@ -1565,6 +1563,11 @@ def execute_action():
         _api_t2 = _time.perf_counter()
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
+
+        _fp_zone = serializable_state.get("move_preview_footprint_zone")
+        _mv_border = serializable_state.get("move_preview_border")
+        _mv_pool = serializable_state.get("valid_move_destinations_pool")
+        print(f"[DEBUG-SERIALIZE] footprint_zone={len(_fp_zone) if isinstance(_fp_zone, list) else type(_fp_zone).__name__} border={len(_mv_border) if isinstance(_mv_border, list) else type(_mv_border).__name__} pool={len(_mv_pool) if isinstance(_mv_pool, list) else type(_mv_pool).__name__}")
 
         # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
         # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
@@ -2155,10 +2158,8 @@ def get_board_config():
                                         "start": {"col": int(a[0]), "row": int(a[1])},
                                         "end": {"col": int(b[0]), "row": int(b[1])},
                                     })
-                        if g.get("hexes"):
-                            from engine.hex_utils import expand_wall_group_to_hex_list as _expand
-                            hexes_only_group = {"hexes": g["hexes"]}
-                            wall_hexes.extend(_expand(hexes_only_group, path_hint=hint))
+                        from engine.hex_utils import expand_wall_group_to_hex_list as _expand
+                        wall_hexes.extend(_expand(g, path_hint=hint))
                 else:
                     wall_hexes = wall_data.get("wall_hexes", [])
 

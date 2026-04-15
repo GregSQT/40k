@@ -281,6 +281,7 @@ export interface GameState {
   deployment_state?: DeploymentState;
   active_movement_unit?: string; // Active unit ID in movement phase
   move_preview_border?: Array<[number, number]>;
+  move_preview_footprint_zone?: Array<[number, number]>;
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
   active_charge_unit?: string; // Active unit ID in charge phase

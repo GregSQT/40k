@@ -374,12 +374,16 @@ class W40KEngine(gym.Env):
         
         # Scale game_rules distance values from inches to sub-hex grid units.
         # Data files keep values in inches (GW standard); the engine works in grid steps.
+        # CRITICAL: deep-copy mutable sub-dicts before scaling to avoid mutating
+        # the cached config_loader objects (causes cumulative ×10 on each game restart).
         _board_cfg = self.config.get("board", {})
         _board_default = _board_cfg.get("default", _board_cfg)
         _scale = int(_board_default.get("inches_to_subhex", 1))
         if _scale != 1:
             gr = self.config.get("game_rules")
             if gr:
+                gr = copy.deepcopy(gr)
+                self.config["game_rules"] = gr
                 for _key in (
                     "engagement_zone",
                     "charge_max_distance",
@@ -391,6 +395,8 @@ class W40KEngine(gym.Env):
                         gr[_key] = int(gr[_key]) * _scale
             op = self.config.get("observation_params")
             if op and "perception_radius" in op:
+                op = copy.deepcopy(op)
+                self.config["observation_params"] = op
                 op["perception_radius"] = int(op["perception_radius"]) * _scale
             self.config["inches_to_subhex"] = _scale
         else:

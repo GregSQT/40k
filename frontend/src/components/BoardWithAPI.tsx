@@ -3102,6 +3102,7 @@ export const BoardWithAPI: React.FC = () => {
             gameState={apiProps.gameState as GameState}
             getChargeDestinations={apiProps.getChargeDestinations}
             moveDestPoolRef={apiProps.moveDestPoolRef}
+            footprintZoneRef={apiProps.footprintZoneRef}
             onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
             onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
             onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}

@@ -915,6 +915,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
         base_shape = unit.get("BASE_SHAPE", "round")
         orientation = unit.get("orientation", 0)
         _off_even, _off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+        _rej_bounds = 0
+        _rej_walls = 0
+        _rej_occupied = 0
 
         while queue:
             (cc, cr), cd = queue.popleft()
@@ -938,18 +941,28 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 nc, nr = nb
                 offsets = _off_even if (nc & 1) == 0 else _off_odd
                 fp_valid = True
+                _rej_reason = None
                 for dc, dr in offsets:
                     fc, fr = nc + dc, nr + dr
                     if fc < 0 or fr < 0 or fc >= _bcols or fr >= _brows:
                         fp_valid = False
+                        _rej_reason = "bounds"
                         break
                     if (fc, fr) in _walls:
                         fp_valid = False
+                        _rej_reason = "walls"
                         break
                     if (fc, fr) in _occupied:
                         fp_valid = False
+                        _rej_reason = "occupied"
                         break
                 if not fp_valid:
+                    if _rej_reason == "bounds":
+                        _rej_bounds += 1
+                    elif _rej_reason == "walls":
+                        _rej_walls += 1
+                    elif _rej_reason == "occupied":
+                        _rej_occupied += 1
                     continue
                 in_engagement = False
                 for dc, dr in offsets:
@@ -966,9 +979,27 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     _bfs_t1 = _time.perf_counter()
     game_state["valid_move_destinations_pool"] = valid_destinations
-    game_state["move_preview_border"] = _compute_border_cells(valid_destinations)
+
+    if is_single_hex:
+        footprint_zone: Set[Tuple[int, int]] = set(valid_destinations)
+        footprint_zone.add(start_pos)
+    else:
+        footprint_zone = set()
+        for vc, vr in valid_destinations:
+            offsets = _off_even if (vc & 1) == 0 else _off_odd
+            for dc, dr in offsets:
+                footprint_zone.add((vc + dc, vr + dr))
+        for dc, dr in (_off_even if (start_pos[0] & 1) == 0 else _off_odd):
+            footprint_zone.add((start_pos[0] + dc, start_pos[1] + dr))
+
+    game_state["move_preview_footprint_zone"] = footprint_zone
+    game_state["move_preview_border"] = _compute_border_cells(footprint_zone)
     _bfs_t2 = _time.perf_counter()
-    print(f"[PERF-BFS] Unit {unit_id} MOVE={move_range} single={is_single_hex}: BFS={(_bfs_t1-_bfs_t0)*1000:.0f}ms border={(_bfs_t2-_bfs_t1)*1000:.0f}ms visited={len(visited)} valid={len(valid_destinations)}")
+    _fp_size = len(_off_even) if not is_single_hex else 1
+    _diag = f" fp={_fp_size} walls={len(_walls)} occ={len(_occupied)} eadj={len(_enemy_adj)} zone={len(footprint_zone)}"
+    if not is_single_hex:
+        _diag += f" rej_bounds={_rej_bounds} rej_walls={_rej_walls} rej_occ={_rej_occupied} rej_ez={blocked_enemy_adjacent_count}"
+    print(f"[PERF-BFS] Unit {unit_id} MOVE={move_range} single={is_single_hex} base={base_size}: BFS={(_bfs_t1-_bfs_t0)*1000:.0f}ms border={(_bfs_t2-_bfs_t1)*1000:.0f}ms visited={len(visited)} valid={len(valid_destinations)}{_diag}")
 
     _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)}")
     if game_state.get("debug_mode", False):

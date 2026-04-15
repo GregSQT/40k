@@ -25,7 +25,6 @@ import {
   areUnitsAdjacent,
   cubeDistance,
   getHexLine,
-  hasLineOfSight,
   offsetToCube,
 } from "../utils/gameHelpers";
 import { getMaxRangedRange, getMeleeRange } from "../utils/weaponHelpers";
@@ -44,6 +43,7 @@ import {
   type HexCoord,
 } from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
+import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -230,6 +230,7 @@ type BoardProps = {
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
   moveDestPoolRef?: React.RefObject<Set<string>>;
+  footprintZoneRef?: React.RefObject<Set<string>>;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callback
   onAdvance?: (unitId: number) => void;
   onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
@@ -310,6 +311,7 @@ export default function Board({
   chargeRollPopup,
   getChargeDestinations,
   moveDestPoolRef,
+  footprintZoneRef,
   onAdvance,
   onAdvanceMove,
   onCancelAdvance,
@@ -331,6 +333,10 @@ export default function Board({
 
   React.useEffect(() => {}, []);
 
+  useEffect(() => {
+    ensureWasmLoaded();
+  }, []);
+
   // ✅ HOOK 1: useRef - ALWAYS called first
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -351,6 +357,13 @@ export default function Board({
   const staticBoardConfigKeyRef = useRef<string>("");
   const unitsLayerRef = useRef<PIXI.Container | null>(null);
   const unitsFingerprintRef = useRef<string>("");
+
+  // Hover preview: imperative PIXI layers (no React re-render)
+  const hoverOverlayRef = useRef<PIXI.Graphics | null>(null);
+  const hoverSpriteRef = useRef<PIXI.Container | null>(null);
+  const hoveredHexRef = useRef<{ col: number; row: number } | null>(null);
+  const losHexRef = useRef<{ col: number; row: number } | null>(null);
+  const losRequestIdRef = useRef(0);
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, gameConfig, loading, error } = useGameConfig();
@@ -679,6 +692,270 @@ export default function Board({
     const sorted = blinkingUnits.length > 0 ? [...blinkingUnits].sort((a, b) => a - b) : [];
     return sorted;
   }, [blinkingUnits]);
+
+  // Hover LoS preview: imperative PIXI update on boardHexHover
+  useEffect(() => {
+    if (!boardConfig || !gameConfig) return;
+
+    const HEX_RADIUS_H = boardConfig.hex_radius;
+    const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+    const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+    const MARGIN_H = boardConfig.margin;
+    const BOARD_COLS_H = boardConfig.cols;
+    const BOARD_ROWS_H = boardConfig.rows;
+    const gameRules = gameConfig.game_rules;
+    const losMin = gameRules?.los_visibility_min_ratio ?? 0;
+    const coverR = gameRules?.cover_ratio ?? 0;
+    const ATTACK_COLOR_H = parseInt((boardConfig.colors.attack || "0xe08080").replace("0x", ""), 16);
+    const COVER_COLOR_H = 0xffa500;
+
+    const wallHexesH: [number, number][] = boardConfig.wall_hexes ? [...boardConfig.wall_hexes] : [];
+    const bottomRowH = BOARD_ROWS_H - 1;
+    const wallKeySetH = new Set(wallHexesH.map(([c, r]) => `${c},${r}`));
+    for (let c = 0; c < BOARD_COLS_H; c++) {
+      if (c % 2 === 1 && !wallKeySetH.has(`${c},${bottomRowH}`)) {
+        wallHexesH.push([c, bottomRowH]);
+      }
+    }
+
+    const hxX = (col: number) => col * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
+    const hxY = (col: number, row: number) =>
+      row * HEX_HEIGHT_H + ((col % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+
+    let spriteBuiltForUnitId: number | null = null;
+
+    // Pre-parse pixel positions for fast nearest-hex lookups
+    let zonePixels: { x: number; y: number }[] | null = null;
+    let destPixels: { x: number; y: number; col: number; row: number }[] | null = null;
+
+    const buildZonePixels = () => {
+      const pool = footprintZoneRef?.current ?? moveDestPoolRef?.current;
+      if (!pool || pool.size === 0) { zonePixels = null; return; }
+      zonePixels = [];
+      for (const k of pool) {
+        const sep = k.indexOf(",");
+        const c = Number(k.substring(0, sep));
+        const r = Number(k.substring(sep + 1));
+        zonePixels.push({ x: hxX(c), y: hxY(c, r) });
+      }
+    };
+
+    const buildDestPixels = () => {
+      const pool = moveDestPoolRef?.current;
+      if (!pool || pool.size === 0) { destPixels = null; return; }
+      destPixels = [];
+      for (const k of pool) {
+        const sep = k.indexOf(",");
+        const c = Number(k.substring(0, sep));
+        const r = Number(k.substring(sep + 1));
+        destPixels.push({ x: hxX(c), y: hxY(c, r), col: c, row: r });
+      }
+    };
+
+    buildZonePixels();
+    buildDestPixels();
+
+    // DOM mousemove: icon follows cursor pixel-perfect
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    const onMouseMove = (ev: MouseEvent) => {
+      if (phase !== "move" || selectedUnitId === null) return;
+      const app = appRef.current;
+      if (!app || !canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
+      const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
+
+      const selectedUnit = units.find((u) => u.id === selectedUnitId);
+      if (!selectedUnit) return;
+
+      // Build the icon container once per selected unit
+      if (!hoverSpriteRef.current || hoverSpriteRef.current.destroyed || spriteBuiltForUnitId !== selectedUnitId) {
+        if (hoverSpriteRef.current) {
+          hoverSpriteRef.current.destroy({ children: true });
+          hoverSpriteRef.current = null;
+        }
+        const container = new PIXI.Container();
+        container.zIndex = 900;
+        app.stage.addChild(container);
+
+        const baseSizeVal = typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : undefined;
+        const iconDiam = baseSizeVal
+          ? baseSizeVal * 1.5 * HEX_RADIUS_H
+          : HEX_RADIUS_H * (selectedUnit.ICON_SCALE ?? 1.0);
+        const circleRadius = iconDiam / 2;
+
+        const baseCircle = new PIXI.Graphics();
+        const baseColor = selectedUnit.player === 1 ? 0x1d4ed8 : 0x882222;
+        baseCircle.beginFill(baseColor, 0.7);
+        baseCircle.drawCircle(0, 0, circleRadius);
+        baseCircle.endFill();
+        container.addChild(baseCircle);
+
+        if (selectedUnit.ICON) {
+          const iconPath = selectedUnit.player === 2
+            ? selectedUnit.ICON.replace(".webp", "_red.webp")
+            : selectedUnit.ICON;
+          const texture = PIXI.Texture.from(iconPath);
+          const iconSprite = new PIXI.Sprite(texture);
+          iconSprite.anchor.set(0.5);
+          iconSprite.width = iconDiam;
+          iconSprite.height = iconDiam;
+          container.addChild(iconSprite);
+        }
+        container.alpha = 0.65;
+        hoverSpriteRef.current = container;
+        spriteBuiltForUnitId = selectedUnitId;
+      }
+
+      const container = hoverSpriteRef.current;
+
+      const approxCol = Math.round((px - HEX_WIDTH_H / 2 - MARGIN_H) / HEX_WIDTH_H);
+      const rowOffset = (approxCol % 2) * HEX_HEIGHT_H / 2;
+      const approxRow = Math.round((py - HEX_HEIGHT_H / 2 - MARGIN_H - rowOffset) / HEX_HEIGHT_H);
+      const curKey = `${approxCol},${approxRow}`;
+      const isValid = footprintZoneRef?.current?.has(curKey)
+        || moveDestPoolRef?.current?.has(curKey);
+
+      if (container.destroyed) return;
+
+      // Resolve the icon position: pixel-perfect inside zone, nearest-hex outside
+      let iconCol: number;
+      let iconRow: number;
+      if (isValid) {
+        container.position.set(px, py);
+        container.visible = true;
+        iconCol = approxCol;
+        iconRow = approxRow;
+      } else {
+        if (!zonePixels) buildZonePixels();
+        if (zonePixels && zonePixels.length > 0) {
+          let bestIdx = 0;
+          let bestDist = Infinity;
+          for (let i = 0; i < zonePixels.length; i++) {
+            const zp = zonePixels[i];
+            const d = (zp.x - px) * (zp.x - px) + (zp.y - py) * (zp.y - py);
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+          }
+          const best = zonePixels[bestIdx];
+          container.position.set(best.x, best.y);
+          container.visible = true;
+          iconCol = Math.round((best.x - HEX_WIDTH_H / 2 - MARGIN_H) / HEX_WIDTH_H);
+          const bRowOff = (iconCol % 2) * HEX_HEIGHT_H / 2;
+          iconRow = Math.round((best.y - HEX_HEIGHT_H / 2 - MARGIN_H - bRowOff) / HEX_HEIGHT_H);
+        } else {
+          container.visible = false;
+          return;
+        }
+      }
+
+      hoveredHexRef.current = { col: iconCol, row: iconRow };
+
+      // Find nearest valid center for LoS (icon may be on a footprint extension hex)
+      let losCol = iconCol;
+      let losRow = iconRow;
+      if (!moveDestPoolRef?.current?.has(`${iconCol},${iconRow}`)) {
+        if (!destPixels) buildDestPixels();
+        if (destPixels && destPixels.length > 0) {
+          const ix = container.position.x;
+          const iy = container.position.y;
+          let bestDist = Infinity;
+          for (let i = 0; i < destPixels.length; i++) {
+            const dp = destPixels[i];
+            const d = (dp.x - ix) * (dp.x - ix) + (dp.y - iy) * (dp.y - iy);
+            if (d < bestDist) { bestDist = d; losCol = dp.col; losRow = dp.row; }
+          }
+        }
+      }
+
+      const prevLos = losHexRef.current;
+      const losHexChanged = !prevLos || prevLos.col !== losCol || prevLos.row !== losRow;
+      losHexRef.current = { col: losCol, row: losRow };
+
+      if (losHexChanged) {
+        triggerLosForHex(losCol, losRow);
+      }
+    };
+
+    // Debounced LoS computation, shared by mousemove and boardHexHover
+    let losDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const LOS_DEBOUNCE_MS = 60;
+
+    const triggerLosForHex = (col: number, row: number) => {
+      if (losDebounceTimer) clearTimeout(losDebounceTimer);
+      losDebounceTimer = setTimeout(() => {
+        const app = appRef.current;
+        if (!app) return;
+        const selectedUnit = units.find((u) => u.id === selectedUnitId);
+        if (!selectedUnit) return;
+        const range = getMaxRangedRange(selectedUnit);
+        if (range <= 0 || !selectedUnit.RNG_WEAPONS?.length || !isWasmReady()) return;
+
+        if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
+          hoverOverlayRef.current = new PIXI.Graphics();
+          hoverOverlayRef.current.zIndex = 50;
+          app.stage.addChild(hoverOverlayRef.current);
+        }
+        const overlay = hoverOverlayRef.current;
+        const requestId = ++losRequestIdRef.current;
+
+        const visibleHexes = computeVisibleHexes(
+          col, row, range,
+          BOARD_COLS_H, BOARD_ROWS_H,
+          wallHexesH,
+          losMin, coverR,
+        );
+
+        if (losRequestIdRef.current !== requestId) return;
+
+        overlay.clear();
+        overlay.beginFill(ATTACK_COLOR_H, 0.3);
+        for (const hex of visibleHexes) {
+          if (hex.state === 1) {
+            overlay.drawCircle(hxX(hex.col), hxY(hex.col, hex.row), HEX_RADIUS_H);
+          }
+        }
+        overlay.endFill();
+        overlay.beginFill(COVER_COLOR_H, 0.3);
+        for (const hex of visibleHexes) {
+          if (hex.state === 2) {
+            overlay.drawCircle(hxX(hex.col), hxY(hex.col, hex.row), HEX_RADIUS_H);
+          }
+        }
+        overlay.endFill();
+        overlay.visible = true;
+      }, LOS_DEBOUNCE_MS);
+    };
+
+    // boardHexHover: also triggers LoS for hex changes inside the zone
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{
+        col: number; row: number; hexChanged: boolean;
+      }>).detail;
+      const { col, row, hexChanged } = detail;
+      if (!hexChanged) return;
+      if (phase !== "move" || selectedUnitId === null) {
+        if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
+        return;
+      }
+      if (!moveDestPoolRef?.current?.has(`${col},${row}`)) return;
+      triggerLosForHex(col, row);
+    };
+
+    if (canvas) canvas.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("boardHexHover", handler);
+    return () => {
+      if (losDebounceTimer) clearTimeout(losDebounceTimer);
+      if (canvas) canvas.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("boardHexHover", handler);
+      if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
+      if (hoverSpriteRef.current) hoverSpriteRef.current.visible = false;
+      hoveredHexRef.current = null;
+      losHexRef.current = null;
+    };
+  }, [boardConfig, gameConfig, phase, selectedUnitId, units]);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -1169,9 +1446,10 @@ export default function Board({
       )
     ) {
       if (phase === "move") {
-        const border = gameState?.move_preview_border;
-        if (border && Array.isArray(border) && border.length > 0) {
-          for (const dest of border) {
+        const zone = gameState?.move_preview_footprint_zone ?? gameState?.move_preview_border;
+        console.log(`[MOVE-PREVIEW] footprint_zone=${gameState?.move_preview_footprint_zone?.length ?? 'N/A'} border=${gameState?.move_preview_border?.length ?? 'N/A'} using=${zone?.length ?? 0}`);
+        if (zone && Array.isArray(zone) && zone.length > 0) {
+          for (const dest of zone) {
             if (Array.isArray(dest) && dest.length === 2) {
               availableCells.push({ col: Number(dest[0]), row: Number(dest[1]) });
             } else if (dest && typeof dest === "object" && "col" in dest && "row" in dest) {
@@ -1262,49 +1540,64 @@ export default function Board({
       }
 
       const attackCellSet = new Set<string>();
-
-      const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
-
-      const enemyById = new Map<string, Unit>();
-      for (const enemy of units) {
-        if (enemy.player !== source.unit.player) {
-          enemyById.set(String(enemy.id), enemy);
-        }
+      const range = getMaxRangedRange(source.unit);
+      if (range <= 0) {
+        return;
       }
 
-      if (shootPreviewBackendIds) {
-        for (const enemyId of shootPreviewBackendIds) {
-          const enemy = enemyById.get(String(enemyId));
-          if (!enemy) {
-            continue;
-          }
-
-          const enemyKey = `${enemy.col},${enemy.row}`;
-          if (!attackCellSet.has(enemyKey)) {
-            attackCellSet.add(enemyKey);
-            attackCells.push({ col: enemy.col, row: enemy.row });
-          }
-
-          const pathHexes: Position[] = getHexLine(source.fromCol, source.fromRow, enemy.col, enemy.row);
-          for (const hex of pathHexes) {
-            const isSourceHex = hex.col === source.fromCol && hex.row === source.fromRow;
-            if (isSourceHex) {
-              continue;
-            }
-            const hexKey = `${hex.col},${hex.row}`;
-            if (wallHexSet.has(hexKey)) {
-              continue;
-            }
-            if (!attackCellSet.has(hexKey)) {
-              attackCellSet.add(hexKey);
+      if (isWasmReady()) {
+        const visibleHexes = computeVisibleHexes(
+          source.fromCol, source.fromRow, range,
+          BOARD_COLS, BOARD_ROWS,
+          effectiveWallHexes,
+          losVisibilityMinRatio, coverRatio,
+        );
+        for (const hex of visibleHexes) {
+          const key = `${hex.col},${hex.row}`;
+          if (hex.state === 2) {
+            coverCells.push({ col: hex.col, row: hex.row });
+            losVisibilityRatioByHex.set(key, coverRatio - 0.01);
+          } else {
+            if (!attackCellSet.has(key)) {
+              attackCellSet.add(key);
               attackCells.push({ col: hex.col, row: hex.row });
             }
+            losVisibilityRatioByHex.set(key, 1.0);
+          }
+        }
+      } else {
+        const enemyById = new Map<string, Unit>();
+        for (const enemy of units) {
+          if (enemy.player !== source.unit.player) {
+            enemyById.set(String(enemy.id), enemy);
+          }
+        }
+        const wallHexSet = new Set<string>(effectiveWallHexes.map((wall: number[]) => `${wall[0]},${wall[1]}`));
+
+        if (shootPreviewBackendIds) {
+          for (const enemyId of shootPreviewBackendIds) {
+            const enemy = enemyById.get(String(enemyId));
+            if (!enemy) {
+              continue;
+            }
+            const enemyKey = `${enemy.col},${enemy.row}`;
+            if (!attackCellSet.has(enemyKey)) {
+              attackCellSet.add(enemyKey);
+              attackCells.push({ col: enemy.col, row: enemy.row });
+            }
+            const pathHexes: Position[] = getHexLine(source.fromCol, source.fromRow, enemy.col, enemy.row);
+            for (const hex of pathHexes) {
+              if (hex.col === source.fromCol && hex.row === source.fromRow) continue;
+              const hexKey = `${hex.col},${hex.row}`;
+              if (wallHexSet.has(hexKey)) continue;
+              if (!attackCellSet.has(hexKey)) {
+                attackCellSet.add(hexKey);
+                attackCells.push({ col: hex.col, row: hex.row });
+              }
+            }
           }
         }
       }
-
-      // Debug LoS overlay: full hex-level visibility computed via WASM (Phase 3)
-      // In normal mode, only enemy targets + ray paths are shown above.
     };
 
     const shootingPreviewSource = resolveShootingPreviewSource();
@@ -1625,6 +1918,8 @@ export default function Board({
           child.destroy({ children: true, texture: false, baseTexture: false });
         }
       }
+      hoverOverlayRef.current = null;
+      hoverSpriteRef.current = null;
 
       // If units changed, clear the units layer so it gets rebuilt
       if (unitsChanged && savedUnitsLayer) {
@@ -1685,6 +1980,7 @@ export default function Board({
       showHexCoordinates,
       objectiveControl,
       moveDestPoolRef,
+      selectedUnitBaseSize: selectedUnit && typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : undefined,
       cachedStaticBoard: canReuseStatic ? staticBoardRef.current : null,
       cachedWalls: canReuseStatic ? staticWallsRef.current : null,
       losDebugShowRatio: showLosDebugOverlay && phase === "shoot" && shootingPreviewSource !== null,
@@ -2123,12 +2419,6 @@ export default function Board({
       }
     }
     } // end if (unitsChanged)
-
-    if ((window as any).__perfMovePreviewStart && mode === "movePreview") {
-      const elapsed = performance.now() - (window as any).__perfMovePreviewStart;
-      console.log(`[PERF-MOVE] click destination → preview rendered: ${elapsed.toFixed(1)}ms`);
-      delete (window as any).__perfMovePreviewStart;
-    }
 
     // ✅ TUTORIAL 1-24-* / 1-25 : ghost Termagant à l'emplacement de mort sur le board
     if (

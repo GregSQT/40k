@@ -941,7 +941,9 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
             per_unit_occupied.append({cell})
 
     from engine.hex_utils import dilate_hex_set
+    print(f"[DEBUG-EZ] player={player_int} engagement_zone={engagement_zone} all_enemy_occupied={len(all_enemy_occupied)} enemy_units={len(per_unit_occupied)}")
     zone_hexes = dilate_hex_set(all_enemy_occupied, engagement_zone, board_cols, board_rows)
+    print(f"[DEBUG-EZ] zone_hexes={len(zone_hexes)}")
 
     counts: Dict[Tuple[int, int], int] = {}
     for unit_occ in per_unit_occupied:

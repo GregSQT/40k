@@ -87,6 +87,7 @@ interface DrawBoardOptions {
   showHexCoordinates?: boolean;
   objectiveControl?: ObjectiveControlMap;
   moveDestPoolRef?: React.RefObject<Set<string>>;
+  selectedUnitBaseSize?: number;
   /** Pre-built static board container (background + wall dots + objectives base). Reused across renders. */
   cachedStaticBoard?: PIXI.Container | null;
   /** Pre-built wall segments container. Reused across renders. */
@@ -178,6 +179,7 @@ export const drawBoard = (
       showHexCoordinates = false,
       objectiveControl = {},
       moveDestPoolRef,
+      selectedUnitBaseSize,
       losDebugShowRatio = false,
       losDebugRatioByHex = {},
       losDebugCoverRatio = 0,
@@ -363,8 +365,9 @@ export const drawBoard = (
       // rely on hover overlay for validation feedback.
       const LARGE_POOL_THRESHOLD = 500;
 
-      const drawGroup = (cells: Array<{ col: number; row: number }>, color: number, alpha: number) => {
-        if (cells.length === 0 || cells.length > LARGE_POOL_THRESHOLD) return;
+      const drawGroup = (cells: Array<{ col: number; row: number }>, color: number, alpha: number, skipThreshold = true) => {
+        if (cells.length === 0) return;
+        if (skipThreshold && cells.length > LARGE_POOL_THRESHOLD) return;
         const batch = new PIXI.Graphics();
         batch.beginFill(color, alpha);
         for (const c of cells) {
@@ -376,8 +379,29 @@ export const drawBoard = (
         highlightContainer.addChild(batch);
       };
 
-      drawGroup(availableCells, HIGHLIGHT_COLOR, 0.4);
-      drawGroup(attackCells, ATTACK_COLOR, 0.4);
+      if (interactionPhase === "move" && selectedUnitBaseSize && selectedUnitBaseSize > 1 && availableCells.length > 0) {
+        const footprintRadius = (selectedUnitBaseSize / 2) * HEX_HORIZ_SPACING;
+        const gfx = new PIXI.Graphics();
+        gfx.beginFill(HIGHLIGHT_COLOR, 1.0);
+        for (const c of availableCells) {
+          const hx = c.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const hy = c.row * HEX_VERT_SPACING + ((c.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+          gfx.drawCircle(hx, hy, footprintRadius);
+        }
+        gfx.endFill();
+        const bounds = gfx.getBounds();
+        const rt = PIXI.RenderTexture.create({ width: bounds.width, height: bounds.height });
+        gfx.position.set(-bounds.x, -bounds.y);
+        app.renderer.render(gfx, { renderTexture: rt });
+        gfx.destroy();
+        const sprite = new PIXI.Sprite(rt);
+        sprite.position.set(bounds.x, bounds.y);
+        sprite.alpha = 0.4;
+        highlightContainer.addChild(sprite);
+      } else {
+        drawGroup(availableCells, HIGHLIGHT_COLOR, 0.4, false);
+      }
+      drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
       drawGroup(
         chargeCells.map((c: any) => ({
           col: Array.isArray(c) ? c[0] : c.col,
@@ -387,30 +411,6 @@ export const drawBoard = (
         0.4,
       );
       drawGroup(advanceCells, CHARGE_COLOR, 0.3);
-
-      // For large movement pools, draw only a thin border ring (outermost cells)
-      if (availableCells.length >= LARGE_POOL_THRESHOLD) {
-        const cellSet = new Set(availableCells.map((c) => `${c.col},${c.row}`));
-        const borderCells: Array<{ col: number; row: number }> = [];
-        const neighborOffsets = [[1, 0], [-1, 0], [0, -1], [0, 1], [1, -1], [-1, -1]];
-        const neighborOffsetsOdd = [[1, 0], [-1, 0], [0, -1], [0, 1], [1, 1], [-1, 1]];
-        for (const c of availableCells) {
-          const offsets = c.col % 2 === 0 ? neighborOffsets : neighborOffsetsOdd;
-          const isBorder = offsets.some(([dc, dr]) => !cellSet.has(`${c.col + dc},${c.row + dr}`));
-          if (isBorder) borderCells.push(c);
-        }
-        if (borderCells.length > 0) {
-          const ring = new PIXI.Graphics();
-          ring.beginFill(HIGHLIGHT_COLOR, 0.35);
-          for (const c of borderCells) {
-            const hx = c.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-            const hy = c.row * HEX_VERT_SPACING + ((c.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-            ring.drawCircle(hx, hy, HEX_RADIUS);
-          }
-          ring.endFill();
-          highlightContainer.addChild(ring);
-        }
-      }
 
       // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
       const hasClickableContent = clickableSet.size > 0 ||
@@ -423,9 +423,8 @@ export const drawBoard = (
         hitArea.hitArea = new PIXI.Rectangle(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
         hitArea.eventMode = "static";
         hitArea.cursor = "pointer";
-        hitArea.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-          if (e.button !== 0) return;
-          const pos = e.getLocalPosition(hitArea);
+
+        const resolveHex = (pos: PIXI.IPointData): { col: number; row: number } => {
           const ux = pos.x - MARGIN;
           const uy = pos.y - MARGIN;
           const colApprox = (ux - HEX_WIDTH / 2) / HEX_HORIZ_SPACING;
@@ -444,18 +443,55 @@ export const drawBoard = (
               if (d < bestD) { bestD = d; bestCol = c; bestRow = r; }
             }
           }
-          const key = `${bestCol},${bestRow}`;
+          return { col: bestCol, row: bestRow };
+        };
+
+        hitArea.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+          if (e.button !== 0) return;
+          const { col, row } = resolveHex(e.getLocalPosition(hitArea));
+          const key = `${col},${row}`;
           const isValid = clickableSet.has(key) ||
             (interactionPhase === "move" && moveDestPoolRef?.current?.has(key));
-          console.log(`[PERF-MOVE] hitArea pointerdown: hex=${bestCol},${bestRow} isValid=${isValid} mode=${mode} phase=${interactionPhase} selectedUnitId=${selectedUnitId}`);
           if (isValid) {
+            let destCol = col, destRow = row;
+            if (interactionPhase === "move" && moveDestPoolRef?.current && !moveDestPoolRef.current.has(key)) {
+              let bestDist = Infinity;
+              for (const k of moveDestPoolRef.current) {
+                const sep = k.indexOf(",");
+                const cc = Number(k.substring(0, sep));
+                const cr = Number(k.substring(sep + 1));
+                const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
+                if (d < bestDist) {
+                  bestDist = d;
+                  destCol = cc;
+                  destRow = cr;
+                }
+              }
+            }
             window.dispatchEvent(
               new CustomEvent("boardHexClick", {
-                detail: { col: bestCol, row: bestRow, phase: interactionPhase, mode, selectedUnitId },
+                detail: { col: destCol, row: destRow, phase: interactionPhase, mode, selectedUnitId },
               })
             );
           }
         });
+
+        let lastHoverCol = -1, lastHoverRow = -1;
+        hitArea.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
+          const localPos = e.getLocalPosition(hitArea);
+          const { col, row } = resolveHex(localPos);
+          const hexChanged = col !== lastHoverCol || row !== lastHoverRow;
+          if (hexChanged) {
+            lastHoverCol = col;
+            lastHoverRow = row;
+          }
+          window.dispatchEvent(
+            new CustomEvent("boardHexHover", {
+              detail: { col, row, pixelX: localPos.x, pixelY: localPos.y, hexChanged },
+            })
+          );
+        });
+
         highlightContainer.addChild(hitArea);
       }
     } else {
