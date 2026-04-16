@@ -27,6 +27,22 @@ from shared.data_validation import require_key
 
 # Cache for LoS thresholds (loaded from game_config, same as engine)
 _los_thresholds_cache: Optional[Tuple[float, float]] = None
+_inches_to_subhex_analyzer_cache: Optional[int] = None
+
+
+def _get_inches_to_subhex_for_analyzer() -> int:
+    """
+    Sub-hex scale from board_config.default (same source as engine game_state['inches_to_subhex']).
+    Boardx10-final §P3: advance budget = D6 face × this scale.
+    """
+    global _inches_to_subhex_analyzer_cache
+    if _inches_to_subhex_analyzer_cache is not None:
+        return _inches_to_subhex_analyzer_cache
+    from config_loader import get_config_loader
+    board_cfg = get_config_loader().get_board_config()
+    default = require_key(board_cfg, "default")
+    _inches_to_subhex_analyzer_cache = int(default.get("inches_to_subhex", 1))
+    return _inches_to_subhex_analyzer_cache
 
 MAX_D3 = 3
 MAX_D6 = 6
@@ -2925,13 +2941,14 @@ def parse_step_log(filepath: str) -> Dict:
                                 })
                             else:
                                 advance_roll = int(advance_roll_match.group(1))
+                                advance_budget = advance_roll * _get_inches_to_subhex_for_analyzer()
                                 occupied_positions = _build_occupied_positions(unit_positions, unit_hp, advance_unit_id)
                                 enemy_adjacent_hexes = _build_enemy_adjacent_hexes(unit_positions, unit_player, unit_hp, player)
                                 advance_unit_type = require_key(unit_types, advance_unit_id)
                                 advance_is_fly = require_key(unit_is_fly_by_type, advance_unit_type)
                                 if advance_is_fly:
                                     advance_distance = calculate_hex_distance(start_col, start_row, dest_col, dest_row)
-                                    if advance_distance > advance_roll:
+                                    if advance_distance > advance_budget:
                                         stats['move_distance_over_limit']['advance'][player] += 1
                                         if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:
                                             stats['first_error_lines']['move_distance_over_limit']['advance'][player] = {
@@ -2944,7 +2961,7 @@ def parse_step_log(filepath: str) -> Dict:
                                         start_row,
                                         dest_col,
                                         dest_row,
-                                        advance_roll,
+                                        advance_budget,
                                         wall_hexes,
                                         occupied_positions,
                                         enemy_adjacent_hexes
@@ -2956,7 +2973,7 @@ def parse_step_log(filepath: str) -> Dict:
                                                 'episode': current_episode_num,
                                                 'line': line.strip()
                                             }
-                                    elif shortest_steps > advance_roll:
+                                    elif shortest_steps > advance_budget:
                                         stats['move_distance_over_limit']['advance'][player] += 1
                                         if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:
                                             stats['first_error_lines']['move_distance_over_limit']['advance'][player] = {

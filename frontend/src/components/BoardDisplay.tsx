@@ -365,6 +365,15 @@ export const drawBoard = (
       // rely on hover overlay for validation feedback.
       const LARGE_POOL_THRESHOLD = 500;
 
+      const useAdvanceMovePoolLikeMove =
+        interactionPhase === "shoot" && mode === "advancePreview";
+      const useLargeBoardMoveDestPoolDraw =
+        (interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
+        selectedUnitBaseSize &&
+        selectedUnitBaseSize > 1 &&
+        moveDestPoolRef?.current &&
+        moveDestPoolRef.current.size > 0;
+
       const drawGroup = (cells: Array<{ col: number; row: number }>, color: number, alpha: number, skipThreshold = true) => {
         if (cells.length === 0) return;
         if (skipThreshold && cells.length > LARGE_POOL_THRESHOLD) return;
@@ -379,7 +388,7 @@ export const drawBoard = (
         highlightContainer.addChild(batch);
       };
 
-      if (interactionPhase === "move" && selectedUnitBaseSize && selectedUnitBaseSize > 1 && moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
+      if (useLargeBoardMoveDestPoolDraw) {
         // Draw icon-sized circles at valid CENTER positions only.
         // Each center was validated by BFS (full footprint clear of walls),
         // so the visual circles won't overlap walls.
@@ -424,7 +433,9 @@ export const drawBoard = (
 
       // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
       const hasClickableContent = clickableSet.size > 0 ||
-        (interactionPhase === "move" && moveDestPoolRef?.current && moveDestPoolRef.current.size > 0);
+        ((interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
+          moveDestPoolRef?.current &&
+          moveDestPoolRef.current.size > 0);
       if (hasClickableContent) {
         const hitArea = new PIXI.Graphics();
         hitArea.beginFill(0, 0);
@@ -460,11 +471,15 @@ export const drawBoard = (
           if (e.button !== 0) return;
           const { col, row } = resolveHex(e.getLocalPosition(hitArea));
           const key = `${col},${row}`;
-          const isValid = clickableSet.has(key) ||
-            (interactionPhase === "move" && moveDestPoolRef?.current?.has(key));
+          const usePoolForPick =
+            (interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
+            moveDestPoolRef?.current &&
+            moveDestPoolRef.current.size > 0;
+          const isValid =
+            clickableSet.has(key) || (usePoolForPick && moveDestPoolRef.current!.has(key));
           if (isValid) {
             let destCol = col, destRow = row;
-            if (interactionPhase === "move" && moveDestPoolRef?.current && !moveDestPoolRef.current.has(key)) {
+            if (usePoolForPick && moveDestPoolRef?.current && !moveDestPoolRef.current.has(key)) {
               let bestDist = Infinity;
               for (const k of moveDestPoolRef.current) {
                 const sep = k.indexOf(",");

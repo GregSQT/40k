@@ -6341,8 +6341,10 @@ def _get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[s
 def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     ADVANCE_IMPLEMENTATION: Handle advance action during shooting phase.
-    
-    Advance allows unit to move 1D6 hexes using movement pathfinding rules.
+
+    Board ×10 (Documentation/TODO/Boardx10-final.md §9.0): roll D6 (affichage 1–6 inch équivalent),
+    budget de déplacement en sous-hex = jet × ``inches_to_subhex`` (ex. ×10 → 10–60).
+    Pathfinding identique à la phase move via ``movement_build_valid_destinations_pool`` (MOVE temporaire).
     After advance: cannot shoot (unless Assault weapon), cannot charge.
     Unit is only marked as "advanced" if it actually moved to a different hex.
     """
@@ -6448,21 +6450,35 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 f"while adjacent_enemies={adjacent_enemies}"
             )
     
-    # Use existing advance_range if already rolled (to keep same roll for destination selection)
-    # Otherwise roll new 1D6 for advance range (from config)
+    scale = int(require_key(game_state, "inches_to_subhex"))
+    gr = require_key(config, "game_rules")
+    advance_cap_subhex = require_key(gr, "advance_distance_range")
+    remainder = advance_cap_subhex % scale
+    if remainder != 0:
+        raise ValueError(
+            f"advance_distance_range ({advance_cap_subhex} sub-hex) must be divisible by "
+            f"inches_to_subhex ({scale}) so advance dice maps to GW inches (Boardx10-final §9.0); "
+            f"remainder={remainder}"
+        )
+    advance_dice_max = advance_cap_subhex // scale
+    if advance_dice_max < 1:
+        raise ValueError(
+            f"Invalid advance dice max derived from config: advance_dice_max={advance_dice_max} "
+            f"(advance_cap_subhex={advance_cap_subhex}, scale={scale})"
+        )
+
+    # ``unit["advance_range"]`` stores the D6 face (1..advance_dice_max) for display and multi-step selection
     if "advance_range" in unit and unit["advance_range"] is not None:
-        advance_range = unit["advance_range"]
+        advance_roll = int(unit["advance_range"])
     else:
-        gr = require_key(config, "game_rules")
-        advance_dice_max = require_key(gr, "advance_distance_range")
-        advance_range = random.randint(1, advance_dice_max)
-        # Store advance range on unit for frontend display
-        unit["advance_range"] = advance_range
-    
+        advance_roll = random.randint(1, advance_dice_max)
+        unit["advance_range"] = advance_roll
+
+    advance_move_budget = advance_roll * scale
+
     # Build valid destinations using BFS (same as movement phase)
-    # Temporarily override unit MOVE attribute with advance_range
     original_move = unit["MOVE"]
-    unit["MOVE"] = advance_range
+    unit["MOVE"] = advance_move_budget
 
     # Use movement pathfinding to get valid destinations
     valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
@@ -6644,7 +6660,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                     
         game_state["action_logs"].append({
             "type": "advance",
-            "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) (Roll: {advance_range})",
+            "message": f"Unit {unit_id} ({orig_col}, {orig_row}) ADVANCED to ({dest_col}, {dest_row}) (Roll: {advance_roll})",
             "turn": game_state.get("turn", 1),
             "phase": "shoot",
             "unitId": unit_id,
@@ -6653,7 +6669,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             "fromRow": orig_row,
             "toCol": dest_col,
             "toRow": dest_row,
-            "advance_range": advance_range,
+            "advance_range": advance_roll,
+            "advance_max_subhex": advance_move_budget,
             "actually_moved": actually_moved,
             "timestamp": "server_time"
         })
@@ -6734,7 +6751,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "fromRow": orig_row,
                 "toCol": dest_col,
                 "toRow": dest_row,
-                "advance_range": advance_range,
+                "advance_range": advance_roll,
+                "advance_max_subhex": advance_move_budget,
                 "actually_moved": actually_moved,
                 "blinking_units": valid_target_pool,
                 "start_blinking": True,
@@ -6749,7 +6767,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
                 "fromRow": orig_row,
                 "toCol": dest_col,
                 "toRow": dest_row,
-                "advance_range": advance_range,
+                "advance_range": advance_roll,
+                "advance_max_subhex": advance_move_budget,
                 "actually_moved": actually_moved
             })
             return success, result
@@ -6795,7 +6814,10 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             "waiting_for_player": True,
             "action": "advance_select_destination",
             "unitId": unit_id,
-            "advance_roll": advance_range,
+            "advance_roll": advance_roll,
+            # Même valeur que advance_roll (face D6) — alias pour clients qui lisent advance_range
+            "advance_range": advance_roll,
+            "advance_max_subhex": advance_move_budget,
             "advance_destinations": [{"col": (norm_coords := normalize_coordinates(d[0], d[1]))[0], "row": norm_coords[1]} for d in valid_destinations],
             "highlight_color": "orange"
         }

@@ -76,6 +76,8 @@ interface ReplayAction {
   charge_success?: boolean;
   // Advance action fields
   advance_roll?: number;
+  /** Budget sous-hex (moteur) ; préféré pour le BFS replay (Boardx10). */
+  advance_max_subhex?: number;
   // Rule choice fields
   selected_rule_name?: string;
 }
@@ -151,7 +153,7 @@ const requireReplayLogMessage = (action: ReplayAction, actionType: string): stri
 };
 
 export const BoardReplay: React.FC = () => {
-  const { gameConfig } = useGameConfig();
+  const { gameConfig, boardConfig } = useGameConfig();
   const gameLog = useGameLog();
 
   // Replay data
@@ -1898,6 +1900,22 @@ export const BoardReplay: React.FC = () => {
       ? currentAction.unit_id // Use real unit ID so icon shows on preview at destination, not on ghost
       : null;
 
+  const inchesToSubhexForReplay =
+    boardConfig !== null &&
+    typeof (boardConfig as unknown as Record<string, unknown>).inches_to_subhex === "number"
+      ? (boardConfig as unknown as { inches_to_subhex: number }).inches_to_subhex
+      : 1;
+
+  const resolveAdvanceMoveBudget = (action: ReplayAction | null | undefined): number => {
+    if (!action || action.type !== "advance") return 0;
+    if (typeof action.advance_max_subhex === "number" && action.advance_max_subhex > 0) {
+      return action.advance_max_subhex;
+    }
+    const roll = action.advance_roll;
+    if (roll === undefined || roll <= 0) return 0;
+    return roll * inchesToSubhexForReplay;
+  };
+
   // For move actions, select the ghost unit to show movement range
   // For shoot actions, select the shooter to show LoS/attack range
   // For charge actions, select the charging unit to show charge destination
@@ -2128,14 +2146,15 @@ export const BoardReplay: React.FC = () => {
         getAdvanceDestinations={(unitId: number) => {
           // Calculate ALL valid advance destinations for replay mode using BFS
           // For advance, unitId will be -3 (ghost unit), so we need to find the actual unit
+          const advanceMoveBudget = resolveAdvanceMoveBudget(currentAction);
           if (
             currentAction?.type === "advance" &&
             currentAction?.from &&
-            currentAction?.advance_roll &&
+            advanceMoveBudget > 0 &&
             unitId === -3
           ) {
             const advanceFrom = currentAction.from;
-            const advanceRollValue = currentAction.advance_roll;
+            const advanceRollValue = advanceMoveBudget;
 
             if (!advanceRollValue || advanceRollValue <= 0) {
               return [];
@@ -2265,19 +2284,19 @@ export const BoardReplay: React.FC = () => {
         wallHexesOverride={currentState.walls}
         objectivesOverride={currentState.objectives}
         availableCellsOverride={(() => {
+          const advanceBudgetForCells = resolveAdvanceMoveBudget(currentAction);
           if (
             currentAction?.type === "advance" &&
             currentAction?.from &&
-            (currentAction?.advance_roll !== undefined || currentAction?.to)
+            (advanceBudgetForCells > 0 || currentAction?.to)
           ) {
             return (() => {
               const advanceFrom = currentAction.from;
-              // Use advance_roll from log (the actual dice roll), NOT the distance traveled
+              // Budget sous-hex = jet D6 × inches_to_subhex (Boardx10) ; repli: distance parcourue
               let advanceRollValue: number;
-              if (currentAction.advance_roll !== undefined) {
-                advanceRollValue = currentAction.advance_roll;
+              if (advanceBudgetForCells > 0) {
+                advanceRollValue = advanceBudgetForCells;
               } else if (currentAction.to) {
-                // Fallback: calculate from distance (should not happen if parser works correctly)
                 const fromCube = offsetToCube(advanceFrom.col, advanceFrom.row);
                 const toCube = offsetToCube(currentAction.to.col, currentAction.to.row);
                 advanceRollValue = cubeDistance(fromCube, toCube);

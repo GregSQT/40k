@@ -860,10 +860,13 @@ export default function Board({
     buildZonePixels();
     buildDestPixels();
 
-    // DOM mousemove: icon follows cursor pixel-perfect
+    // DOM mousemove: icon follows cursor pixel-perfect (move phase ou advance en tir — mêmes refs moveDestPoolRef)
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     const onMouseMove = (ev: MouseEvent) => {
-      if (phase !== "move" || selectedUnitId === null) return;
+      const allowIconFollow =
+        selectedUnitId !== null &&
+        (phase === "move" || (phase === "shoot" && mode === "advancePreview"));
+      if (!allowIconFollow) return;
       const app = appRef.current;
       if (!app || !canvas) return;
 
@@ -1124,7 +1127,7 @@ export default function Board({
       hoveredHexRef.current = null;
       losHexRef.current = null;
     };
-  }, [boardConfig, gameConfig, phase, selectedUnitId, units, setMovePreviewDistanceTooltip]);
+  }, [boardConfig, gameConfig, phase, mode, selectedUnitId, units, setMovePreviewDistanceTooltip]);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -1169,9 +1172,16 @@ export default function Board({
 
     // PIXI textures are managed by the internal cache — no manual clearing needed.
 
-    if (phase !== "move" || selectedUnitId === null) {
+    const keepMovementPickPool =
+      (phase === "move" && selectedUnitId !== null) ||
+      (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null);
+
+    if (!keepMovementPickPool) {
       if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
         moveDestPoolRef.current.clear();
+      }
+      if (footprintZoneRef?.current && footprintZoneRef.current.size > 0) {
+        footprintZoneRef.current.clear();
       }
     }
 
@@ -1627,6 +1637,26 @@ export default function Board({
         }
       } else if (phase !== "charge") {
         availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
+      }
+    }
+
+    // Advance (shoot) : même zone moteur que move — hors bloc mode === "select"
+    if (
+      selectedUnit &&
+      phase === "shoot" &&
+      mode === "advancePreview" &&
+      advancingUnitId != null &&
+      selectedUnit.id === advancingUnitId
+    ) {
+      const zone = gameState?.move_preview_footprint_zone ?? gameState?.move_preview_border;
+      if (zone && Array.isArray(zone) && zone.length > 0) {
+        for (const dest of zone) {
+          if (Array.isArray(dest) && dest.length === 2) {
+            availableCells.push({ col: Number(dest[0]), row: Number(dest[1]) });
+          } else if (dest && typeof dest === "object" && "col" in dest && "row" in dest) {
+            availableCells.push({ col: Number(dest.col), row: Number(dest.row) });
+          }
+        }
       }
     }
 
@@ -2183,13 +2213,8 @@ export default function Board({
       attackCells,
       coverCells,
       chargeCells,
-      advanceCells:
-        mode === "advancePreview" &&
-        selectedUnitId &&
-        getAdvanceDestinations &&
-        !availableCellsOverride
-          ? getAdvanceDestinations(selectedUnitId)
-          : [],
+      // advancePreview : même zone que move (gameState + moveDestPoolRef) — pas de doublon advanceCells
+      advanceCells: [],
       blockedTargets,
       coverTargets,
       phase: effectivePhase,
@@ -2256,7 +2281,6 @@ export default function Board({
         MARGIN;
 
       // Skip units that are being previewed elsewhere
-      if (mode === "advancePreview" && movePreview && unit.id === movePreview.unitId) continue;
       if (mode === "attackPreview" && attackPreview && unit.id === attackPreview.unitId) continue;
 
       // Unified: movePreview and shoot phase use same code path for greying non-targetable enemies
@@ -2521,67 +2545,6 @@ export default function Board({
           onConfirmMove,
           parseColor,
           autoSelectWeapon,
-          onUnitTooltip: handleUnitTooltip,
-          debugMode: showHexCoordinates,
-        });
-      }
-    }
-
-    // ✅ ADVANCE PREVIEW RENDERING (same as movePreview)
-    if (mode === "advancePreview" && movePreview) {
-      const previewUnit = units.find((u) => u.id === movePreview.unitId);
-      if (previewUnit) {
-        const centerX = movePreview.destCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY =
-          movePreview.destRow * HEX_VERT_SPACING +
-          ((movePreview.destCol % 2) * HEX_VERT_SPACING) / 2 +
-          HEX_HEIGHT / 2 +
-          MARGIN;
-
-        renderUnit({
-          unit: previewUnit,
-          centerX,
-          centerY,
-          app,
-          renderTarget: unitsLayer,
-          useOverlayIcons: true,
-          isPreview: true,
-          previewType: "move",
-          isEligible: false,
-          boardConfig: boardConfigForRender,
-          HEX_RADIUS,
-          HEX_HORIZ_SPACING,
-          ICON_SCALE,
-          ELIGIBLE_OUTLINE_WIDTH,
-          ELIGIBLE_COLOR,
-          ELIGIBLE_OUTLINE_ALPHA,
-          HP_BAR_WIDTH_RATIO,
-          HP_BAR_HEIGHT,
-          UNIT_CIRCLE_RADIUS_RATIO,
-          UNIT_TEXT_SIZE,
-          SELECTED_BORDER_WIDTH,
-          CHARGE_TARGET_BORDER_WIDTH,
-          DEFAULT_BORDER_WIDTH,
-          phase: effectivePhase,
-          mode,
-          current_player,
-          selectedUnitId,
-          unitsMoved,
-          unitsCharged,
-          unitsAttacked,
-          unitsFled,
-          fightSubPhase,
-          fightActivePlayer,
-          units,
-          chargeTargets,
-          fightTargets,
-          targetPreview,
-          onConfirmMove,
-          parseColor,
-          autoSelectWeapon,
-          // Pass advance roll info for replay mode (use real unit ID, not ghost ID)
-          advanceRoll,
-          advancingUnitId: movePreview.unitId, // Use real unit ID for preview icon at destination
           onUnitTooltip: handleUnitTooltip,
           debugMode: showHexCoordinates,
         });
