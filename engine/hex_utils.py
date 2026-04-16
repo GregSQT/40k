@@ -660,28 +660,30 @@ def dilate_hex_set(
 # Footprint / occupied_hexes (§2.5, §9.1)
 # ---------------------------------------------------------------------------
 
-# Hex geometry constants for offset odd-q (flat-to-flat = 1 unit).
-# For pointy-top hex with flat-to-flat = w:
-#   w = sqrt(3) * size  =>  size = w / sqrt(3)
-#   h = 2 * size
-# We normalize flat-to-flat = 1, so:
-_HEX_SIZE: float = 1.0 / math.sqrt(3.0)
-_HEX_W: float = 1.0                          # flat-to-flat (horizontal span)
-_HEX_H: float = 2.0 * _HEX_SIZE              # point-to-point (vertical span)
-_HEX_ROW_H: float = 0.75 * _HEX_H            # vertical distance between row centers
+# Flat-top odd-q pixel embedding (same layout as frontend BoardDisplay / hexToPixel).
+# Normalized with hex_radius = 1 (center to vertex):
+#   hex_width  = 1.5   — horizontal distance between column centers
+#   hex_height = sqrt(3) — vertical distance between row centers
+# Odd columns are staggered down by hex_height / 2.
+#
+# Footprint diameters (round/square/oval) are expressed in hex-cell counts. The legacy
+# embedding used horizontal column pitch 1.0; flat-top centers use pitch ``hex_width``.
+# Scale footprint semi-axes so a given diameter still spans the same approximate number
+# of cells as before.
+_FOOTPRINT_SIZE_SCALE: float = 1.5
 
 
 def _hex_center(col: int, row: int) -> Tuple[float, float]:
-    """Pixel-space center of hex (col, row) in offset odd-q.
+    """Pixel-space center of hex (col, row) in offset odd-q, flat-top layout.
 
-    x-axis: horizontal, y-axis: vertical (down).
-    Flat-to-flat width = 1 unit.
+    Matches ``frontend/src/utils/hexFootprint.ts`` (and ``hexToPixel`` there) up to
+    ``hex_radius`` and margin. x-axis horizontal, y-axis vertical (down).
     """
-    x = col * _HEX_W
-    if col & 1:
-        y = row * _HEX_H * 0.75 + _HEX_H * 0.5
-    else:
-        y = row * _HEX_H * 0.75
+    hex_radius = 1.0
+    hex_width = 1.5 * hex_radius
+    hex_height = math.sqrt(3.0) * hex_radius
+    x = col * hex_width + hex_width / 2.0
+    y = row * hex_height + ((col & 1) * hex_height) / 2.0 + hex_height / 2.0
     return x, y
 
 
@@ -758,7 +760,8 @@ def precompute_footprint_offsets(
 
 def _footprint_round(center_col: int, center_row: int, diameter: int) -> Set[Tuple[int, int]]:
     """Hex cells within a circle of given diameter (in hex units) centered on (center_col, center_row)."""
-    radius_sq = (diameter / 2.0) ** 2
+    radius = (diameter / 2.0) * _FOOTPRINT_SIZE_SCALE
+    radius_sq = radius**2
     cx, cy = _hex_center(center_col, center_row)
     scan_r = int(math.ceil(diameter / 2.0)) + 2
     result: Set[Tuple[int, int]] = set()
@@ -778,8 +781,8 @@ def _footprint_oval(
     orientation: int,
 ) -> Set[Tuple[int, int]]:
     """Hex cells within an axis-aligned ellipse, optionally rotated by orientation×60°."""
-    a = major / 2.0
-    b = minor / 2.0
+    a = (major / 2.0) * _FOOTPRINT_SIZE_SCALE
+    b = (minor / 2.0) * _FOOTPRINT_SIZE_SCALE
     angle_rad = orientation * math.pi / 3.0
     cos_a = math.cos(angle_rad)
     sin_a = math.sin(angle_rad)
@@ -804,7 +807,7 @@ def _footprint_square(
     orientation: int,
 ) -> Set[Tuple[int, int]]:
     """Hex cells within a square of given side length, optionally rotated by orientation×60°."""
-    half = side / 2.0
+    half = (side / 2.0) * _FOOTPRINT_SIZE_SCALE
     angle_rad = orientation * math.pi / 3.0
     cos_a = math.cos(angle_rad)
     sin_a = math.sin(angle_rad)

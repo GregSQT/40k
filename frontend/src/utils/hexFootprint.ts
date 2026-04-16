@@ -5,17 +5,20 @@
  * Used for drag-and-drop placement preview (ghost unit + validation).
  */
 
-// --- Internal hex geometry (offset odd-q, flat-topped) ---
-
-const HEX_SIZE = 1.0 / Math.sqrt(3.0);
-const HEX_W = 1.0;
-const HEX_H = 2.0 * HEX_SIZE;
+// --- Internal hex geometry (offset odd-q, flat-top — same centers as hexToPixel, R=1) ---
 
 function hexCenter(col: number, row: number): [number, number] {
-  const x = col * HEX_W;
-  const y = col & 1 ? row * HEX_H * 0.75 + HEX_H * 0.5 : row * HEX_H * 0.75;
+  const hexRadius = 1.0;
+  const hexWidth = 1.5 * hexRadius;
+  const hexHeight = Math.sqrt(3) * hexRadius;
+  const x = col * hexWidth + hexWidth / 2;
+  const y =
+    row * hexHeight + ((col % 2) * hexHeight) / 2 + hexHeight / 2;
   return [x, y];
 }
+
+/** Same as engine/hex_utils._FOOTPRINT_SIZE_SCALE — legacy diameter vs flat-top center units. */
+const FOOTPRINT_SIZE_SCALE = 1.5;
 
 // --- Footprint computation ---
 
@@ -24,7 +27,8 @@ function footprintRound(
   centerRow: number,
   diameter: number,
 ): Set<string> {
-  const radiusSq = (diameter / 2.0) ** 2;
+  const radius = (diameter / 2.0) * FOOTPRINT_SIZE_SCALE;
+  const radiusSq = radius ** 2;
   const [cx, cy] = hexCenter(centerCol, centerRow);
   const scanR = Math.ceil(diameter / 2.0) + 2;
   const result = new Set<string>();

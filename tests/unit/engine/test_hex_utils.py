@@ -273,12 +273,12 @@ class TestComputeOccupiedHexesRound:
         assert len(hexes) < area_approx * 1.5
 
     def test_all_cells_within_radius(self):
-        from engine.hex_utils import _hex_center
+        from engine.hex_utils import _FOOTPRINT_SIZE_SCALE, _hex_center
         center_col, center_row = 50, 50
         diameter = 13
         hexes = compute_occupied_hexes(center_col, center_row, "round", diameter)
         cx, cy = _hex_center(center_col, center_row)
-        radius = diameter / 2.0
+        radius = (diameter / 2.0) * _FOOTPRINT_SIZE_SCALE
         for c, r in hexes:
             hx, hy = _hex_center(c, r)
             dist = math.sqrt((hx - cx) ** 2 + (hy - cy) ** 2)
