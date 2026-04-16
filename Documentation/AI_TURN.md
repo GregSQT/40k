@@ -276,7 +276,7 @@ For each unit
 ├── STEP : UNIT_ACTIVABLE_CHECK → is move_activation_pool NOT empty ?
 │   ├── YES → Current player is an AI player ?
 │   │   ├── YES → pick one unit in move_activation_pool
-│   │   │   └── Valid destination exists (reacheable hexes using BFS pathfinding within MOVE attribute distance, NOT through/into wall hexes, NOT through/into adjacent to enemy hexes) ?
+│   │   │   └── Valid destination exists (reacheable hexes using BFS pathfinding within MOVE attribute distance, NOT through/into wall hexes, may traverse hexes occupied by allies but NOT end overlapping any model, NOT through/into adjacent-to-enemy engagement hexes) ?
 │   │   │       ├── YES → MOVEMENT PHASE ACTIONS AVAILABLE
 │   │   │       │   ├── 🎯 VALID ACTIONS: [move, wait]
 │   │   │       │   ├── ❌ INVALID ACTIONS: [shoot, charge, attack] → end_activation (ERROR, 0, PASS, MOVE, 1, 1)
@@ -295,7 +295,7 @@ For each unit
 │   │   └── NO → Human player → STEP : UNIT_ACTIVATION
 │   │       ├── If any, cancel the Highlight of the hexes in valid_move_destinations_pool
 │   │       ├── Player activate one unit by left clicking on it
-│   │       └── Build valid_move_destinations_pool (NOT wall hexes, NOT adjacent to enemy hexes, reacheable using BFS pathfinding within MOVE attribute distance)
+│   │       └── Build valid_move_destinations_pool (NOT wall hexes, NOT ending on occupied hexes, may pass through allied-occupied hexes, NOT adjacent to enemy engagement hexes, reacheable using BFS pathfinding within MOVE attribute distance)
 │   │           └── valid_move_destinations_pool not empty ?
 │   │               ├── YES → STEP : PLAYER_ACTION_SELECTION
 │   │               │   ├── Highlight the valid_move_destinations_pool hexes by making them green

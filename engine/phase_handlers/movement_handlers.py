@@ -24,7 +24,9 @@ from .shared_utils import (
     get_unit_position, require_unit_position,
     update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
-    build_occupied_positions_set, compute_candidate_footprint,
+    build_occupied_positions_set,
+    build_enemy_occupied_positions_set,
+    compute_candidate_footprint,
     is_footprint_placement_valid, get_engagement_zone,
 )
 
@@ -690,6 +692,9 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     This prevents movement through walls (AI_TURN.md compliance).
 
     Pre-computes enemy adjacent hexes and occupied positions once at BFS start for O(1) lookups.
+
+    Ground BFS may traverse hexes occupied by allies but cannot end movement overlapping any
+    model (ally or enemy). Enemy model hexes block traversal; engagement zone hexes block as before.
     """
     import time as _time
     _bfs_t0 = _time.perf_counter()
@@ -717,6 +722,10 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     unit_id_str = str(unit["id"])
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    current_player_int = int(current_player)
+    enemy_occupied = build_enemy_occupied_positions_set(
+        game_state, current_player=current_player_int
+    )
     units_cache = require_key(game_state, "units_cache")
     
     if game_state.get("debug_mode", False) and "episode_number" in game_state and "turn" in game_state:
@@ -886,6 +895,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     blocked_enemy_adjacent_count = 0
 
     _occupied = occupied_positions
+    _enemy_occ = enemy_occupied
     _walls = wall_hexes_set
     _enemy_adj = enemy_adjacent_hexes
     _bcols = board_cols
@@ -916,15 +926,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     continue
                 if nb in _walls:
                     continue
-                if nb in _occupied:
+                if nb in _enemy_occ:
                     continue
                 if nb in _enemy_adj:
                     blocked_enemy_adjacent_count += 1
                     continue
                 visited[nb] = nd
-                if nb != start_pos:
-                    valid_destinations.append(nb)
                 queue.append((nb, nd))
+                # Traversal may pass through allied hexes; cannot end on any occupied cell.
+                if nb != start_pos and nb not in _occupied:
+                    valid_destinations.append(nb)
     else:
         # Multi-hex units: pre-compute footprint offsets ONCE, then translate
         from engine.hex_utils import precompute_footprint_offsets
@@ -968,7 +979,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                         fp_valid = False
                         _rej_reason = "walls"
                         break
-                    if (fc, fr) in _occupied:
+                    if (fc, fr) in _enemy_occ:
                         fp_valid = False
                         _rej_reason = "occupied"
                         break
@@ -989,9 +1000,11 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     blocked_enemy_adjacent_count += 1
                     continue
                 visited[nb] = nd
-                if nb != start_pos:
-                    valid_destinations.append(nb)
                 queue.append((nb, nd))
+                # Traversal may overlap allied models; destination may not overlap any model.
+                dest_on_unit = any((nc + dc, nr + dr) in _occupied for dc, dr in offsets)
+                if not dest_on_unit and nb != start_pos:
+                    valid_destinations.append(nb)
 
     _bfs_t1 = _time.perf_counter()
     game_state["valid_move_destinations_pool"] = valid_destinations

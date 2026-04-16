@@ -62,10 +62,10 @@ if move_activation_pool:
 - Au moins un hex de destination valide disponible
 
 **Destinations VALIDES** :
-- Non occupé
-- Non adjacent à ennemi
+- Case finale non occupée (aucun modèle allié ou ennemi)
+- Non adjacent à ennemi (zone d’engagement)
 - Non mur
-- Atteignable via BFS pathfinding dans `MOVE` distance
+- Atteignable via BFS pathfinding dans `MOVE` distance (le BFS peut traverser les hex occupés par des **alliés**, pas finir dessus)
 
 ```python
 # ❌ INTERDIT
@@ -160,8 +160,8 @@ def process_move(unit, destination, game_state):
 
 **Contraintes BFS** :
 - Pas à travers murs
-- Pas à travers hex adjacents à ennemis
-- Pas à travers hex occupés
+- Pas à travers hex adjacents à ennemis (engagement)
+- Pas à travers hex occupés par des **ennemis** ; traversée autorisée sur hex occupés par des **alliés** (destination finale jamais sur un modèle)
 - Distance <= `unit.MOVE`
 
 ```python
@@ -183,7 +183,7 @@ def get_reachable_hexes(unit, game_state):
         game_state=game_state,
         avoid_walls=True,
         avoid_enemy_adjacent=True,
-        avoid_occupied=True
+        # occupation : bloquer ennemis au passage ; alliés OK en traversée uniquement (voir movement_handlers BFS)
     )
     return reachable
 ```
@@ -263,7 +263,7 @@ Avant de valider un changement dans movement phase :
 
 - [ ] `current_player` ne change pas pendant la phase (pas de recalcul de caches)
 - [ ] Activation séquentielle (un seul à la fois)
-- [ ] Restrictions de mouvement respectées (pas adjacent, pas occupé, pas mur)
+- [ ] Restrictions de mouvement respectées (pas adjacent engagement, destination non occupée, pas mur ; traversée alliés OK)
 - [ ] BFS pathfinding avec contraintes correctes
 - [ ] Flee détecté à position de départ, pas destination
 - [ ] End activation avec bonnes constantes (MOVE ou FLED)

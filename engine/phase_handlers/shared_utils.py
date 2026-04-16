@@ -218,6 +218,27 @@ def build_occupied_positions_set(
     return occupied
 
 
+def build_enemy_occupied_positions_set(
+    game_state: Dict[str, Any],
+    *,
+    current_player: int,
+) -> Set[Tuple[int, int]]:
+    """Cells occupied by opposing players' units (full footprints)."""
+    units_cache = require_key(game_state, "units_cache")
+    current_player_int = int(current_player)
+    occupied: Set[Tuple[int, int]] = set()
+    for uid, entry in units_cache.items():
+        player_raw = require_key(entry, "player")
+        if int(player_raw) == current_player_int:
+            continue
+        occ = entry.get("occupied_hexes")
+        if occ:
+            occupied.update(occ)
+        else:
+            occupied.add((require_key(entry, "col"), require_key(entry, "row")))
+    return occupied
+
+
 def compute_candidate_footprint(
     center_col: int, center_row: int,
     unit_or_stub: Dict[str, Any],
