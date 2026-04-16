@@ -34,6 +34,8 @@ interface UnitRendererProps {
   blinkVersion?: number;
   blinkState?: boolean;
   shootingTargetInCover?: boolean;
+  /** Per-unit cover from move-preview LoS hover (footprint ratio); overrides shootingTargetInCover when set */
+  movePreviewShootingTargetInCoverByUnitId?: Record<string, boolean>;
 
   // Shooting target (for replay mode explosion icon)
   shootingTargetId?: number | null;
@@ -241,13 +243,33 @@ export class UnitRenderer {
             return idNum === attackerIdNum;
           }) || null
         : null;
-      if (attacker && this.props.phase === "shoot") {
+      const useRangedForBlinkSignature =
+        this.props.phase === "shoot" ||
+        this.props.mode === "movePreview" ||
+        (this.props.phase === "move" &&
+          (this.props.mode === "select" || this.props.mode === "movePreview"));
+      if (attacker && useRangedForBlinkSignature) {
         const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
         const selectedWeaponIgnoresCover =
           Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
           selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
-        const effectiveTargetInCover =
-          this.props.shootingTargetInCover === true && !selectedWeaponIgnoresCover;
+        let effectiveTargetInCover = false;
+        if (selectedWeaponIgnoresCover) {
+          effectiveTargetInCover = false;
+        } else if (
+          (this.props.mode === "movePreview" || this.props.mode === "select") &&
+          this.props.movePreviewShootingTargetInCoverByUnitId
+        ) {
+          const key = String(this.props.unit.id);
+          const map = this.props.movePreviewShootingTargetInCoverByUnitId;
+          if (Object.prototype.hasOwnProperty.call(map, key)) {
+            effectiveTargetInCover = map[key] === true;
+          } else {
+            effectiveTargetInCover = this.props.shootingTargetInCover === true;
+          }
+        } else {
+          effectiveTargetInCover = this.props.shootingTargetInCover === true;
+        }
         const preferred = getPreferredRangedWeaponAgainstTarget(
           attacker,
           this.props.unit,
@@ -256,8 +278,7 @@ export class UnitRenderer {
         if (preferred) {
           expectedWeaponSignature = buildWeaponSignature(preferred.weapon);
         }
-      }
-      if (attacker && this.props.phase !== "shoot") {
+      } else if (attacker && !useRangedForBlinkSignature) {
         const weapon = getSelectedMeleeWeapon(attacker);
         if (weapon) {
           expectedWeaponSignature = buildWeaponSignature(weapon);
@@ -1228,15 +1249,31 @@ export class UnitRenderer {
       if (!attacker) {
         return false;
       }
-      // movePreview = shooting preview from destination; attackPreview/targetPreview = shoot phase
-      if (this.props.phase !== "shoot" && this.props.mode !== "movePreview") {
+      const movePhaseLosHover =
+        this.props.phase === "move" &&
+        (this.props.mode === "select" || this.props.mode === "movePreview") &&
+        this.props.movePreviewShootingTargetInCoverByUnitId !== undefined;
+      if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
         return false;
       }
       const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
       const selectedWeaponIgnoresCover =
         Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
         selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
-      return this.props.shootingTargetInCover === true && !selectedWeaponIgnoresCover;
+      if (selectedWeaponIgnoresCover) {
+        return false;
+      }
+      if (
+        (this.props.mode === "movePreview" || this.props.mode === "select") &&
+        this.props.movePreviewShootingTargetInCoverByUnitId
+      ) {
+        const key = String(this.props.unit.id);
+        const map = this.props.movePreviewShootingTargetInCoverByUnitId;
+        if (Object.prototype.hasOwnProperty.call(map, key)) {
+          return map[key] === true;
+        }
+      }
+      return this.props.shootingTargetInCover === true;
     };
 
     // Use either individual target preview OR multi-unit blinking
@@ -1320,9 +1357,10 @@ export class UnitRenderer {
       }
 
       // Create blinking HP bar using the new utility module
-      // When mode is movePreview, we're previewing shooting from destination → use "shoot" for ranged damage
+      // movePreview ou move+select (survol destination) → dégâts tir comme phase shoot
       const blinkPhase: "shoot" | "fight" | "charge" =
-        this.props.mode === "movePreview"
+        this.props.mode === "movePreview" ||
+        (this.props.phase === "move" && this.props.mode === "select")
           ? "shoot"
           : (this.props.phase as "shoot" | "fight" | "charge");
       createBlinkingHPBar({

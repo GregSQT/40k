@@ -38,7 +38,7 @@
       "antialias": true,
       "forceCanvas": true,
       "icon_scale": 1.2,
-      "eligible_outline_width": 1,
+      "eligible_outline_width": 3,
       "eligible_outline_alpha": 0.8,
       "hp_bar_width_ratio": 1.4,
       "hp_bar_height": 7,

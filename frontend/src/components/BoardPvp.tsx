@@ -28,7 +28,6 @@ import {
   offsetToCube,
 } from "../utils/gameHelpers";
 import { getMaxRangedRange, getMeleeRange } from "../utils/weaponHelpers";
-import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import { drawBoard } from "./BoardDisplay";
 import { renderUnit } from "./UnitRenderer";
 import {
@@ -371,7 +370,6 @@ export default function Board({
 
   // Hover preview: imperative PIXI layers (no React re-render)
   const hoverOverlayRef = useRef<PIXI.Graphics | null>(null);
-  const hoverCoverIconsRef = useRef<PIXI.Container | null>(null);
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
@@ -530,6 +528,10 @@ export default function Board({
     x: number;
     y: number;
   } | null>(null);
+
+  /** Cibles ennemies en LoS depuis la destination survolée (preview move) — même barres blink que la phase tir */
+  const [movePreviewLosBlinkIds, setMovePreviewLosBlinkIds] = useState<number[]>([]);
+  const [movePreviewLosCoverById, setMovePreviewLosCoverById] = useState<Record<string, boolean>>({});
 
   /** Normalise la fermeture : Pixi envoie visible:false mais on garde l’état en null pour le rendu. */
   const handleUnitTooltip = useCallback(
@@ -732,6 +734,22 @@ export default function Board({
     return sorted;
   }, [blinkingUnits]);
 
+  const effectiveBlinkingUnitsWithMovePreview = useMemo(() => {
+    const base = stableBlinkingUnits ?? [];
+    // Survol LoS : phase move + mode "select" (curseur sur zone de move), pas seulement movePreview confirmé
+    const mergeMoveLosHover =
+      phase === "move" &&
+      (mode === "select" || mode === "movePreview") &&
+      movePreviewLosBlinkIds.length > 0;
+    if (!mergeMoveLosHover) {
+      return base;
+    }
+    const merged = new Set<string>();
+    for (const id of base) merged.add(String(id));
+    for (const id of movePreviewLosBlinkIds) merged.add(String(id));
+    return Array.from(merged).map((s) => parseInt(s, 10));
+  }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds]);
+
   // Hover LoS preview: imperative PIXI update on boardHexHover
   useEffect(() => {
     if (!boardConfig || !gameConfig) return;
@@ -746,7 +764,6 @@ export default function Board({
     const losMin = gameRules?.los_visibility_min_ratio ?? 0;
     const coverR = gameRules?.cover_ratio ?? 0;
     const ATTACK_COLOR_H = parseInt((boardConfig.colors.attack || "0xe08080").replace("0x", ""), 16);
-    const HP_BAR_H = boardConfig.display?.hp_bar_height ?? 7;
 
     const wallHexesH: [number, number][] = boardConfig.wall_hexes ? [...boardConfig.wall_hexes] : [];
     const bottomRowH = BOARD_ROWS_H - 1;
@@ -769,6 +786,9 @@ export default function Board({
         movePreviewGuideLineRef.current.visible = false;
       }
       setMovePreviewDistanceTooltip(null);
+      setMovePreviewLosBlinkIds([]);
+      setMovePreviewLosCoverById({});
+      if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
     };
 
     // Pre-parse pixel positions for fast nearest-hex lookups
@@ -974,12 +994,21 @@ export default function Board({
     const triggerLosForHex = (col: number, row: number) => {
       if (losDebounceTimer) clearTimeout(losDebounceTimer);
       losDebounceTimer = setTimeout(() => {
+        const requestId = ++losRequestIdRef.current;
         const app = appRef.current;
         if (!app) return;
         const selectedUnit = units.find((u) => u.id === selectedUnitId);
-        if (!selectedUnit) return;
+        if (!selectedUnit) {
+          setMovePreviewLosBlinkIds([]);
+          setMovePreviewLosCoverById({});
+          return;
+        }
         const range = getMaxRangedRange(selectedUnit);
-        if (range <= 0 || !selectedUnit.RNG_WEAPONS?.length || !isWasmReady()) return;
+        if (range <= 0 || !selectedUnit.RNG_WEAPONS?.length || !isWasmReady()) {
+          setMovePreviewLosBlinkIds([]);
+          setMovePreviewLosCoverById({});
+          return;
+        }
 
         if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
           hoverOverlayRef.current = new PIXI.Graphics();
@@ -987,7 +1016,6 @@ export default function Board({
           app.stage.addChild(hoverOverlayRef.current);
         }
         const overlay = hoverOverlayRef.current;
-        const requestId = ++losRequestIdRef.current;
 
         const visibleHexes = computeVisibleHexes(
           col, row, range,
@@ -1006,20 +1034,13 @@ export default function Board({
         overlay.endFill();
         overlay.visible = true;
 
-        if (hoverCoverIconsRef.current && !hoverCoverIconsRef.current.destroyed) {
-          hoverCoverIconsRef.current.removeChildren();
-        } else {
-          hoverCoverIconsRef.current = new PIXI.Container();
-          hoverCoverIconsRef.current.zIndex = 400;
-          hoverCoverIconsRef.current.sortableChildren = true;
-          app.stage.addChild(hoverCoverIconsRef.current);
-        }
         const losVisibleSet = new Set<string>();
         for (const hex of visibleHexes) {
           losVisibleSet.add(`${hex.col},${hex.row}`);
         }
         const selectedPlayer = selectedUnit.player;
-        const hpBarWidthRatio = boardConfig.display?.hp_bar_width_ratio ?? 1.4;
+        const blinkIds: number[] = [];
+        const coverMap: Record<string, boolean> = {};
 
         for (const u of units) {
           if (u.player === selectedPlayer) continue;
@@ -1038,83 +1059,14 @@ export default function Board({
           const isVisible = ratio >= losMin;
           if (!isVisible) continue;
           const inCover = ratio < coverR;
-
-          const ux = hxX(u.col);
-          const uy = hxY(u.col, u.row);
-          const uIconRadius = uBaseSize > 0
-            ? (uBaseSize / 2) * (1.5 * HEX_RADIUS_H)
-            : (HEX_RADIUS_H * (u.ICON_SCALE ?? 1.2)) / 2;
-
-          // Damage preview bar
-          const barW = (uBaseSize > 0 ? uIconRadius : HEX_RADIUS_H * (u.ICON_SCALE ?? 1.2)) * hpBarWidthRatio * 1.5;
-          const barH = HP_BAR_H * 1.5;
-          const barX = ux - barW / 2;
-          const barY = uy - uIconRadius - barH - 1;
-          const currentHP = Math.max(0, u.HP_CUR ?? u.HP_MAX ?? 1);
-          const hpMax = u.HP_MAX ?? 1;
-
-          // Calculate expected damage (rounded up to at least 1 if any damage expected)
-          let expectedDmg = 0;
-          const preferred = getPreferredRangedWeaponAgainstTarget(selectedUnit, u, inCover);
-          if (preferred && preferred.expectedDamage > 0) {
-            expectedDmg = Math.max(1, Math.round(preferred.expectedDamage));
-          }
-
-          // Background
-          const bg = new PIXI.Graphics();
-          bg.beginFill(0x222222, 0.9);
-          bg.drawRoundedRect(barX, barY, barW, barH, Math.max(1, barH * 0.3));
-          bg.endFill();
-          bg.zIndex = 400;
-          hoverCoverIconsRef.current.addChild(bg);
-
-          // HP slices
-          const sliceW = barW / hpMax;
-          const pad = Math.min(Math.max(0.3, barH * 0.1), sliceW * 0.15);
-          for (let i = 0; i < hpMax; i++) {
-            const slice = new PIXI.Graphics();
-            let color: number;
-            if (i >= currentHP) {
-              color = 0x444444;
-            } else if (i >= currentHP - expectedDmg) {
-              color = 0xff4444;
-            } else {
-              color = u.player === 1 ? 0x4da6ff : 0x36e36b;
-            }
-            slice.beginFill(color, 1);
-            slice.drawRoundedRect(
-              barX + i * sliceW + pad,
-              barY + pad,
-              sliceW - pad * 2,
-              barH - pad * 2,
-              Math.max(0.5, barH * 0.2)
-            );
-            slice.endFill();
-            slice.zIndex = 401;
-            hoverCoverIconsRef.current.addChild(slice);
-          }
-
-          // Cover shield icon (drawn as graphics for reliable rendering)
-          if (inCover) {
-            const s = Math.max(6, barH * 1.2);
-            const sx = barX + barW + s * 0.7;
-            const sy = barY + barH / 2;
-            const shieldGfx = new PIXI.Graphics();
-            shieldGfx.lineStyle(Math.max(1, s * 0.15), 0xfbbf24, 1);
-            shieldGfx.beginFill(0x38bdf8, 0.85);
-            shieldGfx.moveTo(sx, sy - s * 0.5);
-            shieldGfx.lineTo(sx + s * 0.4, sy - s * 0.25);
-            shieldGfx.lineTo(sx + s * 0.4, sy + s * 0.15);
-            shieldGfx.lineTo(sx, sy + s * 0.5);
-            shieldGfx.lineTo(sx - s * 0.4, sy + s * 0.15);
-            shieldGfx.lineTo(sx - s * 0.4, sy - s * 0.25);
-            shieldGfx.closePath();
-            shieldGfx.endFill();
-            shieldGfx.zIndex = 402;
-            hoverCoverIconsRef.current.addChild(shieldGfx);
-          }
+          const uid = typeof u.id === "string" ? parseInt(u.id, 10) : u.id;
+          blinkIds.push(uid);
+          coverMap[String(u.id)] = inCover;
         }
-        hoverCoverIconsRef.current.visible = true;
+
+        if (losRequestIdRef.current !== requestId) return;
+        setMovePreviewLosBlinkIds(blinkIds);
+        setMovePreviewLosCoverById(coverMap);
       }, LOS_DEBOUNCE_MS);
     };
 
@@ -1127,10 +1079,15 @@ export default function Board({
       if (!hexChanged) return;
       if (phase !== "move" || selectedUnitId === null) {
         if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
-        if (hoverCoverIconsRef.current) hoverCoverIconsRef.current.visible = false;
+        setMovePreviewLosBlinkIds([]);
+        setMovePreviewLosCoverById({});
         return;
       }
-      if (!moveDestPoolRef?.current?.has(`${col},${row}`)) return;
+      if (!moveDestPoolRef?.current?.has(`${col},${row}`)) {
+        setMovePreviewLosBlinkIds([]);
+        setMovePreviewLosCoverById({});
+        return;
+      }
       triggerLosForHex(col, row);
     };
 
@@ -1141,7 +1098,8 @@ export default function Board({
       if (canvas) canvas.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("boardHexHover", handler);
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
-      if (hoverCoverIconsRef.current) hoverCoverIconsRef.current.visible = false;
+      setMovePreviewLosBlinkIds([]);
+      setMovePreviewLosCoverById({});
       if (hoverSpriteRef.current) hoverSpriteRef.current.visible = false;
       if (movePreviewGuideLineRef.current && !movePreviewGuideLineRef.current.destroyed) {
         movePreviewGuideLineRef.current.clear();
@@ -1829,7 +1787,7 @@ export default function Board({
     }
 
     // Unified: movePreview and shoot phase use same backend source of truth (blinking_units)
-    const effectiveBlinkingUnits = stableBlinkingUnits ?? [];
+    const effectiveBlinkingUnits = effectiveBlinkingUnitsWithMovePreview;
     const effectiveBlinkingAttackerId = blinkingAttackerId;
     const effectiveShootTargetsSet: Set<string> | null =
       effectiveBlinkingUnits.length > 0
@@ -2105,7 +2063,7 @@ export default function Board({
       for (const u of units) {
         parts.push(`${u.id},${u.col},${u.row},${u.HP_CUR}`);
       }
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -2117,11 +2075,19 @@ export default function Board({
       const savedDragOverlay = dragOverlayRef.current;
       const savedUnitsLayer = unitsLayerRef.current;
       const savedBlinks: PIXI.DisplayObject[] = [];
+      // Move-preview LoS / icône / ligne : même principe que hp-blink — sinon chaque re-run du
+      // useEffect détruit le stage et la preview de tir disparaît + les refs sont perdues.
+      const savedHoverOverlay = hoverOverlayRef.current;
+      const savedHoverSprite = hoverSpriteRef.current;
+      const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
       if (savedDragOverlay?.parent) app.stage.removeChild(savedDragOverlay);
       if (savedUnitsLayer?.parent) app.stage.removeChild(savedUnitsLayer);
+      if (savedHoverOverlay?.parent) app.stage.removeChild(savedHoverOverlay);
+      if (savedHoverSprite?.parent) app.stage.removeChild(savedHoverSprite);
+      if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
       for (const child of [...app.stage.children]) {
         if (child.name === "hp-blink-container") {
           app.stage.removeChild(child);
@@ -2137,9 +2103,6 @@ export default function Board({
           child.destroy({ children: true, texture: false, baseTexture: false });
         }
       }
-      hoverOverlayRef.current = null;
-      hoverSpriteRef.current = null;
-      movePreviewGuideLineRef.current = null;
 
       // If units changed, clear the units layer so it gets rebuilt
       if (unitsChanged && savedUnitsLayer) {
@@ -2159,6 +2122,11 @@ export default function Board({
       for (const blink of savedBlinks) app.stage.addChild(blink);
       if (savedUnitsLayer) app.stage.addChild(savedUnitsLayer);
       if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
+      if (savedHoverOverlay && !savedHoverOverlay.destroyed) app.stage.addChild(savedHoverOverlay);
+      if (savedHoverSprite && !savedHoverSprite.destroyed) app.stage.addChild(savedHoverSprite);
+      if (savedMovePreviewGuideLine && !savedMovePreviewGuideLine.destroyed) {
+        app.stage.addChild(savedMovePreviewGuideLine);
+      }
 
       // Clean stale transient UI markers
       if (savedUi) {
@@ -2412,6 +2380,10 @@ export default function Board({
         isBlinkingActive,
         blinkVersion,
         shootingTargetInCover: coverCellKeySet.has(`${unit.col},${unit.row}`),
+        movePreviewShootingTargetInCoverByUnitId:
+          phase === "move" && (mode === "select" || mode === "movePreview")
+            ? movePreviewLosCoverById
+            : undefined,
         // Pass shooting indicators
         shootingTargetId,
         shootingUnitId,
@@ -3195,6 +3167,8 @@ export default function Board({
     replayActionIndex,
     tutorial?.currentStep?.stage,
     tutorial?.lastEnemyDeathPosition,
+    movePreviewLosBlinkIds,
+    movePreviewLosCoverById,
   ]);
 
   // Handle weapon selection
