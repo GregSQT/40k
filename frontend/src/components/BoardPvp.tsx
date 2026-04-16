@@ -44,6 +44,7 @@ import {
 } from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
+import type { HPBlinkContainer } from "../utils/blinkingHPBar";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -260,6 +261,39 @@ function hexDistOff(c1: number, r1: number, c2: number, r2: number): number {
 
 /** Échelle affichage tooltip mouvement : nombre de pas hex entre centres pour 1″ (règle plateau). */
 const HEX_STEPS_PER_INCH_DISPLAY = 10;
+
+/** Blink / prévisualisation tir : même règle que le rendu Pixi (vivant = présent dans units_cache). */
+function filterBlinkIdsToLivingUnitsCache(
+  ids: number[],
+  unitsCache: Record<string, unknown> | undefined,
+): number[] {
+  if (unitsCache === undefined) {
+    return ids;
+  }
+  return ids.filter((id) => Object.hasOwn(unitsCache, String(id)));
+}
+
+/** Barres blink sur app.stage : sans ça, une cible absente du cache n’est plus rendue mais le container survit au teardown du stage. */
+function destroyAndFilterOrphanHpBlinkContainers(
+  savedBlinks: PIXI.DisplayObject[],
+  unitsCache: Record<string, unknown> | undefined,
+): PIXI.DisplayObject[] {
+  if (unitsCache === undefined) {
+    return savedBlinks;
+  }
+  const kept: PIXI.DisplayObject[] = [];
+  for (const blink of savedBlinks) {
+    const bc = blink as HPBlinkContainer;
+    const uid = bc.unitId;
+    if (uid !== undefined && uid !== null && !Object.hasOwn(unitsCache, String(uid))) {
+      if (bc.cleanupBlink) bc.cleanupBlink();
+      blink.destroy({ children: true });
+      continue;
+    }
+    kept.push(blink);
+  }
+  return kept;
+}
 
 export default function Board({
   units,
@@ -741,14 +775,18 @@ export default function Board({
       phase === "move" &&
       (mode === "select" || mode === "movePreview") &&
       movePreviewLosBlinkIds.length > 0;
-    if (!mergeMoveLosHover) {
-      return base;
-    }
-    const merged = new Set<string>();
-    for (const id of base) merged.add(String(id));
-    for (const id of movePreviewLosBlinkIds) merged.add(String(id));
-    return Array.from(merged).map((s) => parseInt(s, 10));
-  }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds]);
+    const mergedIds = (() => {
+      if (!mergeMoveLosHover) {
+        return base;
+      }
+      const merged = new Set<string>();
+      for (const id of base) merged.add(String(id));
+      for (const id of movePreviewLosBlinkIds) merged.add(String(id));
+      return Array.from(merged).map((s) => parseInt(s, 10));
+    })();
+    const uc = gameState?.units_cache as Record<string, unknown> | undefined;
+    return filterBlinkIdsToLivingUnitsCache(mergedIds, uc);
+  }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds, gameState?.units_cache]);
 
   // Prévisualisation LoS (move) : uniquement depuis onMouseMove = position de l’icône, pas l’hex sous le curseur
   useEffect(() => {
@@ -1669,6 +1707,8 @@ export default function Board({
         return;
       }
 
+      const unitsCacheForShootPreview = gameState?.units_cache as Record<string, unknown> | undefined;
+
       const attackCellSet = new Set<string>();
       const range = getMaxRangedRange(source.unit);
       if (range <= 0) {
@@ -1694,6 +1734,12 @@ export default function Board({
         }
         for (const enemy of units) {
           if (enemy.player === source.unit.player) continue;
+          if (
+            unitsCacheForShootPreview !== undefined &&
+            !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
+          ) {
+            continue;
+          }
           const eBase = typeof enemy.BASE_SIZE === "number" && enemy.BASE_SIZE > 1 ? enemy.BASE_SIZE : 0;
           const scanR = eBase > 0 ? Math.ceil(eBase / 2) : 0;
           let totalHexes = 0;
@@ -1732,6 +1778,12 @@ export default function Board({
           for (const enemyId of shootPreviewBackendIds) {
             const enemy = enemyById.get(String(enemyId));
             if (!enemy) {
+              continue;
+            }
+            if (
+              unitsCacheForShootPreview !== undefined &&
+              !Object.hasOwn(unitsCacheForShootPreview, String(enemy.id))
+            ) {
               continue;
             }
             const enemyKey = `${enemy.col},${enemy.row}`;
@@ -2096,7 +2148,9 @@ export default function Board({
       if (savedStatic) app.stage.addChild(savedStatic);
       if (savedWalls) app.stage.addChild(savedWalls);
       if (savedUi) app.stage.addChild(savedUi);
-      for (const blink of savedBlinks) app.stage.addChild(blink);
+      const unitsCacheForBlinkSweep = gameState?.units_cache as Record<string, unknown> | undefined;
+      const blinksToReattach = destroyAndFilterOrphanHpBlinkContainers(savedBlinks, unitsCacheForBlinkSweep);
+      for (const blink of blinksToReattach) app.stage.addChild(blink);
       if (savedUnitsLayer) app.stage.addChild(savedUnitsLayer);
       if (savedDragOverlay) app.stage.addChild(savedDragOverlay);
       if (savedHoverOverlay && !savedHoverOverlay.destroyed) app.stage.addChild(savedHoverOverlay);
