@@ -541,7 +541,7 @@ def weapon_availability_check(
                         if enemy is None:
                             raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
                         _e_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                        distance = _mds_wpn(_u_fp, _e_fp)
+                        distance = _mds_wpn(_u_fp, _e_fp, max_distance=weapon_range)
                         if distance > weapon_range:
                             continue
                         
@@ -692,7 +692,7 @@ def _get_available_weapons_for_selection(
                 if enemy is None:
                     raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
                 _e_fp2 = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                distance = _mds_wpn2(_u_fp2, _e_fp2)
+                distance = _mds_wpn2(_u_fp2, _e_fp2, max_distance=weapon_range)
                 if distance > weapon_range:
                     continue
                 
@@ -732,6 +732,9 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     Initialize weapon_rule and weapon.shot flags
     """
     global _target_pool_cache
+
+    if game_state.get("pending_shooting_phase_init"):
+        game_state["pending_shooting_phase_init"] = False
 
     # Set phase
     game_state["phase"] = "shoot"
@@ -842,6 +845,8 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
+    import time as _sps_time
+    _sps_t0 = _sps_time.perf_counter()
     # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for all players present.
     # Reactive movement may query adjacency from the opposing player's perspective.
     from .shared_utils import build_enemy_adjacent_hexes
@@ -857,6 +862,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         players_present.add(player_int)
     for player_int in players_present:
         build_enemy_adjacent_hexes(game_state, player_int)
+    _sps_t1 = _sps_time.perf_counter()
     
     # UNITS_CACHE: Verify units_cache exists (built at reset, not here - "reset only" policy)
     if "units_cache" not in game_state:
@@ -870,6 +876,8 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
+    _sps_t2 = _sps_time.perf_counter()
+    print(f"[PERF-SHOOT-START] adj={(_sps_t1-_sps_t0)*1000:.0f}ms pool={(_sps_t2-_sps_t1)*1000:.0f}ms total={(_sps_t2-_sps_t0)*1000:.0f}ms", flush=True)
     
     # If no eligible units, end phase immediately (align with MOVE phase)
     if not eligible_units:
@@ -1508,9 +1516,8 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     target_entry = units_cache.get(target_id_str)
     shooter_fp = shooter_entry.get("occupied_hexes", {(shooter_col, shooter_row)}) if shooter_entry else {(shooter_col, shooter_row)}
     target_fp = target_entry.get("occupied_hexes", {(target_col, target_row)}) if target_entry else {(target_col, target_row)}
-    distance = min_distance_between_sets(shooter_fp, target_fp)
-
     max_range = get_max_ranged_range(shooter)
+    distance = min_distance_between_sets(shooter_fp, target_fp, max_distance=max_range)
     if distance > max_range:
         return False
 
@@ -1542,7 +1549,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
             friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
             if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
                 friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                friendly_distance = min_distance_between_sets(target_fp, friendly_fp)
+                friendly_distance = min_distance_between_sets(target_fp, friendly_fp, max_distance=melee_range)
 
                 if friendly_distance <= melee_range:
                     # Enemy is engaged with friendly unit - cannot shoot
@@ -1960,7 +1967,7 @@ def valid_target_pool_build(
         unit_entry = units_cache.get(unit_id_normalized)
         shooter_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
         enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
-        distance_to_enemy = min_distance_between_sets(shooter_fp, enemy_fp)
+        distance_to_enemy = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=melee_range)
 
         enemy_adjacent_to_shooter = (distance_to_enemy <= melee_range)
         shooter_is_engaged = adjacent_status == 1
@@ -2010,7 +2017,7 @@ def valid_target_pool_build(
                 if (friendly_player == current_player_int and 
                     friendly_id != unit_id_normalized):
                     friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                    friendly_distance = min_distance_between_sets(enemy_fp, friendly_fp)
+                    friendly_distance = min_distance_between_sets(enemy_fp, friendly_fp, max_distance=melee_range)
                     if friendly_distance <= melee_range:
                         enemy_adjacent_to_friendly = True
                         engaged_friendly_id = friendly_id
@@ -3229,8 +3236,15 @@ def _apply_move_after_shooting(
     if dest_col_int == orig_col and dest_row_int == orig_row:
         raise ValueError("move_after_shooting destination must differ from current position")
 
+    old_cache_entry = game_state.get("units_cache", {}).get(unit_id_str)
+    old_occupied = old_cache_entry.get("occupied_hexes") if old_cache_entry else None
+
     set_unit_coordinates(unit, dest_col_int, dest_row_int)
     update_units_cache_position(game_state, unit_id_str, dest_col_int, dest_row_int)
+
+    new_cache_entry = game_state.get("units_cache", {}).get(unit_id_str)
+    new_occupied = new_cache_entry.get("occupied_hexes") if new_cache_entry else None
+
     moved_unit_player = int(require_key(unit, "player"))
     update_enemy_adjacent_caches_after_unit_move(
         game_state,
@@ -3239,6 +3253,8 @@ def _apply_move_after_shooting(
         old_row=orig_row,
         new_col=dest_col_int,
         new_row=dest_row_int,
+        old_occupied=old_occupied,
+        new_occupied=new_occupied,
     )
     _invalidate_los_cache_for_moved_unit(game_state, unit_id_str, old_col=orig_col, old_row=orig_row)
     build_unit_los_cache(game_state, unit_id_str)
@@ -6066,7 +6082,7 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
             enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            distance = min_distance_between_sets(unit_fp, enemy_fp)
+            distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=cc_range)
             if distance <= cc_range:
                 return True
     return False
@@ -6091,7 +6107,7 @@ def _has_los_to_enemies_within_range(game_state: Dict[str, Any], unit: Dict[str,
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
             enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            distance = min_distance_between_sets(unit_fp, enemy_fp)
+            distance = min_distance_between_sets(unit_fp, enemy_fp, max_distance=max_range)
             if distance <= max_range:
                 return True
 
@@ -6284,7 +6300,7 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             if enemy_player == unit_player_int:
                 continue
             enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            if min_distance_between_sets(candidate_fp, enemy_fp) <= engagement_zone:
+            if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
                 return False, {
                     "error": "advance_destination_adjacent_to_enemy",
                     "enemy_id": enemy_id,
@@ -6345,8 +6361,17 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
         conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
         conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
         
+        # Capture old footprint before cache update (for multi-hex adjacency delta)
+        adv_uid_str = str(unit["id"])
+        adv_old_entry = game_state.get("units_cache", {}).get(adv_uid_str)
+        adv_old_occupied = adv_old_entry.get("occupied_hexes") if adv_old_entry else None
+
         # Update units_cache after position change (advance)
-        update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
+        update_units_cache_position(game_state, adv_uid_str, dest_col_int, dest_row_int)
+
+        adv_new_entry = game_state.get("units_cache", {}).get(adv_uid_str)
+        adv_new_occupied = adv_new_entry.get("occupied_hexes") if adv_new_entry else None
+
         moved_unit_player = int(require_key(unit, "player"))
         update_enemy_adjacent_caches_after_unit_move(
             game_state,
@@ -6355,6 +6380,8 @@ def _handle_advance_action(game_state: Dict[str, Any], unit: Dict[str, Any], act
             old_row=orig_row,
             new_col=dest_col_int,
             new_row=dest_row_int,
+            old_occupied=adv_old_occupied,
+            new_occupied=adv_new_occupied,
         )
         
         # Check if unit actually moved (for cache invalidation and logging)

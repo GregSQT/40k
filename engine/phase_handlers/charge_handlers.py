@@ -152,7 +152,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         for enemy_id, enemy_entry in units_cache.items():
             if enemy_entry["player"] != cache_entry["player"]:
                 enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
-                if min_distance_between_sets(unit_fp, enemy_fp) <= engagement_zone:
+                if min_distance_between_sets(unit_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
                     adjacent_found = True
                     break
         
@@ -585,7 +585,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
             raise KeyError(f"Enemy {enemy_id} not in units_cache (dead or absent)")
         enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
 
-        if min_distance_between_sets(unit_fp, enemy_fp) <= engagement_zone:
+        if min_distance_between_sets(unit_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
             continue
 
         has_adjacent_reachable_hex = False
@@ -593,7 +593,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str) -> List
 
         for dest_col, dest_row in reachable_hexes:
             candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
-            dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp)
+            dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone)
             if 0 < dist_to_enemy <= engagement_zone:
                 has_adjacent_reachable_hex = True
                 if not candidate_fp & occupied_positions:
@@ -750,8 +750,17 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: col set to {unit['col']}")
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
 
+    # Capture old footprint before cache update (for multi-hex adjacency delta)
+    chg_uid_str = str(unit["id"])
+    chg_old_entry = game_state.get("units_cache", {}).get(chg_uid_str)
+    chg_old_occupied = chg_old_entry.get("occupied_hexes") if chg_old_entry else None
+
     # Update units_cache after position change
-    update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
+    update_units_cache_position(game_state, chg_uid_str, dest_col_int, dest_row_int)
+
+    chg_new_entry = game_state.get("units_cache", {}).get(chg_uid_str)
+    chg_new_occupied = chg_new_entry.get("occupied_hexes") if chg_new_entry else None
+
     moved_unit_player = int(require_key(unit, "player"))
     update_enemy_adjacent_caches_after_unit_move(
         game_state,
@@ -760,6 +769,8 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
         old_row=orig_row,
         new_col=dest_col_int,
         new_row=dest_row_int,
+        old_occupied=chg_old_occupied,
+        new_occupied=chg_new_occupied,
     )
 
     # AI_TURN_SHOOTING_UPDATE.md: No need to invalidate los_cache here
@@ -888,7 +899,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
             enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
             for dest_col, dest_row in reachable_hexes:
                 candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
-                dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp)
+                dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone)
                 if 0 < dist_to_enemy <= engagement_zone:
                     return True
 
@@ -915,7 +926,7 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     for enemy_id, enemy_entry in units_cache.items():
         if int(enemy_entry["player"]) != unit_player:
             enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
-            if min_distance_between_sets(unit_fp, enemy_fp) <= cc_range:
+            if min_distance_between_sets(unit_fp, enemy_fp, max_distance=cc_range) <= cc_range:
                 return True
     return False
 
@@ -1099,7 +1110,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
-                dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp)
+                dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone)
                 if dist_to_enemy <= engagement_zone:
                     is_adjacent_to_enemy = True
                     if target_id:
@@ -1778,7 +1789,7 @@ def _is_adjacent_to_enemy_simple(game_state: Dict[str, Any], unit: Dict[str, Any
     for enemy_id, enemy_entry in units_cache.items():
         if int(enemy_entry["player"]) != unit_player:
             enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
-            if min_distance_between_sets(unit_fp, enemy_fp) <= cc_range:
+            if min_distance_between_sets(unit_fp, enemy_fp, max_distance=cc_range) <= cc_range:
                 return True
     return False
 

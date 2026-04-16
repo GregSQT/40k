@@ -3,7 +3,7 @@
   "wall_ref": "walls-11.json",
   "objectives_ref": "objectives-51.json",
   "units": [
-    {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 250, "row": 230},
+    {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 220, "row": 220},
     {"id": 2, "unit_type": "Terminator", "player": 1, "col": 280, "row": 220},
     {"id": 3, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 260, "row": 200},
     {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 200, "row": 200},

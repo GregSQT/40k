@@ -40,8 +40,8 @@ fn build_wall_grid(wall_data: &[i32], cols: i32, rows: i32) -> Vec<bool> {
     grid
 }
 
-/// Inline LoS check: traces hex line from→to, returns false if any intermediate hex is a wall.
-/// Zero allocations.
+/// Inline LoS check: traces hex line from→to.
+/// Returns true if line of sight is clear (no wall blocking).
 #[inline]
 fn has_los_fast(
     from_col: i32, from_row: i32,
@@ -62,7 +62,6 @@ fn has_los_fast(
     let fy2 = y2 as f64 + 1e-6;
     let fz2 = z2 as f64 - 2e-6;
 
-    // Only check intermediate hexes (i=1..n-1), skip source and target
     for i in 1..n {
         let t = i as f64 / nf;
         let fx = fx1 + (fx2 - fx1) * t;
@@ -95,7 +94,7 @@ fn has_los_fast(
 
 /// Compute visible hexes from a shooter position within a given range.
 /// Returns a flat array: [col0, row0, state0, col1, row1, state1, ...]
-/// state: 1 = visible (clear), 2 = visible (cover)
+/// state: 1 = visible. Cover is determined by the frontend via footprint ratio.
 #[wasm_bindgen]
 pub fn compute_visible_hexes(
     shooter_col: i32,
@@ -130,7 +129,7 @@ pub fn compute_visible_hexes(
             if has_los_fast(shooter_col, shooter_row, col, row, &wall_grid, board_rows, grid_len) {
                 result.push(col);
                 result.push(row);
-                result.push(1); // clear (cover detection requires multi-path, keeping simple for now)
+                result.push(1);
             }
         }
     }
@@ -138,7 +137,7 @@ pub fn compute_visible_hexes(
     result
 }
 
-/// Single-pair LoS check. Returns: 0 = blocked, 1 = visible clear, 2 = visible cover.
+/// Single-pair LoS check. Returns: 0 = blocked, 1 = visible.
 #[wasm_bindgen]
 pub fn compute_los_single(
     from_col: i32, from_row: i32,
@@ -151,11 +150,7 @@ pub fn compute_los_single(
     let board_rows = wall_data.iter().skip(1).step_by(2).copied().max().unwrap_or(0) + 1;
     let wall_grid = build_wall_grid(wall_data, board_cols, board_rows);
     let grid_len = wall_grid.len();
-    if has_los_fast(from_col, from_row, to_col, to_row, &wall_grid, board_rows, grid_len) {
-        1
-    } else {
-        0
-    }
+    if has_los_fast(from_col, from_row, to_col, to_row, &wall_grid, board_rows, grid_len) { 1 } else { 0 }
 }
 
 /// Hex distance between two positions.

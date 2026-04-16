@@ -950,7 +950,8 @@ class W40KEngine(gym.Env):
             "debug_mode": self.debug_mode,  # ADDED: For handler access
             "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
-            "objective_controllers": {}  # RESET: Clear objective control for new episode
+            "objective_controllers": {},  # RESET: Clear objective control for new episode
+            "pending_shooting_phase_init": False,
         })
         self._configure_deployment_random_mix_for_episode()
         self.game_state["deployment_type"] = self.config.get("deployment_type")
@@ -3782,7 +3783,8 @@ class W40KEngine(gym.Env):
             from engine.game_utils import add_console_log
             add_console_log(self.game_state, f"🔄 PHASE TRANSITION: {current_phase} -> {next_phase} (cascade #{cascade_count})")
 
-            _cascade_t0 = None
+            import time as _cascade_time
+            _cascade_t0 = _cascade_time.perf_counter()
             # Initialize next phase using phase handlers
             phase_init_result = None
             if next_phase == "deployment":
@@ -3801,6 +3803,7 @@ class W40KEngine(gym.Env):
             started_phases.append(next_phase)
 
             if _cascade_t0 is not None:
+                print(f"[PERF-CASCADE] {current_phase}->{next_phase} time={(_cascade_time.perf_counter()-_cascade_t0)*1000:.0f}ms", flush=True)
                 _cascade_dur = time.perf_counter() - _cascade_t0
                 _ep_c = int(require_key(self.game_state, "episode_number"))
                 try:
@@ -3923,19 +3926,34 @@ class W40KEngine(gym.Env):
         
         # Check response for phase_complete flag
         if result.get("phase_complete"):
+            from engine.phase_handlers import movement_handlers as _mh_phase_end
+            _mh_phase_end.movement_phase_end(self.game_state)
             self._movement_phase_initialized = False
             self._shooting_phase_initialized = False
-            init_result = self._shooting_phase_init()
-            if init_result.get("phase_complete"):
-                if "next_phase" not in init_result:
-                    raise KeyError("shooting_phase_start returned phase_complete without next_phase")
-                result.update(init_result)
-                result["phase_transition"] = True
-                result["next_phase"] = init_result["next_phase"]
+            # Gym / RL: keep move + shooting init in one step (same as before).
+            # PvP / human API: defer shooting_phase_start to a second request so the last move
+            # returns quickly; client calls advance_phase from "move" to run cascade (shoot init).
+            if getattr(self, "gym_training_mode", False):
+                import time as _mvt
+                _mvt0 = _mvt.perf_counter()
+                init_result = self._shooting_phase_init()
+                print(f"[PERF-PHASE-INIT] move->shoot: {(_mvt.perf_counter()-_mvt0)*1000:.0f}ms", flush=True)
+                if init_result.get("phase_complete"):
+                    if "next_phase" not in init_result:
+                        raise KeyError("shooting_phase_start returned phase_complete without next_phase")
+                    result.update(init_result)
+                    result["phase_transition"] = True
+                    result["next_phase"] = init_result["next_phase"]
+                else:
+                    result["phase_transition"] = True
+                    result["next_phase"] = "shoot"
             else:
-                result["phase_transition"] = True
-                result["next_phase"] = "shoot"
-        
+                self.game_state["pending_shooting_phase_init"] = True
+                result["pending_shooting_phase_init"] = True
+                result["phase_transition"] = False
+                if "next_phase" in result:
+                    del result["next_phase"]
+
         return success, result
     
     

@@ -211,10 +211,10 @@ export function setupBoardClickHandler(callbacks: {
         callbacks.onDeployUnit(selectedUnitId, col, row);
       }
     } else if (mode === "select" && selectedUnitId !== null && phase === "move") {
-      if (!callbacks.onStartMovePreview) {
-        throw new Error("onStartMovePreview callback is required during move phase");
+      if (!callbacks.onDirectMove) {
+        throw new Error("onDirectMove callback is required during move phase");
       }
-      callbacks.onStartMovePreview(selectedUnitId, col, row);
+      callbacks.onDirectMove(selectedUnitId, col, row);
     } else if (mode === "select" && selectedUnitId !== null && phase === "shoot") {
       if (!callbacks.onStartMovePreview) {
         throw new Error("onStartMovePreview callback is required during shoot phase move preview");

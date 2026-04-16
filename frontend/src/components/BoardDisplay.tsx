@@ -379,25 +379,35 @@ export const drawBoard = (
         highlightContainer.addChild(batch);
       };
 
-      if (interactionPhase === "move" && selectedUnitBaseSize && selectedUnitBaseSize > 1 && availableCells.length > 0) {
+      if (interactionPhase === "move" && selectedUnitBaseSize && selectedUnitBaseSize > 1 && moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
+        // Draw icon-sized circles at valid CENTER positions only.
+        // Each center was validated by BFS (full footprint clear of walls),
+        // so the visual circles won't overlap walls.
         const footprintRadius = (selectedUnitBaseSize / 2) * HEX_HORIZ_SPACING;
         const gfx = new PIXI.Graphics();
         gfx.beginFill(HIGHLIGHT_COLOR, 1.0);
-        for (const c of availableCells) {
-          const hx = c.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const hy = c.row * HEX_VERT_SPACING + ((c.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        for (const key of moveDestPoolRef.current) {
+          const sep = key.indexOf(",");
+          const c = Number(key.substring(0, sep));
+          const r = Number(key.substring(sep + 1));
+          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const hy = r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
           gfx.drawCircle(hx, hy, footprintRadius);
         }
         gfx.endFill();
         const bounds = gfx.getBounds();
-        const rt = PIXI.RenderTexture.create({ width: bounds.width, height: bounds.height });
-        gfx.position.set(-bounds.x, -bounds.y);
-        app.renderer.render(gfx, { renderTexture: rt });
-        gfx.destroy();
-        const sprite = new PIXI.Sprite(rt);
-        sprite.position.set(bounds.x, bounds.y);
-        sprite.alpha = 0.4;
-        highlightContainer.addChild(sprite);
+        if (bounds.width > 0 && bounds.height > 0) {
+          const rt = PIXI.RenderTexture.create({ width: bounds.width, height: bounds.height });
+          gfx.position.set(-bounds.x, -bounds.y);
+          app.renderer.render(gfx, { renderTexture: rt });
+          gfx.destroy();
+          const sprite = new PIXI.Sprite(rt);
+          sprite.position.set(bounds.x, bounds.y);
+          sprite.alpha = 0.4;
+          highlightContainer.addChild(sprite);
+        } else {
+          gfx.destroy();
+        }
       } else {
         drawGroup(availableCells, HIGHLIGHT_COLOR, 0.4, false);
       }

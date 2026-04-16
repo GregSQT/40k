@@ -1564,11 +1564,6 @@ def execute_action():
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
-        _fp_zone = serializable_state.get("move_preview_footprint_zone")
-        _mv_border = serializable_state.get("move_preview_border")
-        _mv_pool = serializable_state.get("valid_move_destinations_pool")
-        print(f"[DEBUG-SERIALIZE] footprint_zone={len(_fp_zone) if isinstance(_fp_zone, list) else type(_fp_zone).__name__} border={len(_mv_border) if isinstance(_mv_border, list) else type(_mv_border).__name__} pool={len(_mv_pool) if isinstance(_mv_pool, list) else type(_mv_pool).__name__}")
-
         # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
         # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
         # Use active_shooting_unit from game_state (not shooterId from result which doesn't exist)
@@ -1599,7 +1594,7 @@ def execute_action():
             "message": "Action executed successfully" if success else "Action failed"
         })
         _api_t4 = _time.perf_counter()
-        print(f"[PERF-API] {action.get('action')}: engine={(_api_t1-_api_t0)*1000:.0f}ms serialize={(_api_t2-_api_t1)*1000:.0f}ms post={(_api_t3-_api_t2)*1000:.0f}ms jsonify={(_api_t4-_api_t3)*1000:.0f}ms TOTAL={(_api_t4-_api_t0)*1000:.0f}ms")
+        print(f"[PERF-API] {action.get('action')}: engine={(_api_t1-_api_t0)*1000:.0f}ms serialize={(_api_t2-_api_t1)*1000:.0f}ms post={(_api_t3-_api_t2)*1000:.0f}ms jsonify={(_api_t4-_api_t3)*1000:.0f}ms TOTAL={(_api_t4-_api_t0)*1000:.0f}ms", flush=True)
         return resp
     
     except Exception as e:

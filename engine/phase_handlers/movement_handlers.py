@@ -278,7 +278,12 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     """
     AI_MOVE.md: Handler action routing with complete autonomy
     """
-    
+    if game_state.get("pending_shooting_phase_init"):
+        return False, {
+            "error": "pending_shooting_phase_init",
+            "hint": "Movement phase ended; call semantic action advance_phase with from=move to start shooting.",
+        }
+
     # Handler self-initialization on first action
     if "phase" not in game_state:
         game_state_phase = None
@@ -558,7 +563,7 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
         if enemy_player_int == unit_player_int:
             continue
         enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        if min_distance_between_sets(candidate_fp, enemy_fp) <= engagement_zone:
+        if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
             return False, {
                 "error": "destination_adjacent_to_enemy",
                 "enemy_id": enemy_id,
@@ -583,8 +588,17 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
     set_unit_coordinates(unit, dest_col_int, dest_row_int)
     conditional_debug_print(game_state, f"[DIRECT ASSIGNMENT] E{episode} T{turn} {phase} Unit {unit['id']}: row set to {unit['row']}")
 
+    # Capture old footprint before cache update (for multi-hex adjacency delta)
+    unit_id_str_cache = str(unit["id"])
+    old_cache_entry = game_state.get("units_cache", {}).get(unit_id_str_cache)
+    old_occupied = old_cache_entry.get("occupied_hexes") if old_cache_entry else None
+
     # Update units_cache after position change
-    update_units_cache_position(game_state, str(unit["id"]), dest_col_int, dest_row_int)
+    update_units_cache_position(game_state, unit_id_str_cache, dest_col_int, dest_row_int)
+
+    # Retrieve new footprint from updated cache
+    new_cache_entry = game_state.get("units_cache", {}).get(unit_id_str_cache)
+    new_occupied = new_cache_entry.get("occupied_hexes") if new_cache_entry else None
 
     # Keep enemy adjacency caches synchronized incrementally with the move.
     moved_unit_player = int(require_key(unit, "player"))
@@ -595,6 +609,8 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
         old_row=orig_row,
         new_col=dest_col_int,
         new_row=dest_row_int,
+        old_occupied=old_occupied,
+        new_occupied=new_occupied,
     )
 
     # Apply AI_TURN.md tracking
@@ -656,7 +672,7 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
         enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if enemy_player != unit_player:
             enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            if min_distance_between_sets(unit_fp, enemy_fp) <= engagement_zone:
+            if min_distance_between_sets(unit_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
                 result = True
                 break
     
@@ -1225,8 +1241,12 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     # Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.
+    import time as _mds_time
+    _mds_t0 = _mds_time.perf_counter()
     config = {}  # Empty config for now
     move_success, move_result = _attempt_movement_to_destination(game_state, unit, dest_col, dest_row, config)
+    _mds_t1 = _mds_time.perf_counter()
+    print(f"[PERF-MOVE-ATTEMPT] unit={unit_id} time={(_mds_t1-_mds_t0)*1000:.0f}ms", flush=True)
 
     if not move_success:
         # Move was blocked (occupied hex, adjacent to enemy, etc.)
@@ -1280,6 +1300,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     _invalidate_all_destination_pools_after_movement(game_state)
 
     move_kind = "flee" if was_adjacent else "move"
+    _react_t0 = _mds_time.perf_counter()
     reactive_result = maybe_resolve_reactive_move(
         game_state=game_state,
         moved_unit_id=str(unit["id"]),
@@ -1290,6 +1311,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         move_kind=move_kind,
         move_cause="normal",
     )
+    print(f"[PERF-REACTIVE-MOVE] time={(_mds_time.perf_counter()-_react_t0)*1000:.0f}ms", flush=True)
 
     # Generate movement log per requested format
     if "action_logs" not in game_state:

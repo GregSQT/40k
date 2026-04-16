@@ -96,28 +96,63 @@ def hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
 
 
 def min_distance_between_sets(
-    set_a: Set[Tuple[int, int]], set_b: Set[Tuple[int, int]]
+    set_a: Set[Tuple[int, int]], set_b: Set[Tuple[int, int]],
+    max_distance: int = 0,
 ) -> int:
     """Minimum hex distance between any cell in set_a and any cell in set_b (§3.3).
 
     Used for distance between unit footprints (occupied_hexes).
     Returns 0 if sets overlap. Raises ValueError if either set is empty.
+
+    Args:
+        max_distance: If > 0, stop searching beyond this distance and return
+            max_distance + 1 when sets are farther apart. Critical for performance
+            when only checking adjacency (max_distance=1) on large footprints.
+
+    For large footprints, uses multi-source BFS from the smaller set to avoid
+    O(|A|*|B|) brute-force which is prohibitive for base_size=35 (1113 hexes).
     """
     if not set_a or not set_b:
         raise ValueError("Cannot compute distance between empty sets")
     if set_a & set_b:
         return 0
-    best = _UNREACHABLE
-    for c1, r1 in set_a:
-        x1, y1, z1 = offset_to_cube(c1, r1)
-        for c2, r2 in set_b:
-            x2, y2, z2 = offset_to_cube(c2, r2)
-            d = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
-            if d < best:
-                best = d
-                if best == 1:
-                    return 1
-    return best
+
+    if len(set_a) <= 64 and len(set_b) <= 64:
+        best = _UNREACHABLE
+        for c1, r1 in set_a:
+            x1, y1, z1 = offset_to_cube(c1, r1)
+            for c2, r2 in set_b:
+                x2, y2, z2 = offset_to_cube(c2, r2)
+                d = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
+                if d < best:
+                    best = d
+                    if best == 1:
+                        return 1
+        return best
+
+    if len(set_a) > len(set_b):
+        set_a, set_b = set_b, set_a
+
+    visited: Set[Tuple[int, int]] = set(set_a)
+    frontier = list(set_a)
+    dist = 0
+    while frontier:
+        dist += 1
+        if max_distance > 0 and dist > max_distance:
+            return max_distance + 1
+        next_frontier: List[Tuple[int, int]] = []
+        for c, r in frontier:
+            offsets = _NEIGHBORS_ODD_COL if (c & 1) else _NEIGHBORS_EVEN_COL
+            for dc, dr in offsets:
+                nc, nr = c + dc, r + dr
+                npos = (nc, nr)
+                if npos in set_b:
+                    return dist
+                if npos not in visited:
+                    visited.add(npos)
+                    next_frontier.append(npos)
+        frontier = next_frontier
+    return _UNREACHABLE
 
 
 # ---------------------------------------------------------------------------

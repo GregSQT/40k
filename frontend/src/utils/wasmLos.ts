@@ -64,13 +64,11 @@ export function computeVisibleHexes(
     throw new Error("WASM not initialized — call ensureWasmLoaded() first");
   }
   const wallData = getWallData(wallHexes);
-  const t0 = performance.now();
   const raw = compute_visible_hexes(
     shooterCol, shooterRow, maxRange,
     boardCols, boardRows,
     wallData, losVisibilityMinRatio, coverRatio,
   );
-  const t1 = performance.now();
   const results: VisibleHex[] = [];
   for (let i = 0; i < raw.length; i += 3) {
     results.push({
@@ -79,7 +77,6 @@ export function computeVisibleHexes(
       state: raw[i + 2] as 1 | 2,
     });
   }
-  console.log(`[WASM-LOS] compute_visible_hexes: ${results.length} hexes in ${(t1 - t0).toFixed(1)}ms`);
   return results;
 }
 

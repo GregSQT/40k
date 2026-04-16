@@ -84,6 +84,7 @@ interface UnitRendererProps {
         [key: string]: unknown;
       };
   HEX_RADIUS: number;
+  HEX_HORIZ_SPACING: number;
   ICON_SCALE: number;
   ELIGIBLE_OUTLINE_WIDTH: number;
   ELIGIBLE_COLOR: number;
@@ -186,14 +187,16 @@ export class UnitRenderer {
     displayObject.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
       updateTooltipPosition(e);
     });
-    displayObject.on("pointerout", () => {
+    const hideTooltip = (): void => {
       this.props.onUnitTooltip?.({
         visible: false,
         text: tooltipText,
         x: 0,
         y: 0,
       });
-    });
+    };
+    displayObject.on("pointerout", hideTooltip);
+    displayObject.on("pointerleave", hideTooltip);
   }
 
   private cleanupExistingBlinkIntervals(): void {
@@ -601,11 +604,14 @@ export class UnitRenderer {
         addClickHandler = false;
       }
 
-      // CRITICAL FIX: Block enemy unit clicks during movement phase
-      // In movement phase, only destinations are clickable, NOT units
-      // In charge phase, block enemy clicks except in chargePreview mode where enemy units are clickable
-      if (phase === "move" && unit.player !== current_player) {
+      // Block enemy and selected-unit clicks during movement phase.
+      // The selected unit must be eventMode="none" so clicks pass through
+      // to the hitArea underneath (boardHexClick → onDirectMove).
+      // Other friendly units remain clickable for activation switching.
+      if (phase === "move" && (unit.player !== current_player || unit.id === selectedUnitId)) {
         addClickHandler = false;
+        unitCircle.eventMode = "none";
+        unitCircle.cursor = "default";
       }
       if (
         phase === "charge" &&
@@ -1190,16 +1196,22 @@ export class UnitRenderer {
       parseColor,
       mode,
       HEX_RADIUS,
+      HEX_HORIZ_SPACING,
       HP_BAR_WIDTH_RATIO,
       HP_BAR_HEIGHT,
     } = this.props;
 
     if (!unit.HP_MAX) return; // Only skip if no HP_MAX, not if isPreview
 
-    const scaledYOffset = ((HEX_RADIUS * unitIconScale) / 2) * (0.9 + 0.3 / unitIconScale);
-    const HP_BAR_WIDTH = HEX_RADIUS * HP_BAR_WIDTH_RATIO;
+    // Icon visual radius: matches the circle drawn in render()
+    const baseSizeVal = typeof unit.BASE_SIZE === "number" && unit.BASE_SIZE > 1 ? unit.BASE_SIZE : 0;
+    const iconRadius = baseSizeVal > 0
+      ? (baseSizeVal / 2) * HEX_HORIZ_SPACING
+      : (HEX_RADIUS * unitIconScale) / 2;
+
+    const HP_BAR_WIDTH = (baseSizeVal > 0 ? iconRadius : HEX_RADIUS * unitIconScale) * HP_BAR_WIDTH_RATIO;
     const barX = centerX - HP_BAR_WIDTH / 2;
-    const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
+    const barY = centerY - iconRadius - HP_BAR_HEIGHT - 1;
 
     // Check if this unit is being previewed for shooting
     const isTargetPreviewed =
@@ -1362,7 +1374,10 @@ export class UnitRenderer {
       // Create background for normal HP bar
       const barBg = new PIXI.Graphics();
       barBg.beginFill(0x222222, 1);
-      barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
+      const cornerRadius = Math.max(0.5, finalBarHeight * 0.3);
+      const rawSlicePad = Math.max(0.3, finalBarHeight * 0.1);
+      const slicePad = Math.min(rawSlicePad, sliceWidth * 0.15);
+      barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, cornerRadius);
       barBg.endFill();
       barBg.zIndex = 350;
       this.target.addChild(barBg);
@@ -1386,11 +1401,11 @@ export class UnitRenderer {
             : parseColor(hpDamagedColor || "#666666");
         slice.beginFill(color, 1);
         slice.drawRoundedRect(
-          finalBarX + i * sliceWidth + 1,
-          finalBarY + 1,
-          sliceWidth - 2,
-          finalBarHeight - 2,
-          2
+          finalBarX + i * sliceWidth + slicePad,
+          finalBarY + slicePad,
+          sliceWidth - slicePad * 2,
+          finalBarHeight - slicePad * 2,
+          Math.max(0.5, cornerRadius * 0.7)
         );
         slice.endFill();
         slice.zIndex = 350;
@@ -1496,13 +1511,14 @@ export class UnitRenderer {
     if (!isActiveShooting) return;
 
     // Position: above HP bar (same calculation as renderHPBar)
-    const scaledYOffset = ((HEX_RADIUS * unitIconScale) / 2) * (0.9 + 0.3 / unitIconScale);
-    const HP_BAR_HEIGHT = this.props.HP_BAR_HEIGHT;
-    const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
+    const { HEX_HORIZ_SPACING } = this.props;
+    const baseSizeAdv = typeof unit.BASE_SIZE === "number" && unit.BASE_SIZE > 1 ? unit.BASE_SIZE : 0;
+    const iconRadiusAdv = baseSizeAdv > 0 ? (baseSizeAdv / 2) * HEX_HORIZ_SPACING : (HEX_RADIUS * unitIconScale) / 2;
+    const barY = centerY - iconRadiusAdv - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);
     const squareSize = HEX_RADIUS * squareSizeRatio;
     const positionX = centerX;
-    const positionY = barY - squareSize / 2 - 5; // 5px spacing above HP bar
+    const positionY = barY - squareSize / 2 - Math.max(2, this.props.HP_BAR_HEIGHT * 0.7);
 
     // Get values from CSS variables for icon size
     const iconSize = this.getCSSNumber("--icon-advance-size", 1.5);
@@ -1581,12 +1597,13 @@ export class UnitRenderer {
     // Note: The icon allows manual weapon selection even if auto-selection is enabled
 
     // Position: to the right of Advance icon (same Y position as Advance)
-    const scaledYOffset = ((HEX_RADIUS * unitIconScale) / 2) * (0.9 + 0.3 / unitIconScale);
-    const HP_BAR_HEIGHT = this.props.HP_BAR_HEIGHT;
-    const barY = centerY - scaledYOffset - HP_BAR_HEIGHT;
+    const { HEX_HORIZ_SPACING: hexHS } = this.props;
+    const baseSizeWpn = typeof unit.BASE_SIZE === "number" && unit.BASE_SIZE > 1 ? unit.BASE_SIZE : 0;
+    const iconRadiusWpn = baseSizeWpn > 0 ? (baseSizeWpn / 2) * hexHS : (HEX_RADIUS * unitIconScale) / 2;
+    const barY = centerY - iconRadiusWpn - this.props.HP_BAR_HEIGHT - 1;
     const squareSizeRatio = this.getCSSNumber("--icon-square-standard-size", 0.5);
     const squareSize = HEX_RADIUS * squareSizeRatio;
-    const positionY = barY - squareSize / 2 - 5; // Same Y as Advance icon
+    const positionY = barY - squareSize / 2 - Math.max(2, this.props.HP_BAR_HEIGHT * 0.7);
 
     // Position X: to the right of Advance icon (centerX + spacing)
     const iconSize = this.getCSSNumber("--icon-advance-size", 1.5);

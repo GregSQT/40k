@@ -806,7 +806,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       try {
         const requestId = Date.now();
         const requestBody = JSON.stringify({ ...action, requestId });
-        const _apiT0 = performance.now();
         const response = await fetch(`${API_BASE}/game/action`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -818,7 +817,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
 
         const data = await response.json();
-        console.log(`[PERF-API] ${action.action} took ${(performance.now() - _apiT0).toFixed(0)}ms`);
         setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
 
         // Process detailed backend action logs FIRST
@@ -901,6 +899,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               setSelectedUnitId(ruleChoicePreviousSelectedUnitIdRef.current);
               ruleChoicePreviousSelectedUnitIdRef.current = null;
             }
+          }
+
+          // Last move emptied move pool: PvP defers shooting init to a second request — chain it.
+          if (data.result?.pending_shooting_phase_init === true) {
+            setTimeout(() => {
+              void executeAction({ action: "advance_phase", from: "move" });
+            }, 0);
           }
 
           // CRITICAL: Handle empty activation pools before other processing

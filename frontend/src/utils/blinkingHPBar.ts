@@ -185,10 +185,13 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   hpContainer.attackerId = attackerIdNum;
   hpContainer.weaponSignature = weaponSignature;
 
-  // Create background
+  // Create background — scale decorative values with bar height
+  const cornerR = Math.max(0.5, finalBarHeight * 0.3);
+  const rawSlicePad = Math.max(0.3, finalBarHeight * 0.1);
+  const slicePad = Math.min(rawSlicePad, sliceWidth * 0.15);
   const barBg = new PIXI.Graphics();
   barBg.beginFill(0x222222, 1);
-  barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, 3);
+  barBg.drawRoundedRect(finalBarX, finalBarY, finalBarWidth, finalBarHeight, cornerR);
   barBg.endFill();
   barBg.zIndex = 350;
   hpContainer.background = barBg;
@@ -217,11 +220,11 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
         : getCSSColor("--hp-bar-lost");
     normalSlice.beginFill(normalColor, 1);
     normalSlice.drawRoundedRect(
-      finalBarX + i * sliceWidth + 1,
-      finalBarY + 1,
-      sliceWidth - 2,
-      finalBarHeight - 2,
-      2
+      finalBarX + i * sliceWidth + slicePad,
+      finalBarY + slicePad,
+      sliceWidth - slicePad * 2,
+      finalBarHeight - slicePad * 2,
+      Math.max(0.5, cornerR * 0.7)
     );
     normalSlice.endFill();
     normalSlice.zIndex = 360;
@@ -240,11 +243,11 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
         : getCSSColor("--hp-bar-lost");
     highlightSlice.beginFill(highlightColor, 1);
     highlightSlice.drawRoundedRect(
-      finalBarX + i * sliceWidth + 1,
-      finalBarY + 1,
-      sliceWidth - 2,
-      finalBarHeight - 2,
-      2
+      finalBarX + i * sliceWidth + slicePad,
+      finalBarY + slicePad,
+      sliceWidth - slicePad * 2,
+      finalBarHeight - slicePad * 2,
+      Math.max(0.5, cornerR * 0.7)
     );
     highlightSlice.endFill();
     highlightSlice.visible = false; // Start hidden
@@ -295,23 +298,24 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     displayProbability = calculateWoundProbability(attacker, unit, phase, inCover);
   }
 
-  // Create probability display square
-  const cellWidth = 30;
-  const cellHeight = 24;
-  const iconGap = 6;
-  const iconAdvance = phase === "shoot" && inCover ? 24 : 0;
+  // Create probability display square — scale relative to finalBarHeight
+  const scale = Math.max(1, finalBarHeight / 7);
+  const cellWidth = 30 * scale;
+  const cellHeight = 24 * scale;
+  const iconGap = 6 * scale;
+  const iconAdvance = phase === "shoot" && inCover ? 24 * scale : 0;
   const hasCoverIcon = phase === "shoot" && inCover;
   const groupWidth = cellWidth + (hasCoverIcon ? iconGap + iconAdvance : 0);
   const groupLeftX = centerX - groupWidth / 2;
-  const percentageOffsetX = 2;
+  const percentageOffsetX = 2 * scale;
   const squareX = groupLeftX + percentageOffsetX;
-  const squareY = finalBarY - cellHeight - 4;
+  const squareY = finalBarY - cellHeight - 4 * scale;
 
   const probBg = new PIXI.Graphics();
   probBg.name = `prob-bg-${unit.id}`;
   probBg.beginFill(0x333333, 0.9);
-  probBg.lineStyle(2, 0x00ff00, 1);
-  probBg.drawRoundedRect(squareX, squareY, cellWidth, cellHeight, 3);
+  probBg.lineStyle(Math.max(1, 2 * scale), 0x00ff00, 1);
+  probBg.drawRoundedRect(squareX, squareY, cellWidth, cellHeight, 3 * scale);
   probBg.endFill();
   probBg.zIndex = 400;
   probBg.eventMode = "static";
@@ -319,7 +323,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   hpContainer.addChild(probBg);
 
   const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
-    fontSize: 10,
+    fontSize: Math.max(6, 10 * scale),
     fill: 0xe6ffed,
     align: "center",
     fontWeight: "bold",
@@ -358,18 +362,20 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   probBg.on("pointerover", updateProbabilityTooltip);
   probBg.on("pointermove", updateProbabilityTooltip);
   probBg.on("pointerout", hideProbabilityTooltip);
+  probBg.on("pointerleave", hideProbabilityTooltip);
   probText.on("pointerover", updateProbabilityTooltip);
   probText.on("pointermove", updateProbabilityTooltip);
   probText.on("pointerout", hideProbabilityTooltip);
+  probText.on("pointerleave", hideProbabilityTooltip);
 
   if (hasCoverIcon) {
     const coverIcon = new PIXI.Text("🛡️", {
-      fontSize: 24,
+      fontSize: Math.max(10, 24 * scale),
       fill: 0xfbbf24,
       align: "center",
       fontWeight: "bold",
       stroke: 0x38bdf8,
-      strokeThickness: 3,
+      strokeThickness: Math.max(1, 3 * scale),
     });
     coverIcon.name = `cover-icon-${unit.id}`;
     coverIcon.anchor.set(0.5);
@@ -403,14 +409,16 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     coverIcon.on("pointermove", (event: PIXI.FederatedPointerEvent) => {
       updateTooltipPosition(event);
     });
-    coverIcon.on("pointerout", () => {
+    const hideCoverTooltip = (): void => {
       onTooltip?.({
         visible: false,
         text: "COVER (+1 Save)",
         x: 0,
         y: 0,
       });
-    });
+    };
+    coverIcon.on("pointerout", hideCoverTooltip);
+    coverIcon.on("pointerleave", hideCoverTooltip);
     hpContainer.addChild(coverIcon);
   }
 
