@@ -963,12 +963,8 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
             all_enemy_occupied.add(cell)
             per_unit_occupied.append({cell})
 
-    import time as _time
-    _t0 = _time.perf_counter()
     from engine.hex_utils import dilate_hex_set
     zone_hexes = dilate_hex_set(all_enemy_occupied, engagement_zone, board_cols, board_rows)
-    _t1 = _time.perf_counter()
-    print(f"[PERF-EZ] player={player_int} ez={engagement_zone} src={len(all_enemy_occupied)} zone={len(zone_hexes)} dilate={(_t1-_t0)*1000:.0f}ms", flush=True)
 
     counts: Dict[Tuple[int, int], int] = {h: 1 for h in zone_hexes}
 
@@ -1050,9 +1046,6 @@ def _build_enemy_adjacent_structures_from_units_cache(
         player_int: set() for player_int in players_present
     }
 
-    import time as _time, sys as _sys
-    _t0 = _time.perf_counter()
-    _dilate_count = 0
     for cache_entry in units_cache.values():
         hp_cur = require_key(cache_entry, "HP_CUR")
         if hp_cur <= 0:
@@ -1070,7 +1063,6 @@ def _build_enemy_adjacent_structures_from_units_cache(
             unit_row = require_key(cache_entry, "row")
             occupied = {(unit_col, unit_row)}
         unit_zone = dilate_hex_set(occupied, engagement_zone, board_cols, board_rows)
-        _dilate_count += 1
         for perspective_player in players_present:
             if perspective_player == unit_player_int:
                 continue
@@ -1083,8 +1075,6 @@ def _build_enemy_adjacent_structures_from_units_cache(
                     player_counters[h] = 1
                 player_set.add(h)
 
-    _t1 = _time.perf_counter()
-    print(f"[PERF-BUILD-ADJ] ez={engagement_zone} units={_dilate_count} time={(_t1-_t0)*1000:.0f}ms", flush=True)
     return counters_by_player, sets_by_player
 
 
@@ -1771,7 +1761,6 @@ def maybe_resolve_reactive_move(
     if not ordered_units:
         return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False}
 
-    print(f"[PERF-REACTIVE] ordered_units={len(ordered_units)} eligible={len(eligible_units)}", flush=True)
     # Build adjacency structures only when at least one non-reacted unit is eligible.
     players_present = _get_players_present_from_units_cache(game_state)
     reactive_adjacent_counts_by_player, reactive_adjacent_sets_by_player = (

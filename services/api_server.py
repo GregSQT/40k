@@ -1515,8 +1515,6 @@ def execute_action():
 
         # Read-only preview: valid shoot targets from hypothetical position (move/advance phase preview)
         if action.get("action") == "preview_shoot_from_position":
-            import time as _ptime
-            _pt0 = _ptime.perf_counter()
             unit_id = action.get("unitId")
             dest_col = action.get("destCol")
             dest_row = action.get("destRow")
@@ -1531,8 +1529,6 @@ def execute_action():
                 engine.game_state, str(unit_id), int(dest_col), int(dest_row),
                 advance_position=advance_position,
             )
-            _pt1 = _ptime.perf_counter()
-            print(f"[PERF-API] preview_shoot_from_position: unit={unit_id} dest=({dest_col},{dest_row}) targets={len(valid_targets)} time={(_pt1-_pt0)*1000:.0f}ms")
             return jsonify({
                 "success": True,
                 "result": {
@@ -1541,8 +1537,6 @@ def execute_action():
                 },
             })
 
-        import time as _time
-        _api_t0 = _time.perf_counter()
         # Route ALL actions through engine consistently
         if success is None:
             if action.get("action") == "end_phase":
@@ -1552,7 +1546,6 @@ def execute_action():
             else:
                 success, result = engine.execute_semantic_action(action)
 
-        _api_t1 = _time.perf_counter()
         if success and endless_mode_active and action.get("action") != "endless_duty_status":
             ed_post = handle_endless_duty_post_action(engine)
             if isinstance(result, dict):
@@ -1560,7 +1553,6 @@ def execute_action():
 
         # Convert game state to JSON-serializable format
         serializable_state = make_json_serializable(_game_state_for_json(engine))
-        _api_t2 = _time.perf_counter()
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
 
@@ -1579,8 +1571,7 @@ def execute_action():
         # CRITICAL: Always clear logs after each AI turn to prevent accumulation
         engine.game_state["action_logs"] = []
         serializable_state["action_logs"] = []
-        
-        _api_t3 = _time.perf_counter()
+
         resp = jsonify({
             "success": success,
             "result": result,
@@ -1593,8 +1584,6 @@ def execute_action():
             ),
             "message": "Action executed successfully" if success else "Action failed"
         })
-        _api_t4 = _time.perf_counter()
-        print(f"[PERF-API] {action.get('action')}: engine={(_api_t1-_api_t0)*1000:.0f}ms serialize={(_api_t2-_api_t1)*1000:.0f}ms post={(_api_t3-_api_t2)*1000:.0f}ms jsonify={(_api_t4-_api_t3)*1000:.0f}ms TOTAL={(_api_t4-_api_t0)*1000:.0f}ms", flush=True)
         return resp
     
     except Exception as e:
@@ -2067,7 +2056,6 @@ def get_board_config():
         config_loader = get_config_loader()
         board_data = config_loader.get_board_config()
         board_spec = board_data["default"]
-        print(f"[DEBUG board_config] cols={board_spec.get('cols')} rows={board_spec.get('rows')} hex_radius={board_spec.get('hex_radius')}")
         config_json = config_loader.load_config("config", force_reload=False)
         board_subdir = config_json.get("paths", {}).get("board")
         if not board_subdir:

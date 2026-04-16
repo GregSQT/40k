@@ -845,8 +845,6 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
-    import time as _sps_time
-    _sps_t0 = _sps_time.perf_counter()
     # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for all players present.
     # Reactive movement may query adjacency from the opposing player's perspective.
     from .shared_utils import build_enemy_adjacent_hexes
@@ -862,8 +860,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         players_present.add(player_int)
     for player_int in players_present:
         build_enemy_adjacent_hexes(game_state, player_int)
-    _sps_t1 = _sps_time.perf_counter()
-    
+
     # UNITS_CACHE: Verify units_cache exists (built at reset, not here - "reset only" policy)
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist at shooting_phase_start (should be built at reset)")
@@ -876,9 +873,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
-    _sps_t2 = _sps_time.perf_counter()
-    print(f"[PERF-SHOOT-START] adj={(_sps_t1-_sps_t0)*1000:.0f}ms pool={(_sps_t2-_sps_t1)*1000:.0f}ms total={(_sps_t2-_sps_t0)*1000:.0f}ms", flush=True)
-    
+
     # If no eligible units, end phase immediately (align with MOVE phase)
     if not eligible_units:
         if "active_shooting_unit" in game_state:

@@ -696,8 +696,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     Ground BFS may traverse hexes occupied by allies but cannot end movement overlapping any
     model (ally or enemy). Enemy model hexes block traversal; engagement zone hexes block as before.
     """
-    import time as _time
-    _bfs_t0 = _time.perf_counter()
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
@@ -1006,7 +1004,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 if not dest_on_unit and nb != start_pos:
                     valid_destinations.append(nb)
 
-    _bfs_t1 = _time.perf_counter()
     game_state["valid_move_destinations_pool"] = valid_destinations
 
     if is_single_hex:
@@ -1023,12 +1020,6 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     game_state["move_preview_footprint_zone"] = footprint_zone
     game_state["move_preview_border"] = _compute_border_cells(footprint_zone)
-    _bfs_t2 = _time.perf_counter()
-    _fp_size = len(_off_even) if not is_single_hex else 1
-    _diag = f" fp={_fp_size} walls={len(_walls)} occ={len(_occupied)} eadj={len(_enemy_adj)} zone={len(footprint_zone)}"
-    if not is_single_hex:
-        _diag += f" rej_bounds={_rej_bounds} rej_walls={_rej_walls} rej_occ={_rej_occupied} rej_ez={blocked_enemy_adjacent_count}"
-    print(f"[PERF-BFS] Unit {unit_id} MOVE={move_range} single={is_single_hex} base={base_size}: BFS={(_bfs_t1-_bfs_t0)*1000:.0f}ms border={(_bfs_t2-_bfs_t1)*1000:.0f}ms visited={len(visited)} valid={len(valid_destinations)}{_diag}")
 
     _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)}")
     if game_state.get("debug_mode", False):
@@ -1254,12 +1245,8 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
 
     # Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.
-    import time as _mds_time
-    _mds_t0 = _mds_time.perf_counter()
     config = {}  # Empty config for now
     move_success, move_result = _attempt_movement_to_destination(game_state, unit, dest_col, dest_row, config)
-    _mds_t1 = _mds_time.perf_counter()
-    print(f"[PERF-MOVE-ATTEMPT] unit={unit_id} time={(_mds_t1-_mds_t0)*1000:.0f}ms", flush=True)
 
     if not move_success:
         # Move was blocked (occupied hex, adjacent to enemy, etc.)
@@ -1313,7 +1300,6 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     _invalidate_all_destination_pools_after_movement(game_state)
 
     move_kind = "flee" if was_adjacent else "move"
-    _react_t0 = _mds_time.perf_counter()
     reactive_result = maybe_resolve_reactive_move(
         game_state=game_state,
         moved_unit_id=str(unit["id"]),
@@ -1324,7 +1310,6 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         move_kind=move_kind,
         move_cause="normal",
     )
-    print(f"[PERF-REACTIVE-MOVE] time={(_mds_time.perf_counter()-_react_t0)*1000:.0f}ms", flush=True)
 
     # Generate movement log per requested format
     if "action_logs" not in game_state:

@@ -3802,16 +3802,14 @@ class W40KEngine(gym.Env):
                 phase_init_result = movement_handlers.movement_phase_start(self.game_state)
             started_phases.append(next_phase)
 
-            if _cascade_t0 is not None:
-                print(f"[PERF-CASCADE] {current_phase}->{next_phase} time={(_cascade_time.perf_counter()-_cascade_t0)*1000:.0f}ms", flush=True)
-                _cascade_dur = time.perf_counter() - _cascade_t0
-                _ep_c = int(require_key(self.game_state, "episode_number"))
-                try:
-                    _debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                    with open(_debug_path, "a", encoding="utf-8", errors="replace") as _f:
-                        _f.write(f"CASCADE_TIMING episode={_ep_c} cascade_num={cascade_count} from_phase={current_phase} to_phase={next_phase} duration_s={_cascade_dur:.6f}\n")
-                except (OSError, IOError):
-                    pass
+            _cascade_dur = _cascade_time.perf_counter() - _cascade_t0
+            _ep_c = int(require_key(self.game_state, "episode_number"))
+            try:
+                _debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                with open(_debug_path, "a", encoding="utf-8", errors="replace") as _f:
+                    _f.write(f"CASCADE_TIMING episode={_ep_c} cascade_num={cascade_count} from_phase={current_phase} to_phase={next_phase} duration_s={_cascade_dur:.6f}\n")
+            except (OSError, IOError):
+                pass
 
             add_console_log(self.game_state, f"🔄 PHASE NOW: {self.game_state.get('phase', 'UNKNOWN')}")
 
@@ -3934,10 +3932,7 @@ class W40KEngine(gym.Env):
             # PvP / human API: defer shooting_phase_start to a second request so the last move
             # returns quickly; client calls advance_phase from "move" to run cascade (shoot init).
             if getattr(self, "gym_training_mode", False):
-                import time as _mvt
-                _mvt0 = _mvt.perf_counter()
                 init_result = self._shooting_phase_init()
-                print(f"[PERF-PHASE-INIT] move->shoot: {(_mvt.perf_counter()-_mvt0)*1000:.0f}ms", flush=True)
                 if init_result.get("phase_complete"):
                     if "next_phase" not in init_result:
                         raise KeyError("shooting_phase_start returned phase_complete without next_phase")
