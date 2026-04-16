@@ -750,7 +750,7 @@ export default function Board({
     return Array.from(merged).map((s) => parseInt(s, 10));
   }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds]);
 
-  // Hover LoS preview: imperative PIXI update on boardHexHover
+  // Prévisualisation LoS (move) : uniquement depuis onMouseMove = position de l’icône, pas l’hex sous le curseur
   useEffect(() => {
     if (!boardConfig || !gameConfig) return;
 
@@ -987,7 +987,7 @@ export default function Board({
       }
     };
 
-    // Debounced LoS computation, shared by mousemove and boardHexHover
+    // Debounced LoS computation (source unique : icône de prévisualisation)
     let losDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const LOS_DEBOUNCE_MS = 60;
 
@@ -1070,33 +1070,10 @@ export default function Board({
       }, LOS_DEBOUNCE_MS);
     };
 
-    // boardHexHover: also triggers LoS for hex changes inside the zone
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{
-        col: number; row: number; hexChanged: boolean;
-      }>).detail;
-      const { col, row, hexChanged } = detail;
-      if (!hexChanged) return;
-      if (phase !== "move" || selectedUnitId === null) {
-        if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
-        setMovePreviewLosBlinkIds([]);
-        setMovePreviewLosCoverById({});
-        return;
-      }
-      if (!moveDestPoolRef?.current?.has(`${col},${row}`)) {
-        setMovePreviewLosBlinkIds([]);
-        setMovePreviewLosCoverById({});
-        return;
-      }
-      triggerLosForHex(col, row);
-    };
-
     if (canvas) canvas.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("boardHexHover", handler);
     return () => {
       if (losDebounceTimer) clearTimeout(losDebounceTimer);
       if (canvas) canvas.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("boardHexHover", handler);
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
