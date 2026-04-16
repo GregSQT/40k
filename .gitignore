@@ -50,6 +50,7 @@ tsconfig.tsbuildinfo
 
 # Logs NPM/Yarn
 npm-debug.log*
+perf_timing.log
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*

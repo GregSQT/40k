@@ -1561,13 +1561,15 @@ export class UnitRenderer {
     // Get values from CSS variables for icon size
     const iconSize = this.getCSSNumber("--icon-advance-size", 1.5);
     const iconScale = this.getCSSNumber("--icon-square-icon-scale", 0.7);
+    /* Si la variable existe sur :root (App.css), la valeur CSS prime — le 2e argument n'est pas utilisé. */
+    const iconBoost = this.getCSSNumber("--shooting-overlay-action-icon-boost", 1.45);
 
     // Load and create icon sprite (same pattern as renderActionIconInSquare, but without background square)
     const texture = PIXI.Texture.from("/icons/Action_Logo/3-5 - Advance.png");
     const iconSprite = new PIXI.Sprite(texture);
     iconSprite.anchor.set(0.5);
     iconSprite.position.set(positionX, positionY);
-    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale * iconBoost;
     iconSprite.width = iconDisplaySize;
     iconSprite.height = iconDisplaySize;
     iconSprite.zIndex = iconZIndex + 1001;
@@ -1646,7 +1648,9 @@ export class UnitRenderer {
     // Position X: to the right of Advance icon (centerX + spacing)
     const iconSize = this.getCSSNumber("--icon-advance-size", 1.5);
     const iconScale = this.getCSSNumber("--icon-square-icon-scale", 0.7);
-    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+    /* Si la variable existe sur :root (App.css), la valeur CSS prime — le 2e argument n'est pas utilisé. */
+    const iconBoost = this.getCSSNumber("--shooting-overlay-action-icon-boost", 1.45);
+    const iconDisplaySize = HEX_RADIUS * iconSize * iconScale * iconBoost;
     const spacing = iconDisplaySize * 1.2; // Spacing between icons
     const positionX = centerX + spacing; // To the right of Advance icon
 

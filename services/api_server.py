@@ -1539,12 +1539,21 @@ def execute_action():
 
         # Route ALL actions through engine consistently
         if success is None:
+            from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+            _api_perf = perf_timing_enabled(engine.game_state)
+            _api_t0 = time.perf_counter() if _api_perf else None
             if action.get("action") == "end_phase":
                 success, result = _execute_end_phase_action(engine, action)
             elif action.get("action") == "change_roster":
                 success, result = _execute_change_roster_action(engine, action)
             else:
                 success, result = engine.execute_semantic_action(action)
+            _api_t1 = time.perf_counter() if _api_perf else None
+        else:
+            _api_perf = False
+            _api_t0 = None
+            _api_t1 = None
 
         if success and endless_mode_active and action.get("action") != "endless_duty_status":
             ed_post = handle_endless_duty_post_action(engine)
@@ -1552,9 +1561,11 @@ def execute_action():
                 result["endless_duty"] = ed_post
 
         # Convert game state to JSON-serializable format
+        _ser_t0 = time.perf_counter() if _api_perf else None
         serializable_state = make_json_serializable(_game_state_for_json(engine))
         _sync_units_hp_from_cache(serializable_state, engine.game_state)
         _attach_player_types(serializable_state, engine)
+        _ser_t1 = time.perf_counter() if _api_perf else None
 
         # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
         # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
@@ -1572,6 +1583,7 @@ def execute_action():
         engine.game_state["action_logs"] = []
         serializable_state["action_logs"] = []
 
+        _j0 = time.perf_counter() if _api_perf else None
         resp = jsonify({
             "success": success,
             "result": result,
@@ -1584,6 +1596,21 @@ def execute_action():
             ),
             "message": "Action executed successfully" if success else "Action failed"
         })
+        _j1 = time.perf_counter() if _api_perf else None
+        if _api_perf and _api_t0 is not None and _api_t1 is not None and _ser_t0 is not None and _ser_t1 is not None and _j0 is not None and _j1 is not None:
+            from engine.perf_timing import append_perf_timing_line
+
+            gs = engine.game_state
+            ep = gs.get("episode_number", "?")
+            trn = gs.get("turn", "?")
+            ph = gs.get("phase", "?")
+            act = action.get("action") if isinstance(action, dict) else None
+            append_perf_timing_line(
+                f"API_POST_ACTION episode={ep} turn={trn} phase={ph} action={act!r} "
+                f"engine_s={_api_t1 - _api_t0:.6f} serialize_game_state_s={_ser_t1 - _ser_t0:.6f} "
+                f"jsonify_response_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f}"
+            )
+
         return resp
     
     except Exception as e:

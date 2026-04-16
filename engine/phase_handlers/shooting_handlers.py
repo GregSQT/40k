@@ -7,6 +7,7 @@ Only pool building functionality - foundation for complete handler autonomy
 import copy
 import math
 import os
+import time
 from typing import Dict, List, Tuple, Set, Optional, Any
 from engine.combat_utils import (
     normalize_coordinates,
@@ -765,6 +766,12 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Invalid current_player value: {current_player}")
     game_state["current_player"] = current_player
     units_cache = require_key(game_state, "units_cache")
+
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _t_reset0 = time.perf_counter() if _perf else None
+
     for unit_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) == int(current_player):
             unit = get_unit_by_id(game_state, unit_id)
@@ -845,6 +852,8 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 unit["SHOOT_LEFT"] = 0  # Pas d'armes ranged
 
+    _t_reset1 = time.perf_counter() if _perf else None
+
     # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for all players present.
     # Reactive movement may query adjacency from the opposing player's perspective.
     from .shared_utils import build_enemy_adjacent_hexes
@@ -861,6 +870,8 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     for player_int in players_present:
         build_enemy_adjacent_hexes(game_state, player_int)
 
+    _t_enemy_adj = time.perf_counter() if _perf else None
+
     # UNITS_CACHE: Verify units_cache exists (built at reset, not here - "reset only" policy)
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist at shooting_phase_start (should be built at reset)")
@@ -873,6 +884,21 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Build activation pool
     eligible_units = shooting_build_activation_pool(game_state)
+
+    if (
+        _perf
+        and _t_reset0 is not None
+        and _t_reset1 is not None
+        and _t_enemy_adj is not None
+    ):
+        _t_pool1 = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_PHASE_START episode={episode} turn={turn} "
+            f"reset_allies_s={_t_reset1 - _t_reset0:.6f} "
+            f"enemy_adj_hex_s={_t_enemy_adj - _t_reset1:.6f} "
+            f"los_clear_and_pool_s={_t_pool1 - _t_enemy_adj:.6f} "
+            f"total_heavy_s={_t_pool1 - _t_reset0:.6f} eligible_count={len(eligible_units)}"
+        )
 
     # If no eligible units, end phase immediately (align with MOVE phase)
     if not eligible_units:
@@ -2497,6 +2523,25 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     unit["_pool_cache_key"] = str(cache_key)
 
     return valid_target_pool
+
+
+def focus_fire_valid_target_ids_for_reward(
+    shooter: Dict[str, Any], game_state: Dict[str, Any]
+) -> List[str]:
+    """
+    Target IDs for the target_lowest_hp bonus at shot resolution time.
+
+    When the unit already has ``valid_target_pool`` as a list (filled by
+    ``shooting_build_valid_target_pool`` during target selection), reusing it
+    avoids a second expensive pool build on large boards.
+
+    If the key is missing or not a list, rebuilds via ``shooting_build_valid_target_pool``.
+    """
+    raw_pool = shooter.get("valid_target_pool")
+    if isinstance(raw_pool, list):
+        return [str(x) for x in raw_pool]
+    return shooting_build_valid_target_pool(game_state, str(shooter["id"]))
+
 
 def _has_line_of_sight(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
     """
@@ -4347,6 +4392,14 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     """
     AI_SHOOT.md: Route click actions to appropriate handlers
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf_click = perf_timing_enabled(game_state)
+    _t_click0 = time.perf_counter() if _perf_click else None
+    _click_branch = "unknown"
+    _ep_click = game_state.get("episode_number", "?")
+    _turn_click = game_state.get("turn", "?")
+
     # Direct field access
     if "targetId" not in action:
         target_id = None
@@ -4358,98 +4411,116 @@ def shooting_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     else:
         click_target = action["clickTarget"]
     
-    if click_target in ["target", "enemy"] and target_id:
-        if action.get("tutorial_force_kill") is True:
-            game_state["_tutorial_force_kill_this_shot"] = True
-        if action.get("tutorial_force_miss") is True:
-            game_state["_tutorial_force_miss_this_shot"] = True
-        return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
-    
-    elif click_target == "friendly_unit" and target_id:
-        # Left click on another unit in pool - switch units (only if current unit hasn't shot)
-        if "shoot_activation_pool" not in game_state:
-            raise KeyError("game_state missing required 'shoot_activation_pool' field")
-        target_id_str = str(target_id)
-        pool_ids = [str(uid) for uid in game_state["shoot_activation_pool"]]
-        if target_id_str in pool_ids:
-            current_unit = _get_unit_by_id(game_state, unit_id)
-            if current_unit:
-                has_shot = _unit_has_shot_with_any_weapon(current_unit)
-                if has_shot:
-                    # Unit has already shot - cannot switch (must finish shooting)
-                    return True, {
-                        "action": "no_effect",
-                        "unitId": unit_id,
-                        "error": "cannot_switch_after_shooting",
-                    }
-            return _handle_unit_switch_with_context(game_state, unit_id, target_id_str, config)
-        return False, {"error": "unit_not_in_pool", "targetId": target_id_str}
-    
-    elif click_target == "active_unit":
-        # Left click on active unit - behavior depends on whether unit has shot
-        unit = _get_unit_by_id(game_state, unit_id)
-        if not unit:
-            return False, {"error": "unit_not_found", "unitId": unit_id}
-        has_shot = _unit_has_shot_with_any_weapon(unit)
-        if has_shot:
-            # Unit has already shot - no effect (must finish shooting)
-            return True, {"action": "no_effect", "unitId": unit_id}
+    try:
+        if click_target in ["target", "enemy"] and target_id:
+            _click_branch = "target_or_enemy"
+            if action.get("tutorial_force_kill") is True:
+                game_state["_tutorial_force_kill_this_shot"] = True
+            if action.get("tutorial_force_miss") is True:
+                game_state["_tutorial_force_miss_this_shot"] = True
+            return shooting_target_selection_handler(game_state, unit_id, str(target_id), config)
+
+        elif click_target == "friendly_unit" and target_id:
+            _click_branch = "friendly_unit_switch"
+            # Left click on another unit in pool - switch units (only if current unit hasn't shot)
+            if "shoot_activation_pool" not in game_state:
+                raise KeyError("game_state missing required 'shoot_activation_pool' field")
+            target_id_str = str(target_id)
+            pool_ids = [str(uid) for uid in game_state["shoot_activation_pool"]]
+            if target_id_str in pool_ids:
+                current_unit = _get_unit_by_id(game_state, unit_id)
+                if current_unit:
+                    has_shot = _unit_has_shot_with_any_weapon(current_unit)
+                    if has_shot:
+                        # Unit has already shot - cannot switch (must finish shooting)
+                        return True, {
+                            "action": "no_effect",
+                            "unitId": unit_id,
+                            "error": "cannot_switch_after_shooting",
+                        }
+                return _handle_unit_switch_with_context(game_state, unit_id, target_id_str, config)
+            return False, {"error": "unit_not_in_pool", "targetId": target_id_str}
+
+        elif click_target == "active_unit":
+            _click_branch = "active_unit"
+            # Left click on active unit - behavior depends on whether unit has shot
+            unit = _get_unit_by_id(game_state, unit_id)
+            if not unit:
+                return False, {"error": "unit_not_found", "unitId": unit_id}
+            has_shot = _unit_has_shot_with_any_weapon(unit)
+            if has_shot:
+                # Unit has already shot - no effect (must finish shooting)
+                return True, {"action": "no_effect", "unitId": unit_id}
+            else:
+                # Unit has not shot yet - postpone (deselect, return to pool)
+                if "active_shooting_unit" in game_state:
+                    del game_state["active_shooting_unit"]
+                # Auto-select next unit only for AI-controlled player.
+                pool = require_key(game_state, "shoot_activation_pool")
+                if pool:
+                    cfg = require_key(game_state, "config")
+                    if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
+                        game_state["active_shooting_unit"] = pool[0]
+                return True, {
+                    "action": "postpone",
+                    "unitId": unit_id,
+                    "activation_ended": False,
+                    "reset_mode": "select",
+                    "clear_selected_unit": True
+                }
+
         else:
-            # Unit has not shot yet - postpone (deselect, return to pool)
-            if "active_shooting_unit" in game_state:
-                del game_state["active_shooting_unit"]
-            # Auto-select next unit only for AI-controlled player.
-            pool = require_key(game_state, "shoot_activation_pool")
-            if pool:
-                cfg = require_key(game_state, "config")
-                if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
-                    game_state["active_shooting_unit"] = pool[0]
-            return True, {
-                "action": "postpone",
-                "unitId": unit_id,
-                "activation_ended": False,
-                "reset_mode": "select",
-                "clear_selected_unit": True
-            }
-    
-    else:
-        # STEP 5A/5B: Postpone/Click elsewhere (Human only)
-        # Check if unit has shot with ANY weapon?
-        unit = _get_unit_by_id(game_state, unit_id)
-        if not unit:
-            return False, {"error": "unit_not_found", "unitId": unit_id}
-        has_shot = _unit_has_shot_with_any_weapon(unit)
-        if not has_shot:
-            # NO -> POSTPONE_ACTIVATION() -> UNIT_ACTIVABLE_CHECK
-            # Unit is NOT removed from shoot_activation_pool (can be re-activated later)
-            # Remove weapon selection icon from UI (handled by frontend)
-            # Clear active unit
-            if "active_shooting_unit" in game_state:
-                del game_state["active_shooting_unit"]
-            # Auto-select next unit only for AI-controlled player.
-            pool = require_key(game_state, "shoot_activation_pool")
-            if pool:
-                cfg = require_key(game_state, "config")
-                if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
-                    game_state["active_shooting_unit"] = pool[0]
-            # Return to UNIT_ACTIVABLE_CHECK step (by returning activation_ended=False)
-            return True, {
-                "action": "postpone",
-                "unitId": unit_id,
-                "activation_ended": False,
-                "reset_mode": "select",
-                "clear_selected_unit": True
-            }
-        else:
-            # YES -> Do not end activation automatically (allow user to click active unit to confirm)
-            return True, {"action": "continue_selection", "context": "elsewhere_clicked"}
+            _click_branch = "elsewhere"
+            # STEP 5A/5B: Postpone/Click elsewhere (Human only)
+            # Check if unit has shot with ANY weapon?
+            unit = _get_unit_by_id(game_state, unit_id)
+            if not unit:
+                return False, {"error": "unit_not_found", "unitId": unit_id}
+            has_shot = _unit_has_shot_with_any_weapon(unit)
+            if not has_shot:
+                # NO -> POSTPONE_ACTIVATION() -> UNIT_ACTIVABLE_CHECK
+                # Unit is NOT removed from shoot_activation_pool (can be re-activated later)
+                # Remove weapon selection icon from UI (handled by frontend)
+                # Clear active unit
+                if "active_shooting_unit" in game_state:
+                    del game_state["active_shooting_unit"]
+                # Auto-select next unit only for AI-controlled player.
+                pool = require_key(game_state, "shoot_activation_pool")
+                if pool:
+                    cfg = require_key(game_state, "config")
+                    if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
+                        game_state["active_shooting_unit"] = pool[0]
+                # Return to UNIT_ACTIVABLE_CHECK step (by returning activation_ended=False)
+                return True, {
+                    "action": "postpone",
+                    "unitId": unit_id,
+                    "activation_ended": False,
+                    "reset_mode": "select",
+                    "clear_selected_unit": True
+                }
+            else:
+                # YES -> Do not end activation automatically (allow user to click active unit to confirm)
+                return True, {"action": "continue_selection", "context": "elsewhere_clicked"}
+    finally:
+        if _perf_click and _t_click0 is not None:
+            append_perf_timing_line(
+                f"SHOOT_CLICK_HANDLER episode={_ep_click} turn={_turn_click} branch={_click_branch} "
+                f"unit_id={unit_id} duration_s={time.perf_counter() - _t_click0:.6f}"
+            )
 
 
 def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md: Handle target selection and shooting execution.
     Requires explicit targetId selection.
-    """    
+    """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf_ts = perf_timing_enabled(game_state)
+    _ts_start = time.perf_counter() if _perf_ts else None
+    _ep_ts = game_state.get("episode_number", "?")
+    _turn_ts = game_state.get("turn", "?")
+
     try:
         unit = _get_unit_by_id(game_state, unit_id)
         
@@ -4782,7 +4853,14 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         
         target = _get_unit_by_id(game_state, selected_target_id)
         if not target:
+            if _perf_ts:
+                _t_pool0 = time.perf_counter()
             updated_pool = shooting_build_valid_target_pool(game_state, unit_id)
+            if _perf_ts:
+                append_perf_timing_line(
+                    f"SHOOT_BUILD_VALID_TARGET_POOL episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
+                    f"duration_s={time.perf_counter() - _t_pool0:.6f}"
+                )
             unit["valid_target_pool"] = updated_pool
             if not updated_pool:
                 game_state["active_shooting_unit"] = unit_id
@@ -4888,8 +4966,20 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
         )
         unit["_rapid_fire_bonus_shot_current"] = rapid_fire_bonus_shot_current
         # Pool is source of truth — no redundant validation
+        _atk_t0: Optional[float] = None
+        if _perf_ts and _ts_start is not None:
+            _atk_t0 = time.perf_counter()
+            append_perf_timing_line(
+                f"SHOOT_TARGET_PRE_ATTACK episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} target_id={selected_target_id} "
+                f"duration_s={_atk_t0 - _ts_start:.6f}"
+            )
         attack_result = shooting_attack_controller(game_state, unit_id, selected_target_id)
-        
+        if _perf_ts and _atk_t0 is not None:
+            append_perf_timing_line(
+                f"SHOOT_ATTACK_CONTROLLER_CALL episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} target_id={selected_target_id} "
+                f"duration_s={time.perf_counter() - _atk_t0:.6f}"
+            )
+
         # CRITICAL: Check if attack_result is an error before adding to shoot_attack_results
         # Error results don't have required fields like hit_roll, wound_roll, etc.
         if "error" in attack_result:
@@ -4982,12 +5072,26 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
                 
                 # CRITICAL: Rebuild target pool using shooting_build_valid_target_pool for consistency
                 # This wrapper automatically determines context (advance_status, adjacent_status)
+                if _perf_ts:
+                    _t_vtp0 = time.perf_counter()
                 valid_target_pool = shooting_build_valid_target_pool(game_state, unit_id)
+                if _perf_ts:
+                    append_perf_timing_line(
+                        f"SHOOT_BUILD_VALID_TARGET_POOL episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
+                        f"context=after_weapon_switch duration_s={time.perf_counter() - _t_vtp0:.6f}"
+                    )
                 unit["valid_target_pool"] = valid_target_pool
                 
                 # Continue to shooting action selection step (ADVANCED if arg2=1, else normal)
                 # This is handled by _shooting_unit_execution_loop
+                if _perf_ts:
+                    _t_ex0 = time.perf_counter()
                 success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
+                if _perf_ts:
+                    append_perf_timing_line(
+                        f"SHOOT_EXEC_LOOP episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
+                        f"context=after_shoot_left_zero_weapon_switch duration_s={time.perf_counter() - _t_ex0:.6f}"
+                    )
                 loop_result["phase"] = "shoot"
                 loop_result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
                 loop_result["damage"] = attack_result["damage"] if "damage" in attack_result else 0
@@ -5037,7 +5141,14 @@ def shooting_target_selection_handler(game_state: Dict[str, Any], unit_id: str, 
             # NO -> Continue to shooting action selection step
             
             # Continue to shooting action selection step
+            if _perf_ts:
+                _t_ex1 = time.perf_counter()
             success, loop_result = _shooting_unit_execution_loop(game_state, unit_id, config)
+            if _perf_ts:
+                append_perf_timing_line(
+                    f"SHOOT_EXEC_LOOP episode={_ep_ts} turn={_turn_ts} unit_id={unit_id} "
+                    f"context=continue_after_shot duration_s={time.perf_counter() - _t_ex1:.6f}"
+                )
             loop_result["phase"] = "shoot"
             loop_result["target_died"] = attack_result["target_died"] if "target_died" in attack_result else False
             loop_result["damage"] = attack_result["damage"] if "damage" in attack_result else 0
@@ -5065,6 +5176,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     """
     attack_sequence(RNG) implementation with proper logging
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
     # CRITICAL: Enforce activation pool membership (no out-of-pool shooting)
     shoot_pool = require_key(game_state, "shoot_activation_pool")
     unit_id_str = str(unit_id)
@@ -5077,6 +5190,11 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     
     if not shooter or not target:
         return {"error": "unit_or_target_not_found"}
+
+    _perf_sac = perf_timing_enabled(game_state)
+    _t_sac0 = time.perf_counter() if _perf_sac else None
+    _ep_sac = game_state.get("episode_number", "?")
+    _turn_sac = game_state.get("turn", "?")
     
     # CRITICAL: Validate unit_id matches shooter ID (detect ID mismatches)
     shooter_id_str = str(shooter["id"])
@@ -5150,7 +5268,23 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         }
     else:
         # Execute single attack_sequence(RNG) per AI_TURN.md
+        _t_seq0 = time.perf_counter() if _perf_sac else None
         attack_result = _attack_sequence_rng(shooter, target, game_state)
+        if _perf_sac and _t_seq0 is not None:
+            append_perf_timing_line(
+                f"SHOOT_ATTACK_SEQUENCE_RNG episode={_ep_sac} turn={_turn_sac} shooter_id={unit_id_str} "
+                f"target_id={target_id} duration_s={time.perf_counter() - _t_seq0:.6f}"
+            )
+
+    if _perf_sac and _t_sac0 is not None:
+        _t_after_resolve = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_CTRL_RESOLVE_ATTACK episode={_ep_sac} turn={_turn_sac} unit_id={unit_id} target_id={target_id} "
+            f"duration_s={_t_after_resolve - _t_sac0:.6f}"
+        )
+    else:
+        _t_after_resolve = None
+
     attack_result["target_hp_before_damage"] = target_hp_before_damage
     attack_result["target_coords"] = (target_col, target_row)
     # Preserve shooter metadata before potential hazardous self-destruction removes it from units_cache.
@@ -5167,6 +5301,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             shooter["TOTAL_ATTACK_LOG"] += " / " + attack_log_message
         else:
             shooter["TOTAL_ATTACK_LOG"] = attack_log_message
+
+    if _perf_sac and _t_after_resolve is not None:
+        _t_after_meta = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_CTRL_RESULT_META episode={_ep_sac} turn={_turn_sac} unit_id={unit_id} target_id={target_id} "
+            f"duration_s={_t_after_meta - _t_after_resolve:.6f}"
+        )
+    else:
+        _t_after_meta = None
 
     # Apply damage immediately per AI_TURN.md — HP_CUR single write path: update_units_cache_hp only (Phase 2: from cache)
     damage = require_key(attack_result, "damage")
@@ -5236,6 +5379,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
                             if pool_before != pool_after:
                                 add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} target_died: Removed dead target {target_id_str} from Unit {active_unit_id} pool (before={pool_before}, after={pool_after})")
 
+    if _perf_sac and _t_after_meta is not None:
+        _t_after_damage = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_CTRL_DAMAGE_AND_DEATH episode={_ep_sac} turn={_turn_sac} unit_id={unit_id} target_id={target_id} "
+            f"duration_s={_t_after_damage - _t_after_meta:.6f}"
+        )
+    else:
+        _t_after_damage = None
+
     # Store pre-damage HP in attack_result for reward calculation
     attack_result["target_hp_before_damage"] = target_hp_before_damage
 
@@ -5262,6 +5414,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             _invalidate_los_cache_for_unit(game_state, unit_id)
     attack_result["hazardous_mortal_wounds"] = hazardous_mortal_wounds
     attack_result["hazardous_self_died"] = hazardous_self_died
+
+    if _perf_sac and _t_after_damage is not None:
+        _t_after_hazard = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_CTRL_HAZARDOUS_AND_HP_DEDUP episode={_ep_sac} turn={_turn_sac} unit_id={unit_id} target_id={target_id} "
+            f"duration_s={_t_after_hazard - _t_after_damage:.6f}"
+        )
+    else:
+        _t_after_hazard = None
     
     # Store detailed log for frontend display with location data
     if "action_logs" not in game_state:
@@ -5417,6 +5578,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         add_debug_log(game_state, log_msg)
         safe_print(game_state, log_msg)
 
+    if _perf_sac and _t_after_hazard is not None:
+        _t_after_ux = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_CTRL_MSG_ACTION_LOGS_CONSOLE episode={_ep_sac} turn={_turn_sac} unit_id={unit_id} target_id={target_id} "
+            f"duration_s={_t_after_ux - _t_after_hazard:.6f}"
+        )
+    else:
+        _t_after_ux = None
+
     # Calculate reward for this action using progressive bonus system
     # OPTIMIZATION: Only calculate rewards for controlled player's units
     # Bot units don't need rewards since they don't learn
@@ -5485,8 +5655,38 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
             # FOCUS FIRE BONUS: Check if shooter targeted the lowest HP enemy
             if "target_lowest_hp" in result_bonuses:
                 try:
-                    # Get all valid targets this shooter could have shot AT THE TIME OF SHOOTING
-                    valid_target_ids = shooting_build_valid_target_pool(game_state, shooter["id"])
+                    from engine.perf_timing import append_perf_timing_line, focus_fire_pool_audit_enabled
+
+                    valid_target_ids = focus_fire_valid_target_ids_for_reward(shooter, game_state)
+
+                    if focus_fire_pool_audit_enabled(game_state):
+                        _rebuilt_ff = shooting_build_valid_target_pool(
+                            game_state, str(shooter["id"])
+                        )
+                        _vpool = shooter.get("valid_target_pool")
+                        if isinstance(_vpool, list):
+                            _cached_set = {str(x) for x in _vpool}
+                        else:
+                            _cached_set = set()
+                        _used_set = {str(x) for x in valid_target_ids}
+                        _rebuilt_set = {str(x) for x in _rebuilt_ff}
+                        _tdied = bool(attack_result.get("target_died", False))
+                        _ep_ff = game_state.get("episode_number", "?")
+                        _turn_ff = game_state.get("turn", "?")
+                        _sid = str(shooter["id"])
+                        if _rebuilt_set == _used_set:
+                            append_perf_timing_line(
+                                f"SHOOT_FOCUS_FIRE_POOL_AUDIT episode={_ep_ff} turn={_turn_ff} shooter_id={_sid} "
+                                f"match=1 count={len(_rebuilt_set)} target_died={_tdied}"
+                            )
+                        else:
+                            append_perf_timing_line(
+                                f"SHOOT_FOCUS_FIRE_POOL_AUDIT episode={_ep_ff} turn={_turn_ff} shooter_id={_sid} "
+                                f"match=0 target_died={_tdied} count_rebuilt={len(_rebuilt_set)} count_used={len(_used_set)} "
+                                f"count_cached={len(_cached_set)} "
+                                f"only_in_rebuild={sorted(_rebuilt_set - _used_set)} "
+                                f"only_in_used={sorted(_used_set - _rebuilt_set)}"
+                            )
 
                     if len(valid_target_ids) > 1:  # Only apply if there was a choice
                         # Get the target's HP before this shot (from attack_result)
@@ -5496,8 +5696,8 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
 
                         # Find the lowest HP among all valid targets AT THE TIME OF SHOOTING
                         lowest_hp = float('inf')
-                        for target_id in valid_target_ids:
-                            candidate = _get_unit_by_id(game_state, target_id)
+                        for focus_pool_tid in valid_target_ids:
+                            candidate = _get_unit_by_id(game_state, focus_pool_tid)
                             if not candidate:
                                 continue
 
@@ -5525,6 +5725,15 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
         except Exception as e:
             pass
             raise
+
+    if _perf_sac and _t_after_ux is not None:
+        _t_after_reward = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_CTRL_REWARD_BLOCK episode={_ep_sac} turn={_turn_sac} unit_id={unit_id} target_id={target_id} "
+            f"duration_s={_t_after_reward - _t_after_ux:.6f}"
+        )
+    else:
+        _t_after_reward = None
 
     # Update the shoot log entry with calculated reward and action_name
     logged_reward = round(action_reward, 2)
@@ -5556,6 +5765,14 @@ def shooting_attack_controller(game_state: Dict[str, Any], unit_id: str, target_
     # Target may have been removed from cache if it died; use get_hp_from_cache (0 if dead)
     target_hp_remaining = get_hp_from_cache(str(target["id"]), game_state)
     target_hp_remaining = 0 if target_hp_remaining is None else target_hp_remaining
+
+    if _perf_sac and _t_after_reward is not None:
+        _t_before_return = time.perf_counter()
+        append_perf_timing_line(
+            f"SHOOT_CTRL_TAIL episode={_ep_sac} turn={_turn_sac} unit_id={unit_id} target_id={target_id} "
+            f"duration_s={_t_before_return - _t_after_reward:.6f}"
+        )
+
     return {
         "action": "shot_executed",
         "phase": "shoot",  # For metrics tracking

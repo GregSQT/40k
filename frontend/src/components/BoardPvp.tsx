@@ -2759,6 +2759,11 @@ export default function Board({
         iconEl.style.top = `${globalPos.y - iconSize / 2}px`;
         iconEl.style.width = `${iconSize}px`;
         iconEl.style.height = `${iconSize}px`;
+        /* Tailwind preflight: img { max-width: 100%; height: auto } — forcer la taille demandée */
+        iconEl.style.maxWidth = "none";
+        iconEl.style.minWidth = `${iconSize}px`;
+        iconEl.style.minHeight = `${iconSize}px`;
+        iconEl.style.objectFit = "contain";
         iconEl.style.pointerEvents = "auto";
         iconEl.style.cursor = "pointer";
         iconEl.draggable = false;
@@ -2815,9 +2820,12 @@ export default function Board({
           isActiveShootingFromState &&
           isExplicitlyActivatedInUi;
         if (shouldShowShootingActionIcons) {
+          /* Taille lue depuis :root (App.css) — pas de fallback TS ici. Pour agrandir/réduire :
+             --icon-advance-size, --icon-square-icon-scale, --shooting-overlay-action-icon-boost */
           const iconSize = getRequiredCssNumber("--icon-advance-size");
           const iconScale = getRequiredCssNumber("--icon-square-icon-scale");
-          const iconDisplaySize = HEX_RADIUS * iconSize * iconScale;
+          const iconBoost = getRequiredCssNumber("--shooting-overlay-action-icon-boost");
+          const iconDisplaySize = HEX_RADIUS * iconSize * iconScale * iconBoost;
           const squareSizeRatio = getRequiredCssNumber("--icon-square-standard-size");
           const squareSize = HEX_RADIUS * squareSizeRatio;
           const positionY = barY - squareSize / 2 - Math.max(2, HP_BAR_HEIGHT * 0.7);

@@ -65,7 +65,9 @@
   --icon-advance-bg-rgb: 255, 140, 0; /* RGB values for rgba() in CSS */
   --icon-advance-stroke: #ffffff;
   --icon-advance-stroke-thickness: 3;
-  --icon-advance-size: 1.5;
+  --icon-advance-size: 7;
+  /* Facteur supplémentaire pour Advance + choix d’arme (overlay DOM BoardPvp, phase tir) */
+  --shooting-overlay-action-icon-boost: 2.45;
   --icon-advance-square-size: 0.75;
 
   /* Target icon (for all action targets: shoot, charge, fight) */

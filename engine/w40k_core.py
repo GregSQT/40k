@@ -1916,7 +1916,23 @@ class W40KEngine(gym.Env):
         Execute semantic actions directly from frontend.
         Public interface for human player actions.
         """
-        return self._process_semantic_action(action)
+        from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+        gs = self.game_state
+        _perf = perf_timing_enabled(gs)
+        _t0 = time.perf_counter() if _perf else None
+        success, result = self._process_semantic_action(action)
+        if _perf and _t0 is not None:
+            dt = time.perf_counter() - _t0
+            ep = gs.get("episode_number", "?")
+            trn = gs.get("turn", "?")
+            phase = gs.get("phase", "?")
+            act = action.get("action") if isinstance(action, dict) else None
+            append_perf_timing_line(
+                f"EXECUTE_SEMANTIC_TOTAL episode={ep} turn={trn} phase={phase} action={act!r} "
+                f"duration_s={dt:.6f} success={success}"
+            )
+        return success, result
     
     
     def execute_ai_turn(self) -> Tuple[bool, Dict[str, Any]]:
@@ -2484,6 +2500,15 @@ class W40KEngine(gym.Env):
             if choice_prompt_result is not None:
                 return True, choice_prompt_result
 
+        # PERF: segment timings — enable with W40K_PERF_TIMING=1 or game_state["perf_timing"]
+        from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+        _perf = perf_timing_enabled(self.game_state)
+        _t_entry: Optional[float] = time.perf_counter() if _perf else None
+        _t_after_handlers: Optional[float] = None
+        _t_pre_cascade: Optional[float] = None
+        _t_post_cascade: Optional[float] = None
+
         # Handle special "advance_phase" action when pool is empty
         if action.get("action") == "advance_phase":
             # Pool is empty - trigger phase transition
@@ -2536,6 +2561,9 @@ class W40KEngine(gym.Env):
             success, result = self._process_fight_phase(action)
         else:
             return False, {"error": "invalid_phase", "phase": current_phase}
+
+        if _perf:
+            _t_after_handlers = time.perf_counter()
 
         # CRITICAL FIX: Log action BEFORE cascade to ensure action is logged even if phase completes
         # Log action with result (before cascade modifies it)
@@ -3758,6 +3786,15 @@ class W40KEngine(gym.Env):
                 safe_print(self.game_state, error_msg)
                 # Don't re-raise - let action execution continue
         
+        if _perf:
+            _t_pre_cascade = time.perf_counter()
+            if _t_entry is not None and _t_after_handlers is not None and _t_pre_cascade is not None:
+                append_perf_timing_line(
+                    f"SEMANTIC_SEGMENTS episode={pre_action_episode} turn={pre_action_turn} pre_phase={pre_action_phase} "
+                    f"action={action.get('action')!r} handlers_and_prerun_s={_t_after_handlers - _t_entry:.6f} "
+                    f"step_logger_block_s={_t_pre_cascade - _t_after_handlers:.6f}"
+                )
+
         # Auto-advance to next phase when current phase completes
         # Loop to handle cascading empty phases (e.g., charge -> fight -> move if all empty)
         # CRITICAL: This must happen AFTER logging to allow logging of actions before phase transitions
@@ -3810,6 +3847,11 @@ class W40KEngine(gym.Env):
                     _f.write(f"CASCADE_TIMING episode={_ep_c} cascade_num={cascade_count} from_phase={current_phase} to_phase={next_phase} duration_s={_cascade_dur:.6f}\n")
             except (OSError, IOError):
                 pass
+            if _perf:
+                append_perf_timing_line(
+                    f"CASCADE_ITER episode={_ep_c} cascade_num={cascade_count} from_phase={current_phase} "
+                    f"to_phase={next_phase} duration_s={_cascade_dur:.6f}"
+                )
 
             add_console_log(self.game_state, f"🔄 PHASE NOW: {self.game_state.get('phase', 'UNKNOWN')}")
 
@@ -3833,6 +3875,14 @@ class W40KEngine(gym.Env):
             else:
                 break  # Phase has eligible units, stop cascading
         
+        if _perf:
+            _t_post_cascade = time.perf_counter()
+            if _t_pre_cascade is not None:
+                append_perf_timing_line(
+                    f"CASCADE_LOOP_TOTAL episode={pre_action_episode} turn={pre_action_turn} "
+                    f"duration_s={_t_post_cascade - _t_pre_cascade:.6f} iterations={cascade_count}"
+                )
+
         # Keep semantic-action flow aligned with step() terminal detection.
         self.game_state["game_over"] = self._check_game_over()
         if self.game_state["game_over"]:
@@ -3881,8 +3931,20 @@ class W40KEngine(gym.Env):
 
             choice_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
             if choice_prompt_result is not None:
+                if _perf and _t_post_cascade is not None:
+                    _t_tail = time.perf_counter()
+                    append_perf_timing_line(
+                        f"SEMANTIC_POST_CASCADE episode={pre_action_episode} turn={pre_action_turn} "
+                        f"duration_s={_t_tail - _t_post_cascade:.6f} early_return=rule_choice_prompt"
+                    )
                 return True, choice_prompt_result
 
+        if _perf and _t_post_cascade is not None:
+            _t_tail = time.perf_counter()
+            append_perf_timing_line(
+                f"SEMANTIC_POST_CASCADE episode={pre_action_episode} turn={pre_action_turn} "
+                f"duration_s={_t_tail - _t_post_cascade:.6f} early_return=none"
+            )
         return success, result
     
     

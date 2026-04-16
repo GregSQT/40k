@@ -696,6 +696,13 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     Ground BFS may traverse hexes occupied by allies but cannot end movement overlapping any
     model (ally or enemy). Enemy model hexes block traversal; engagement zone hexes block as before.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _pt = perf_timing_enabled(game_state)
+    import time as _perf_clock
+
+    _m0 = _perf_clock.perf_counter() if _pt else None
+
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
@@ -782,6 +789,8 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 f"missing_examples={missing_examples} extra_examples={extra_examples}",
             )
 
+    _m_prep_end = _perf_clock.perf_counter() if _pt else None
+
     # FLY units: BFS ignoring walls/occupation for traversal.
     # Only destination validation checks walls, occupation and engagement zone.
     # This replaces the O(cols×rows) scan with O(reachable) BFS.
@@ -810,6 +819,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 _fly_shape, _fly_base_size, _fly_orient
             )
 
+        _m_bfs_start = _perf_clock.perf_counter() if _pt else None
         while fly_queue:
             (fc, fr), fly_dist = fly_queue.popleft()
             if fly_dist >= move_range:
@@ -863,8 +873,17 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     else:
                         fly_rejected_footprint += 1
 
+        _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         game_state["valid_move_destinations_pool"] = valid_destinations
         game_state["move_preview_border"] = _compute_border_cells(valid_destinations)
+        _m_fly_done = _perf_clock.perf_counter() if _pt else None
+        if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_fly_done is not None:
+            append_perf_timing_line(
+                f"MOVE_POOL_BUILD unit={unit_id} fly=True prep_s={_m_prep_end - _m0:.6f} "
+                f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} preview_border_s={_m_fly_done - _m_bfs_end:.6f} "
+                f"total_s={_m_fly_done - _m0:.6f} visited={len(fly_visited)} valid={len(valid_destinations)} "
+                f"MOVE={move_range}"
+            )
         _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)} [FLY BFS]")
         if game_state.get("debug_mode", False):
             from engine.game_utils import add_debug_file_log
@@ -899,6 +918,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
     _bcols = board_cols
     _brows = board_rows
 
+    _m_bfs_start = _perf_clock.perf_counter() if _pt else None
     if is_single_hex:
         while queue:
             (cc, cr), cd = queue.popleft()
@@ -1004,6 +1024,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 if not dest_on_unit and nb != start_pos:
                     valid_destinations.append(nb)
 
+    _m_bfs_end = _perf_clock.perf_counter() if _pt else None
     game_state["valid_move_destinations_pool"] = valid_destinations
 
     if is_single_hex:
@@ -1020,6 +1041,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     game_state["move_preview_footprint_zone"] = footprint_zone
     game_state["move_preview_border"] = _compute_border_cells(footprint_zone)
+
+    _m_ground_done = _perf_clock.perf_counter() if _pt else None
+    if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_ground_done is not None:
+        _fp_n = len(_off_even) if not is_single_hex else 1
+        append_perf_timing_line(
+            f"MOVE_POOL_BUILD unit={unit_id} fly=False single_hex={is_single_hex} prep_s={_m_prep_end - _m0:.6f} "
+            f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} footprint_zone_border_s={_m_ground_done - _m_bfs_end:.6f} "
+            f"total_s={_m_ground_done - _m0:.6f} visited={len(visited)} valid={len(valid_destinations)} "
+            f"MOVE={move_range} base={base_size} fp={_fp_n}"
+        )
 
     _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)}")
     if game_state.get("debug_mode", False):
