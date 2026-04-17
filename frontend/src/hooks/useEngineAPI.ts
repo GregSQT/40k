@@ -282,6 +282,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [chargeDestinations, setChargeDestinations] = useState<Array<{ col: number; row: number }>>(
     []
   );
+  /** Union des hexes d'empreinte finales (moteur) — affichage violet autour de la cible, pas seulement les ancres. */
+  const [chargePreviewOverlayHexes, setChargePreviewOverlayHexes] = useState<
+    Array<{ col: number; row: number }>
+  >([]);
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Advance state management
   const [advanceDestinations, setAdvanceDestinations] = useState<
     Array<{ col: number; row: number }>
@@ -750,6 +754,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPendingPreviewAction(null);
       setAttackPreview(null);
       setChargeDestinations([]);
+      setChargePreviewOverlayHexes([]);
       setPendingChargeRollDisplay(null);
       setChargePreviewTargetId(null);
       setAdvanceDestinations([]);
@@ -1233,6 +1238,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           }
 
+          // Charge : après sélection de cible + jet OK, le moteur garde l’unité active mais la
+          // réponse JSON peut omettre active_charge_unit — le réinjecter avant setGameState pour
+          // l’UI (pastilles violettes, isActiveCharger).
+          if (
+            data.game_state?.phase === "charge" &&
+            data.result?.action === "charge_target_selected" &&
+            data.result.unitId != null
+          ) {
+            data.game_state = {
+              ...data.game_state,
+              active_charge_unit: data.result.unitId,
+            };
+          }
+
           setGameState(data.game_state);
 
           // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance activation response (jet D6 + pool sous-hex)
@@ -1398,6 +1417,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               pd?.violet_hexes ??
               [];
             setChargeDestinations(normalizeChargeDestinationsFromApi(raw));
+            const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
+              .charge_preview_display_hexes;
+            setChargePreviewOverlayHexes(normalizeChargeDestinationsFromApi(displayRaw ?? []));
             if (data.result.targetId != null) {
               setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
             }
@@ -1423,6 +1445,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setChargeDestinations(
               normalizeChargeDestinationsFromApi(data.result.valid_destinations)
             );
+            const displayRawFb = (data.result as { charge_preview_display_hexes?: unknown })
+              .charge_preview_display_hexes;
+            setChargePreviewOverlayHexes(normalizeChargeDestinationsFromApi(displayRawFb ?? []));
             if (data.result.targetId != null) {
               setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
             }
@@ -1458,6 +1483,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             // CRITICAL: Reset mode immediately (EXACT same as successful charges) so logo renders in stable state
             setChargeDestinations([]);
+            setChargePreviewOverlayHexes([]);
             setPendingChargeRollDisplay(null);
             setSelectedUnitId(null);
             setMode("select");
@@ -1489,6 +1515,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }, 2000);
             }
             setChargeDestinations([]);
+            setChargePreviewOverlayHexes([]);
             setPendingChargeRollDisplay(null);
             setChargePreviewTargetId(null);
             setSelectedUnitId(null);
@@ -1955,6 +1982,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           clickTarget: "active_unit",
         });
         setChargeDestinations([]);
+        setChargePreviewOverlayHexes([]);
         setPendingChargeRollDisplay(null);
         setChargePreviewTargetId(null);
       } else if (numericUnitId === null && mode === "advancePreview") {
@@ -3035,6 +3063,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onValidateCharge: () => {},
       onLogChargeRoll: () => {},
       getChargeDestinations: () => [],
+      chargePreviewOverlayHexes: [],
       moveDestPoolRef,
       footprintZoneRef,
       onAdvance: async () => {},
@@ -3120,6 +3149,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onValidateCharge: emptyCallback,
     onLogChargeRoll: emptyCallback,
     getChargeDestinations,
+    chargePreviewOverlayHexes,
     moveDestPoolRef,
     footprintZoneRef,
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler

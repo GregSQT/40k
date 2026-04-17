@@ -2143,6 +2143,7 @@ export const BoardReplay: React.FC = () => {
           }
           return [];
         }}
+        chargePreviewOverlayHexes={[]}
         getAdvanceDestinations={(unitId: number) => {
           // Calculate ALL valid advance destinations for replay mode using BFS
           // For advance, unitId will be -3 (ghost unit), so we need to find the actual unit

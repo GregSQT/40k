@@ -3104,6 +3104,7 @@ export const BoardWithAPI: React.FC = () => {
             chargeSuccess={apiProps.chargeSuccess}
             gameState={apiProps.gameState as GameState}
             getChargeDestinations={apiProps.getChargeDestinations}
+            chargePreviewOverlayHexes={apiProps.chargePreviewOverlayHexes ?? []}
             moveDestPoolRef={apiProps.moveDestPoolRef}
             footprintZoneRef={apiProps.footprintZoneRef}
             onAdvance={isGameOver ? () => {} : apiProps.onAdvance}

@@ -230,6 +230,8 @@ type BoardProps = {
   gameState: GameState; // Add gameState prop
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
+  /** Union empreintes valides (API) — pastilles violettes autour de la zone d’engagement cible. */
+  chargePreviewOverlayHexes?: Array<{ col: number; row: number }>;
   moveDestPoolRef?: React.RefObject<Set<string>>;
   footprintZoneRef?: React.RefObject<Set<string>>;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callback
@@ -354,6 +356,7 @@ export default function Board({
   gameState,
   chargeRollPopup,
   getChargeDestinations,
+  chargePreviewOverlayHexes = [],
   moveDestPoolRef,
   footprintZoneRef,
   onAdvance,
@@ -1587,18 +1590,28 @@ export default function Board({
       const activeChargeRaw = gameState?.active_charge_unit;
       const isActiveCharger =
         activeChargeRaw != null && String(activeChargeRaw) === String(sid);
-      const showChargeDestinationLayer = inChargePool || isActiveCharger;
+      // Pool moteur déjà dans le state React (result.valid_destinations) : afficher même si
+      // game_state n’a pas active_charge_unit / charge_activation_pool (sync API partielle).
+      const destPreview = getChargeDestinations(selectedUnit.id);
+      const hasPendingChargePreview =
+        mode === "chargePreview" &&
+        destPreview.length > 0 &&
+        chargingUnitId != null &&
+        chargingUnitId === sid;
+      const showChargeDestinationLayer =
+        inChargePool || isActiveCharger || hasPendingChargePreview;
 
       if (showChargeDestinationLayer) {
-        // Pool moteur (empreintes ×10) : ne pas filtrer par u.col/u.row — sur grand plateau les
-        // ancres valides ne coïncident souvent pas avec les positions « primaires » affichées.
-        chargeCells = getChargeDestinations(selectedUnit.id);
+        // Ancres BFS = destPreview ; affichage = union des empreintes finales (API) pour couvrir
+        // la zone autour de la cible, pas une poignée de points près du chargeur.
+        const overlay = chargePreviewOverlayHexes ?? [];
+        chargeCells = overlay.length > 0 ? overlay : destPreview;
 
         // Red outline: enemy units that can be reached via valid charge movement
         chargeTargets = units.filter((u) => {
           if (u.player === selectedUnit.player) return false;
 
-          return chargeCells.some((dest) => {
+          return destPreview.some((dest) => {
             const dc = Array.isArray(dest) ? dest[0] : dest.col;
             const dr = Array.isArray(dest) ? dest[1] : dest.row;
             const cube1 = offsetToCube(dc, dr);
@@ -2120,7 +2133,7 @@ export default function Board({
       for (const u of units) {
         parts.push(`${u.id},${u.col},${u.row},${u.HP_CUR}`);
       }
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}#chov:${chargePreviewOverlayHexes.length}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -2210,9 +2223,12 @@ export default function Board({
     const gsRules = (
       gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
     )?.config?.game_rules;
+    const cfgRules = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
     const engagementZoneSteps =
-      gsRules?.engagement_zone ?? gameConfig?.game_rules?.engagement_zone ?? 1;
+      gsRules?.engagement_zone ?? cfgRules?.engagement_zone ?? 1;
+    const hasChargeFootprintOverlay = (chargePreviewOverlayHexes?.length ?? 0) > 0;
     const chargeEngagementHalo =
+      !hasChargeFootprintOverlay &&
       phase === "charge" &&
       mode === "chargePreview" &&
       chargeTargetId != null &&

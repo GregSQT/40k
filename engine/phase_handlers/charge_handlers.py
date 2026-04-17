@@ -110,6 +110,262 @@ def _candidate_footprint_charge(
     return compute_candidate_footprint(center_col, center_row, unit, game_state)
 
 
+def _charge_footprint_union_for_anchors(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    anchor_positions: List[Tuple[int, int]],
+) -> List[Tuple[int, int]]:
+    """
+    Union of all occupied hexes for each valid anchor — used for PvP violet preview.
+
+    ``valid_destinations`` lists anchor cells only; the UI must show the full end footprint
+    (around the declared target / engagement band), not a scatter of anchor dots near the charger.
+    """
+    unit = get_unit_by_id(game_state, unit_id)
+    if not unit or not anchor_positions:
+        return []
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    seen: Set[Tuple[int, int]] = set()
+    ordered: List[Tuple[int, int]] = []
+    for ac, ar in anchor_positions:
+        fp = _candidate_footprint_charge(int(ac), int(ar), unit, game_state, fp_pair)
+        for h in fp:
+            if h not in seen:
+                seen.add(h)
+                ordered.append(h)
+    return ordered
+
+
+def _resolve_charge_dest_to_anchor(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    valid_pool: List[Tuple[int, int]],
+    dest_col: int,
+    dest_row: int,
+) -> Optional[Tuple[int, int]]:
+    """Map a clicked hex (any cell of the end footprint) to the canonical anchor in ``valid_pool``.
+
+    Ordre de résolution : (1) ancre exacte, (2) ancre dont l'empreinte couvre l'hex cliqué,
+    (3) ancre la plus proche en distance hex (clic dans la zone violette hors empreinte exacte).
+    """
+    from engine.hex_utils import hex_distance
+
+    if (dest_col, dest_row) in valid_pool:
+        return (dest_col, dest_row)
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    for ac, ar in valid_pool:
+        fp = _candidate_footprint_charge(int(ac), int(ar), unit, game_state, fp_pair)
+        if (dest_col, dest_row) in fp:
+            return (int(ac), int(ar))
+    best: Optional[Tuple[int, int]] = None
+    best_d = 10**9
+    for ac, ar in valid_pool:
+        d = hex_distance(int(ac), int(ar), int(dest_col), int(dest_row))
+        if d < best_d:
+            best_d = d
+            best = (int(ac), int(ar))
+    return best
+
+
+def _charge_base_diameter(unit: Dict[str, Any]) -> int:
+    """Diamètre de l'empreinte en hexes (fallback 1).
+
+    BASE_SIZE peut être int (round/square) ou [major, minor] (oval).
+    """
+    bs = unit.get("BASE_SIZE", 1)
+    if isinstance(bs, (list, tuple)) and len(bs) >= 1:
+        try:
+            return max(int(v) for v in bs)
+        except (TypeError, ValueError):
+            return 1
+    try:
+        return max(1, int(bs))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _charge_closest_charger_hex_to_target(
+    charger_fp: Set[Tuple[int, int]],
+    target_fp: Set[Tuple[int, int]],
+) -> Tuple[Tuple[int, int], int]:
+    """Renvoie (hex allié le plus proche de la cible, distance hex associée)."""
+    from engine.hex_utils import hex_distance
+
+    best_h: Optional[Tuple[int, int]] = None
+    best_d = 10**9
+    for hc, hr in charger_fp:
+        for tc, tr in target_fp:
+            d = hex_distance(int(hc), int(hr), int(tc), int(tr))
+            if d < best_d:
+                best_d = d
+                best_h = (int(hc), int(hr))
+    if best_h is None:
+        # charger_fp vide — repli arbitraire
+        return ((0, 0), 0)
+    return (best_h, best_d)
+
+
+def _compute_charge_preview_zone(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target: Dict[str, Any],
+    charge_roll: int,
+) -> Tuple[Set[Tuple[int, int]], Tuple[int, int]]:
+    """
+    Zone violette cible-centrée (spec utilisateur) :
+
+    - Hexes adjacents aux hex extérieurs de l'empreinte **cible** jusqu'à
+      ``diamètre(empreinte chargeur) + engagement_zone`` pas (exclut l'empreinte cible).
+    - Filtrée par la distance hex depuis **l'hex chargeur le plus proche de la cible**,
+      qui doit rester ≤ ``charge_roll``.
+
+    Renvoie ``(zone_hexes, closest_charger_hex_to_target)``.
+    """
+    from engine.hex_utils import dilate_hex_set_unbounded, hex_distance
+    from .shared_utils import get_engagement_zone
+
+    units_cache = require_key(game_state, "units_cache")
+    uid = str(unit["id"])
+    tid = str(target["id"])
+    ue = units_cache.get(uid)
+    te = units_cache.get(tid)
+    if not ue or not te:
+        return (set(), (0, 0))
+
+    charger_fp = set(ue.get("occupied_hexes") or {(int(ue["col"]), int(ue["row"]))})
+    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
+
+    closest_ch, _ = _charge_closest_charger_hex_to_target(charger_fp, target_fp)
+
+    engagement_zone = get_engagement_zone(game_state)
+    diameter = _charge_base_diameter(unit)
+    max_ring = max(1, diameter + engagement_zone)
+
+    # Zone extérieure autour de la cible : [1 .. max_ring] hexes depuis la cible.
+    outer_with_target = dilate_hex_set_unbounded(target_fp, max_ring)
+    target_zone = outer_with_target - target_fp
+
+    # Disque autour de l'hex chargeur le plus proche : distance ≤ charge_roll.
+    if charge_roll <= 0:
+        return (set(), closest_ch)
+    charger_disk = dilate_hex_set_unbounded({closest_ch}, int(charge_roll))
+
+    # Bornes plateau
+    board_cols = int(game_state.get("board_cols", 0) or 0)
+    board_rows = int(game_state.get("board_rows", 0) or 0)
+
+    zone: Set[Tuple[int, int]] = set()
+    for h in target_zone & charger_disk:
+        c, r = int(h[0]), int(h[1])
+        if board_cols > 0 and (c < 0 or c >= board_cols):
+            continue
+        if board_rows > 0 and (r < 0 or r >= board_rows):
+            continue
+        # Confirme la contrainte de portée charge (sécurité, dilate est exact).
+        if hex_distance(closest_ch[0], closest_ch[1], c, r) > int(charge_roll):
+            continue
+        zone.add((c, r))
+    return (zone, closest_ch)
+
+
+def _build_charge_anchors_in_zone(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target: Dict[str, Any],
+    zone: Set[Tuple[int, int]],
+    charge_roll: int,
+) -> List[Tuple[int, int]]:
+    """
+    Ancres de placement valides dont :
+    - le centre est dans la ``zone`` cible-centrée ;
+    - l'empreinte ne chevauche pas la cible (``occupied_hexes``) ;
+    - l'empreinte touche la zone d'engagement de la cible ;
+    - le placement est légal (``is_footprint_placement_valid``).
+    """
+    from engine.hex_utils import dilate_hex_set_unbounded, hex_distance
+    from .shared_utils import get_engagement_zone
+
+    units_cache = require_key(game_state, "units_cache")
+    te = units_cache.get(str(target["id"]))
+    if not te:
+        return []
+    target_fp = set(te.get("occupied_hexes") or {(int(te["col"]), int(te["row"]))})
+    engagement_zone = get_engagement_zone(game_state)
+    enemy_shell = dilate_hex_set_unbounded(target_fp, engagement_zone)
+
+    unit_id_str = str(unit["id"])
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+
+    charger_fp_now = set((units_cache.get(unit_id_str) or {}).get("occupied_hexes") or set())
+    closest_ch, _ = _charge_closest_charger_hex_to_target(charger_fp_now, target_fp)
+
+    anchors: List[Tuple[int, int]] = []
+    for ac, ar in zone:
+        # Re-confirme la portée depuis l'hex chargeur le plus proche.
+        if hex_distance(closest_ch[0], closest_ch[1], int(ac), int(ar)) > int(charge_roll):
+            continue
+        candidate_fp = _candidate_footprint_charge(int(ac), int(ar), unit, game_state, fp_pair)
+        if candidate_fp & target_fp:
+            continue
+        if not (candidate_fp & enemy_shell):
+            continue
+        if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+            continue
+        anchors.append((int(ac), int(ar)))
+    return anchors
+
+
+def _charge_bfs_max_distance(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    charge_roll: int,
+    target_id: Optional[str],
+) -> int:
+    """
+    Nombre maximum de pas d'ancre pour le BFS de charge.
+
+    AI_TURN / charge_compliance : la distance utile se rapporte au contact avec la cible — sur
+    plateau ×10, l'ancre ``col``/``row`` peut être du côté opposé à la cible alors qu'un hex de
+    l'empreinte est déjà proche. On ajoute la distance hex (primaire → hex allié le plus proche
+    de l'empreinte ennemie) au jet, pour que le pool et la zone violette s'étendent vers la cible.
+    """
+    from engine.hex_utils import hex_distance
+
+    rid = int(charge_roll)
+    if not target_id:
+        return rid
+
+    units_cache = require_key(game_state, "units_cache")
+    uid = str(unit_id)
+    tid = str(target_id)
+    ue = units_cache.get(uid)
+    te = units_cache.get(tid)
+    if not ue or not te:
+        return rid
+
+    own_hexes = ue.get("occupied_hexes")
+    if not own_hexes:
+        own_hexes = {(int(ue["col"]), int(ue["row"]))}
+    enemy_fp = te.get("occupied_hexes")
+    if not enemy_fp:
+        enemy_fp = {(int(te["col"]), int(te["row"]))}
+
+    primary = (int(ue["col"]), int(ue["row"]))
+    best_h: Optional[Tuple[int, int]] = None
+    best_d = 10**9
+    for hc, hr in own_hexes:
+        for tc, tr in enemy_fp:
+            d = hex_distance(int(hc), int(hr), int(tc), int(tr))
+            if d < best_d:
+                best_d = d
+                best_h = (int(hc), int(hr))
+    if best_h is None:
+        return rid
+    extra = hex_distance(primary[0], primary[1], best_h[0], best_h[1])
+    return rid + extra
+
+
 def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Initialize charge phase and build activation pool
@@ -1183,11 +1439,14 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     unit_id_str = str(unit["id"])
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
+    tid_arg: Optional[str] = str(target_id) if target_id is not None else None
+    bfs_max_distance = _charge_bfs_max_distance(game_state, unit_id_str, int(charge_range), tid_arg)
     cache = game_state.setdefault("_charge_dest_bfs_cache", {})
     cache_key = (unit_id_str, int(charge_range), target_id if target_id else None)
     if (
         not early_exit_if_valid
         and charge_range == CHARGE_MAX_DISTANCE
+        and tid_arg is None
         and cache_key in cache
     ):
         cached_list = cache[cache_key]
@@ -1226,7 +1485,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         add_console_log(game_state, log_message)
         safe_print(game_state, log_message)
 
-    # BFS pathfinding to find all reachable hexes within charge_range
+    # BFS pathfinding to find all reachable anchor positions within bfs_max_distance (jet + offset ×10)
     visited = {start_pos: 0}
     queue = deque([(start_pos, 0)])
     valid_destinations = []
@@ -1256,7 +1515,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         current_pos, current_dist = queue.popleft()
         current_col, current_row = current_pos
 
-        if current_dist >= charge_range:
+        if current_dist >= bfs_max_distance:
             continue
 
         neighbors = get_hex_neighbors(current_col, current_row)
@@ -1286,7 +1545,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     break
                 if candidate_fp & shell:
                     is_adjacent_to_enemy = True
-                    if target_id:
+                    if tid_arg:
                         break
 
             if is_adjacent_to_enemy and not hex_overlaps_enemy and neighbor_pos != start_pos:
@@ -1300,7 +1559,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     _t_bfs1 = time.perf_counter() if _perf else None
 
     game_state["valid_charge_destinations_pool"] = valid_destinations
-    if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid:
+    if charge_range == CHARGE_MAX_DISTANCE and not early_exit_if_valid and tid_arg is None:
         cache[cache_key] = list(valid_destinations)
 
     if _perf and _t_func0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
@@ -1309,6 +1568,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         _sc = "1" if bfs_short_circuit else "0"
         append_perf_timing_line(
             f"CHARGE_DEST_BFS episode={_ep} turn={_turn} unit_id={unit_id} charge_roll={charge_range} "
+            f"bfs_max={bfs_max_distance} "
             f"bfs_loop_s={_t_bfs1 - _t_bfs0:.6f} total_s={_t_done - _t_func0:.6f} "
             f"visited_n={len(visited)} valid_dest_n={len(valid_destinations)} cache_hit=0 "
             f"early_exit={_ee} short_circuit={_sc} fp={_fp_tag}"
@@ -1512,10 +1772,15 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     if _is_adjacent_to_enemy(game_state, unit):
         return _handle_skip_action(game_state, unit, had_valid_destinations=False)
 
-    # Roll 2d6 AFTER target selection
+    # Roll 2d6 AFTER target selection — résultat en POUCES (règles GW).
+    # Le badge UI affiche la valeur en inches (2..12). Sur Board ×10 les distances
+    # moteur sont en sous-hex : on scale via ``inches_to_subhex`` pour rester homogène
+    # avec ``charge_max_distance``, ``engagement_zone`` et les footprints.
     import random
     charge_roll = random.randint(1, 6) + random.randint(1, 6)
     game_state["charge_roll_values"][unit_id] = charge_roll
+    _charge_scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
+    charge_roll_subhex = charge_roll * _charge_scale
     # Store target_id for destination selection
     if "charge_target_selections" not in game_state:
         game_state["charge_target_selections"] = {}
@@ -1527,12 +1792,25 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     if "pending_charge_unit_id" in game_state:
         del game_state["pending_charge_unit_id"]
 
-    # Build pool with actual roll for THIS SPECIFIC TARGET
-    charge_build_valid_destinations_pool(game_state, unit_id, charge_roll, target_id=target_id)
-    
-    if "valid_charge_destinations_pool" not in game_state:
-        raise KeyError("game_state missing required 'valid_charge_destinations_pool' field")
-    valid_pool = game_state["valid_charge_destinations_pool"]
+    # Build pool with actual roll for THIS SPECIFIC TARGET — zone cible-centrée
+    # (spec utilisateur) : anneau autour de la cible [1 .. diamètre_chargeur + engagement_zone]
+    # filtré par distance ≤ charge_roll depuis l'hex du chargeur le plus proche de la cible.
+    target_unit_entry = get_unit_by_id(game_state, target_id)
+    if (
+        not target_unit_entry
+        or target_unit_entry["player"] == unit["player"]
+        or not is_unit_alive(str(target_unit_entry["id"]), game_state)
+    ):
+        display_zone_set: Set[Tuple[int, int]] = set()
+        valid_pool: List[Tuple[int, int]] = []
+    else:
+        display_zone_set, _closest_ch = _compute_charge_preview_zone(
+            game_state, unit, target_unit_entry, int(charge_roll_subhex)
+        )
+        valid_pool = _build_charge_anchors_in_zone(
+            game_state, unit, target_unit_entry, display_zone_set, int(charge_roll_subhex)
+        )
+    game_state["valid_charge_destinations_pool"] = valid_pool
     if "debug_mode" in game_state and game_state["debug_mode"]:
         episode = game_state.get("episode_number", "?")
         turn = game_state.get("turn", "?")
@@ -1618,7 +1896,14 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         # Generate preview with violet hexes (charge destinations)
         preview_data = charge_preview(valid_pool)
         game_state["preview_hexes"] = valid_pool
-        
+        # Violet = union des empreintes finales légales (murs, occupation, engagement).
+        # ``display_zone_set`` sert uniquement à énumérer les ancres candidates ; l'UI ne doit
+        # pas montrer des hex « théoriques » où le socle ne peut pas tenir.
+        display_union = _charge_footprint_union_for_anchors(
+            game_state, str(unit_id), valid_pool
+        )
+        display_hexes = [[int(c), int(r)] for (c, r) in display_union]
+
         # Human players: return waiting_for_player for destination selection
         return True, {
             "action": "charge_target_selected",
@@ -1626,6 +1911,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             "targetId": target_id,
             "charge_roll": charge_roll,
             "valid_destinations": valid_pool,
+            "charge_preview_display_hexes": display_hexes,
             "preview_data": preview_data,
             "clear_blinking_gentle": True,  # Stop blinking when target is selected
             "waiting_for_player": True  # Wait for destination selection
@@ -1697,6 +1983,10 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         return False, {"error": "destination_pool_not_built", "action": "charge"}
     
     valid_pool = game_state["valid_charge_destinations_pool"]
+
+    resolved_anchor = _resolve_charge_dest_to_anchor(game_state, unit, valid_pool, dest_col, dest_row)
+    if resolved_anchor is not None:
+        dest_col, dest_row = resolved_anchor
 
     # Check if destination is in valid pool (reachable with this roll)
     if (dest_col, dest_row) not in valid_pool:

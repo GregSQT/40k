@@ -90,6 +90,8 @@ interface GameRules {
   los_debug_show_ratio_rule: string;
   max_units_per_player: number;
   board_size?: [number, number];
+  engagement_zone?: number;
+  charge_max_distance?: number;
 }
 
 interface GameConfig {
