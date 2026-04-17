@@ -2093,6 +2093,9 @@ export default function Board({
           }
           const ratio = totalHexes > 0 ? visCount / totalHexes : 0;
           if (ratio >= losVisibilityMinRatio && ratio < coverRatio) {
+            // Source de vérité pour l’UI (bouclier / bonus save) : ratio d’empreinte, pas la présence de l’hex centre dans coverCells
+            // (l’ancre peut être hors des hex visibles alors que l’unité est partiellement visible en couvert).
+            coverTargets.add(String(enemy.id));
             for (let dc = -scanR; dc <= scanR; dc++) {
               for (let dr = -scanR; dr <= scanR; dr++) {
                 if (hexDistOff(enemy.col, enemy.row, enemy.col + dc, enemy.row + dr) > scanR) continue;
@@ -2150,7 +2153,6 @@ export default function Board({
     if (shootingPreviewSource) {
       appendShootingPreviewCells(shootingPreviewSource);
     }
-    const coverCellKeySet = new Set(coverCells.map((cell) => `${cell.col},${cell.row}`));
     if (
       phase === "fight" &&
       selectedUnit &&
@@ -2623,6 +2625,8 @@ export default function Board({
     }
     const unitsLayer = unitsLayerRef.current;
 
+    const chargeMaxDistance = gameConfig?.game_rules?.charge_max_distance ?? 12;
+
     // ✅ UNIFIED UNIT RENDERING USING COMPONENT — skip if fingerprint unchanged
     if (unitsChanged) {
     unitsFingerprintRef.current = unitsFingerprint;
@@ -2804,7 +2808,7 @@ export default function Board({
         blinkingAttackerId: effectiveBlinkingAttackerId,
         isBlinkingActive,
         blinkVersion,
-        shootingTargetInCover: coverCellKeySet.has(`${unit.col},${unit.row}`),
+        shootingTargetInCover: coverTargets.has(String(unit.id)),
         movePreviewShootingTargetInCoverByUnitId:
           phase === "move" && (mode === "select" || mode === "movePreview")
             ? movePreviewLosCoverById
@@ -2860,6 +2864,7 @@ export default function Board({
         onAdvance: onAdvance,
         onUnitTooltip: handleUnitTooltip,
         debugMode: showHexCoordinates,
+        chargeMaxDistance,
       });
     }
 
@@ -2917,6 +2922,7 @@ export default function Board({
           autoSelectWeapon,
           onUnitTooltip: handleUnitTooltip,
           debugMode: showHexCoordinates,
+          chargeMaxDistance,
         });
       }
     }
@@ -2975,6 +2981,7 @@ export default function Board({
           onUnitTooltip: handleUnitTooltip,
           autoSelectWeapon,
           debugMode: showHexCoordinates,
+          chargeMaxDistance,
         });
       }
     }

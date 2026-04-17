@@ -2,11 +2,13 @@
 import * as PIXI from "pixi.js-legacy";
 import type { FightSubPhase, GameState, PlayerId, TargetPreview, Unit } from "../types/game";
 import {
+  buildChargeMinRollOverlay,
   buildWeaponSignature,
   createBlinkingHPBar,
   type HpBarHtmlTooltipPayload,
   type HPBlinkContainer,
 } from "../utils/blinkingHPBar";
+import { minHexDistanceBetweenUnitFootprints } from "../utils/hexFootprint";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 import {
@@ -133,6 +135,8 @@ interface UnitRendererProps {
   debugMode?: boolean;
   onUnitTooltip?: (tooltip: HpBarHtmlTooltipPayload) => void;
   renderTarget?: PIXI.Container;
+  /** Plafond du jet 2D6 (règle `charge_max_distance`) pour l’affichage au-dessus de la barre blink en phase charge. */
+  chargeMaxDistance?: number;
 }
 
 export class UnitRenderer {
@@ -1364,6 +1368,27 @@ export class UnitRenderer {
         (this.props.phase === "move" && this.props.mode === "select")
           ? "shoot"
           : (this.props.phase as "shoot" | "fight" | "charge");
+
+      const chargeMaxInches = this.props.chargeMaxDistance ?? 12;
+      const bc = this.props.boardConfig;
+      const inchesToSubhexRaw =
+        bc &&
+        typeof bc === "object" &&
+        "inches_to_subhex" in bc &&
+        typeof (bc as { inches_to_subhex?: unknown }).inches_to_subhex === "number"
+          ? (bc as { inches_to_subhex: number }).inches_to_subhex
+          : 10;
+      const inchesToSubhex = Math.max(1, Math.floor(inchesToSubhexRaw));
+      const chargeMaxSubhex = chargeMaxInches * inchesToSubhex;
+      const chargeMinRollOverlay =
+        blinkPhase === "charge" && attacker
+          ? buildChargeMinRollOverlay(
+              minHexDistanceBetweenUnitFootprints(attacker, unit, chargeMaxSubhex),
+              chargeMaxInches,
+              inchesToSubhex,
+            )
+          : null;
+
       createBlinkingHPBar({
         unit,
         attacker,
@@ -1378,10 +1403,16 @@ export class UnitRenderer {
         finalBarHeight,
         sliceWidth,
         getCSSColor: this.getCSSColor.bind(this),
+        chargeMinRollOverlay,
       });
 
-      // If targetPreview has overallProbability, update the display
-      if (isTargetPreviewed && targetPreview && targetPreview.overallProbability !== undefined) {
+      // If targetPreview has overallProbability, update the display (pas en phase charge : affichage jet 2D6)
+      if (
+        blinkPhase !== "charge" &&
+        isTargetPreviewed &&
+        targetPreview &&
+        targetPreview.overallProbability !== undefined
+      ) {
         // Find the container and update probability display
         const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
         const existingContainer = this.props.app.stage.children.find((child) => {

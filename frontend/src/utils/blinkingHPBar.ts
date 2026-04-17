@@ -9,6 +9,14 @@ import { getDiceAverage, getSelectedMeleeWeapon } from "./weaponHelpers";
 export const DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX = 150_000;
 export const DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY = 0.5;
 
+/**
+ * Résolution de rasterisation pour `PIXI.Text` : le canvas interne est plus dense que le renderer
+ * (souvent 1×) pour éviter le flou au redimensionnement en texture GPU.
+ */
+function crispTextResolution(rendererResolution: number): number {
+  return Math.min(4, Math.max(2, Math.ceil(rendererResolution * 2)));
+}
+
 export type HpBarHtmlTooltipPayload = {
   visible: boolean;
   text: string;
@@ -19,6 +27,48 @@ export type HpBarHtmlTooltipPayload = {
 };
 
 // Types
+/** Phase charge : remplace « XX% » par le jet 2D6 minimum (ex. `7+`) et un tooltip dédié. */
+export type ChargeMinRollOverlay = {
+  primaryText: string;
+  tooltipText: string;
+};
+
+/**
+ * @param distanceSubhexRaw Distance minimale entre empreintes en **pas de grille** (Board×10 : sous-hex).
+ * @param chargeMaxInches Maximum du jet 2D6 en **pouces** (ex. 12), aligné sur `game_rules.charge_max_distance`.
+ * @param inchesToSubhex Pas sous-hex par pouce (ex. 10) — `board_config.inches_to_subhex`.
+ */
+export function buildChargeMinRollOverlay(
+  distanceSubhexRaw: number,
+  chargeMaxInches: number,
+  inchesToSubhex: number,
+): ChargeMinRollOverlay {
+  const scale = Math.max(1, Math.floor(inchesToSubhex));
+  const maxSubhex = chargeMaxInches * scale;
+  const dSub = Math.floor(distanceSubhexRaw);
+
+  if (dSub <= 0) {
+    return {
+      primaryText: "—",
+      tooltipText:
+        "Empreintes adjacentes ou superposées : charge impossible vers cette cible.",
+    };
+  }
+  if (distanceSubhexRaw > maxSubhex) {
+    const approxIn = Math.ceil(distanceSubhexRaw / scale);
+    return {
+      primaryText: "—",
+      tooltipText: `Distance minimale ≈ ${approxIn}″ (${dSub} pas sous-hex) : au-delà du maximum du jet 2D6 (${chargeMaxInches}″).`,
+    };
+  }
+  // Jet 2D6 (2–12) en pouces ; minimum pour couvrir la distance en sous-hex.
+  const minRollInches = Math.max(2, Math.ceil(distanceSubhexRaw / scale));
+  return {
+    primaryText: `${minRollInches}+`,
+    tooltipText: `Jet 2D6 minimum : ${minRollInches}+ pour couvrir environ ${minRollInches}″ entre empreintes (1″ = ${scale} pas de grille ; ${dSub} pas mesurés).`,
+  };
+}
+
 export interface BlinkingHPBarConfig {
   unit: Unit;
   attacker: Unit | null;
@@ -33,6 +83,8 @@ export interface BlinkingHPBarConfig {
   finalBarHeight: number;
   sliceWidth: number;
   getCSSColor: (cssVar: string) => number;
+  /** Si défini (phase charge), remplace l’affichage probabilité / tooltip blessure. */
+  chargeMinRollOverlay?: ChargeMinRollOverlay | null;
 }
 
 export interface HPBlinkContainer extends PIXI.Container {
@@ -221,6 +273,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     finalBarHeight,
     sliceWidth,
     getCSSColor,
+    chargeMinRollOverlay,
   } = config;
 
   // Normalize unit.id to number
@@ -258,7 +311,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   }) as HPBlinkContainer | undefined;
 
   // If container exists and matches attacker/weapon, reuse it and update probability
-  if (existingContainer?.blinkTicker) {
+  // (phase charge : pas de mise à jour rapide — le jet affiché dépend de la distance empreintes, recalculée à chaque rendu)
+  if (existingContainer?.blinkTicker && phase !== "charge") {
     const attackerMatches = existingContainer.attackerId === attackerIdNum;
     const weaponMatches = existingContainer.weaponSignature === weaponSignature;
     if (attackerMatches && weaponMatches) {
@@ -397,11 +451,14 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   app.ticker.add(blinkTicker);
   hpContainer.blinkTicker = blinkTicker;
 
-  // Calculate and display probability
+  // Calculate and display probability (sauf phase charge avec overlay jet 2D6)
   let displayProbability = 0;
-  if (attacker) {
+  if (attacker && !chargeMinRollOverlay) {
     displayProbability = calculateWoundProbability(attacker, unit, phase, inCover);
   }
+
+  const probLabel =
+    chargeMinRollOverlay?.primaryText ?? `${Math.round(displayProbability * 100)}%`;
 
   // Cadre % : aligné sur les design tokens `.rule-tooltip` (`App.css` : --tooltip-*).
   // Non reproduit ici : box-shadow (--tooltip-shadow), max-width, line-height multi-lignes.
@@ -415,15 +472,16 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   const probPadX = tooltipPad.padX + 1;
   const probPadY = tooltipPad.padY + 1;
 
-  const probText = new PIXI.Text(`${Math.round(displayProbability * 100)}%`, {
+  const probFontPxRounded = Math.round(tooltipFontPx);
+  const probText = new PIXI.Text(probLabel, {
     fontFamily: tooltipFontFamily,
-    fontSize: tooltipFontPx,
+    fontSize: probFontPxRounded,
     fill: getCSSColor("--tooltip-text-color"),
     align: "center",
     fontWeight: tooltipFontWeight,
   });
-  /** Aligner la densité du glyphe sur le renderer (sinon texture 1× upscalée = flou vs texte HTML). */
-  probText.resolution = app.renderer.resolution;
+  probText.resolution = crispTextResolution(app.renderer.resolution);
+  probText.roundPixels = true;
   probText.name = `prob-text-${unit.id}`;
   probText.anchor.set(0.5);
   probText.updateText(true);
@@ -454,7 +512,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
       stroke: 0x38bdf8,
       strokeThickness: Math.max(1, 2 * scale),
     });
-    coverIconPrebuilt.resolution = app.renderer.resolution;
+    coverIconPrebuilt.resolution = crispTextResolution(app.renderer.resolution);
+    coverIconPrebuilt.roundPixels = true;
     coverIconPrebuilt.name = `cover-icon-${unit.id}`;
     coverIconPrebuilt.anchor.set(0, 0.5);
     coverIconPrebuilt.updateText(true);
@@ -465,8 +524,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   /** Cadre % : toujours centré au-dessus de la barre (centre du rectangle = centre de la barre). */
   const squareX = Math.round(barCenterX - cellWidth * 0.5);
 
-  /** Écart minimal après le bord droit du cadre % (bord extérieur du trait) pour ne pas chevaucher le bouclier. */
-  const gapAfterProbBox = Math.max(3, Math.min(8, Math.round(scale * 2)));
+  /** Écart après le bord droit du cadre % jusqu’au bouclier (serré pour rester lisible sans les coller). */
+  const gapAfterProbBox = Math.max(1, Math.min(3, Math.round(scale * 0.9)));
 
   if (hasCoverIcon && coverIconPrebuilt) {
     const probRightOuter = squareX + cellWidth + probStrokeW;
@@ -498,7 +557,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   hpContainer.addChild(probText);
 
   const probabilityTooltipText =
-    "Probabilité estimée d'infliger des degats";
+    chargeMinRollOverlay?.tooltipText ?? "Probabilité estimée d'infliger des degats";
   const updateProbabilityTooltip = (event: PIXI.FederatedPointerEvent): void => {
     if (!onTooltip) {
       return;

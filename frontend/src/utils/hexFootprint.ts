@@ -325,6 +325,29 @@ export function minHexDistanceBetweenFootprintKeySets(
   return maxDistance + 1;
 }
 
+/** Unité source pour {@link minHexDistanceBetweenUnitFootprints}. */
+export type UnitFootprintInput = {
+  col: number;
+  row: number;
+  BASE_SHAPE?: string;
+  BASE_SIZE?: number | [number, number];
+};
+
+/**
+ * Distance minimale entre deux empreintes en **pas de grille** (voisins 6), plafonnée par `maxDistance`.
+ * Sur plateau Board×10, un pas = un sous-hex ; comparer au budget `jet 2D6 × inches_to_subhex`.
+ * Un résultat &gt; `maxDistance` indique une distance strictement supérieure (hors fenêtre de recherche).
+ */
+export function minHexDistanceBetweenUnitFootprints(
+  charger: UnitFootprintInput,
+  target: UnitFootprintInput,
+  maxDistance: number,
+): number {
+  const setA = unitFootprintHexKeys(charger);
+  const setB = unitFootprintHexKeys(target);
+  return minHexDistanceBetweenFootprintKeySets(setA, setB, maxDistance);
+}
+
 // --- Pixel ↔ Hex conversion ---
 
 /**
