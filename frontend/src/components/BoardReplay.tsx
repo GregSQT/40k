@@ -10,7 +10,7 @@ import { useGameLog } from "../hooks/useGameLog";
 import type { GameState, Unit, Weapon } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "../utils/weaponHelpers";
-import BoardPvp from "./BoardPvp";
+import BoardPvp, { type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
 import { SettingsMenu } from "./SettingsMenu";
@@ -174,6 +174,23 @@ export const BoardReplay: React.FC = () => {
   // Settings menu state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const handleOpenSettings = () => setIsSettingsOpen(true);
+
+  const [measureMode, setMeasureMode] = useState<MeasureModeState>({ kind: "off" });
+  const handleToggleMeasureMode = useCallback(() => {
+    setMeasureMode((prev) => (prev.kind === "off" ? { kind: "armed" } : { kind: "off" }));
+  }, []);
+  const handleMeasureHexCommit = useCallback((col: number, row: number) => {
+    setMeasureMode((prev) => {
+      if (prev.kind === "armed") {
+        return { kind: "measuring", startCol: col, startRow: row };
+      }
+      if (prev.kind === "measuring") {
+        return { kind: "off" };
+      }
+      return prev;
+    });
+  }, []);
+  const measureModeActive = measureMode.kind !== "off";
 
   // Settings preferences (from localStorage)
   const [settings, setSettings] = useState(() => {
@@ -2144,6 +2161,7 @@ export const BoardReplay: React.FC = () => {
           return [];
         }}
         chargePreviewOverlayHexes={[]}
+        chargeReferenceHex={null}
         getAdvanceDestinations={(unitId: number) => {
           // Calculate ALL valid advance destinations for replay mode using BFS
           // For advance, unitId will be -3 (ghost unit), so we need to find the actual unit
@@ -2416,6 +2434,8 @@ export const BoardReplay: React.FC = () => {
           }
           return undefined;
         })()}
+        measureMode={measureMode}
+        onMeasureHexCommit={handleMeasureHexCommit}
       />
     ) : (
       <div className="replay-empty-state">
@@ -2434,7 +2454,12 @@ export const BoardReplay: React.FC = () => {
 
   return (
     <>
-      <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>
+      <SharedLayout
+        rightColumnContent={rightColumnContent}
+        onOpenSettings={handleOpenSettings}
+        onToggleMeasureMode={handleToggleMeasureMode}
+        measureModeActive={measureModeActive}
+      >
         {centerContent}
       </SharedLayout>
       <SettingsMenu

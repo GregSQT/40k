@@ -84,7 +84,7 @@ interface ObjectiveControlMap {
   [hexKey: string]: number | null; // "col,row" -> 0 (P0), 1 (P1), or null (contested/uncontrolled)
 }
 
-interface DrawBoardOptions {
+export interface DrawBoardOptions {
   availableCells?: HighlightCell[];
   attackCells?: HighlightCell[];
   coverCells?: HighlightCell[];
@@ -99,6 +99,8 @@ interface DrawBoardOptions {
   showHexCoordinates?: boolean;
   objectiveControl?: ObjectiveControlMap;
   moveDestPoolRef?: React.RefObject<Set<string>>;
+  /** Ancres charge (même sémantique que ``moveDestPoolRef``) — preview multi-base comme la phase move. */
+  chargeDestPoolRef?: React.RefObject<Set<string>>;
   selectedUnitBaseSize?: number;
   /** Pre-built static board container (background + wall dots + objectives base). Reused across renders. */
   cachedStaticBoard?: PIXI.Container | null;
@@ -113,6 +115,13 @@ interface DrawBoardOptions {
     centerCol: number;
     centerRow: number;
     zoneHexSteps: number;
+  };
+  /** Preview combat : cercle euclidien (bord extérieur lissé par-dessus les pastilles hex). */
+  fightEngagementRing?: {
+    cx: number;
+    cy: number;
+    rInner: number;
+    rOuter: number;
   };
 }
 
@@ -338,6 +347,53 @@ const parseColor = (colorStr: string): number => {
   return parseInt(colorStr.replace("0x", ""), 16);
 };
 
+/**
+ * Phase move, unité multi-base sur grand plateau : pool de centres → disques d’empreinte →
+ * `RenderTexture` 1:1 → sprite (même code qu’historiquement).
+ */
+function addFootprintHighlightSprite(
+  app: PIXI.Application,
+  highlightContainer: PIXI.Container,
+  gfx: PIXI.Graphics,
+  alpha: number,
+  displayName: string
+): void {
+  const bounds = gfx.getBounds();
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    gfx.destroy();
+    return;
+  }
+  const rt = PIXI.RenderTexture.create({ width: bounds.width, height: bounds.height });
+  gfx.position.set(-bounds.x, -bounds.y);
+  app.renderer.render(gfx, { renderTexture: rt });
+  gfx.destroy();
+  const sprite = new PIXI.Sprite(rt);
+  sprite.name = displayName;
+  sprite.position.set(bounds.x, bounds.y);
+  sprite.alpha = alpha;
+  highlightContainer.addChild(sprite);
+}
+
+/** Contour extérieur lissé pour la preview d’engagement (combat) — plusieurs traits concentriques. */
+function createFightEngagementRingSmoothOutline(
+  cx: number,
+  cy: number,
+  rOuter: number,
+  color: number,
+): PIXI.Graphics {
+  const gfx = new PIXI.Graphics();
+  gfx.name = "fight-engagement-ring-smooth";
+  const featherW = Math.max(5, Math.min(14, rOuter * 0.018));
+  gfx.lineStyle(featherW, color, 0.1);
+  gfx.drawCircle(cx, cy, rOuter);
+  gfx.lineStyle(2.6, color, 0.34);
+  gfx.drawCircle(cx, cy, rOuter);
+  const hi = Math.min(0xffffff, ((color & 0xfefefe) >> 1) + 0x282828);
+  gfx.lineStyle(1.05, hi, 0.8);
+  gfx.drawCircle(cx, cy, rOuter);
+  return gfx;
+}
+
 /** Remplissage objectif : texture teintée ou couleur unie (même pipeline que les murs). */
 function beginObjectiveFill(
   g: PIXI.Graphics,
@@ -402,12 +458,14 @@ export const drawBoard = (
       showHexCoordinates = false,
       objectiveControl = {},
       moveDestPoolRef,
+      chargeDestPoolRef,
       selectedUnitBaseSize,
       losDebugShowRatio = false,
       losDebugRatioByHex = {},
       losDebugCoverRatio = 0,
       losDebugVisibilityMinRatio = 0,
       chargeEngagementHalo,
+      fightEngagementRing,
     } = options || {};
 
     // Parse objective control colors - use same colors as player units
@@ -645,6 +703,19 @@ export const drawBoard = (
         moveDestPoolRef?.current &&
         moveDestPoolRef.current.size > 0;
 
+      const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
+      const availableCellsDrawColor = useAdvanceMovePoolLikeMove
+        ? advanceZoneFillColor
+        : HIGHLIGHT_COLOR;
+
+      const useLargeBoardChargeDestPoolDraw =
+        interactionPhase === "charge" &&
+        (mode === "select" || mode === "chargePreview") &&
+        selectedUnitBaseSize &&
+        selectedUnitBaseSize > 1 &&
+        chargeDestPoolRef?.current &&
+        chargeDestPoolRef.current.size > 0;
+
       const drawGroup = (cells: Array<{ col: number; row: number }>, color: number, alpha: number, skipThreshold = true) => {
         if (cells.length === 0) return;
         if (skipThreshold && cells.length > LARGE_POOL_THRESHOLD) return;
@@ -665,7 +736,8 @@ export const drawBoard = (
         // so the visual circles won't overlap walls.
         const footprintRadius = (selectedUnitBaseSize / 2) * HEX_HORIZ_SPACING;
         const gfx = new PIXI.Graphics();
-        gfx.beginFill(HIGHLIGHT_COLOR, 1.0);
+        const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
+        gfx.beginFill(poolFillColor, 1.0);
         for (const key of moveDestPoolRef.current) {
           const sep = key.indexOf(",");
           const c = Number(key.substring(0, sep));
@@ -675,32 +747,43 @@ export const drawBoard = (
           gfx.drawCircle(hx, hy, footprintRadius);
         }
         gfx.endFill();
-        const bounds = gfx.getBounds();
-        if (bounds.width > 0 && bounds.height > 0) {
-          const rt = PIXI.RenderTexture.create({ width: bounds.width, height: bounds.height });
-          gfx.position.set(-bounds.x, -bounds.y);
-          app.renderer.render(gfx, { renderTexture: rt });
-          gfx.destroy();
-          const sprite = new PIXI.Sprite(rt);
-          sprite.position.set(bounds.x, bounds.y);
-          sprite.alpha = 0.4;
-          highlightContainer.addChild(sprite);
-        } else {
-          gfx.destroy();
-        }
+        addFootprintHighlightSprite(
+          app,
+          highlightContainer,
+          gfx,
+          0.4,
+          useAdvanceMovePoolLikeMove ? "advance-dest-pool" : "move-dest-pool",
+        );
       } else {
-        drawGroup(availableCells, HIGHLIGHT_COLOR, 0.4, false);
+        drawGroup(availableCells, availableCellsDrawColor, 0.4, false);
       }
       drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
-      drawGroup(
-        chargeCells.map((c: any) => ({
-          col: Array.isArray(c) ? c[0] : c.col,
-          row: Array.isArray(c) ? c[1] : c.row,
-        })),
-        CHARGE_DESTINATION_HEX_FILL,
-        0.4,
-        false,
-      );
+      if (useLargeBoardChargeDestPoolDraw && chargeDestPoolRef?.current) {
+        const footprintRadius = (selectedUnitBaseSize / 2) * HEX_HORIZ_SPACING;
+        const chargeGfx = new PIXI.Graphics();
+        chargeGfx.beginFill(CHARGE_DESTINATION_HEX_FILL, 1.0);
+        const chargePool = chargeDestPoolRef.current;
+        for (const key of chargePool) {
+          const sep = key.indexOf(",");
+          const c = Number(key.substring(0, sep));
+          const r = Number(key.substring(sep + 1));
+          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+          const hy = r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+          chargeGfx.drawCircle(hx, hy, footprintRadius);
+        }
+        chargeGfx.endFill();
+        addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.4, "charge-dest-pool");
+      } else {
+        drawGroup(
+          chargeCells.map((c: any) => ({
+            col: Array.isArray(c) ? c[0] : c.col,
+            row: Array.isArray(c) ? c[1] : c.row,
+          })),
+          CHARGE_DESTINATION_HEX_FILL,
+          0.4,
+          false,
+        );
+      }
       drawGroup(advanceCells, ADVANCE_DESTINATION_HEX_FILL, 0.3, false);
 
       if (
@@ -719,12 +802,18 @@ export const drawBoard = (
           MARGIN;
         const ringGfx = new PIXI.Graphics();
         ringGfx.name = "charge-engagement-halo";
-        ringGfx.lineStyle(2.5, CHARGE_DESTINATION_HEX_FILL, 0.38);
-        ringGfx.drawCircle(
-          hcx,
-          hcy,
-          chargeEngagementHalo.zoneHexSteps * HEX_HORIZ_SPACING
-        );
+        const haloR = chargeEngagementHalo.zoneHexSteps * HEX_HORIZ_SPACING;
+        const haloColor = CHARGE_DESTINATION_HEX_FILL;
+        // Plusieurs traits superposés (large + léger → fin + opaque) : bord moins crénelé sous CanvasRenderer.
+        const haloLayers: Array<{ width: number; alpha: number }> = [
+          { width: 14, alpha: 0.06 },
+          { width: 7, alpha: 0.14 },
+          { width: 3, alpha: 0.32 },
+        ];
+        for (const layer of haloLayers) {
+          ringGfx.lineStyle(layer.width, haloColor, layer.alpha);
+          ringGfx.drawCircle(hcx, hcy, haloR);
+        }
         highlightContainer.addChild(ringGfx);
       }
 
@@ -937,13 +1026,11 @@ export const drawBoard = (
           // Shooting preview palette: used in shoot phase and movePreview confirm step
           const useShootingPreviewPalette = phase === "shoot" || mode === "movePreview";
           if (useShootingPreviewPalette) {
-            // In advancePreview mode, use light brown for availableCells
-            if (mode === "advancePreview" && isAvailable) {
-              // Light brown for advance destinations (0xD4A574 = light brown)
-              highlightCell.beginFill(0xd4a574, 0.5);
-            } else if (isAdvanceDestination) {
-              // ADVANCE_IMPLEMENTATION_PLAN.md: Orange for advance destinations
-              highlightCell.beginFill(0xff8c00, 0.5);
+            if (
+              (mode === "advancePreview" && isAvailable) ||
+              isAdvanceDestination
+            ) {
+              highlightCell.beginFill(ADVANCE_DESTINATION_HEX_FILL, 0.5);
             } else if (isInCover) {
               // Vivid light blue for targets in cover
               highlightCell.beginFill(0x9ec5ff, 0.4);
@@ -994,6 +1081,23 @@ export const drawBoard = (
       }
     }
     } // end else (legacy small board)
+
+    if (
+      fightEngagementRing &&
+      Number.isFinite(fightEngagementRing.rOuter) &&
+      fightEngagementRing.rOuter > 1 &&
+      Number.isFinite(fightEngagementRing.cx) &&
+      Number.isFinite(fightEngagementRing.cy)
+    ) {
+      highlightContainer.addChild(
+        createFightEngagementRingSmoothOutline(
+          fightEngagementRing.cx,
+          fightEngagementRing.cy,
+          fightEngagementRing.rOuter,
+          ATTACK_COLOR,
+        ),
+      );
+    }
 
     // Caller (BoardPvp) handles stage cleanup. drawBoard only adds containers.
 

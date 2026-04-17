@@ -137,8 +137,8 @@
   --tooltip-font-size: 11px;
   --tooltip-font-weight: 400;
   --tooltip-line-height: 1.4;
-  --tooltip-padding-y: 6px;
-  --tooltip-padding-x: 8px;
+  --tooltip-padding-y: 4px;
+  --tooltip-padding-x: 6px;
   --tooltip-max-width: 600px;
   --tooltip-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
 

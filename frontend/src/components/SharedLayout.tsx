@@ -1,5 +1,6 @@
 // frontend/src/components/SharedLayout.tsx
 import type React from "react";
+import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { getAuthSession } from "../auth/authStorage";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -10,13 +11,51 @@ interface SharedLayoutProps {
   rightColumnContent: React.ReactNode; // Right column content (varies by page)
   className?: string;
   onOpenSettings?: () => void;
+  /** Active le mode mesure (règle) ou annule si déjà actif. */
+  onToggleMeasureMode?: () => void;
+  /** Règle « allumée » : en attente du 1er clic ou mesure en cours. */
+  measureModeActive?: boolean;
 }
 
 interface NavigationProps {
   onOpenSettings?: () => void;
+  onToggleMeasureMode?: () => void;
+  measureModeActive?: boolean;
 }
 
-const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
+/** Logo règle (assets : `frontend/public/icons/Action_Logo/Ruler.png`). */
+function RulerMenuIcon({ active }: { active: boolean }) {
+  return (
+    <img
+      src="/icons/Action_Logo/Ruler.png"
+      alt=""
+      width={20}
+      height={20}
+      draggable={false}
+      aria-hidden
+      style={{
+        display: "block",
+        opacity: active ? 1 : 0.78,
+        objectFit: "contain",
+      }}
+    />
+  );
+}
+
+const Navigation: React.FC<NavigationProps> = ({
+  onOpenSettings,
+  onToggleMeasureMode,
+  measureModeActive = false,
+}) => {
+  const measureRulerButtonRef = useRef<HTMLButtonElement>(null);
+
+  /** Retire le focus du bouton règle quand le mode mesure se termine (évite le cadre :focus-visible). */
+  useEffect(() => {
+    if (!measureModeActive) {
+      measureRulerButtonRef.current?.blur();
+    }
+  }, [measureModeActive]);
+
   const location = useLocation();
   const authSession = getAuthSession();
   const tutorialCompleted = authSession?.tutorial_completed ?? true;
@@ -145,23 +184,60 @@ const Navigation: React.FC<NavigationProps> = ({ onOpenSettings }) => {
       </nav>
 
       {onOpenSettings && (
-        <TooltipWrapper text="Paramètres">
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="settings-button"
-            style={{
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "20px",
-              color: "#9ca3af",
-              padding: "4px",
-            }}
-          >
-            ⚙️
-          </button>
-        </TooltipWrapper>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          {onToggleMeasureMode && (
+            <TooltipWrapper
+              text={
+                measureModeActive
+                  ? "Annuler le mode mesure (ou terminez par un 2e clic sur le plateau)"
+                  : "Mesurer une distance sur le plateau"
+              }
+            >
+              <button
+                ref={measureRulerButtonRef}
+                type="button"
+                onClick={onToggleMeasureMode}
+                className="settings-button"
+                aria-pressed={measureModeActive}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: measureModeActive ? "#93c5fd" : "#9ca3af",
+                  padding: "4px",
+                }}
+              >
+                <RulerMenuIcon active={measureModeActive} />
+              </button>
+            </TooltipWrapper>
+          )}
+          <TooltipWrapper text="Paramètres">
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="settings-button"
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "20px",
+                color: "#9ca3af",
+                padding: "4px",
+              }}
+            >
+              ⚙️
+            </button>
+          </TooltipWrapper>
+        </div>
       )}
     </div>
   );
@@ -172,6 +248,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   rightColumnContent,
   className,
   onOpenSettings,
+  onToggleMeasureMode,
+  measureModeActive,
 }) => {
   return (
     <div
@@ -190,7 +268,11 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
             className="unit-status-tables"
             style={{ paddingTop: "0px", marginTop: "0px", gap: "4px" }}
           >
-            <Navigation onOpenSettings={onOpenSettings} />
+            <Navigation
+              onOpenSettings={onOpenSettings}
+              onToggleMeasureMode={onToggleMeasureMode}
+              measureModeActive={measureModeActive}
+            />
             {rightColumnContent}
           </div>
         </div>

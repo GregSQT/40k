@@ -6,7 +6,6 @@ import type { GameMode, PlayerId, Unit } from "../types";
 import type { DiceValue } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
-import { getMeleeRange } from "../utils/weaponHelpers";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -286,6 +285,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [chargePreviewOverlayHexes, setChargePreviewOverlayHexes] = useState<
     Array<{ col: number; row: number }>
   >([]);
+  /** Hex de référence portée charge (moteur) — même point que ``charge_reference_hex`` API. */
+  const [chargeReferenceHex, setChargeReferenceHex] = useState<{
+    col: number;
+    row: number;
+  } | null>(null);
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Advance state management
   const [advanceDestinations, setAdvanceDestinations] = useState<
     Array<{ col: number; row: number }>
@@ -294,6 +298,34 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [advanceRoll, setAdvanceRoll] = useState<number | null>(null);
   const moveDestPoolRef = useRef<Set<string>>(new Set());
   const footprintZoneRef = useRef<Set<string>>(new Set());
+  /** Ancres charge valides + zone violette (empreintes) — même usage que moveDestPoolRef pour l’icône sous le curseur. */
+  const chargeDestPoolRef = useRef<Set<string>>(new Set());
+  const chargeFootprintZoneRef = useRef<Set<string>>(new Set());
+
+  const syncChargePoolRefs = useCallback(
+    (
+      anchors: Array<{ col: number; row: number }>,
+      overlay: Array<{ col: number; row: number }>
+    ) => {
+      const a = new Set<string>();
+      for (const h of anchors) {
+        a.add(`${h.col},${h.row}`);
+      }
+      chargeDestPoolRef.current = a;
+      const z = new Set<string>();
+      const zoneSource = overlay.length > 0 ? overlay : anchors;
+      for (const h of zoneSource) {
+        z.add(`${h.col},${h.row}`);
+      }
+      chargeFootprintZoneRef.current = z;
+    },
+    []
+  );
+
+  const clearChargePoolRefs = useCallback(() => {
+    chargeDestPoolRef.current = new Set();
+    chargeFootprintZoneRef.current = new Set();
+  }, []);
   const [advanceWarningPopup, setAdvanceWarningPopup] = useState<{
     unitId: number;
     timestamp: number;
@@ -755,6 +787,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAttackPreview(null);
       setChargeDestinations([]);
       setChargePreviewOverlayHexes([]);
+      setChargeReferenceHex(null);
+      clearChargePoolRefs();
       setPendingChargeRollDisplay(null);
       setChargePreviewTargetId(null);
       setAdvanceDestinations([]);
@@ -1416,10 +1450,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               data.result.valid_destinations ??
               pd?.violet_hexes ??
               [];
-            setChargeDestinations(normalizeChargeDestinationsFromApi(raw));
+            const anchorsNorm = normalizeChargeDestinationsFromApi(raw);
             const displayRaw = (data.result as { charge_preview_display_hexes?: unknown })
               .charge_preview_display_hexes;
-            setChargePreviewOverlayHexes(normalizeChargeDestinationsFromApi(displayRaw ?? []));
+            const overlayNorm = normalizeChargeDestinationsFromApi(displayRaw ?? []);
+            setChargeDestinations(anchorsNorm);
+            setChargePreviewOverlayHexes(overlayNorm);
+            syncChargePoolRefs(anchorsNorm, overlayNorm);
+            const refH = (data.result as { charge_reference_hex?: unknown }).charge_reference_hex;
+            if (Array.isArray(refH) && refH.length >= 2) {
+              setChargeReferenceHex({ col: Number(refH[0]), row: Number(refH[1]) });
+            } else {
+              setChargeReferenceHex(null);
+            }
             if (data.result.targetId != null) {
               setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
             }
@@ -1442,12 +1485,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.result?.valid_destinations &&
             data.result?.waiting_for_player === true
           ) {
-            setChargeDestinations(
-              normalizeChargeDestinationsFromApi(data.result.valid_destinations)
-            );
+            const anchorsNormFb = normalizeChargeDestinationsFromApi(data.result.valid_destinations);
             const displayRawFb = (data.result as { charge_preview_display_hexes?: unknown })
               .charge_preview_display_hexes;
-            setChargePreviewOverlayHexes(normalizeChargeDestinationsFromApi(displayRawFb ?? []));
+            const overlayNormFb = normalizeChargeDestinationsFromApi(displayRawFb ?? []);
+            setChargeDestinations(anchorsNormFb);
+            setChargePreviewOverlayHexes(overlayNormFb);
+            syncChargePoolRefs(anchorsNormFb, overlayNormFb);
+            const refFb = (data.result as { charge_reference_hex?: unknown }).charge_reference_hex;
+            if (Array.isArray(refFb) && refFb.length >= 2) {
+              setChargeReferenceHex({ col: Number(refFb[0]), row: Number(refFb[1]) });
+            } else {
+              setChargeReferenceHex(null);
+            }
             if (data.result.targetId != null) {
               setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
             }
@@ -1484,6 +1534,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             // CRITICAL: Reset mode immediately (EXACT same as successful charges) so logo renders in stable state
             setChargeDestinations([]);
             setChargePreviewOverlayHexes([]);
+            setChargeReferenceHex(null);
+            clearChargePoolRefs();
             setPendingChargeRollDisplay(null);
             setSelectedUnitId(null);
             setMode("select");
@@ -1516,6 +1568,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             setChargeDestinations([]);
             setChargePreviewOverlayHexes([]);
+            setChargeReferenceHex(null);
+            clearChargePoolRefs();
             setPendingChargeRollDisplay(null);
             setChargePreviewTargetId(null);
             setSelectedUnitId(null);
@@ -1983,6 +2037,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         });
         setChargeDestinations([]);
         setChargePreviewOverlayHexes([]);
+        setChargeReferenceHex(null);
+        clearChargePoolRefs();
         setPendingChargeRollDisplay(null);
         setChargePreviewTargetId(null);
       } else if (numericUnitId === null && mode === "advancePreview") {
@@ -1997,7 +2053,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setTargetPreview(null);
       // Remove all frontend shooting state - backend manages everything
     },
-    [gameState, executeAction, mode, determineClickTarget, selectedUnitId, getTutorialShootOptionsRef]
+    [
+      gameState,
+      executeAction,
+      mode,
+      determineClickTarget,
+      selectedUnitId,
+      getTutorialShootOptionsRef,
+      clearChargePoolRefs,
+    ]
   );
 
   // Right-click handler for shooting phase
@@ -2604,7 +2668,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (chargerId: number | string, destCol: number, destRow: number) => {
       const numericChargerId = typeof chargerId === "string" ? parseInt(chargerId, 10) : chargerId;
 
-      // Find target enemy adjacent to destination
       if (!gameState) return;
 
       const charger = gameState.units.find((u) => parseInt(String(u.id), 10) === numericChargerId);
@@ -2613,37 +2676,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
 
-      // Find enemy units adjacent to destination (within CC_RNG)
-      const enemies = gameState.units.filter((u) => u.player !== charger.player && u.HP_CUR > 0);
-
-      const destCube = offsetToCube(destCol, destRow);
-      let targetEnemy = null;
-
-      for (const enemy of enemies) {
-        const enemyCube = offsetToCube(enemy.col, enemy.row);
-        const distance = cubeDistance(destCube, enemyCube);
-        // Use getMeleeRange() (always 1)
-        if (distance <= getMeleeRange()) {
-          targetEnemy = enemy;
-          break; // Use first adjacent enemy
+      // La cible a déjà été choisie (clic sur l’ennemi → jet + zone violette). Ne pas la deviner
+      // par « adjacent à l’hex cliqué » : sur Board ×10 / empreintes larges, l’ancre de fin n’est
+      // pas à distance 1 du centre primaire ennemi — le backend résout l’ancre depuis l’hex cliqué.
+      let targetIdStr: string | null =
+        chargePreviewTargetId != null ? String(chargePreviewTargetId) : null;
+      if (targetIdStr == null) {
+        const sel = (gameState as { charge_target_selections?: Record<string, string> })
+          .charge_target_selections;
+        if (sel && sel[String(numericChargerId)]) {
+          targetIdStr = String(sel[String(numericChargerId)]);
         }
       }
-
-      if (!targetEnemy) {
-        console.error("🟠 No enemy found adjacent to destination:", { destCol, destRow });
+      if (!targetIdStr) {
+        console.error("🟠 handleMoveCharger: no charge target (chargePreviewTargetId / game_state)");
         return;
       }
 
-      // Send charge action with correct field names
       await executeAction({
         action: "charge",
         unitId: numericChargerId.toString(),
-        destCol: destCol,
-        destRow: destRow,
-        targetId: targetEnemy.id.toString(),
+        destCol,
+        destRow,
+        targetId: targetIdStr,
       });
     },
-    [executeAction, gameState]
+    [executeAction, gameState, chargePreviewTargetId]
   );
 
   const handleStartTargetPreview = useCallback(
@@ -3064,8 +3122,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onLogChargeRoll: () => {},
       getChargeDestinations: () => [],
       chargePreviewOverlayHexes: [],
+      chargeReferenceHex: null,
       moveDestPoolRef,
       footprintZoneRef,
+      chargeDestPoolRef,
+      chargeFootprintZoneRef,
       onAdvance: async () => {},
       getAdvanceDestinations: () => [],
       advancingUnitId: null,
@@ -3150,8 +3211,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onLogChargeRoll: emptyCallback,
     getChargeDestinations,
     chargePreviewOverlayHexes,
+    chargeReferenceHex,
     moveDestPoolRef,
     footprintZoneRef,
+    chargeDestPoolRef,
+    chargeFootprintZoneRef,
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler
     getAdvanceDestinations: getAdvanceDestinationsMemo,
     advancingUnitId,

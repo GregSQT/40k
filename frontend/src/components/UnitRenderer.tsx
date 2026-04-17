@@ -4,6 +4,7 @@ import type { FightSubPhase, GameState, PlayerId, TargetPreview, Unit } from "..
 import {
   buildWeaponSignature,
   createBlinkingHPBar,
+  type HpBarHtmlTooltipPayload,
   type HPBlinkContainer,
 } from "../utils/blinkingHPBar";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
@@ -130,7 +131,7 @@ interface UnitRendererProps {
 
   // Debug mode
   debugMode?: boolean;
-  onUnitTooltip?: (tooltip: { visible: boolean; text: string; x: number; y: number }) => void;
+  onUnitTooltip?: (tooltip: HpBarHtmlTooltipPayload) => void;
   renderTarget?: PIXI.Container;
 }
 

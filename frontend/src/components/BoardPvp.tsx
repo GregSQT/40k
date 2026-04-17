@@ -2,6 +2,7 @@
 
 import * as PIXI from "pixi.js-legacy";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   TUTORIAL_STEP_TITLES_INTERCESSOR_HALO,
   useTutorial,
@@ -27,11 +28,15 @@ import {
   getHexLine,
   offsetToCube,
 } from "../utils/gameHelpers";
-import { getMaxRangedRange, getMeleeRange } from "../utils/weaponHelpers";
-import { drawBoard } from "./BoardDisplay";
+import { getMaxRangedRange } from "../utils/weaponHelpers";
+import { drawBoard, type DrawBoardOptions } from "./BoardDisplay";
 import { renderUnit } from "./UnitRenderer";
 import {
   computeOccupiedHexes,
+  engagementRoundRingPreviewHexesOnBoard,
+  getFightEngagementRingBoardPixels,
+  minHexDistanceBetweenFootprintKeySets,
+  unitFootprintHexKeys,
   pixelToHex,
   hexToPixel,
   isFootprintInBounds,
@@ -44,7 +49,7 @@ import {
 } from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
-import type { HPBlinkContainer } from "../utils/blinkingHPBar";
+import type { HPBlinkContainer, HpBarHtmlTooltipPayload } from "../utils/blinkingHPBar";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -165,6 +170,12 @@ type Mode =
   | "chargePreview"
   | "advancePreview";
 
+/** État du mode mesure (règle dans la barre). */
+export type MeasureModeState =
+  | { kind: "off" }
+  | { kind: "armed" }
+  | { kind: "measuring"; startCol: number; startRow: number };
+
 type BoardProps = {
   units: Unit[];
   selectedUnitId: number | null;
@@ -232,8 +243,13 @@ type BoardProps = {
   getChargeDestinations: (unitId: number) => { col: number; row: number }[];
   /** Union empreintes valides (API) — pastilles violettes autour de la zone d’engagement cible. */
   chargePreviewOverlayHexes?: Array<{ col: number; row: number }>;
+  /** Hex de référence portée (API ``charge_reference_hex``) — ne pas recalculer côté client. */
+  chargeReferenceHex?: { col: number; row: number } | null;
   moveDestPoolRef?: React.RefObject<Set<string>>;
   footprintZoneRef?: React.RefObject<Set<string>>;
+  /** Phase charge : ancres valides + zone violette (empreinte) pour l’icône sous le curseur. */
+  chargeDestPoolRef?: React.RefObject<Set<string>>;
+  chargeFootprintZoneRef?: React.RefObject<Set<string>>;
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callback
   onAdvance?: (unitId: number) => void;
   onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
@@ -252,6 +268,9 @@ type BoardProps = {
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
+  /** Mode mesure (règle) : armed → 1er clic sur le plateau pose l’ancre ; ligne + distance ; 2e clic termine. */
+  measureMode?: MeasureModeState;
+  onMeasureHexCommit?: (col: number, row: number) => void;
 };
 
 /** Hex distance between two offset-coordinate positions. */
@@ -263,6 +282,45 @@ function hexDistOff(c1: number, r1: number, c2: number, r2: number): number {
 
 /** Échelle affichage tooltip mouvement : nombre de pas hex entre centres pour 1″ (règle plateau). */
 const HEX_STEPS_PER_INCH_DISPLAY = 10;
+
+/** Empreintes depuis ``units_cache`` (API) pour aligner l’UI sur le moteur (charge : hex le plus proche de la cible). */
+function parseOccupiedHexesFromCacheEntry(entry: unknown): Array<{ col: number; row: number }> {
+  if (!entry || typeof entry !== "object") return [];
+  const occ = (entry as { occupied_hexes?: unknown }).occupied_hexes;
+  if (!Array.isArray(occ) || occ.length === 0) return [];
+  const out: Array<{ col: number; row: number }> = [];
+  for (const x of occ) {
+    if (Array.isArray(x) && x.length >= 2) {
+      out.push({ col: Number(x[0]), row: Number(x[1]) });
+    }
+  }
+  return out;
+}
+
+/** Même logique que ``_charge_closest_charger_hex_to_target`` (charge_handlers.py). */
+function closestChargerHexToTargetFootprint(
+  chargerCacheEntry: unknown,
+  targetCacheEntry: unknown,
+  fallbackCharger: { col: number; row: number },
+  fallbackTarget: { col: number; row: number }
+): { col: number; row: number } {
+  let ch = parseOccupiedHexesFromCacheEntry(chargerCacheEntry);
+  if (ch.length === 0) ch = [{ col: fallbackCharger.col, row: fallbackCharger.row }];
+  let ta = parseOccupiedHexesFromCacheEntry(targetCacheEntry);
+  if (ta.length === 0) ta = [{ col: fallbackTarget.col, row: fallbackTarget.row }];
+  let best = ch[0]!;
+  let bestD = Infinity;
+  for (const h of ch) {
+    for (const t of ta) {
+      const d = hexDistOff(h.col, h.row, t.col, t.row);
+      if (d < bestD) {
+        bestD = d;
+        best = h;
+      }
+    }
+  }
+  return best;
+}
 
 /** Blink / prévisualisation tir : même règle que le rendu Pixi (vivant = présent dans units_cache). */
 function filterBlinkIdsToLivingUnitsCache(
@@ -357,8 +415,11 @@ export default function Board({
   chargeRollPopup,
   getChargeDestinations,
   chargePreviewOverlayHexes = [],
+  chargeReferenceHex = null,
   moveDestPoolRef,
   footprintZoneRef,
+  chargeDestPoolRef,
+  chargeFootprintZoneRef,
   onAdvance,
   onAdvanceMove,
   onCancelAdvance,
@@ -375,6 +436,8 @@ export default function Board({
   objectivesOverride,
   replayActionIndex,
   autoSelectWeapon,
+  measureMode = { kind: "off" },
+  onMeasureHexCommit,
 }: BoardProps) {
   React.useEffect(() => {}, []);
 
@@ -409,6 +472,8 @@ export default function Board({
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
   /** Ligne départ → pointeur + libellé distance hex (preview move) */
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
+  /** Ligne mesure règle (ancre → hex sous curseur) */
+  const measureGuideLineRef = useRef<PIXI.Graphics | null>(null);
   const hoveredHexRef = useRef<{ col: number; row: number } | null>(null);
   const losHexRef = useRef<{ col: number; row: number } | null>(null);
   const losRequestIdRef = useRef(0);
@@ -550,15 +615,17 @@ export default function Board({
     }
   }, [boardConfig, showHexCoordinates]);
 
-  const [unitHoverTooltip, setUnitHoverTooltip] = useState<{
+  const [unitHoverTooltip, setUnitHoverTooltip] = useState<HpBarHtmlTooltipPayload | null>(null);
+
+  /** Tooltip distance prévisualisation mouvement (″) : même style que survol unité ; échelle hex → ″ via HEX_STEPS_PER_INCH_DISPLAY. */
+  const [movePreviewDistanceTooltip, setMovePreviewDistanceTooltip] = useState<{
     visible: boolean;
     text: string;
     x: number;
     y: number;
   } | null>(null);
 
-  /** Tooltip distance prévisualisation mouvement (″) : même style que survol unité ; échelle hex → ″ via HEX_STEPS_PER_INCH_DISPLAY. */
-  const [movePreviewDistanceTooltip, setMovePreviewDistanceTooltip] = useState<{
+  const [measureDistanceTooltip, setMeasureDistanceTooltip] = useState<{
     visible: boolean;
     text: string;
     x: number;
@@ -570,21 +637,20 @@ export default function Board({
   const [movePreviewLosCoverById, setMovePreviewLosCoverById] = useState<Record<string, boolean>>({});
 
   /** Normalise la fermeture : Pixi envoie visible:false mais on garde l’état en null pour le rendu. */
-  const handleUnitTooltip = useCallback(
-    (payload: { visible: boolean; text: string; x: number; y: number }) => {
-      if (!payload.visible) {
-        setUnitHoverTooltip(null);
-      } else {
-        setUnitHoverTooltip({
-          visible: true,
-          text: payload.text,
-          x: payload.x,
-          y: payload.y,
-        });
-      }
-    },
-    []
-  );
+  const handleUnitTooltip = useCallback((payload: HpBarHtmlTooltipPayload) => {
+    if (!payload.visible) {
+      setUnitHoverTooltip(null);
+    } else {
+      setUnitHoverTooltip({
+        visible: true,
+        text: payload.text,
+        x: payload.x,
+        y: payload.y,
+        ...(payload.zIndex !== undefined ? { zIndex: payload.zIndex } : {}),
+        ...(payload.opacity !== undefined ? { opacity: payload.opacity } : {}),
+      });
+    }
+  }, []);
 
   // Persistent container for drag placement overlay (deployment phase)
   const dragOverlayRef = useRef<PIXI.Container | null>(null);
@@ -836,8 +902,25 @@ export default function Board({
     let destPixels: { x: number; y: number; col: number; row: number }[] | null = null;
 
     const buildZonePixels = () => {
-      const pool = footprintZoneRef?.current ?? moveDestPoolRef?.current;
-      if (!pool || pool.size === 0) { zonePixels = null; return; }
+      let pool: Set<string> | undefined | null;
+      if (phase === "charge" && mode === "chargePreview") {
+        const z = chargeFootprintZoneRef?.current;
+        const a = chargeDestPoolRef?.current;
+        if (z && z.size > 0) {
+          pool = z;
+        } else if (a && a.size > 0) {
+          pool = a;
+        } else {
+          zonePixels = null;
+          return;
+        }
+      } else {
+        pool = footprintZoneRef?.current ?? moveDestPoolRef?.current;
+      }
+      if (!pool || pool.size === 0) {
+        zonePixels = null;
+        return;
+      }
       zonePixels = [];
       for (const k of pool) {
         const sep = k.indexOf(",");
@@ -848,8 +931,14 @@ export default function Board({
     };
 
     const buildDestPixels = () => {
-      const pool = moveDestPoolRef?.current;
-      if (!pool || pool.size === 0) { destPixels = null; return; }
+      const pool =
+        phase === "charge" && mode === "chargePreview"
+          ? chargeDestPoolRef?.current
+          : moveDestPoolRef?.current;
+      if (!pool || pool.size === 0) {
+        destPixels = null;
+        return;
+      }
       destPixels = [];
       for (const k of pool) {
         const sep = k.indexOf(",");
@@ -862,12 +951,14 @@ export default function Board({
     buildZonePixels();
     buildDestPixels();
 
-    // DOM mousemove: icon follows cursor pixel-perfect (move phase ou advance en tir — mêmes refs moveDestPoolRef)
+    // DOM mousemove: icon follows cursor pixel-perfect (move, advance tir, charge destination)
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     const onMouseMove = (ev: MouseEvent) => {
       const allowIconFollow =
         selectedUnitId !== null &&
-        (phase === "move" || (phase === "shoot" && mode === "advancePreview"));
+        (phase === "move" ||
+          (phase === "shoot" && mode === "advancePreview") ||
+          (phase === "charge" && mode === "chargePreview"));
       if (!allowIconFollow) return;
       const app = appRef.current;
       if (!app || !canvas) return;
@@ -952,8 +1043,12 @@ export default function Board({
       const rowOffset = (approxCol % 2) * HEX_HEIGHT_H / 2;
       const approxRow = Math.round((py - HEX_HEIGHT_H / 2 - MARGIN_H - rowOffset) / HEX_HEIGHT_H);
       const curKey = `${approxCol},${approxRow}`;
-      const inZone = footprintZoneRef?.current?.has(curKey)
-        || moveDestPoolRef?.current?.has(curKey);
+      const inZone =
+        phase === "charge" && mode === "chargePreview"
+          ? (chargeFootprintZoneRef?.current?.has(curKey) ?? false) ||
+            (chargeDestPoolRef?.current?.has(curKey) ?? false)
+          : (footprintZoneRef?.current?.has(curKey) ?? false) ||
+            (moveDestPoolRef?.current?.has(curKey) ?? false);
 
       if (!inZone) {
         // Cursor outside zone: still snap to nearest center for smooth boundary sliding
@@ -971,15 +1066,54 @@ export default function Board({
       const iconCol = best.col;
       const iconRow = best.row;
 
-      // Ligne centre départ → centre icône prévisualisée (best) ; distance = hex entre ces centres (indépendante du curseur)
-      const startCol = Number(selectedUnit.col);
-      const startRow = Number(selectedUnit.row);
+      // Ligne départ → prévisualisation : en charge, départ = hex du chargeur **le plus proche de l’empreinte cible**
+      // (aligné sur charge_handlers / Board ×10). Sinon on gardait le centre primaire → faux 7,6″ vs jet 6″.
+      let startCol = Number(selectedUnit.col);
+      let startRow = Number(selectedUnit.row);
+      if (phase === "charge" && mode === "chargePreview" && selectedUnitId != null) {
+        if (
+          chargeReferenceHex != null &&
+          Number.isFinite(chargeReferenceHex.col) &&
+          Number.isFinite(chargeReferenceHex.row)
+        ) {
+          startCol = chargeReferenceHex.col;
+          startRow = chargeReferenceHex.row;
+        } else {
+          const sel = (gameState as { charge_target_selections?: Record<string, string> } | undefined)
+            ?.charge_target_selections;
+          const rawTid =
+            chargeTargetId != null
+              ? String(chargeTargetId)
+              : sel?.[String(selectedUnitId)] ?? null;
+          if (rawTid != null) {
+            const tidNum = parseInt(String(rawTid), 10);
+            const uc = gameState?.units_cache as Record<string, unknown> | undefined;
+            const targetUnit = units.find((u) => String(u.id) === String(tidNum));
+            if (uc && targetUnit) {
+              const chEntry = uc[String(selectedUnitId)];
+              const tEntry = uc[String(tidNum)];
+              const ref = closestChargerHexToTargetFootprint(
+                chEntry,
+                tEntry,
+                { col: Number(selectedUnit.col), row: Number(selectedUnit.row) },
+                { col: Number(targetUnit.col), row: Number(targetUnit.row) }
+              );
+              startCol = ref.col;
+              startRow = ref.row;
+            }
+          }
+        }
+      }
       const startX = hxX(startCol);
       const startY = hxY(startCol, startRow);
       const previewIconX = best.x;
       const previewIconY = best.y;
       const hexSteps = hexDistOff(startCol, startRow, iconCol, iconRow);
       const distanceDisplay = (hexSteps / HEX_STEPS_PER_INCH_DISPLAY).toFixed(1);
+      const tooltipCharge =
+        phase === "charge" && mode === "chargePreview" && chargeRoll != null && chargeRoll !== undefined
+          ? `${distanceDisplay}" / ${chargeRoll}"`
+          : `${distanceDisplay}"`;
 
       if (!movePreviewGuideLineRef.current || movePreviewGuideLineRef.current.destroyed) {
         const g = new PIXI.Graphics();
@@ -997,7 +1131,7 @@ export default function Board({
 
       setMovePreviewDistanceTooltip({
         visible: true,
-        text: `${distanceDisplay}"`,
+        text: tooltipCharge,
         x: rect.left + previewIconX / scaleX,
         y: rect.top + previewIconY / scaleY,
       });
@@ -1007,7 +1141,11 @@ export default function Board({
       // Find nearest valid center for LoS (icon may be on a footprint extension hex)
       let losCol = iconCol;
       let losRow = iconRow;
-      if (!moveDestPoolRef?.current?.has(`${iconCol},${iconRow}`)) {
+      const anchorPoolForLos =
+        phase === "charge" && mode === "chargePreview"
+          ? chargeDestPoolRef?.current
+          : moveDestPoolRef?.current;
+      if (!anchorPoolForLos?.has(`${iconCol},${iconRow}`)) {
         if (!destPixels) buildDestPixels();
         if (destPixels && destPixels.length > 0) {
           const ix = container.position.x;
@@ -1016,7 +1154,11 @@ export default function Board({
           for (let i = 0; i < destPixels.length; i++) {
             const dp = destPixels[i];
             const d = (dp.x - ix) * (dp.x - ix) + (dp.y - iy) * (dp.y - iy);
-            if (d < bestDist) { bestDist = d; losCol = dp.col; losRow = dp.row; }
+            if (d < bestDist) {
+              bestDist = d;
+              losCol = dp.col;
+              losRow = dp.row;
+            }
           }
         }
       }
@@ -1025,7 +1167,7 @@ export default function Board({
       const losHexChanged = !prevLos || prevLos.col !== losCol || prevLos.row !== losRow;
       losHexRef.current = { col: losCol, row: losRow };
 
-      if (losHexChanged) {
+      if (losHexChanged && !(phase === "charge" && mode === "chargePreview")) {
         triggerLosForHex(losCol, losRow);
       }
     };
@@ -1129,7 +1271,131 @@ export default function Board({
       hoveredHexRef.current = null;
       losHexRef.current = null;
     };
-  }, [boardConfig, gameConfig, phase, mode, selectedUnitId, units, setMovePreviewDistanceTooltip]);
+  }, [
+    boardConfig,
+    gameConfig,
+    phase,
+    mode,
+    selectedUnitId,
+    units,
+    gameState,
+    chargeTargetId,
+    chargeReferenceHex,
+    chargeRoll,
+    setMovePreviewDistanceTooltip,
+  ]);
+
+  // Mode mesure : clic plateau (capture) pour poser l’ancre ou terminer — prioritaire sur les unités.
+  useEffect(() => {
+    if (!boardConfig || measureMode.kind === "off" || !onMeasureHexCommit) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+
+    const onPointerDownCapture = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const app = appRef.current;
+      if (!app) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
+      const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const HEX_RADIUS = boardConfig.hex_radius;
+      const MARGIN = boardConfig.margin;
+      const { col, row } = pixelToHex(px, py, HEX_RADIUS, MARGIN, boardConfig.cols, boardConfig.rows);
+      if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onMeasureHexCommit(col, row);
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDownCapture, true);
+    return () => canvas.removeEventListener("pointerdown", onPointerDownCapture, true);
+  }, [boardConfig, measureMode.kind, onMeasureHexCommit]);
+
+  // Mode mesure : ligne ancre → hex sous curseur + tooltip distance (″), même échelle que le mouvement.
+  useEffect(() => {
+    if (!boardConfig || measureMode.kind !== "measuring") {
+      if (measureGuideLineRef.current && !measureGuideLineRef.current.destroyed) {
+        measureGuideLineRef.current.clear();
+        measureGuideLineRef.current.visible = false;
+      }
+      setMeasureDistanceTooltip(null);
+      return;
+    }
+
+    const { startCol, startRow } = measureMode;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+
+    const HEX_RADIUS = boardConfig.hex_radius;
+    const MARGIN = boardConfig.margin;
+    const BOARD_COLS = boardConfig.cols;
+    const BOARD_ROWS = boardConfig.rows;
+    const HEX_WIDTH = 1.5 * HEX_RADIUS;
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+
+    const hxX = (col: number) => col * HEX_WIDTH + HEX_WIDTH / 2 + MARGIN;
+    const hxY = (col: number, row: number) =>
+      row * HEX_HEIGHT + ((col % 2) * HEX_HEIGHT) / 2 + HEX_HEIGHT / 2 + MARGIN;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const app = appRef.current;
+      if (!app) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
+      const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
+      const { col: endCol, row: endRow } = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
+      if (endCol < 0 || endCol >= BOARD_COLS || endRow < 0 || endRow >= BOARD_ROWS) {
+        if (measureGuideLineRef.current && !measureGuideLineRef.current.destroyed) {
+          measureGuideLineRef.current.clear();
+          measureGuideLineRef.current.visible = false;
+        }
+        setMeasureDistanceTooltip(null);
+        return;
+      }
+
+      const startX = hxX(startCol);
+      const startY = hxY(startCol, startRow);
+      const endX = hxX(endCol);
+      const endY = hxY(endCol, endRow);
+      const hexSteps = hexDistOff(startCol, startRow, endCol, endRow);
+      const distanceDisplay = (hexSteps / HEX_STEPS_PER_INCH_DISPLAY).toFixed(1);
+
+      if (!measureGuideLineRef.current || measureGuideLineRef.current.destroyed) {
+        const g = new PIXI.Graphics();
+        g.zIndex = 848;
+        g.eventMode = "none";
+        app.stage.addChild(g);
+        measureGuideLineRef.current = g;
+      }
+      const guideLine = measureGuideLineRef.current;
+      guideLine.clear();
+      guideLine.lineStyle(2, 0xe2e8f0, 0.9);
+      guideLine.moveTo(startX, startY);
+      guideLine.lineTo(endX, endY);
+      guideLine.visible = true;
+
+      setMeasureDistanceTooltip({
+        visible: true,
+        text: `${distanceDisplay}"`,
+        x: rect.left + endX / scaleX,
+        y: rect.top + endY / scaleY,
+      });
+    };
+
+    canvas.addEventListener("mousemove", onMouseMove);
+    return () => {
+      canvas.removeEventListener("mousemove", onMouseMove);
+      if (measureGuideLineRef.current && !measureGuideLineRef.current.destroyed) {
+        measureGuideLineRef.current.clear();
+        measureGuideLineRef.current.visible = false;
+      }
+      setMeasureDistanceTooltip(null);
+    };
+  }, [boardConfig, measureMode]);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -1184,6 +1450,17 @@ export default function Board({
       }
       if (footprintZoneRef?.current && footprintZoneRef.current.size > 0) {
         footprintZoneRef.current.clear();
+      }
+    }
+
+    const keepChargePickPool =
+      phase === "charge" && mode === "chargePreview" && selectedUnitId !== null;
+    if (!keepChargePickPool) {
+      if (chargeDestPoolRef?.current && chargeDestPoolRef.current.size > 0) {
+        chargeDestPoolRef.current.clear();
+      }
+      if (chargeFootprintZoneRef?.current && chargeFootprintZoneRef.current.size > 0) {
+        chargeFootprintZoneRef.current.clear();
       }
     }
 
@@ -1521,37 +1798,59 @@ export default function Board({
     // Fight preview: fightTargets for red outline on enemies within fight range
     let fightTargets: Unit[] = [];
     const fightPreviewCells: { col: number; row: number }[] = [];
-    if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
-      const c1 = offsetToCube(selectedUnit.col, selectedUnit.row);
+    const gsRulesFight = (
+      gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
+    )?.config?.game_rules;
+    const cfgRulesFight = gameConfig?.game_rules as { engagement_zone?: number } | undefined;
+    const engagementFromRules =
+      gsRulesFight?.engagement_zone ?? cfgRulesFight?.engagement_zone ?? 1;
+    const inchesToSubhexRaw = (boardConfig as unknown as { inches_to_subhex?: number })
+      .inches_to_subhex;
+    const inchesToSubhex = typeof inchesToSubhexRaw === "number" ? inchesToSubhexRaw : 10;
+    // Plateau ×10 : 1″ ≈ inches_to_subhex pas ; le moteur expose engagement_zone (souvent 10). Si la config
+    // locale reste à 1, on retombe sur inches_to_subhex pour coller à la règle.
+    const fightEngagementHexSteps =
+      engagementFromRules > 1 ? engagementFromRules : inchesToSubhex;
 
+    if (
+      phase === "fight" &&
+      selectedUnit &&
+      (mode === "select" || mode === "attackPreview")
+    ) {
       // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use weapon helpers (imported at top)
 
-      // Check if unit has melee weapons
       if (!selectedUnit.CC_WEAPONS || selectedUnit.CC_WEAPONS.length === 0) {
-        throw new Error(
-          `Unit ${selectedUnit.id} (${selectedUnit.type || "unknown"}) has no melee weapons for fight phase`
-        );
-      }
-
-      const fightRange = getMeleeRange(); // Always 1
-
-      // Find all enemies within CC_RNG range
-      fightTargets = units.filter(
-        (u) =>
-          u.player !== selectedUnit.player &&
-          u.HP_CUR > 0 &&
-          cubeDistance(c1, offsetToCube(u.col, u.row)) <= fightRange
-      );
-
-      // Fight preview: show adjacent hexes around active unit in red.
-      // Use direct neighbor computation instead of O(cols×rows) scan.
-      const cubeNeighborDirs = [[1,-1,0],[1,0,-1],[0,1,-1],[-1,1,0],[-1,0,1],[0,-1,1]];
-      for (const [dx, , dz] of cubeNeighborDirs) {
-        const nc = c1.x + dx;
-        const nr = (c1.z + dz) + ((nc - (nc & 1)) >> 1);
-        if (nc >= 0 && nc < BOARD_COLS && nr >= 0 && nr < BOARD_ROWS) {
-          fightPreviewCells.push({ col: nc, row: nr });
+        if (mode === "attackPreview") {
+          throw new Error(
+            `Unit ${selectedUnit.id} (${selectedUnit.type || "unknown"}) has no melee weapons for fight phase`
+          );
         }
+      } else {
+        const attackerFp = unitFootprintHexKeys(selectedUnit);
+        // Aligné sur min_distance_between_sets (empreinte ↔ empreinte), §3.3 moteur
+        fightTargets = units.filter((u) => {
+          if (u.player === selectedUnit.player || u.HP_CUR <= 0) {
+            return false;
+          }
+          const enemyFp = unitFootprintHexKeys(u);
+          return (
+            minHexDistanceBetweenFootprintKeySets(
+              attackerFp,
+              enemyFp,
+              fightEngagementHexSteps,
+            ) <= fightEngagementHexSteps
+          );
+        });
+
+        // Preview rouge : couronne euclidienne (même logique « ronde » que l’empreinte), pas dilatation hex
+        fightPreviewCells.push(
+          ...engagementRoundRingPreviewHexesOnBoard(
+            selectedUnit,
+            fightEngagementHexSteps,
+            BOARD_COLS,
+            BOARD_ROWS,
+          ),
+        );
       }
     }
 
@@ -1852,7 +2151,11 @@ export default function Board({
       appendShootingPreviewCells(shootingPreviewSource);
     }
     const coverCellKeySet = new Set(coverCells.map((cell) => `${cell.col},${cell.row}`));
-    if (phase === "fight" && mode === "attackPreview" && selectedUnit) {
+    if (
+      phase === "fight" &&
+      selectedUnit &&
+      (mode === "select" || mode === "attackPreview")
+    ) {
       attackCells.push(...fightPreviewCells);
     }
 
@@ -2133,7 +2436,7 @@ export default function Board({
       for (const u of units) {
         parts.push(`${u.id},${u.col},${u.row},${u.HP_CUR}`);
       }
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}#chov:${chargePreviewOverlayHexes.length}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}#chov:${chargePreviewOverlayHexes.length}#cref:${chargeReferenceHex ? `${chargeReferenceHex.col},${chargeReferenceHex.row}` : ""}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -2150,6 +2453,7 @@ export default function Board({
       const savedHoverOverlay = hoverOverlayRef.current;
       const savedHoverSprite = hoverSpriteRef.current;
       const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
+      const savedMeasureGuideLine = measureGuideLineRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -2199,6 +2503,9 @@ export default function Board({
       if (savedMovePreviewGuideLine && !savedMovePreviewGuideLine.destroyed) {
         app.stage.addChild(savedMovePreviewGuideLine);
       }
+      if (savedMeasureGuideLine && !savedMeasureGuideLine.destroyed) {
+        app.stage.addChild(savedMeasureGuideLine);
+      }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
       // Sinon le badge 2D6 est supprimé ici puis jamais redessiné (unitsChanged false).
@@ -2245,7 +2552,21 @@ export default function Board({
           })()
         : undefined;
 
-    const drawResult = drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
+    const fightEngagementRing =
+      phase === "fight" &&
+      selectedUnit &&
+      (mode === "select" || mode === "attackPreview") &&
+      selectedUnit.CC_WEAPONS &&
+      selectedUnit.CC_WEAPONS.length > 0
+        ? getFightEngagementRingBoardPixels(
+            selectedUnit,
+            fightEngagementHexSteps,
+            HEX_RADIUS,
+            MARGIN,
+          )
+        : undefined;
+
+    const drawBoardOptions: DrawBoardOptions = {
       availableCells: effectiveAvailableCells,
       attackCells,
       coverCells,
@@ -2261,6 +2582,7 @@ export default function Board({
       showHexCoordinates,
       objectiveControl,
       moveDestPoolRef,
+      chargeDestPoolRef,
       selectedUnitBaseSize: selectedUnit && typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : undefined,
       cachedStaticBoard: canReuseStatic ? staticBoardRef.current : null,
       cachedWalls: canReuseStatic ? staticWallsRef.current : null,
@@ -2269,7 +2591,13 @@ export default function Board({
       losDebugCoverRatio: coverRatio,
       losDebugVisibilityMinRatio: losVisibilityMinRatio,
       chargeEngagementHalo,
-    });
+      fightEngagementRing,
+    };
+    const drawResult = drawBoard(
+      app,
+      boardConfigWithOverrides as Parameters<typeof drawBoard>[1],
+      drawBoardOptions,
+    );
 
     if (!canReuseStatic && drawResult) {
       staticBoardRef.current = drawResult.baseHexContainer;
@@ -3319,6 +3647,7 @@ export default function Board({
             setHexCoordTooltip(null);
             setUnitHoverTooltip(null);
             setMovePreviewDistanceTooltip(null);
+            setMeasureDistanceTooltip(null);
           }}
         />
         <div
@@ -3333,24 +3662,27 @@ export default function Board({
             overflow: "visible",
           }}
         />
-        {unitHoverTooltip?.visible && (
-          <div
-            className="rule-tooltip unit-icon-tooltip"
-            style={{
-              position: "fixed",
-              left: `${unitHoverTooltip.x}px`,
-              top: `${unitHoverTooltip.y}px`,
-              marginBottom: 0,
-              zIndex: 1300,
-              visibility: "visible",
-              opacity: 1,
-              transform: "translate(12px, -14px)",
-              pointerEvents: "none",
-            }}
-          >
-            {unitHoverTooltip.text}
-          </div>
-        )}
+        {unitHoverTooltip?.visible &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="rule-tooltip unit-icon-tooltip"
+              style={{
+                position: "fixed",
+                left: `${unitHoverTooltip.x}px`,
+                top: `${unitHoverTooltip.y}px`,
+                marginBottom: 0,
+                zIndex: unitHoverTooltip.zIndex ?? 1300,
+                visibility: "visible",
+                opacity: unitHoverTooltip.opacity ?? 1,
+                transform: "translate(12px, -14px)",
+                pointerEvents: "none",
+              }}
+            >
+              {unitHoverTooltip.text}
+            </div>,
+            document.body
+          )}
         {movePreviewDistanceTooltip?.visible && (
           <div
             className="rule-tooltip unit-icon-tooltip"
@@ -3367,6 +3699,24 @@ export default function Board({
             }}
           >
             {movePreviewDistanceTooltip.text}
+          </div>
+        )}
+        {measureDistanceTooltip?.visible && (
+          <div
+            className="rule-tooltip unit-icon-tooltip"
+            style={{
+              position: "fixed",
+              left: `${measureDistanceTooltip.x}px`,
+              top: `${measureDistanceTooltip.y}px`,
+              marginBottom: 0,
+              zIndex: 1300,
+              visibility: "visible",
+              opacity: 1,
+              transform: "translate(12px, -14px)",
+              pointerEvents: "none",
+            }}
+          >
+            {measureDistanceTooltip.text}
           </div>
         )}
         {hexCoordTooltip?.visible && (

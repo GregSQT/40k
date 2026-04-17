@@ -1795,6 +1795,8 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     # Build pool with actual roll for THIS SPECIFIC TARGET — zone cible-centrée
     # (spec utilisateur) : anneau autour de la cible [1 .. diamètre_chargeur + engagement_zone]
     # filtré par distance ≤ charge_roll depuis l'hex du chargeur le plus proche de la cible.
+    _ref_c, _ref_r = require_unit_position(unit, game_state)
+    charge_reference_hex: Tuple[int, int] = (int(_ref_c), int(_ref_r))
     target_unit_entry = get_unit_by_id(game_state, target_id)
     if (
         not target_unit_entry
@@ -1804,12 +1806,25 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         display_zone_set: Set[Tuple[int, int]] = set()
         valid_pool: List[Tuple[int, int]] = []
     else:
-        display_zone_set, _closest_ch = _compute_charge_preview_zone(
+        display_zone_set, closest_ch = _compute_charge_preview_zone(
             game_state, unit, target_unit_entry, int(charge_roll_subhex)
         )
-        valid_pool = _build_charge_anchors_in_zone(
+        charge_reference_hex = (int(closest_ch[0]), int(closest_ch[1]))
+        # Ancres géométriques (anneau cible + portée depuis l’hex allié le plus proche).
+        zone_anchors = _build_charge_anchors_in_zone(
             game_state, unit, target_unit_entry, display_zone_set, int(charge_roll_subhex)
         )
+        # BFS : chaque pas vérifie murs + empreintes (autres unités) — impossible de « traverser »
+        # un mur ou un socle (allié ou ennemi) comme si c’était du vide. On garde l’intersection
+        # avec la zone cible-centrée pour respecter la spec d’affichage autour de la cible.
+        bfs_reachable = charge_build_valid_destinations_pool(
+            game_state,
+            str(unit_id),
+            int(charge_roll_subhex),
+            target_id=str(target_id),
+        )
+        bfs_set = set(bfs_reachable)
+        valid_pool = [p for p in zone_anchors if p in bfs_set]
     game_state["valid_charge_destinations_pool"] = valid_pool
     if "debug_mode" in game_state and game_state["debug_mode"]:
         episode = game_state.get("episode_number", "?")
@@ -1910,6 +1925,9 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             "unitId": unit_id,
             "targetId": target_id,
             "charge_roll": charge_roll,
+            # Hex de référence pour la portée (empreinte chargeur la plus proche de la cible) —
+            # l’UI doit l’utiliser pour la règle / tooltip ; ne pas le recalculer depuis units_cache.
+            "charge_reference_hex": [charge_reference_hex[0], charge_reference_hex[1]],
             "valid_destinations": valid_pool,
             "charge_preview_display_hexes": display_hexes,
             "preview_data": preview_data,

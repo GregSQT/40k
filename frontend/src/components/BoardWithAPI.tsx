@@ -36,7 +36,7 @@ import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState } from "../types/game";
-import BoardPvp from "./BoardPvp";
+import BoardPvp, { type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
 import { SettingsMenu } from "./SettingsMenu";
@@ -1743,6 +1743,23 @@ export const BoardWithAPI: React.FC = () => {
   // Settings menu state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const handleOpenSettings = () => setIsSettingsOpen(true);
+
+  const [measureMode, setMeasureMode] = useState<MeasureModeState>({ kind: "off" });
+  const handleToggleMeasureMode = useCallback(() => {
+    setMeasureMode((prev) => (prev.kind === "off" ? { kind: "armed" } : { kind: "off" }));
+  }, []);
+  const handleMeasureHexCommit = useCallback((col: number, row: number) => {
+    setMeasureMode((prev) => {
+      if (prev.kind === "armed") {
+        return { kind: "measuring", startCol: col, startRow: row };
+      }
+      if (prev.kind === "measuring") {
+        return { kind: "off" };
+      }
+      return prev;
+    });
+  }, []);
+  const measureModeActive = measureMode.kind !== "off";
   const [advanceWarningDontRemind, setAdvanceWarningDontRemind] = useState(false);
 
   // Settings preferences (from localStorage)
@@ -3015,7 +3032,12 @@ export const BoardWithAPI: React.FC = () => {
       onGoToPveMode={handleGoToPveMode}
     >
       <TutorialShootOptionsSync getTutorialShootOptionsRef={getTutorialShootOptionsRef} />
-      <SharedLayout rightColumnContent={rightColumnContent} onOpenSettings={handleOpenSettings}>
+      <SharedLayout
+        rightColumnContent={rightColumnContent}
+        onOpenSettings={handleOpenSettings}
+        onToggleMeasureMode={handleToggleMeasureMode}
+        measureModeActive={measureModeActive}
+      >
         {/*
         In test deployment setup, lock gameplay interactions until Start Game! is clicked.
       */}
@@ -3100,13 +3122,17 @@ export const BoardWithAPI: React.FC = () => {
             onValidateCharge={isGameOver ? () => {} : apiProps.onValidateCharge}
             onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
             chargingUnitId={apiProps.chargingUnitId}
+            chargeTargetId={apiProps.chargeTargetId ?? null}
             chargeRoll={apiProps.chargeRoll}
             chargeSuccess={apiProps.chargeSuccess}
             gameState={apiProps.gameState as GameState}
             getChargeDestinations={apiProps.getChargeDestinations}
             chargePreviewOverlayHexes={apiProps.chargePreviewOverlayHexes ?? []}
+            chargeReferenceHex={apiProps.chargeReferenceHex ?? null}
             moveDestPoolRef={apiProps.moveDestPoolRef}
             footprintZoneRef={apiProps.footprintZoneRef}
+            chargeDestPoolRef={apiProps.chargeDestPoolRef}
+            chargeFootprintZoneRef={apiProps.chargeFootprintZoneRef}
             onAdvance={isGameOver ? () => {} : apiProps.onAdvance}
             onAdvanceMove={isGameOver ? () => {} : apiProps.onAdvanceMove}
             onCancelAdvance={isGameOver ? () => {} : apiProps.onCancelAdvance}
@@ -3122,6 +3148,8 @@ export const BoardWithAPI: React.FC = () => {
             autoSelectWeapon={settings.autoSelectWeapon}
             deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
             objectivesOverride={objectivesOverride}
+            measureMode={measureMode}
+            onMeasureHexCommit={handleMeasureHexCommit}
           />
           {isRosterSetupMode &&
             apiProps.gameState?.phase === "deployment" &&
