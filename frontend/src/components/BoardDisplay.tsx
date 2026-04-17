@@ -46,8 +46,20 @@ interface BoardConfig {
     objective_texture?: string;
     objective_texture_alpha?: number;
     objective_smooth_contour?: boolean;
+    /** Multiplie le rayon extérieur de la surcouche zone (barycentre → hex le plus éloigné + 1 hex). */
     objective_smooth_radius_ratio?: number;
+    /** @deprecated Utiliser objective_zone_ring_alpha. Conservé comme défaut si objective_zone_ring_alpha absent. */
     objective_smooth_alpha?: number;
+    /** Alpha des pastilles d’emprise par hex (footprint). */
+    objective_hex_fill_alpha?: number;
+    /** Cercle extérieur : épaisseur du trait (px). */
+    objective_zone_ring_width?: number;
+    objective_zone_ring_color?: string;
+    objective_zone_ring_alpha?: number;
+    /** Rayon du petit disque central, en fraction du rayon extérieur (0–1). */
+    objective_zone_center_radius_ratio?: number;
+    objective_zone_center_color?: string;
+    objective_zone_center_alpha?: number;
   };
   objective_hexes: [number, number][];
   objective_zones?: Array<{
@@ -112,6 +124,207 @@ function hexCorner(cx: number, cy: number, size: number, i: number) {
 
 function getHexPolygonPoints(cx: number, cy: number, size: number) {
   return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
+}
+
+type PixelPt = [number, number];
+
+/** Cercle dont [p1,p2] est un diamètre. */
+function circleFromDiameter(p1: PixelPt, p2: PixelPt): { cx: number; cy: number; r: number } {
+  const cx = (p1[0] + p2[0]) / 2;
+  const cy = (p1[1] + p2[1]) / 2;
+  const r = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 2;
+  return { cx, cy, r };
+}
+
+/** Cercle circonscrit aux trois points (null si alignés). */
+function circumcircleThroughThreePoints(
+  p1: PixelPt,
+  p2: PixelPt,
+  p3: PixelPt
+): { cx: number; cy: number; r: number } | null {
+  const ax = p1[0];
+  const ay = p1[1];
+  const bx = p2[0];
+  const by = p2[1];
+  const cx = p3[0];
+  const cy = p3[1];
+  const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+  if (Math.abs(d) < 1e-12) return null;
+  const a2 = ax * ax + ay * ay;
+  const b2 = bx * bx + by * by;
+  const c2 = cx * cx + cy * cy;
+  const ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d;
+  const uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d;
+  const r = Math.hypot(ux - ax, uy - ay);
+  return { cx: ux, cy: uy, r };
+}
+
+/** Énumération paires/triples : gardé pour petits jeux de points uniquement. */
+const MEC_BRUTE_MAX_POINTS = 120;
+
+/** Enveloppe convexe (monotone chain). Le MEC d’un ensemble fini du plan est celui de son enveloppe. */
+function convexHull2D(points: PixelPt[]): PixelPt[] {
+  if (points.length <= 1) return points.slice();
+  const sorted = [...points].sort((a, b) => (a[0] === b[0] ? a[1] - b[1] : a[0] - b[0]));
+  const cross = (o: PixelPt, a: PixelPt, b: PixelPt) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: PixelPt[] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper: PixelPt[] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i]!;
+    while (upper.length >= 2 && cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+/**
+ * Plus petit cercle contenant des points, par énumération paires/triples — sans récursion.
+ */
+function bruteForceSmallestEnclosingCirclePoints(
+  points: PixelPt[]
+): { cx: number; cy: number; r: number } {
+  const n = points.length;
+  const EPS = 1e-6;
+  if (n === 0) {
+    return { cx: 0, cy: 0, r: 0 };
+  }
+  if (n === 1) {
+    const p = points[0]!;
+    return { cx: p[0], cy: p[1], r: 0 };
+  }
+
+  const containsAll = (c: { cx: number; cy: number; r: number }): boolean => {
+    return points.every((p) => Math.hypot(p[0] - c.cx, p[1] - c.cy) <= c.r + EPS);
+  };
+
+  let best = { cx: 0, cy: 0, r: Number.POSITIVE_INFINITY };
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const c = circleFromDiameter(points[i]!, points[j]!);
+      if (containsAll(c) && c.r < best.r) {
+        best = c;
+      }
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      for (let k = j + 1; k < n; k++) {
+        const c = circumcircleThroughThreePoints(points[i]!, points[j]!, points[k]!);
+        if (c !== null && containsAll(c) && c.r < best.r) {
+          best = c;
+        }
+      }
+    }
+  }
+
+  if (!Number.isFinite(best.r)) {
+    let sx = 0;
+    let sy = 0;
+    for (const p of points) {
+      sx += p[0];
+      sy += p[1];
+    }
+    const cx = sx / n;
+    const cy = sy / n;
+    let mr = 0;
+    for (const p of points) {
+      mr = Math.max(mr, Math.hypot(p[0] - cx, p[1] - cy));
+    }
+    return { cx, cy, r: mr };
+  }
+
+  return best;
+}
+
+function trivialBoundaryCircle(R: PixelPt[]): { cx: number; cy: number; r: number } {
+  if (R.length === 0) {
+    return { cx: 0, cy: 0, r: -1 };
+  }
+  if (R.length === 1) {
+    const p = R[0]!;
+    return { cx: p[0], cy: p[1], r: 0 };
+  }
+  if (R.length === 2) {
+    return circleFromDiameter(R[0]!, R[1]!);
+  }
+  const cc = circumcircleThroughThreePoints(R[0]!, R[1]!, R[2]!);
+  if (cc !== null) return cc;
+  const a = circleFromDiameter(R[0]!, R[1]!);
+  const b = circleFromDiameter(R[0]!, R[2]!);
+  const c = circleFromDiameter(R[1]!, R[2]!);
+  return a.r >= b.r && a.r >= c.r ? a : b.r >= c.r ? b : c;
+}
+
+/**
+ * Welzl sur `pts` mélangés — uniquement sur l’enveloppe (souvent ≤ quelques centaines de sommets).
+ * Profondeur = nombre de points passés ; ne pas appeler avec des milliers de points.
+ */
+function welzlSmallestEnclosingCirclePoints(pts: PixelPt[]): { cx: number; cy: number; r: number } {
+  const shuffled = pts.map((p) => [p[0], p[1]] as PixelPt);
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    const t = shuffled[i]!;
+    shuffled[i] = shuffled[j]!;
+    shuffled[j] = t;
+  }
+  const EPS = 1e-7;
+  const inside = (p: PixelPt, c: { cx: number; cy: number; r: number }) =>
+    c.r >= 0 && Math.hypot(p[0] - c.cx, p[1] - c.cy) <= c.r + EPS;
+
+  const sec = (n: number, R: PixelPt[]): { cx: number; cy: number; r: number } => {
+    if (n === 0 || R.length === 3) {
+      return trivialBoundaryCircle(R);
+    }
+    const D = sec(n - 1, R);
+    if (inside(shuffled[n - 1]!, D, EPS)) {
+      return D;
+    }
+    return sec(n - 1, [...R, shuffled[n - 1]!]);
+  };
+
+  return sec(shuffled.length, []);
+}
+
+/**
+ * MEC des centres d’hex, puis +hexRadius pour couvrir les disques comme les pastilles objectif.
+ * Enveloppe convexe → même MEC qu’avec tous les centres ; Welzl seulement sur le contour (léger).
+ */
+function smallestEnclosingCircleForHexDisks(
+  hexCenters: PixelPt[],
+  hexRadius: number
+): { cx: number; cy: number; r: number } {
+  const n = hexCenters.length;
+  if (n === 0) {
+    return { cx: 0, cy: 0, r: 0 };
+  }
+  if (n === 1) {
+    const p = hexCenters[0]!;
+    return { cx: p[0], cy: p[1], r: hexRadius };
+  }
+
+  const hull = convexHull2D(hexCenters);
+  const mecInput = hull.length >= 1 ? hull : hexCenters;
+
+  let core: { cx: number; cy: number; r: number };
+  if (mecInput.length <= MEC_BRUTE_MAX_POINTS) {
+    core = bruteForceSmallestEnclosingCirclePoints(mecInput);
+  } else {
+    core = welzlSmallestEnclosingCirclePoints(mecInput);
+  }
+
+  return { cx: core.cx, cy: core.cy, r: core.r + hexRadius };
 }
 
 // Parse colors from config - same as Board.tsx
@@ -252,6 +465,18 @@ export const drawBoard = (
         ? boardConfig.display.objective_texture_alpha
         : 0.85;
 
+    const objectiveHexFillAlpha =
+      typeof boardConfig.display?.objective_hex_fill_alpha === "number"
+        ? boardConfig.display.objective_hex_fill_alpha
+        : objectiveTexture
+          ? objectiveTextureAlpha
+          : 0.5;
+
+    const smoothRadiusRatio =
+      typeof boardConfig.display?.objective_smooth_radius_ratio === "number"
+        ? boardConfig.display.objective_smooth_radius_ratio
+        : 1.0;
+
     if (IS_LARGE_BOARD) {
       if (!reuseStatic) {
         if (backgroundImagePath) {
@@ -290,42 +515,78 @@ export const drawBoard = (
         }
 
         if (objectiveSmoothContour && Array.isArray(boardConfig.objective_zones)) {
+          const displayCfg = boardConfig.display;
+          const ringColorStr =
+            typeof displayCfg?.objective_zone_ring_color === "string" &&
+            displayCfg.objective_zone_ring_color.length > 0
+              ? displayCfg.objective_zone_ring_color
+              : boardConfig.colors.objective;
+          const ringColorParsed = parseColor(ringColorStr);
+          const ringAlpha =
+            typeof displayCfg?.objective_zone_ring_alpha === "number"
+              ? displayCfg.objective_zone_ring_alpha
+              : typeof displayCfg?.objective_smooth_alpha === "number"
+                ? displayCfg.objective_smooth_alpha
+                : 0.35;
+          const ringWidth =
+            typeof displayCfg?.objective_zone_ring_width === "number"
+              ? displayCfg.objective_zone_ring_width
+              : Math.max(1.2, HEX_RADIUS * 0.22);
+          const centerColorStr =
+            typeof displayCfg?.objective_zone_center_color === "string" &&
+            displayCfg.objective_zone_center_color.length > 0
+              ? displayCfg.objective_zone_center_color
+              : boardConfig.colors.objective;
+          const centerColorParsed = parseColor(centerColorStr);
+          const centerAlpha =
+            typeof displayCfg?.objective_zone_center_alpha === "number"
+              ? displayCfg.objective_zone_center_alpha
+              : 0.5;
+          const centerRadiusRatio =
+            typeof displayCfg?.objective_zone_center_radius_ratio === "number"
+              ? displayCfg.objective_zone_center_radius_ratio
+              : 0.14;
+
           for (const zone of boardConfig.objective_zones) {
             const zoneHexes = zone.hexes || [];
             if (!Array.isArray(zoneHexes) || zoneHexes.length === 0) continue;
 
-            const centers: Array<[number, number]> = [];
+            const zoneCells: Array<[number, number]> = [];
             for (const h of zoneHexes) {
               const oc = Array.isArray(h) ? Number(h[0]) : Number((h as { col: number }).col);
               const or_ = Array.isArray(h) ? Number(h[1]) : Number((h as { row: number }).row);
               if (!Number.isFinite(oc) || !Number.isFinite(or_)) continue;
-              const ox = oc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-              const oy = or_ * HEX_VERT_SPACING + ((oc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-              centers.push([ox, oy]);
+              zoneCells.push([oc, or_]);
             }
-            if (centers.length === 0) continue;
+            if (zoneCells.length === 0) continue;
 
-            let sumX = 0, sumY = 0;
-            for (const [x, y] of centers) { sumX += x; sumY += y; }
-            const cx = sumX / centers.length;
-            const cy = sumY / centers.length;
-
-            let maxDist = 0;
-            for (const [x, y] of centers) {
-              const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-              if (d > maxDist) maxDist = d;
+            const hexCenters: PixelPt[] = [];
+            for (const [col, row] of zoneCells) {
+              const hcx = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+              const hcy =
+                row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+              hexCenters.push([hcx, hcy]);
             }
 
-            const smoothZone = new PIXI.Graphics();
-            beginObjectiveFill(
-              smoothZone,
-              objectiveTexture,
-              OBJECTIVE_NEUTRAL_COLOR,
-              objectiveTexture ? objectiveTextureAlpha : 0.8
-            );
-            smoothZone.drawCircle(cx, cy, maxDist + HEX_RADIUS);
-            smoothZone.endFill();
-            baseHexContainer.addChild(smoothZone);
+            const mec = smallestEnclosingCircleForHexDisks(hexCenters, HEX_RADIUS);
+            if (
+              Number.isFinite(mec.cx) &&
+              Number.isFinite(mec.cy) &&
+              Number.isFinite(mec.r) &&
+              mec.r >= 0
+            ) {
+              const outerR = Math.max(0, mec.r * smoothRadiusRatio);
+              const innerR = Math.max(0.5, outerR * centerRadiusRatio);
+
+              const smoothZone = new PIXI.Graphics();
+              smoothZone.lineStyle(ringWidth, ringColorParsed, ringAlpha);
+              smoothZone.drawCircle(mec.cx, mec.cy, outerR);
+              smoothZone.lineStyle(0);
+              smoothZone.beginFill(centerColorParsed, centerAlpha);
+              smoothZone.drawCircle(mec.cx, mec.cy, innerR);
+              smoothZone.endFill();
+              baseHexContainer.addChild(smoothZone);
+            }
           }
         }
 
@@ -338,12 +599,7 @@ export const drawBoard = (
           if (controller === 1) objColor = OBJECTIVE_P0_COLOR;
           else if (controller === 2) objColor = OBJECTIVE_P1_COLOR;
           const objDot = new PIXI.Graphics();
-          beginObjectiveFill(
-            objDot,
-            objectiveTexture,
-            objColor,
-            objectiveTexture ? objectiveTextureAlpha : 0.8
-          );
+          beginObjectiveFill(objDot, objectiveTexture, objColor, objectiveHexFillAlpha);
           objDot.drawCircle(ox, oy, HEX_RADIUS);
           objDot.endFill();
           baseHexContainer.addChild(objDot);

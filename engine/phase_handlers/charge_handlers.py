@@ -7,6 +7,7 @@ References: AI_TURN.md Section ⚡ CHARGE PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
+import time
 from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
@@ -52,6 +53,13 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Initialize charge phase and build activation pool
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t_total0 = time.perf_counter() if _perf else None
+
     # Set phase
     game_state["phase"] = "charge"
 
@@ -73,14 +81,27 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["pending_charge_targets"] = []  # Store targets for gym training target selection
     game_state["pending_charge_unit_id"] = None  # Store unit ID waiting for target selection
 
+    _t_before_enemy_adj = time.perf_counter() if _perf else None
+
     # PERFORMANCE: Pre-compute enemy_adjacent_hexes once at phase start for current player
     # Cache will be reused throughout the phase for all units (invalidated after each charge)
     current_player = require_key(game_state, "current_player")
     from .shared_utils import build_enemy_adjacent_hexes
     build_enemy_adjacent_hexes(game_state, current_player)
 
+    _t_after_enemy_adj = time.perf_counter() if _perf else None
+
     # Build activation pool
     charge_build_activation_pool(game_state)
+
+    if _perf and _t_total0 is not None and _t_before_enemy_adj is not None and _t_after_enemy_adj is not None:
+        _t_end = time.perf_counter()
+        append_perf_timing_line(
+            f"CHARGE_PHASE_START episode={_ep} turn={_turn} "
+            f"setup_until_adj_s={_t_before_enemy_adj - _t_total0:.6f} "
+            f"enemy_adjacent_hexes_s={_t_after_enemy_adj - _t_before_enemy_adj:.6f} "
+            f"pool_build_s={_t_end - _t_after_enemy_adj:.6f} total_s={_t_end - _t_total0:.6f}"
+        )
 
     # Console log (disabled in training mode for performance)
     add_console_log(game_state, "CHARGE POOL BUILT")
@@ -101,10 +122,23 @@ def charge_build_activation_pool(game_state: Dict[str, Any]) -> None:
     """
     Build charge activation pool with eligibility checks
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _t0 = time.perf_counter() if _perf else None
+
     # CRITICAL: Clear pool before rebuilding (defense in depth)
     game_state["charge_activation_pool"] = []
     eligible_units = get_eligible_units(game_state)
     game_state["charge_activation_pool"] = list(eligible_units)  # Ensure it's a new list, not a reference
+
+    if _perf and _t0 is not None:
+        append_perf_timing_line(
+            f"CHARGE_BUILD_POOL episode={_ep} turn={_turn} "
+            f"get_eligible_s={time.perf_counter() - _t0:.6f} eligible_count={len(eligible_units)}"
+        )
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
@@ -870,12 +904,17 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     Args:
         full_occupied_positions: Optional pre-computed set of all unit positions (from get_eligible_units).
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+    _uid = str(unit["id"])
+    _t_hvt0 = time.perf_counter() if _perf else None
+
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(game_rules, "charge_max_distance")
-    from engine.utils.weapon_helpers import get_melee_range
-    cc_range = get_melee_range(game_state)
-    TARGET_MAX_DISTANCE = CHARGE_MAX_DISTANCE + cc_range
-    
+
     try:
         # Build all hexes reachable via BFS within max charge distance
         # Use the existing charge_build_valid_destinations_pool with max roll
@@ -886,7 +925,15 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     except Exception as e:
         # If BFS fails, log error and return False (no valid targets)
         add_console_log(game_state, f"ERROR: BFS failed for unit {unit['id']}: {str(e)}")
+        if _perf and _t_hvt0 is not None:
+            append_perf_timing_line(
+                f"CHARGE_HAS_VALID_TARGET episode={_ep} turn={_turn} unit_id={_uid} "
+                f"bfs_pool_s={time.perf_counter() - _t_hvt0:.6f} nested_loop_s=0.000000 "
+                f"reachable_n=0 enemy_n=0 outcome=bfs_error"
+            )
         return False
+
+    _t_after_bfs_pool = time.perf_counter() if _perf else None
 
     from engine.hex_utils import min_distance_between_sets
     from .shared_utils import get_engagement_zone, compute_candidate_footprint
@@ -894,6 +941,14 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
 
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
+    enemy_n = sum(
+        1
+        for _, enemy_entry in units_cache.items()
+        if int(enemy_entry["player"]) != unit_player
+    )
+
+    _t_nested0 = time.perf_counter() if _perf else None
+
     for enemy_id, enemy_entry in units_cache.items():
         if int(enemy_entry["player"]) != unit_player:
             enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
@@ -901,7 +956,24 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
                 candidate_fp = compute_candidate_footprint(dest_col, dest_row, unit, game_state)
                 dist_to_enemy = min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone)
                 if 0 < dist_to_enemy <= engagement_zone:
+                    if _perf and _t_hvt0 is not None and _t_after_bfs_pool is not None and _t_nested0 is not None:
+                        _t_hit = time.perf_counter()
+                        append_perf_timing_line(
+                            f"CHARGE_HAS_VALID_TARGET episode={_ep} turn={_turn} unit_id={_uid} "
+                            f"bfs_pool_s={_t_after_bfs_pool - _t_hvt0:.6f} "
+                            f"nested_loop_s={_t_hit - _t_nested0:.6f} "
+                            f"reachable_n={len(reachable_hexes)} enemy_n={enemy_n} outcome=hit"
+                        )
                     return True
+
+    if _perf and _t_hvt0 is not None and _t_after_bfs_pool is not None and _t_nested0 is not None:
+        _t_miss = time.perf_counter()
+        append_perf_timing_line(
+            f"CHARGE_HAS_VALID_TARGET episode={_ep} turn={_turn} unit_id={_uid} "
+            f"bfs_pool_s={_t_after_bfs_pool - _t_hvt0:.6f} "
+            f"nested_loop_s={_t_miss - _t_nested0:.6f} "
+            f"reachable_n={len(reachable_hexes)} enemy_n={enemy_n} outcome=miss"
+        )
 
     return False
 
@@ -1014,11 +1086,20 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         full_occupied_positions: Optional pre-computed set of all unit positions. If provided, unit's position
             is excluded internally. Used by get_eligible_units for performance.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _ep = game_state.get("episode_number", "?")
+    _turn = game_state.get("turn", "?")
+
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return []
 
+    units_cache = require_key(game_state, "units_cache")
+
     charge_range = charge_roll  # 2d6 result
+    _t_func0 = time.perf_counter() if _perf else None
     # CRITICAL: Normalize coordinates to int for consistent tuple comparison
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -1031,7 +1112,6 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
         enemies = [target]
     else:
         # Get all enemy positions for adjacency checks (used during activation preview)
-        units_cache = require_key(game_state, "units_cache")
         unit_player = int(unit["player"]) if unit["player"] is not None else None
         enemies = [enemy_id for enemy_id, cache_entry in units_cache.items()
                    if int(cache_entry["player"]) != unit_player]
@@ -1075,6 +1155,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     melee_range = get_melee_range(game_state)
     engagement_zone = get_engagement_zone(game_state)
 
+    _t_bfs0 = time.perf_counter() if _perf else None
     while queue:
         current_pos, current_dist = queue.popleft()
         current_col, current_row = current_pos
@@ -1121,7 +1202,17 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             queue.append((neighbor_pos, neighbor_dist))
 
+    _t_bfs1 = time.perf_counter() if _perf else None
+
     game_state["valid_charge_destinations_pool"] = valid_destinations
+
+    if _perf and _t_func0 is not None and _t_bfs0 is not None and _t_bfs1 is not None:
+        _t_done = time.perf_counter()
+        append_perf_timing_line(
+            f"CHARGE_DEST_BFS episode={_ep} turn={_turn} unit_id={unit_id} charge_roll={charge_range} "
+            f"bfs_loop_s={_t_bfs1 - _t_bfs0:.6f} total_s={_t_done - _t_func0:.6f} "
+            f"visited_n={len(visited)} valid_dest_n={len(valid_destinations)}"
+        )
 
     return valid_destinations
 

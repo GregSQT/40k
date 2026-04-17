@@ -29,6 +29,13 @@ interface DisplayConfig {
   objective_smooth_contour?: boolean;
   objective_smooth_radius_ratio?: number;
   objective_smooth_alpha?: number;
+  objective_hex_fill_alpha?: number;
+  objective_zone_ring_width?: number;
+  objective_zone_ring_color?: string;
+  objective_zone_ring_alpha?: number;
+  objective_zone_center_radius_ratio?: number;
+  objective_zone_center_color?: string;
+  objective_zone_center_alpha?: number;
 }
 
 interface ObjectiveZone {
