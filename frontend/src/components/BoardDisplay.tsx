@@ -818,10 +818,15 @@ export const drawBoard = (
       }
 
       // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
-      const hasClickableContent = clickableSet.size > 0 ||
+      const hasClickableContent =
+        clickableSet.size > 0 ||
         ((interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
           moveDestPoolRef?.current &&
-          moveDestPoolRef.current.size > 0);
+          moveDestPoolRef.current.size > 0) ||
+        (interactionPhase === "charge" &&
+          mode === "chargePreview" &&
+          chargeDestPoolRef?.current &&
+          chargeDestPoolRef.current.size > 0);
       if (hasClickableContent) {
         const hitArea = new PIXI.Graphics();
         hitArea.beginFill(0, 0);
@@ -857,17 +862,42 @@ export const drawBoard = (
           if (e.button !== 0) return;
           const { col, row } = resolveHex(e.getLocalPosition(hitArea));
           const key = `${col},${row}`;
-          const usePoolForPick =
+          const useMovePoolForPick =
             (interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
             moveDestPoolRef?.current &&
             moveDestPoolRef.current.size > 0;
+          const useChargePoolForPick =
+            interactionPhase === "charge" &&
+            mode === "chargePreview" &&
+            chargeDestPoolRef?.current &&
+            chargeDestPoolRef.current.size > 0;
           const isValid =
-            clickableSet.has(key) || (usePoolForPick && moveDestPoolRef.current!.has(key));
+            clickableSet.has(key) ||
+            (useMovePoolForPick && (moveDestPoolRef?.current?.has(key) ?? false)) ||
+            (useChargePoolForPick && (chargeDestPoolRef?.current?.has(key) ?? false));
           if (isValid) {
-            let destCol = col, destRow = row;
-            if (usePoolForPick && moveDestPoolRef?.current && !moveDestPoolRef.current.has(key)) {
+            let destCol = col,
+              destRow = row;
+            if (useMovePoolForPick && moveDestPoolRef?.current && !moveDestPoolRef.current.has(key)) {
               let bestDist = Infinity;
               for (const k of moveDestPoolRef.current) {
+                const sep = k.indexOf(",");
+                const cc = Number(k.substring(0, sep));
+                const cr = Number(k.substring(sep + 1));
+                const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
+                if (d < bestDist) {
+                  bestDist = d;
+                  destCol = cc;
+                  destRow = cr;
+                }
+              }
+            } else if (
+              useChargePoolForPick &&
+              chargeDestPoolRef?.current &&
+              !chargeDestPoolRef.current.has(key)
+            ) {
+              let bestDist = Infinity;
+              for (const k of chargeDestPoolRef.current) {
                 const sep = k.indexOf(",");
                 const cc = Number(k.substring(0, sep));
                 const cr = Number(k.substring(sep + 1));

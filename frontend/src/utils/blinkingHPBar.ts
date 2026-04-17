@@ -9,13 +9,51 @@ import { getDiceAverage, getSelectedMeleeWeapon } from "./weaponHelpers";
 export const DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX = 150_000;
 export const DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY = 0.5;
 
-/**
- * Résolution de rasterisation pour `PIXI.Text` : le canvas interne est plus dense que le renderer
- * (souvent 1×) pour éviter le flou au redimensionnement en texture GPU.
- */
-function crispTextResolution(rendererResolution: number): number {
-  return Math.min(4, Math.max(2, Math.ceil(rendererResolution * 2)));
+/** Texte d’aide sous le cadre % (hors overlay charge jet 2D6). */
+export const DEFAULT_BLINK_PROBABILITY_HELP_TEXT = "Probabilité estimée d'infliger des degats";
+
+/** Coordonnées plateau (stage) → pixels écran pour `position: fixed` (aligné sur le canvas). */
+export function pixiStagePointToClientScreen(
+  app: PIXI.Application,
+  stageX: number,
+  stageY: number
+): { x: number; y: number } {
+  if (typeof document === "undefined") {
+    return { x: stageX, y: stageY };
+  }
+  const canvas = app.view as HTMLCanvasElement;
+  const rect = canvas.getBoundingClientRect();
+  const sw = app.renderer.screen.width;
+  const sh = app.renderer.screen.height;
+  if (sw <= 0 || sh <= 0) {
+    return { x: rect.left + stageX, y: rect.top + stageY };
+  }
+  return {
+    x: rect.left + (stageX / sw) * rect.width,
+    y: rect.top + (stageY / sh) * rect.height,
+  };
 }
+
+/** Overlay HTML au-dessus de la barre blink (`.rule-tooltip` dans BoardPvp). */
+export type BlinkProbHtmlPayload =
+  | {
+      action: "show";
+      unitId: number;
+      /** Position fixe (px) : le conteneur est centré horizontalement avec `translateX(-50%)`. */
+      left: number;
+      top: number;
+      label: string;
+      showCoverShield: boolean;
+      probabilityHelpText: string;
+    }
+  | { action: "hide"; unitId: number }
+  | {
+      action: "updateLabel";
+      unitId: number;
+      label: string;
+      showCoverShield: boolean;
+      probabilityHelpText: string;
+    };
 
 export type HpBarHtmlTooltipPayload = {
   visible: boolean;
@@ -85,6 +123,8 @@ export interface BlinkingHPBarConfig {
   getCSSColor: (cssVar: string) => number;
   /** Si défini (phase charge), remplace l’affichage probabilité / tooltip blessure. */
   chargeMinRollOverlay?: ChargeMinRollOverlay | null;
+  /** Cadre % / bouclier en HTML (net) — obligatoire côté BoardPvp en jeu. */
+  onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void;
 }
 
 export interface HPBlinkContainer extends PIXI.Container {
@@ -175,58 +215,6 @@ function readCssTooltipFontSizePx(): number {
   return parseFloat(m[1]);
 }
 
-function readCssTooltipFontFamilyPrimary(): string {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-font-family").trim();
-  if (!raw) {
-    throw new Error("CSS --tooltip-font-family is missing or empty");
-  }
-  const first = raw.split(",")[0].trim().replace(/^["']|["']$/g, "");
-  if (!first) {
-    throw new Error("CSS --tooltip-font-family has no first family");
-  }
-  return first;
-}
-
-/** Poids aligné sur `--tooltip-font-weight` (PIXI.Text : surtout normal / bold). */
-function readCssTooltipFontWeightForPixi(): "normal" | "bold" {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-font-weight").trim();
-  if (raw === "normal") return "normal";
-  if (raw === "bold") return "bold";
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n)) {
-    throw new Error(`Invalid CSS --tooltip-font-weight: ${JSON.stringify(raw)}`);
-  }
-  return n >= 600 ? "bold" : "normal";
-}
-
-/** `--tooltip-bg` (souvent rgba) → remplissage PIXI. */
-function readCssTooltipBackgroundFill(): { color: number; alpha: number } {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-bg").trim();
-  const rgba = raw.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i);
-  if (rgba) {
-    const r = parseInt(rgba[1], 10);
-    const g = parseInt(rgba[2], 10);
-    const b = parseInt(rgba[3], 10);
-    const a = parseFloat(rgba[4]);
-    const color = (r << 16) | (g << 8) | b;
-    return { color, alpha: a };
-  }
-  const rgb = raw.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i);
-  if (rgb) {
-    const r = parseInt(rgb[1], 10);
-    const g = parseInt(rgb[2], 10);
-    const b = parseInt(rgb[3], 10);
-    return { color: (r << 16) | (g << 8) | b, alpha: 1 };
-  }
-  if (raw.startsWith("#")) {
-    const hex = raw.replace("#", "");
-    if (hex.length === 6) {
-      return { color: parseInt(hex, 16), alpha: 1 };
-    }
-  }
-  throw new Error(`Unsupported --tooltip-bg value: ${JSON.stringify(raw)}`);
-}
-
 function readCssTooltipPaddingPx(): { padX: number; padY: number } {
   const xRaw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-padding-x").trim();
   const yRaw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-padding-y").trim();
@@ -240,24 +228,6 @@ function readCssTooltipPaddingPx(): { padX: number; padY: number } {
   return { padX: parsePx(xRaw, "--tooltip-padding-x"), padY: parsePx(yRaw, "--tooltip-padding-y") };
 }
 
-function readCssTooltipBorderWidthPx(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-border-width").trim();
-  const m = raw.match(/^([\d.]+)px$/i);
-  if (!m) {
-    throw new Error(`--tooltip-border-width must be a px length, got ${JSON.stringify(raw)}`);
-  }
-  return parseFloat(m[1]);
-}
-
-function readCssTooltipBorderRadiusPx(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--tooltip-border-radius").trim();
-  const m = raw.match(/^([\d.]+)px$/i);
-  if (!m) {
-    throw new Error(`--tooltip-border-radius must be a px length, got ${JSON.stringify(raw)}`);
-  }
-  return parseFloat(m[1]);
-}
-
 // Create blinking HP bar container with animation
 export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarResult {
   const {
@@ -265,7 +235,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     attacker,
     phase,
     inCover,
-    onTooltip,
+    onTooltip: _onTooltip,
     app,
     finalBarX,
     finalBarY,
@@ -274,6 +244,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     sliceWidth,
     getCSSColor,
     chargeMinRollOverlay,
+    onBlinkProbHtml,
   } = config;
 
   // Normalize unit.id to number
@@ -316,7 +287,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     const attackerMatches = existingContainer.attackerId === attackerIdNum;
     const weaponMatches = existingContainer.weaponSignature === weaponSignature;
     if (attackerMatches && weaponMatches) {
-      updateProbabilityDisplay(existingContainer, attacker, unit, phase, inCover);
+      updateProbabilityDisplay(existingContainer, attacker, unit, phase, inCover, onBlinkProbHtml);
       return {
         container: existingContainer,
         cleanup: existingContainer.cleanupBlink || (() => {}),
@@ -460,181 +431,33 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   const probLabel =
     chargeMinRollOverlay?.primaryText ?? `${Math.round(displayProbability * 100)}%`;
 
-  // Cadre % : aligné sur les design tokens `.rule-tooltip` (`App.css` : --tooltip-*).
-  // Non reproduit ici : box-shadow (--tooltip-shadow), max-width, line-height multi-lignes.
   const scale = Math.max(1, finalBarHeight / 7);
   const hasCoverIcon = phase === "shoot" && inCover;
 
   const tooltipFontPx = readCssTooltipFontSizePx();
-  const tooltipFontFamily = readCssTooltipFontFamilyPrimary();
-  const tooltipFontWeight = readCssTooltipFontWeightForPixi();
   const tooltipPad = readCssTooltipPaddingPx();
-  const probPadX = tooltipPad.padX + 1;
-  const probPadY = tooltipPad.padY + 1;
-
-  const probFontPxRounded = Math.round(tooltipFontPx);
-  const probText = new PIXI.Text(probLabel, {
-    fontFamily: tooltipFontFamily,
-    fontSize: probFontPxRounded,
-    fill: getCSSColor("--tooltip-text-color"),
-    align: "center",
-    fontWeight: tooltipFontWeight,
-  });
-  probText.resolution = crispTextResolution(app.renderer.resolution);
-  probText.roundPixels = true;
-  probText.name = `prob-text-${unit.id}`;
-  probText.anchor.set(0.5);
-  probText.updateText(true);
-
-  const borderW = readCssTooltipBorderWidthPx();
-  const probStrokeW = Math.max(1, borderW);
-  const probBoxCornerR = readCssTooltipBorderRadiusPx();
-  const cellWidth = Math.ceil(probText.width) + probPadX * 2;
-  const cellHeight = Math.ceil(probText.height) + probPadY * 2;
-
+  const estimatedTextHeight = Math.ceil(tooltipFontPx * 1.25);
+  const cellHeight = estimatedTextHeight + (tooltipPad.padY + 1) * 2;
   const squareY = finalBarY - cellHeight - 4 * scale;
-
-  /** Centre horizontal de la barre PV (identique à `centerX` quand la barre est centrée sur la figurine). */
   const barCenterX = finalBarX + finalBarWidth * 0.5;
+  const screenPos = pixiStagePointToClientScreen(app, barCenterX, squareY);
 
-  let coverIconPrebuilt: PIXI.Text | null = null;
-  let coverIconLocalBoundsPre = new PIXI.Rectangle();
-  let coverIconYPre = 0;
+  const probabilityHelpText =
+    chargeMinRollOverlay?.tooltipText ?? DEFAULT_BLINK_PROBABILITY_HELP_TEXT;
 
-  if (hasCoverIcon) {
-    const coverIconFontPx = Math.max(12, Math.round(tooltipFontPx * 1.45));
-    coverIconPrebuilt = new PIXI.Text("🛡️", {
-      fontFamily: tooltipFontFamily,
-      fontSize: coverIconFontPx,
-      fill: 0xfbbf24,
-      align: "left",
-      fontWeight: tooltipFontWeight,
-      stroke: 0x38bdf8,
-      strokeThickness: Math.max(1, 2 * scale),
-    });
-    coverIconPrebuilt.resolution = crispTextResolution(app.renderer.resolution);
-    coverIconPrebuilt.roundPixels = true;
-    coverIconPrebuilt.name = `cover-icon-${unit.id}`;
-    coverIconPrebuilt.anchor.set(0, 0.5);
-    coverIconPrebuilt.updateText(true);
-    coverIconLocalBoundsPre = coverIconPrebuilt.getLocalBounds();
-    coverIconYPre = Math.round(squareY + cellHeight / 2);
-  }
-
-  /** Cadre % : toujours centré au-dessus de la barre (centre du rectangle = centre de la barre). */
-  const squareX = Math.round(barCenterX - cellWidth * 0.5);
-
-  /** Écart après le bord droit du cadre % jusqu’au bouclier (serré pour rester lisible sans les coller). */
-  const gapAfterProbBox = Math.max(1, Math.min(3, Math.round(scale * 0.9)));
-
-  if (hasCoverIcon && coverIconPrebuilt) {
-    const probRightOuter = squareX + cellWidth + probStrokeW;
-    coverIconPrebuilt.position.set(
-      Math.round(probRightOuter + gapAfterProbBox - coverIconLocalBoundsPre.x),
-      coverIconYPre
-    );
-  }
-
-  const probBg = new PIXI.Graphics();
-  probBg.name = `prob-bg-${unit.id}`;
-  const tooltipBgFill = readCssTooltipBackgroundFill();
-  probBg.beginFill(tooltipBgFill.color, tooltipBgFill.alpha);
-  probBg.lineStyle(Math.max(1, borderW), getCSSColor("--tooltip-border-color"), 1);
-  probBg.drawRoundedRect(squareX, squareY, cellWidth, cellHeight, Math.max(1, probBoxCornerR));
-  probBg.endFill();
-  probBg.zIndex = 500;
-  probBg.eventMode = "static";
-  probBg.cursor = "help";
-  hpContainer.addChild(probBg);
-
-  probText.position.set(
-    Math.round(squareX + cellWidth / 2),
-    Math.round(squareY + cellHeight / 2)
-  );
-  probText.zIndex = 501;
-  probText.eventMode = "static";
-  probText.cursor = "help";
-  hpContainer.addChild(probText);
-
-  const probabilityTooltipText =
-    chargeMinRollOverlay?.tooltipText ?? "Probabilité estimée d'infliger des degats";
-  const updateProbabilityTooltip = (event: PIXI.FederatedPointerEvent): void => {
-    if (!onTooltip) {
-      return;
-    }
-    const canvas = app.view as HTMLCanvasElement;
-    const rect = canvas.getBoundingClientRect();
-    onTooltip({
-      visible: true,
-      text: probabilityTooltipText,
-      x: rect.left + event.global.x,
-      y: rect.top + event.global.y,
-      zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
-      opacity: DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
-    });
-  };
-  const hideProbabilityTooltip = (): void => {
-    onTooltip?.({
-      visible: false,
-      text: probabilityTooltipText,
-      x: 0,
-      y: 0,
-    });
-  };
-  probBg.on("pointerover", updateProbabilityTooltip);
-  probBg.on("pointermove", updateProbabilityTooltip);
-  probBg.on("pointerout", hideProbabilityTooltip);
-  probBg.on("pointerleave", hideProbabilityTooltip);
-  probText.on("pointerover", updateProbabilityTooltip);
-  probText.on("pointermove", updateProbabilityTooltip);
-  probText.on("pointerout", hideProbabilityTooltip);
-  probText.on("pointerleave", hideProbabilityTooltip);
-
-  if (hasCoverIcon && coverIconPrebuilt) {
-    const coverIcon = coverIconPrebuilt;
-    coverIcon.zIndex = 502;
-    coverIcon.eventMode = "static";
-    coverIcon.cursor = "help";
-    coverIcon.on("pointerover", () => {
-      coverIcon.style.fill = 0xfcd34d;
-    });
-    coverIcon.on("pointerout", () => {
-      coverIcon.style.fill = 0xfbbf24;
-    });
-    const updateTooltipPosition = (event: PIXI.FederatedPointerEvent): void => {
-      if (!onTooltip) {
-        return;
-      }
-      const canvas = app.view as HTMLCanvasElement;
-      const rect = canvas.getBoundingClientRect();
-      onTooltip({
-        visible: true,
-        text: "COVER (+1 Save)",
-        x: rect.left + event.global.x,
-        y: rect.top + event.global.y,
-      });
-    };
-    coverIcon.on("pointerover", (event: PIXI.FederatedPointerEvent) => {
-      updateTooltipPosition(event);
-    });
-    coverIcon.on("pointermove", (event: PIXI.FederatedPointerEvent) => {
-      updateTooltipPosition(event);
-    });
-    const hideCoverTooltip = (): void => {
-      onTooltip?.({
-        visible: false,
-        text: "COVER (+1 Save)",
-        x: 0,
-        y: 0,
-      });
-    };
-    coverIcon.on("pointerout", hideCoverTooltip);
-    coverIcon.on("pointerleave", hideCoverTooltip);
-    hpContainer.addChild(coverIcon);
-  }
+  onBlinkProbHtml?.({
+    action: "show",
+    unitId: unitIdNum,
+    left: screenPos.x,
+    top: screenPos.y,
+    label: probLabel,
+    showCoverShield: hasCoverIcon,
+    probabilityHelpText,
+  });
 
   // Cleanup function
   const cleanup = () => {
+    onBlinkProbHtml?.({ action: "hide", unitId: unitIdNum });
     if (hpContainer.blinkTicker) {
       app.ticker.remove(hpContainer.blinkTicker);
     }
@@ -655,21 +478,23 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   };
 }
 
-// Update probability display for existing container
+// Update probability display for existing container (overlay HTML)
 export function updateProbabilityDisplay(
-  container: HPBlinkContainer,
+  _container: HPBlinkContainer,
   attacker: Unit | null,
   target: Unit,
   phase: "shoot" | "fight" | "charge",
-  inCover: boolean = false
+  inCover: boolean = false,
+  onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void
 ): void {
   const displayProbability = attacker ? calculateWoundProbability(attacker, target, phase, inCover) : 0;
-
-  const existingProbText = container.children.find(
-    (c: PIXI.DisplayObject) => c.name === `prob-text-${target.id}`
-  ) as PIXI.Text | undefined;
-
-  if (existingProbText && existingProbText instanceof PIXI.Text) {
-    existingProbText.text = `${Math.round(displayProbability * 100)}%`;
-  }
+  const unitIdNum = typeof target.id === "string" ? parseInt(target.id, 10) : target.id;
+  const showCoverShield = phase === "shoot" && inCover;
+  onBlinkProbHtml?.({
+    action: "updateLabel",
+    unitId: unitIdNum,
+    label: `${Math.round(displayProbability * 100)}%`,
+    showCoverShield,
+    probabilityHelpText: DEFAULT_BLINK_PROBABILITY_HELP_TEXT,
+  });
 }

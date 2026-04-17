@@ -49,7 +49,13 @@ import {
 } from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
-import type { HPBlinkContainer, HpBarHtmlTooltipPayload } from "../utils/blinkingHPBar";
+import {
+  DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
+  DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
+  type BlinkProbHtmlPayload,
+  type HPBlinkContainer,
+  type HpBarHtmlTooltipPayload,
+} from "../utils/blinkingHPBar";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
 
@@ -617,6 +623,20 @@ export default function Board({
 
   const [unitHoverTooltip, setUnitHoverTooltip] = useState<HpBarHtmlTooltipPayload | null>(null);
 
+  /** Cadre % / bouclier COVER au-dessus de la barre PV clignotante (HTML, aligné `.rule-tooltip`). */
+  const [blinkProbHtmlByUnitId, setBlinkProbHtmlByUnitId] = useState<
+    Record<
+      number,
+      {
+        left: number;
+        top: number;
+        label: string;
+        showCoverShield: boolean;
+        probabilityHelpText: string;
+      }
+    >
+  >({});
+
   /** Tooltip distance prévisualisation mouvement (″) : même style que survol unité ; échelle hex → ″ via HEX_STEPS_PER_INCH_DISPLAY. */
   const [movePreviewDistanceTooltip, setMovePreviewDistanceTooltip] = useState<{
     visible: boolean;
@@ -650,6 +670,40 @@ export default function Board({
         ...(payload.opacity !== undefined ? { opacity: payload.opacity } : {}),
       });
     }
+  }, []);
+
+  const handleBlinkProbHtml = useCallback((payload: BlinkProbHtmlPayload) => {
+    setBlinkProbHtmlByUnitId((prev) => {
+      if (payload.action === "hide") {
+        if (!(payload.unitId in prev)) return prev;
+        const next = { ...prev };
+        delete next[payload.unitId];
+        return next;
+      }
+      if (payload.action === "show") {
+        return {
+          ...prev,
+          [payload.unitId]: {
+            left: payload.left,
+            top: payload.top,
+            label: payload.label,
+            showCoverShield: payload.showCoverShield,
+            probabilityHelpText: payload.probabilityHelpText,
+          },
+        };
+      }
+      const cur = prev[payload.unitId];
+      if (!cur) return prev;
+      return {
+        ...prev,
+        [payload.unitId]: {
+          ...cur,
+          label: payload.label,
+          showCoverShield: payload.showCoverShield,
+          probabilityHelpText: payload.probabilityHelpText,
+        },
+      };
+    });
   }, []);
 
   // Persistent container for drag placement overlay (deployment phase)
@@ -2863,6 +2917,7 @@ export default function Board({
         })(),
         onAdvance: onAdvance,
         onUnitTooltip: handleUnitTooltip,
+        onBlinkProbHtml: handleBlinkProbHtml,
         debugMode: showHexCoordinates,
         chargeMaxDistance,
       });
@@ -2921,6 +2976,7 @@ export default function Board({
           parseColor,
           autoSelectWeapon,
           onUnitTooltip: handleUnitTooltip,
+          onBlinkProbHtml: handleBlinkProbHtml,
           debugMode: showHexCoordinates,
           chargeMaxDistance,
         });
@@ -2979,6 +3035,7 @@ export default function Board({
           onConfirmMove,
           parseColor,
           onUnitTooltip: handleUnitTooltip,
+          onBlinkProbHtml: handleBlinkProbHtml,
           autoSelectWeapon,
           debugMode: showHexCoordinates,
           chargeMaxDistance,
@@ -3688,6 +3745,76 @@ export default function Board({
             >
               {unitHoverTooltip.text}
             </div>,
+            document.body
+          )}
+        {typeof document !== "undefined" &&
+          Object.keys(blinkProbHtmlByUnitId).length > 0 &&
+          createPortal(
+            <>
+              {Object.entries(blinkProbHtmlByUnitId).map(([idStr, data]) => (
+                <div
+                  key={`blink-prob-${idStr}`}
+                  className="rule-tooltip unit-icon-tooltip"
+                  role="presentation"
+                  style={{
+                    position: "fixed",
+                    left: `${data.left}px`,
+                    top: `${data.top}px`,
+                    marginBottom: 0,
+                    zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
+                    visibility: "visible",
+                    opacity: 1,
+                    transform: "translateX(-50%)",
+                    pointerEvents: "auto",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    maxWidth: "min(92vw, var(--tooltip-max-width))",
+                  }}
+                  onPointerMove={(e) => {
+                    const el = e.target as HTMLElement;
+                    if (el.closest('[data-blink-prob-shield="1"]')) {
+                      setUnitHoverTooltip({
+                        visible: true,
+                        text: "Couvert (COVER) : +1 au jet de sauvegarde.",
+                        x: e.clientX,
+                        y: e.clientY,
+                        zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
+                        opacity: DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
+                      });
+                    } else {
+                      setUnitHoverTooltip({
+                        visible: true,
+                        text: data.probabilityHelpText,
+                        x: e.clientX,
+                        y: e.clientY,
+                        zIndex: DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
+                        opacity: DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
+                      });
+                    }
+                  }}
+                  onPointerLeave={() => {
+                    setUnitHoverTooltip(null);
+                  }}
+                >
+                  <span data-blink-prob-label="1">{data.label}</span>
+                  {data.showCoverShield ? (
+                    <span
+                      data-blink-prob-shield="1"
+                      style={{ display: "inline-flex", alignItems: "center" }}
+                      aria-hidden
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" style={{ display: "block" }}>
+                        <path
+                          fill="currentColor"
+                          d="M12 2L4 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-8-3z"
+                        />
+                      </svg>
+                    </span>
+                  ) : null}
+                </div>
+              ))}
+            </>,
             document.body
           )}
         {movePreviewDistanceTooltip?.visible && (

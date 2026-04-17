@@ -5,6 +5,8 @@ import {
   buildChargeMinRollOverlay,
   buildWeaponSignature,
   createBlinkingHPBar,
+  DEFAULT_BLINK_PROBABILITY_HELP_TEXT,
+  type BlinkProbHtmlPayload,
   type HpBarHtmlTooltipPayload,
   type HPBlinkContainer,
 } from "../utils/blinkingHPBar";
@@ -134,6 +136,8 @@ interface UnitRendererProps {
   // Debug mode
   debugMode?: boolean;
   onUnitTooltip?: (tooltip: HpBarHtmlTooltipPayload) => void;
+  /** Cadre % / bouclier net (HTML) au-dessus de la barre blink */
+  onBlinkProbHtml?: (payload: BlinkProbHtmlPayload) => void;
   renderTarget?: PIXI.Container;
   /** Plafond du jet 2D6 (règle `charge_max_distance`) pour l’affichage au-dessus de la barre blink en phase charge. */
   chargeMaxDistance?: number;
@@ -1404,6 +1408,7 @@ export class UnitRenderer {
         sliceWidth,
         getCSSColor: this.getCSSColor.bind(this),
         chargeMinRollOverlay,
+        onBlinkProbHtml: this.props.onBlinkProbHtml,
       });
 
       // If targetPreview has overallProbability, update the display (pas en phase charge : affichage jet 2D6)
@@ -1413,28 +1418,16 @@ export class UnitRenderer {
         targetPreview &&
         targetPreview.overallProbability !== undefined
       ) {
-        // Find the container and update probability display
         const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
-        const existingContainer = this.props.app.stage.children.find((child) => {
-          if (child.name !== "hp-blink-container") return false;
-          const blinkContainer = child as HPBlinkContainer;
-          if (!blinkContainer.unitId) return false;
-          const containerUnitIdNum =
-            typeof blinkContainer.unitId === "string"
-              ? parseInt(blinkContainer.unitId, 10)
-              : blinkContainer.unitId;
-          return containerUnitIdNum === unitIdNum;
-        }) as HPBlinkContainer | undefined;
-
-        if (existingContainer) {
-          const existingProbText = existingContainer.children.find(
-            (c: PIXI.DisplayObject) => c.name === `prob-text-${unit.id}`
-          ) as PIXI.Text | undefined;
-
-          if (existingProbText && existingProbText instanceof PIXI.Text) {
-            existingProbText.text = `${Math.round(targetPreview.overallProbability * 100)}%`;
-          }
-        }
+        const showCoverShield =
+          blinkPhase === "shoot" && getEffectiveTargetInCover(attacker);
+        this.props.onBlinkProbHtml?.({
+          action: "updateLabel",
+          unitId: unitIdNum,
+          label: `${Math.round(targetPreview.overallProbability * 100)}%`,
+          showCoverShield,
+          probabilityHelpText: DEFAULT_BLINK_PROBABILITY_HELP_TEXT,
+        });
       }
 
       // Skip normal HP bar rendering when blinking
