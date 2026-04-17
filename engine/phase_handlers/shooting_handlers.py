@@ -4133,6 +4133,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Check if SHOOT_LEFT equals selected weapon NB
         from engine.utils.weapon_helpers import get_selected_ranged_weapon
         selected_weapon = get_selected_ranged_weapon(unit)
+        activation_started_in_this_execute = False
         if selected_weapon and "_current_shoot_nb" not in unit:
             if unit.get("_shoot_activation_started", False):
                 valid_targets = unit.get("valid_target_pool")
@@ -4143,6 +4144,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             activation_result = shooting_unit_activation_start(game_state, unit_id)
             if activation_result.get("error"):
                 return False, activation_result
+            activation_started_in_this_execute = True
             if "_current_shoot_nb" not in unit and unit.get("valid_target_pool"):
                 raise KeyError(
                     f"Unit missing required '_current_shoot_nb' after activation start: unit_id={unit.get('id')}"
@@ -4151,7 +4153,18 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         
         # Auto-select target if not provided (AI mode)
         if not target_id:
-            valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
+            # shooting_unit_activation_start already called shooting_build_valid_target_pool (same request).
+            # Reuse that list here — no stale risk (same execute_action, no intervening state).
+            if activation_started_in_this_execute:
+                pool_raw = unit.get("valid_target_pool")
+                if not isinstance(pool_raw, list):
+                    raise TypeError(
+                        f"valid_target_pool must be list after shooting_unit_activation_start, "
+                        f"got {type(pool_raw).__name__} for unit_id={unit.get('id')}"
+                    )
+                valid_targets = [str(x) for x in pool_raw]
+            else:
+                valid_targets = shooting_build_valid_target_pool(game_state, unit_id)
             
             # Debug output only in debug training mode
             if not valid_targets:
