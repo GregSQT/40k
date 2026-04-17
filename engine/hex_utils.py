@@ -155,6 +155,45 @@ def min_distance_between_sets(
     return _UNREACHABLE
 
 
+def dilate_hex_set_unbounded(
+    fp: Set[Tuple[int, int]],
+    radius: int,
+) -> Set[Tuple[int, int]]:
+    """All hexes on the infinite odd-q grid within ``radius`` steps of ``fp`` (inclusive).
+
+    Uses the same 6-neighbor expansion as ``min_distance_between_sets`` (unbounded BFS).
+    For disjoint non-empty footprints A and B: ``min_distance_between_sets(A, B) <= radius``
+    iff ``A & dilate_hex_set_unbounded(B, radius)`` is non-empty (and same symmetrically).
+
+    Args:
+        fp: Non-empty set of (col, row) cells; empty input returns empty set.
+        radius: Number of expansion layers (must be >= 0).
+
+    Raises:
+        ValueError: if ``radius`` is negative.
+    """
+    if radius < 0:
+        raise ValueError("radius must be non-negative")
+    if not fp:
+        return set()
+    result: Set[Tuple[int, int]] = set(fp)
+    frontier = list(fp)
+    for _ in range(radius):
+        next_frontier: List[Tuple[int, int]] = []
+        for c, r in frontier:
+            offsets = _NEIGHBORS_ODD_COL if (c & 1) else _NEIGHBORS_EVEN_COL
+            for dc, dr in offsets:
+                nc, nr = c + dc, r + dr
+                npos = (nc, nr)
+                if npos not in result:
+                    result.add(npos)
+                    next_frontier.append(npos)
+        frontier = next_frontier
+        if not frontier:
+            break
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Bounds checking
 # ---------------------------------------------------------------------------

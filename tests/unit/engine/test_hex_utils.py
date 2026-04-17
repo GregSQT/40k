@@ -9,6 +9,7 @@ from engine.hex_utils import (
     cube_to_offset,
     hex_distance,
     min_distance_between_sets,
+    dilate_hex_set_unbounded,
     is_in_bounds,
     normalize_coordinate,
     normalize_coordinates,
@@ -120,6 +121,26 @@ class TestMinDistanceBetweenSets:
         a = {(3, 7)}
         b = {(10, 2)}
         assert min_distance_between_sets(a, b) == hex_distance(3, 7, 10, 2)
+
+
+class TestDilateHexSetUnbounded:
+    def test_agrees_with_min_distance_threshold(self):
+        """``min_distance(A,B) <= r`` iff ``A & dilate(B, r)`` (non-empty), same metric as BFS distance."""
+        pairs = [
+            ({(3, 4), (4, 5)}, {(10, 2), (11, 3)}),
+            ({(0, 0)}, {(0, 0)}),
+            ({(0, 0)}, {(2, 0)}),
+            ({(5, 5)}, set(get_neighbors(5, 5)[:2])),
+        ]
+        for a, b in pairs:
+            for r in range(0, 20):
+                shell = dilate_hex_set_unbounded(b, r)
+                md = min_distance_between_sets(a, b)
+                assert (md <= r) == bool(a & shell), f"A={a} B={b} r={r} md={md}"
+
+    def test_includes_source_hexes(self):
+        b = {(5, 5)}
+        assert b <= dilate_hex_set_unbounded(b, 3)
 
 
 class TestBounds:

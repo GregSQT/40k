@@ -25,10 +25,13 @@ Lignes typiques (référence) :
   ``visited`` / ``valid``.
 - ``CHARGE_PHASE_START`` — ``setup_until_adj_s``, ``enemy_adjacent_hexes_s``, ``pool_build_s``, ``total_s`` (début phase charge).
 - ``CHARGE_BUILD_POOL`` — ``get_eligible_s``, ``eligible_count`` (construction du pool d’activation).
-- ``CHARGE_DEST_BFS`` — ``bfs_loop_s``, ``total_s``, ``visited_n``, ``valid_dest_n``, recherche ``search=astar``,
-  empreintes ``fp_pre_n`` (offsets pré-calculés) / ``fp_legacy_n`` (``compute_candidate_footprint``),
-  ``placement_fail_n`` (empreinte construite puis rejet par ``is_footprint_placement_valid``),
-  heuristique ``h_hit`` / ``h_miss`` / ``h_cache_n`` (cache des h par hex centre).
+- ``CHARGE_DEST_BFS`` — ``bfs_loop_s``, ``total_s``, ``visited_n``, ``valid_dest_n``, ``cache_hit``,
+  ``early_exit`` (1 = éligibilité uniquement, arrêt au premier hex valide), ``short_circuit`` (1 si arrêt anticipé).
+  ``charge_roll`` est en **pas de grille** (sous-hex) : sur plateau Boardx10, ``game_rules.charge_max_distance``
+  est déjà multiplié par ``inches_to_subhex`` (ex. 12\" → 120).
+  ``fp=offset`` : empreinte par offsets pré-calculés (multi-hex ×10) ; ``fp=legacy`` : ``compute_candidate_footprint``.
+- Logs verbeux ``[CHARGE DEBUG]`` (positions / occupation) : ``W40K_CHARGE_DEBUG=1`` ou
+  ``game_state["charge_debug_positions"]``.
 - ``CHARGE_HAS_VALID_TARGET`` — ``bfs_pool_s``, ``nested_loop_s``, ``reachable_n``, ``enemy_n`` (éligibilité).
 """
 

@@ -101,7 +101,9 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
     # Clear charge destination pools
     if "valid_charge_destinations_pool" in game_state:
         game_state["valid_charge_destinations_pool"] = []
-    
+    if "_charge_dest_bfs_cache" in game_state:
+        game_state["_charge_dest_bfs_cache"] = {}
+
     # Clear target pools for all units (shoot phase)
     for unit in require_key(game_state, "units"):
         if "valid_target_pool" in unit:

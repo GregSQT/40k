@@ -93,6 +93,8 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "engagement_zone_cache",
     "occupation_map",
     "_cache_instance_id",
+    "_charge_dest_bfs_cache",
+    "_charge_fp_offset_pair_cache",
 })
 
 
