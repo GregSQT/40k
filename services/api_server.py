@@ -85,6 +85,7 @@ _GAME_STATE_EXCLUDE_KEYS = frozenset({
     "occupied_positions",
     "los_cache",
     "valid_advance_destinations_pool",
+    # Charge pool: envoyé au client dans result.valid_destinations (sélection cible), pas ici — JSON trop lourd.
     "valid_charge_destinations_pool",
     "units_already_adjacent_to_enemy",
     "reward_state",

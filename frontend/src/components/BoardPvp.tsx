@@ -178,7 +178,7 @@ type BoardProps = {
   shootingUnitId?: number | null; // For replay mode: shows shooting indicator on shooter
   movingUnitId?: number | null; // For replay mode: shows boot icon on moving unit
   chargingUnitId?: number | null; // For replay mode: shows lightning icon on charging unit
-  chargeTargetId?: number | null; // For replay mode: shows lightning icon on charge target
+  chargeTargetId?: number | null; // Cible charge (replay / après coup) + fusion avec prévisualisation
   fightingUnitId?: number | null; // For replay mode: shows crossed swords icon on fighting unit
   fightTargetId?: number | null; // For replay mode: shows explosion icon on fight target
   // Charge roll display for replay mode
@@ -401,7 +401,6 @@ export default function Board({
   const staticBoardConfigKeyRef = useRef<string>("");
   const unitsLayerRef = useRef<PIXI.Container | null>(null);
   const unitsFingerprintRef = useRef<string>("");
-
   // Hover preview: imperative PIXI layers (no React re-render)
   const hoverOverlayRef = useRef<PIXI.Graphics | null>(null);
   const hoverSpriteRef = useRef<PIXI.Container | null>(null);
@@ -1576,34 +1575,33 @@ export default function Board({
 
     // Show charge destinations in both select and chargePreview modes
     if (phase === "charge" && (mode === "chargePreview" || mode === "select") && selectedUnit) {
-      // Check if this unit is eligible to charge
-      const isEligible = eligibleUnitIds.includes(
+      // Pool membership alone is not enough: once a unit is activated, the backend removes it
+      // from charge_activation_pool but keeps active_charge_unit. If we only checked eligibleUnitIds,
+      // isEligible would be false during chargePreview and we'd never draw valid destinations (violet
+      // hexes near the declared target).
+      const sid =
         typeof selectedUnit.id === "number"
           ? selectedUnit.id
-          : parseInt(selectedUnit.id as string, 10)
-      );
+          : parseInt(selectedUnit.id as string, 10);
+      const inChargePool = eligibleUnitIds.includes(sid);
+      const activeChargeRaw = gameState?.active_charge_unit;
+      const isActiveCharger =
+        activeChargeRaw != null && String(activeChargeRaw) === String(sid);
+      const showChargeDestinationLayer = inChargePool || isActiveCharger;
 
-      if (isEligible) {
-        // Get charge destinations from backend (already rolled and calculated)
-        const rawChargeCells = getChargeDestinations(selectedUnit.id);
-
-        // CRITICAL FIX: Filter out occupied hexes - occupied hexes should NEVER be valid destinations
-        // Even though backend filters these, add defensive check here
-        chargeCells = rawChargeCells.filter((dest) => {
-          // Check if any unit occupies this hex
-          const isOccupied = units.some(
-            (u) => u.col === dest.col && u.row === dest.row && u.HP_CUR > 0
-          );
-          return !isOccupied; // Only include if NOT occupied
-        });
+      if (showChargeDestinationLayer) {
+        // Pool moteur (empreintes ×10) : ne pas filtrer par u.col/u.row — sur grand plateau les
+        // ancres valides ne coïncident souvent pas avec les positions « primaires » affichées.
+        chargeCells = getChargeDestinations(selectedUnit.id);
 
         // Red outline: enemy units that can be reached via valid charge movement
         chargeTargets = units.filter((u) => {
           if (u.player === selectedUnit.player) return false;
 
-          // Check if any valid charge destination is adjacent to this enemy
           return chargeCells.some((dest) => {
-            const cube1 = offsetToCube(dest.col, dest.row);
+            const dc = Array.isArray(dest) ? dest[0] : dest.col;
+            const dr = Array.isArray(dest) ? dest[1] : dest.row;
+            const cube1 = offsetToCube(dc, dr);
             const cube2 = offsetToCube(u.col, u.row);
             return cubeDistance(cube1, cube2) === 1;
           });
@@ -2122,7 +2120,7 @@ export default function Board({
       for (const u of units) {
         parts.push(`${u.id},${u.col},${u.row},${u.HP_CUR}`);
       }
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#${blinkVersion}#${fightSubPhase}#${chargeTargetId}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${movePreviewLosBlinkIds.join(",")}#${JSON.stringify(movePreviewLosCoverById)}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -2189,8 +2187,9 @@ export default function Board({
         app.stage.addChild(savedMovePreviewGuideLine);
       }
 
-      // Clean stale transient UI markers
-      if (savedUi) {
+      // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
+      // Sinon le badge 2D6 est supprimé ici puis jamais redessiné (unitsChanged false).
+      if (savedUi && unitsChanged) {
         const staleTargetMarkers = savedUi.children.filter(
           (child: PIXI.DisplayObject) =>
             typeof child.name === "string" &&
@@ -2207,6 +2206,28 @@ export default function Board({
     // Reuse cached static board layers when the board config hasn't changed.
     const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}`;
     const canReuseStatic = staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
+
+    const gsRules = (
+      gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
+    )?.config?.game_rules;
+    const engagementZoneSteps =
+      gsRules?.engagement_zone ?? gameConfig?.game_rules?.engagement_zone ?? 1;
+    const chargeEngagementHalo =
+      phase === "charge" &&
+      mode === "chargePreview" &&
+      chargeTargetId != null &&
+      typeof engagementZoneSteps === "number" &&
+      engagementZoneSteps > 1
+        ? (() => {
+            const tu = units.find((u) => String(u.id) === String(chargeTargetId));
+            if (!tu) return undefined;
+            return {
+              centerCol: tu.col,
+              centerRow: tu.row,
+              zoneHexSteps: engagementZoneSteps,
+            };
+          })()
+        : undefined;
 
     const drawResult = drawBoard(app, boardConfigWithOverrides as Parameters<typeof drawBoard>[1], {
       availableCells: effectiveAvailableCells,
@@ -2231,6 +2252,7 @@ export default function Board({
       losDebugRatioByHex: Object.fromEntries(losVisibilityRatioByHex),
       losDebugCoverRatio: coverRatio,
       losDebugVisibilityMinRatio: losVisibilityMinRatio,
+      chargeEngagementHalo,
     });
 
     if (!canReuseStatic && drawResult) {
@@ -2248,6 +2270,10 @@ export default function Board({
       unitsLayerRef.current.name = "units-layer";
       unitsLayerRef.current.sortableChildren = true;
     }
+    // Above board highlights + full-screen hex hitArea (zIndex 0): unit clicks must win so
+    // chargePreview can select blinking enemies (their hex is rarely in clickableSet). Empty
+    // pixels still fall through to the hitArea below. Below drag overlay (9000) and ui (10000).
+    unitsLayerRef.current.zIndex = 2000;
     if (!unitsLayerRef.current.parent) {
       app.stage.addChild(unitsLayerRef.current);
     }

@@ -108,6 +108,12 @@ interface DrawBoardOptions {
   losDebugRatioByHex?: Record<string, number>;
   losDebugCoverRatio?: number;
   losDebugVisibilityMinRatio?: number;
+  /** Halo violet (grand plateau) : centre sur la cible de charge, rayon ~ engagement_zone en pas hex. */
+  chargeEngagementHalo?: {
+    centerCol: number;
+    centerRow: number;
+    zoneHexSteps: number;
+  };
 }
 
 export interface DrawBoardResult {
@@ -377,6 +383,10 @@ export const drawBoard = (
     const ATTACK_COLOR = parseColor(boardConfig.colors.attack!);
     const CHARGE_COLOR = parseColor(boardConfig.colors.charge!);
     const WALL_COLOR = parseColor(boardConfig.colors.wall!);
+    /** Hex destinations fin de charge (legacy small board uses 0x9f7aea — do not use ``colors.charge`` here: that key is orange UI / bordures). */
+    const CHARGE_DESTINATION_HEX_FILL = 0x9f7aea;
+    /** Advance move destinations (ADVANCE_IMPLEMENTATION_PLAN — same as legacy ``0xff8c00``). */
+    const ADVANCE_DESTINATION_HEX_FILL = 0xff8c00;
 
     // Extract options with defaults for replay viewer compatibility
     const {
@@ -397,6 +407,7 @@ export const drawBoard = (
       losDebugRatioByHex = {},
       losDebugCoverRatio = 0,
       losDebugVisibilityMinRatio = 0,
+      chargeEngagementHalo,
     } = options || {};
 
     // Parse objective control colors - use same colors as player units
@@ -608,7 +619,12 @@ export const drawBoard = (
 
       // Build clickable set for hit detection
       const clickableSet = new Set<string>();
-      for (const c of availableCells) clickableSet.add(`${c.col},${c.row}`);
+      // Charge (pool selection): activation is unit-driven (boardUnitClick → left_click). Green
+      // eligible hex highlights must stay non-interactive: the full-screen hitArea is above unit
+      // sprites and would steal clicks while boardHexClick has no charge+select branch.
+      if (!(interactionPhase === "charge" && mode === "select")) {
+        for (const c of availableCells) clickableSet.add(`${c.col},${c.row}`);
+      }
       for (const c of chargeCells) {
         const cc = Array.isArray(c) ? c[0] : (c as { col: number }).col;
         const cr = Array.isArray(c) ? c[1] : (c as { row: number }).row;
@@ -616,9 +632,8 @@ export const drawBoard = (
       }
       for (const c of advanceCells) clickableSet.add(`${c.col},${c.row}`);
 
-      // On large boards, only draw highlights for small pools (< 500 cells).
-      // Large pools (movement range on ×10) would create a solid blob — skip visual,
-      // rely on hover overlay for validation feedback.
+      // On large boards, skip drawing huge *move* highlight arrays (solid blob); hover validates.
+      // Charge destination pools can exceed 500 on Board×10 (max charge roll in sub-hex) — still draw.
       const LARGE_POOL_THRESHOLD = 500;
 
       const useAdvanceMovePoolLikeMove =
@@ -682,10 +697,36 @@ export const drawBoard = (
           col: Array.isArray(c) ? c[0] : c.col,
           row: Array.isArray(c) ? c[1] : c.row,
         })),
-        CHARGE_COLOR,
+        CHARGE_DESTINATION_HEX_FILL,
         0.4,
+        false,
       );
-      drawGroup(advanceCells, CHARGE_COLOR, 0.3);
+      drawGroup(advanceCells, ADVANCE_DESTINATION_HEX_FILL, 0.3, false);
+
+      if (
+        chargeEngagementHalo &&
+        typeof chargeEngagementHalo.zoneHexSteps === "number" &&
+        chargeEngagementHalo.zoneHexSteps > 1 &&
+        Number.isFinite(chargeEngagementHalo.centerCol) &&
+        Number.isFinite(chargeEngagementHalo.centerRow)
+      ) {
+        const hcx =
+          chargeEngagementHalo.centerCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const hcy =
+          chargeEngagementHalo.centerRow * HEX_VERT_SPACING +
+          ((chargeEngagementHalo.centerCol % 2) * HEX_VERT_SPACING) / 2 +
+          HEX_HEIGHT / 2 +
+          MARGIN;
+        const ringGfx = new PIXI.Graphics();
+        ringGfx.name = "charge-engagement-halo";
+        ringGfx.lineStyle(2.5, CHARGE_DESTINATION_HEX_FILL, 0.38);
+        ringGfx.drawCircle(
+          hcx,
+          hcy,
+          chargeEngagementHalo.zoneHexSteps * HEX_HORIZ_SPACING
+        );
+        highlightContainer.addChild(ringGfx);
+      }
 
       // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
       const hasClickableContent = clickableSet.size > 0 ||

@@ -3099,6 +3099,9 @@ export const BoardWithAPI: React.FC = () => {
             onCancelCharge={isGameOver ? () => {} : apiProps.onCancelCharge}
             onValidateCharge={isGameOver ? () => {} : apiProps.onValidateCharge}
             onLogChargeRoll={isGameOver ? () => {} : apiProps.onLogChargeRoll}
+            chargingUnitId={apiProps.chargingUnitId}
+            chargeRoll={apiProps.chargeRoll}
+            chargeSuccess={apiProps.chargeSuccess}
             gameState={apiProps.gameState as GameState}
             getChargeDestinations={apiProps.getChargeDestinations}
             moveDestPoolRef={apiProps.moveDestPoolRef}

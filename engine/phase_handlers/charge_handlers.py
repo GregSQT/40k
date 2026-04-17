@@ -36,6 +36,7 @@ from .shared_utils import (
 CHARGE_IMPACT_TRIGGER_THRESHOLD = 4
 CHARGE_IMPACT_MORTAL_WOUNDS = 1
 
+
 def _unit_has_rule(unit: Dict[str, Any], rule_id: str) -> bool:
     """Check if unit has a specific direct or granted rule effect by ruleId."""
     return shared_unit_has_rule_effect(unit, rule_id)
@@ -1129,13 +1130,19 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     CRITICAL: Charge destinations must:
     - Be reachable within charge_roll distance (2d6) via BFS
-    - End adjacent to target enemy (within melee range) if target_id provided, or any enemy if not
-    - Not be blocked by walls or units
+    - Use a **legal footprint** at the end hex (``is_footprint_placement_valid``).
+    - End in **engagement** vs the declared target (if ``target_id``) or vs **some** enemy :
+      no overlap with enemy ``occupied_hexes``, and the footprint must intersect the
+      **dilated** enemy footprint ``dilate_hex_set_unbounded(enemy_fp, engagement_zone)`` without
+      overlapping the enemy core. For disjoint footprints this is **equivalent** to
+      ``1 <= min_distance_between_sets <= engagement_zone`` (see ``hex_utils.dilate_hex_set_unbounded``).
+      **Do not** call ``min_distance_between_sets`` inside this BFS — it would nest BFS per neighbor
+      and destroy performance on large boards.
 
     Unlike movement, charges CAN move through hexes adjacent to enemies.
 
     Args:
-        target_id: Optional target unit ID. If provided, only hexes adjacent to this target are included.
+        target_id: Optional target unit ID. If provided, only hexes engaging **this** target count.
         full_occupied_positions: Optional pre-computed set of all unit positions. If provided, unit's position
             is excluded internally. Used by get_eligible_units for performance.
         early_exit_if_valid: If True, stop the BFS as soon as one valid charge end hex is found
@@ -1229,6 +1236,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     from engine.hex_utils import dilate_hex_set_unbounded
     from .shared_utils import get_engagement_zone
+
     engagement_zone = get_engagement_zone(game_state)
 
     indexed_enemy_engagement: List[Tuple[Any, Set[Tuple[int, int]], Set[Tuple[int, int]]]] = []

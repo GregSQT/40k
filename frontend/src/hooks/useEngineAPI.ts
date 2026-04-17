@@ -48,6 +48,25 @@ function readRequiredBooleanSetting(key: string, defaultValue: boolean): boolean
   return parsed;
 }
 
+/** Backend renvoie souvent des couples [col, row] ; le state React attend { col, row }. */
+function normalizeChargeDestinationsFromApi(
+  raw: unknown
+): Array<{ col: number; row: number }> {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: Array<{ col: number; row: number }> = [];
+  for (const d of raw) {
+    if (Array.isArray(d) && d.length >= 2) {
+      out.push({ col: Number(d[0]), row: Number(d[1]) });
+    } else if (d && typeof d === "object" && "col" in d && "row" in d) {
+      const o = d as { col: unknown; row: unknown };
+      out.push({ col: Number(o.col), row: Number(o.row) });
+    }
+  }
+  return out;
+}
+
 export interface APIGameState {
   units: Array<{
     id: string | number;
@@ -317,6 +336,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     roll: number;
     targetId?: number;
   } | null>(null);
+  /** Jet 2D6 après choix de cible (charge possible) — badge vert sur l'unité active */
+  const [pendingChargeRollDisplay, setPendingChargeRollDisplay] = useState<{
+    unitId: number;
+    roll: number;
+  } | null>(null);
+  /** Cible déclarée pour la charge en cours (icône + halo d’engagement) */
+  const [chargePreviewTargetId, setChargePreviewTargetId] = useState<number | null>(null);
   // State for successful charge target display
   const [successfulChargeTarget, setSuccessfulChargeTarget] = useState<{
     unitId: number;
@@ -724,6 +750,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPendingPreviewAction(null);
       setAttackPreview(null);
       setChargeDestinations([]);
+      setPendingChargeRollDisplay(null);
+      setChargePreviewTargetId(null);
       setAdvanceDestinations([]);
       setPostShootMoveDestinations([]);
       setAdvancingUnitId(null);
@@ -1185,24 +1213,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
           }
 
-          // STEP 3: Set mode to attackPreview only if unit has valid targets (not empty_target_pool)
-          // This prevents shooting preview from showing when unit can only advance
-          // CRITICAL FIX: After advance move, blinking_units indicates valid targets are available
-          if (data.result?.blinking_units && data.result?.start_blinking) {
-            // If blinking_units is present and has elements, unit has valid targets
-            // blinking_units IS the list of valid target IDs, so if it exists and has length > 0, targets are available
+          // STEP 3: Tir uniquement — ne pas forcer attackPreview en phase charge (cibles de charge clignotantes).
+          if (
+            data.game_state?.phase === "shoot" &&
+            data.result?.blinking_units &&
+            data.result?.start_blinking
+          ) {
             const hasValidTargets =
               Array.isArray(data.result.blinking_units) && data.result.blinking_units.length > 0;
 
             if (hasValidTargets) {
-              // AI_TURN.md COMPLIANCE: Clear stale attackPreview when entering attackPreview mode for shooting
-              // This prevents units from rendering at old positions from previous fight phases
               setAttackPreview(null);
               setMode("attackPreview");
 
-              // CRITICAL: Set selectedUnitId to active_shooting_unit or unitId from result
-              // This MUST happen BEFORE setGameState to ensure weapon icon appears
-              // active_shooting_unit is set by backend (shooting_handlers.py line 3180) after advance
               const activeUnitId = data.game_state?.active_shooting_unit || data.result?.unitId;
               if (activeUnitId) {
                 setSelectedUnitId(parseInt(activeUnitId, 10));
@@ -1363,62 +1386,66 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(parseInt(data.result.unitId, 10));
             setMode("chargePreview");
           }
-          // Handle charge activation response with valid destinations (after target selection)
-          // MUST be after setGameState to prevent being overwritten
-          else if (data.result?.valid_destinations && data.result?.waiting_for_player) {
-            // STEP 1: Start blinking if blinking_units is present (for charge phase)
-            if (data.result?.blinking_units && data.result?.start_blinking) {
-              const newUnitIds = data.result.blinking_units.map((id: string) => parseInt(id, 10));
-              const needsNewTimer =
-                !blinkingUnits.blinkTimer ||
-                !blinkingUnits.unitIds.some((id) => newUnitIds.includes(id));
-
-              if (needsNewTimer) {
-                // Clear any existing blinking timer
-                if (blinkingUnits.blinkTimer) {
-                  clearInterval(blinkingUnits.blinkTimer);
-                }
-
-                // Start blinking for all valid targets
-                // Note: Actual blinking animation is handled locally in UnitRenderer
-                // We only track which units should blink, not the blink state itself
-                const timer = window.setInterval(() => {
-                  // Empty interval - blinking is handled locally in UnitRenderer
-                  // This timer is kept for cleanup purposes only
-                }, 500);
-
-                // For charge phase, store attacker ID directly in blinkingUnits to avoid React timing issues
-                const attackerId =
-                  data.game_state?.phase === "charge" && data.result?.unitId
-                    ? parseInt(data.result.unitId, 10)
-                    : null;
-
-                // Also update gameState for consistency
-                if (data.game_state?.phase === "charge" && data.result?.unitId) {
-                  data.game_state = {
-                    ...data.game_state,
-                    active_charge_unit: data.result.unitId,
-                  };
-                  setSelectedUnitId(parseInt(data.result.unitId, 10));
-                }
-
-                setBlinkingUnits({ unitIds: newUnitIds, blinkTimer: timer, attackerId });
-              }
-            } else if (data.result?.blinking_units && !data.result?.start_blinking) {
-              console.warn(
-                "💫 WARNING: blinking_units present but start_blinking is false (charge phase)"
-              );
+          // Charge : cible validée → jet 2D6 + zone violette (pool). Ne pas dépendre seulement de
+          // waiting_for_player (sinon la branche "shoot" plus bas effaçait selectedUnitId).
+          else if (
+            data.game_state?.phase === "charge" &&
+            data.result?.action === "charge_target_selected"
+          ) {
+            const pd = data.result.preview_data as { violet_hexes?: unknown } | undefined;
+            const raw =
+              data.result.valid_destinations ??
+              pd?.violet_hexes ??
+              [];
+            setChargeDestinations(normalizeChargeDestinationsFromApi(raw));
+            if (data.result.targetId != null) {
+              setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
             }
-
-            setChargeDestinations(data.result.valid_destinations);
-            setSelectedUnitId(parseInt(data.result.unitId, 10));
+            if (data.result.unitId != null && data.result.charge_roll != null) {
+              setPendingChargeRollDisplay({
+                unitId: parseInt(String(data.result.unitId), 10),
+                roll: data.result.charge_roll as number,
+              });
+            }
+            setSelectedUnitId(parseInt(String(data.result.unitId), 10));
             setMode("chargePreview");
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+            setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
+          }
+          // Fallback : anciennes réponses sans action === charge_target_selected
+          else if (
+            data.game_state?.phase === "charge" &&
+            data.result?.valid_destinations &&
+            data.result?.waiting_for_player === true
+          ) {
+            setChargeDestinations(
+              normalizeChargeDestinationsFromApi(data.result.valid_destinations)
+            );
+            if (data.result.targetId != null) {
+              setChargePreviewTargetId(parseInt(String(data.result.targetId), 10));
+            }
+            if (data.result.unitId != null && data.result.charge_roll != null) {
+              setPendingChargeRollDisplay({
+                unitId: parseInt(String(data.result.unitId), 10),
+                roll: data.result.charge_roll as number,
+              });
+            }
+            setSelectedUnitId(parseInt(String(data.result.unitId), 10));
+            setMode("chargePreview");
+            if (blinkingUnits.blinkTimer) {
+              clearInterval(blinkingUnits.blinkTimer);
+            }
+            setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
           }
           // NEW RULE: Handle charge failure - show failed roll badge
           // Use EXACT same logic as successful charges: reset mode immediately, store targetId
           else if (data.result?.charge_failed && data.result?.charge_roll !== undefined) {
             const failedUnitId = parseInt(data.result.unitId || "0", 10);
             const targetId = data.result.targetId ? parseInt(data.result.targetId, 10) : undefined;
+            setPendingChargeRollDisplay(null);
+            setChargePreviewTargetId(null);
             // Store failed charge info for badge display
             setFailedChargeRoll({ unitId: failedUnitId, roll: data.result.charge_roll });
             // Store target separately (EXACT same as successful charges) for target icon display
@@ -1431,6 +1458,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             // CRITICAL: Reset mode immediately (EXACT same as successful charges) so logo renders in stable state
             setChargeDestinations([]);
+            setPendingChargeRollDisplay(null);
             setSelectedUnitId(null);
             setMode("select");
             // Clear blinking from charge preview to avoid stale attacker stats
@@ -1461,6 +1489,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }, 2000);
             }
             setChargeDestinations([]);
+            setPendingChargeRollDisplay(null);
+            setChargePreviewTargetId(null);
             setSelectedUnitId(null);
             setMode("select");
             // Clear blinking from charge preview when charge resolves
@@ -1542,7 +1572,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             // Mode will be set by blinking_units handler (attackPreview) or allow_advance handler (advancePreview)
           } else {
-            setSelectedUnitId(null);
+            // Ne pas effacer la sélection en phase charge (réponses partielles / clés manquantes).
+            if (data.game_state?.phase !== "charge") {
+              setSelectedUnitId(null);
+            }
           }
 
           // CRITICAL FIX: Propagate available_weapons independently of allow_advance condition
@@ -1922,6 +1955,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           clickTarget: "active_unit",
         });
         setChargeDestinations([]);
+        setPendingChargeRollDisplay(null);
+        setChargePreviewTargetId(null);
       } else if (numericUnitId === null && mode === "advancePreview") {
         setAdvanceDestinations([]);
         setPostShootMoveDestinations([]);
@@ -3115,12 +3150,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onSelectRuleChoice: handleSelectRuleChoice,
     // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display
-    chargingUnitId: failedChargeRoll ? failedChargeRoll.unitId : null,
-    chargeRoll: failedChargeRoll ? failedChargeRoll.roll : null,
-    chargeSuccess: failedChargeRoll ? false : undefined,
+    chargingUnitId: failedChargeRoll
+      ? failedChargeRoll.unitId
+      : pendingChargeRollDisplay
+        ? pendingChargeRollDisplay.unitId
+        : null,
+    chargeRoll: failedChargeRoll
+      ? failedChargeRoll.roll
+      : pendingChargeRollDisplay
+        ? pendingChargeRollDisplay.roll
+        : null,
+    chargeSuccess: failedChargeRoll ? false : pendingChargeRollDisplay ? true : undefined,
     // Export charge target ID for target icon display (for both successful and failed charges)
     chargeTargetId: (() => {
-      const targetId = failedChargeRoll?.targetId || successfulChargeTarget?.targetId || null;
+      const targetId =
+        chargePreviewTargetId ??
+        failedChargeRoll?.targetId ??
+        successfulChargeTarget?.targetId ??
+        null;
       return targetId;
     })(),
     // Add AI turn execution for PvE mode

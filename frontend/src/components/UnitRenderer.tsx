@@ -1815,8 +1815,11 @@ export class UnitRenderer {
     // Clean up any existing charge badge for this unit from the container
     const unitIdNum = typeof unit.id === "string" ? parseInt(unit.id, 10) : unit.id;
     if (uiElementsContainer) {
+      const prefix = `charge-badge-${unitIdNum}`;
       const existingElements = uiElementsContainer.children.filter(
-        (child: PIXI.DisplayObject) => child.name === `charge-badge-${unitIdNum}`
+        (child: PIXI.DisplayObject) =>
+          typeof child.name === "string" &&
+          (child.name === prefix || child.name.startsWith(`${prefix}-`))
       );
       existingElements.forEach((child: PIXI.DisplayObject) => {
         uiElementsContainer.removeChild(child);
