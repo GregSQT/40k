@@ -33,10 +33,10 @@
       "objective_p2": "0xcc4444"
     },
     "display": {
-      "background_image": "/backgrounds/Highland.webp",
+      "background_image": "/backgrounds/Fallout.webp",
       "background_image_alpha": 0.85,
       "background_overlay_alpha": 0.18,
-      "wall_texture": "/textures/Highland.webp",
+      "wall_texture": "/textures/Fallout.webp",
       "wall_texture_alpha": 1.0,
       "objective_smooth_contour": true,
       "objective_smooth_radius_ratio": 1.0,

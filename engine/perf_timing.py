@@ -14,6 +14,9 @@ Sortie : fichier append-only ``<racine_projet>/perf_timing.log`` (une ligne par 
 
 Lignes typiques (référence) :
 
+- ``API_ACTION_REQUEST`` — entrée ``POST /api/game/action`` : ``phase_before``, ``action``, ``unitId`` (requête
+  client avant routage ; à distinguer des ``EXECUTE_SEMANTIC_TOTAL`` internes, ex. ``skip`` lors d’un
+  ``end_phase``).
 - ``API_POST_ACTION`` — ``engine_s`` (``execute_semantic_action`` / handlers), ``serialize_game_state_s``
   (``make_json_serializable`` + sync HP + types joueurs), ``jsonify_response_s`` (construction de la
   réponse Flask + sérialisation du corps), ``total_wall_s`` depuis le début du traitement POST.
@@ -22,7 +25,10 @@ Lignes typiques (référence) :
   ``visited`` / ``valid``.
 - ``CHARGE_PHASE_START`` — ``setup_until_adj_s``, ``enemy_adjacent_hexes_s``, ``pool_build_s``, ``total_s`` (début phase charge).
 - ``CHARGE_BUILD_POOL`` — ``get_eligible_s``, ``eligible_count`` (construction du pool d’activation).
-- ``CHARGE_DEST_BFS`` — ``bfs_loop_s``, ``total_s``, ``visited_n``, ``valid_dest_n`` (BFS destinations de charge).
+- ``CHARGE_DEST_BFS`` — ``bfs_loop_s``, ``total_s``, ``visited_n``, ``valid_dest_n``, recherche ``search=astar``,
+  empreintes ``fp_pre_n`` (offsets pré-calculés) / ``fp_legacy_n`` (``compute_candidate_footprint``),
+  ``placement_fail_n`` (empreinte construite puis rejet par ``is_footprint_placement_valid``),
+  heuristique ``h_hit`` / ``h_miss`` / ``h_cache_n`` (cache des h par hex centre).
 - ``CHARGE_HAS_VALID_TARGET`` — ``bfs_pool_s``, ``nested_loop_s``, ``reachable_n``, ``enemy_n`` (éligibilité).
 """
 
