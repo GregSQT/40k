@@ -174,7 +174,8 @@ type Mode =
   | "attackPreview"
   | "targetPreview"
   | "chargePreview"
-  | "advancePreview";
+  | "advancePreview"
+  | "pileInPreview";
 
 /** État du mode mesure (règle dans la barre). */
 export type MeasureModeState =
@@ -233,6 +234,8 @@ type BoardProps = {
   onDeployUnit?: (unitId: number | string, destCol: number, destRow: number) => void;
   onFightAttack?: (attackerId: number, targetId: number | null) => void;
   onActivateFight?: (fighterId: number) => void;
+  onPileInMove?: (unitId: number, destCol: number, destRow: number) => void;
+  onSkipPileIn?: () => void;
   current_player: 1 | 2;
   unitsMoved: number[];
   unitsCharged?: number[];
@@ -276,7 +279,7 @@ type BoardProps = {
   /** Tutoriel : masquer l’icône Advance au-dessus des unités pendant certains steps. */
   hideAdvanceIconForTutorial?: boolean;
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
-  availableCellsOverride?: Array<{ col: number; row: number }>; // For replay mode: override available cells (green highlights)
+  availableCellsOverride?: Array<{ col: number; row: number }>; // Replay / pile in : surbrillance des hexes disponibles
   deploymentState?: GameState["deployment_state"];
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
@@ -414,6 +417,8 @@ export default function Board({
   onDeployUnit,
   onFightAttack,
   onActivateFight,
+  onPileInMove,
+  onSkipPileIn,
   onCharge,
   onActivateCharge,
   onChargeEnemyUnit,
@@ -531,6 +536,8 @@ export default function Board({
     onAdvanceMove?: (unitId: number | string, destCol: number, destRow: number) => void;
     onValidateCharge?: (chargerId: number) => void;
     onLogChargeRoll?: (unit: Unit, roll: number) => void;
+    onPileInMove?: (unitId: number, destCol: number, destRow: number) => void;
+    onSkipPileIn?: () => void;
   }>({
     onSelectUnit,
     onStartMovePreview,
@@ -550,6 +557,8 @@ export default function Board({
     onAdvanceMove,
     onValidateCharge,
     onLogChargeRoll,
+    onPileInMove,
+    onSkipPileIn,
   });
 
   // Update refs when props change but don't trigger re-render - MOVE THIS BEFORE useEffect
@@ -574,6 +583,8 @@ export default function Board({
     onAdvanceMove,
     onValidateCharge,
     onLogChargeRoll,
+    onPileInMove,
+    onSkipPileIn,
   };
 
   // Remove debug log
@@ -942,7 +953,9 @@ export default function Board({
     const gameRules = gameConfig.game_rules;
     const losMin = gameRules?.los_visibility_min_ratio ?? 0;
     const coverR = gameRules?.cover_ratio ?? 0;
-    const ATTACK_COLOR_H = parseInt((boardConfig.colors.attack || "0xe08080").replace("0x", ""), 16);
+    /** Aligné sur BoardDisplay (prévisualisation tir / movePreview) : bleu clair = couvert, bleu moyen = LoS claire */
+    const LOS_PREVIEW_CLEAR_HEX = 0x4f8bff;
+    const LOS_PREVIEW_COVER_HEX = 0x9ec5ff;
 
     const wallHexesH: [number, number][] = boardConfig.wall_hexes ? [...boardConfig.wall_hexes] : [];
     const bottomRowH = BOARD_ROWS_H - 1;
@@ -1031,7 +1044,8 @@ export default function Board({
         selectedUnitId !== null &&
         (phase === "move" ||
           (phase === "shoot" && mode === "advancePreview") ||
-          (phase === "charge" && mode === "chargePreview"));
+          (phase === "charge" && mode === "chargePreview") ||
+          (phase === "fight" && mode === "pileInPreview"));
       if (!allowIconFollow) return;
       const app = appRef.current;
       if (!app || !canvas) return;
@@ -1270,7 +1284,7 @@ export default function Board({
 
         if (!hoverOverlayRef.current || hoverOverlayRef.current.destroyed) {
           hoverOverlayRef.current = new PIXI.Graphics();
-          hoverOverlayRef.current.zIndex = 50;
+          hoverOverlayRef.current.zIndex = 40;
           app.stage.addChild(hoverOverlayRef.current);
         }
         const overlay = hoverOverlayRef.current;
@@ -1285,9 +1299,18 @@ export default function Board({
         if (losRequestIdRef.current !== requestId) return;
 
         overlay.clear();
-        overlay.beginFill(ATTACK_COLOR_H, 0.3);
+        overlay.beginFill(LOS_PREVIEW_COVER_HEX, 0.3);
         for (const hex of visibleHexes) {
-          overlay.drawCircle(hxX(hex.col), hxY(hex.col, hex.row), HEX_RADIUS_H);
+          if (hex.state === 2) {
+            overlay.drawCircle(hxX(hex.col), hxY(hex.col, hex.row), HEX_RADIUS_H);
+          }
+        }
+        overlay.endFill();
+        overlay.beginFill(LOS_PREVIEW_CLEAR_HEX, 0.3);
+        for (const hex of visibleHexes) {
+          if (hex.state === 1) {
+            overlay.drawCircle(hxX(hex.col), hxY(hex.col, hex.row), HEX_RADIUS_H);
+          }
         }
         overlay.endFill();
         overlay.visible = true;
@@ -1578,7 +1601,8 @@ export default function Board({
 
     const keepMovementPickPool =
       (phase === "move" && selectedUnitId !== null) ||
-      (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null);
+      (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null) ||
+      (phase === "fight" && mode === "pileInPreview" && selectedUnitId !== null);
 
     if (!keepMovementPickPool) {
       if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
@@ -1866,6 +1890,9 @@ export default function Board({
       onMoveCharger: stableCallbacks.current.onMoveCharger,
       onChargeEnemyUnit: stableCallbacks.current.onChargeEnemyUnit || (() => {}),
       onAdvanceMove: stableCallbacks.current.onAdvanceMove,
+      onPileInMove: (uid: number, dc: number, dr: number) => {
+        stableCallbacks.current.onPileInMove?.(uid, dc, dr);
+      },
       onStartMovePreview: onStartMovePreview,
       onDirectMove: (unitId: number | string, col: number | string, row: number | string) => {
         onDirectMove(unitId, col, row);
@@ -1894,6 +1921,8 @@ export default function Board({
         if (targetPreview) {
           onCancelTargetPreview?.();
         }
+      } else if (phase === "fight" && mode === "pileInPreview") {
+        onSkipPileIn?.();
       } else if (mode === "movePreview" || mode === "attackPreview") {
         onCancelMove?.();
       }
@@ -2289,11 +2318,7 @@ export default function Board({
     if (shootingPreviewSource) {
       appendShootingPreviewCells(shootingPreviewSource);
     }
-    if (
-      phase === "fight" &&
-      selectedUnit &&
-      (mode === "select" || mode === "attackPreview")
-    ) {
+    if (phase === "fight" && selectedUnit && mode === "attackPreview") {
       attackCells.push(...fightPreviewCells);
     }
 
@@ -2695,7 +2720,7 @@ export default function Board({
     const fightEngagementRing =
       phase === "fight" &&
       selectedUnit &&
-      (mode === "select" || mode === "attackPreview") &&
+      mode === "attackPreview" &&
       selectedUnit.CC_WEAPONS &&
       selectedUnit.CC_WEAPONS.length > 0
         ? getFightEngagementRingBoardPixels(
@@ -2812,7 +2837,7 @@ export default function Board({
         // Debug code removed - variables were not used
       }
       // Calculate queue-based eligibility during shooting phase
-      const isEligibleForRendering = (() => {
+      const isEligibleForRenderingBase = (() => {
         if (phase === "shoot" && shootingActivationQueue && shootingActivationQueue.length > 0) {
           // During active shooting: unit is eligible if in queue OR is active unit
           const inQueue = shootingActivationQueue.some(
@@ -2866,6 +2891,16 @@ export default function Board({
           typeof unit.id === "number" ? unit.id : parseInt(unit.id as string, 10)
         );
       })();
+
+      // Fight : pas de cercle vert « éligible » sur l'unité active tant qu'on n'est pas en choix de cible
+      // (après pile in le cas échéant) — évite l'anneau 1″ avant le pile in.
+      const suppressFightActiveEligibleGreen =
+        phase === "fight" &&
+        selectedUnitId !== null &&
+        String(unit.id) === String(selectedUnitId) &&
+        mode !== "attackPreview";
+      const isEligibleForRendering =
+        isEligibleForRenderingBase && !suppressFightActiveEligibleGreen;
 
       // During charge phase, show selected unit as ghost (darkened) at origin
       // This indicates the unit is about to move, similar to movement preview

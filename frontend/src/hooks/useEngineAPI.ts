@@ -167,6 +167,7 @@ export interface APIGameState {
   valid_move_destinations_pool?: Array<[number, number]>;
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
+  fight_pile_in_footprint_zone?: Array<[number, number]>;
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
@@ -264,6 +265,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "targetPreview"
     | "chargePreview"
     | "advancePreview"
+    | "pileInPreview"
   >("select");
   const [movePreview, setMovePreview] = useState<{
     unitId: number;
@@ -279,6 +281,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     row: number;
   } | null>(null);
   const [chargeDestinations, setChargeDestinations] = useState<Array<{ col: number; row: number }>>(
+    []
+  );
+  /** Fight phase : ancres valides pour pile in (moteur) */
+  const [pileInDestinations, setPileInDestinations] = useState<Array<{ col: number; row: number }>>(
     []
   );
   /** Union des hexes d'empreinte finales (moteur) — affichage violet autour de la cible, pas seulement les ancres. */
@@ -791,6 +797,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       clearChargePoolRefs();
       setPendingChargeRollDisplay(null);
       setChargePreviewTargetId(null);
+      setPileInDestinations([]);
       setAdvanceDestinations([]);
       setPostShootMoveDestinations([]);
       setAdvancingUnitId(null);
@@ -1580,12 +1587,48 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
           }
+          // Fight phase : pile in avant sélection de cible CC
+          else if (
+            data.game_state?.phase === "fight" &&
+            data.result?.waiting_for_pile_in &&
+            data.result?.valid_pile_in_destinations
+          ) {
+            const raw = data.result.valid_pile_in_destinations as Array<
+              [number, number] | { col: number; row: number }
+            >;
+            const norm = raw.map((h) =>
+              Array.isArray(h)
+                ? { col: Number(h[0]), row: Number(h[1]) }
+                : { col: Number(h.col), row: Number(h.row) }
+            );
+            setPileInDestinations(norm);
+            const poolSet = new Set<string>();
+            for (const h of norm) {
+              poolSet.add(`${h.col},${h.row}`);
+            }
+            moveDestPoolRef.current = poolSet;
+            const gsPi = data.game_state;
+            const fpZone = gsPi?.fight_pile_in_footprint_zone as unknown;
+            const fpSet = new Set<string>();
+            if (Array.isArray(fpZone)) {
+              for (const d of fpZone) {
+                if (Array.isArray(d) && d.length === 2) {
+                  fpSet.add(`${d[0]},${d[1]}`);
+                }
+              }
+            }
+            footprintZoneRef.current = fpSet;
+            const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
+            setSelectedUnitId(uid);
+            setMode("pileInPreview");
+          }
           // Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
           else if (
             data.game_state?.phase === "fight" &&
             data.result?.waiting_for_player &&
             data.result?.valid_targets
           ) {
+            setPileInDestinations([]);
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
             }
@@ -1638,6 +1681,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             }
             setBlinkingUnits({ unitIds: [], blinkTimer: null });
             setAttackPreview(null);
+            setPileInDestinations([]);
             setSelectedUnitId(null);
             setMode("select");
           }
@@ -2446,6 +2490,30 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  const handlePileInMove = useCallback(
+    async (unitId: number, destCol: number, destRow: number) => {
+      await executeAction({
+        action: "pile_in",
+        unitId: String(unitId),
+        destCol,
+        destRow,
+      });
+    },
+    [executeAction]
+  );
+
+  const handleSkipPileIn = useCallback(async () => {
+    const uid = selectedUnitId;
+    if (uid === null) {
+      return;
+    }
+    await executeAction({
+      action: "pile_in",
+      unitId: String(uid),
+      skip: true,
+    });
+  }, [executeAction, selectedUnitId]);
+
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
   const handleAdvance = useCallback(
     async (unitId: number) => {
@@ -2929,6 +2997,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return undefined;
   }, [gameState?.phase, mode, pendingPreviewAction, postShootMoveDestinations]);
 
+  const pileInCellsOverride = useMemo(() => {
+    if (gameState?.phase === "fight" && mode === "pileInPreview") {
+      const fp = gameState.fight_pile_in_footprint_zone;
+      if (Array.isArray(fp) && fp.length > 0) {
+        return fp.map((d) =>
+          Array.isArray(d) && d.length >= 2
+            ? { col: Number(d[0]), row: Number(d[1]) }
+            : { col: Number((d as { col: number }).col), row: Number((d as { row: number }).row) }
+        );
+      }
+      if (pileInDestinations.length > 0) {
+        return pileInDestinations;
+      }
+    }
+    return undefined;
+  }, [gameState?.phase, gameState?.fight_pile_in_footprint_zone, mode, pileInDestinations]);
+
+  const combinedAvailableCellsOverride = useMemo(() => {
+    return pileInCellsOverride ?? moveSelectionCellsOverride;
+  }, [pileInCellsOverride, moveSelectionCellsOverride]);
+
   // Memoize isBlinkingActive to prevent re-renders when only blinkState toggles
   const isBlinkingActiveMemo = useMemo(() => {
     return blinkingUnits.blinkTimer !== null;
@@ -3051,6 +3140,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       active_movement_unit: gameState.active_movement_unit,
       move_preview_border: gameState.move_preview_border,
       move_preview_footprint_zone: gameState.move_preview_footprint_zone,
+      fight_pile_in_footprint_zone: gameState.fight_pile_in_footprint_zone,
       active_shooting_unit: gameState.active_shooting_unit,
       active_fight_unit: gameState.active_fight_unit,
       units_cache: gameState.units_cache,
@@ -3113,6 +3203,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onStartTargetPreview: () => {},
       onFightAttack: () => {},
       onActivateFight: () => {},
+      onPileInMove: async () => {},
+      onSkipPileIn: async () => {},
       onCharge: () => {},
       onActivateCharge: () => {},
       onMoveCharger: () => {},
@@ -3201,6 +3293,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: handleFightAttack,
     onActivateFight: handleActivateFight,
+    onPileInMove: handlePileInMove,
+    onSkipPileIn: handleSkipPileIn,
     onCharge: emptyCallback,
     onActivateCharge: handleActivateCharge,
     onChargeEnemyUnit: handleChargeEnemyUnit,
@@ -3230,7 +3324,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onConfirmFleeWarning: handleConfirmFleeWarning,
     onCancelFleeWarning: handleCancelFleeWarning,
     onToggleFleeWarningDontRemind: handleToggleFleeWarningDontRemind,
-    availableCellsOverride: moveSelectionCellsOverride,
+    availableCellsOverride: combinedAvailableCellsOverride,
     // Export blinking state for HP bar components
     blinkingUnits: blinkingUnitsIds,
     blinkingAttackerId: (() => {

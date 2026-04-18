@@ -512,6 +512,8 @@ export const drawBoard = (
       baseHexContainer.name = "baseHexes";
     }
     highlightContainer.name = "highlights";
+    /** Au-dessus de l’overlay LoS survol (BoardPvp, zIndex ~40), sous les unités (2000) et la ligne/icône de prévisualisation (~848–900). */
+    highlightContainer.zIndex = 120;
     const TOTAL_WIDTH = BOARD_COLS * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + 2 * MARGIN;
     const TOTAL_HEIGHT = BOARD_ROWS * HEX_VERT_SPACING + HEX_VERT_SPACING / 2 + 2 * MARGIN;
     const backgroundImagePath = boardConfig.display?.background_image?.trim();
@@ -696,6 +698,10 @@ export const drawBoard = (
 
       const useAdvanceMovePoolLikeMove =
         interactionPhase === "shoot" && mode === "advancePreview";
+      const usePileInPoolLikeMove =
+        interactionPhase === "fight" && mode === "pileInPreview";
+      // Pile in : zone rouge (empreinte moteur) — comme move_preview_footprint_zone en forme,
+      // pas seulement des disques aux ancres ; on dessine via ``availableCells`` (override).
       const useLargeBoardMoveDestPoolDraw =
         (interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
         selectedUnitBaseSize &&
@@ -706,7 +712,9 @@ export const drawBoard = (
       const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
       const availableCellsDrawColor = useAdvanceMovePoolLikeMove
         ? advanceZoneFillColor
-        : HIGHLIGHT_COLOR;
+        : usePileInPoolLikeMove
+          ? ATTACK_COLOR
+          : HIGHLIGHT_COLOR;
 
       const useLargeBoardChargeDestPoolDraw =
         interactionPhase === "charge" &&
@@ -757,7 +765,17 @@ export const drawBoard = (
       } else {
         drawGroup(availableCells, availableCellsDrawColor, 0.4, false);
       }
-      drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
+      {
+        const useShootingPreviewPalette = phase === "shoot" || mode === "movePreview";
+        if (useShootingPreviewPalette && (attackCells.length > 0 || coverCells.length > 0)) {
+          const coverKeySet = new Set(coverCells.map((c) => `${c.col},${c.row}`));
+          const attackClearOnly = attackCells.filter((c) => !coverKeySet.has(`${c.col},${c.row}`));
+          drawGroup(coverCells, 0x9ec5ff, 0.4, false);
+          drawGroup(attackClearOnly, 0x4f8bff, 0.4, false);
+        } else {
+          drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
+        }
+      }
       if (useLargeBoardChargeDestPoolDraw && chargeDestPoolRef?.current) {
         const footprintRadius = (selectedUnitBaseSize / 2) * HEX_HORIZ_SPACING;
         const chargeGfx = new PIXI.Graphics();
@@ -820,7 +838,9 @@ export const drawBoard = (
       // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
       const hasClickableContent =
         clickableSet.size > 0 ||
-        ((interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
+        ((interactionPhase === "move" ||
+          useAdvanceMovePoolLikeMove ||
+          usePileInPoolLikeMove) &&
           moveDestPoolRef?.current &&
           moveDestPoolRef.current.size > 0) ||
         (interactionPhase === "charge" &&
@@ -863,7 +883,9 @@ export const drawBoard = (
           const { col, row } = resolveHex(e.getLocalPosition(hitArea));
           const key = `${col},${row}`;
           const useMovePoolForPick =
-            (interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
+            (interactionPhase === "move" ||
+              useAdvanceMovePoolLikeMove ||
+              usePileInPoolLikeMove) &&
             moveDestPoolRef?.current &&
             moveDestPoolRef.current.size > 0;
           const useChargePoolForPick =
@@ -1081,6 +1103,12 @@ export const drawBoard = (
             } else if (isInCover) {
               highlightCell.beginFill(CHARGE_COLOR, 0.5);
             } else if (isAttackable) {
+              highlightCell.beginFill(ATTACK_COLOR, 0.5);
+            } else if (
+              interactionPhase === "fight" &&
+              mode === "pileInPreview" &&
+              isAvailable
+            ) {
               highlightCell.beginFill(ATTACK_COLOR, 0.5);
             } else if (isAvailable) {
               highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);

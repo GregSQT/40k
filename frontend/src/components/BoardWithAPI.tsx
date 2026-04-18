@@ -3113,6 +3113,8 @@ export const BoardWithAPI: React.FC = () => {
             }}
             onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
             onActivateFight={isGameOver ? () => {} : apiProps.onActivateFight}
+            onPileInMove={isGameOver ? () => {} : apiProps.onPileInMove}
+            onSkipPileIn={isGameOver ? () => {} : apiProps.onSkipPileIn}
             current_player={apiProps.current_player as PlayerId}
             unitsMoved={apiProps.unitsMoved}
             unitsCharged={apiProps.unitsCharged}

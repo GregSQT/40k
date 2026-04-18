@@ -26,6 +26,8 @@ export function setupBoardClickHandler(callbacks: {
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action callbacks
   onAdvanceMove?(unitId: UnitId, destCol: number, destRow: number): void;
   onDeployUnit?(unitId: UnitId, destCol: number, destRow: number): void;
+  /** Fight phase : pile in 3\" vers hex valide */
+  onPileInMove?(unitId: UnitId, destCol: number, destRow: number): void;
 }) {
   // Remove existing unit click handler
   if (globalClickHandler) {
@@ -224,6 +226,10 @@ export function setupBoardClickHandler(callbacks: {
       // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance mode - clicking orange hex moves the unit
       if (callbacks.onAdvanceMove) {
         callbacks.onAdvanceMove(selectedUnitId, col, row);
+      }
+    } else if (mode === "pileInPreview" && selectedUnitId !== null && phase === "fight") {
+      if (callbacks.onPileInMove) {
+        callbacks.onPileInMove(selectedUnitId, col, row);
       }
     } else if (mode === "movePreview") {
       callbacks.onCancelMove?.();

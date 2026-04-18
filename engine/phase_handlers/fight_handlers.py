@@ -10,6 +10,7 @@ CRITICAL: On ne tire PAS en phase de fight. La règle PISTOL permet de tirer en 
 de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au "engaged").
 """
 
+from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
@@ -19,7 +20,9 @@ from engine.combat_utils import (
     calculate_hex_distance,
     get_unit_by_id,
     get_unit_coordinates,
-    resolve_dice_value
+    get_hex_neighbors,
+    resolve_dice_value,
+    set_unit_coordinates,
 )
 from engine.game_state import GameStateManager
 from .shared_utils import (
@@ -31,6 +34,11 @@ from .shared_utils import (
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
+    build_occupied_positions_set,
+    compute_candidate_footprint,
+    is_footprint_placement_valid,
+    update_units_cache_position,
+    update_enemy_adjacent_caches_after_unit_move,
 )
 
 
@@ -369,6 +377,325 @@ def _is_adjacent_to_enemy_within_cc_range(game_state: Dict[str, Any], unit: Dict
 
     add_console_log(game_state, f"FIGHT NOT ELIGIBLE: Unit {unit['id']} has no enemies within engagement_zone {cc_range}")
     return False
+
+
+def _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """
+    « Collé » : au moins un hex de l'empreinte partage un bord avec un hex d'empreinte ennemie
+    (distance minimale entre empreintes == 1).
+    """
+    from engine.hex_utils import min_distance_between_sets
+
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+
+    for enemy_id, cache_entry in units_cache.items():
+        if int(cache_entry["player"]) == unit_player:
+            continue
+        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        if min_distance_between_sets(unit_fp, enemy_fp, max_distance=1) <= 1:
+            return True
+    return False
+
+
+def _fight_pile_in_closest_enemy_snapshot(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> Tuple[int, List[str]]:
+    """
+    Retourne (d_min, ids des unités ennemies dont l'empreinte est à distance minimale d_min).
+    """
+    from engine.hex_utils import min_distance_between_sets
+
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit["id"])
+    unit_entry = units_cache.get(unit_id_str)
+    unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+
+    d_min: Optional[int] = None
+    closest_ids: List[str] = []
+    for enemy_id, cache_entry in units_cache.items():
+        if int(cache_entry["player"]) == unit_player:
+            continue
+        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        d = min_distance_between_sets(unit_fp, enemy_fp)
+        if d_min is None or d < d_min:
+            d_min = d
+            closest_ids = [str(enemy_id)]
+        elif d == d_min:
+            closest_ids.append(str(enemy_id))
+
+    if d_min is None:
+        raise ValueError("_fight_pile_in_closest_enemy_snapshot: no enemy on board")
+    return d_min, closest_ids
+
+
+def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
+    game_state: Dict[str, Any],
+    new_fp: Set[Tuple[int, int]],
+    d_min: int,
+    closest_ids: List[str],
+) -> bool:
+    """True si la nouvelle empreinte est strictement plus proche d'au moins une unité du palier le plus proche."""
+    if d_min <= 0:
+        return False
+    from engine.hex_utils import dilate_hex_set_unbounded
+
+    units_cache = require_key(game_state, "units_cache")
+    radius = d_min - 1
+    for eid in closest_ids:
+        ce = units_cache.get(str(eid))
+        if not ce:
+            continue
+        efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+        shell = dilate_hex_set_unbounded(efp, radius)
+        if new_fp & shell:
+            return True
+    return False
+
+
+def _fight_build_pile_in_valid_destinations(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    d_min: int,
+    closest_ids: List[str],
+) -> List[Tuple[int, int]]:
+    """
+    BFS jusqu'à 3\" (× inches_to_subhex) : mêmes contraintes de placement que charge
+    (empreinte légale, pas chevauchement), avec fin strictement plus proche d'une cible du palier d'activation.
+    """
+    if d_min <= 0:
+        return []
+
+    scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
+    bfs_max = 3 * scale
+
+    unit_id_str = str(unit["id"])
+    start_col, start_row = require_unit_position(unit, game_state)
+    start_pos = (start_col, start_row)
+
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+
+    visited: Dict[Tuple[int, int], int] = {start_pos: 0}
+    queue = deque([(start_pos, 0)])
+    valid_destinations: List[Tuple[int, int]] = []
+
+    while queue:
+        current_pos, current_dist = queue.popleft()
+        current_col, current_row = current_pos
+        if current_dist >= bfs_max:
+            continue
+        neighbor_dist = current_dist + 1
+        for neighbor_col, neighbor_row in get_hex_neighbors(current_col, current_row):
+            neighbor_pos = (neighbor_col, neighbor_row)
+            if neighbor_pos in visited:
+                continue
+            candidate_fp = compute_candidate_footprint(neighbor_col, neighbor_row, unit, game_state)
+            if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+                continue
+            visited[neighbor_pos] = neighbor_dist
+            queue.append((neighbor_pos, neighbor_dist))
+            if neighbor_pos == start_pos:
+                continue
+            if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
+                game_state, candidate_fp, d_min, closest_ids
+            ):
+                continue
+            valid_destinations.append(neighbor_pos)
+
+    return valid_destinations
+
+
+def _fight_compute_pile_in_footprint_zone(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    valid_anchors: List[Tuple[int, int]],
+) -> Set[Tuple[int, int]]:
+    """
+    Union des hexes occupés par l'empreinte à chaque ancre valide + empreinte actuelle.
+    Aligné sur l'idée de ``move_preview_footprint_zone`` (phase move).
+    """
+    zone: Set[Tuple[int, int]] = set()
+    for ac, ar in valid_anchors:
+        fp = compute_candidate_footprint(int(ac), int(ar), unit, game_state)
+        zone.update(fp)
+    unit_id_str = str(unit["id"])
+    start_col, start_row = require_unit_position(unit, game_state)
+    units_cache = require_key(game_state, "units_cache")
+    cache_entry = units_cache.get(unit_id_str)
+    cur_fp = cache_entry.get("occupied_hexes", {(start_col, start_row)}) if cache_entry else {(start_col, start_row)}
+    zone.update(cur_fp)
+    return zone
+
+
+def _fight_apply_pile_in_move(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    dest_col: int,
+    dest_row: int,
+) -> None:
+    """Applique le déplacement de pile in (ne marque pas units_moved)."""
+    dest_col_i, dest_row_i = normalize_coordinates(dest_col, dest_row)
+    orig_col, orig_row = require_unit_position(unit, game_state)
+    unit_id_str = str(unit["id"])
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    candidate_fp = compute_candidate_footprint(dest_col_i, dest_row_i, unit, game_state)
+    if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+        raise ValueError(
+            f"Pile in illegal placement unit={unit_id_str} dest=({dest_col_i},{dest_row_i})"
+        )
+
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    phase = game_state.get("phase", "fight")
+    log_message = (
+        f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: "
+        f"({orig_col},{orig_row})→({dest_col_i},{dest_row_i}) via PILE_IN"
+    )
+    add_console_log(game_state, log_message)
+    safe_print(game_state, log_message)
+
+    set_unit_coordinates(unit, dest_col_i, dest_row_i)
+    old_cache = game_state.get("units_cache", {}).get(unit_id_str)
+    old_occupied = old_cache.get("occupied_hexes") if old_cache else None
+
+    update_units_cache_position(game_state, unit_id_str, dest_col_i, dest_row_i)
+
+    new_cache = game_state.get("units_cache", {}).get(unit_id_str)
+    new_occupied = new_cache.get("occupied_hexes") if new_cache else None
+    moved_unit_player = int(require_key(unit, "player"))
+    update_enemy_adjacent_caches_after_unit_move(
+        game_state,
+        moved_unit_player=moved_unit_player,
+        old_col=orig_col,
+        old_row=orig_row,
+        new_col=dest_col_i,
+        new_row=dest_row_i,
+        old_occupied=old_occupied,
+        new_occupied=new_occupied,
+    )
+    from .shooting_handlers import _invalidate_los_cache_for_moved_unit
+
+    _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
+
+
+def _ai_select_pile_in_destination(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    pile_dests: List[Tuple[int, int]],
+    d_min: int,
+    closest_ids: List[str],
+) -> Tuple[int, int]:
+    """Choisit la destination qui minimise la distance au palier d'ennemis les plus proches."""
+    from engine.hex_utils import min_distance_between_sets
+
+    if not pile_dests:
+        raise ValueError("_ai_select_pile_in_destination: empty pile_dests")
+    units_cache = require_key(game_state, "units_cache")
+    best: Optional[Tuple[int, int]] = None
+    best_score: Optional[int] = None
+    for ac, ar in pile_dests:
+        fp = compute_candidate_footprint(ac, ar, unit, game_state)
+        tier_scores: List[int] = []
+        for eid in closest_ids:
+            ce = units_cache.get(str(eid))
+            if not ce:
+                continue
+            efp = ce.get("occupied_hexes", {(ce["col"], ce["row"])})
+            tier_scores.append(min_distance_between_sets(fp, efp))
+        if not tier_scores:
+            continue
+        m = min(tier_scores)
+        if best_score is None or m < best_score:
+            best_score = m
+            best = (ac, ar)
+    return best if best is not None else pile_dests[0]
+
+
+def _handle_fight_pile_in_resolution(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    action: Dict[str, Any],
+    config: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Après choix joueur : pile in (hex) ou skip."""
+    unit_id = unit["id"]
+    if not game_state.get("fight_pile_in_pending"):
+        return False, {"error": "pile_in_not_pending", "unitId": unit_id}
+
+    ctx = game_state.get("_fight_pile_in_ctx")
+    if not isinstance(ctx, dict):
+        raise TypeError("game_state['_fight_pile_in_ctx'] must be a dict when fight_pile_in_pending")
+
+    skip = action.get("skip") is True
+    if not skip:
+        if "destCol" not in action or "destRow" not in action:
+            return False, {"error": "pile_in_requires_dest_or_skip", "unitId": unit_id}
+        dest_col, dest_row = normalize_coordinates(action["destCol"], action["destRow"])
+        valids: List[Tuple[int, int]] = ctx.get("valid_destinations") or []
+        if (dest_col, dest_row) not in valids:
+            return False, {
+                "error": "invalid_pile_in_destination",
+                "unitId": unit_id,
+                "destination": (dest_col, dest_row),
+            }
+        _fight_apply_pile_in_move(game_state, unit, dest_col, dest_row)
+
+    game_state["fight_pile_in_pending"] = False
+    game_state["_fight_pile_in_ctx"] = None
+    game_state.pop("valid_pile_in_destinations", None)
+    game_state.pop("fight_pile_in_footprint_zone", None)
+
+    valid_targets = _fight_build_valid_target_pool(game_state, unit)
+    if not valid_targets:
+        result = end_activation(game_state, unit, PASS, 1, PASS, FIGHT, 0)
+        game_state["active_fight_unit"] = None
+        game_state["valid_fight_targets"] = []
+        result["action"] = "wait"
+        result["phase"] = "fight"
+        result["unitId"] = unit_id
+        result["pile_in_completed"] = True
+        if result.get("phase_complete"):
+            preserved_action = result.get("action")
+            preserved_unit_id = result.get("unitId")
+            phase_result = _fight_phase_complete(game_state)
+            result.update(phase_result)
+            if preserved_action is not None:
+                result["action"] = preserved_action
+            if preserved_unit_id:
+                result["unitId"] = preserved_unit_id
+        else:
+            _toggle_fight_alternation(game_state)
+            _update_fight_subphase(game_state)
+        return True, result
+
+    game_state["active_fight_unit"] = unit_id
+    game_state["valid_fight_targets"] = valid_targets
+
+    is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
+    auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
+    is_gym_training = require_key(config, "gym_training_mode")
+    if not isinstance(is_gym_training, bool):
+        raise TypeError(f"config['gym_training_mode'] must be bool, got {type(is_gym_training).__name__}")
+
+    if (is_ai_controlled or is_gym_training) and auto_execution_allowed and valid_targets:
+        target_id = _ai_select_fight_target(game_state, str(unit_id), valid_targets)
+        if target_id:
+            return _handle_fight_attack(game_state, unit, target_id, config)
+
+    return True, {
+        "unitId": unit_id,
+        "waiting_for_player": True,
+        "valid_targets": valid_targets,
+        "ATTACK_LEFT": unit["ATTACK_LEFT"],
+        "pile_in_completed": True,
+        "action": "wait",
+    }
 
 
 def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
@@ -756,6 +1083,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
         # trigger an additional attack sequence.
         if activation_result[1].get("attack_executed") or activation_result[1].get("all_attack_results"):
             return activation_result
+        if activation_result[1].get("waiting_for_pile_in"):
+            return activation_result
         # Otherwise continue with fight action - targets should now be populated
 
     # NOTE: AI_TURN.md line 667 specifies invalid actions should call end_activation (ERROR, 0, PASS, FIGHT)
@@ -765,9 +1094,18 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     if action_type == "activate_unit":
         return _handle_fight_unit_activation(game_state, unit, config)
 
+    elif action_type == "pile_in":
+        return _handle_fight_pile_in_resolution(game_state, unit, action, config)
+
     elif action_type == "fight":
         # Fight action with target selection
         # Auto-select target if not provided (for all modes: gym training, PvE AI, bots, etc.)
+        if game_state.get("fight_pile_in_pending"):
+            return False, {
+                "error": "pile_in_required_first",
+                "unitId": unit_id,
+                "phase": "fight",
+            }
         if "targetId" not in action:
             # Always rebuild for the current unit to avoid stale target pools
             # from a previous active unit/subphase.
@@ -1053,6 +1391,55 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
         log_msg = f"[FIGHT DEBUG] E{episode} T{turn} fight unit_activation: Unit {unit_id} valid_targets={valid_targets} count={len(valid_targets)}"
         add_console_log(game_state, log_msg)
         safe_print(game_state, log_msg)
+
+    # Pile in (optionnel) : pas « collé », mais cibles CC valides — jusqu'à 3\", fin plus proche du palier ennemi le plus proche
+    game_state["fight_pile_in_pending"] = False
+    game_state.pop("valid_pile_in_destinations", None)
+    game_state.pop("fight_pile_in_footprint_zone", None)
+    game_state.pop("_fight_pile_in_ctx", None)
+
+    if valid_targets:
+        if not _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state, unit):
+            d_min, closest_ids = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
+            pile_dests = _fight_build_pile_in_valid_destinations(
+                game_state, unit, d_min, closest_ids
+            )
+            if pile_dests:
+                is_gym_training = require_key(config, "gym_training_mode")
+                if not isinstance(is_gym_training, bool):
+                    raise TypeError(
+                        f"config['gym_training_mode'] must be bool, got {type(is_gym_training).__name__}"
+                    )
+                is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
+                auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
+                auto_pile = (is_ai_controlled or is_gym_training) and auto_execution_allowed
+                if auto_pile:
+                    pc, pr = _ai_select_pile_in_destination(
+                        game_state, unit, pile_dests, d_min, closest_ids
+                    )
+                    _fight_apply_pile_in_move(game_state, unit, pc, pr)
+                    valid_targets = _fight_build_valid_target_pool(game_state, unit)
+                else:
+                    game_state["fight_pile_in_pending"] = True
+                    game_state["valid_pile_in_destinations"] = pile_dests
+                    game_state["fight_pile_in_footprint_zone"] = list(
+                        _fight_compute_pile_in_footprint_zone(game_state, unit, pile_dests)
+                    )
+                    game_state["_fight_pile_in_ctx"] = {
+                        "d_min": d_min,
+                        "closest_ids": list(closest_ids),
+                        "valid_destinations": list(pile_dests),
+                    }
+                    game_state["active_fight_unit"] = unit_id
+                    return True, {
+                        "unit_activated": True,
+                        "unitId": unit_id,
+                        "waiting_for_pile_in": True,
+                        "valid_pile_in_destinations": pile_dests,
+                        "ATTACK_LEFT": unit["ATTACK_LEFT"],
+                        "waiting_for_player": True,
+                        "action": "wait",
+                    }
 
     if not valid_targets:
         # DEBUG: Check if unit is adjacent to enemy but not attacking
