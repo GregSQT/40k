@@ -11,9 +11,9 @@ interface SharedLayoutProps {
   rightColumnContent: React.ReactNode; // Right column content (varies by page)
   className?: string;
   onOpenSettings?: () => void;
-  /** Active le mode mesure (règle) ou annule si déjà actif. */
+  /** Bascule le mode mesure (règle) : seule action qui le désactive quand il est actif. */
   onToggleMeasureMode?: () => void;
-  /** Règle « allumée » : en attente du 1er clic ou mesure en cours. */
+  /** Règle « allumée » : entre deux lignes (armed) ou pendant une mesure. */
   measureModeActive?: boolean;
 }
 
@@ -195,8 +195,8 @@ const Navigation: React.FC<NavigationProps> = ({
             <TooltipWrapper
               text={
                 measureModeActive
-                  ? "Annuler le mode mesure (ou terminez par un 2e clic sur le plateau)"
-                  : "Mesurer une distance sur le plateau"
+                  ? "2e clic gauche : fin de la ligne courante (tu peux en tracer une autre). Clic droit : jonction. Icône règle : désactiver le mode mesure."
+                  : "Activer la mesure sur le plateau : 1er clic = départ, clic droit = jonction, 2e clic = fin de ligne ; recliquer l’icône pour quitter."
               }
             >
               <button

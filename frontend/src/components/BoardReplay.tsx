@@ -182,12 +182,18 @@ export const BoardReplay: React.FC = () => {
   const handleMeasureHexCommit = useCallback((col: number, row: number) => {
     setMeasureMode((prev) => {
       if (prev.kind === "armed") {
-        return { kind: "measuring", startCol: col, startRow: row };
+        return { kind: "measuring", originCol: col, originRow: row, junctions: [] };
       }
       if (prev.kind === "measuring") {
-        return { kind: "off" };
+        return { kind: "armed" };
       }
       return prev;
+    });
+  }, []);
+  const handleMeasureJunctionCommit = useCallback((col: number, row: number) => {
+    setMeasureMode((prev) => {
+      if (prev.kind !== "measuring") return prev;
+      return { ...prev, junctions: [...prev.junctions, { col, row }] };
     });
   }, []);
   const measureModeActive = measureMode.kind !== "off";
@@ -2436,6 +2442,7 @@ export const BoardReplay: React.FC = () => {
         })()}
         measureMode={measureMode}
         onMeasureHexCommit={handleMeasureHexCommit}
+        onMeasureJunctionCommit={handleMeasureJunctionCommit}
       />
     ) : (
       <div className="replay-empty-state">

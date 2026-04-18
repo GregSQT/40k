@@ -180,7 +180,14 @@ type Mode =
 export type MeasureModeState =
   | { kind: "off" }
   | { kind: "armed" }
-  | { kind: "measuring"; startCol: number; startRow: number };
+  | {
+      kind: "measuring";
+      /** Premier point (1er clic gauche). La distance affichée est la somme des segments jusqu’au curseur. */
+      originCol: number;
+      originRow: number;
+      /** Points de jonction (clic droit), dans l’ordre — le segment courant part du dernier point fixé. */
+      junctions: Array<{ col: number; row: number }>;
+    };
 
 type BoardProps = {
   units: Unit[];
@@ -274,9 +281,11 @@ type BoardProps = {
   objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
-  /** Mode mesure (règle) : armed → 1er clic sur le plateau pose l’ancre ; ligne + distance ; 2e clic termine. */
+  /** Mode mesure (règle) : armed → 1er clic pose l’ancre ; clic droit = jonction ; 2e clic termine la ligne → armed. Sortie : bouton règle uniquement. */
   measureMode?: MeasureModeState;
   onMeasureHexCommit?: (col: number, row: number) => void;
+  /** Pendant `measuring` : clic droit sur un hex ajoute une jonction et poursuit la mesure depuis ce hex. */
+  onMeasureJunctionCommit?: (col: number, row: number) => void;
 };
 
 /** Hex distance between two offset-coordinate positions. */
@@ -288,6 +297,8 @@ function hexDistOff(c1: number, r1: number, c2: number, r2: number): number {
 
 /** Échelle affichage tooltip mouvement : nombre de pas hex entre centres pour 1″ (règle plateau). */
 const HEX_STEPS_PER_INCH_DISPLAY = 10;
+/** Au-dessus de tout le reste du stage (unités 2000, drag 9000, UI / popups ~10000). */
+const MEASURE_GUIDE_LINE_Z_INDEX = 15000;
 
 /** Empreintes depuis ``units_cache`` (API) pour aligner l’UI sur le moteur (charge : hex le plus proche de la cible). */
 function parseOccupiedHexesFromCacheEntry(entry: unknown): Array<{ col: number; row: number }> {
@@ -444,6 +455,7 @@ export default function Board({
   autoSelectWeapon,
   measureMode = { kind: "off" },
   onMeasureHexCommit,
+  onMeasureJunctionCommit,
 }: BoardProps) {
   React.useEffect(() => {}, []);
 
@@ -480,6 +492,13 @@ export default function Board({
   const movePreviewGuideLineRef = useRef<PIXI.Graphics | null>(null);
   /** Ligne mesure règle (ancre → hex sous curseur) */
   const measureGuideLineRef = useRef<PIXI.Graphics | null>(null);
+  /** Dernier clientX/clientY pendant la mesure — pour redessiner après un setState (ex. jonction) sans attendre mousemove. */
+  const measurePointerClientRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  /** Toujours à jour : permet aux handlers (effet stable) de lire l’état courant sans redémonter l’effet à chaque jonction. */
+  const measureModeRef = useRef(measureMode);
+  measureModeRef.current = measureMode;
+  /** Redessin ligne mesure — défini tant que l’effet « mesure » est monté (pas de cleanup quand seules les jonctions changent). */
+  const measureLineRedrawRef = useRef<((clientX: number, clientY: number) => void) | null>(null);
   const hoveredHexRef = useRef<{ col: number; row: number } | null>(null);
   const losHexRef = useRef<{ col: number; row: number } | null>(null);
   const losRequestIdRef = useRef(0);
@@ -1339,14 +1358,13 @@ export default function Board({
     setMovePreviewDistanceTooltip,
   ]);
 
-  // Mode mesure : clic plateau (capture) pour poser l’ancre ou terminer — prioritaire sur les unités.
+  // Mode mesure : clic gauche = ancre ou fin de ligne (puis armed) ; clic droit = jonction — prioritaire sur les unités.
   useEffect(() => {
     if (!boardConfig || measureMode.kind === "off" || !onMeasureHexCommit) return;
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     if (!canvas) return;
 
     const onPointerDownCapture = (e: PointerEvent) => {
-      if (e.button !== 0) return;
       const app = appRef.current;
       if (!app) return;
       const rect = canvas.getBoundingClientRect();
@@ -1358,18 +1376,59 @@ export default function Board({
       const MARGIN = boardConfig.margin;
       const { col, row } = pixelToHex(px, py, HEX_RADIUS, MARGIN, boardConfig.cols, boardConfig.rows);
       if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return;
+
+      if (e.button === 2) {
+        const mode = measureModeRef.current;
+        if (mode.kind === "measuring" && onMeasureJunctionCommit) {
+          const last =
+            mode.junctions.length > 0
+              ? mode.junctions[mode.junctions.length - 1]!
+              : { col: mode.originCol, row: mode.originRow };
+          if (last.col === col && last.row === row) return;
+          e.preventDefault();
+          e.stopPropagation();
+          measurePointerClientRef.current = { clientX: e.clientX, clientY: e.clientY };
+          onMeasureJunctionCommit(col, row);
+        }
+        return;
+      }
+
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       onMeasureHexCommit(col, row);
     };
 
-    canvas.addEventListener("pointerdown", onPointerDownCapture, true);
-    return () => canvas.removeEventListener("pointerdown", onPointerDownCapture, true);
-  }, [boardConfig, measureMode.kind, onMeasureHexCommit]);
+    const onContextMenu = (e: MouseEvent) => {
+      if (measureModeRef.current.kind === "measuring") {
+        e.preventDefault();
+      }
+    };
 
-  // Mode mesure : ligne ancre → hex sous curseur + tooltip distance (″), même échelle que le mouvement.
+    canvas.addEventListener("pointerdown", onPointerDownCapture, true);
+    canvas.addEventListener("contextmenu", onContextMenu);
+    return () => {
+      canvas.removeEventListener("pointerdown", onPointerDownCapture, true);
+      canvas.removeEventListener("contextmenu", onContextMenu);
+    };
+  }, [boardConfig, measureMode.kind !== "off", onMeasureHexCommit, onMeasureJunctionCommit]);
+
+  const isMeasuring = measureMode.kind === "measuring";
+
+  /** Après chaque mise à jour des jonctions (sans remonter l’effet mesure), redessine la même Graphics sans flash. */
+  useLayoutEffect(() => {
+    if (measureMode.kind !== "measuring") return;
+    const redraw = measureLineRedrawRef.current;
+    const last = measurePointerClientRef.current;
+    if (!redraw || !last) return;
+    redraw(last.clientX, last.clientY);
+  }, [measureMode]);
+
+  // Mode mesure : monté une fois par session « measuring » (pas de cleanup quand seules les jonctions changent).
   useEffect(() => {
-    if (!boardConfig || measureMode.kind !== "measuring") {
+    if (!boardConfig || !isMeasuring) {
+      measurePointerClientRef.current = null;
+      measureLineRedrawRef.current = null;
       if (measureGuideLineRef.current && !measureGuideLineRef.current.destroyed) {
         measureGuideLineRef.current.clear();
         measureGuideLineRef.current.visible = false;
@@ -1378,7 +1437,6 @@ export default function Board({
       return;
     }
 
-    const { startCol, startRow } = measureMode;
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     if (!canvas) return;
 
@@ -1393,14 +1451,17 @@ export default function Board({
     const hxY = (col: number, row: number) =>
       row * HEX_HEIGHT + ((col % 2) * HEX_HEIGHT) / 2 + HEX_HEIGHT / 2 + MARGIN;
 
-    const onMouseMove = (ev: MouseEvent) => {
+    const updateMeasureLineFromClient = (clientX: number, clientY: number) => {
+      const mode = measureModeRef.current;
+      if (mode.kind !== "measuring") return;
+      const { originCol, originRow, junctions } = mode;
       const app = appRef.current;
       if (!app) return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = (app.renderer.width / app.renderer.resolution) / rect.width;
       const scaleY = (app.renderer.height / app.renderer.resolution) / rect.height;
-      const px = (ev.clientX - rect.left) * scaleX;
-      const py = (ev.clientY - rect.top) * scaleY;
+      const px = (clientX - rect.left) * scaleX;
+      const py = (clientY - rect.top) * scaleY;
       const { col: endCol, row: endRow } = pixelToHex(px, py, HEX_RADIUS, MARGIN, BOARD_COLS, BOARD_ROWS);
       if (endCol < 0 || endCol >= BOARD_COLS || endRow < 0 || endRow >= BOARD_ROWS) {
         if (measureGuideLineRef.current && !measureGuideLineRef.current.destroyed) {
@@ -1411,27 +1472,36 @@ export default function Board({
         return;
       }
 
-      const startX = hxX(startCol);
-      const startY = hxY(startCol, startRow);
-      const endX = hxX(endCol);
-      const endY = hxY(endCol, endRow);
-      const hexSteps = hexDistOff(startCol, startRow, endCol, endRow);
-      const distanceDisplay = (hexSteps / HEX_STEPS_PER_INCH_DISPLAY).toFixed(1);
+      const pathHexes = [{ col: originCol, row: originRow }, ...junctions, { col: endCol, row: endRow }];
+      let hexStepsTotal = 0;
+      for (let i = 0; i < pathHexes.length - 1; i++) {
+        const a = pathHexes[i]!;
+        const b = pathHexes[i + 1]!;
+        hexStepsTotal += hexDistOff(a.col, a.row, b.col, b.row);
+      }
+      const distanceDisplay = (hexStepsTotal / HEX_STEPS_PER_INCH_DISPLAY).toFixed(1);
 
       if (!measureGuideLineRef.current || measureGuideLineRef.current.destroyed) {
         const g = new PIXI.Graphics();
-        g.zIndex = 848;
+        g.zIndex = MEASURE_GUIDE_LINE_Z_INDEX;
         g.eventMode = "none";
         app.stage.addChild(g);
         measureGuideLineRef.current = g;
       }
       const guideLine = measureGuideLineRef.current;
+      guideLine.zIndex = MEASURE_GUIDE_LINE_Z_INDEX;
       guideLine.clear();
       guideLine.lineStyle(2, 0xe2e8f0, 0.9);
-      guideLine.moveTo(startX, startY);
-      guideLine.lineTo(endX, endY);
+      const first = pathHexes[0]!;
+      guideLine.moveTo(hxX(first.col), hxY(first.col, first.row));
+      for (let i = 1; i < pathHexes.length; i++) {
+        const h = pathHexes[i]!;
+        guideLine.lineTo(hxX(h.col), hxY(h.col, h.row));
+      }
       guideLine.visible = true;
 
+      const endX = hxX(endCol);
+      const endY = hxY(endCol, endRow);
       setMeasureDistanceTooltip({
         visible: true,
         text: `${distanceDisplay}"`,
@@ -1440,16 +1510,28 @@ export default function Board({
       });
     };
 
+    measureLineRedrawRef.current = updateMeasureLineFromClient;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      measurePointerClientRef.current = { clientX: ev.clientX, clientY: ev.clientY };
+      updateMeasureLineFromClient(ev.clientX, ev.clientY);
+    };
+
     canvas.addEventListener("mousemove", onMouseMove);
+    const last = measurePointerClientRef.current;
+    if (last) {
+      updateMeasureLineFromClient(last.clientX, last.clientY);
+    }
     return () => {
       canvas.removeEventListener("mousemove", onMouseMove);
+      measureLineRedrawRef.current = null;
       if (measureGuideLineRef.current && !measureGuideLineRef.current.destroyed) {
         measureGuideLineRef.current.clear();
         measureGuideLineRef.current.visible = false;
       }
       setMeasureDistanceTooltip(null);
     };
-  }, [boardConfig, measureMode]);
+  }, [boardConfig, isMeasuring]);
 
   // ✅ HOOK 3: useEffect - MINIMAL DEPENDENCIES TO PREVENT RE-RENDER LOOPS
   useEffect(() => {
@@ -2504,8 +2586,8 @@ export default function Board({
       const savedDragOverlay = dragOverlayRef.current;
       const savedUnitsLayer = unitsLayerRef.current;
       const savedBlinks: PIXI.DisplayObject[] = [];
-      // Move-preview LoS / icône / ligne : même principe que hp-blink — sinon chaque re-run du
-      // useEffect détruit le stage et la preview de tir disparaît + les refs sont perdues.
+      // Move-preview LoS / icône / ligne / règle : même principe que hp-blink — sinon chaque re-run du
+      // useEffect détruit le stage et la preview (ou la ligne mesure) disparaît + les refs sont perdues.
       const savedHoverOverlay = hoverOverlayRef.current;
       const savedHoverSprite = hoverSpriteRef.current;
       const savedMovePreviewGuideLine = movePreviewGuideLineRef.current;
@@ -2518,6 +2600,7 @@ export default function Board({
       if (savedHoverOverlay?.parent) app.stage.removeChild(savedHoverOverlay);
       if (savedHoverSprite?.parent) app.stage.removeChild(savedHoverSprite);
       if (savedMovePreviewGuideLine?.parent) app.stage.removeChild(savedMovePreviewGuideLine);
+      if (savedMeasureGuideLine?.parent) app.stage.removeChild(savedMeasureGuideLine);
       for (const child of [...app.stage.children]) {
         if (child.name === "hp-blink-container") {
           app.stage.removeChild(child);
@@ -2560,6 +2643,7 @@ export default function Board({
         app.stage.addChild(savedMovePreviewGuideLine);
       }
       if (savedMeasureGuideLine && !savedMeasureGuideLine.destroyed) {
+        savedMeasureGuideLine.zIndex = MEASURE_GUIDE_LINE_Z_INDEX;
         app.stage.addChild(savedMeasureGuideLine);
       }
 
