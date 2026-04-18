@@ -168,6 +168,7 @@ export interface APIGameState {
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
   fight_pile_in_footprint_zone?: Array<[number, number]>;
+  fight_consolidation_footprint_zone?: Array<[number, number]>;
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
@@ -266,6 +267,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "chargePreview"
     | "advancePreview"
     | "pileInPreview"
+    | "consolidationPreview"
   >("select");
   const [movePreview, setMovePreview] = useState<{
     unitId: number;
@@ -1622,6 +1624,51 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(uid);
             setMode("pileInPreview");
           }
+          // Fight : consolidation après attaques (≤ 3") — sans destination valide = fin d'activation (comme le moteur)
+          else if (data.game_state?.phase === "fight" && data.result?.waiting_for_consolidation) {
+            const raw = data.result.valid_consolidation_destinations as
+              | Array<[number, number] | { col: number; row: number }>
+              | undefined;
+            const hasDests = Array.isArray(raw) && raw.length > 0;
+            if (hasDests) {
+              const norm = raw.map((h) =>
+                Array.isArray(h)
+                  ? { col: Number(h[0]), row: Number(h[1]) }
+                  : { col: Number(h.col), row: Number(h.row) }
+              );
+              setPileInDestinations(norm);
+              const poolSet = new Set<string>();
+              for (const h of norm) {
+                poolSet.add(`${h.col},${h.row}`);
+              }
+              moveDestPoolRef.current = poolSet;
+              const gsC = data.game_state;
+              const fpZone = gsC?.fight_consolidation_footprint_zone as unknown;
+              const fpSet = new Set<string>();
+              if (Array.isArray(fpZone)) {
+                for (const d of fpZone) {
+                  if (Array.isArray(d) && d.length === 2) {
+                    fpSet.add(`${d[0]},${d[1]}`);
+                  }
+                }
+              }
+              footprintZoneRef.current = fpSet;
+              const uid = parseInt(String(data.result.unitId ?? data.game_state.active_fight_unit), 10);
+              setSelectedUnitId(uid);
+              setMode("consolidationPreview");
+            } else {
+              if (blinkingUnits.blinkTimer) {
+                clearInterval(blinkingUnits.blinkTimer);
+              }
+              setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
+              setAttackPreview(null);
+              setPileInDestinations([]);
+              moveDestPoolRef.current = new Set();
+              footprintZoneRef.current = new Set();
+              setSelectedUnitId(null);
+              setMode("select");
+            }
+          }
           // Handle fight phase multi-attack (ATTACK_LEFT > 0, waiting_for_player)
           else if (
             data.game_state?.phase === "fight" &&
@@ -1671,6 +1718,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               if (unitIdsChanged || attackerIdChanged || !blinkingUnits.blinkTimer) {
                 setBlinkingUnits({ unitIds, blinkTimer: timer, attackerId });
               }
+            } else {
+              // Empty valid_targets: clear stale blink IDs (e.g. last enemy killed) — previously skipped
+              if (blinkingUnits.blinkTimer) {
+                clearInterval(blinkingUnits.blinkTimer);
+              }
+              setBlinkingUnits({ unitIds: [], blinkTimer: null, attackerId: null });
             }
           }
           // Handle fight phase completion (ATTACK_LEFT = 0, activation_ended)
@@ -2492,14 +2545,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handlePileInMove = useCallback(
     async (unitId: number, destCol: number, destRow: number) => {
+      const isConsolidation = mode === "consolidationPreview";
       await executeAction({
-        action: "pile_in",
+        action: isConsolidation ? "consolidation" : "pile_in",
         unitId: String(unitId),
         destCol,
         destRow,
       });
     },
-    [executeAction]
+    [executeAction, mode]
   );
 
   const handleSkipPileIn = useCallback(async () => {
@@ -2507,12 +2561,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (uid === null) {
       return;
     }
+    const isConsolidation = mode === "consolidationPreview";
     await executeAction({
-      action: "pile_in",
+      action: isConsolidation ? "consolidation" : "pile_in",
       unitId: String(uid),
       skip: true,
     });
-  }, [executeAction, selectedUnitId]);
+  }, [executeAction, selectedUnitId, mode]);
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
   const handleAdvance = useCallback(
@@ -3011,8 +3066,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return pileInDestinations;
       }
     }
+    if (gameState?.phase === "fight" && mode === "consolidationPreview") {
+      const fp = gameState.fight_consolidation_footprint_zone;
+      if (Array.isArray(fp) && fp.length > 0) {
+        return fp.map((d) =>
+          Array.isArray(d) && d.length >= 2
+            ? { col: Number(d[0]), row: Number(d[1]) }
+            : { col: Number((d as { col: number }).col), row: Number((d as { row: number }).row) }
+        );
+      }
+      if (pileInDestinations.length > 0) {
+        return pileInDestinations;
+      }
+    }
     return undefined;
-  }, [gameState?.phase, gameState?.fight_pile_in_footprint_zone, mode, pileInDestinations]);
+  }, [
+    gameState?.phase,
+    gameState?.fight_pile_in_footprint_zone,
+    gameState?.fight_consolidation_footprint_zone,
+    mode,
+    pileInDestinations,
+  ]);
 
   const combinedAvailableCellsOverride = useMemo(() => {
     return pileInCellsOverride ?? moveSelectionCellsOverride;
@@ -3141,6 +3215,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       move_preview_border: gameState.move_preview_border,
       move_preview_footprint_zone: gameState.move_preview_footprint_zone,
       fight_pile_in_footprint_zone: gameState.fight_pile_in_footprint_zone,
+      fight_consolidation_footprint_zone: gameState.fight_consolidation_footprint_zone,
       active_shooting_unit: gameState.active_shooting_unit,
       active_fight_unit: gameState.active_fight_unit,
       units_cache: gameState.units_cache,

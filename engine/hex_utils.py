@@ -934,3 +934,44 @@ def build_wall_set(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
         (int(w[0]), int(w[1])) if isinstance(w, (list, tuple)) else w
         for w in raw
     }
+
+
+# ---------------------------------------------------------------------------
+# Euclidean clearance — round bases (Board ×10), aligné sur frontend hexFootprint
+# ---------------------------------------------------------------------------
+
+# Pas horizontal entre centres de cases (repère _hex_center, hex_radius = 1).
+ENGAGEMENT_NORM_HEX_WIDTH: float = 1.5
+
+
+def round_base_radius_norm(base_size: int) -> float:
+    """Rayon d'un socle rond en unités _hex_center (identique à ``_footprint_round``)."""
+    if base_size < 1:
+        base_size = 1
+    return (base_size / 2.0) * _FOOTPRINT_SIZE_SCALE
+
+
+def euclidean_edge_clearance_round_round(
+    center_col_a: int,
+    center_row_a: int,
+    base_size_a: int,
+    center_col_b: int,
+    center_row_b: int,
+    base_size_b: int,
+) -> float:
+    """Écart bord à bord entre deux socles ronds (négatif si chevauchement)."""
+    cxa, cya = _hex_center(center_col_a, center_row_a)
+    cxb, cyb = _hex_center(center_col_b, center_row_b)
+    d = math.hypot(cxb - cxa, cyb - cya)
+    return d - round_base_radius_norm(base_size_a) - round_base_radius_norm(base_size_b)
+
+
+def engagement_minimum_clearance_norm(engagement_zone: int) -> float:
+    """Écart bord à bord minimal (1″ en ×10) en unités _hex_center.
+
+    ``engagement_zone`` sous-pas pour 1″ (ex. 10) × pas horizontal — aligné
+    ``getFightEngagementRingBoardPixels`` / ``engagementRoundRingPreviewHexesOnBoard``.
+    """
+    if engagement_zone <= 0:
+        return 0.0
+    return float(engagement_zone) * ENGAGEMENT_NORM_HEX_WIDTH

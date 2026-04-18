@@ -575,8 +575,10 @@ def _fight_apply_pile_in_move(
     unit: Dict[str, Any],
     dest_col: int,
     dest_row: int,
+    *,
+    log_label: str = "PILE_IN",
 ) -> None:
-    """Applique le déplacement de pile in (ne marque pas units_moved)."""
+    """Applique un déplacement court en phase fight (pile in, consolidation, etc.) — ne marque pas units_moved."""
     dest_col_i, dest_row_i = normalize_coordinates(dest_col, dest_row)
     orig_col, orig_row = require_unit_position(unit, game_state)
     unit_id_str = str(unit["id"])
@@ -592,7 +594,7 @@ def _fight_apply_pile_in_move(
     phase = game_state.get("phase", "fight")
     log_message = (
         f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: "
-        f"({orig_col},{orig_row})→({dest_col_i},{dest_row_i}) via PILE_IN"
+        f"({orig_col},{orig_row})→({dest_col_i},{dest_row_i}) via {log_label}"
     )
     add_console_log(game_state, log_message)
     safe_print(game_state, log_message)
@@ -619,6 +621,379 @@ def _fight_apply_pile_in_move(
     from .shooting_handlers import _invalidate_los_cache_for_moved_unit
 
     _invalidate_los_cache_for_moved_unit(game_state, unit["id"], old_col=orig_col, old_row=orig_row)
+
+
+def _fight_clear_consolidation_state(game_state: Dict[str, Any]) -> None:
+    game_state.pop("fight_consolidation_pending", None)
+    game_state.pop("valid_consolidation_destinations", None)
+    game_state.pop("fight_consolidation_footprint_zone", None)
+    game_state.pop("fight_consolidation_branch", None)
+    game_state.pop("_fight_consolidation_ctx", None)
+
+
+def _fight_all_objective_hexes_union(game_state: Dict[str, Any]) -> Set[Tuple[int, int]]:
+    """Union des hexes de tous les objectifs (empreinte objectif)."""
+    objectives = game_state.get("objectives")
+    if not isinstance(objectives, list) or not objectives:
+        return set()
+    out: Set[Tuple[int, int]] = set()
+    for objective in objectives:
+        if not isinstance(objective, dict):
+            continue
+        objective_hexes = objective.get("hexes")
+        if not isinstance(objective_hexes, list):
+            continue
+        for objective_hex in objective_hexes:
+            if isinstance(objective_hex, dict):
+                oc, orow = normalize_coordinates(
+                    require_key(objective_hex, "col"),
+                    require_key(objective_hex, "row"),
+                )
+            elif isinstance(objective_hex, (list, tuple)) and len(objective_hex) == 2:
+                oc, orow = normalize_coordinates(objective_hex[0], objective_hex[1])
+            else:
+                continue
+            out.add((int(oc), int(orow)))
+    return out
+
+
+def _fight_bfs_reachable_anchors_consolidation(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+) -> Dict[Tuple[int, int], int]:
+    """BFS jusqu'à 3\" (sous-hex) : ancres avec placement d'empreinte valide (sans filtre pile in)."""
+    scale = max(1, int(game_state.get("inches_to_subhex", 1) or 1))
+    bfs_max = 3 * scale
+    unit_id_str = str(unit["id"])
+    start_col, start_row = require_unit_position(unit, game_state)
+    start_pos = (start_col, start_row)
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
+    visited: Dict[Tuple[int, int], int] = {start_pos: 0}
+    queue = deque([(start_pos, 0)])
+    while queue:
+        current_pos, current_dist = queue.popleft()
+        current_col, current_row = current_pos
+        if current_dist >= bfs_max:
+            continue
+        neighbor_dist = current_dist + 1
+        for neighbor_col, neighbor_row in get_hex_neighbors(current_col, current_row):
+            neighbor_pos = (neighbor_col, neighbor_row)
+            if neighbor_pos in visited:
+                continue
+            candidate_fp = compute_candidate_footprint(neighbor_col, neighbor_row, unit, game_state)
+            if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+                continue
+            visited[neighbor_pos] = neighbor_dist
+            queue.append((neighbor_pos, neighbor_dist))
+    return visited
+
+
+def _fight_min_distance_fp_to_nearest_enemy(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    fp: Set[Tuple[int, int]],
+) -> Optional[int]:
+    from engine.hex_utils import min_distance_between_sets
+
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    unit_id_str = str(unit["id"])
+    best: Optional[int] = None
+    for enemy_id, cache_entry in units_cache.items():
+        if str(enemy_id) == unit_id_str:
+            continue
+        if int(cache_entry["player"]) == unit_player:
+            continue
+        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        d = min_distance_between_sets(fp, enemy_fp)
+        if best is None or d < best:
+            best = d
+    return best
+
+
+def _fight_fp_has_adjacent_enemy_footprint(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    fp: Set[Tuple[int, int]],
+) -> bool:
+    from engine.hex_utils import min_distance_between_sets
+
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    unit_id_str = str(unit["id"])
+    for enemy_id, cache_entry in units_cache.items():
+        if str(enemy_id) == unit_id_str:
+            continue
+        if int(cache_entry["player"]) == unit_player:
+            continue
+        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        if min_distance_between_sets(fp, enemy_fp, max_distance=1) <= 1:
+            return True
+    return False
+
+
+def _fight_plan_consolidation_destinations(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+) -> Optional[Tuple[str, List[Tuple[int, int]], Dict[Tuple[int, int], int]]]:
+    """
+    Priorité 1 : ennemis — minimiser la distance à l'empreinte ennemie la plus proche ; si possible, contact (distance 1).
+    Priorité 2 (sans ennemis sur le plateau) : objectif — finir avec empreinte ∩ empreinte objectif ; mouvement le plus court possible.
+    Retourne None si aucune consolidation n'est possible / utile.
+    """
+    visited = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
+    start_col, start_row = require_unit_position(unit, game_state)
+    start_pos = (start_col, start_row)
+
+    has_enemy = _fight_opposing_enemies_exist(game_state, unit)
+
+    if has_enemy:
+        dist_by_anchor: List[Tuple[Tuple[int, int], int]] = []
+        for anchor in visited:
+            ac, ar = anchor
+            fp = compute_candidate_footprint(ac, ar, unit, game_state)
+            dmin = _fight_min_distance_fp_to_nearest_enemy(game_state, unit, fp)
+            if dmin is None:
+                continue
+            dist_by_anchor.append((anchor, int(dmin)))
+        if not dist_by_anchor:
+            return None
+        best_score = min(d for _, d in dist_by_anchor)
+        tier = [a for a, d in dist_by_anchor if d == best_score]
+        contact_tier = []
+        for anchor in tier:
+            ac, ar = anchor
+            fp = compute_candidate_footprint(ac, ar, unit, game_state)
+            if _fight_fp_has_adjacent_enemy_footprint(game_state, unit, fp):
+                contact_tier.append(anchor)
+        final_cands = contact_tier if contact_tier else tier
+        if len(final_cands) == 1 and final_cands[0] == start_pos:
+            return None
+        return ("enemy", final_cands, visited)
+
+    obj_hexes = _fight_all_objective_hexes_union(game_state)
+    if not obj_hexes:
+        return None
+    overlap_cands: List[Tuple[Tuple[int, int], int]] = []
+    for anchor in visited:
+        ac, ar = anchor
+        fp = compute_candidate_footprint(ac, ar, unit, game_state)
+        if fp & obj_hexes:
+            overlap_cands.append((anchor, visited[anchor]))
+    if not overlap_cands:
+        return None
+    min_walk = min(w for _, w in overlap_cands)
+    final_cands = [a for a, w in overlap_cands if w == min_walk]
+    if len(final_cands) == 1 and final_cands[0] == start_pos:
+        return None
+    return ("objective", final_cands, visited)
+
+
+def _fight_opposing_enemies_exist(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    unit_id_str = str(unit["id"])
+    for uid, cache_entry in units_cache.items():
+        if str(uid) == unit_id_str:
+            continue
+        if int(cache_entry["player"]) != unit_player:
+            return True
+    return False
+
+
+def _ai_select_consolidation_destination(
+    destinations: List[Tuple[int, int]],
+    visited: Dict[Tuple[int, int], int],
+) -> Tuple[int, int]:
+    """Minimise la distance de marche BFS parmi les ancres optimales."""
+    if not destinations:
+        raise ValueError("_ai_select_consolidation_destination: empty destinations")
+    best: Optional[Tuple[int, int]] = None
+    best_w: Optional[int] = None
+    for a in destinations:
+        w = visited.get(a, 10**9)
+        if best_w is None or w < best_w:
+            best_w = w
+            best = a
+    return best if best is not None else destinations[0]
+
+
+def _fight_post_process_fight_activation_result(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    result: Dict[str, Any],
+) -> None:
+    """Après ``end_activation`` fight : alternance / fin de phase (effets de bord sur ``result``)."""
+    if result.get("phase_complete"):
+        preserved_action = result.get("action")
+        preserved_attack_results = result.get("all_attack_results")
+        preserved_unit_id = result.get("unitId")
+        phase_result = _fight_phase_complete(game_state)
+        result.update(phase_result)
+        if preserved_action is not None:
+            result["action"] = preserved_action
+        if preserved_attack_results:
+            result["all_attack_results"] = preserved_attack_results
+        if preserved_unit_id:
+            result["unitId"] = preserved_unit_id
+    else:
+        _toggle_fight_alternation(game_state)
+        _update_fight_subphase(game_state)
+
+
+def _fight_try_begin_consolidation_after_attacks(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    all_attack_results_snapshot: List[Any],
+    result_reason: str,
+    last_target_id: Optional[str] = None,
+) -> Optional[Tuple[bool, Dict[str, Any]]]:
+    """
+    Après la dernière attaque : propose consolidation (humain) ou l'exécute (IA / gym).
+    Retourne None si pas de consolidation ; sinon (True, résultat API).
+    """
+    _fight_clear_consolidation_state(game_state)
+    plan = _fight_plan_consolidation_destinations(game_state, unit)
+    if plan is None:
+        return None
+    branch, destinations, visited = plan
+    if not destinations:
+        return None
+    # Dédupliquer ; si la seule option utile est « rester », pas de consolidation UI.
+    dedup: List[Tuple[int, int]] = []
+    seen_a: Set[Tuple[int, int]] = set()
+    for a in destinations:
+        if a not in seen_a:
+            seen_a.add(a)
+            dedup.append(a)
+    destinations = dedup
+    if not destinations:
+        return None
+
+    unit_id = unit["id"]
+    is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
+    is_gym_training = require_key(config, "gym_training_mode")
+    if not isinstance(is_gym_training, bool):
+        raise TypeError(f"config['gym_training_mode'] must be bool, got {type(is_gym_training).__name__}")
+    auto_execution_allowed = _is_fight_auto_execution_allowed(game_state)
+
+    if (is_ai_controlled or is_gym_training) and auto_execution_allowed:
+        pc, pr = _ai_select_consolidation_destination(destinations, visited)
+        _fight_apply_pile_in_move(game_state, unit, pc, pr, log_label="CONSOLIDATION")
+        _fight_clear_consolidation_state(game_state)
+        game_state["fight_attack_results"] = []
+        result = end_activation(
+            game_state,
+            unit,
+            ACTION,
+            1,
+            FIGHT,
+            FIGHT,
+            0,
+        )
+        game_state["active_fight_unit"] = None
+        game_state["valid_fight_targets"] = []
+        result["action"] = "combat"
+        result["phase"] = "fight"
+        result["unitId"] = unit_id
+        result["waiting_for_player"] = False
+        result["reason"] = result_reason
+        result["fight_subphase"] = require_key(game_state, "fight_subphase")
+        result["consolidation_executed"] = True
+        result["consolidation_branch"] = branch
+        result["all_attack_results"] = list(all_attack_results_snapshot)
+        if last_target_id is not None:
+            result["targetId"] = last_target_id
+        _fight_post_process_fight_activation_result(game_state, unit, result)
+        return True, result
+
+    game_state["fight_consolidation_pending"] = True
+    game_state["valid_consolidation_destinations"] = list(destinations)
+    game_state["fight_consolidation_footprint_zone"] = list(
+        _fight_compute_pile_in_footprint_zone(game_state, unit, destinations)
+    )
+    game_state["fight_consolidation_branch"] = branch
+    game_state["_fight_consolidation_ctx"] = {
+        "valid_destinations": list(destinations),
+        "branch": branch,
+        "all_attack_results": list(all_attack_results_snapshot),
+    }
+    game_state["active_fight_unit"] = unit_id
+    game_state["fight_attack_results"] = []
+
+    out: Dict[str, Any] = {
+        "waiting_for_consolidation": True,
+        "valid_consolidation_destinations": [list(x) for x in destinations],
+        "fight_consolidation_branch": branch,
+        "unitId": unit_id,
+        "action": "combat",
+        "phase": "fight",
+        "all_attack_results": list(all_attack_results_snapshot),
+        "reason": result_reason,
+        "fight_subphase": require_key(game_state, "fight_subphase"),
+    }
+    if last_target_id is not None:
+        out["targetId"] = last_target_id
+    return True, out
+
+
+def _handle_fight_consolidation_resolution(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    action: Dict[str, Any],
+    config: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Choix joueur : consolidation vers une ancre ou abandon (pas de déplacement)."""
+    unit_id = unit["id"]
+    if not game_state.get("fight_consolidation_pending"):
+        return False, {"error": "consolidation_not_pending", "unitId": unit_id}
+
+    ctx = game_state.get("_fight_consolidation_ctx")
+    if not isinstance(ctx, dict):
+        raise TypeError("game_state['_fight_consolidation_ctx'] must be a dict when fight_consolidation_pending")
+
+    skip = action.get("skip") is True
+    if not skip:
+        if "destCol" not in action or "destRow" not in action:
+            return False, {"error": "consolidation_requires_dest_or_skip", "unitId": unit_id}
+        dest_col, dest_row = normalize_coordinates(action["destCol"], action["destRow"])
+        valids: List[Tuple[int, int]] = [
+            (int(t[0]), int(t[1])) for t in (ctx.get("valid_destinations") or [])
+        ]
+        if (dest_col, dest_row) not in valids:
+            return False, {
+                "error": "invalid_consolidation_destination",
+                "unitId": unit_id,
+                "destination": (dest_col, dest_row),
+            }
+        _fight_apply_pile_in_move(game_state, unit, dest_col, dest_row, log_label="CONSOLIDATION")
+
+    snap_attacks = ctx.get("all_attack_results") or []
+
+    _fight_clear_consolidation_state(game_state)
+
+    result = end_activation(
+        game_state,
+        unit,
+        ACTION,
+        1,
+        FIGHT,
+        FIGHT,
+        0,
+    )
+    game_state["active_fight_unit"] = None
+    game_state["valid_fight_targets"] = []
+    result["action"] = "combat"
+    result["phase"] = "fight"
+    result["unitId"] = unit_id
+    result["waiting_for_player"] = False
+    result["consolidation_completed"] = True
+    result["fight_subphase"] = require_key(game_state, "fight_subphase")
+    result["all_attack_results"] = list(snap_attacks)
+    _fight_post_process_fight_activation_result(game_state, unit, result)
+    return True, result
 
 
 def _ai_select_pile_in_destination(
@@ -1096,6 +1471,37 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             "current_pool": current_pool
         }
 
+    # État incohérent : consolidation en attente sans ancres valides → terminer l'activation.
+    # Ne pas traiter None (clé absente) comme liste vide : évite de couper l'activation à tort.
+    if game_state.get("fight_consolidation_pending"):
+        raw_dests = game_state.get("valid_consolidation_destinations")
+        if isinstance(raw_dests, list) and len(raw_dests) == 0:
+            au = game_state.get("active_fight_unit")
+            u_recover = get_unit_by_id(game_state, str(au)) if au is not None else None
+            _fight_clear_consolidation_state(game_state)
+            if u_recover and is_unit_alive(str(u_recover["id"]), game_state):
+                result = end_activation(
+                    game_state,
+                    u_recover,
+                    ACTION,
+                    1,
+                    FIGHT,
+                    FIGHT,
+                    0,
+                )
+                game_state["active_fight_unit"] = None
+                game_state["valid_fight_targets"] = []
+                result["action"] = "combat"
+                result["phase"] = "fight"
+                result["unitId"] = u_recover["id"]
+                result["reason"] = "consolidation_impossible_stale_state"
+                result["consolidation_aborted"] = True
+                result["fight_subphase"] = require_key(game_state, "fight_subphase")
+                _fight_post_process_fight_activation_result(game_state, u_recover, result)
+                return True, result
+            game_state["active_fight_unit"] = None
+            game_state["valid_fight_targets"] = []
+
     # Check actor controller type from strict game_state player mapping.
     is_ai_controlled = _is_ai_controlled_fight_unit(game_state, unit)
 
@@ -1122,6 +1528,8 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return activation_result
         if activation_result[1].get("waiting_for_pile_in"):
             return activation_result
+        if activation_result[1].get("waiting_for_consolidation"):
+            return activation_result
         # Otherwise continue with fight action - targets should now be populated
 
     # NOTE: AI_TURN.md line 667 specifies invalid actions should call end_activation (ERROR, 0, PASS, FIGHT)
@@ -1134,12 +1542,21 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
     elif action_type == "pile_in":
         return _handle_fight_pile_in_resolution(game_state, unit, action, config)
 
+    elif action_type == "consolidation":
+        return _handle_fight_consolidation_resolution(game_state, unit, action, config)
+
     elif action_type == "fight":
         # Fight action with target selection
         # Auto-select target if not provided (for all modes: gym training, PvE AI, bots, etc.)
         if game_state.get("fight_pile_in_pending"):
             return False, {
                 "error": "pile_in_required_first",
+                "unitId": unit_id,
+                "phase": "fight",
+            }
+        if game_state.get("fight_consolidation_pending"):
+            return False, {
+                "error": "consolidation_required_first",
                 "unitId": unit_id,
                 "phase": "fight",
             }
@@ -1434,6 +1851,7 @@ def _handle_fight_unit_activation(game_state: Dict[str, Any], unit: Dict[str, An
     game_state.pop("valid_pile_in_destinations", None)
     game_state.pop("fight_pile_in_footprint_zone", None)
     game_state.pop("_fight_pile_in_ctx", None)
+    _fight_clear_consolidation_state(game_state)
 
     if valid_targets:
         if not _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state, unit):
@@ -1703,6 +2121,47 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
     return valid_targets
 
 
+def _fight_ensure_current_fight_nb(unit: Dict[str, Any], unit_id: Any) -> None:
+    """
+    If unit['_current_fight_nb'] is missing (e.g. stripped from serialized state),
+    recover the original NB as ATTACK_LEFT + _fight_attacks_executed.
+
+    Using ATTACK_LEFT alone is wrong mid-activation: it equals remaining attacks only,
+    so the cap check can fire one strike early.
+    """
+    if "_current_fight_nb" in unit:
+        return
+    if "_fight_attacks_executed" not in unit:
+        unit["_fight_attacks_executed"] = 0
+    al = require_key(unit, "ATTACK_LEFT")
+    if not isinstance(al, int):
+        raise TypeError(
+            f"unit['ATTACK_LEFT'] must be int when initializing _current_fight_nb, "
+            f"got {type(al).__name__}"
+        )
+    if al <= 0:
+        raise ValueError(
+            f"Cannot initialize _current_fight_nb with non-positive ATTACK_LEFT: "
+            f"{al} (unit_id={unit_id})"
+        )
+    k = unit["_fight_attacks_executed"]
+    if not isinstance(k, int):
+        raise TypeError(
+            f"unit['_fight_attacks_executed'] must be int, got {type(k).__name__}"
+        )
+    if k < 0:
+        raise ValueError(
+            f"unit['_fight_attacks_executed'] cannot be negative: {k} (unit_id={unit_id})"
+        )
+    total = al + k
+    if total <= 0:
+        raise ValueError(
+            f"Recovered _current_fight_nb must be > 0, got total={total} "
+            f"(ATTACK_LEFT={al}, _fight_attacks_executed={k}, unit_id={unit_id})"
+        )
+    unit["_current_fight_nb"] = total
+
+
 def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], target_id: str, config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Handle fight attack execution.
@@ -1764,19 +2223,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     if "fight_attack_results" not in game_state:
         game_state["fight_attack_results"] = []
 
-    if "_current_fight_nb" not in unit:
-        current_attack_left = require_key(unit, "ATTACK_LEFT")
-        if not isinstance(current_attack_left, int):
-            raise TypeError(
-                f"unit['ATTACK_LEFT'] must be int when initializing _current_fight_nb, "
-                f"got {type(current_attack_left).__name__}"
-            )
-        if current_attack_left <= 0:
-            raise ValueError(
-                f"Cannot initialize _current_fight_nb with non-positive ATTACK_LEFT: "
-                f"{current_attack_left} (unit_id={unit_id})"
-            )
-        unit["_current_fight_nb"] = current_attack_left
+    _fight_ensure_current_fight_nb(unit, unit_id)
 
     total_attacks_allowed = require_key(unit, "_current_fight_nb")
     if not isinstance(total_attacks_allowed, int):
@@ -1799,6 +2246,20 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
             f"unit['_fight_attacks_executed'] cannot be negative: {attacks_executed} (unit_id={unit_id})"
         )
     if attacks_executed >= total_attacks_allowed:
+        snap_cap = list(game_state.get("fight_attack_results") or [])
+        cons_cap = _fight_try_begin_consolidation_after_attacks(
+            game_state,
+            unit,
+            config,
+            all_attack_results_snapshot=snap_cap,
+            result_reason="attack_cap_reached",
+            last_target_id=target_id,
+        )
+        if cons_cap is not None:
+            cons_cap[1]["attack_cap_reached"] = True
+            cons_cap[1]["attack_cap_total"] = total_attacks_allowed
+            cons_cap[1]["attack_cap_executed"] = attacks_executed
+            return cons_cap
         result = end_activation(
             game_state, unit,
             ACTION,        # Arg1: Log action
@@ -1862,19 +2323,7 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     from engine.utils.weapon_helpers import get_selected_melee_weapon
     selected_weapon = get_selected_melee_weapon(unit)
     if selected_weapon:
-        if "_current_fight_nb" not in unit:
-            current_attack_left = require_key(unit, "ATTACK_LEFT")
-            if not isinstance(current_attack_left, int):
-                raise TypeError(
-                    f"unit['ATTACK_LEFT'] must be int when initializing _current_fight_nb, "
-                    f"got {type(current_attack_left).__name__}"
-                )
-            if current_attack_left <= 0:
-                raise ValueError(
-                    f"Cannot initialize _current_fight_nb with non-positive ATTACK_LEFT: "
-                    f"{current_attack_left} (unit_id={unit_id})"
-                )
-            unit["_current_fight_nb"] = current_attack_left
+        _fight_ensure_current_fight_nb(unit, unit_id)
         total_attacks = require_key(unit, "_current_fight_nb")
     else:
         total_attacks = 0
@@ -2079,6 +2528,23 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
         
         # No more targets - end activation
         # ATTACK_LEFT > 0 but no targets -> end_activation (ACTION, 1, FIGHT, FIGHT)
+        snap_nt = list(game_state.get("fight_attack_results") or [])
+        cons_nt = _fight_try_begin_consolidation_after_attacks(
+            game_state,
+            unit,
+            config,
+            all_attack_results_snapshot=snap_nt,
+            result_reason="no_more_targets",
+            last_target_id=target_id,
+        )
+        if cons_nt is not None:
+            if isinstance(cons_nt[1], dict):
+                cons_nt[1]["attack_result"] = attack_result
+                cons_nt[1]["target_died"] = (
+                    attack_result["target_died"] if "target_died" in attack_result else False
+                )
+            return cons_nt
+
         result = end_activation(
             game_state, unit,
             ACTION,        # Arg1: Log action
@@ -2184,6 +2650,23 @@ def _handle_fight_attack(game_state: Dict[str, Any], unit: Dict[str, Any], targe
     else:
         # ATTACK_LEFT = 0 - end activation
         # end_activation (ACTION, 1, FIGHT, FIGHT)
+        snap_ac = list(game_state.get("fight_attack_results") or [])
+        if not snap_ac and attack_result:
+            snap_ac = [attack_result]
+        cons_ac = _fight_try_begin_consolidation_after_attacks(
+            game_state,
+            unit,
+            config,
+            all_attack_results_snapshot=snap_ac,
+            result_reason="attacks_complete",
+            last_target_id=target_id,
+        )
+        if cons_ac is not None:
+            if isinstance(cons_ac[1], dict):
+                cons_ac[1]["attack_result"] = attack_result
+                cons_ac[1]["target_died"] = attack_result.get("target_died", False)
+            return cons_ac
+
         result = end_activation(
             game_state, unit,
             ACTION,        # Arg1: Log action

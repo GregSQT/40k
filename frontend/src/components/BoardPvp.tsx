@@ -175,7 +175,8 @@ type Mode =
   | "targetPreview"
   | "chargePreview"
   | "advancePreview"
-  | "pileInPreview";
+  | "pileInPreview"
+  | "consolidationPreview";
 
 /** État du mode mesure (règle dans la barre). */
 export type MeasureModeState =
@@ -342,15 +343,42 @@ function closestChargerHexToTargetFootprint(
   return best;
 }
 
-/** Blink / prévisualisation tir : même règle que le rendu Pixi (vivant = présent dans units_cache). */
+/**
+ * Blink / prévisualisation tir : vivant = présent dans units_cache (si fourni) ET HP > 0
+ * (units + cache) pour retirer tout de suite une cible tuée même si le state React des ids
+ * de blink n’a pas été resynchronisé.
+ */
 function filterBlinkIdsToLivingUnitsCache(
   ids: number[],
   unitsCache: Record<string, unknown> | undefined,
+  units?: Unit[],
 ): number[] {
-  if (unitsCache === undefined) {
-    return ids;
+  const byId = new Map<string, Unit>();
+  if (units) {
+    for (const u of units) {
+      byId.set(String(u.id), u);
+    }
   }
-  return ids.filter((id) => Object.hasOwn(unitsCache, String(id)));
+  return ids.filter((id) => {
+    const idStr = String(id);
+    if (unitsCache !== undefined && !Object.hasOwn(unitsCache, idStr)) {
+      return false;
+    }
+    const u = byId.get(idStr);
+    if (u !== undefined && (u.HP_CUR ?? 0) <= 0) {
+      return false;
+    }
+    if (unitsCache !== undefined) {
+      const raw = unitsCache[idStr];
+      if (raw && typeof raw === "object" && raw !== null && "HP_CUR" in raw) {
+        const hp = (raw as { HP_CUR: unknown }).HP_CUR;
+        if (typeof hp === "number" && hp <= 0) {
+          return false;
+        }
+      }
+    }
+    return true;
+  });
 }
 
 /** Barres blink sur app.stage : sans ça, une cible absente du cache n’est plus rendue mais le container survit au teardown du stage. */
@@ -937,8 +965,8 @@ export default function Board({
       return Array.from(merged).map((s) => parseInt(s, 10));
     })();
     const uc = gameState?.units_cache as Record<string, unknown> | undefined;
-    return filterBlinkIdsToLivingUnitsCache(mergedIds, uc);
-  }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds, gameState?.units_cache]);
+    return filterBlinkIdsToLivingUnitsCache(mergedIds, uc, units);
+  }, [stableBlinkingUnits, mode, phase, movePreviewLosBlinkIds, gameState?.units_cache, units]);
 
   // Prévisualisation LoS (move) : uniquement depuis onMouseMove = position de l’icône, pas l’hex sous le curseur
   useEffect(() => {
@@ -1045,7 +1073,8 @@ export default function Board({
         (phase === "move" ||
           (phase === "shoot" && mode === "advancePreview") ||
           (phase === "charge" && mode === "chargePreview") ||
-          (phase === "fight" && mode === "pileInPreview"));
+          (phase === "fight" &&
+            (mode === "pileInPreview" || mode === "consolidationPreview")));
       if (!allowIconFollow) return;
       const app = appRef.current;
       if (!app || !canvas) return;
@@ -1602,7 +1631,9 @@ export default function Board({
     const keepMovementPickPool =
       (phase === "move" && selectedUnitId !== null) ||
       (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null) ||
-      (phase === "fight" && mode === "pileInPreview" && selectedUnitId !== null);
+      (phase === "fight" &&
+        (mode === "pileInPreview" || mode === "consolidationPreview") &&
+        selectedUnitId !== null);
 
     if (!keepMovementPickPool) {
       if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
@@ -1921,7 +1952,10 @@ export default function Board({
         if (targetPreview) {
           onCancelTargetPreview?.();
         }
-      } else if (phase === "fight" && mode === "pileInPreview") {
+      } else if (
+        phase === "fight" &&
+        (mode === "pileInPreview" || mode === "consolidationPreview")
+      ) {
         onSkipPileIn?.();
       } else if (mode === "movePreview" || mode === "attackPreview") {
         onCancelMove?.();
@@ -1993,8 +2027,19 @@ export default function Board({
       } else {
         const attackerFp = unitFootprintHexKeys(selectedUnit);
         // Aligné sur min_distance_between_sets (empreinte ↔ empreinte), §3.3 moteur
+        const ucFight = gameState?.units_cache as
+          | Record<string, { HP_CUR?: number }>
+          | undefined;
         fightTargets = units.filter((u) => {
-          if (u.player === selectedUnit.player || u.HP_CUR <= 0) {
+          if (u.player === selectedUnit.player) {
+            return false;
+          }
+          let hp = u.HP_CUR ?? 0;
+          const ce = ucFight?.[String(u.id)];
+          if (ce && typeof ce.HP_CUR === "number") {
+            hp = ce.HP_CUR;
+          }
+          if (hp <= 0) {
             return false;
           }
           const enemyFp = unitFootprintHexKeys(u);

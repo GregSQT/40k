@@ -10,7 +10,8 @@ export type GameMode =
   | "targetPreview"
   | "chargePreview"
   | "advancePreview"
-  | "pileInPreview";
+  | "pileInPreview"
+  | "consolidationPreview";
 // AI_TURN.md COMPLIANCE: Fight subphase names match backend exactly
 export type FightSubPhase =
   | "charging"
@@ -285,6 +286,8 @@ export interface GameState {
   move_preview_footprint_zone?: Array<[number, number]>;
   /** Phase fight : union des hexes occupés par l'empreinte pour chaque ancre pile in valide (comme move_preview_footprint_zone). */
   fight_pile_in_footprint_zone?: Array<[number, number]>;
+  /** Consolidation après attaques : union des empreintes valides (moteur). */
+  fight_consolidation_footprint_zone?: Array<[number, number]>;
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_fight_unit?: string; // Active unit ID in fight phase
   active_charge_unit?: string; // Active unit ID in charge phase

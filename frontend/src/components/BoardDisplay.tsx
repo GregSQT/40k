@@ -383,15 +383,78 @@ function createFightEngagementRingSmoothOutline(
 ): PIXI.Graphics {
   const gfx = new PIXI.Graphics();
   gfx.name = "fight-engagement-ring-smooth";
-  const featherW = Math.max(5, Math.min(14, rOuter * 0.018));
-  gfx.lineStyle(featherW, color, 0.1);
-  gfx.drawCircle(cx, cy, rOuter);
-  gfx.lineStyle(2.6, color, 0.34);
-  gfx.drawCircle(cx, cy, rOuter);
-  const hi = Math.min(0xffffff, ((color & 0xfefefe) >> 1) + 0x282828);
-  gfx.lineStyle(1.05, hi, 0.8);
-  gfx.drawCircle(cx, cy, rOuter);
+  appendFeatheredCircleOutlineStrokes(gfx, cx, cy, rOuter, color);
   return gfx;
+}
+
+type FeatherLayer = { width: number; alpha: number; useHighlightStroke?: boolean };
+
+/**
+ * Traits concentriques anti-alias (même logique que halo charge / anneau combat).
+ * Réduit le crénelage du bord des disques de preview move/charge.
+ */
+function appendFeatheredCircleOutlineStrokes(
+  gfx: PIXI.Graphics,
+  cx: number,
+  cy: number,
+  r: number,
+  color: number,
+  layers?: FeatherLayer[],
+): void {
+  const hi = Math.min(0xffffff, ((color & 0xfefefe) >> 1) + 0x282828);
+  const defaultLayers: FeatherLayer[] =
+    layers ??
+    [
+      { width: Math.max(5, Math.min(14, r * 0.018)), alpha: 0.1 },
+      { width: 2.6, alpha: 0.34 },
+      { width: 1.05, alpha: 0.8, useHighlightStroke: true },
+    ];
+  for (const layer of defaultLayers) {
+    const strokeColor = layer.useHighlightStroke ? hi : color;
+    gfx.lineStyle(layer.width, strokeColor, layer.alpha);
+    gfx.drawCircle(cx, cy, r);
+  }
+}
+
+/** Au-delà, pas de contour (coût O(n) traits GPU → trop lent sur Board×10). */
+const FOOTPRINT_POOL_OUTLINE_MAX_CENTERS = 160;
+
+/**
+ * Contour léger au-dessus du remplissage union des empreintes (move / charge).
+ * Un seul trait par centre + seuil : évite 2–3× drawCircle par centre (très lent au redraw).
+ */
+function addFootprintPoolSmoothOutlines(
+  highlightContainer: PIXI.Container,
+  pool: Set<string>,
+  footprintRadius: number,
+  HEX_HORIZ_SPACING: number,
+  HEX_WIDTH: number,
+  HEX_HEIGHT: number,
+  HEX_VERT_SPACING: number,
+  MARGIN: number,
+  color: number,
+): void {
+  if (pool.size === 0 || footprintRadius <= 0) return;
+  if (pool.size > FOOTPRINT_POOL_OUTLINE_MAX_CENTERS) {
+    return;
+  }
+
+  const gfx = new PIXI.Graphics();
+  gfx.name = "footprint-pool-smooth-outline";
+  gfx.eventMode = "none";
+  gfx.alpha = 0.32;
+  const strokeW = Math.max(1.0, Math.min(2.4, footprintRadius * 0.038));
+  gfx.lineStyle(strokeW, color, 0.16);
+  for (const key of pool) {
+    const sep = key.indexOf(",");
+    const c = Number(key.substring(0, sep));
+    const r = Number(key.substring(sep + 1));
+    const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+    const hy =
+      r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+    gfx.drawCircle(hx, hy, footprintRadius);
+  }
+  highlightContainer.addChild(gfx);
 }
 
 /** Remplissage objectif : texture teintée ou couleur unie (même pipeline que les murs). */
@@ -699,7 +762,8 @@ export const drawBoard = (
       const useAdvanceMovePoolLikeMove =
         interactionPhase === "shoot" && mode === "advancePreview";
       const usePileInPoolLikeMove =
-        interactionPhase === "fight" && mode === "pileInPreview";
+        interactionPhase === "fight" &&
+        (mode === "pileInPreview" || mode === "consolidationPreview");
       // Pile in : zone rouge (empreinte moteur) — comme move_preview_footprint_zone en forme,
       // pas seulement des disques aux ancres ; on dessine via ``availableCells`` (override).
       const useLargeBoardMoveDestPoolDraw =
@@ -710,10 +774,13 @@ export const drawBoard = (
         moveDestPoolRef.current.size > 0;
 
       const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
+      const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
       const availableCellsDrawColor = useAdvanceMovePoolLikeMove
         ? advanceZoneFillColor
         : usePileInPoolLikeMove
-          ? ATTACK_COLOR
+          ? useConsolidationPreview
+            ? 0xff8c00
+            : ATTACK_COLOR
           : HIGHLIGHT_COLOR;
 
       const useLargeBoardChargeDestPoolDraw =
@@ -759,8 +826,19 @@ export const drawBoard = (
           app,
           highlightContainer,
           gfx,
-          0.4,
+          0.28,
           useAdvanceMovePoolLikeMove ? "advance-dest-pool" : "move-dest-pool",
+        );
+        addFootprintPoolSmoothOutlines(
+          highlightContainer,
+          moveDestPoolRef.current,
+          footprintRadius,
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          poolFillColor,
         );
       } else {
         drawGroup(availableCells, availableCellsDrawColor, 0.4, false);
@@ -790,7 +868,18 @@ export const drawBoard = (
           chargeGfx.drawCircle(hx, hy, footprintRadius);
         }
         chargeGfx.endFill();
-        addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.4, "charge-dest-pool");
+        addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.28, "charge-dest-pool");
+        addFootprintPoolSmoothOutlines(
+          highlightContainer,
+          chargePool,
+          footprintRadius,
+          HEX_HORIZ_SPACING,
+          HEX_WIDTH,
+          HEX_HEIGHT,
+          HEX_VERT_SPACING,
+          MARGIN,
+          CHARGE_DESTINATION_HEX_FILL,
+        );
       } else {
         drawGroup(
           chargeCells.map((c: any) => ({
@@ -1104,6 +1193,12 @@ export const drawBoard = (
               highlightCell.beginFill(CHARGE_COLOR, 0.5);
             } else if (isAttackable) {
               highlightCell.beginFill(ATTACK_COLOR, 0.5);
+            } else if (
+              interactionPhase === "fight" &&
+              mode === "consolidationPreview" &&
+              isAvailable
+            ) {
+              highlightCell.beginFill(0xff8c00, 0.5);
             } else if (
               interactionPhase === "fight" &&
               mode === "pileInPreview" &&

@@ -325,13 +325,16 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         else:
             charging_empty = len(game_state["charging_activation_pool"]) == 0
 
-        # AI_TURN.md line 727: "All charging units processed -> GO TO STEP : ATLERNATE_FIGHT"
-        # AI_TURN.md lines 731-755: Build alternating pools ONLY when transitioning from charging to alternating
-        # This happens when charging pool becomes empty AND we're removing a unit from charging pool
-        # We do NOT rebuild after every activation - only when entering alternating phase
-        if charging_empty and response.get("removed_from_charging_pool"):
-            # Charging phase just completed - build alternating pools for the first time
-            # AI_TURN.md lines 731-755: ACTIVE PLAYER ELIGIBILITY CHECK and NON-ACTIVE PLAYER ELIGIBILITY CHECK
+        # Reconstruire les pools d'alternance dès que la sous-phase charge est terminée et qu'une
+        # unité vient d'être retirée d'un pool fight (charge ou alternance). Avant, seul
+        # removed_from_charging_pool déclenchait un rebuild : après la dernière activation en
+        # alternating_active, l'adversaire pouvait disparaître des pools / fight_subphase devenait
+        # incohérent et phase_complete se déclenchait à tort.
+        if charging_empty and (
+            response.get("removed_from_charging_pool")
+            or response.get("removed_from_active_alternating_pool")
+            or response.get("removed_from_non_active_alternating_pool")
+        ):
             _rebuild_alternating_pools_for_fight(game_state)
 
         if "active_alternating_activation_pool" not in game_state:

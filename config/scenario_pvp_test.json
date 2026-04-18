@@ -9,6 +9,7 @@
     {"id": 101, "unit_type": "TyranidWarriorRanged", "player": 2, "col": 200, "row": 200},
     {"id": 102, "unit_type": "Termagant", "player": 2, "col": 80, "row": 90},
     {"id": 103, "unit_type": "Genestealer", "player": 2, "col": 100, "row": 80},
-    {"id": 104, "unit_type": "ScreamerKiller", "player": 2, "col": 90, "row": 120}
+    {"id": 104, "unit_type": "ScreamerKiller", "player": 2, "col": 90, "row": 120},
+    {"id": 105, "unit_type": "Hormagaunt", "player": 2, "col": 220, "row": 245}
   ]
 }

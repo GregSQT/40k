@@ -29,6 +29,11 @@ from .shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid, get_engagement_zone,
 )
+from engine.hex_utils import (
+    engagement_minimum_clearance_norm,
+    euclidean_edge_clearance_round_round,
+    min_distance_between_sets,
+)
 
 
 def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
@@ -52,6 +57,75 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
         keyword_value = keyword_entry.get("keywordId")
         if keyword_value == keyword_id:
             return True
+    return False
+
+
+def _movement_engagement_violates(
+    game_state: Dict[str, Any],
+    mover: Dict[str, Any],
+    center_col: int,
+    center_row: int,
+    candidate_fp: Set[Tuple[int, int]],
+    units_cache: Dict[str, Any],
+    enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+) -> bool:
+    """True si le placement est interdit par la zone autour des ennemis.
+
+    Plateau ×10 (``engagement_zone`` > 1) : pour deux socles **ronds**, écart
+    bord à bord euclidien (repère ``_hex_center``) ≥ ``engagement_zone`` × pas
+    horizontal — aligné preview combat / ``hexFootprint.ts``. Autres formes :
+    repli sur ``min_distance_between_sets`` (comportement historique).
+    Legacy (``engagement_zone`` ≤ 1) : toute case de l'empreinte dans
+    ``enemy_adjacent_hexes`` (dilatation hex).
+    """
+    ez = get_engagement_zone(game_state)
+    mover_id = str(require_key(mover, "id"))
+    mover_player = int(require_key(mover, "player"))
+
+    if ez <= 1:
+        if enemy_adjacent_hexes is None:
+            ck = f"enemy_adjacent_hexes_player_{mover_player}"
+            enemy_adjacent_hexes = require_key(game_state, ck)
+        for c, r in candidate_fp:
+            if (c, r) in enemy_adjacent_hexes:
+                return True
+        return False
+
+    req = engagement_minimum_clearance_norm(ez)
+    mover_shape = mover.get("BASE_SHAPE", "round")
+    mover_bs = mover.get("BASE_SIZE", 1)
+    mover_bs_i = mover_bs if isinstance(mover_bs, int) else 1
+
+    for eid, cache_entry in units_cache.items():
+        if str(eid) == mover_id:
+            continue
+        if int(require_key(cache_entry, "player")) == mover_player:
+            continue
+        enemy_fp = cache_entry.get("occupied_hexes")
+        if not enemy_fp:
+            ec = require_key(cache_entry, "col")
+            er = require_key(cache_entry, "row")
+            enemy_fp = {(ec, er)}
+        e_shape = cache_entry.get("BASE_SHAPE", "round")
+        e_bs_raw = cache_entry.get("BASE_SIZE", 1)
+        e_bs_i = e_bs_raw if isinstance(e_bs_raw, int) else 1
+        e_col = require_key(cache_entry, "col")
+        e_row = require_key(cache_entry, "row")
+
+        if mover_shape == "round" and e_shape == "round":
+            gap = euclidean_edge_clearance_round_round(
+                center_col,
+                center_row,
+                mover_bs_i,
+                e_col,
+                e_row,
+                e_bs_i,
+            )
+            if gap < req - 1e-6:
+                return True
+        else:
+            if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=ez) <= ez:
+                return True
     return False
 
 
@@ -234,7 +308,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if cache_key not in game_state:
             raise KeyError(f"enemy_adjacent_hexes cache missing for player {current_player} - build_enemy_adjacent_hexes() must be called at phase start")
         enemy_adjacent_hexes = game_state[cache_key]
-        
+        ez_elig = get_engagement_zone(game_state)
+
         has_valid_adjacent_hex = False
         if has_fly_keyword:
             board_cols = require_key(game_state, "board_cols")
@@ -254,7 +329,24 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                     fly_visited.add(nb)
                     fly_q.append((nb, fd + 1))
                     candidate_fp = compute_candidate_footprint(nc, nr, unit_obj, game_state)
-                    if is_footprint_placement_valid(candidate_fp, game_state, occupied_positions, enemy_adjacent_hexes):
+                    base_ok = is_footprint_placement_valid(
+                        candidate_fp,
+                        game_state,
+                        occupied_positions,
+                        enemy_adjacent_hexes if ez_elig <= 1 else None,
+                    )
+                    if base_ok and (
+                        ez_elig <= 1
+                        or not _movement_engagement_violates(
+                            game_state,
+                            unit_obj,
+                            nc,
+                            nr,
+                            candidate_fp,
+                            units_cache,
+                            enemy_adjacent_hexes,
+                        )
+                    ):
                         has_valid_adjacent_hex = True
                         break
         else:
@@ -262,7 +354,24 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             for neighbor_pos in neighbors:
                 neighbor_col, neighbor_row = neighbor_pos
                 candidate_fp = compute_candidate_footprint(neighbor_col, neighbor_row, unit_obj, game_state)
-                if is_footprint_placement_valid(candidate_fp, game_state, occupied_positions, enemy_adjacent_hexes):
+                base_ok = is_footprint_placement_valid(
+                    candidate_fp,
+                    game_state,
+                    occupied_positions,
+                    enemy_adjacent_hexes if ez_elig <= 1 else None,
+                )
+                if base_ok and (
+                    ez_elig <= 1
+                    or not _movement_engagement_violates(
+                        game_state,
+                        unit_obj,
+                        neighbor_col,
+                        neighbor_row,
+                        candidate_fp,
+                        units_cache,
+                        enemy_adjacent_hexes,
+                    )
+                ):
                     has_valid_adjacent_hex = True
                     break
         
@@ -557,22 +666,48 @@ def _attempt_movement_to_destination(game_state: Dict[str, Any], unit: Dict[str,
             "destination": (dest_col_int, dest_row_int)
         }
 
-    # Re-validate against enemy engagement zone at commit time.
-    from engine.hex_utils import min_distance_between_sets
-    engagement_zone = get_engagement_zone(game_state)
+    # Re-validate against enemy engagement zone at commit time (euclidien bord à bord ×10).
     units_cache = require_key(game_state, "units_cache")
-    unit_player_int = int(require_key(unit, "player"))
-    for enemy_id, cache_entry in units_cache.items():
-        enemy_player_int = int(require_key(cache_entry, "player"))
-        if enemy_player_int == unit_player_int:
-            continue
-        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-        if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
-            return False, {
-                "error": "destination_adjacent_to_enemy",
-                "enemy_id": enemy_id,
-                "destination": (dest_col_int, dest_row_int),
-            }
+    if _movement_engagement_violates(
+        game_state,
+        unit,
+        dest_col_int,
+        dest_row_int,
+        candidate_fp,
+        units_cache,
+        None,
+    ):
+        blocking_eid: Optional[str] = None
+        ez_blk = get_engagement_zone(game_state)
+        mover_player_int = int(require_key(unit, "player"))
+        mover_id_str = str(require_key(unit, "id"))
+        mover_shape = unit.get("BASE_SHAPE", "round")
+        mover_bs_i = unit.get("BASE_SIZE", 1)
+        mover_bs_i = mover_bs_i if isinstance(mover_bs_i, int) else 1
+        if ez_blk > 1 and mover_shape == "round":
+            req_blk = engagement_minimum_clearance_norm(ez_blk)
+            for eid, cache_entry in units_cache.items():
+                if str(eid) == mover_id_str:
+                    continue
+                if int(require_key(cache_entry, "player")) == mover_player_int:
+                    continue
+                if cache_entry.get("BASE_SHAPE", "round") != "round":
+                    continue
+                e_bs = cache_entry.get("BASE_SIZE", 1)
+                e_bs_i = e_bs if isinstance(e_bs, int) else 1
+                e_col = require_key(cache_entry, "col")
+                e_row = require_key(cache_entry, "row")
+                gap = euclidean_edge_clearance_round_round(
+                    dest_col_int, dest_row_int, mover_bs_i, e_col, e_row, e_bs_i
+                )
+                if gap < req_blk - 1e-6:
+                    blocking_eid = str(eid)
+                    break
+        return False, {
+            "error": "destination_adjacent_to_enemy",
+            "enemy_id": blocking_eid,
+            "destination": (dest_col_int, dest_row_int),
+        }
 
     # Execute movement - position assignment
     # Log ALL position changes to detect unauthorized modifications
@@ -661,8 +796,6 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     For CC_RNG>1, use hex distance calculation.
     MULTIPLE_WEAPONS_IMPLEMENTATION.md: Melee range is always 1.
     """
-    from engine.hex_utils import min_distance_between_sets
-    engagement_zone = get_engagement_zone(game_state)
     unit_col, unit_row = require_unit_position(unit, game_state)
 
     unit_id_str = str(unit["id"])
@@ -670,15 +803,18 @@ def _is_adjacent_to_enemy(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     unit_entry = units_cache.get(unit_id_str)
     unit_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
 
-    result = False
-    unit_player = int(unit["player"]) if unit["player"] is not None else None
-    for enemy_id, cache_entry in units_cache.items():
-        enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-        if enemy_player != unit_player:
-            enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-            if min_distance_between_sets(unit_fp, enemy_fp, max_distance=engagement_zone) <= engagement_zone:
-                result = True
-                break
+    cache_key = f"enemy_adjacent_hexes_player_{int(require_key(unit, 'player'))}"
+    enemy_adj = game_state.get(cache_key)
+
+    result = _movement_engagement_violates(
+        game_state,
+        unit,
+        unit_col,
+        unit_row,
+        unit_fp,
+        units_cache,
+        enemy_adj if isinstance(enemy_adj, set) else None,
+    )
     
     # Log adjacency check result
     _log_movement_debug(game_state, "is_adjacent_to_enemy", str(unit["id"]), f"ADJACENT" if result else "NOT_ADJACENT")
@@ -849,7 +985,17 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                 if nb == start_pos:
                     continue
                 if _fly_single_hex:
-                    if nb in _fly_walls or nb in _fly_occupied or nb in enemy_adjacent_hexes:
+                    if nb in _fly_walls or nb in _fly_occupied:
+                        fly_rejected_footprint += 1
+                    elif _movement_engagement_violates(
+                        game_state,
+                        unit,
+                        nc,
+                        nr,
+                        {(nc, nr)},
+                        units_cache,
+                        enemy_adjacent_hexes if ez <= 1 else None,
+                    ):
                         fly_rejected_footprint += 1
                     else:
                         valid_destinations.append(nb)
@@ -867,10 +1013,16 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                         if (_fc, _fr) in _fly_occupied:
                             dest_ok = False
                             break
-                        if (_fc, _fr) in enemy_adjacent_hexes:
-                            dest_ok = False
-                            break
-                    if dest_ok:
+                    candidate_fp_nb = {(nc + dc, nr + dr) for dc, dr in offsets}
+                    if dest_ok and not _movement_engagement_violates(
+                        game_state,
+                        unit,
+                        nc,
+                        nr,
+                        candidate_fp_nb,
+                        units_cache,
+                        enemy_adjacent_hexes if ez <= 1 else None,
+                    ):
                         valid_destinations.append(nb)
                     else:
                         fly_rejected_footprint += 1
@@ -948,9 +1100,22 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     continue
                 if nb in _enemy_occ:
                     continue
-                if nb in _enemy_adj:
-                    blocked_enemy_adjacent_count += 1
-                    continue
+                if ez <= 1:
+                    if nb in _enemy_adj:
+                        blocked_enemy_adjacent_count += 1
+                        continue
+                else:
+                    if _movement_engagement_violates(
+                        game_state,
+                        unit,
+                        nc,
+                        nr,
+                        {(nc, nr)},
+                        units_cache,
+                        None,
+                    ):
+                        blocked_enemy_adjacent_count += 1
+                        continue
                 visited[nb] = nd
                 queue.append((nb, nd))
                 # Traversal may pass through allied hexes; cannot end on any occupied cell.
@@ -1011,12 +1176,21 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
                     elif _rej_reason == "occupied":
                         _rej_occupied += 1
                     continue
-                in_engagement = False
-                for dc, dr in offsets:
-                    if (nc + dc, nr + dr) in _enemy_adj:
-                        in_engagement = True
-                        break
-                if in_engagement:
+                candidate_fp_nb = {(nc + dc, nr + dr) for dc, dr in offsets}
+                if ez <= 1:
+                    in_engagement = any((nc + dc, nr + dr) in _enemy_adj for dc, dr in offsets)
+                    if in_engagement:
+                        blocked_enemy_adjacent_count += 1
+                        continue
+                elif _movement_engagement_violates(
+                    game_state,
+                    unit,
+                    nc,
+                    nr,
+                    candidate_fp_nb,
+                    units_cache,
+                    None,
+                ):
                     blocked_enemy_adjacent_count += 1
                     continue
                 visited[nb] = nd
@@ -1273,8 +1447,8 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         return False, {"error": "unit_not_found", "unit_id": unit_id}
 
     # Destination validation is already done in movement_build_valid_destinations_pool()
-    # The destination is in valid_pool, which was built using cached enemy_adjacent_hexes from phase start
-    # No need to re-validate here - if destination is in pool, it's valid
+    # (BFS + zone ennemie euclidienne bord à bord sur plateau ×10). Le pool doit rester
+    # aligné avec _attempt_movement_to_destination (revalidation stricte au commit).
 
     # Use _attempt_movement_to_destination() to validate occupation
     # This function checks if destination is occupied, validates enemy adjacency, etc.

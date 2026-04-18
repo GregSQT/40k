@@ -23,6 +23,9 @@ from engine.hex_utils import (
     validate_placement,
     dilate_hex_set,
     expand_wall_group_to_hex_list,
+    engagement_minimum_clearance_norm,
+    euclidean_edge_clearance_round_round,
+    round_base_radius_norm,
 )
 
 
@@ -496,6 +499,21 @@ class TestDilateHexSet:
         area_approx = math.pi * 10 ** 2
         assert len(result) > area_approx * 0.7
         assert len(result) < area_approx * 1.3
+
+
+class TestEuclideanEngagementClearance:
+    """Bord à bord socles ronds (mouvement ×10) — aligné frontend hexFootprint."""
+
+    def test_engagement_minimum_clearance_norm(self):
+        assert engagement_minimum_clearance_norm(10) == 15.0
+        assert engagement_minimum_clearance_norm(1) == 1.5
+
+    def test_round_base_radius_matches_footprint_scale(self):
+        assert round_base_radius_norm(2) == 1.5
+
+    def test_identical_centers_negative_clearance(self):
+        g = euclidean_edge_clearance_round_round(10, 10, 3, 10, 10, 3)
+        assert g < 0
 
 
 class TestExpandWallGroupToHexList:

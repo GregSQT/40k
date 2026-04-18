@@ -227,7 +227,11 @@ export function setupBoardClickHandler(callbacks: {
       if (callbacks.onAdvanceMove) {
         callbacks.onAdvanceMove(selectedUnitId, col, row);
       }
-    } else if (mode === "pileInPreview" && selectedUnitId !== null && phase === "fight") {
+    } else if (
+      (mode === "pileInPreview" || mode === "consolidationPreview") &&
+      selectedUnitId !== null &&
+      phase === "fight"
+    ) {
       if (callbacks.onPileInMove) {
         callbacks.onPileInMove(selectedUnitId, col, row);
       }
