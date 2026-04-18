@@ -459,6 +459,33 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
     return False
 
 
+def _fight_pile_in_anchor_adjacent_to_enemy_footprint(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    anchor_col: int,
+    anchor_row: int,
+) -> bool:
+    """
+    True si l'empreinte à cette ancre est « collée » à au moins un ennemi
+    (distance minimale entre empreintes == 1), comme ``_fight_unit_is_hex_adjacent_to_enemy_footprint``.
+    """
+    from engine.hex_utils import min_distance_between_sets
+
+    candidate_fp = compute_candidate_footprint(int(anchor_col), int(anchor_row), unit, game_state)
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    unit_id_str = str(unit["id"])
+    for enemy_id, cache_entry in units_cache.items():
+        if str(enemy_id) == unit_id_str:
+            continue
+        if int(cache_entry["player"]) == unit_player:
+            continue
+        enemy_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+        if min_distance_between_sets(candidate_fp, enemy_fp, max_distance=1) <= 1:
+            return True
+    return False
+
+
 def _fight_build_pile_in_valid_destinations(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -468,6 +495,9 @@ def _fight_build_pile_in_valid_destinations(
     """
     BFS jusqu'à 3\" (× inches_to_subhex) : mêmes contraintes de placement que charge
     (empreinte légale, pas chevauchement), avec fin strictement plus proche d'une cible du palier d'activation.
+
+    Si au moins une ancre valide permet de finir au contact ennemi (empreintes adjacentes),
+    seules ces ancres sont proposées (preview + validation).
     """
     if d_min <= 0:
         return []
@@ -508,6 +538,13 @@ def _fight_build_pile_in_valid_destinations(
                 continue
             valid_destinations.append(neighbor_pos)
 
+    contact_destinations = [
+        p
+        for p in valid_destinations
+        if _fight_pile_in_anchor_adjacent_to_enemy_footprint(game_state, unit, p[0], p[1])
+    ]
+    if contact_destinations:
+        return contact_destinations
     return valid_destinations
 
 
