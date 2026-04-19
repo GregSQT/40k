@@ -501,6 +501,7 @@ class W40KEngine(gym.Env):
             # AI_MOVE.md movement preview state
             "valid_move_destinations_pool": [],
             "preview_hexes": [],
+            "move_preview_footprint_span": None,
             "active_movement_unit": None,
             
             # Fight state

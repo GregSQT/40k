@@ -282,6 +282,12 @@ export interface GameState {
   deployment_type?: "random" | "fixed" | "active";
   deployment_state?: DeploymentState;
   active_movement_unit?: string; // Active unit ID in movement phase
+  /** Ancres BFS valides (une par destination d’empreinte) — affichage disques, pas union hex-par-hex. */
+  valid_move_destinations_pool?: Array<[number, number]>;
+  /** Rayon disques UI : max dimension d’empreinte en hex (moteur) — si l’unité client n’a pas BASE_SIZE. */
+  move_preview_footprint_span?: number | null;
+  /** Souvent identique au pool de move (moteur). */
+  preview_hexes?: Array<[number, number]>;
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
   /** Phase fight : union des hexes occupés par l'empreinte pour chaque ancre pile in valide (comme move_preview_footprint_zone). */

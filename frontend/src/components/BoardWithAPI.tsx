@@ -3138,6 +3138,7 @@ export const BoardWithAPI: React.FC = () => {
             chargePreviewOverlayHexes={apiProps.chargePreviewOverlayHexes ?? []}
             chargeReferenceHex={apiProps.chargeReferenceHex ?? null}
             moveDestPoolRef={apiProps.moveDestPoolRef}
+            pendingMoveAfterShooting={apiProps.pendingMoveAfterShooting ?? false}
             footprintZoneRef={apiProps.footprintZoneRef}
             chargeDestPoolRef={apiProps.chargeDestPoolRef}
             chargeFootprintZoneRef={apiProps.chargeFootprintZoneRef}

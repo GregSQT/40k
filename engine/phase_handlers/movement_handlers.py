@@ -36,6 +36,20 @@ from engine.hex_utils import (
 )
 
 
+def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
+    """Dimension max d’empreinte (hexes), alignée sur charge_handlers._charge_base_diameter — rayon disques UI."""
+    bs = unit.get("BASE_SIZE", 1)
+    if isinstance(bs, (list, tuple)) and len(bs) >= 1:
+        try:
+            return max(int(v) for v in bs)
+        except (TypeError, ValueError):
+            return 1
+    try:
+        return max(1, int(bs))
+    except (TypeError, ValueError):
+        return 1
+
+
 def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
     """
     Return True if UNIT_KEYWORDS contains keyword_id.
@@ -169,6 +183,8 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
     # Clear movement destination pools
     if "valid_move_destinations_pool" in game_state:
         game_state["valid_move_destinations_pool"] = []
+    if "move_preview_footprint_zone" in game_state:
+        game_state["move_preview_footprint_zone"] = set()
     if "move_preview_border" in game_state:
         game_state["move_preview_border"] = []
     
@@ -560,8 +576,10 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
 def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> None:
     """AI_MOVE.md: Unit activation initialization"""
     game_state["valid_move_destinations_pool"] = []
+    game_state["move_preview_footprint_zone"] = set()
     game_state["move_preview_border"] = []
     game_state["preview_hexes"] = []
+    game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = unit_id
 
 
@@ -1029,13 +1047,29 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
         _m_bfs_end = _perf_clock.perf_counter() if _pt else None
         game_state["valid_move_destinations_pool"] = valid_destinations
+        game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
         game_state["move_preview_border"] = _compute_border_cells(valid_destinations)
+        # Même sémantique que le BFS au sol : zone union d'empreintes (évite zone empreinte obsolète côté client).
+        if _fly_single_hex:
+            _fly_fp_zone: Set[Tuple[int, int]] = set(valid_destinations)
+            _fly_fp_zone.add(start_pos)
+        else:
+            _fly_fp_zone = set()
+            for vc, vr in valid_destinations:
+                _offs = _fly_off_even if (vc & 1) == 0 else _fly_off_odd
+                for dc, dr in _offs:
+                    _fly_fp_zone.add((vc + dc, vr + dr))
+            _start_offs = _fly_off_even if (start_pos[0] & 1) == 0 else _fly_off_odd
+            for dc, dr in _start_offs:
+                _fly_fp_zone.add((start_pos[0] + dc, start_pos[1] + dr))
+        game_state["move_preview_footprint_zone"] = _fly_fp_zone
         _m_fly_done = _perf_clock.perf_counter() if _pt else None
         if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_fly_done is not None:
             append_perf_timing_line(
                 f"MOVE_POOL_BUILD unit={unit_id} fly=True prep_s={_m_prep_end - _m0:.6f} "
                 f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} preview_border_s={_m_fly_done - _m_bfs_end:.6f} "
                 f"total_s={_m_fly_done - _m0:.6f} visited={len(fly_visited)} valid={len(valid_destinations)} "
+                f"anchors_n={len(valid_destinations)} footprint_hex_n={len(_fly_fp_zone)} "
                 f"MOVE={move_range}"
             )
         _log_movement_debug(game_state, "build_valid_destinations", str(unit_id), f"valid_destinations count={len(valid_destinations)} [FLY BFS]")
@@ -1202,6 +1236,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
 
     _m_bfs_end = _perf_clock.perf_counter() if _pt else None
     game_state["valid_move_destinations_pool"] = valid_destinations
+    game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
 
     if is_single_hex:
         footprint_zone: Set[Tuple[int, int]] = set(valid_destinations)
@@ -1225,6 +1260,7 @@ def movement_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: 
             f"MOVE_POOL_BUILD unit={unit_id} fly=False single_hex={is_single_hex} prep_s={_m_prep_end - _m0:.6f} "
             f"bfs_s={_m_bfs_end - _m_bfs_start:.6f} footprint_zone_border_s={_m_ground_done - _m_bfs_end:.6f} "
             f"total_s={_m_ground_done - _m0:.6f} visited={len(visited)} valid={len(valid_destinations)} "
+            f"anchors_n={len(valid_destinations)} footprint_hex_n={len(footprint_zone)} "
             f"MOVE={move_range} base={base_size} fp={_fp_n}"
         )
 
@@ -1390,7 +1426,9 @@ def movement_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """AI_MOVE.md: Clear movement preview"""
     game_state["preview_hexes"] = []
     game_state["valid_move_destinations_pool"] = []
+    game_state["move_preview_footprint_zone"] = set()
     game_state["move_preview_border"] = []
+    game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = None
     return {
         "show_preview": False,

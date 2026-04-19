@@ -1,6 +1,8 @@
 // frontend/src/components/BoardDisplay.tsx
 import type React from "react";
 import * as PIXI from "pixi.js-legacy";
+import { addHexKeysToSet } from "../utils/movePoolRefsSync";
+import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 
 interface BoardConfig {
   cols: number;
@@ -99,9 +101,28 @@ export interface DrawBoardOptions {
   showHexCoordinates?: boolean;
   objectiveControl?: ObjectiveControlMap;
   moveDestPoolRef?: React.RefObject<Set<string>>;
+  /**
+   * Ancres move/advance depuis game_state (repli si ``moveDestPoolRef`` vide). Le dessin des disques
+   * privilégie **toujours** ``moveDestPoolRef`` quand elle est non vide — même principe que la charge.
+   */
+  moveDestinationAnchorsFromState?: unknown;
+  /** Prioritaire sur ``selectedUnitBaseSize`` : span moteur (game_state.move_preview_footprint_span). */
+  movePreviewFootprintSpanFromState?: number | null;
+  /** Voir ``interactionPhase === "shoot"`` + ``movePoolRefsSync`` : pavage disques vs pastilles hex. */
+  pendingMoveAfterShooting?: boolean;
   /** Ancres charge (même sémantique que ``moveDestPoolRef``) — preview multi-base comme la phase move. */
   chargeDestPoolRef?: React.RefObject<Set<string>>;
   selectedUnitBaseSize?: number;
+  /**
+   * (col, row) de l'unité dont on dessine la preview move / advance / post-shoot.
+   *
+   * Requis pour rendre la zone en **disque euclidien** (rayon calculé depuis le
+   * centre de l'unité jusqu'au bord extérieur du BFS + demi-empreinte), masqué
+   * par l'union des empreintes du pool — cercle net en terrain libre, tronqué
+   * franchement par murs / EZ / pathfinding. Si absent ou si le pool est vide,
+   * on retombe sur le pipeline union-de-disques historique.
+   */
+  selectedUnitAnchor?: { col: number; row: number } | null;
   /** Pre-built static board container (background + wall dots + objectives base). Reused across renders. */
   cachedStaticBoard?: PIXI.Container | null;
   /** Pre-built wall segments container. Reused across renders. */
@@ -128,17 +149,6 @@ export interface DrawBoardOptions {
 export interface DrawBoardResult {
   baseHexContainer: PIXI.Container;
   wallsContainer: PIXI.Container | null;
-}
-
-// Helper functions from Board.tsx
-function hexCorner(cx: number, cy: number, size: number, i: number) {
-  const angle_deg = 60 * i;
-  const angle_rad = (Math.PI / 180) * angle_deg;
-  return [cx + size * Math.cos(angle_rad), cy + size * Math.sin(angle_rad)];
-}
-
-function getHexPolygonPoints(cx: number, cy: number, size: number) {
-  return Array.from({ length: 6 }, (_, i) => hexCorner(cx, cy, size, i)).flat();
 }
 
 type PixelPt = [number, number];
@@ -303,7 +313,7 @@ function welzlSmallestEnclosingCirclePoints(pts: PixelPt[]): { cx: number; cy: n
       return trivialBoundaryCircle(R);
     }
     const D = sec(n - 1, R);
-    if (inside(shuffled[n - 1]!, D, EPS)) {
+    if (inside(shuffled[n - 1]!, D)) {
       return D;
     }
     return sec(n - 1, [...R, shuffled[n - 1]!]);
@@ -348,9 +358,17 @@ const parseColor = (colorStr: string): number => {
 };
 
 /**
- * Phase move, unité multi-base sur grand plateau : pool de centres → disques d’empreinte →
- * `RenderTexture` 1:1 → sprite (même code qu’historiquement).
+ * Phase move / charge : pool → disques d’empreinte → une ou plusieurs `RenderTexture` (tuiles) → sprites.
+ *
+ * - **Pas de repli** sur un `Graphics` brut : bornes invalides ou erreur → destruction, rien au stage.
+ * - **Tuiles** : réponse aux plafonds GPU (4096 px / côté) — rendu nominal pour les grandes zones, pas un plan B graphique.
+ *
+ * `resolution` + `alphaMode` alignés sur le framebuffer ; **multisample désactivé** sur la RT
+ * (MSAA sur RenderTexture = échecs GL fréquents → `catch` → aucun sprite, preview vide).
  */
+/** Taille max d’un côté de tuile (limite texture WebGL courante). Au-delà on découpe en plusieurs RT. */
+const FOOTPRINT_HIGHLIGHT_RT_MAX_DIM = 4096;
+
 function addFootprintHighlightSprite(
   app: PIXI.Application,
   highlightContainer: PIXI.Container,
@@ -358,20 +376,87 @@ function addFootprintHighlightSprite(
   alpha: number,
   displayName: string
 ): void {
-  const bounds = gfx.getBounds();
-  if (bounds.width <= 0 || bounds.height <= 0) {
+  const lb = gfx.getLocalBounds();
+  const bounds =
+    lb.width > 0 && lb.height > 0 && Number.isFinite(lb.width) && Number.isFinite(lb.height)
+      ? lb
+      : gfx.getBounds();
+  if (
+    !Number.isFinite(bounds.width) ||
+    !Number.isFinite(bounds.height) ||
+    bounds.width <= 0 ||
+    bounds.height <= 0
+  ) {
     gfx.destroy();
     return;
   }
-  const rt = PIXI.RenderTexture.create({ width: bounds.width, height: bounds.height });
-  gfx.position.set(-bounds.x, -bounds.y);
-  app.renderer.render(gfx, { renderTexture: rt });
-  gfx.destroy();
-  const sprite = new PIXI.Sprite(rt);
-  sprite.name = displayName;
-  sprite.position.set(bounds.x, bounds.y);
-  sprite.alpha = alpha;
-  highlightContainer.addChild(sprite);
+  const w = Math.ceil(bounds.width);
+  const h = Math.ceil(bounds.height);
+  const TILE = FOOTPRINT_HIGHLIGHT_RT_MAX_DIM;
+  const tilesW = Math.max(1, Math.ceil(w / TILE));
+  const tilesH = Math.max(1, Math.ceil(h / TILE));
+  const createdSprites: PIXI.Sprite[] = [];
+  const resolution = app.renderer.resolution;
+  try {
+    for (let j = 0; j < tilesH; j++) {
+      for (let i = 0; i < tilesW; i++) {
+        const tileLeft = i * TILE;
+        const tileTop = j * TILE;
+        const tw = Math.min(TILE, w - tileLeft);
+        const th = Math.min(TILE, h - tileTop);
+        const rt = PIXI.RenderTexture.create({
+          width: tw,
+          height: th,
+          resolution,
+          multisample: PIXI.MSAA_QUALITY.NONE,
+          alphaMode: PIXI.ALPHA_MODES.PMA,
+        });
+        gfx.position.set(-bounds.x - tileLeft, -bounds.y - tileTop);
+        app.renderer.render(gfx, { renderTexture: rt, clear: true });
+        const sprite = new PIXI.Sprite(rt);
+        sprite.name =
+          tilesW === 1 && tilesH === 1 ? displayName : `${displayName}-t${i}-${j}`;
+        sprite.position.set(bounds.x + tileLeft, bounds.y + tileTop);
+        sprite.alpha = alpha;
+        sprite.roundPixels = false;
+        highlightContainer.addChild(sprite);
+        createdSprites.push(sprite);
+      }
+    }
+    gfx.destroy();
+  } catch (err) {
+    // Remonte explicitement les échecs silencieux du pipeline RenderTexture
+    // (perte de contexte WebGL, dépassement du buffer d'indices, bornes Pixi
+    // aberrantes…) uniquement en mode debug — sinon aucun sprite ne sort au
+    // stage et la zone de preview disparait sans laisser de trace en console.
+    if (typeof window !== "undefined") {
+      try {
+        if (window.localStorage.getItem("debugMovePool") === "1") {
+          const lb = gfx.getLocalBounds?.();
+          console.warn(
+            "[addFootprintHighlightSprite] RenderTexture pipeline failed",
+            {
+              spriteName: displayName,
+              width: w,
+              height: h,
+              tilesW,
+              tilesH,
+              localBounds: lb
+                ? { x: lb.x, y: lb.y, width: lb.width, height: lb.height }
+                : null,
+            },
+            err,
+          );
+        }
+      } catch {
+        // ignore localStorage/console access errors (SSR, privacy mode)
+      }
+    }
+    for (const s of createdSprites) {
+      s.destroy({ texture: true });
+    }
+    gfx.destroy();
+  }
 }
 
 /** Contour extérieur lissé pour la preview d’engagement (combat) — plusieurs traits concentriques. */
@@ -420,6 +505,101 @@ function appendFeatheredCircleOutlineStrokes(
 const FOOTPRINT_POOL_OUTLINE_MAX_CENTERS = 160;
 
 /**
+ * Plafond strict du nombre de `drawCircle` poussés dans un unique `PIXI.Graphics`
+ * pour le remplissage des pools move / charge.
+ *
+ * Pixi génère ~40 sommets par cercle : au-delà de ~1500 disques, on dépasse la
+ * capacité du buffer d'indices 16 bits (65 535) et le rendu `RenderTexture`
+ * échoue silencieusement — résultat : aucun sprite lissé, seul un autre layer
+ * (contours / hit-areas / cellules hex en fallback) reste visible, d'où la
+ * perception d'un "preview en hex" au lieu d'un disque.
+ *
+ * Le footprint des pools `move` est typiquement `(BASE_SIZE/2) * HEX_HORIZ_SPACING`,
+ * soit plusieurs fois l'inter-cellule → la décimation par grille est sans
+ * conséquence visuelle (les disques conservés recouvrent largement les sautés).
+ */
+const FOOTPRINT_POOL_MAX_CIRCLES = 1500;
+
+/**
+ * Cellule de bord du pool : au moins un de ses 6 voisins (flat-top avec offset
+ * de colonnes impaires vers le bas) est absent du pool.
+ *
+ * On garde **toutes** les cellules de bord intactes lors de la décimation pour
+ * préserver la frontière visible de la zone d'empreinte ; seul l'intérieur est
+ * sous-échantillonné.
+ */
+function isPoolBoundaryCell(c: number, r: number, pool: Set<string>): boolean {
+  const neighbours: Array<[number, number]> =
+    c % 2 === 0
+      ? [
+          [c, r - 1],
+          [c, r + 1],
+          [c - 1, r - 1],
+          [c - 1, r],
+          [c + 1, r - 1],
+          [c + 1, r],
+        ]
+      : [
+          [c, r - 1],
+          [c, r + 1],
+          [c - 1, r],
+          [c - 1, r + 1],
+          [c + 1, r],
+          [c + 1, r + 1],
+        ];
+  for (const [nc, nr] of neighbours) {
+    if (!pool.has(`${nc},${nr}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Pousse les disques d'empreinte d'un pool dans un `PIXI.Graphics` unique.
+ *
+ * - **Un seul `beginFill` / `endFill`** pour tous les cercles (≪ 6 000 changements
+ *   d'état Pixi sur un pool dense, cause directe de la perte silencieuse du
+ *   contexte WebGL / du rendu `RenderTexture` vide observée en phase move).
+ * - **Cap `FOOTPRINT_POOL_MAX_CIRCLES`** avec décimation `(c + r) % stride === 0`
+ *   + préservation systématique des cellules de bord — couverture strictement
+ *   équivalente tant que `footprintRadius ≥ stride · max(HEX_HORIZ_SPACING,
+ *   HEX_VERT_SPACING)`, condition toujours vraie pour les pools move / charge
+ *   réels où `footprintRadius ≫ spacing`.
+ */
+function fillFootprintPoolCircles(
+  gfx: PIXI.Graphics,
+  pool: Set<string>,
+  footprintRadius: number,
+  fillColor: number,
+  HEX_HORIZ_SPACING: number,
+  HEX_WIDTH: number,
+  HEX_HEIGHT: number,
+  HEX_VERT_SPACING: number,
+  MARGIN: number,
+): number {
+  const stride =
+    pool.size > FOOTPRINT_POOL_MAX_CIRCLES
+      ? Math.max(2, Math.ceil(pool.size / FOOTPRINT_POOL_MAX_CIRCLES))
+      : 1;
+  gfx.beginFill(fillColor, 1.0);
+  let drawn = 0;
+  for (const key of pool) {
+    const sep = key.indexOf(",");
+    const c = Number(key.substring(0, sep));
+    const r = Number(key.substring(sep + 1));
+    if (stride > 1 && ((c + r) % stride) !== 0 && !isPoolBoundaryCell(c, r, pool)) {
+      continue;
+    }
+    const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+    const hy =
+      r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+    gfx.drawCircle(hx, hy, footprintRadius);
+    drawn++;
+  }
+  gfx.endFill();
+  return drawn;
+}
+
+/**
  * Contour léger au-dessus du remplissage union des empreintes (move / charge).
  * Un seul trait par centre + seuil : évite 2–3× drawCircle par centre (très lent au redraw).
  */
@@ -455,6 +635,190 @@ function addFootprintPoolSmoothOutlines(
     gfx.drawCircle(hx, hy, footprintRadius);
   }
   highlightContainer.addChild(gfx);
+}
+
+/**
+ * Zone de preview **move / advance / post-shoot** rendue comme un **cercle
+ * euclidien** centré sur l'unité sélectionnée — pas comme l'union des disques
+ * d'empreinte du BFS (qui donne naturellement une forme hexagonale parce que le
+ * BFS s'effectue sur grille hex).
+ *
+ * Principe :
+ * - **Rayon** = `max_euclidean_distance(unit_center → cellule du pool) +
+ *   demi-empreinte`. Dérivé du BFS, donc aligné sur la portée réelle autorisée
+ *   par le moteur (M×10 en phase move, M×10+D6×10 en advance, etc.) sans
+ *   dupliquer les règles côté front.
+ * - **Masque** = union des empreintes (un disque de rayon `footprintRadius` par
+ *   cellule du pool), rendu sur une `RenderTexture` unique. Sert de masque
+ *   sprite au grand disque → le cercle est net en terrain libre et tronqué
+ *   franchement là où un mur / EZ / rule interdit de s'y rendre.
+ *
+ * **Chemin unique, pas de fallback silencieux** : toute condition aberrante
+ * (pool vide, empreinte nulle, bornes du masque non finies, RT trop grande,
+ * échec du rendu GPU…) lève une erreur explicite. C'est volontaire : on
+ * préfère un crash visible qu'un rendu "à peu près" qui masque un vrai bug.
+ */
+function renderMoveAdvanceDestPoolCircleLayer(
+  app: PIXI.Application,
+  highlightContainer: PIXI.Container,
+  pool: Set<string>,
+  footprintRadius: number,
+  poolFillColor: number,
+  spriteName: string,
+  unitCol: number,
+  unitRow: number,
+  unitCx: number,
+  unitCy: number,
+  HEX_HORIZ_SPACING: number,
+  HEX_WIDTH: number,
+  HEX_HEIGHT: number,
+  HEX_VERT_SPACING: number,
+  MARGIN: number,
+): void {
+  if (pool.size === 0) {
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] pool vide (spriteName=${spriteName})`,
+    );
+  }
+  if (!(footprintRadius > 0) || !Number.isFinite(footprintRadius)) {
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] footprintRadius invalide (${footprintRadius}, spriteName=${spriteName})`,
+    );
+  }
+
+  // **Rayon cible** : on veut la distance qui correspond à la règle "M × 10
+  // hexes" côté moteur. Pour l'obtenir sans lire ``unit.M`` côté front on prend
+  // la **distance hex maximale** (cube distance) entre le centre de l'unité et
+  // n'importe quelle cellule du pool — c'est exactement la borne BFS du moteur
+  // (= M×10 en phase move, +D6 en advance, etc.).
+  //
+  // Pourquoi pas la distance euclidienne max ? Parce que sur grille hex, le BFS
+  // à distance N forme un hexagone : les cellules les plus lointaines en
+  // **euclidien** sont les 6 sommets du polygone (distance ≈ N × HEX_HEIGHT),
+  // PAS les bords flat (distance = N × HEX_HORIZ_SPACING). Un cercle centré sur
+  // l'unité dont le rayon est la distance vertex DÉPASSE le polygone BFS sur
+  // les bords flat → le masque rogne cette zone et le rendu final reprend
+  // exactement la forme hex — bug visuel observé en pratique.
+  //
+  // En prenant ``max_cube × HEX_HORIZ_SPACING + demi-empreinte``, le cercle est
+  // strictement **inscrit** dans le polygone BFS (sauf aux 6 coins, où il
+  // effleure) → le masque ne le rogne plus qu'aux endroits réellement bloqués
+  // par murs / EZ / pathfinding, ce qui est le comportement voulu.
+  const unitCube = offsetToCube(unitCol, unitRow);
+  let maxCubeDist = 0;
+  for (const key of pool) {
+    const sep = key.indexOf(",");
+    const c = Number(key.substring(0, sep));
+    const r = Number(key.substring(sep + 1));
+    const d = cubeDistance(unitCube, offsetToCube(c, r));
+    if (d > maxCubeDist) maxCubeDist = d;
+  }
+  const rOuter = maxCubeDist * HEX_HORIZ_SPACING + footprintRadius;
+  if (!Number.isFinite(rOuter) || !(rOuter > 0)) {
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] rOuter invalide (${rOuter}, ` +
+        `maxCubeDist=${maxCubeDist}, spriteName=${spriteName})`,
+    );
+  }
+
+  // Masque : union des empreintes du pool. Full alpha (couleur arbitraire, seule
+  // la forme sert) → les pixels opaques définissent la zone "atteignable".
+  const maskGfx = new PIXI.Graphics();
+  maskGfx.name = `${spriteName}-mask-gfx`;
+  const drawnCount = fillFootprintPoolCircles(
+    maskGfx,
+    pool,
+    footprintRadius,
+    0xffffff,
+    HEX_HORIZ_SPACING,
+    HEX_WIDTH,
+    HEX_HEIGHT,
+    HEX_VERT_SPACING,
+    MARGIN,
+  );
+
+  const maskBounds = maskGfx.getLocalBounds();
+  if (
+    !Number.isFinite(maskBounds.width) ||
+    !Number.isFinite(maskBounds.height) ||
+    !(maskBounds.width > 0) ||
+    !(maskBounds.height > 0)
+  ) {
+    maskGfx.destroy();
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] bornes du masque invalides ` +
+        `(w=${maskBounds.width}, h=${maskBounds.height}, spriteName=${spriteName}, ` +
+        `drawnCount=${drawnCount})`,
+    );
+  }
+
+  // Rendu du masque sur une RenderTexture UNIQUE. Un target Pixi ne peut avoir
+  // qu'un seul `mask` : un masque multi-tuiles serait à coder nous-mêmes, et
+  // on refuse explicitement ce cas plutôt que de silencieusement dessiner une
+  // zone incomplète. Pour une preview move réelle (footprintRadius modéré,
+  // portée M×10 bornée), un tile unique est toujours largement suffisant.
+  const w = Math.ceil(maskBounds.width);
+  const h = Math.ceil(maskBounds.height);
+  if (w > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM || h > FOOTPRINT_HIGHLIGHT_RT_MAX_DIM) {
+    maskGfx.destroy();
+    throw new Error(
+      `[renderMoveAdvanceDestPoolCircleLayer] masque trop grand pour une RT ` +
+        `unique (w=${w}, h=${h}, max=${FOOTPRINT_HIGHLIGHT_RT_MAX_DIM}, ` +
+        `spriteName=${spriteName})`,
+    );
+  }
+
+  const rt = PIXI.RenderTexture.create({
+    width: w,
+    height: h,
+    resolution: app.renderer.resolution,
+    multisample: PIXI.MSAA_QUALITY.NONE,
+    alphaMode: PIXI.ALPHA_MODES.PMA,
+  });
+  maskGfx.position.set(-maskBounds.x, -maskBounds.y);
+  app.renderer.render(maskGfx, { renderTexture: rt, clear: true });
+  const maskSprite = new PIXI.Sprite(rt);
+  maskSprite.name = `${spriteName}-mask-sprite`;
+  maskSprite.position.set(maskBounds.x, maskBounds.y);
+  maskSprite.roundPixels = false;
+  maskGfx.destroy();
+
+  // Grand disque cible. Alpha 0.28 (cohérence avec le halo de charge).
+  const diskGfx = new PIXI.Graphics();
+  diskGfx.name = spriteName;
+  diskGfx.beginFill(poolFillColor, 1.0);
+  diskGfx.drawCircle(unitCx, unitCy, rOuter);
+  diskGfx.endFill();
+  diskGfx.alpha = 0.28;
+  diskGfx.mask = maskSprite;
+
+  // Le masque DOIT être présent dans l'arbre d'affichage pour que Pixi calcule
+  // sa transform lors du rendu, mais il ne s'affiche pas lui-même (utilisé
+  // uniquement comme stencil/alpha). On l'ajoute dans le même container.
+  highlightContainer.addChild(maskSprite);
+  highlightContainer.addChild(diskGfx);
+
+  if (typeof window !== "undefined") {
+    try {
+      if (window.localStorage.getItem("debugMovePool") === "1") {
+        console.info("[renderMoveAdvanceDestPoolCircleLayer] rendered", {
+          spriteName,
+          poolSize: pool.size,
+          drawnMaskCircles: drawnCount,
+          footprintRadius,
+          unitCol,
+          unitRow,
+          unitCx,
+          unitCy,
+          maxCubeDist,
+          rOuter,
+          maskSize: { w, h },
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /** Remplissage objectif : texture teintée ou couleur unie (même pipeline que les murs). */
@@ -500,9 +864,8 @@ export const drawBoard = (
     // Parse colors from config
     const HIGHLIGHT_COLOR = parseColor(boardConfig.colors.highlight!);
     const ATTACK_COLOR = parseColor(boardConfig.colors.attack!);
-    const CHARGE_COLOR = parseColor(boardConfig.colors.charge!);
     const WALL_COLOR = parseColor(boardConfig.colors.wall!);
-    /** Hex destinations fin de charge (legacy small board uses 0x9f7aea — do not use ``colors.charge`` here: that key is orange UI / bordures). */
+    /** Hex destinations fin de charge (do not use ``colors.charge`` here: that key is orange UI / bordures). */
     const CHARGE_DESTINATION_HEX_FILL = 0x9f7aea;
     /** Advance move destinations (ADVANCE_IMPLEMENTATION_PLAN — same as legacy ``0xff8c00``). */
     const ADVANCE_DESTINATION_HEX_FILL = 0xff8c00;
@@ -518,15 +881,19 @@ export const drawBoard = (
       interactionPhase = phase,
       selectedUnitId = null,
       mode = "select",
-      showHexCoordinates = false,
+      showHexCoordinates: _showHexCoordinates = false,
       objectiveControl = {},
       moveDestPoolRef,
+      moveDestinationAnchorsFromState,
+      movePreviewFootprintSpanFromState,
+      pendingMoveAfterShooting = false,
       chargeDestPoolRef,
       selectedUnitBaseSize,
-      losDebugShowRatio = false,
-      losDebugRatioByHex = {},
-      losDebugCoverRatio = 0,
-      losDebugVisibilityMinRatio = 0,
+      selectedUnitAnchor,
+      losDebugShowRatio: _losDebugShowRatio = false,
+      losDebugRatioByHex: _losDebugRatioByHex = {},
+      losDebugCoverRatio: _losDebugCoverRatio = 0,
+      losDebugVisibilityMinRatio: _losDebugVisibilityMinRatio = 0,
       chargeEngagementHalo,
       fightEngagementRing,
     } = options || {};
@@ -560,15 +927,46 @@ export const drawBoard = (
       objectiveHexSet.add(`${objCol},${objRow}`);
     }
 
-    // Pre-compute wallHexSet
-    const wallHexSet = new Set<string>(
-      (boardConfig.wall_hexes || []).map(([c, r]: [number, number]) => `${c},${r}`)
-    );
+    const useAdvanceMovePoolLikeMove =
+      interactionPhase === "shoot" && mode === "advancePreview";
+    const usePostShootMovePoolLikeMove =
+      interactionPhase === "shoot" && pendingMoveAfterShooting === true;
+    const usePileInPoolLikeMoveHoisted =
+      interactionPhase === "fight" &&
+      (mode === "pileInPreview" || mode === "consolidationPreview");
+    const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
+    const spanFromEngine =
+      typeof movePreviewFootprintSpanFromState === "number" &&
+      Number.isFinite(movePreviewFootprintSpanFromState) &&
+      movePreviewFootprintSpanFromState >= 1
+        ? Math.floor(movePreviewFootprintSpanFromState)
+        : null;
+    const footprintSpanForPool = Math.max(1, spanFromEngine ?? selectedUnitBaseSize ?? 1);
 
-    const IS_LARGE_BOARD = BOARD_COLS * BOARD_ROWS > 10000;
+    const anchorsFromStatePool: Set<string> | null = (() => {
+      if (moveDestinationAnchorsFromState == null) return null;
+      const s = new Set<string>();
+      addHexKeysToSet(moveDestinationAnchorsFromState, s);
+      return s.size > 0 ? s : null;
+    })();
+
+    /** Disques d’ancre : ``moveDestPoolRef`` en priorité (comme ``chargeDestPoolRef``), puis state. */
+    const movePoolForDiskDraw: Set<string> | null =
+      moveDestPoolRef?.current && moveDestPoolRef.current.size > 0
+        ? moveDestPoolRef.current
+        : anchorsFromStatePool && anchorsFromStatePool.size > 0
+          ? anchorsFromStatePool
+          : null;
+
+    const useMoveDestPoolCircleLayer =
+      (interactionPhase === "move" ||
+        useAdvanceMovePoolLikeMove ||
+        usePostShootMovePoolLikeMove) &&
+      !!movePoolForDiskDraw &&
+      movePoolForDiskDraw.size > 0;
 
     const cachedStaticBoard = options?.cachedStaticBoard ?? null;
-    const reuseStatic = IS_LARGE_BOARD && cachedStaticBoard !== null;
+    const reuseStatic = cachedStaticBoard !== null;
     const baseHexContainer = reuseStatic ? cachedStaticBoard : new PIXI.Container();
     const highlightContainer = new PIXI.Container();
     if (!reuseStatic) {
@@ -611,629 +1009,472 @@ export const drawBoard = (
         ? boardConfig.display.objective_smooth_radius_ratio
         : 1.0;
 
-    if (IS_LARGE_BOARD) {
-      if (!reuseStatic) {
-        if (backgroundImagePath) {
-          const bgSprite = PIXI.Sprite.from(backgroundImagePath);
-          bgSprite.x = 0;
-          bgSprite.y = 0;
-          bgSprite.width = TOTAL_WIDTH;
-          bgSprite.height = TOTAL_HEIGHT;
-          bgSprite.alpha = backgroundImageAlpha;
-          baseHexContainer.addChild(bgSprite);
+    if (!reuseStatic) {
+      if (backgroundImagePath) {
+        const bgSprite = PIXI.Sprite.from(backgroundImagePath);
+        bgSprite.x = 0;
+        bgSprite.y = 0;
+        bgSprite.width = TOTAL_WIDTH;
+        bgSprite.height = TOTAL_HEIGHT;
+        bgSprite.alpha = backgroundImageAlpha;
+        baseHexContainer.addChild(bgSprite);
 
-          const bgOverlay = new PIXI.Graphics();
-          bgOverlay.beginFill(parseColor(boardConfig.colors.cell_even), backgroundOverlayAlpha);
-          bgOverlay.drawRect(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
-          bgOverlay.endFill();
-          baseHexContainer.addChild(bgOverlay);
-        } else {
-          const bg = new PIXI.Graphics();
-          bg.beginFill(parseColor(boardConfig.colors.cell_even), 1.0);
-          bg.drawRect(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
-          bg.endFill();
-          baseHexContainer.addChild(bg);
-        }
-
-        const wallDotRadius = HEX_RADIUS;
-        const wallAltColor = (WALL_COLOR & 0xfefefe) + 0x101010;
-        for (const [wc, wr] of boardConfig.wall_hexes || []) {
-          const wx = wc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const wy = wr * HEX_VERT_SPACING + ((wc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-          const wallDot = new PIXI.Graphics();
-          const fill = wc % 2 === 0 ? WALL_COLOR : wallAltColor;
-          wallDot.beginFill(fill, 1.0);
-          wallDot.drawCircle(wx, wy, wallDotRadius);
-          wallDot.endFill();
-          baseHexContainer.addChild(wallDot);
-        }
-
-        if (objectiveSmoothContour && Array.isArray(boardConfig.objective_zones)) {
-          const displayCfg = boardConfig.display;
-          const ringColorStr =
-            typeof displayCfg?.objective_zone_ring_color === "string" &&
-            displayCfg.objective_zone_ring_color.length > 0
-              ? displayCfg.objective_zone_ring_color
-              : boardConfig.colors.objective;
-          const ringColorParsed = parseColor(ringColorStr);
-          const ringAlpha =
-            typeof displayCfg?.objective_zone_ring_alpha === "number"
-              ? displayCfg.objective_zone_ring_alpha
-              : typeof displayCfg?.objective_smooth_alpha === "number"
-                ? displayCfg.objective_smooth_alpha
-                : 0.35;
-          const ringWidth =
-            typeof displayCfg?.objective_zone_ring_width === "number"
-              ? displayCfg.objective_zone_ring_width
-              : Math.max(1.2, HEX_RADIUS * 0.22);
-          const centerColorStr =
-            typeof displayCfg?.objective_zone_center_color === "string" &&
-            displayCfg.objective_zone_center_color.length > 0
-              ? displayCfg.objective_zone_center_color
-              : boardConfig.colors.objective;
-          const centerColorParsed = parseColor(centerColorStr);
-          const centerAlpha =
-            typeof displayCfg?.objective_zone_center_alpha === "number"
-              ? displayCfg.objective_zone_center_alpha
-              : 0.5;
-          const centerRadiusRatio =
-            typeof displayCfg?.objective_zone_center_radius_ratio === "number"
-              ? displayCfg.objective_zone_center_radius_ratio
-              : 0.14;
-
-          for (const zone of boardConfig.objective_zones) {
-            const zoneHexes = zone.hexes || [];
-            if (!Array.isArray(zoneHexes) || zoneHexes.length === 0) continue;
-
-            const zoneCells: Array<[number, number]> = [];
-            for (const h of zoneHexes) {
-              const oc = Array.isArray(h) ? Number(h[0]) : Number((h as { col: number }).col);
-              const or_ = Array.isArray(h) ? Number(h[1]) : Number((h as { row: number }).row);
-              if (!Number.isFinite(oc) || !Number.isFinite(or_)) continue;
-              zoneCells.push([oc, or_]);
-            }
-            if (zoneCells.length === 0) continue;
-
-            const hexCenters: PixelPt[] = [];
-            for (const [col, row] of zoneCells) {
-              const hcx = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-              const hcy =
-                row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-              hexCenters.push([hcx, hcy]);
-            }
-
-            const mec = smallestEnclosingCircleForHexDisks(hexCenters, HEX_RADIUS);
-            if (
-              Number.isFinite(mec.cx) &&
-              Number.isFinite(mec.cy) &&
-              Number.isFinite(mec.r) &&
-              mec.r >= 0
-            ) {
-              const outerR = Math.max(0, mec.r * smoothRadiusRatio);
-              const innerR = Math.max(0.5, outerR * centerRadiusRatio);
-
-              const smoothZone = new PIXI.Graphics();
-              smoothZone.lineStyle(ringWidth, ringColorParsed, ringAlpha);
-              smoothZone.drawCircle(mec.cx, mec.cy, outerR);
-              smoothZone.lineStyle(0);
-              smoothZone.beginFill(centerColorParsed, centerAlpha);
-              smoothZone.drawCircle(mec.cx, mec.cy, innerR);
-              smoothZone.endFill();
-              baseHexContainer.addChild(smoothZone);
-            }
-          }
-        }
-
-        for (const [oc, or_] of baseObjectives) {
-          const ox = oc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const oy = or_ * HEX_VERT_SPACING + ((oc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-          const hexKey = `${oc},${or_}`;
-          const controller = objectiveControl[hexKey];
-          let objColor = OBJECTIVE_NEUTRAL_COLOR;
-          if (controller === 1) objColor = OBJECTIVE_P0_COLOR;
-          else if (controller === 2) objColor = OBJECTIVE_P1_COLOR;
-          const objDot = new PIXI.Graphics();
-          beginObjectiveFill(objDot, objectiveTexture, objColor, objectiveHexFillAlpha);
-          objDot.drawCircle(ox, oy, HEX_RADIUS);
-          objDot.endFill();
-          baseHexContainer.addChild(objDot);
-        }
-      }
-
-      // Build clickable set for hit detection
-      const clickableSet = new Set<string>();
-      // Charge (pool selection): activation is unit-driven (boardUnitClick → left_click). Green
-      // eligible hex highlights must stay non-interactive: the full-screen hitArea is above unit
-      // sprites and would steal clicks while boardHexClick has no charge+select branch.
-      if (!(interactionPhase === "charge" && mode === "select")) {
-        for (const c of availableCells) clickableSet.add(`${c.col},${c.row}`);
-      }
-      for (const c of chargeCells) {
-        const cc = Array.isArray(c) ? c[0] : (c as { col: number }).col;
-        const cr = Array.isArray(c) ? c[1] : (c as { row: number }).row;
-        clickableSet.add(`${cc},${cr}`);
-      }
-      for (const c of advanceCells) clickableSet.add(`${c.col},${c.row}`);
-
-      // On large boards, skip drawing huge *move* highlight arrays (solid blob); hover validates.
-      // Charge destination pools can exceed 500 on Board×10 (max charge roll in sub-hex) — still draw.
-      const LARGE_POOL_THRESHOLD = 500;
-
-      const useAdvanceMovePoolLikeMove =
-        interactionPhase === "shoot" && mode === "advancePreview";
-      const usePileInPoolLikeMove =
-        interactionPhase === "fight" &&
-        (mode === "pileInPreview" || mode === "consolidationPreview");
-      // Pile in : zone rouge (empreinte moteur) — comme move_preview_footprint_zone en forme,
-      // pas seulement des disques aux ancres ; on dessine via ``availableCells`` (override).
-      const useLargeBoardMoveDestPoolDraw =
-        (interactionPhase === "move" || useAdvanceMovePoolLikeMove) &&
-        selectedUnitBaseSize &&
-        selectedUnitBaseSize > 1 &&
-        moveDestPoolRef?.current &&
-        moveDestPoolRef.current.size > 0;
-
-      const advanceZoneFillColor = ADVANCE_DESTINATION_HEX_FILL;
-      const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
-      const availableCellsDrawColor = useAdvanceMovePoolLikeMove
-        ? advanceZoneFillColor
-        : usePileInPoolLikeMove
-          ? useConsolidationPreview
-            ? 0xff8c00
-            : ATTACK_COLOR
-          : HIGHLIGHT_COLOR;
-
-      const useLargeBoardChargeDestPoolDraw =
-        interactionPhase === "charge" &&
-        (mode === "select" || mode === "chargePreview") &&
-        selectedUnitBaseSize &&
-        selectedUnitBaseSize > 1 &&
-        chargeDestPoolRef?.current &&
-        chargeDestPoolRef.current.size > 0;
-
-      const drawGroup = (cells: Array<{ col: number; row: number }>, color: number, alpha: number, skipThreshold = true) => {
-        if (cells.length === 0) return;
-        if (skipThreshold && cells.length > LARGE_POOL_THRESHOLD) return;
-        const batch = new PIXI.Graphics();
-        batch.beginFill(color, alpha);
-        for (const c of cells) {
-          const hx = c.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const hy = c.row * HEX_VERT_SPACING + ((c.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-          batch.drawCircle(hx, hy, HEX_RADIUS);
-        }
-        batch.endFill();
-        highlightContainer.addChild(batch);
-      };
-
-      if (useLargeBoardMoveDestPoolDraw) {
-        // Draw icon-sized circles at valid CENTER positions only.
-        // Each center was validated by BFS (full footprint clear of walls),
-        // so the visual circles won't overlap walls.
-        const footprintRadius = (selectedUnitBaseSize / 2) * HEX_HORIZ_SPACING;
-        const gfx = new PIXI.Graphics();
-        const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
-        gfx.beginFill(poolFillColor, 1.0);
-        for (const key of moveDestPoolRef.current) {
-          const sep = key.indexOf(",");
-          const c = Number(key.substring(0, sep));
-          const r = Number(key.substring(sep + 1));
-          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const hy = r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-          gfx.drawCircle(hx, hy, footprintRadius);
-        }
-        gfx.endFill();
-        addFootprintHighlightSprite(
-          app,
-          highlightContainer,
-          gfx,
-          0.28,
-          useAdvanceMovePoolLikeMove ? "advance-dest-pool" : "move-dest-pool",
-        );
-        addFootprintPoolSmoothOutlines(
-          highlightContainer,
-          moveDestPoolRef.current,
-          footprintRadius,
-          HEX_HORIZ_SPACING,
-          HEX_WIDTH,
-          HEX_HEIGHT,
-          HEX_VERT_SPACING,
-          MARGIN,
-          poolFillColor,
-        );
+        const bgOverlay = new PIXI.Graphics();
+        bgOverlay.beginFill(parseColor(boardConfig.colors.cell_even), backgroundOverlayAlpha);
+        bgOverlay.drawRect(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
+        bgOverlay.endFill();
+        baseHexContainer.addChild(bgOverlay);
       } else {
-        drawGroup(availableCells, availableCellsDrawColor, 0.4, false);
-      }
-      {
-        const useShootingPreviewPalette = phase === "shoot" || mode === "movePreview";
-        if (useShootingPreviewPalette && (attackCells.length > 0 || coverCells.length > 0)) {
-          const coverKeySet = new Set(coverCells.map((c) => `${c.col},${c.row}`));
-          const attackClearOnly = attackCells.filter((c) => !coverKeySet.has(`${c.col},${c.row}`));
-          drawGroup(coverCells, 0x9ec5ff, 0.4, false);
-          drawGroup(attackClearOnly, 0x4f8bff, 0.4, false);
-        } else {
-          drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
-        }
-      }
-      if (useLargeBoardChargeDestPoolDraw && chargeDestPoolRef?.current) {
-        const footprintRadius = (selectedUnitBaseSize / 2) * HEX_HORIZ_SPACING;
-        const chargeGfx = new PIXI.Graphics();
-        chargeGfx.beginFill(CHARGE_DESTINATION_HEX_FILL, 1.0);
-        const chargePool = chargeDestPoolRef.current;
-        for (const key of chargePool) {
-          const sep = key.indexOf(",");
-          const c = Number(key.substring(0, sep));
-          const r = Number(key.substring(sep + 1));
-          const hx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-          const hy = r * HEX_VERT_SPACING + ((c % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-          chargeGfx.drawCircle(hx, hy, footprintRadius);
-        }
-        chargeGfx.endFill();
-        addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.28, "charge-dest-pool");
-        addFootprintPoolSmoothOutlines(
-          highlightContainer,
-          chargePool,
-          footprintRadius,
-          HEX_HORIZ_SPACING,
-          HEX_WIDTH,
-          HEX_HEIGHT,
-          HEX_VERT_SPACING,
-          MARGIN,
-          CHARGE_DESTINATION_HEX_FILL,
-        );
-      } else {
-        drawGroup(
-          chargeCells.map((c: any) => ({
-            col: Array.isArray(c) ? c[0] : c.col,
-            row: Array.isArray(c) ? c[1] : c.row,
-          })),
-          CHARGE_DESTINATION_HEX_FILL,
-          0.4,
-          false,
-        );
-      }
-      drawGroup(advanceCells, ADVANCE_DESTINATION_HEX_FILL, 0.3, false);
-
-      if (
-        chargeEngagementHalo &&
-        typeof chargeEngagementHalo.zoneHexSteps === "number" &&
-        chargeEngagementHalo.zoneHexSteps > 1 &&
-        Number.isFinite(chargeEngagementHalo.centerCol) &&
-        Number.isFinite(chargeEngagementHalo.centerRow)
-      ) {
-        const hcx =
-          chargeEngagementHalo.centerCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const hcy =
-          chargeEngagementHalo.centerRow * HEX_VERT_SPACING +
-          ((chargeEngagementHalo.centerCol % 2) * HEX_VERT_SPACING) / 2 +
-          HEX_HEIGHT / 2 +
-          MARGIN;
-        const ringGfx = new PIXI.Graphics();
-        ringGfx.name = "charge-engagement-halo";
-        const haloR = chargeEngagementHalo.zoneHexSteps * HEX_HORIZ_SPACING;
-        const haloColor = CHARGE_DESTINATION_HEX_FILL;
-        // Plusieurs traits superposés (large + léger → fin + opaque) : bord moins crénelé sous CanvasRenderer.
-        const haloLayers: Array<{ width: number; alpha: number }> = [
-          { width: 14, alpha: 0.06 },
-          { width: 7, alpha: 0.14 },
-          { width: 3, alpha: 0.32 },
-        ];
-        for (const layer of haloLayers) {
-          ringGfx.lineStyle(layer.width, haloColor, layer.alpha);
-          ringGfx.drawCircle(hcx, hcy, haloR);
-        }
-        highlightContainer.addChild(ringGfx);
+        const bg = new PIXI.Graphics();
+        bg.beginFill(parseColor(boardConfig.colors.cell_even), 1.0);
+        bg.drawRect(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
+        bg.endFill();
+        baseHexContainer.addChild(bg);
       }
 
-      // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
-      const hasClickableContent =
-        clickableSet.size > 0 ||
-        ((interactionPhase === "move" ||
-          useAdvanceMovePoolLikeMove ||
-          usePileInPoolLikeMove) &&
-          moveDestPoolRef?.current &&
-          moveDestPoolRef.current.size > 0) ||
-        (interactionPhase === "charge" &&
-          mode === "chargePreview" &&
-          chargeDestPoolRef?.current &&
-          chargeDestPoolRef.current.size > 0);
-      if (hasClickableContent) {
-        const hitArea = new PIXI.Graphics();
-        hitArea.beginFill(0, 0);
-        hitArea.drawRect(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
-        hitArea.endFill();
-        hitArea.hitArea = new PIXI.Rectangle(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
-        hitArea.eventMode = "static";
-        hitArea.cursor = "pointer";
-
-        const resolveHex = (pos: PIXI.IPointData): { col: number; row: number } => {
-          const ux = pos.x - MARGIN;
-          const uy = pos.y - MARGIN;
-          const colApprox = (ux - HEX_WIDTH / 2) / HEX_HORIZ_SPACING;
-          const c0 = Math.max(0, Math.floor(colApprox) - 2);
-          const c1 = Math.min(BOARD_COLS - 1, Math.ceil(colApprox) + 2);
-          let bestCol = 0, bestRow = 0, bestD = Infinity;
-          for (let c = c0; c <= c1; c++) {
-            const stagger = ((c % 2) * HEX_VERT_SPACING) / 2;
-            const rowApprox = (uy - HEX_HEIGHT / 2 - stagger) / HEX_VERT_SPACING;
-            const r0 = Math.max(0, Math.floor(rowApprox) - 2);
-            const r1 = Math.min(BOARD_ROWS - 1, Math.ceil(rowApprox) + 2);
-            for (let r = r0; r <= r1; r++) {
-              const cx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2;
-              const cy = r * HEX_VERT_SPACING + stagger + HEX_HEIGHT / 2;
-              const d = (ux - cx) ** 2 + (uy - cy) ** 2;
-              if (d < bestD) { bestD = d; bestCol = c; bestRow = r; }
-            }
-          }
-          return { col: bestCol, row: bestRow };
-        };
-
-        hitArea.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-          if (e.button !== 0) return;
-          const { col, row } = resolveHex(e.getLocalPosition(hitArea));
-          const key = `${col},${row}`;
-          const useMovePoolForPick =
-            (interactionPhase === "move" ||
-              useAdvanceMovePoolLikeMove ||
-              usePileInPoolLikeMove) &&
-            moveDestPoolRef?.current &&
-            moveDestPoolRef.current.size > 0;
-          const useChargePoolForPick =
-            interactionPhase === "charge" &&
-            mode === "chargePreview" &&
-            chargeDestPoolRef?.current &&
-            chargeDestPoolRef.current.size > 0;
-          const isValid =
-            clickableSet.has(key) ||
-            (useMovePoolForPick && (moveDestPoolRef?.current?.has(key) ?? false)) ||
-            (useChargePoolForPick && (chargeDestPoolRef?.current?.has(key) ?? false));
-          if (isValid) {
-            let destCol = col,
-              destRow = row;
-            if (useMovePoolForPick && moveDestPoolRef?.current && !moveDestPoolRef.current.has(key)) {
-              let bestDist = Infinity;
-              for (const k of moveDestPoolRef.current) {
-                const sep = k.indexOf(",");
-                const cc = Number(k.substring(0, sep));
-                const cr = Number(k.substring(sep + 1));
-                const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
-                if (d < bestDist) {
-                  bestDist = d;
-                  destCol = cc;
-                  destRow = cr;
-                }
-              }
-            } else if (
-              useChargePoolForPick &&
-              chargeDestPoolRef?.current &&
-              !chargeDestPoolRef.current.has(key)
-            ) {
-              let bestDist = Infinity;
-              for (const k of chargeDestPoolRef.current) {
-                const sep = k.indexOf(",");
-                const cc = Number(k.substring(0, sep));
-                const cr = Number(k.substring(sep + 1));
-                const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
-                if (d < bestDist) {
-                  bestDist = d;
-                  destCol = cc;
-                  destRow = cr;
-                }
-              }
-            }
-            window.dispatchEvent(
-              new CustomEvent("boardHexClick", {
-                detail: { col: destCol, row: destRow, phase: interactionPhase, mode, selectedUnitId },
-              })
-            );
-          }
-        });
-
-        let lastHoverCol = -1, lastHoverRow = -1;
-        hitArea.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
-          const localPos = e.getLocalPosition(hitArea);
-          const { col, row } = resolveHex(localPos);
-          const hexChanged = col !== lastHoverCol || row !== lastHoverRow;
-          if (hexChanged) {
-            lastHoverCol = col;
-            lastHoverRow = row;
-          }
-          window.dispatchEvent(
-            new CustomEvent("boardHexHover", {
-              detail: { col, row, pixelX: localPos.x, pixelY: localPos.y, hexChanged },
-            })
-          );
-        });
-
-        highlightContainer.addChild(hitArea);
+      const wallDotRadius = HEX_RADIUS;
+      const wallAltColor = (WALL_COLOR & 0xfefefe) + 0x101010;
+      for (const [wc, wr] of boardConfig.wall_hexes || []) {
+        const wx = wc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const wy = wr * HEX_VERT_SPACING + ((wc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        const wallDot = new PIXI.Graphics();
+        const fill = wc % 2 === 0 ? WALL_COLOR : wallAltColor;
+        wallDot.beginFill(fill, 1.0);
+        wallDot.drawCircle(wx, wy, wallDotRadius);
+        wallDot.endFill();
+        baseHexContainer.addChild(wallDot);
       }
-    } else {
 
-    // Legacy small board: draw individual hex polygons
-    for (let col = 0; col < BOARD_COLS; col++) {
-      for (let row = 0; row < BOARD_ROWS; row++) {
-        if (row === BOARD_ROWS - 1 && col % 2 === 1) {
-          continue;
-        }
-        const centerX = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
-        const centerY =
-          row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
-        const points = getHexPolygonPoints(centerX, centerY, HEX_RADIUS);
+      if (objectiveSmoothContour && Array.isArray(boardConfig.objective_zones)) {
+        const displayCfg = boardConfig.display;
+        const ringColorStr =
+          typeof displayCfg?.objective_zone_ring_color === "string" &&
+          displayCfg.objective_zone_ring_color.length > 0
+            ? displayCfg.objective_zone_ring_color
+            : boardConfig.colors.objective;
+        const ringColorParsed = parseColor(ringColorStr);
+        const ringAlpha =
+          typeof displayCfg?.objective_zone_ring_alpha === "number"
+            ? displayCfg.objective_zone_ring_alpha
+            : typeof displayCfg?.objective_smooth_alpha === "number"
+              ? displayCfg.objective_smooth_alpha
+              : 0.35;
+        const ringWidth =
+          typeof displayCfg?.objective_zone_ring_width === "number"
+            ? displayCfg.objective_zone_ring_width
+            : Math.max(1.2, HEX_RADIUS * 0.22);
+        const centerColorStr =
+          typeof displayCfg?.objective_zone_center_color === "string" &&
+          displayCfg.objective_zone_center_color.length > 0
+            ? displayCfg.objective_zone_center_color
+            : boardConfig.colors.objective;
+        const centerColorParsed = parseColor(centerColorStr);
+        const centerAlpha =
+          typeof displayCfg?.objective_zone_center_alpha === "number"
+            ? displayCfg.objective_zone_center_alpha
+            : 0.5;
+        const centerRadiusRatio =
+          typeof displayCfg?.objective_zone_center_radius_ratio === "number"
+            ? displayCfg.objective_zone_center_radius_ratio
+            : 0.14;
 
-        // Check highlight states
-        const isAvailable = availableCells.some((cell) => cell.col === col && cell.row === row);
-        const isAttackable = attackCells.some((cell) => cell.col === col && cell.row === row);
-        const isInCover = coverCells.some((cell) => cell.col === col && cell.row === row);
-        // chargeCells come as [col, row] arrays from backend, not {col, row} objects
-        const isChargeable = chargeCells.some((cell) => {
-          if (Array.isArray(cell)) {
-            return cell[0] === col && cell[1] === row;
+        for (const zone of boardConfig.objective_zones) {
+          const zoneHexes = zone.hexes || [];
+          if (!Array.isArray(zoneHexes) || zoneHexes.length === 0) continue;
+
+          const zoneCells: Array<[number, number]> = [];
+          for (const h of zoneHexes) {
+            const oc = Array.isArray(h) ? Number(h[0]) : Number((h as { col: number }).col);
+            const or_ = Array.isArray(h) ? Number(h[1]) : Number((h as { row: number }).row);
+            if (!Number.isFinite(oc) || !Number.isFinite(or_)) continue;
+            zoneCells.push([oc, or_]);
           }
-          return cell.col === col && cell.row === row;
-        });
+          if (zoneCells.length === 0) continue;
 
-        // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance destinations (orange)
-        const isAdvanceDestination = advanceCells.some(
-          (cell) => cell.col === col && cell.row === row
-        );
-
-        // Check if this is a wall hex
-        const isWallHex = wallHexSet.has(`${col},${row}`);
-
-        // Create base hex (always present)
-        const baseCell = new PIXI.Graphics();
-        const isEven = (col + row) % 2 === 0;
-        let cellColor = isEven
-          ? parseColor(boardConfig.colors.cell_even)
-          : parseColor(boardConfig.colors.cell_odd);
-
-        // Override color for walls and objective zones
-        if (isWallHex) {
-          cellColor = WALL_COLOR;
-        } else if (objectiveHexSet.has(`${col},${row}`)) {
-          // Check if this objective hex is controlled by a player
-          const hexKey = `${col},${row}`;
-          const controller = objectiveControl[hexKey];
-          if (controller === 1) {
-            cellColor = OBJECTIVE_P0_COLOR; // Blue for Player 1
-          } else if (controller === 2) {
-            cellColor = OBJECTIVE_P1_COLOR; // Red for Player 2
-          } else {
-            cellColor = OBJECTIVE_NEUTRAL_COLOR; // Yellow/Orange for neutral/contested
-          }
-        }
-
-        const isObjectiveHex = objectiveHexSet.has(`${col},${row}`);
-        if (objectiveTexture && isObjectiveHex) {
-          beginObjectiveFill(baseCell, objectiveTexture, cellColor, objectiveTextureAlpha);
-        } else {
-          baseCell.beginFill(cellColor, 1.0);
-        }
-        baseCell.lineStyle(1, parseColor(boardConfig.colors.cell_border), 0.8);
-        baseCell.drawPolygon(points);
-        baseCell.endFill();
-        baseHexContainer.addChild(baseCell);
-
-        if (losDebugShowRatio) {
-          const losRatioValue = losDebugRatioByHex[`${col},${row}`];
-          if (losRatioValue !== undefined) {
-            if (typeof losRatioValue !== "number" || Number.isNaN(losRatioValue)) {
-              throw new Error(`Invalid LoS debug ratio at ${col},${row}`);
-            }
-            if (
-              typeof losDebugCoverRatio !== "number" ||
-              Number.isNaN(losDebugCoverRatio) ||
-              typeof losDebugVisibilityMinRatio !== "number" ||
-              Number.isNaN(losDebugVisibilityMinRatio)
-            ) {
-              throw new Error("Invalid LoS debug thresholds in drawBoard options");
-            }
-            const ratioPercent = Math.round(losRatioValue * 100);
-            const ratioColor =
-              losRatioValue < losDebugVisibilityMinRatio
-                ? 0x9ca3af
-                : losRatioValue < losDebugCoverRatio
-                  ? 0xf59e0b
-                  : 0x86efac;
-            const losRatioText = new PIXI.Text(`${ratioPercent}%`, {
-              fontSize: 8,
-              fill: ratioColor,
-              fontWeight: "bold",
-              stroke: 0x000000,
-              strokeThickness: 2,
-              align: "center",
-            });
-            losRatioText.anchor.set(0.5);
-            losRatioText.position.set(centerX, centerY + (showHexCoordinates ? 13 : 0));
-            baseHexContainer.addChild(losRatioText);
-          }
-        }
-
-        // Add coordinate text when toggle is enabled
-        if (showHexCoordinates) {
-          const coordText = new PIXI.Text(`${col},${row}`, {
-            fontSize: 8,
-            fill: 0xffffff,
-            align: "center",
-          });
-          coordText.anchor.set(0.5);
-          coordText.position.set(centerX, centerY);
-          baseHexContainer.addChild(coordText);
-        }
-
-        // Create highlight hex (only if needed) - NO INTERACTIONS
-        if (isAdvanceDestination || isChargeable || isAttackable || isInCover || isAvailable) {
-          const highlightCell = new PIXI.Graphics();
-
-          // Shooting preview palette: used in shoot phase and movePreview confirm step
-          const useShootingPreviewPalette = phase === "shoot" || mode === "movePreview";
-          if (useShootingPreviewPalette) {
-            if (
-              (mode === "advancePreview" && isAvailable) ||
-              isAdvanceDestination
-            ) {
-              highlightCell.beginFill(ADVANCE_DESTINATION_HEX_FILL, 0.5);
-            } else if (isInCover) {
-              // Vivid light blue for targets in cover
-              highlightCell.beginFill(0x9ec5ff, 0.4);
-            } else if (isAttackable) {
-              // Vivid medium blue for clear line of sight (plus bleu, même luminosité)
-              highlightCell.beginFill(0x4f8bff, 0.4);
-            } else if (isChargeable) {
-              // Charge destinations: use violet
-              highlightCell.beginFill(0x9f7aea, 0.4);
-            } else if (isAvailable) {
-              highlightCell.beginFill(HIGHLIGHT_COLOR, 0.4);
-            }
-          } else {
-            // Other phases keep existing colors
-            if (isChargeable) {
-              // Charge destinations: use violet
-              highlightCell.beginFill(0x9f7aea, 0.5);
-            } else if (isInCover) {
-              highlightCell.beginFill(CHARGE_COLOR, 0.5);
-            } else if (isAttackable) {
-              highlightCell.beginFill(ATTACK_COLOR, 0.5);
-            } else if (
-              interactionPhase === "fight" &&
-              mode === "consolidationPreview" &&
-              isAvailable
-            ) {
-              highlightCell.beginFill(0xff8c00, 0.5);
-            } else if (
-              interactionPhase === "fight" &&
-              mode === "pileInPreview" &&
-              isAvailable
-            ) {
-              highlightCell.beginFill(ATTACK_COLOR, 0.5);
-            } else if (isAvailable) {
-              highlightCell.beginFill(HIGHLIGHT_COLOR, 0.5);
-            }
+          const hexCenters: PixelPt[] = [];
+          for (const [col, row] of zoneCells) {
+            const hcx = col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+            const hcy =
+              row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+            hexCenters.push([hcx, hcy]);
           }
 
-          highlightCell.drawPolygon(points);
-          highlightCell.endFill();
+          const mec = smallestEnclosingCircleForHexDisks(hexCenters, HEX_RADIUS);
+          if (
+            Number.isFinite(mec.cx) &&
+            Number.isFinite(mec.cy) &&
+            Number.isFinite(mec.r) &&
+            mec.r >= 0
+          ) {
+            const outerR = Math.max(0, mec.r * smoothRadiusRatio);
+            const innerR = Math.max(0.5, outerR * centerRadiusRatio);
 
-          // Add click handlers for movement, charge, and advance hexes
-          if (isAvailable || isChargeable || isAdvanceDestination) {
-            highlightCell.eventMode = "static";
-            highlightCell.cursor = "pointer";
-            highlightCell.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0) {
-                // Left click only
-                window.dispatchEvent(
-                  new CustomEvent("boardHexClick", {
-                    detail: { col, row, phase: interactionPhase, mode, selectedUnitId },
-                  })
-                );
-              }
-            });
+            const smoothZone = new PIXI.Graphics();
+            smoothZone.lineStyle(ringWidth, ringColorParsed, ringAlpha);
+            smoothZone.drawCircle(mec.cx, mec.cy, outerR);
+            smoothZone.lineStyle(0);
+            smoothZone.beginFill(centerColorParsed, centerAlpha);
+            smoothZone.drawCircle(mec.cx, mec.cy, innerR);
+            smoothZone.endFill();
+            baseHexContainer.addChild(smoothZone);
           }
-
-          highlightContainer.addChild(highlightCell);
         }
+      }
+
+      for (const [oc, or_] of baseObjectives) {
+        const ox = oc * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const oy = or_ * HEX_VERT_SPACING + ((oc % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        const hexKey = `${oc},${or_}`;
+        const controller = objectiveControl[hexKey];
+        let objColor = OBJECTIVE_NEUTRAL_COLOR;
+        if (controller === 1) objColor = OBJECTIVE_P0_COLOR;
+        else if (controller === 2) objColor = OBJECTIVE_P1_COLOR;
+        const objDot = new PIXI.Graphics();
+        beginObjectiveFill(objDot, objectiveTexture, objColor, objectiveHexFillAlpha);
+        objDot.drawCircle(ox, oy, HEX_RADIUS);
+        objDot.endFill();
+        baseHexContainer.addChild(objDot);
       }
     }
-    } // end else (legacy small board)
+
+    // Build clickable set for hit detection
+    const clickableSet = new Set<string>();
+    // Charge (pool selection): activation is unit-driven (boardUnitClick → left_click). Green
+    // eligible hex highlights must stay non-interactive: the full-screen hitArea is above unit
+    // sprites and would steal clicks while boardHexClick has no charge+select branch.
+    if (!(interactionPhase === "charge" && mode === "select")) {
+      for (const c of availableCells) clickableSet.add(`${c.col},${c.row}`);
+    }
+    for (const c of chargeCells) {
+      const cc = Array.isArray(c) ? c[0] : (c as { col: number }).col;
+      const cr = Array.isArray(c) ? c[1] : (c as { row: number }).row;
+      clickableSet.add(`${cc},${cr}`);
+    }
+    for (const c of advanceCells) clickableSet.add(`${c.col},${c.row}`);
+
+    // Évite les tableaux énormes de surbrillance move ; charge peut dépasser 500 hex (Board×10).
+    const LARGE_POOL_THRESHOLD = 500;
+
+    // Pile in : zone rouge (empreinte moteur) — comme move_preview_footprint_zone en forme,
+    // pas seulement des disques aux ancres ; on dessine via ``availableCells`` (override).
+    // Dès que le moteur fournit valid_move_destinations_pool : un disque par ancre (cercle),
+    // pas un remplissage hex-par-hex de move_preview_footprint_zone (blob « hex géant » si BASE_SIZE
+    // tuple/oval et selectedUnitBaseSize était undefined).
+    const useConsolidationPreview = interactionPhase === "fight" && mode === "consolidationPreview";
+    const availableCellsDrawColor = useAdvanceMovePoolLikeMove
+      ? advanceZoneFillColor
+      : usePileInPoolLikeMoveHoisted
+        ? useConsolidationPreview
+          ? 0xff8c00
+          : ATTACK_COLOR
+        : HIGHLIGHT_COLOR;
+
+    const useChargeDestPoolDiskDraw =
+      interactionPhase === "charge" &&
+      (mode === "select" || mode === "chargePreview") &&
+      chargeDestPoolRef?.current &&
+      chargeDestPoolRef.current.size > 0;
+
+    /** Move / advance / pile-in / post-shoot move : disques d’empreinte (comme la charge), pas des pastilles rayon hex (= grille « en hex »). */
+    const useFootprintDiskRadiusForAvailCells =
+      interactionPhase === "move" ||
+      useAdvanceMovePoolLikeMove ||
+      usePileInPoolLikeMoveHoisted ||
+      usePostShootMovePoolLikeMove;
+    const availableCellCircleR = useFootprintDiskRadiusForAvailCells
+      ? (footprintSpanForPool / 2) * HEX_HORIZ_SPACING
+      : HEX_RADIUS;
+
+    const drawGroup = (
+      cells: Array<{ col: number; row: number }>,
+      color: number,
+      alpha: number,
+      skipThreshold = true,
+      circleRadius: number = HEX_RADIUS,
+    ) => {
+      if (cells.length === 0) return;
+      if (skipThreshold && cells.length > LARGE_POOL_THRESHOLD) return;
+      const batch = new PIXI.Graphics();
+      // Un beginFill/endFill par cercle : sinon Pixi fusionne les sous-chemins en un seul polygone
+      // rempli (« hex géant » / blob au lieu de pastilles distinctes).
+      for (const c of cells) {
+        const hx = c.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+        const hy = c.row * HEX_VERT_SPACING + ((c.col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN;
+        batch.beginFill(color, alpha);
+        batch.drawCircle(hx, hy, circleRadius);
+        batch.endFill();
+      }
+      highlightContainer.addChild(batch);
+    };
+
+    if (useMoveDestPoolCircleLayer && movePoolForDiskDraw) {
+      const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
+      const poolFillColor = useAdvanceMovePoolLikeMove ? advanceZoneFillColor : HIGHLIGHT_COLOR;
+      const moveSpriteName = useAdvanceMovePoolLikeMove
+        ? "advance-dest-pool"
+        : "move-dest-pool";
+      // Spec utilisateur : preview = **cercle euclidien net** centré sur l'unité,
+      // rayon = M×10 (dérivé du BFS) + demi-empreinte, tronqué par murs / EZ /
+      // pathfinding via masque BFS. Pas de fallback : si ``selectedUnitAnchor``
+      // n'est pas fourni alors qu'on entre dans le layer move, c'est un bug de
+      // câblage côté caller (BoardPvp) et on veut le voir immédiatement.
+      if (selectedUnitAnchor == null) {
+        throw new Error(
+          "[drawBoard] ``selectedUnitAnchor`` requis pour rendre le layer move/advance — " +
+            `absent alors que useMoveDestPoolCircleLayer=true (spriteName=${moveSpriteName})`,
+        );
+      }
+      renderMoveAdvanceDestPoolCircleLayer(
+        app,
+        highlightContainer,
+        movePoolForDiskDraw,
+        footprintRadius,
+        poolFillColor,
+        moveSpriteName,
+        selectedUnitAnchor.col,
+        selectedUnitAnchor.row,
+        selectedUnitAnchor.col * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN,
+        selectedUnitAnchor.row * HEX_VERT_SPACING +
+          ((selectedUnitAnchor.col % 2) * HEX_VERT_SPACING) / 2 +
+          HEX_HEIGHT / 2 +
+          MARGIN,
+        HEX_HORIZ_SPACING,
+        HEX_WIDTH,
+        HEX_HEIGHT,
+        HEX_VERT_SPACING,
+        MARGIN,
+      );
+    } else {
+      // Short-circuit uniquement si ``availableCells`` est vide côté caller : en phase déploiement
+      // (mappée ``interactionPhase === "move"``), le pool de déploiement est légitimement poussé
+      // dans ``availableCells`` et doit être dessiné comme des disques (aucune ancre côté moteur).
+      const moveOrAdvanceNoAnchors =
+        (interactionPhase === "move" ||
+          useAdvanceMovePoolLikeMove ||
+          usePostShootMovePoolLikeMove) &&
+        !movePoolForDiskDraw &&
+        availableCells.length === 0;
+      const cellsForHighlight = moveOrAdvanceNoAnchors ? [] : availableCells;
+      drawGroup(cellsForHighlight, availableCellsDrawColor, 0.4, false, availableCellCircleR);
+    }
+    {
+      const useShootingPreviewPalette = phase === "shoot" || mode === "movePreview";
+      if (useShootingPreviewPalette && (attackCells.length > 0 || coverCells.length > 0)) {
+        const coverKeySet = new Set(coverCells.map((c) => `${c.col},${c.row}`));
+        const attackClearOnly = attackCells.filter((c) => !coverKeySet.has(`${c.col},${c.row}`));
+        drawGroup(coverCells, 0x9ec5ff, 0.4, false);
+        drawGroup(attackClearOnly, 0x4f8bff, 0.4, false);
+      } else {
+        drawGroup(attackCells, ATTACK_COLOR, 0.4, false);
+      }
+    }
+    if (useChargeDestPoolDiskDraw && chargeDestPoolRef?.current) {
+      const footprintRadius = (footprintSpanForPool / 2) * HEX_HORIZ_SPACING;
+      const chargeGfx = new PIXI.Graphics();
+      chargeGfx.name = "charge-dest-pool-gfx";
+      const chargePool = chargeDestPoolRef.current;
+      fillFootprintPoolCircles(
+        chargeGfx,
+        chargePool,
+        footprintRadius,
+        CHARGE_DESTINATION_HEX_FILL,
+        HEX_HORIZ_SPACING,
+        HEX_WIDTH,
+        HEX_HEIGHT,
+        HEX_VERT_SPACING,
+        MARGIN,
+      );
+      addFootprintHighlightSprite(app, highlightContainer, chargeGfx, 0.28, "charge-dest-pool");
+      addFootprintPoolSmoothOutlines(
+        highlightContainer,
+        chargePool,
+        footprintRadius,
+        HEX_HORIZ_SPACING,
+        HEX_WIDTH,
+        HEX_HEIGHT,
+        HEX_VERT_SPACING,
+        MARGIN,
+        CHARGE_DESTINATION_HEX_FILL,
+      );
+    } else {
+      drawGroup(
+        chargeCells.map((c: any) => ({
+          col: Array.isArray(c) ? c[0] : c.col,
+          row: Array.isArray(c) ? c[1] : c.row,
+        })),
+        CHARGE_DESTINATION_HEX_FILL,
+        0.4,
+        false,
+      );
+    }
+    drawGroup(advanceCells, ADVANCE_DESTINATION_HEX_FILL, 0.3, false);
+
+    if (
+      chargeEngagementHalo &&
+      typeof chargeEngagementHalo.zoneHexSteps === "number" &&
+      chargeEngagementHalo.zoneHexSteps > 1 &&
+      Number.isFinite(chargeEngagementHalo.centerCol) &&
+      Number.isFinite(chargeEngagementHalo.centerRow)
+    ) {
+      const hcx =
+        chargeEngagementHalo.centerCol * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + MARGIN;
+      const hcy =
+        chargeEngagementHalo.centerRow * HEX_VERT_SPACING +
+        ((chargeEngagementHalo.centerCol % 2) * HEX_VERT_SPACING) / 2 +
+        HEX_HEIGHT / 2 +
+        MARGIN;
+      const ringGfx = new PIXI.Graphics();
+      ringGfx.name = "charge-engagement-halo";
+      const haloR = chargeEngagementHalo.zoneHexSteps * HEX_HORIZ_SPACING;
+      const haloColor = CHARGE_DESTINATION_HEX_FILL;
+      // Plusieurs traits superposés (large + léger → fin + opaque) : bord moins crénelé sous CanvasRenderer.
+      const haloLayers: Array<{ width: number; alpha: number }> = [
+        { width: 14, alpha: 0.06 },
+        { width: 7, alpha: 0.14 },
+        { width: 3, alpha: 0.32 },
+      ];
+      for (const layer of haloLayers) {
+        ringGfx.lineStyle(layer.width, haloColor, layer.alpha);
+        ringGfx.drawCircle(hcx, hcy, haloR);
+      }
+      highlightContainer.addChild(ringGfx);
+    }
+
+    const moveAdvanceOrPileInPickPool: Set<string> | null = (() => {
+      if (
+        interactionPhase === "move" ||
+        useAdvanceMovePoolLikeMove ||
+        usePostShootMovePoolLikeMove
+      ) {
+        return movePoolForDiskDraw && movePoolForDiskDraw.size > 0 ? movePoolForDiskDraw : null;
+      }
+      if (usePileInPoolLikeMoveHoisted) {
+        if (moveDestPoolRef?.current && moveDestPoolRef.current.size > 0) {
+          return moveDestPoolRef.current;
+        }
+        return null;
+      }
+      return null;
+    })();
+
+    // Invisible interactive overlay for click detection (pixelToHex nearest-neighbor)
+    const hasClickableContent =
+      clickableSet.size > 0 ||
+      (moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0) ||
+      (interactionPhase === "charge" &&
+        mode === "chargePreview" &&
+        chargeDestPoolRef?.current &&
+        chargeDestPoolRef.current.size > 0);
+    if (hasClickableContent) {
+      const hitArea = new PIXI.Graphics();
+      hitArea.beginFill(0, 0);
+      hitArea.drawRect(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
+      hitArea.endFill();
+      hitArea.hitArea = new PIXI.Rectangle(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
+      hitArea.eventMode = "static";
+      hitArea.cursor = "pointer";
+
+      const resolveHex = (pos: PIXI.IPointData): { col: number; row: number } => {
+        const ux = pos.x - MARGIN;
+        const uy = pos.y - MARGIN;
+        const colApprox = (ux - HEX_WIDTH / 2) / HEX_HORIZ_SPACING;
+        const c0 = Math.max(0, Math.floor(colApprox) - 2);
+        const c1 = Math.min(BOARD_COLS - 1, Math.ceil(colApprox) + 2);
+        let bestCol = 0, bestRow = 0, bestD = Infinity;
+        for (let c = c0; c <= c1; c++) {
+          const stagger = ((c % 2) * HEX_VERT_SPACING) / 2;
+          const rowApprox = (uy - HEX_HEIGHT / 2 - stagger) / HEX_VERT_SPACING;
+          const r0 = Math.max(0, Math.floor(rowApprox) - 2);
+          const r1 = Math.min(BOARD_ROWS - 1, Math.ceil(rowApprox) + 2);
+          for (let r = r0; r <= r1; r++) {
+            const cx = c * HEX_HORIZ_SPACING + HEX_WIDTH / 2;
+            const cy = r * HEX_VERT_SPACING + stagger + HEX_HEIGHT / 2;
+            const d = (ux - cx) ** 2 + (uy - cy) ** 2;
+            if (d < bestD) { bestD = d; bestCol = c; bestRow = r; }
+          }
+        }
+        return { col: bestCol, row: bestRow };
+      };
+
+      hitArea.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
+        if (e.button !== 0) return;
+        const { col, row } = resolveHex(e.getLocalPosition(hitArea));
+        const key = `${col},${row}`;
+        const useMovePoolForPick =
+          moveAdvanceOrPileInPickPool != null && moveAdvanceOrPileInPickPool.size > 0;
+        const useChargePoolForPick =
+          interactionPhase === "charge" &&
+          mode === "chargePreview" &&
+          chargeDestPoolRef?.current &&
+          chargeDestPoolRef.current.size > 0;
+        const isValid =
+          clickableSet.has(key) ||
+          (useMovePoolForPick && (moveAdvanceOrPileInPickPool?.has(key) ?? false)) ||
+          (useChargePoolForPick && (chargeDestPoolRef?.current?.has(key) ?? false));
+        if (isValid) {
+          let destCol = col,
+            destRow = row;
+          if (
+            useMovePoolForPick &&
+            moveAdvanceOrPileInPickPool &&
+            !moveAdvanceOrPileInPickPool.has(key)
+          ) {
+            let bestDist = Infinity;
+            for (const k of moveAdvanceOrPileInPickPool) {
+              const sep = k.indexOf(",");
+              const cc = Number(k.substring(0, sep));
+              const cr = Number(k.substring(sep + 1));
+              const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
+              if (d < bestDist) {
+                bestDist = d;
+                destCol = cc;
+                destRow = cr;
+              }
+            }
+          } else if (
+            useChargePoolForPick &&
+            chargeDestPoolRef?.current &&
+            !chargeDestPoolRef.current.has(key)
+          ) {
+            let bestDist = Infinity;
+            for (const k of chargeDestPoolRef.current) {
+              const sep = k.indexOf(",");
+              const cc = Number(k.substring(0, sep));
+              const cr = Number(k.substring(sep + 1));
+              const d = (cc - col) * (cc - col) + (cr - row) * (cr - row);
+              if (d < bestDist) {
+                bestDist = d;
+                destCol = cc;
+                destRow = cr;
+              }
+            }
+          }
+          window.dispatchEvent(
+            new CustomEvent("boardHexClick", {
+              detail: { col: destCol, row: destRow, phase: interactionPhase, mode, selectedUnitId },
+            })
+          );
+        }
+      });
+
+      let lastHoverCol = -1, lastHoverRow = -1;
+      hitArea.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
+        const localPos = e.getLocalPosition(hitArea);
+        const { col, row } = resolveHex(localPos);
+        const hexChanged = col !== lastHoverCol || row !== lastHoverRow;
+        if (hexChanged) {
+          lastHoverCol = col;
+          lastHoverRow = row;
+        }
+        window.dispatchEvent(
+          new CustomEvent("boardHexHover", {
+            detail: { col, row, pixelX: localPos.x, pixelY: localPos.y, hexChanged },
+          })
+        );
+      });
+
+      highlightContainer.addChild(hitArea);
+    }
 
     if (
       fightEngagementRing &&
@@ -1266,7 +1507,7 @@ export const drawBoard = (
       const wallsContainer = new PIXI.Container();
       wallsContainer.name = "walls";
 
-      const halfW = IS_LARGE_BOARD ? HEX_HEIGHT * 0.8 : 1.5;
+      const halfW = HEX_HEIGHT * 0.8;
       const wallTexturePath = boardConfig.display?.wall_texture?.trim() || "/textures/wall1.webp";
       const wallTextureAlpha =
         typeof boardConfig.display?.wall_texture_alpha === "number"

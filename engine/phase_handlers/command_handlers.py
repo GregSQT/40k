@@ -49,6 +49,8 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Clear movement preview state
     game_state["valid_move_destinations_pool"] = []
     game_state["preview_hexes"] = []
+    game_state["move_preview_footprint_zone"] = set()
+    game_state["move_preview_footprint_span"] = None
     game_state["active_movement_unit"] = None
     
     # Clear enemy reachable positions cache (enemy positions may have changed)

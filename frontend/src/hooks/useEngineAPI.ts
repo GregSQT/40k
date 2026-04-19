@@ -5,6 +5,7 @@ import { getAuthSession } from "../auth/authStorage";
 import type { GameMode, PlayerId, Unit } from "../types";
 import type { DiceValue } from "../types/game";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
+import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { getPreferredRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
 
 // Get max_turns from config instead of hardcoded fallback
@@ -165,6 +166,7 @@ export interface APIGameState {
   units_cache?: Record<string, { col: number; row: number; HP_CUR: number; player: number }>;
   active_movement_unit?: string;
   valid_move_destinations_pool?: Array<[number, number]>;
+  move_preview_footprint_span?: number | null;
   move_preview_border?: Array<[number, number]>;
   move_preview_footprint_zone?: Array<[number, number]>;
   fight_pile_in_footprint_zone?: Array<[number, number]>;
@@ -334,6 +336,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     chargeDestPoolRef.current = new Set();
     chargeFootprintZoneRef.current = new Set();
   }, []);
+
   const [advanceWarningPopup, setAdvanceWarningPopup] = useState<{
     unitId: number;
     timestamp: number;
@@ -1376,33 +1379,26 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           // Handle movement activation response with valid destinations
           else if (
-            data.result?.valid_destinations &&
-            data.result?.waiting_for_player &&
-            data.game_state?.phase === "move"
+            data.game_state?.phase === "move" &&
+            data.result?.waiting_for_player === true &&
+            (Array.isArray(data.result?.valid_destinations) ||
+              (Array.isArray(data.game_state.valid_move_destinations_pool) &&
+                data.game_state.valid_move_destinations_pool.length > 0))
           ) {
-            setSelectedUnitId(parseInt(data.result.unitId, 10));
-            // Store the full destination pool in a ref for click validation
-            // (not in memoizedGameState to avoid triggering a heavy PIXI rebuild)
-            const pool = data.game_state.valid_move_destinations_pool;
-            const poolSet = new Set<string>();
-            if (Array.isArray(pool)) {
-              for (const d of pool) {
-                if (Array.isArray(d) && d.length === 2) {
-                  poolSet.add(`${d[0]},${d[1]}`);
-                }
-              }
+            const uid = data.result?.unitId ?? data.game_state.active_movement_unit;
+            if (uid != null) {
+              setSelectedUnitId(parseInt(String(uid), 10));
             }
+            const poolSet = new Set<string>();
+            const anchorSrc =
+              data.game_state.valid_move_destinations_pool ??
+              data.result?.valid_destinations ??
+              (data.game_state as { preview_hexes?: unknown }).preview_hexes;
+            addHexKeysToSet(anchorSrc, poolSet);
             moveDestPoolRef.current = poolSet;
 
-            const fpZone = data.game_state.move_preview_footprint_zone;
             const fpSet = new Set<string>();
-            if (Array.isArray(fpZone)) {
-              for (const d of fpZone) {
-                if (Array.isArray(d) && d.length === 2) {
-                  fpSet.add(`${d[0]},${d[1]}`);
-                }
-              }
-            }
+            addHexKeysToSet(data.game_state.move_preview_footprint_zone, fpSet);
             footprintZoneRef.current = fpSet;
           }
           // Handle charge activation response - can have blinking_units without valid_destinations yet
@@ -1776,6 +1772,29 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                   ...data.game_state.units[unitIndex],
                   available_weapons: data.result.available_weapons,
                 };
+              }
+            }
+          }
+
+          // Filet : le pool d’ancres vit surtout dans game_state ; result.valid_destinations peut être absent
+          // (taille JSON / évolution API) alors que valid_move_destinations_pool est présent.
+          if (data.game_state?.phase === "move") {
+            const raw =
+              data.game_state.valid_move_destinations_pool ??
+              (data.game_state as { preview_hexes?: unknown }).preview_hexes;
+            if (Array.isArray(raw) && raw.length > 0) {
+              const poolSet = new Set<string>();
+              addHexKeysToSet(raw, poolSet);
+              if (poolSet.size > 0) {
+                moveDestPoolRef.current = poolSet;
+              }
+            }
+            const fp = data.game_state.move_preview_footprint_zone;
+            if (Array.isArray(fp) && fp.length > 0) {
+              const fpSet = new Set<string>();
+              addHexKeysToSet(fp, fpSet);
+              if (fpSet.size > 0) {
+                footprintZoneRef.current = fpSet;
               }
             }
           }
@@ -3056,11 +3075,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (gameState?.phase === "fight" && mode === "pileInPreview") {
       const fp = gameState.fight_pile_in_footprint_zone;
       if (Array.isArray(fp) && fp.length > 0) {
-        return fp.map((d) =>
-          Array.isArray(d) && d.length >= 2
-            ? { col: Number(d[0]), row: Number(d[1]) }
-            : { col: Number((d as { col: number }).col), row: Number((d as { row: number }).row) }
-        );
+        return fp.map((d): { col: number; row: number } => {
+          if (Array.isArray(d) && d.length >= 2) {
+            return { col: Number(d[0]), row: Number(d[1]) };
+          }
+          const o = d as unknown as { col: number; row: number };
+          return { col: Number(o.col), row: Number(o.row) };
+        });
       }
       if (pileInDestinations.length > 0) {
         return pileInDestinations;
@@ -3069,11 +3090,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (gameState?.phase === "fight" && mode === "consolidationPreview") {
       const fp = gameState.fight_consolidation_footprint_zone;
       if (Array.isArray(fp) && fp.length > 0) {
-        return fp.map((d) =>
-          Array.isArray(d) && d.length >= 2
-            ? { col: Number(d[0]), row: Number(d[1]) }
-            : { col: Number((d as { col: number }).col), row: Number((d as { row: number }).row) }
-        );
+        return fp.map((d): { col: number; row: number } => {
+          if (Array.isArray(d) && d.length >= 2) {
+            return { col: Number(d[0]), row: Number(d[1]) };
+          }
+          const o = d as unknown as { col: number; row: number };
+          return { col: Number(o.col), row: Number(o.row) };
+        });
       }
       if (pileInDestinations.length > 0) {
         return pileInDestinations;
@@ -3212,6 +3235,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       active_alternating_activation_pool: gameState.active_alternating_activation_pool,
       non_active_alternating_activation_pool: gameState.non_active_alternating_activation_pool,
       active_movement_unit: gameState.active_movement_unit,
+      /** Requis pour sync moveDestPoolRef / cercles d’ancre (sinon seul move_preview_footprint_zone → « hex géant »). */
+      valid_move_destinations_pool: gameState.valid_move_destinations_pool,
+      move_preview_footprint_span: (gameState as { move_preview_footprint_span?: number | null })
+        .move_preview_footprint_span,
+      preview_hexes: (gameState as { preview_hexes?: unknown }).preview_hexes,
       move_preview_border: gameState.move_preview_border,
       move_preview_footprint_zone: gameState.move_preview_footprint_zone,
       fight_pile_in_footprint_zone: gameState.fight_pile_in_footprint_zone,
@@ -3294,6 +3322,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       footprintZoneRef,
       chargeDestPoolRef,
       chargeFootprintZoneRef,
+      pendingMoveAfterShooting: false,
+      chargingUnitId: null,
+      chargeTargetId: null,
+      chargeRoll: null,
+      chargeSuccess: undefined,
       onAdvance: async () => {},
       getAdvanceDestinations: () => [],
       advancingUnitId: null,
@@ -3385,6 +3418,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     footprintZoneRef,
     chargeDestPoolRef,
     chargeFootprintZoneRef,
+    pendingMoveAfterShooting: pendingPreviewAction === "move_after_shooting",
     // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Export advance state and handler
     getAdvanceDestinations: getAdvanceDestinationsMemo,
     advancingUnitId,

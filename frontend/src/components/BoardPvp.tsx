@@ -48,7 +48,9 @@ import {
   type HexCoord,
 } from "../utils/hexFootprint";
 import { WeaponDropdown } from "./WeaponDropdown";
+import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { ensureWasmLoaded, isWasmReady, computeVisibleHexes } from "../utils/wasmLos";
+import { FEATURES } from "../constants/gameConfig";
 import {
   DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
   DAMAGE_PROBABILITY_TOOLTIP_HTML_Z_INDEX,
@@ -58,6 +60,48 @@ import {
 } from "../utils/blinkingHPBar";
 
 // Helper functions are now in BoardDisplay.tsx - removed from here
+
+/** Taille d'empreinte pour le rendu move/charge (round = entier ; oval = max des côtés — aligné usage moteur). */
+function resolveBaseSizeForFootprint(unit: Unit | undefined): number {
+  if (!unit?.BASE_SIZE) return 1;
+  const bs = unit.BASE_SIZE;
+  if (typeof bs === "number" && Number.isFinite(bs)) {
+    return Math.max(1, bs);
+  }
+  if (Array.isArray(bs) && bs.length >= 2) {
+    const a = Number(bs[0]);
+    const b = Number(bs[1]);
+    if (Number.isFinite(a) && Number.isFinite(b)) {
+      return Math.max(1, Math.max(a, b));
+    }
+  }
+  return 1;
+}
+
+/**
+ * Même liste que le sync ref / ``moveDestinationAnchorsFromState`` (valid_move_destinations_pool ou preview_hexes).
+ * Si présente : le draw n’ajoute pas ``move_preview_footprint_zone`` dans ``availableCells`` (évite le double rendu « nid d’abeille »).
+ */
+function pickMoveDestinationAnchorsFromGameState(
+  gameState: GameState | null | undefined,
+): unknown[] | undefined {
+  if (!gameState) return undefined;
+  const gs = gameState as GameState & { preview_hexes?: unknown };
+  const v = gs.valid_move_destinations_pool;
+  const p = gs.preview_hexes;
+  const raw = (gameState as unknown as Record<string, unknown>)["valid_move_destinations_pool"];
+  const rawP = (gameState as unknown as Record<string, unknown>)["preview_hexes"];
+  const pool =
+    Array.isArray(v) && v.length > 0
+      ? v
+      : Array.isArray(raw) && raw.length > 0
+        ? raw
+        : undefined;
+  if (pool) return pool;
+  if (Array.isArray(p) && p.length > 0) return p;
+  if (Array.isArray(rawP) && rawP.length > 0) return rawP;
+  return undefined;
+}
 
 // Objective control map type - tracks which player controls each objective
 type ObjectiveControllers = { [objectiveName: string]: number | null };
@@ -264,6 +308,8 @@ type BoardProps = {
   chargeReferenceHex?: { col: number; row: number } | null;
   moveDestPoolRef?: React.RefObject<Set<string>>;
   footprintZoneRef?: React.RefObject<Set<string>>;
+  /** Sélection déplacement après tir — même sync de pools que phase move (voir charge : refs avant draw). */
+  pendingMoveAfterShooting?: boolean;
   /** Phase charge : ancres valides + zone violette (empreinte) pour l’icône sous le curseur. */
   chargeDestPoolRef?: React.RefObject<Set<string>>;
   chargeFootprintZoneRef?: React.RefObject<Set<string>>;
@@ -468,6 +514,7 @@ export default function Board({
   chargeReferenceHex = null,
   moveDestPoolRef,
   footprintZoneRef,
+  pendingMoveAfterShooting = false,
   chargeDestPoolRef,
   chargeFootprintZoneRef,
   onAdvance,
@@ -535,6 +582,8 @@ export default function Board({
   const hoveredHexRef = useRef<{ col: number; row: number } | null>(null);
   const losHexRef = useRef<{ col: number; row: number } | null>(null);
   const losRequestIdRef = useRef(0);
+  /** Dédup des logs move pool : ``localStorage.setItem('debugMovePool','1')`` puis F5 — retirer la clé pour couper. */
+  const movePoolDebugLastSnapRef = useRef<string>("");
 
   // ✅ HOOK 2: useGameConfig - ALWAYS called second
   const { boardConfig, gameConfig, loading, error } = useGameConfig();
@@ -1628,9 +1677,12 @@ export default function Board({
 
     // PIXI textures are managed by the internal cache — no manual clearing needed.
 
+    const enginePhaseForPools = gameState?.phase ?? phase;
     const keepMovementPickPool =
-      (phase === "move" && selectedUnitId !== null) ||
+      ((enginePhaseForPools === "move" || enginePhaseForPools === "command") &&
+        selectedUnitId !== null) ||
       (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null) ||
+      (phase === "shoot" && pendingMoveAfterShooting && selectedUnitId !== null) ||
       (phase === "fight" &&
         (mode === "pileInPreview" || mode === "consolidationPreview") &&
         selectedUnitId !== null);
@@ -1653,6 +1705,28 @@ export default function Board({
       if (chargeFootprintZoneRef?.current && chargeFootprintZoneRef.current.size > 0) {
         chargeFootprintZoneRef.current.clear();
       }
+    }
+
+    // Comme la charge (syncChargePoolRefs synchrone dans le handler API) : remplir les refs
+    // **dans cet effet**, avant drawBoard. Un useEffect parent sur gameState s’exécute après
+    // l’enfant → drawBoard lisait moveDestPoolRef vide et retombait sur les pastilles hex.
+    const shouldSyncMovePoolsFromState =
+      keepMovementPickPool &&
+      moveDestPoolRef?.current &&
+      (enginePhaseForPools === "move" ||
+        enginePhaseForPools === "command" ||
+        (phase === "shoot" && mode === "advancePreview") ||
+        (phase === "shoot" && pendingMoveAfterShooting));
+    if (shouldSyncMovePoolsFromState) {
+      syncMoveDestinationPoolRefs({
+        gameState: gameState ?? null,
+        phase: enginePhaseForPools,
+        mode,
+        selectedUnitId,
+        moveDestPoolRef,
+        footprintZoneRef,
+        pendingMoveAfterShooting,
+      });
     }
 
     // Extract board configuration values - USE CONFIG VALUES
@@ -1967,7 +2041,9 @@ export default function Board({
 
     // ✅ RESTRUCTURED: Calculate ALL highlight data BEFORE any drawBoard calls
     const availableCells: { col: number; row: number }[] = [];
-    const selectedUnit = units.find((u) => u.id === selectedUnitId);
+    /** ``===`` sur id casse le match (API string / state number) → pas de zone move / BASE_SIZE = 1. */
+    const selectedUnit =
+      selectedUnitId == null ? undefined : units.find((u) => String(u.id) === String(selectedUnitId));
 
     if (phase === "deployment" && deploymentState) {
       const deployer = deploymentState.current_deployer ?? current_player;
@@ -2144,39 +2220,10 @@ export default function Board({
           : parseInt(selectedUnit.id as string, 10)
       )
     ) {
-      if (phase === "move") {
-        const zone = gameState?.move_preview_footprint_zone ?? gameState?.move_preview_border;
-        if (zone && Array.isArray(zone) && zone.length > 0) {
-          for (const dest of zone) {
-            if (Array.isArray(dest) && dest.length === 2) {
-              availableCells.push({ col: Number(dest[0]), row: Number(dest[1]) });
-            } else if (dest && typeof dest === "object" && "col" in dest && "row" in dest) {
-              availableCells.push({ col: Number(dest.col), row: Number(dest.row) });
-            }
-          }
-        }
-      } else if (phase !== "charge") {
+      const enginePhase = gameState?.phase ?? phase;
+      // Move : pas de cellules « zone empreinte » dans availableCells (disques d’ancres uniquement).
+      if (enginePhase !== "move" && phase !== "charge") {
         availableCells.push({ col: selectedUnit.col, row: selectedUnit.row });
-      }
-    }
-
-    // Advance (shoot) : même zone moteur que move — hors bloc mode === "select"
-    if (
-      selectedUnit &&
-      phase === "shoot" &&
-      mode === "advancePreview" &&
-      advancingUnitId != null &&
-      selectedUnit.id === advancingUnitId
-    ) {
-      const zone = gameState?.move_preview_footprint_zone ?? gameState?.move_preview_border;
-      if (zone && Array.isArray(zone) && zone.length > 0) {
-        for (const dest of zone) {
-          if (Array.isArray(dest) && dest.length === 2) {
-            availableCells.push({ col: Number(dest[0]), row: Number(dest[1]) });
-          } else if (dest && typeof dest === "object" && "col" in dest && "row" in dest) {
-            availableCells.push({ col: Number(dest.col), row: Number(dest.row) });
-          }
-        }
       }
     }
 
@@ -2776,24 +2823,62 @@ export default function Board({
           )
         : undefined;
 
+    /**
+     * Ancres pour les disques : UI **ou** moteur en move/command (évite désaccord phase affichée / ``game_state``).
+     */
+    const gsPhaseForMove = gameState?.phase;
+    const moveDestinationAnchorsFromState =
+      phase !== "deployment" &&
+      (effectivePhase === "move" ||
+        gsPhaseForMove === "move" ||
+        gsPhaseForMove === "command" ||
+        (phase === "shoot" && mode === "advancePreview") ||
+        pendingMoveAfterShooting)
+        ? pickMoveDestinationAnchorsFromGameState(gameState)
+        : undefined;
+
+    const activeMovementId = gameState?.active_movement_unit;
+    const unitForMoveFootprint =
+      phase === "move" && activeMovementId != null
+        ? units.find((u) => String(u.id) === String(activeMovementId))
+        : undefined;
+    const unitForFootprintBase = unitForMoveFootprint ?? selectedUnit;
+
     const drawBoardOptions: DrawBoardOptions = {
       availableCells: effectiveAvailableCells,
       attackCells,
       coverCells,
       chargeCells,
-      // advancePreview : même zone que move (gameState + moveDestPoolRef) — pas de doublon advanceCells
+      // advancePreview : même ancres que move (game_state) — pas de doublon empreinte hex-par-hex
       advanceCells: [],
       blockedTargets,
       coverTargets,
       phase: effectivePhase,
-      interactionPhase: phase,
+      /** Aligné sur ``effectivePhase`` : avant on passait la phase brute (command/deployment) ici
+       * alors que ``phase`` était déjà mappée en ``move`` → ``interactionPhase === "move"`` était faux,
+       * pas de couche disques, et ``drawGroup(availableCells)`` avec toute l’empreinte = nid d’abeille. */
+      interactionPhase: effectivePhase,
       selectedUnitId,
       mode,
       showHexCoordinates,
       objectiveControl,
       moveDestPoolRef,
+      moveDestinationAnchorsFromState,
+      movePreviewFootprintSpanFromState: (gameState as { move_preview_footprint_span?: number | null })
+        .move_preview_footprint_span,
+      pendingMoveAfterShooting,
       chargeDestPoolRef,
-      selectedUnitBaseSize: selectedUnit && typeof selectedUnit.BASE_SIZE === "number" ? selectedUnit.BASE_SIZE : undefined,
+      selectedUnitBaseSize: unitForFootprintBase
+        ? resolveBaseSizeForFootprint(unitForFootprintBase)
+        : undefined,
+      // Ancre de l'unité sélectionnée (col, row) — utilisée par drawBoard pour
+      // centrer la preview move / advance / post-shoot en **cercle euclidien**
+      // (spec : rayon = M×10 + demi-empreinte, masqué par le BFS). On priorise
+      // l'unité en mouvement (unitForMoveFootprint) pour rester aligné sur la
+      // post-shoot move, sinon on retombe sur la sélection courante.
+      selectedUnitAnchor: unitForFootprintBase
+        ? { col: unitForFootprintBase.col, row: unitForFootprintBase.row }
+        : null,
       cachedStaticBoard: canReuseStatic ? staticBoardRef.current : null,
       cachedWalls: canReuseStatic ? staticWallsRef.current : null,
       losDebugShowRatio: showLosDebugOverlay && phase === "shoot" && shootingPreviewSource !== null,
@@ -2803,6 +2888,49 @@ export default function Board({
       chargeEngagementHalo,
       fightEngagementRing,
     };
+
+    if (
+      FEATURES.ENABLE_DEBUG_MODE &&
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem("debugMovePool") === "1"
+    ) {
+      const gs = gameState as {
+        valid_move_destinations_pool?: unknown;
+        preview_hexes?: unknown;
+        move_preview_footprint_span?: number | null;
+      } | null;
+      const pickLen = Array.isArray(moveDestinationAnchorsFromState)
+        ? moveDestinationAnchorsFromState.length
+        : null;
+      const dbg = {
+        phaseProp: phase,
+        gameStatePhase: gameState?.phase ?? null,
+        effectivePhase,
+        mode,
+        selectedUnitId,
+        pendingMoveAfterShooting,
+        enginePhaseForPools,
+        keepMovementPickPool,
+        shouldSyncMovePoolsFromState,
+        moveDestPoolSize: moveDestPoolRef?.current?.size ?? 0,
+        footprintZoneSize: footprintZoneRef?.current?.size ?? 0,
+        gsValidPoolLen: Array.isArray(gs?.valid_move_destinations_pool)
+          ? gs.valid_move_destinations_pool.length
+          : null,
+        gsPreviewHexesLen: Array.isArray(gs?.preview_hexes) ? gs.preview_hexes.length : null,
+        movePreviewFootprintSpan: gs?.move_preview_footprint_span ?? null,
+        pickMoveAnchorsLen: pickLen,
+        selectedUnitBaseSize: unitForFootprintBase
+          ? resolveBaseSizeForFootprint(unitForFootprintBase)
+          : null,
+      };
+      const snap = JSON.stringify(dbg);
+      if (snap !== movePoolDebugLastSnapRef.current) {
+        movePoolDebugLastSnapRef.current = snap;
+        console.info("[BoardPvp debugMovePool]", dbg);
+      }
+    }
+
     const drawResult = drawBoard(
       app,
       boardConfigWithOverrides as Parameters<typeof drawBoard>[1],
@@ -3734,6 +3862,7 @@ export default function Board({
     fightTargetId,
     fightingUnitId,
     gameState,
+    pendingMoveAfterShooting,
     getAdvanceDestinations,
     getChargeDestinations,
     movePreview,
