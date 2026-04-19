@@ -546,7 +546,15 @@ def weapon_availability_check(
                         if distance > weapon_range:
                             continue
                         
-                        # Check Line of Sight
+                        # Si build_unit_los_cache a déjà été appelé, pas de LoS => pas de cible valide
+                        # pour cette arme (évite _is_valid_shooting_target complet: engagement + LoS redondant).
+                        _enemy_id_str = str(enemy_id)
+                        _los_map = unit.get("los_cache")
+                        if isinstance(_los_map, dict) and _enemy_id_str in _los_map:
+                            if not _los_map[_enemy_id_str]:
+                                continue
+                        
+                        # Portée OK + (LoS True ou inconnu) : règles engagement / pistolet / etc. + cohérence LoS
                         temp_unit = dict(unit)
                         temp_unit["RNG_WEAPONS"] = [weapon]
                         temp_unit["selectedRngWeaponIndex"] = 0
@@ -1753,7 +1761,11 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # CRITICAL: Use shooting_build_valid_target_pool for consistent pool building
     # This wrapper automatically determines context (advance_status, adjacent_status) and handles cache
     _t_pool0 = time.perf_counter() if _perf_act else None
-    valid_target_pool = shooting_build_valid_target_pool(game_state, unit_id)
+    valid_target_pool = shooting_build_valid_target_pool(
+        game_state,
+        unit_id,
+        precomputed_weapon_available_pool=weapon_available_pool,
+    )
     if _perf_act and _t_pool0 is not None:
         _t_after_tgt_pool = time.perf_counter()
     
@@ -1931,7 +1943,8 @@ def valid_target_pool_build(
     unit: Dict[str, Any],
     weapon_rule: int,
     advance_status: int,
-    adjacent_status: int
+    adjacent_status: int,
+    precomputed_weapon_available_pool: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """
     shoot_refactor.md EXACT: Build list of valid enemy targets
@@ -1942,6 +1955,8 @@ def valid_target_pool_build(
         weapon_rule: 0 = no rules, 1 = rules apply
         advance_status: 0 = no advance, 1 = advanced
         adjacent_status: 0 = not adjacent, 1 = adjacent to enemy
+        precomputed_weapon_available_pool: si fourni (même contexte arg1–arg3), évite un second
+            ``weapon_availability_check`` (ex. activation après ``shooting_unit_activation_start``).
     
     Returns:
         List of enemy unit IDs that can be targeted (valid_target_pool)
@@ -1949,9 +1964,12 @@ def valid_target_pool_build(
     current_player = unit["player"]
     
     # Perform weapon_availability_check(arg1, arg2, arg3) -> Build weapon_available_pool
-    weapon_available_pool = weapon_availability_check(
-        game_state, unit, weapon_rule, advance_status, adjacent_status
-    )
+    if precomputed_weapon_available_pool is not None:
+        weapon_available_pool = precomputed_weapon_available_pool
+    else:
+        weapon_available_pool = weapon_availability_check(
+            game_state, unit, weapon_rule, advance_status, adjacent_status
+        )
     
     # Get usable weapons (can_use = True)
     usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
@@ -2209,7 +2227,12 @@ def valid_target_pool_build(
     return valid_target_pool
 
 
-def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -> List[str]:
+def shooting_build_valid_target_pool(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    *,
+    precomputed_weapon_available_pool: Optional[List[Dict[str, Any]]] = None,
+) -> List[str]:
     """
     Build valid_target_pool and always send blinking data to frontend.
     All enemies within range AND in Line of Sight AND alive (in units_cache)
@@ -2217,6 +2240,10 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     PERFORMANCE: Caches target pool per (unit_id, col, row) to avoid repeated
     distance/LoS calculations during a unit's shooting activation.
     Cache invalidates automatically when unit changes or moves.
+    
+    precomputed_weapon_available_pool: résultat déjà calculé de ``weapon_availability_check`` pour le
+    même (weapon_rule, advance_status, adjacent_status) que ce wrapper déduit — évite un double
+    appel coûteux sur le chemin activation.
     
     NOTE: This function is a wrapper that determines context and calls valid_target_pool_build.
     For direct calls, use valid_target_pool_build() with explicit parameters.
@@ -2351,7 +2378,12 @@ def shooting_build_valid_target_pool(game_state: Dict[str, Any], unit_id: str) -
     # Call valid_target_pool_build with context parameters
     # Use advance_status and adjacent_status already calculated above (lines 885, 890-892)
     valid_target_pool = valid_target_pool_build(
-        game_state, unit, weapon_rule, advance_status, adjacent_status
+        game_state,
+        unit,
+        weapon_rule,
+        advance_status,
+        adjacent_status,
+        precomputed_weapon_available_pool=precomputed_weapon_available_pool,
     )
 
     # PERFORMANCE: Pre-calculate priorities for all targets ONCE before sorting

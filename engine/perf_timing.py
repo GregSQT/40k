@@ -10,7 +10,12 @@ Audit optionnel focus fire (comparaison pools) :
   - ``W40K_FOCUS_FIRE_POOL_AUDIT=1`` ou ``focus_fire_pool_audit`` dans ``game_state``,
   - ou tout audit perf si ``W40K_PERF_TIMING`` est déjà actif.
 
-Sortie : fichier append-only ``<racine_projet>/perf_timing.log`` (une ligne par segment).
+Sortie : fichier append-only ``<racine_projet>/perf_timing.log`` (une ligne par segment), sauf si
+``W40K_PERF_TIMING_LOG`` est défini (chemin absolu ou relatif du fichier à utiliser).
+
+**Important :** seul le processus **Python** (API Flask, bots, tests moteur) écrit ce fichier — pas le
+serveur frontend (Vite / ``npm run dev``). Si tu lances uniquement ``app``, aucun ``perf_timing.log``
+n’apparaîtra à la racine du dépôt.
 
 Lignes typiques (référence) :
 
@@ -24,6 +29,12 @@ Lignes typiques (référence) :
   ``los_cache_s`` (``build_unit_los_cache``), ``weapon_avail_s`` (``weapon_availability_check``),
   ``target_pool_s`` (``shooting_build_valid_target_pool``), ``tail_s`` (arme par défaut, JSON armes, etc.),
   ``total_s``, ``outcome`` (ex. ``success``, ``empty_pool_advance``, ``empty_pool_skip``), ``valid_targets_n``.
+- ``SHOOT_PHASE_HANDLER`` — découpe ``_process_shooting_phase`` (``w40k_core``) : ``shooting_phase_start_s``
+  (appel optionnel à ``shooting_phase_start`` si la phase n’était pas encore marquée initialisée),
+  ``execute_action_s`` (``shooting_handlers.execute_action`` — inclut p.ex. ``activate_unit`` / tir / advance),
+  ``phase_end_s`` (fusion ``shooting_phase_end`` si ``phase_complete``), ``total_handler_s``.
+  Explique l’écart entre ``SHOOT_ACTIVATION_START`` et ``SEMANTIC_SEGMENTS`` / ``EXECUTE_SEMANTIC_TOTAL`` pour
+  ``activate_unit`` quand ``shooting_phase_start`` a encore tourné sur la même requête.
 - ``MOVE_POOL_BUILD`` — ``prep_s`` (caches occupation / EZ), ``bfs_s`` (exploration), pour le sol
   multi-hex ``footprint_zone_border_s`` (union empreintes + bordure), ``total_s``, compteurs
   ``visited`` / ``valid``. ``anchors_n`` = taille de ``valid_move_destinations_pool`` (disques UI) ;
@@ -43,9 +54,28 @@ Lignes typiques (référence) :
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any, Dict, Optional
 
 _PERF_ENV_TRUE = frozenset({"1", "true", "yes"})
+_PERF_WRITE_ERROR_LOGGED = False
+
+
+def perf_timing_log_file_path() -> str:
+    """
+    Chemin du fichier de log perf (append).
+
+    Priorité :
+    1. ``W40K_PERF_TIMING_LOG`` si défini (non vide) — chemin relatif au cwd ou absolu ;
+    2. sinon ``<racine_projet>/perf_timing.log`` (parent du dossier ``engine/`` où se trouve ce module).
+    """
+    override = os.environ.get("W40K_PERF_TIMING_LOG", "").strip()
+    if override:
+        return os.path.abspath(override)
+    here = os.path.abspath(__file__)
+    engine_dir = os.path.dirname(here)
+    project_root = os.path.dirname(engine_dir)
+    return os.path.join(project_root, "perf_timing.log")
 
 
 def perf_timing_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
@@ -78,19 +108,22 @@ def focus_fire_pool_audit_enabled(game_state: Optional[Dict[str, Any]]) -> bool:
 
 def append_perf_timing_line(message: str) -> None:
     """
-    Écrit une ligne dans perf_timing.log sous la racine du dépôt (append, flush).
+    Écrit une ligne dans le fichier perf (voir ``perf_timing_log_file_path``), append + flush.
 
-    Les erreurs d'écriture sont ignorées (diagnostic uniquement, comme debug.log).
+    En cas d'échec d'écriture, un message est envoyé une fois sur stderr (pour ne pas masquer
+    un mauvais cwd, permissions, ou moteur chargé depuis un autre répertoire).
     """
+    global _PERF_WRITE_ERROR_LOGGED
+    path = perf_timing_log_file_path()
     try:
-        import os as _os
-
-        here = _os.path.abspath(__file__)
-        engine_dir = _os.path.dirname(here)
-        project_root = _os.path.dirname(engine_dir)
-        path = _os.path.join(project_root, "perf_timing.log")
         with open(path, "a", encoding="utf-8", errors="replace") as f:
             f.write(message + "\n")
             f.flush()
-    except OSError:
-        pass
+    except OSError as exc:
+        if not _PERF_WRITE_ERROR_LOGGED:
+            _PERF_WRITE_ERROR_LOGGED = True
+            print(
+                f"[perf_timing] impossible d'écrire dans {path!r}: {exc} "
+                f"(cwd={os.getcwd()!r}, définir W40K_PERF_TIMING_LOG si besoin)",
+                file=sys.stderr,
+            )

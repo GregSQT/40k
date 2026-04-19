@@ -576,6 +576,22 @@ initialize_auth_db()
 # Global engine instance
 engine: Optional[W40KEngine] = None
 
+
+def _perf_timing_boot_if_enabled() -> None:
+    """Si W40K_PERF_TIMING=1, crée tout de suite une ligne dans perf_timing.log (vérif env + chemin)."""
+    try:
+        from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+        if perf_timing_enabled(None):
+            append_perf_timing_line(
+                f"PERF_TIMING_BOOT api_server_import pid={os.getpid()} cwd={os.getcwd()}"
+            )
+    except Exception as exc:
+        print(f"[perf_timing] boot failed: {exc}", file=sys.stderr)
+
+
+_perf_timing_boot_if_enabled()
+
 def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
     """Extract unique agent keys from scenario units.
     

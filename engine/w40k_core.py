@@ -3832,6 +3832,9 @@ class W40KEngine(gym.Env):
                 self._clear_turn_scoped_rule_choices()
             elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
+                # Aligner avec _process_shooting_phase : évite un second shooting_phase_start (~1,5 s)
+                # sur la première action tir après une transition cascade move → shoot.
+                self._shooting_phase_initialized = True
             elif next_phase == "charge":
                 phase_init_result = charge_handlers.charge_phase_start(self.game_state)
             elif next_phase == "fight":
@@ -4019,12 +4022,25 @@ class W40KEngine(gym.Env):
         """
         AI_TURN.md EXACT: Pure delegation - handler manages complete phase lifecycle
         """
+        from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+        _pw = perf_timing_enabled(self.game_state)
+        _t_wrap0 = time.perf_counter() if _pw else None
+        _phase_start_called = False
+        _t_ps0: Optional[float] = None
+        _t_ps1: Optional[float] = None
+
         # Align with MOVE phase: initialize shooting phase once per phase
         if not getattr(self, "_shooting_phase_initialized", False):
+            _phase_start_called = True
+            _t_ps0 = time.perf_counter()
             shooting_handlers.shooting_phase_start(self.game_state)
             self._shooting_phase_initialized = True
+            _t_ps1 = time.perf_counter()
         # Pure delegation - handler manages initialization, player progression, everything
+        _t_ex0 = time.perf_counter() if _pw else None
         handler_response = shooting_handlers.execute_action(self.game_state, None, action, self.config)
+        _t_ex1 = time.perf_counter() if _pw and _t_ex0 is not None else None
         if isinstance(handler_response, tuple) and len(handler_response) == 2:
             success, result = handler_response
         else:
@@ -4032,8 +4048,11 @@ class W40KEngine(gym.Env):
             success = True
             result = handler_response if isinstance(handler_response, dict) else {"error": "invalid_handler_response"}
         
+        _t_pe0: Optional[float] = None
+        _t_pe1: Optional[float] = None
         # Check response for phase_complete flag (aligned with MOVE phase)
         if result.get("phase_complete"):
+            _t_pe0 = time.perf_counter() if _pw else None
             self._shooting_phase_initialized = False
             # Call shooting_phase_end to get next_phase and all_attack_results (like MOVE calls _shooting_phase_init)
             phase_end_result = shooting_handlers.shooting_phase_end(self.game_state)
@@ -4047,7 +4066,25 @@ class W40KEngine(gym.Env):
             elif "all_attack_results" in phase_end_result:
                 # Use all_attack_results from phase_end_result
                 result["all_attack_results"] = phase_end_result["all_attack_results"]
-        
+            if _pw and _t_pe0 is not None:
+                _t_pe1 = time.perf_counter()
+
+        if _pw and _t_wrap0 is not None:
+            _t_wrap1 = time.perf_counter()
+            ep = self.game_state.get("episode_number", "?")
+            trn = self.game_state.get("turn", "?")
+            act = action.get("action")
+            uid = action.get("unitId", "?")
+            ps_s = (_t_ps1 - _t_ps0) if _t_ps0 is not None and _t_ps1 is not None else 0.0
+            ex_s = (_t_ex1 - _t_ex0) if _t_ex0 is not None and _t_ex1 is not None else 0.0
+            pe_s = (_t_pe1 - _t_pe0) if _t_pe0 is not None and _t_pe1 is not None else 0.0
+            total_s = _t_wrap1 - _t_wrap0
+            append_perf_timing_line(
+                f"SHOOT_PHASE_HANDLER episode={ep} turn={trn} action={act!r} unitId={uid} "
+                f"shooting_phase_start_called={int(_phase_start_called)} shooting_phase_start_s={ps_s:.6f} "
+                f"execute_action_s={ex_s:.6f} phase_end_s={pe_s:.6f} total_handler_s={total_s:.6f}"
+            )
+
         return success, result
     
     
@@ -4106,6 +4143,7 @@ class W40KEngine(gym.Env):
         """AI_SHOOT.md EXACT: Pure delegation to handler"""
         # Handler manages everything including phase setting and pool building
         result = shooting_handlers.shooting_phase_start(self.game_state)
+        self._shooting_phase_initialized = True
         return result
     
     
