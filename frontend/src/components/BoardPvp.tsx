@@ -2878,7 +2878,7 @@ export default function Board({
     const hasChargeFootprintOverlay = (chargePreviewOverlayHexes?.length ?? 0) > 0;
     const chargeEngagementHalo =
       !hasChargeFootprintOverlay &&
-      phase === "charge" &&
+      enginePhaseForPools === "charge" &&
       mode === "chargePreview" &&
       chargeTargetId != null &&
       typeof engagementZoneSteps === "number" &&
@@ -2895,7 +2895,7 @@ export default function Board({
         : undefined;
 
     const fightEngagementRing =
-      phase === "fight" &&
+      enginePhaseForPools === "fight" &&
       selectedUnit &&
       mode === "attackPreview" &&
       selectedUnit.CC_WEAPONS &&
@@ -3058,7 +3058,7 @@ export default function Board({
       const isPresentInUnitsCache =
         unitsCache !== undefined ? Object.hasOwn(unitsCache, unitIdStr) : true;
       const isHazardousDeathGhost =
-        phase === "shoot" &&
+        enginePhaseForPools === "shoot" &&
         selectedUnitId === unit.id &&
         unitsCache !== undefined &&
         !isPresentInUnitsCache;
@@ -3083,7 +3083,7 @@ export default function Board({
       const hasAuthoritativeShootTargets =
         effectiveShootTargetsSet !== null &&
         effectiveShootTargetsSet.size > 0 &&
-        ((phase === "shoot" && selectedUnitId !== null) ||
+        ((enginePhaseForPools === "shoot" && selectedUnitId !== null) ||
           (mode === "movePreview" && movePreview !== null));
 
       let isShootable = true;
@@ -3097,7 +3097,12 @@ export default function Board({
       }
       // Calculate queue-based eligibility during shooting phase
       const isEligibleForRenderingBase = (() => {
-        if (phase === "shoot" && shootingActivationQueue && shootingActivationQueue.length > 0) {
+        // gameState.phase is authoritative (prop `phase` can lag one frame after API response).
+        if (
+          enginePhaseForPools === "shoot" &&
+          shootingActivationQueue &&
+          shootingActivationQueue.length > 0
+        ) {
           // During active shooting: unit is eligible if in queue OR is active unit
           const inQueue = shootingActivationQueue.some(
             (u: Unit) => String(u.id) === String(unit.id)
@@ -3119,13 +3124,18 @@ export default function Board({
 
           return result;
         }
-        if (phase === "fight") {
+        if (enginePhaseForPools === "fight") {
           if (!gameState) {
             throw new Error("Missing gameState during fight eligibility calculation");
           }
           const currentFightSubPhase = gameState.fight_subphase;
           if (!currentFightSubPhase) {
-            throw new Error("Missing fight_subphase during fight eligibility calculation");
+            // Engine sets fight_subphase to null when all fight pools are empty until advance_phase
+            // completes (fight_handlers._update_fight_subphase). useEngineAPI auto-advances after 100ms,
+            // but we still render in between — fall back to standard eligibility instead of crashing.
+            return eligibleUnitIds.includes(
+              typeof unit.id === "number" ? unit.id : parseInt(unit.id as string, 10)
+            );
           }
           let fightPool: Array<number | string> | undefined;
           if (currentFightSubPhase === "charging") {
@@ -3154,7 +3164,7 @@ export default function Board({
       // Fight : pas de cercle vert « éligible » sur l'unité active tant qu'on n'est pas en choix de cible
       // (après pile in le cas échéant) — évite l'anneau 1″ avant le pile in.
       const suppressFightActiveEligibleGreen =
-        phase === "fight" &&
+        enginePhaseForPools === "fight" &&
         selectedUnitId !== null &&
         String(unit.id) === String(selectedUnitId) &&
         mode !== "attackPreview";
@@ -3181,7 +3191,7 @@ export default function Board({
         unit.id === movePreview.unitId;
 
       const isShootingPreviewGhost =
-        (phase === "shoot" || mode === "movePreview") &&
+        (enginePhaseForPools === "shoot" || mode === "movePreview") &&
         hasAuthoritativeShootTargets &&
         unit.player !== current_player &&
         effectiveShootTargetsSet !== null &&
@@ -3274,7 +3284,7 @@ export default function Board({
         canAdvance: (() => {
           // AI_TURN.md STEP 1: ELIGIBILITY CHECK (lignes 583-599)
           // CAN_ADVANCE = true if unit is NOT adjacent to enemy AND not already advanced
-          if (phase !== "shoot") return false;
+          if (enginePhaseForPools !== "shoot") return false;
           if (unit.player !== current_player) return false;
           if (unitsFled?.includes(unit.id)) return false;
 

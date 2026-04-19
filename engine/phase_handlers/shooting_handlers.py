@@ -422,6 +422,84 @@ def _set_combi_weapon_choice(game_state: Dict[str, Any], unit: Dict[str, Any], w
     )
 
 
+def _build_weapon_availability_enemy_precheck(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    rng_weapons: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Une passe par ennemi (distance max RNG, blocage allié/mêlée, clé los_cache) pour
+    weapon_availability_check : évite de répéter min_distance / boucle alliés pour chaque arme.
+    """
+    from engine.hex_utils import min_distance_between_sets as _mds_wpn
+    from engine.utils.weapon_helpers import get_melee_range
+
+    max_rng = 0
+    for w in rng_weapons:
+        try:
+            r = require_key(w, "RNG")
+            if r > max_rng:
+                max_rng = r
+        except Exception:
+            continue
+    if max_rng <= 0:
+        return []
+
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(unit["player"]) if unit["player"] is not None else None
+    unit_col, unit_row = require_unit_position(unit, game_state)
+    _uid_str = str(unit["id"])
+    _ue = units_cache.get(_uid_str)
+    _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)}) if _ue else {(unit_col, unit_row)}
+    shooter_id_str = _uid_str
+    shooter_player_int = int(unit["player"]) if unit["player"] is not None else None
+    melee_range = get_melee_range(game_state)
+
+    _los_map = unit.get("los_cache")
+    out: List[Dict[str, Any]] = []
+    for enemy_id, cache_entry in units_cache.items():
+        enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+        if enemy_player != unit_player:
+            enemy = get_unit_by_id(game_state, enemy_id)
+            if enemy is None:
+                raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
+            _enemy_id_str = str(enemy_id)
+            if not is_unit_alive(_enemy_id_str, game_state):
+                continue
+            if isinstance(_los_map, dict) and _enemy_id_str in _los_map:
+                if not _los_map[_enemy_id_str]:
+                    continue
+
+            _e_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            d = _mds_wpn(_u_fp, _e_fp, max_distance=max_rng)
+            if d > max_rng:
+                continue
+
+            enemy_adjacent_to_shooter = d <= melee_range
+            friendly_blocks = _friendly_engagement_blocks_ranged_shot(
+                game_state,
+                shooter_id_str,
+                shooter_player_int,
+                _e_fp,
+                _enemy_id_str,
+                enemy_adjacent_to_shooter,
+                units_cache,
+            )
+
+            los_cache_has_key = isinstance(_los_map, dict) and _enemy_id_str in _los_map
+            los_cache_true = bool(_los_map[_enemy_id_str]) if los_cache_has_key else False
+
+            out.append({
+                "enemy": enemy,
+                "enemy_id_str": _enemy_id_str,
+                "distance": d,
+                "friendly_blocks": friendly_blocks,
+                "los_cache_has_key": los_cache_has_key,
+                "los_cache_true": los_cache_true,
+            })
+    return out
+
+
 def weapon_availability_check(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -445,7 +523,8 @@ def weapon_availability_check(
     """
     available_weapons = []
     rng_weapons = require_key(unit, "RNG_WEAPONS")
-    
+    _enemy_precheck_for_availability: Optional[List[Dict[str, Any]]] = None
+
     for idx, weapon in enumerate(rng_weapons):
         can_use = True
         reason = None
@@ -527,46 +606,43 @@ def weapon_availability_check(
             else:
                 # Check if at least ONE enemy unit meets ALL conditions
                 weapon_has_valid_target = False
-                
-                from engine.hex_utils import min_distance_between_sets as _mds_wpn
-                units_cache = require_key(game_state, "units_cache")
-                unit_player = int(unit["player"]) if unit["player"] is not None else None
-                unit_col, unit_row = require_unit_position(unit, game_state)
-                _uid_str = str(unit["id"])
-                _ue = units_cache.get(_uid_str)
-                _u_fp = _ue.get("occupied_hexes", {(unit_col, unit_row)}) if _ue else {(unit_col, unit_row)}
-                for enemy_id, cache_entry in units_cache.items():
-                    enemy_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-                    if enemy_player != unit_player:
-                        enemy = get_unit_by_id(game_state, enemy_id)
-                        if enemy is None:
-                            raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
-                        _e_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                        distance = _mds_wpn(_u_fp, _e_fp, max_distance=weapon_range)
-                        if distance > weapon_range:
-                            continue
-                        
-                        # Si build_unit_los_cache a déjà été appelé, pas de LoS => pas de cible valide
-                        # pour cette arme (évite _is_valid_shooting_target complet: engagement + LoS redondant).
-                        _enemy_id_str = str(enemy_id)
-                        _los_map = unit.get("los_cache")
-                        if isinstance(_los_map, dict) and _enemy_id_str in _los_map:
-                            if not _los_map[_enemy_id_str]:
+
+                if _enemy_precheck_for_availability is None:
+                    _enemy_precheck_for_availability = _build_weapon_availability_enemy_precheck(
+                        game_state, unit, rng_weapons
+                    )
+                from engine.utils.weapon_helpers import get_melee_range
+
+                melee_range = get_melee_range(game_state)
+                weapon_is_pistol = _weapon_has_pistol_rule(weapon)
+                shooter_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
+
+                for row in _enemy_precheck_for_availability:
+                    if row["distance"] > weapon_range:
+                        continue
+                    temp_unit = dict(unit)
+                    temp_unit["RNG_WEAPONS"] = [weapon]
+                    temp_unit["selectedRngWeaponIndex"] = 0
+                    try:
+                        if row["los_cache_has_key"] and row["los_cache_true"]:
+                            if shooter_engaged:
+                                if not weapon_is_pistol:
+                                    continue
+                                if row["distance"] > melee_range:
+                                    continue
+                            elif row["distance"] <= melee_range and not weapon_is_pistol:
                                 continue
-                        
-                        # Portée OK + (LoS True ou inconnu) : règles engagement / pistolet / etc. + cohérence LoS
-                        temp_unit = dict(unit)
-                        temp_unit["RNG_WEAPONS"] = [weapon]
-                        temp_unit["selectedRngWeaponIndex"] = 0
-                        
-                        try:
-                            is_valid = _is_valid_shooting_target(game_state, temp_unit, enemy)
-                            if is_valid:
-                                weapon_has_valid_target = True
-                                break
-                        except (KeyError, IndexError, AttributeError) as e:
-                            continue
-                
+                            if row["friendly_blocks"]:
+                                continue
+                            weapon_has_valid_target = True
+                            break
+                        is_valid = _is_valid_shooting_target(game_state, temp_unit, row["enemy"])
+                        if is_valid:
+                            weapon_has_valid_target = True
+                            break
+                    except (KeyError, IndexError, AttributeError):
+                        continue
+
                 if not weapon_has_valid_target:
                     can_use = False
                     reason = "No valid targets in range or line of sight"
@@ -1556,6 +1632,47 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     return can_shoot or can_advance
 
 
+def _friendly_engagement_blocks_ranged_shot(
+    game_state: Dict[str, Any],
+    shooter_id_str: str,
+    shooter_player_int: int,
+    target_fp: Set[Tuple[int, int]],
+    target_id_str: str,
+    enemy_adjacent_to_shooter: bool,
+    units_cache: Dict[str, Any],
+) -> bool:
+    """
+    When the target footprint is not adjacent to the shooter's (enemy_adjacent_to_shooter is False),
+    a ranged shot is blocked if the enemy is in melee range of a friendly (same logic as
+    _is_valid_shooting_target). Weapon-independent for a fixed (shooter, target) pair.
+    """
+    if enemy_adjacent_to_shooter:
+        return False
+    from engine.hex_utils import min_distance_between_sets
+    from engine.utils.weapon_helpers import get_melee_range
+
+    melee_range = get_melee_range(game_state)
+    for friendly_id, cache_entry in units_cache.items():
+        friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
+        if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
+            friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
+            friendly_distance = min_distance_between_sets(target_fp, friendly_fp, max_distance=melee_range)
+
+            if friendly_distance <= melee_range:
+                if game_state.get("debug_mode", False):
+                    from engine.game_utils import add_debug_file_log
+                    episode = game_state.get("episode_number", "?")
+                    turn = game_state.get("turn", "?")
+                    add_debug_file_log(
+                        game_state,
+                        f"[SHOOT DEBUG] E{episode} T{turn} _is_valid_shooting_target: "
+                        f"Shooter {shooter_id_str} blocked - target {target_id_str} engaged with "
+                        f"friendly {friendly_id} (dist={friendly_distance})"
+                    )
+                return True
+    return False
+
+
 def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any], target: Dict[str, Any]) -> bool:
     """
     EXACT COPY from w40k_engine_save.py working validation with proper LoS
@@ -1602,28 +1719,17 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
     elif enemy_adjacent_to_shooter and not weapon_is_pistol:
         return False
 
-    if not enemy_adjacent_to_shooter:
-        shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
-        for friendly_id, cache_entry in units_cache.items():
-            friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
-            if friendly_player == shooter_player_int and friendly_id != shooter_id_str:
-                friendly_fp = cache_entry.get("occupied_hexes", {(cache_entry["col"], cache_entry["row"])})
-                friendly_distance = min_distance_between_sets(target_fp, friendly_fp, max_distance=melee_range)
-
-                if friendly_distance <= melee_range:
-                    # Enemy is engaged with friendly unit - cannot shoot
-                    if game_state.get("debug_mode", False):
-                        from engine.game_utils import add_debug_file_log
-                        episode = game_state.get("episode_number", "?")
-                        turn = game_state.get("turn", "?")
-                        target_id_str = str(target["id"])
-                        add_debug_file_log(
-                            game_state,
-                            f"[SHOOT DEBUG] E{episode} T{turn} _is_valid_shooting_target: "
-                            f"Shooter {shooter_id_str} blocked - target {target_id_str} engaged with "
-                            f"friendly {friendly_id} (dist={friendly_distance})"
-                        )
-                    return False
+    shooter_player_int = int(shooter["player"]) if shooter["player"] is not None else None
+    if _friendly_engagement_blocks_ranged_shot(
+        game_state,
+        shooter_id_str,
+        shooter_player_int,
+        target_fp,
+        str(target["id"]),
+        enemy_adjacent_to_shooter,
+        units_cache,
+    ):
+        return False
 
     # PERFORMANCE: Prefer unit-local los_cache (built at activation), then global, then direct calc.
     # Unit-local cache avoids 56-call spike at shooting_phase_start (AI_TURN.md per-unit cache).
