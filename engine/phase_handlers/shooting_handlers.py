@@ -4665,6 +4665,22 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return success, loop_result
         return result
 
+    elif action_type == "skip" and action.get("manual_end_phase"):
+        # Fin de phase manuelle (API) : forfait sans enchaîner move_after_shooting (évite un BFS move
+        # par unité ayant déjà tiré). Le ``skip`` UI / RL reste sur la branche wait|skip ci-dessous.
+        success, result = _handle_shooting_end_activation(
+            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+        )
+        result["skip_reason"] = "manual_end_phase"
+        pool_after_removal = require_key(game_state, "shoot_activation_pool")
+        if not pool_after_removal:
+            game_state["_shooting_phase_initialized"] = False
+            phase_complete_result = _shooting_phase_complete(game_state)
+            result.update(phase_complete_result)
+            if "active_shooting_unit" in game_state:
+                del game_state["active_shooting_unit"]
+        return success, result
+
     elif action_type == "wait" or action_type == "skip":
         # AI_TURN.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
         # EXACT COMPLIANCE: Same logic as right_click action (lines 2453-2468)
@@ -4718,26 +4734,6 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             else:
                 # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1)
                 success, result = _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
-        
-        # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
-        # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
-        # AI_TURN.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
-        # CRITICAL: According to AI_TURN.md, pool should never contain dead units, so checking pool emptiness is correct
-        pool_after_removal = require_key(game_state, "shoot_activation_pool")
-        if not pool_after_removal:
-            # Pool is empty - phase is complete (AI_TURN.md LINE 794: "NO → End of shooting phase")
-            game_state["_shooting_phase_initialized"] = False
-            phase_complete_result = _shooting_phase_complete(game_state)
-            result.update(phase_complete_result)
-            if "active_shooting_unit" in game_state:
-                del game_state["active_shooting_unit"]
-        
-        return success, result
-    
-    elif action_type == "skip":
-        # AI_TURN.md: Skip = unit has no valid actions (e.g. target died before activation). Engine-determined, not agent choice.
-        success, result = _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip")
-        result["skip_reason"] = "no_valid_actions"
         
         # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty

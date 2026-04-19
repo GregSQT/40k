@@ -1680,7 +1680,6 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
 
     _perf = perf_timing_enabled(game_state)
     _t_ep0 = time.perf_counter() if _perf else None
-    _sum_activate_s = 0.0
     _sum_skip_s = 0.0
     _unit_pairs = 0
 
@@ -1701,7 +1700,7 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
                 _dt = time.perf_counter() - _t_ep0
                 append_perf_timing_line(
                     f"END_PHASE episode={ep} turn={trn} start_phase={current_phase} outcome=phase_changed_early "
-                    f"unit_pairs={_unit_pairs} activate_semantic_s={_sum_activate_s:.6f} skip_semantic_s={_sum_skip_s:.6f} "
+                    f"unit_pairs={_unit_pairs} activate_semantic_s=0.000000 skip_semantic_s={_sum_skip_s:.6f} "
                     f"advance_phase_s=0.000000 total_s={_dt:.6f}"
                 )
             return True, last_result
@@ -1711,46 +1710,19 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
             break
 
         unit_id = str(activation_pool[0])
-        _ta0 = time.perf_counter() if _perf else None
-        activate_success, activate_result = engine_instance.execute_semantic_action(
-            {"action": "activate_unit", "unitId": unit_id}
-        )
-        if _perf and _ta0 is not None:
-            _sum_activate_s += time.perf_counter() - _ta0
-        if not activate_success:
-            if _perf and _t_ep0 is not None:
-                ep = game_state.get("episode_number", "?")
-                trn = game_state.get("turn", "?")
-                _dt = time.perf_counter() - _t_ep0
-                append_perf_timing_line(
-                    f"END_PHASE episode={ep} turn={trn} start_phase={current_phase} outcome=activate_failed "
-                    f"unit_pairs={_unit_pairs} activate_semantic_s={_sum_activate_s:.6f} skip_semantic_s={_sum_skip_s:.6f} "
-                    f"advance_phase_s=0.000000 total_s={_dt:.6f}"
-                )
-            return False, {
-                "error": "end_phase_activation_failed",
-                "phase": current_phase,
-                "unitId": unit_id,
-                "details": activate_result,
-            }
-
-        last_result = activate_result if isinstance(activate_result, dict) else last_result
-
-        if require_key(game_state, "phase") != current_phase:
-            if _perf and _t_ep0 is not None:
-                ep = game_state.get("episode_number", "?")
-                trn = game_state.get("turn", "?")
-                _dt = time.perf_counter() - _t_ep0
-                append_perf_timing_line(
-                    f"END_PHASE episode={ep} turn={trn} start_phase={current_phase} outcome=phase_changed_after_activate "
-                    f"unit_pairs={_unit_pairs} activate_semantic_s={_sum_activate_s:.6f} skip_semantic_s={_sum_skip_s:.6f} "
-                    f"advance_phase_s=0.000000 total_s={_dt:.6f}"
-                )
-            return True, last_result
-
+        # Ne pas appeler ``activate_unit`` avant ``skip`` : ``skip`` retire l'unité de la pool via
+        # ``end_activation`` sans les coûts d'activation (BFS move, construction de cibles tir, etc.).
+        # Charge : ``execute_action`` traite un ``skip`` pour une unité dans ``charge_activation_pool``
+        # sans activation préalable (voir charge_handlers).
         _ts0 = time.perf_counter() if _perf else None
         skip_success, skip_result = engine_instance.execute_semantic_action(
-            {"action": "skip", "unitId": unit_id}
+            {
+                "action": "skip",
+                "unitId": unit_id,
+                # Tir : sans ce flag, ``skip`` peut suivre la logique ``wait`` → move_after_shooting + BFS.
+                # Charge : sans ce flag, ``skip`` utilise ``WAIT`` dans ``end_activation`` (logs + step) par unité.
+                "manual_end_phase": True,
+            }
         )
         if _perf and _ts0 is not None:
             _sum_skip_s += time.perf_counter() - _ts0
@@ -1762,7 +1734,7 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
                 _dt = time.perf_counter() - _t_ep0
                 append_perf_timing_line(
                     f"END_PHASE episode={ep} turn={trn} start_phase={current_phase} outcome=skip_failed "
-                    f"unit_pairs={_unit_pairs} activate_semantic_s={_sum_activate_s:.6f} skip_semantic_s={_sum_skip_s:.6f} "
+                    f"unit_pairs={_unit_pairs} activate_semantic_s=0.000000 skip_semantic_s={_sum_skip_s:.6f} "
                     f"advance_phase_s=0.000000 total_s={_dt:.6f}"
                 )
             return False, {
@@ -1780,7 +1752,7 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
                 _dt = time.perf_counter() - _t_ep0
                 append_perf_timing_line(
                     f"END_PHASE episode={ep} turn={trn} start_phase={current_phase} outcome=phase_changed_after_skip "
-                    f"unit_pairs={_unit_pairs} activate_semantic_s={_sum_activate_s:.6f} skip_semantic_s={_sum_skip_s:.6f} "
+                    f"unit_pairs={_unit_pairs} activate_semantic_s=0.000000 skip_semantic_s={_sum_skip_s:.6f} "
                     f"advance_phase_s=0.000000 total_s={_dt:.6f}"
                 )
             return True, last_result
@@ -1788,7 +1760,12 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
     # If pool is empty but phase did not transition yet, trigger explicit phase advance.
     _t_adv0 = time.perf_counter() if _perf else None
     advance_success, advance_result = engine_instance.execute_semantic_action(
-        {"action": "advance_phase", "from": current_phase, "reason": "manual_end_phase"}
+        {
+            "action": "advance_phase",
+            "from": current_phase,
+            "reason": "manual_end_phase",
+            "manual_end_phase": True,
+        }
     )
     _adv_s = (time.perf_counter() - _t_adv0) if _perf and _t_adv0 is not None else 0.0
     if not advance_success:
@@ -1798,7 +1775,7 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
             _dt = time.perf_counter() - _t_ep0
             append_perf_timing_line(
                 f"END_PHASE episode={ep} turn={trn} start_phase={current_phase} outcome=advance_failed "
-                f"unit_pairs={_unit_pairs} activate_semantic_s={_sum_activate_s:.6f} skip_semantic_s={_sum_skip_s:.6f} "
+                f"unit_pairs={_unit_pairs} activate_semantic_s=0.000000 skip_semantic_s={_sum_skip_s:.6f} "
                 f"advance_phase_s={_adv_s:.6f} total_s={_dt:.6f}"
             )
         return False, {
@@ -1812,7 +1789,7 @@ def _execute_end_phase_action(engine_instance: W40KEngine, action: Dict[str, Any
         _dt = time.perf_counter() - _t_ep0
         append_perf_timing_line(
             f"END_PHASE episode={ep} turn={trn} start_phase={current_phase} outcome=success "
-            f"unit_pairs={_unit_pairs} activate_semantic_s={_sum_activate_s:.6f} skip_semantic_s={_sum_skip_s:.6f} "
+            f"unit_pairs={_unit_pairs} activate_semantic_s=0.000000 skip_semantic_s={_sum_skip_s:.6f} "
             f"advance_phase_s={_adv_s:.6f} total_s={_dt:.6f}"
         )
     if isinstance(advance_result, dict):

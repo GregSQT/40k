@@ -123,8 +123,6 @@ def test_execute_end_phase_action_processes_pool_and_advances_phase() -> None:
             }
 
         def execute_semantic_action(self, action):
-            if action["action"] == "activate_unit":
-                return True, {"action": "activate_unit", "unitId": action["unitId"]}
             if action["action"] == "skip":
                 self.game_state["move_activation_pool"] = []
                 return True, {"action": "skip", "unitId": action["unitId"]}

@@ -2568,7 +2568,8 @@ class W40KEngine(gym.Env):
 
         # CRITICAL FIX: Log action BEFORE cascade to ensure action is logged even if phase completes
         # Log action with result (before cascade modifies it)
-        if (self.step_logger and self.step_logger.enabled):
+        # API « end phase » : un skip par unité avec manual_end_phase — éviter N× step_logger + reward (~très lent).
+        if (self.step_logger and self.step_logger.enabled) and not action.get("manual_end_phase"):
             try:
                 move_after_shooting_logged = False
                 
@@ -3845,12 +3846,17 @@ class W40KEngine(gym.Env):
 
             _cascade_dur = _cascade_time.perf_counter() - _cascade_t0
             _ep_c = int(require_key(self.game_state, "episode_number"))
-            try:
-                _debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                with open(_debug_path, "a", encoding="utf-8", errors="replace") as _f:
-                    _f.write(f"CASCADE_TIMING episode={_ep_c} cascade_num={cascade_count} from_phase={current_phase} to_phase={next_phase} duration_s={_cascade_dur:.6f}\n")
-            except (OSError, IOError):
-                pass
+            # Écriture synchrone dans debug.log désactivée par défaut (coûteuse à chaque transition en cascade).
+            if os.environ.get("W40K_CASCADE_DEBUG_FILE", "").lower() in ("1", "true", "yes"):
+                try:
+                    _debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+                    with open(_debug_path, "a", encoding="utf-8", errors="replace") as _f:
+                        _f.write(
+                            f"CASCADE_TIMING episode={_ep_c} cascade_num={cascade_count} "
+                            f"from_phase={current_phase} to_phase={next_phase} duration_s={_cascade_dur:.6f}\n"
+                        )
+                except (OSError, IOError):
+                    pass
             if _perf:
                 append_perf_timing_line(
                     f"CASCADE_ITER episode={_ep_c} cascade_num={cascade_count} from_phase={current_phase} "

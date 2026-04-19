@@ -675,10 +675,24 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
             return False, {"error": "invalid_charge_action", "action": action}
 
     elif action_type == "skip":
+        # Fin de phase manuelle (API) : forfait charge sans WAIT ni journalisation « wait » par unité
+        # (had_valid_destinations=False → end_activation PASS, pas d'entrée action_logs type wait, pas +step).
+        if action.get("manual_end_phase"):
+            success, result = _handle_skip_action(
+                game_state, active_unit, had_valid_destinations=False
+            )
+            result["action"] = "skip"
+            result["skip_reason"] = "manual_end_phase"
+            return success, result
         # Ignore skip action if unit is not active in charge phase
         # This prevents skip actions from shooting phase being processed in charge phase
         active_charge_unit = game_state.get("active_charge_unit")
         if active_charge_unit != unit_id:
+            pool_ids = [str(u) for u in require_key(game_state, "charge_activation_pool")]
+            if str(unit_id) in pool_ids:
+                # Unit in charge pool but not activated (e.g. API end_phase without activate_unit).
+                # Match active-unit skip: had_valid_destinations=True (AI_TURN.md line 515 path).
+                return _handle_skip_action(game_state, active_unit, had_valid_destinations=True)
             # CRITICAL: In gym training mode, skip must NOT trigger activation or movement.
             # Determine had_valid_destinations without executing charge logic.
             if is_gym_training:
@@ -698,7 +712,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
                 valid_targets = charge_build_valid_targets(game_state, unit_id)
                 had_valid_destinations = len(valid_targets) > 0
                 return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
-            # Unit is in pool but not active - return no effect (don't remove from pool)
+            # Unit not in charge pool and not active — ignore (e.g. stale action)
             return True, {"action": "no_effect", "unitId": unit_id, "reason": "unit_not_active_in_charge_phase"}
         # AI_TURN.md Line 515: Agent chooses wait (has valid destinations, chooses to skip)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=True)
