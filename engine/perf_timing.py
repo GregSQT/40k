@@ -26,15 +26,29 @@ Lignes typiques (référence) :
   (``make_json_serializable`` + sync HP + types joueurs), ``jsonify_response_s`` (construction de la
   réponse Flask + sérialisation du corps), ``total_wall_s`` depuis le début du traitement POST.
 - ``SHOOT_ACTIVATION_START`` — une activation tir (``activate_unit`` → ``shooting_unit_activation_start``) :
-  ``los_cache_s`` (``build_unit_los_cache``), ``weapon_avail_s`` (``weapon_availability_check``),
-  ``target_pool_s`` (``shooting_build_valid_target_pool``), ``tail_s`` (arme par défaut, JSON armes, etc.),
+  ``los_cache_s`` (``build_unit_los_cache``) ;
+  ``activation_prep_s`` (réinitialisations entre fin LoS et précheck ennemi : adjacence, PISTOL, reset ``shot``, etc.) ;
+  ``enemy_precheck_s`` (uniquement ``_build_weapon_availability_enemy_precheck``) ;
+  ``weapon_avail_inner_s`` (uniquement le corps de ``weapon_availability_check`` avec ``_precheck`` déjà fourni) ;
+  ``target_pool_s`` (``shooting_build_valid_target_pool``) ; ``tail_s`` (arme par défaut, JSON armes, etc.) ;
   ``total_s``, ``outcome`` (ex. ``success``, ``empty_pool_advance``, ``empty_pool_skip``), ``valid_targets_n``.
+  La somme ``enemy_precheck_s`` + ``weapon_avail_inner_s`` correspond au coût « armes » avant le pool de cibles ;
+  la ligne ``WEAPON_AVAILABILITY_CHECK`` ne mesure que l’intérieur de ``weapon_availability_check`` (donc proche de
+  ``weapon_avail_inner_s`` quand le précheck est passé en amont, pas ``enemy_precheck_s``).
 - ``SHOOT_PHASE_HANDLER`` — découpe ``_process_shooting_phase`` (``w40k_core``) : ``shooting_phase_start_s``
   (appel optionnel à ``shooting_phase_start`` si la phase n’était pas encore marquée initialisée),
   ``execute_action_s`` (``shooting_handlers.execute_action`` — inclut p.ex. ``activate_unit`` / tir / advance),
   ``phase_end_s`` (fusion ``shooting_phase_end`` si ``phase_complete``), ``total_handler_s``.
   Explique l’écart entre ``SHOOT_ACTIVATION_START`` et ``SEMANTIC_SEGMENTS`` / ``EXECUTE_SEMANTIC_TOTAL`` pour
   ``activate_unit`` quand ``shooting_phase_start`` a encore tourné sur la même requête.
+- ``WEAPON_AVAILABILITY_CHECK`` — une ligne par appel à ``weapon_availability_check`` (perf activée) :
+  ``precheck_build_s`` (construction ``_build_weapon_availability_enemy_precheck`` **à l’intérieur** de la fonction
+  si le précheck n’est pas fourni par l’appelant), ``weapon_row_scan_s``, ``overhead_s``, ``total_s``.
+  À l’activation tir, le précheck est souvent déjà construit dans ``enemy_precheck_s`` (voir ``SHOOT_ACTIVATION_START``) :
+  alors ``precheck_build_s`` est nul ici mais le gros travail peut apparaître dans ``enemy_precheck_s``.
+- ``END_PHASE`` — ``services/api_server._execute_end_phase_action`` : ``activate_semantic_s`` / ``skip_semantic_s``
+  (sommes des ``execute_semantic_action`` activate / skip par unité), ``advance_phase_s``, ``unit_pairs``,
+  ``outcome``, ``total_s``. Découpe le coût moteur d’un ``end_phase`` HTTP (plusieurs activations + ``advance_phase``).
 - ``MOVE_POOL_BUILD`` — ``prep_s`` (caches occupation / EZ), ``bfs_s`` (exploration), pour le sol
   multi-hex ``footprint_zone_border_s`` (union empreintes + bordure), ``total_s``, compteurs
   ``visited`` / ``valid``. ``anchors_n`` = taille de ``valid_move_destinations_pool`` (disques UI) ;

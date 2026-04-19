@@ -505,7 +505,9 @@ def weapon_availability_check(
     unit: Dict[str, Any],
     weapon_rule: int,
     advance_status: int,
-    adjacent_status: int
+    adjacent_status: int,
+    *,
+    _precheck: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     shoot_refactor.md EXACT: Filter weapons based on rules and context
@@ -516,14 +518,23 @@ def weapon_availability_check(
         weapon_rule: 0 = no rules, 1 = rules apply
         advance_status: 0 = no advance, 1 = advanced
         adjacent_status: 0 = not adjacent, 1 = adjacent to enemy
+        _precheck: Si fourni (même liste que ``_build_weapon_availability_enemy_precheck``), évite
+            de reconstruire le précalcul ennemi (chemin activation).
     
     Returns:
         List of weapons that can be selected (weapon_available_pool)
         Each item has: index, weapon, can_use, reason
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf_wa = perf_timing_enabled(game_state)
+    _t_wa0 = time.perf_counter() if _perf_wa else None
+    _precheck_build_s = 0.0
+    _weapon_row_scan_s = 0.0
+
     available_weapons = []
     rng_weapons = require_key(unit, "RNG_WEAPONS")
-    _enemy_precheck_for_availability: Optional[List[Dict[str, Any]]] = None
+    _enemy_precheck_for_availability: Optional[List[Dict[str, Any]]] = _precheck
 
     for idx, weapon in enumerate(rng_weapons):
         can_use = True
@@ -608,15 +619,19 @@ def weapon_availability_check(
                 weapon_has_valid_target = False
 
                 if _enemy_precheck_for_availability is None:
+                    _tpb = time.perf_counter() if _perf_wa else None
                     _enemy_precheck_for_availability = _build_weapon_availability_enemy_precheck(
                         game_state, unit, rng_weapons
                     )
+                    if _perf_wa and _tpb is not None:
+                        _precheck_build_s += time.perf_counter() - _tpb
                 from engine.utils.weapon_helpers import get_melee_range
 
                 melee_range = get_melee_range(game_state)
                 weapon_is_pistol = _weapon_has_pistol_rule(weapon)
                 shooter_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
 
+                _trs = time.perf_counter() if _perf_wa else None
                 for row in _enemy_precheck_for_availability:
                     if row["distance"] > weapon_range:
                         continue
@@ -642,6 +657,8 @@ def weapon_availability_check(
                             break
                     except (KeyError, IndexError, AttributeError):
                         continue
+                if _perf_wa and _trs is not None:
+                    _weapon_row_scan_s += time.perf_counter() - _trs
 
                 if not weapon_has_valid_target:
                     can_use = False
@@ -653,7 +670,19 @@ def weapon_availability_check(
             "can_use": can_use,
             "reason": reason
         })
-    
+
+    if _perf_wa and _t_wa0 is not None:
+        _total = time.perf_counter() - _t_wa0
+        _overhead = _total - _precheck_build_s - _weapon_row_scan_s
+        ep = game_state.get("episode_number", "?")
+        trn = game_state.get("turn", "?")
+        uid = str(unit.get("id", "?"))
+        append_perf_timing_line(
+            f"WEAPON_AVAILABILITY_CHECK episode={ep} turn={trn} unit_id={uid} "
+            f"precheck_build_s={_precheck_build_s:.6f} weapon_row_scan_s={_weapon_row_scan_s:.6f} "
+            f"overhead_s={_overhead:.6f} total_s={_total:.6f}"
+        )
+
     return available_weapons
 
 def _get_available_weapons_for_selection(
@@ -1103,28 +1132,45 @@ def _emit_shoot_activation_perf(
     unit_id: str,
     t0: Optional[float],
     t_after_los: Optional[float],
-    t_after_wpn: Optional[float],
+    t_ep0: Optional[float],
+    t_ep1: Optional[float],
+    t_wai0: Optional[float],
+    t_wai1: Optional[float],
     t_after_tgt_pool: Optional[float],
     outcome: str,
     valid_targets_n: int,
 ) -> None:
-    """Une ligne ``SHOOT_ACTIVATION_START`` dans perf_timing.log si ``perf_timing`` est actif."""
+    """Une ligne ``SHOOT_ACTIVATION_START`` dans perf_timing.log si ``perf_timing`` est actif.
+
+    Segments armes (après ``los_cache_s``) :
+    - ``activation_prep_s`` : entre fin LoS et début ``_build_weapon_availability_enemy_precheck`` ;
+    - ``enemy_precheck_s`` : uniquement ``_build_weapon_availability_enemy_precheck`` ;
+    - ``weapon_avail_inner_s`` : uniquement ``weapon_availability_check`` (avec ``_precheck`` déjà fourni).
+
+    Somme ``enemy_precheck_s`` + ``weapon_avail_inner_s`` ≈ coût total de la passe « armes » avant le pool
+    de cibles (à rapprocher de la ligne ``WEAPON_AVAILABILITY_CHECK`` qui ne mesure que l’intérieur de
+    ``weapon_availability_check``).
+    """
     from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
 
     if not perf_timing_enabled(game_state) or t0 is None:
         return
     t_end = time.perf_counter()
     los_s = (t_after_los - t0) if t_after_los is not None else 0.0
-    wpn_s = (t_after_wpn - t_after_los) if t_after_wpn is not None and t_after_los is not None else 0.0
-    pool_s = (t_after_tgt_pool - t_after_wpn) if t_after_tgt_pool is not None and t_after_wpn is not None else 0.0
+    activation_prep_s = (t_ep0 - t_after_los) if t_after_los is not None and t_ep0 is not None else 0.0
+    enemy_precheck_s = (t_ep1 - t_ep0) if t_ep0 is not None and t_ep1 is not None else 0.0
+    weapon_avail_inner_s = (t_wai1 - t_wai0) if t_wai0 is not None and t_wai1 is not None else 0.0
+    pool_s = (t_after_tgt_pool - t_wai1) if t_after_tgt_pool is not None and t_wai1 is not None else 0.0
     tail_s = (t_end - t_after_tgt_pool) if t_after_tgt_pool is not None else (t_end - t0)
     total_s = t_end - t0
     ep = game_state.get("episode_number", "?")
     trn = game_state.get("turn", "?")
     append_perf_timing_line(
         f"SHOOT_ACTIVATION_START episode={ep} turn={trn} unit_id={unit_id} "
-        f"los_cache_s={los_s:.6f} weapon_avail_s={wpn_s:.6f} target_pool_s={pool_s:.6f} "
-        f"tail_s={tail_s:.6f} total_s={total_s:.6f} outcome={outcome} valid_targets_n={valid_targets_n}"
+        f"los_cache_s={los_s:.6f} activation_prep_s={activation_prep_s:.6f} "
+        f"enemy_precheck_s={enemy_precheck_s:.6f} weapon_avail_inner_s={weapon_avail_inner_s:.6f} "
+        f"target_pool_s={pool_s:.6f} tail_s={tail_s:.6f} total_s={total_s:.6f} "
+        f"outcome={outcome} valid_targets_n={valid_targets_n}"
     )
 
 
@@ -1754,6 +1800,14 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         has_los = _has_line_of_sight(game_state, shooter, target)
     return has_los
 
+
+def _clear_shoot_activation_weapon_reuse_cache(unit: Dict[str, Any]) -> None:
+    """Invalidate activation-scoped weapon pool / precheck reuse (see shooting_unit_activation_start)."""
+    unit.pop("_shoot_activation_reuse_weapon_pool", None)
+    unit.pop("_shoot_activation_reuse_ctx", None)
+    unit.pop("_shoot_activation_enemy_precheck", None)
+
+
 def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
     """
     Start unit activation from shoot_activation_pool
@@ -1794,7 +1848,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     _perf_act = perf_timing_enabled(game_state)
     _t_act0 = time.perf_counter() if _perf_act else None
     _t_after_los: Optional[float] = None
-    _t_after_wpn: Optional[float] = None
+    _t_ep0: Optional[float] = None
+    _t_ep1: Optional[float] = None
+    _t_wai0: Optional[float] = None
+    _t_wai1: Optional[float] = None
     _t_after_tgt_pool: Optional[float] = None
 
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is in pool, it's alive (no need to check)
@@ -1863,12 +1920,23 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     weapon_rule = game_state["weapon_rule"]
     advance_status = 0  # STEP 2: Unit has NOT advanced yet
     adjacent_status = 1 if unit_is_adjacent else 0
-    _t_wpn0 = time.perf_counter() if _perf_act else None
-    weapon_available_pool = weapon_availability_check(
-        game_state, unit, weapon_rule, advance_status, adjacent_status
+    _t_ep0 = time.perf_counter() if _perf_act else None
+    _activation_enemy_precheck = _build_weapon_availability_enemy_precheck(
+        game_state, unit, require_key(unit, "RNG_WEAPONS")
     )
-    if _perf_act and _t_wpn0 is not None:
-        _t_after_wpn = time.perf_counter()
+    if _perf_act and _t_ep0 is not None:
+        _t_ep1 = time.perf_counter()
+    _t_wai0 = time.perf_counter() if _perf_act else None
+    weapon_available_pool = weapon_availability_check(
+        game_state,
+        unit,
+        weapon_rule,
+        advance_status,
+        adjacent_status,
+        _precheck=_activation_enemy_precheck,
+    )
+    if _perf_act and _t_wai0 is not None:
+        _t_wai1 = time.perf_counter()
     
     # CRITICAL: Use shooting_build_valid_target_pool for consistent pool building
     # This wrapper automatically determines context (advance_status, adjacent_status) and handles cache
@@ -1877,6 +1945,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         game_state,
         unit_id,
         precomputed_weapon_available_pool=weapon_available_pool,
+        precomputed_enemy_precheck=_activation_enemy_precheck,
     )
     if _perf_act and _t_pool0 is not None:
         _t_after_tgt_pool = time.perf_counter()
@@ -1899,7 +1968,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 str(unit_id),
                 _t_act0,
                 _t_after_los,
-                _t_after_wpn,
+                _t_ep0,
+                _t_ep1,
+                _t_wai0,
+                _t_wai1,
                 _t_after_tgt_pool,
                 "empty_pool_advance",
                 0,
@@ -1925,7 +1997,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 str(unit_id),
                 _t_act0,
                 _t_after_los,
-                _t_after_wpn,
+                _t_ep0,
+                _t_ep1,
+                _t_wai0,
+                _t_wai1,
                 _t_after_tgt_pool,
                 "empty_pool_skip",
                 0,
@@ -1959,7 +2034,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 str(unit_id),
                 _t_act0,
                 _t_after_los,
-                _t_after_wpn,
+                _t_ep0,
+                _t_ep1,
+                _t_wai0,
+                _t_wai1,
                 _t_after_tgt_pool,
                 "no_usable_advance",
                 len(valid_target_pool),
@@ -1983,7 +2061,10 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             str(unit_id),
             _t_act0,
             _t_after_los,
-            _t_after_wpn,
+            _t_ep0,
+            _t_ep1,
+            _t_wai0,
+            _t_wai1,
             _t_after_tgt_pool,
             "no_usable_skip",
             len(valid_target_pool),
@@ -2034,12 +2115,20 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in weapon_available_pool]
 
     unit_col, unit_row = require_unit_position(unit, game_state)
+    # Réutilisation immédiate dans _shooting_unit_execution_loop (menu joueur) : évite un second
+    # weapon_availability_check identique à celui ci-dessus pour le même (advance, adjacent).
+    unit["_shoot_activation_reuse_weapon_pool"] = weapon_available_pool
+    unit["_shoot_activation_reuse_ctx"] = (advance_status, adjacent_status)
+    unit["_shoot_activation_enemy_precheck"] = _activation_enemy_precheck
     _emit_shoot_activation_perf(
         game_state,
         str(unit_id),
         _t_act0,
         _t_after_los,
-        _t_after_wpn,
+        _t_ep0,
+        _t_ep1,
+        _t_wai0,
+        _t_wai1,
         _t_after_tgt_pool,
         "success",
         len(valid_target_pool),
@@ -2057,6 +2146,7 @@ def valid_target_pool_build(
     advance_status: int,
     adjacent_status: int,
     precomputed_weapon_available_pool: Optional[List[Dict[str, Any]]] = None,
+    precomputed_enemy_precheck: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """
     shoot_refactor.md EXACT: Build list of valid enemy targets
@@ -2069,6 +2159,8 @@ def valid_target_pool_build(
         adjacent_status: 0 = not adjacent, 1 = adjacent to enemy
         precomputed_weapon_available_pool: si fourni (même contexte arg1–arg3), évite un second
             ``weapon_availability_check`` (ex. activation après ``shooting_unit_activation_start``).
+        precomputed_enemy_precheck: même liste que ``_build_weapon_availability_enemy_precheck`` pour
+            réutiliser distance + ``friendly_blocks`` (évite BFS / boucle alliés redondants).
     
     Returns:
         List of enemy unit IDs that can be targeted (valid_target_pool)
@@ -2140,6 +2232,14 @@ def valid_target_pool_build(
             f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
             f"Found {len(targets_with_los)} targets with LoS out of {len(unit['los_cache'])} total targets"
         )
+
+    precheck_by_id: Optional[Dict[str, Dict[str, Any]]] = None
+    if precomputed_enemy_precheck is not None:
+        precheck_by_id = {
+            r["enemy_id_str"]: r
+            for r in precomputed_enemy_precheck
+            if isinstance(r.get("enemy_id_str"), str)
+        }
     
     # For each target_id in targets_with_los.keys():
     units_cache = require_key(game_state, "units_cache")
@@ -2215,9 +2315,17 @@ def valid_target_pool_build(
         unit_entry = units_cache.get(unit_id_normalized)
         shooter_fp = unit_entry.get("occupied_hexes", {(unit_col, unit_row)}) if unit_entry else {(unit_col, unit_row)}
         enemy_fp = enemy_entry.get("occupied_hexes", {(enemy_entry["col"], enemy_entry["row"])})
-        distance_to_enemy = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=melee_range)
 
-        enemy_adjacent_to_shooter = (distance_to_enemy <= melee_range)
+        row_opt = precheck_by_id.get(target_id_str) if precheck_by_id else None
+        if row_opt is not None:
+            distance_to_enemy = int(row_opt["distance"])
+            enemy_adjacent_to_shooter = distance_to_enemy <= melee_range
+            if not enemy_adjacent_to_shooter and bool(row_opt.get("friendly_blocks")):
+                continue
+        else:
+            distance_to_enemy = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=melee_range)
+            enemy_adjacent_to_shooter = distance_to_enemy <= melee_range
+
         shooter_is_engaged = adjacent_status == 1
         has_pistol_weapon = False
         
@@ -2234,10 +2342,12 @@ def valid_target_pool_build(
             if not has_pistol_weapon:
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
+                    _ep = enemy.get("col", "?")
+                    _er = enemy.get("row", "?")
                     add_debug_file_log(
                         game_state,
                         f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
-                        f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - adjacent without PISTOL weapon"
+                        f"Enemy {enemy_id_normalized}({_ep},{_er}) EXCLUDED - adjacent without PISTOL weapon"
                     )
                 continue
         
@@ -2245,10 +2355,12 @@ def valid_target_pool_build(
         if shooter_is_engaged and not enemy_adjacent_to_shooter:
             if game_state.get("debug_mode", False):
                 from engine.game_utils import add_debug_file_log
+                _ep = enemy.get("col", "?")
+                _er = enemy.get("row", "?")
                 add_debug_file_log(
                     game_state,
                     f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
-                    f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - shooter engaged, non-adjacent target"
+                    f"Enemy {enemy_id_normalized}({_ep},{_er}) EXCLUDED - shooter engaged, non-adjacent target"
                 )
             continue
 
@@ -2256,7 +2368,7 @@ def valid_target_pool_build(
         # CRITICAL: This rule applies ONLY when enemy is NOT adjacent to shooter
         # If enemy is adjacent to shooter AND we have PISTOL weapon, we can shoot regardless of engagement
         # If enemy is NOT adjacent to shooter, normal rules apply: cannot shoot if enemy is engaged with friendly units
-        if not enemy_adjacent_to_shooter:
+        if not enemy_adjacent_to_shooter and row_opt is None:
             enemy_adjacent_to_friendly = False
             engaged_friendly_id = None
             engaged_friendly_distance = None
@@ -2275,10 +2387,12 @@ def valid_target_pool_build(
             if enemy_adjacent_to_friendly:
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
+                    _ep = enemy.get("col", "?")
+                    _er = enemy.get("row", "?")
                     add_debug_file_log(
                         game_state,
                         f"[SHOOT DEBUG] E{episode} T{turn} valid_target_pool_build: "
-                        f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) engaged with friendly "
+                        f"Enemy {enemy_id_normalized}({_ep},{_er}) engaged with friendly "
                         f"{engaged_friendly_id} (dist={engaged_friendly_distance})"
                     )
                 if game_state.get("debug_mode", False):
@@ -2286,7 +2400,7 @@ def valid_target_pool_build(
                     add_debug_file_log(
                         game_state,
                         f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
-                        f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - engaged with friendly unit"
+                        f"Enemy {enemy_id_normalized}({_ep},{_er}) EXCLUDED - engaged with friendly unit"
                     )
                 continue
         
@@ -2319,20 +2433,24 @@ def valid_target_pool_build(
             valid_target_pool.append(str(enemy["id"]))
             if game_state.get("debug_mode", False):
                 from engine.game_utils import add_debug_file_log
+                _ep = enemy.get("col", "?")
+                _er = enemy.get("row", "?")
                 add_debug_file_log(
                     game_state,
                     f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
-                    f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) ADDED to pool "
+                    f"Enemy {enemy_id_normalized}({_ep},{_er}) ADDED to pool "
                     f"(distance={distance}, shooter_player={current_player_int}, target_player={enemy_player})"
                 )
         else:
             max_rng = max((require_key(w, "RNG") for w in rng_weapons), default=0)
             if game_state.get("debug_mode", False):
                 from engine.game_utils import add_debug_file_log
+                _ep = enemy.get("col", "?")
+                _er = enemy.get("row", "?")
                 add_debug_file_log(
                     game_state,
                     f"[TARGET POOL DEBUG] E{episode} T{turn} valid_target_pool_build: "
-                    f"Enemy {enemy_id_normalized}({enemy_col},{enemy_row}) EXCLUDED - out of range "
+                    f"Enemy {enemy_id_normalized}({_ep},{_er}) EXCLUDED - out of range "
                     f"(distance={distance}, max_range={max_rng})"
                 )
     
@@ -2344,6 +2462,7 @@ def shooting_build_valid_target_pool(
     unit_id: str,
     *,
     precomputed_weapon_available_pool: Optional[List[Dict[str, Any]]] = None,
+    precomputed_enemy_precheck: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """
     Build valid_target_pool and always send blinking data to frontend.
@@ -2356,6 +2475,7 @@ def shooting_build_valid_target_pool(
     precomputed_weapon_available_pool: résultat déjà calculé de ``weapon_availability_check`` pour le
     même (weapon_rule, advance_status, adjacent_status) que ce wrapper déduit — évite un double
     appel coûteux sur le chemin activation.
+    precomputed_enemy_precheck: même passe ennemis que pour ``weapon_availability_check`` (activation).
     
     NOTE: This function is a wrapper that determines context and calls valid_target_pool_build.
     For direct calls, use valid_target_pool_build() with explicit parameters.
@@ -2430,7 +2550,22 @@ def shooting_build_valid_target_pool(
         wall_col, wall_row = normalize_coordinates(raw_wall[0], raw_wall[1])
         normalized_wall_hexes.append((wall_col, wall_row))
     wall_hexes_tuple = tuple(sorted(normalized_wall_hexes))
-    cache_key = (os.getpid(), gs_instance_id, episode_num, turn_num, unit_id_str, unit_col, unit_row, advance_status, adjacent_status, unit_player_int, enemy_pos_hash, wall_hexes_tuple)
+    precheck_cache_tag = 1 if precomputed_enemy_precheck is not None else 0
+    cache_key = (
+        os.getpid(),
+        gs_instance_id,
+        episode_num,
+        turn_num,
+        unit_id_str,
+        unit_col,
+        unit_row,
+        advance_status,
+        adjacent_status,
+        unit_player_int,
+        enemy_pos_hash,
+        wall_hexes_tuple,
+        precheck_cache_tag,
+    )
 
     # Check cache
     if cache_key in _target_pool_cache:
@@ -2496,6 +2631,7 @@ def shooting_build_valid_target_pool(
         advance_status,
         adjacent_status,
         precomputed_weapon_available_pool=precomputed_weapon_available_pool,
+        precomputed_enemy_precheck=precomputed_enemy_precheck,
     )
 
     # PERFORMANCE: Pre-calculate priorities for all targets ONCE before sorting
@@ -3407,6 +3543,7 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_manual_weapon_selected"]
     if "_shoot_activation_started" in unit:
         del unit["_shoot_activation_started"]
+    _clear_shoot_activation_weapon_reuse_cache(unit)
     if "_pending_move_after_shooting" in unit:
         del unit["_pending_move_after_shooting"]
     if "_move_after_shooting_destinations" in unit:
@@ -4020,10 +4157,30 @@ def _shooting_unit_execution_loop(game_state: Dict[str, Any], unit_id: str, conf
     is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
     advance_status = 1 if has_advanced else 0
     adjacent_status = 1 if is_adjacent else 0
-    
-    weapon_available_pool = weapon_availability_check(
-        game_state, unit, weapon_rule, advance_status, adjacent_status
-    )
+    ctx_now = (advance_status, adjacent_status)
+    reuse_pool = unit.get("_shoot_activation_reuse_weapon_pool")
+    reuse_ctx = unit.get("_shoot_activation_reuse_ctx")
+    enemy_precheck = unit.get("_shoot_activation_enemy_precheck")
+    if (
+        reuse_pool is not None
+        and reuse_ctx == ctx_now
+        and not _unit_has_shot_with_any_weapon(unit)
+    ):
+        weapon_available_pool = reuse_pool
+    elif reuse_ctx == ctx_now and enemy_precheck is not None:
+        weapon_available_pool = weapon_availability_check(
+            game_state,
+            unit,
+            weapon_rule,
+            advance_status,
+            adjacent_status,
+            _precheck=enemy_precheck,
+        )
+    else:
+        weapon_available_pool = weapon_availability_check(
+            game_state, unit, weapon_rule, advance_status, adjacent_status
+        )
+    _clear_shoot_activation_weapon_reuse_cache(unit)
     usable_weapons = [w for w in weapon_available_pool if w["can_use"]]
     
     # Filter by category (PISTOL or non-PISTOL) if needed
@@ -4452,6 +4609,7 @@ def execute_action(game_state: Dict[str, Any], unit: Dict[str, Any], action: Dic
 
         unit["selectedRngWeaponIndex"] = weapon_index
         unit["_manual_weapon_selected"] = True
+        _clear_shoot_activation_weapon_reuse_cache(unit)
 
         # CRITICAL FIX: Invalidate target pool cache after weapon change
         # Cache key doesn't include selectedRngWeaponIndex, so we must clear matching entries
