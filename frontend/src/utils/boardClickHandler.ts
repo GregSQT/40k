@@ -51,10 +51,7 @@ export function setupBoardClickHandler(callbacks: {
     ).detail;
 
     if (mode === "advancePreview") {
-      // Keep advancePreview mostly hex-driven, but allow right-click cancel on active unit.
-      if (phase === "shoot" && selectedUnitId === unitId && clickType === "right") {
-        callbacks.onCancelMove?.();
-      }
+      // Sélection d’unité gérée ailleurs ; annulation advance = clic droit canvas (BoardPvp).
       return;
     }
 

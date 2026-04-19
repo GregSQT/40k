@@ -999,6 +999,36 @@ def build_unit_los_cache(game_state: Dict[str, Any], unit_id: str) -> None:
             sys.stderr.flush()
 
 
+def _emit_shoot_activation_perf(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    t0: Optional[float],
+    t_after_los: Optional[float],
+    t_after_wpn: Optional[float],
+    t_after_tgt_pool: Optional[float],
+    outcome: str,
+    valid_targets_n: int,
+) -> None:
+    """Une ligne ``SHOOT_ACTIVATION_START`` dans perf_timing.log si ``perf_timing`` est actif."""
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    if not perf_timing_enabled(game_state) or t0 is None:
+        return
+    t_end = time.perf_counter()
+    los_s = (t_after_los - t0) if t_after_los is not None else 0.0
+    wpn_s = (t_after_wpn - t_after_los) if t_after_wpn is not None and t_after_los is not None else 0.0
+    pool_s = (t_after_tgt_pool - t_after_wpn) if t_after_tgt_pool is not None and t_after_wpn is not None else 0.0
+    tail_s = (t_end - t_after_tgt_pool) if t_after_tgt_pool is not None else (t_end - t0)
+    total_s = t_end - t0
+    ep = game_state.get("episode_number", "?")
+    trn = game_state.get("turn", "?")
+    append_perf_timing_line(
+        f"SHOOT_ACTIVATION_START episode={ep} turn={trn} unit_id={unit_id} "
+        f"los_cache_s={los_s:.6f} weapon_avail_s={wpn_s:.6f} target_pool_s={pool_s:.6f} "
+        f"tail_s={tail_s:.6f} total_s={total_s:.6f} outcome={outcome} valid_targets_n={valid_targets_n}"
+    )
+
+
 def _build_shooting_los_cache(game_state: Dict[str, Any]) -> None:
     """
     DEPRECATED: This function is kept for backward compatibility but should not be used.
@@ -1639,6 +1669,14 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         add_debug_log(game_state, f"[ACTIVATION_START ERROR] E{episode} T{turn} shooting_unit_activation_start: Unit {unit_id_str} NOT in pool, cannot activate. Pool={shoot_pool}")
         return {"error": "unit_not_in_pool", "unitId": unit_id, "message": "Unit was removed from pool and cannot be reactivated"}
 
+    from engine.perf_timing import perf_timing_enabled
+
+    _perf_act = perf_timing_enabled(game_state)
+    _t_act0 = time.perf_counter() if _perf_act else None
+    _t_after_los: Optional[float] = None
+    _t_after_wpn: Optional[float] = None
+    _t_after_tgt_pool: Optional[float] = None
+
     # PRINCIPLE: "Le Pool DOIT gérer les morts" - If unit is in pool, it's alive (no need to check)
 
     # STEP 2: UNIT_ACTIVABLE_CHECK
@@ -1653,12 +1691,15 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # AI_TURN.md STEP 2: Build unit's los_cache at activation
     # Build los_cache for units that can shoot (including shoot_after_flee exception).
     unit_id_str = str(unit_id)
+    _t_los0 = time.perf_counter() if _perf_act else None
     if unit_id_str not in require_key(game_state, "units_fled") or _unit_has_rule(unit, "shoot_after_flee"):
         build_unit_los_cache(game_state, unit_id)
     else:
         # Unit has fled - cannot shoot, so no los_cache needed
         # Unit can still advance if not adjacent to enemy
         unit["los_cache"] = {}
+    if _perf_act and _t_los0 is not None:
+        _t_after_los = time.perf_counter()
     
     # Determine adjacency
     unit_is_adjacent = _is_adjacent_to_enemy_within_cc_range(game_state, unit)
@@ -1702,13 +1743,19 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     weapon_rule = game_state["weapon_rule"]
     advance_status = 0  # STEP 2: Unit has NOT advanced yet
     adjacent_status = 1 if unit_is_adjacent else 0
+    _t_wpn0 = time.perf_counter() if _perf_act else None
     weapon_available_pool = weapon_availability_check(
         game_state, unit, weapon_rule, advance_status, adjacent_status
     )
+    if _perf_act and _t_wpn0 is not None:
+        _t_after_wpn = time.perf_counter()
     
     # CRITICAL: Use shooting_build_valid_target_pool for consistent pool building
     # This wrapper automatically determines context (advance_status, adjacent_status) and handles cache
+    _t_pool0 = time.perf_counter() if _perf_act else None
     valid_target_pool = shooting_build_valid_target_pool(game_state, unit_id)
+    if _perf_act and _t_pool0 is not None:
+        _t_after_tgt_pool = time.perf_counter()
     
     # valid_target_pool NOT empty?
     if len(valid_target_pool) == 0:
@@ -1723,6 +1770,16 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             # Return signal to allow advance action (handled by frontend/action handler)
             unit["valid_target_pool"] = []
             unit["_current_shoot_nb"] = require_key(unit, "SHOOT_LEFT")
+            _emit_shoot_activation_perf(
+                game_state,
+                str(unit_id),
+                _t_act0,
+                _t_after_los,
+                _t_after_wpn,
+                _t_after_tgt_pool,
+                "empty_pool_advance",
+                0,
+            )
             return {
                 "success": True,
                 "unitId": unit_id,
@@ -1739,6 +1796,16 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
                 game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
             )
             result["skip_reason"] = "no_valid_actions"
+            _emit_shoot_activation_perf(
+                game_state,
+                str(unit_id),
+                _t_act0,
+                _t_after_los,
+                _t_after_wpn,
+                _t_after_tgt_pool,
+                "empty_pool_skip",
+                0,
+            )
             return result
     # YES -> SHOOTING ACTIONS AVAILABLE -> Go to STEP 3: ACTION_SELECTION
     unit["valid_target_pool"] = valid_target_pool
@@ -1763,6 +1830,16 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         if can_advance:
             unit["valid_target_pool"] = []
             unit["_current_shoot_nb"] = require_key(unit, "SHOOT_LEFT")
+            _emit_shoot_activation_perf(
+                game_state,
+                str(unit_id),
+                _t_act0,
+                _t_after_los,
+                _t_after_wpn,
+                _t_after_tgt_pool,
+                "no_usable_advance",
+                len(valid_target_pool),
+            )
             return {
                 "success": True,
                 "unitId": unit_id,
@@ -1777,6 +1854,16 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
         )
         result["skip_reason"] = "no_usable_weapons"
+        _emit_shoot_activation_perf(
+            game_state,
+            str(unit_id),
+            _t_act0,
+            _t_after_los,
+            _t_after_wpn,
+            _t_after_tgt_pool,
+            "no_usable_skip",
+            len(valid_target_pool),
+        )
         return result
     if usable_weapons:
         if unit_is_adjacent:
@@ -1823,6 +1910,16 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     available_weapons = [{"index": w["index"], "weapon": w["weapon"], "can_use": w["can_use"], "reason": w.get("reason")} for w in weapon_available_pool]
 
     unit_col, unit_row = require_unit_position(unit, game_state)
+    _emit_shoot_activation_perf(
+        game_state,
+        str(unit_id),
+        _t_act0,
+        _t_after_los,
+        _t_after_wpn,
+        _t_after_tgt_pool,
+        "success",
+        len(valid_target_pool),
+    )
     return {"success": True, "unitId": unit_id, "shootLeft": unit["SHOOT_LEFT"],
             "position": {"col": unit_col, "row": unit_row},
             "selectedRngWeaponIndex": unit["selectedRngWeaponIndex"] if "selectedRngWeaponIndex" in unit else 0,

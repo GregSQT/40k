@@ -600,20 +600,6 @@ export class UnitRenderer {
           );
         }
       });
-    } else if (
-      phase === "shoot" &&
-      selectedUnitId === unit.id &&
-      this.props.mode === "advancePreview"
-    ) {
-      // Cancel advance on click (left or right) of active unit in advancePreview mode
-      unitCircle.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-        if (e.button === 0 || e.button === 2) {
-          // Left or right click
-          e.preventDefault();
-          e.stopPropagation();
-          window.dispatchEvent(new CustomEvent("boardCancelAdvance"));
-        }
-      });
     } else {
       // Block enemy unit clicks when no friendly unit is selected
       let addClickHandler = true;
@@ -639,6 +625,17 @@ export class UnitRenderer {
       // to the hitArea underneath (boardHexClick → onDirectMove).
       // Other friendly units remain clickable for activation switching.
       if (phase === "move" && (unit.player !== current_player || unit.id === selectedUnitId)) {
+        addClickHandler = false;
+        unitCircle.eventMode = "none";
+        unitCircle.cursor = "default";
+      }
+      // Advance (shoot) : même principe que le move — clic gauche sur l’icône / l’hex valide
+      // via capture canvas (boardHexClick → onAdvanceMove), pas d’annulation sur l’unité.
+      if (
+        phase === "shoot" &&
+        this.props.mode === "advancePreview" &&
+        unit.id === selectedUnitId
+      ) {
         addClickHandler = false;
         unitCircle.eventMode = "none";
         unitCircle.cursor = "default";

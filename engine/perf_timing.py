@@ -20,6 +20,10 @@ Lignes typiques (référence) :
 - ``API_POST_ACTION`` — ``engine_s`` (``execute_semantic_action`` / handlers), ``serialize_game_state_s``
   (``make_json_serializable`` + sync HP + types joueurs), ``jsonify_response_s`` (construction de la
   réponse Flask + sérialisation du corps), ``total_wall_s`` depuis le début du traitement POST.
+- ``SHOOT_ACTIVATION_START`` — une activation tir (``activate_unit`` → ``shooting_unit_activation_start``) :
+  ``los_cache_s`` (``build_unit_los_cache``), ``weapon_avail_s`` (``weapon_availability_check``),
+  ``target_pool_s`` (``shooting_build_valid_target_pool``), ``tail_s`` (arme par défaut, JSON armes, etc.),
+  ``total_s``, ``outcome`` (ex. ``success``, ``empty_pool_advance``, ``empty_pool_skip``), ``valid_targets_n``.
 - ``MOVE_POOL_BUILD`` — ``prep_s`` (caches occupation / EZ), ``bfs_s`` (exploration), pour le sol
   multi-hex ``footprint_zone_border_s`` (union empreintes + bordure), ``total_s``, compteurs
   ``visited`` / ``valid``. ``anchors_n`` = taille de ``valid_move_destinations_pool`` (disques UI) ;

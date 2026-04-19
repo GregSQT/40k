@@ -2105,6 +2105,8 @@ export default function Board({
 
       if (phase === "move" && mode === "select" && selectedUnitId !== null) {
         onSelectUnit(null);
+      } else if (phase === "shoot" && mode === "advancePreview" && selectedUnitId !== null) {
+        onCancelAdvance?.();
       } else if (phase === "shoot" && mode === "movePreview") {
         onCancelMove?.();
       } else if (phase === "shoot") {
@@ -3954,6 +3956,7 @@ export default function Board({
     objectivesOverride,
     onAdvance,
     onCancelAdvanceWarning,
+    onCancelAdvance,
     onCancelMove,
     onCancelTargetPreview,
     onConfirmAdvanceWarning,
